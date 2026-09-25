@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="description" content="Support ob.Pal: sponsor monthly or make a one-time donation through Stripe." />
+    <title>Sponsor ob.Pal</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&family=JetBrains+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+  </head>
+  <body data-page="sponsor">
+    <main class="support">
+      <header class="support-top"><a class="logo" href="/" aria-label="ob.Pal home"></a><a class="back" href="/view/">Open the viewer</a></header>
+      <div class="banner" id="banner" role="status" hidden></div>
+      <section class="card glass">
+        <h1>Sponsor ob.Pal</h1>
+        <p class="lede">Keep the phone remote free, fast and open for everyone.</p>
+        <div class="mode-switch" role="group" aria-label="Contribution type"><button data-mode="subscription">Monthly</button><button data-mode="payment">One-time</button></div>
+        <p class="mode-note" id="mode-note"></p>
+        <div class="amounts" id="amounts"></div>
+        <label class="custom"><span>$</span><input id="custom" type="number" inputmode="decimal" min="1" max="10000" step="0.01" placeholder="Other amount" aria-label="Other amount in USD" /></label>
+        <div class="field">
+          <div class="name"><input id="name" type="text" maxlength="60" placeholder="Your name (optional)" aria-label="Your name" autocomplete="name" /></div>
+          <label class="check"><input id="public" type="checkbox" /> Show my name with my contribution</label>
+        </div>
+        <button class="btn primary go" id="go" disabled>Checking availability…</button>
+        <p class="secure" id="secure"></p>
+        <p class="status" id="status" role="alert"></p>
+      </section>
+      <section class="ledger glass" aria-label="Verified contributions">
+        <div class="ledger-top"><strong id="raised">…</strong><span id="raised-label">raised</span><em id="backers"></em></div>
+        <ul class="recent" id="recent"></ul>
+        <p class="ledger-note">Shared with the Blackboxes ecosystem. Only settled Stripe payments are counted.</p>
+      </section>
+      <nav class="links" id="links"></nav>
+    </main>
+    <script type="module" src="/src/support/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+*.log
+.DS_Store
+.claude/worktrees/
+.claude/settings.local.json
+extension/release/
+.open-source-deny
+*.pem

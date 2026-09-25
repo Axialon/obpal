@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="description" content="How ob.Pal, its phone controller, viewer and the ob.Pal Link extension handle data: no accounts, no analytics, direct encrypted connections." />
+    <title>Privacy · ob.Pal</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&family=JetBrains+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/family/family.css" />
+    <link rel="stylesheet" href="/src/styles/base.css" />
+    <link rel="stylesheet" href="/src/styles/landing.css" />
+    <link rel="stylesheet" href="/src/styles/pages.css" />
+    <script type="module" src="/src/landing/main.ts"></script>
+  </head>
+  <body>
+    <main class="land">
+      <header class="page-top">
+        <a class="logo" href="/" aria-label="ob.Pal"><img class="mark" src="/logo-mark.svg" alt=""><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span></a>
+        <nav><a href="/view/">Viewer</a><a href="/link/">Extension</a></nav>
+      </header>
+
+      <article class="prose">
+        <p class="eyebrow">Privacy policy</p>
+        <h1>Your phone talks to your screen, and nothing else is kept.</h1>
+        <p class="updated">Last updated 26 September 2026</p>
+
+        <ul class="summary">
+          <li><b>No accounts.</b> Nothing to sign up for, on either device.</li>
+          <li><b>No analytics or tracking.</b> No ad or analytics scripts, and no tracking cookies.</li>
+          <li><b>Direct and encrypted.</b> Controller input goes from your phone to your screen over an encrypted connection and is never stored.</li>
+          <li><b>Your files stay yours.</b> Models you open are read in your browser and never uploaded.</li>
+        </ul>
+
+        <p>This policy covers ob.Pal at obpal.blackboxes.net: the website, the phone controller that opens in your phone's browser, the 3D viewer, and the ob.Pal Link browser extension.</p>
+
+        <h2>Pairing and the connection</h2>
+        <p>The QR code holds a one-time pairing secret. It sits in the part of the link that browsers never send to a server, so it stays on your two devices. The ob.Pal signaling service only sees a room identifier derived from it.</p>
+        <p>To connect, both devices briefly join that room on the signaling service, which runs on Cloudflare. They swap the technical details a WebRTC connection needs, including network addresses. The service passes these messages between the two devices in memory and doesn't store or log them.</p>
+        <p>After that, your phone and your screen talk directly over an encrypted WebRTC connection. On networks that block direct connections, the traffic is relayed through Cloudflare's TURN service. It stays encrypted end to end and isn't stored.</p>
+
+        <h2>The ob.Pal Link extension</h2>
+        <ul>
+          <li><b>Only the tab you switch on.</b> It sends your phone's input into the tab you turned on with <b>This tab</b>, and nowhere else. With <b>All sites</b> turned on, a small bridge also loads in other tabs so control can follow the page as it navigates, but it stays idle there.</li>
+          <li><b>Doesn't read your browsing.</b> It doesn't read page content, your browsing history or what you type. Its only job is to create input events from your phone in the controlled page.</li>
+          <li><b>Local storage only.</b> It remembers the mode you picked (Controller, 3D or Keys). Until the browser closes, it also keeps which tab is controlled and whether your phone is connected. All of this stays in the browser.</li>
+          <li><b>Talks only to ob.Pal and your phone.</b> Its only network use is the ob.Pal service (for pairing and relay credentials) and the direct connection to your phone. It loads no remote code and has no analytics.</li>
+        </ul>
+        <table class="perms">
+          <tr><th>Permission</th><th>Why</th></tr>
+          <tr><td>Offscreen document</td><td>Keeps the connection to your phone open (extension service workers can't hold one).</td></tr>
+          <tr><td>Storage</td><td>Remembers your chosen mode and, until the browser closes, the controlled tab.</td></tr>
+          <tr><td>Active tab, scripting</td><td>When you click the extension on a page, it can control that page, and only that page.</td></tr>
+          <tr><td>obpal.blackboxes.net</td><td>Pairing and relay credentials.</td></tr>
+          <tr><td>All sites (optional, off by default)</td><td>Only if you turn it on: reaches game frames served from other domains and keeps control across navigation. You can turn it off again in the popup.</td></tr>
+        </table>
+
+        <h2>The viewer and your files</h2>
+        <p>Models you open, drop in or add from a connected folder are read and displayed in your browser and never uploaded. When you connect a folder, the browser remembers your permission on this device until you disconnect the folder.</p>
+
+        <h2>What's stored on your device</h2>
+        <p>Your theme is kept in a <code>bb_theme</code> cookie that all Blackboxes sites share, so every site opens in the same look. Your accent, viewer and remote preferences, and your last scene stay in your browser's local storage. None of this is used for tracking, and clearing your browser data removes it.</p>
+
+        <h2>Sponsoring and donations</h2>
+        <p>Payments are handled by Stripe on its own checkout pages, and ob.Pal never sees your card details. For the public supporters list, ob.Pal records the amount and the time. Your name is recorded only if you choose to show it; otherwise the list says "Anonymous".</p>
+
+        <h2>Who else is involved</h2>
+        <p>Two services handle data for ob.Pal:</p>
+        <ul>
+          <li>Cloudflare: hosting, signaling, relays, and email to the address below.</li>
+          <li>Stripe: payments.</li>
+        </ul>
+        <p>ob.Pal doesn't sell or share data with anyone else, and doesn't use it for advertising.</p>
+
+        <h2>Changes and contact</h2>
+        <p>If this policy changes, this page and its date will be updated. For questions or requests, email <a href="mailto:hello@obpal.blackboxes.net">hello@obpal.blackboxes.net</a>.</p>
+      </article>
+
+      <footer class="foot"><a href="/">ob.Pal</a> · <a href="/link/">ob.Pal Link</a> · <a href="/sponsor/">Sponsor</a> · part of the <a href="https://ecosystem.blackboxes.net">Blackboxes</a> ecosystem</footer>
+    </main>
+  </body>
+</html>

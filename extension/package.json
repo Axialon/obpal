@@ -1,0 +1,24 @@
+{
+  "name": "@obpal/extension",
+  "version": "1.0.2",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "ob.Pal Link: a Chromium MV3 extension that lets a phone paired through ob.Pal control any website.",
+  "scripts": {
+    "build": "vite build",
+    "icons": "node scripts/icons.mjs",
+    "pack": "node scripts/pack.mjs",
+    "e2e": "node scripts/e2e.mjs"
+  },
+  "dependencies": {
+    "@obpal/core": "workspace:*",
+    "@obpal/host": "workspace:*",
+    "uqr": "^0.1.3"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.3.0",
+    "sharp": "^0.35.4",
+    "vite": "^8.3.0"
+  }
+}

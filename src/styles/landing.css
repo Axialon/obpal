@@ -1,0 +1,23 @@
+.land { max-width: 1040px; margin: 0 auto; padding: 24px 20px 48px; }
+.hero { padding: 72px 0 48px; max-width: 760px; }
+.eyebrow { color: var(--accent-text); font-weight: 700; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 12px; }
+.hero h1 { font-family: var(--font-display); font-weight: 800; font-size: clamp(38px, 5.2vw, 64px); line-height: 1.08; letter-spacing: -0.035em; margin: 0 0 18px; }
+.lede { font-size: 18px; color: var(--secondary); margin: 0 0 28px; max-width: 620px; }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; }
+.cta .btn { text-decoration: none; }
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; padding: 24px 0; }
+.steps article { padding: 22px; border-radius: 22px; background: var(--glass); border: 1px solid var(--line); }
+.steps span { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: rgb(var(--accent-rgb) / 0.16); color: var(--accent-soft); font-weight: 700; }
+.steps h2 { font-family: var(--font-display); font-size: 18px; margin: 12px 0 6px; letter-spacing: -0.02em; }
+.steps p { margin: 0; color: var(--muted); }
+.foot { color: var(--muted); font-size: 14px; padding-top: 24px; border-top: 1px solid var(--line); margin-top: 24px; }
+
+/* The browser extension, from the landing page */
+.link-card { display: flex; align-items: center; gap: 16px; margin: 8px 0 0; padding: 18px 22px; border-radius: 22px; text-decoration: none; color: var(--ink); border: 1px solid rgb(var(--accent-rgb) / 0.3); background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.1), rgb(var(--hl-rgb) / 0.02)); transition: transform 0.18s var(--ease), border-color 0.2s; }
+.link-card:hover { transform: translateY(-2px); border-color: rgb(var(--accent-rgb) / 0.6); }
+.link-card .ic { flex: none; width: 28px; height: 28px; padding: 8px; box-sizing: content-box; border-radius: 12px; background: rgb(var(--accent-rgb) / 0.16); color: var(--accent-text); }
+.link-card span { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.link-card b { font-family: var(--font-display); font-size: 17px; letter-spacing: -0.02em; }
+.link-card em { font-style: normal; color: var(--muted); font-size: 14px; }
+.link-card i { font-style: normal; font-weight: 700; font-size: 14px; color: var(--accent-text); white-space: nowrap; }
+@media (max-width: 600px) { .link-card i { display: none; } }

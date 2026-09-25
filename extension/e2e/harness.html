@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>ob.Pal Link test page</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0e0f12; color: #e8eaf0; font: 14px/1.4 system-ui, sans-serif; }
+    canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+    #out { position: fixed; left: 16px; bottom: 16px; white-space: pre; opacity: 0.7; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <!-- What a game or 3D viewer would receive from ob.Pal Link: the extension's end-to-end test reads window.__log / __pad(). -->
+  <canvas id="stage"></canvas>
+  <div id="out"></div>
+  <script>
+    const log = { pointer: [], wheel: 0, keys: [], pads: [], mouse: [0, 0] }
+    const stage = document.getElementById('stage')
+    for (const t of ['pointerdown', 'pointermove', 'pointerup']) {
+      stage.addEventListener(t, (e) => log.pointer.push({ t, buttons: e.buttons, button: e.button, mx: e.movementX, my: e.movementY, id: e.pointerId }))
+    }
+    stage.addEventListener('wheel', (e) => { log.wheel += e.deltaY }, { passive: true })
+    addEventListener('keydown', (e) => log.keys.push({ t: 'down', key: e.key, code: e.code }))
+    addEventListener('keyup', (e) => log.keys.push({ t: 'up', key: e.key, code: e.code }))
+    addEventListener('mousemove', (e) => { log.mouse[0] += e.movementX; log.mouse[1] += e.movementY })
+    addEventListener('gamepadconnected', (e) => log.pads.push(e.gamepad.id))
+    window.__log = log
+    window.__pad = () => {
+      const p = [...navigator.getGamepads()].find((g) => g && /ob\.Pal/.test(g.id))
+      return p ? { id: p.id, mapping: p.mapping, pressed: p.buttons.map((b) => b.pressed), axes: [...p.axes] } : null
+    }
+    // A visible readout, handy when running headed.
+    const out = document.getElementById('out')
+    setInterval(() => {
+      const p = window.__pad()
+      out.textContent = `pointer events ${log.pointer.length} · wheel ${log.wheel.toFixed(0)} · keys ${log.keys.length}\npad ${p ? p.id + ' ' + p.pressed.map((b) => (b ? 1 : 0)).join('') : 'none'}`
+    }, 100)
+  </script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+/* Content pages on the landing layout: ob.Pal Link (/link/) and the privacy policy (/privacy/). */
+.page-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.page-top nav { display: flex; gap: 6px; }
+.page-top nav a { height: 36px; display: inline-flex; align-items: center; padding: 0 14px; border-radius: 12px; color: var(--secondary); text-decoration: none; font-size: 13.5px; font-weight: 650; border: 1px solid var(--line); background: rgb(var(--hl-rgb) / 0.03); transition: color 0.2s, border-color 0.2s; }
+.page-top nav a:hover { color: var(--ink); border-color: rgb(var(--hl-rgb) / 0.2); }
+.fine { margin: 14px 0 0; font-size: 13px; color: var(--muted); }
+code { font-family: var(--font-data); font-size: 0.92em; padding: 1px 6px; border-radius: 6px; background: rgb(var(--hl-rgb) / 0.07); color: var(--ink); }
+
+/* ob.Pal Link: what the phone becomes */
+.modes-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; padding: 8px 0 16px; }
+.modes-grid article { padding: 22px; border-radius: 22px; background: var(--glass); border: 1px solid var(--line); }
+.modes-grid .ic { width: 30px; height: 30px; padding: 7px; box-sizing: content-box; border-radius: 12px; background: rgb(var(--accent-rgb) / 0.16); color: var(--accent-text); }
+.modes-grid h2 { font-family: var(--font-display); font-size: 18px; margin: 14px 0 6px; letter-spacing: -0.02em; }
+.modes-grid p { margin: 0; color: var(--muted); }
+.steps b { color: var(--secondary); }
+.note-card { margin: 8px 0 0; padding: 22px; border-radius: 22px; border: 1px solid rgb(var(--accent-rgb) / 0.3); background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.1), rgb(var(--hl-rgb) / 0.02)); }
+.note-card h2 { font-family: var(--font-display); font-size: 18px; margin: 0 0 6px; letter-spacing: -0.02em; }
+.note-card p { margin: 0; color: var(--secondary); }
+
+/* Privacy policy */
+.prose { max-width: 720px; padding: 56px 0 24px; }
+.prose h1 { font-family: var(--font-display); font-weight: 800; font-size: clamp(30px, 4.2vw, 46px); line-height: 1.1; letter-spacing: -0.035em; margin: 0 0 10px; }
+.prose h2 { font-family: var(--font-display); font-size: 20px; letter-spacing: -0.02em; margin: 36px 0 10px; }
+.prose p, .prose li { color: var(--secondary); font-size: 16px; line-height: 1.6; }
+.prose li { margin: 6px 0; }
+.prose b { color: var(--ink); }
+.prose a { color: var(--accent-text); }
+.updated { margin: 0 0 24px; font-size: 13px; color: var(--muted); }
+.summary { list-style: none; padding: 18px 20px; margin: 0 0 24px; border-radius: 20px; background: var(--glass); border: 1px solid var(--line); display: grid; gap: 4px; }
+.summary li { margin: 0; padding-left: 18px; position: relative; }
+.summary li::before { content: ''; position: absolute; left: 0; top: 0.62em; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.perms { width: 100%; border-collapse: collapse; margin: 16px 0 4px; font-size: 14.5px; }
+.perms th, .perms td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.perms th { font-size: 12px; font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.perms td:first-child { color: var(--ink); font-weight: 650; white-space: nowrap; }
+.perms td:last-child { color: var(--secondary); }
+@media (max-width: 600px) { .perms td:first-child { white-space: normal; } }

@@ -1,0 +1,100 @@
+/* ob.Pal theme variables: aliases of the Blackboxes family tokens (surface via data-bb-theme, accent via data-bb-product). */
+:root {
+  /* Aliases of the Blackboxes family tokens (src/family/family.css): data-bb-theme picks the surface,
+     data-bb-product="obpal" fixes the lime identity accent. */
+  --page: var(--bb-page);
+  --base-rgb: var(--bb-base-rgb);
+  --surface-rgb: var(--bb-surface-rgb);
+  --sheet: var(--bb-sheet);
+  --accent: var(--bb-accent);
+  --accent-rgb: var(--bb-accent-rgb);
+  --accent2: #86bd13;
+  --accent2-rgb: 134 189 19;
+  --accent-ink: var(--bb-accent-ink);
+  --accent-soft: var(--bb-accent-soft);
+  --accent-text: var(--bb-accent-text);
+  --ink: var(--bb-ink);
+  --secondary: var(--bb-ink-2);
+  --muted: var(--bb-ink-3);
+  --aurora-1-rgb: var(--bb-aurora);
+  --aurora-2-rgb: var(--bb-accent-rgb);
+  --aurora-3-rgb: var(--bb-surface-rgb);
+  /* Highlight channel for subtle fills and hairlines: white on dark surfaces, slate ink on the light one. */
+  --hl-rgb: 255 255 255;
+  --focus: var(--accent);
+  --line: var(--bb-line);
+  --ok: #6ee7b7;
+  --warn: #fcd34d;
+  --bad: #fb7185;
+  /* frosted glass, after the reference cards: tinted, heavily blurred, a faint light edge */
+  --glass: linear-gradient(150deg, rgb(var(--surface-rgb) / 0.66), rgb(var(--surface-rgb) / 0.42));
+  --glass-edge: var(--bb-line);
+  --glass-shadow: 0 20px 50px rgb(0 0 0 / 0.32), inset 0 1px 0 rgb(255 255 255 / 0.1);
+  --glass-light: linear-gradient(150deg, rgb(var(--accent-rgb) / 0.95), rgb(var(--accent-rgb) / 0.78));
+  --blur: blur(28px) saturate(150%);
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --font: var(--bb-font-ui);
+  --font-display: var(--bb-font-display);
+  --font-data: var(--bb-font-data);
+  --r-action: 14px;
+  --r-card: 26px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.55 var(--font); font-optical-sizing: auto; -webkit-font-smoothing: antialiased; transition: background-color 0.5s var(--ease); }
+button { font: inherit; color: inherit; cursor: pointer; }
+a { color: var(--accent-text); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+[hidden] { display: none !important; }
+
+.glass { background: var(--glass); border: 1px solid var(--glass-edge); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); box-shadow: var(--glass-shadow); }
+.ic { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; display: block; }
+
+/* logo lockup: obsidian box + orbit mark, then the ob.Pal wordmark */
+.logo { display: inline-flex; align-items: center; gap: 11px; color: var(--ink); text-decoration: none; }
+.logo .mark { width: 40px; height: 40px; flex: none; overflow: visible; filter: drop-shadow(0 6px 14px rgb(0 0 0 / 0.5)); }
+.logo .word { font-family: var(--font-display); font-size: 21px; font-weight: 700; letter-spacing: -0.03em; line-height: 1; white-space: nowrap; }
+.logo .word b { font-weight: 800; }
+.logo .word .ob { font-weight: 500; opacity: 0.82; }
+.logo .word .pt { color: var(--accent-text); margin: 0 0.015em; text-shadow: 0 0 14px rgb(var(--accent-rgb) / 0.6); }
+.mark-scan { opacity: 0; transform-box: view-box; animation: mark-scan 1.9s var(--ease) 0.5s 1 both; }
+.logo:hover .mark-scan { animation: mark-scan-again 1.6s var(--ease) 1 both; }
+@keyframes mark-scan { 0% { opacity: 0; transform: translateY(-10px); } 18% { opacity: 1; } 82% { opacity: 1; } 100% { opacity: 0; transform: translateY(60px); } }
+@keyframes mark-scan-again { 0% { opacity: 0; transform: translateY(-10px); } 18% { opacity: 1; } 82% { opacity: 1; } 100% { opacity: 0; transform: translateY(60px); } }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; padding: 0 20px; border-radius: var(--r-action); border: 1px solid var(--glass-edge); background: var(--glass); font-weight: 650; letter-spacing: -0.01em; -webkit-tap-highlight-color: transparent; touch-action: manipulation; transition: filter 0.15s, transform 0.12s var(--ease); }
+.btn:active { transform: scale(0.98); }
+.btn.primary { background: var(--glass-light); border-color: rgb(255 255 255 / 0.25); color: var(--accent-ink); box-shadow: 0 12px 30px rgb(var(--accent-rgb) / 0.22), inset 0 1px 0 rgb(255 255 255 / 0.45); }
+.btn.primary:hover { filter: brightness(1.04); }
+.btn.big { min-height: 56px; font-size: 17px; width: 100%; }
+
+/* theme swatches */
+.swatch { position: relative; width: 34px; height: 34px; flex: none; display: block; }
+.swatch i { position: absolute; width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid rgb(var(--hl-rgb) / 0.22); }
+.swatch i:first-child { left: 0; top: 0; background: var(--sw-a); }
+.swatch i:last-child { right: 0; bottom: 0; background: var(--sw-b); box-shadow: 0 0 12px color-mix(in srgb, var(--sw-b) 45%, transparent); }
+
+/* floating tooltips (src/ui/tips.ts) */
+.tip { position: fixed; left: 0; top: 0; z-index: 60; padding: 6px 10px; border-radius: 10px; background: var(--sheet); border: 1px solid var(--glass-edge); box-shadow: 0 10px 26px rgb(0 0 0 / 0.35); font-size: 12px; font-weight: 600; letter-spacing: -0.005em; color: var(--ink); white-space: nowrap; pointer-events: none; opacity: 0; transform: translate3d(0, 3px, 0); transition: opacity 0.14s var(--ease), transform 0.14s var(--ease); will-change: transform, opacity; }
+.tip[data-side='top'] { transform: translate3d(0, -3px, 0); }
+.tip[data-side='right'] { transform: translate3d(-3px, 0, 0); }
+.tip.in { opacity: 1; transform: none; }
+
+/* coach-mark hints: light frosted accent cards with dark ink, like the reference swatch cards */
+.hint { position: fixed; left: 0; top: 0; z-index: 50; display: flex; align-items: center; gap: 10px; max-width: min(300px, calc(100vw - 24px)); padding: 11px 8px 11px 15px; border-radius: 16px;
+  background: var(--glass-light); border: 1px solid rgb(255 255 255 / 0.35); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  box-shadow: 0 18px 44px rgb(0 0 0 / 0.38), inset 0 1px 0 rgb(255 255 255 / 0.5);
+  font-size: 13.5px; font-weight: 650; line-height: 1.35; letter-spacing: -0.01em; color: var(--accent-ink); opacity: 0; transition: opacity 0.3s var(--ease); pointer-events: auto; will-change: transform, opacity; backface-visibility: hidden; }
+.hint.in { opacity: 1; animation: hint-float 3.6s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
+.hint.in.away { opacity: 0; pointer-events: none; }
+.hint-x { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 9px; background: rgb(0 0 0 / 0.08); color: var(--accent-ink); }
+.hint-x .ic { width: 15px; height: 15px; }
+.hint::before { content: ''; position: absolute; width: 10px; height: 10px; background: rgb(var(--accent-rgb)); transform: rotate(45deg); }
+.hint-bottom::before { top: -5px; left: calc(var(--arrow, 50%) - 5px); }
+.hint-top::before { bottom: -5px; left: calc(var(--arrow, 50%) - 5px); }
+.hint-right::before { left: -5px; top: calc(var(--arrow, 50%) - 5px); }
+.hint-left::before { right: -5px; top: calc(var(--arrow, 50%) - 5px); }
+/* float on the compositor (transform), never on layout, so motion is sub-pixel smooth */
+@keyframes hint-float { 0%, 100% { transform: translate3d(0, 0, 0); } 50% { transform: translate3d(0, -4px, 0); } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; } }
+
+[data-bb-theme='light'] { --hl-rgb: 15 23 42; }

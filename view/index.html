@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="description" content="Control this 3D view with your phone: scan the QR code, then tilt, rotate, point and navigate." />
+    <title>ob.Pal Viewer</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&family=JetBrains+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <canvas id="scene" aria-label="3D view"></canvas>
+    <div class="to-tags" id="tags" aria-hidden="true" hidden></div>
+
+    <header class="topbar">
+      <div class="brand">
+        <a class="logo" href="/" aria-label="ob.Pal home" id="logo"></a>
+        <button class="switch-btn" id="t-switch" aria-label="Blackboxes apps" data-tip="Blackboxes apps"></button>
+      </div>
+      <div class="chip glass" id="chip" hidden>
+        <span class="chip-ic" data-icon="phone"></span>
+        <span class="chip-text" id="chip-text"></span>
+        <span class="chip-mode" id="chip-mode"></span>
+        <button class="chip-x" id="chip-disc" aria-label="Disconnect phone" data-tip="Disconnect" data-icon="close"></button>
+      </div>
+      <nav class="tools glass" id="tools" aria-label="View options">
+        <button class="tool t2" id="t-grid" aria-label="Grid" aria-pressed="true" data-tip="Grid · G" data-icon="grid"></button>
+        <button class="tool t2" id="t-glow" aria-label="Glow" aria-pressed="true" data-tip="Glow · B" data-icon="glow"></button>
+        <button class="tool t2" id="t-light" aria-label="Lighting" aria-pressed="false" data-tip="Lighting · L" data-icon="sun"></button>
+        <button class="tool t2" id="t-spin" aria-label="Spin" aria-pressed="false" data-tip="Spin · S" data-icon="spin"></button>
+        <span class="sep t2" aria-hidden="true"></span>
+        <button class="tool" id="t-frame" aria-label="Frame the model" data-tip="Frame · F" data-icon="frame"></button>
+        <button class="tool" id="t-reset" aria-label="Reset the view" data-tip="Reset · R" data-icon="reset"></button>
+        <span class="sep" aria-hidden="true"></span>
+        <button class="tool t2" id="t-theme" aria-label="Theme" aria-pressed="false" data-tip="Theme · T" data-icon="palette"></button>
+        <a class="tool t2" id="t-support" href="/sponsor/" aria-label="Support ob.Pal" data-tip="Support ob.Pal" data-icon="heart"></a>
+        <button class="tool more-btn" id="t-more" aria-label="More tools" aria-expanded="false" data-tip="More" data-icon="more"></button>
+        <button class="tool accent" id="open" aria-label="Open a model file" data-tip="Open GLB · STL · OBJ" data-icon="upload"></button>
+      </nav>
+    </header>
+
+    <aside class="catalog glass" id="catalog" data-state="open" aria-label="Model catalogue">
+      <div class="rail" id="rail" role="tablist" aria-orientation="vertical"></div>
+      <div class="cat-body">
+        <div class="cat-head"><h2 id="cat-name"></h2><span class="cat-count" id="cat-count"></span></div>
+        <div class="tiles" id="tiles"></div>
+      </div>
+    </aside>
+
+    <div class="caption glass" id="caption" aria-live="polite"><span class="cap-single" id="cap-single"><span class="cap-dot" id="cap-dot"></span><span class="cap-cat" id="cap-cat"></span><span class="cap-name" id="cap-name">Loading</span></span><div class="scene-strip" id="scene-strip" role="list" aria-label="Objects in the scene" hidden></div></div>
+
+    <div class="more glass" id="more" role="menu" aria-label="More tools" hidden></div>
+    <div class="bb-menu bb-glass switcher" id="switcher" aria-label="Blackboxes apps" hidden></div>
+    <div class="themes glass" id="themes" role="radiogroup" aria-label="Theme" hidden></div>
+    <div class="lighting glass" id="lighting" aria-label="Lighting" hidden><div class="lt-presets" id="lt-presets"></div><div class="lt-sliders" id="lt-sliders"></div><button class="lt-reset" id="lt-reset">Reset</button></div>
+    <div class="v-pair" id="pair"></div>
+    <div class="pointer" id="pointer" hidden></div>
+    <div class="loading glass" id="loading" hidden><span class="ring" aria-hidden="true"></span><span id="loading-text"></span></div>
+    <div class="drop" id="drop" hidden><div><span data-icon="upload"></span>Drop to open</div></div>
+    <div class="note glass" id="note" role="status" aria-live="polite"></div>
+    <input type="file" id="file" accept=".glb,.gltf,.stl,.obj" multiple hidden />
+    <script type="module" src="/src/viewer/main.ts"></script>
+  </body>
+</html>

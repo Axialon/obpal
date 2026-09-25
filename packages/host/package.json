@@ -1,0 +1,17 @@
+{
+  "name": "@obpal/host",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "ob-pal host SDK: pair a phone controller with any web page and read its input each frame.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./gamepad": "./src/gamepad.ts"
+  },
+  "dependencies": {
+    "@obpal/core": "workspace:*",
+    "uqr": "^0.1.3"
+  }
+}

@@ -1,0 +1,115 @@
+/* ob.Pal Link popup. Tokens (Lime on Carbon, glass, blur) come from src/styles/base.css. */
+html,
+body {
+  width: 332px;
+  overflow: hidden;
+}
+body {
+  background:
+    radial-gradient(110% 70% at 50% -14%, rgb(var(--accent-rgb) / 0.16), transparent 62%),
+    radial-gradient(80% 60% at 110% 112%, rgb(var(--aurora-1-rgb) / 0.55), transparent 70%),
+    var(--page);
+}
+.pop { display: grid; gap: 10px; padding: 14px; }
+.glass { border-radius: 22px; }
+
+/* header: lockup, product tag, live status */
+.bar { display: flex; align-items: center; gap: 8px; min-height: 36px; }
+.bar .logo { gap: 8px; }
+.bar .logo .mark { width: 30px; height: 30px; }
+.bar .logo .word { font-size: 18px; }
+.tag {
+  padding: 2px 7px; border-radius: 999px; background: var(--glass-light); color: var(--accent-ink);
+  font-size: 10.5px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+}
+.status {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 7px; padding: 5px 10px; border-radius: 999px;
+  border: 1px solid var(--glass-edge); background: rgb(255 255 255 / 0.05);
+  color: var(--secondary); font-size: 12px; font-weight: 650; white-space: nowrap;
+}
+.status i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.status[data-s='ready'] i { background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
+.status[data-s='connecting'] i { background: var(--warn); }
+.status[data-s='connected'] i { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+.status[data-s='offline'] i { background: var(--bad); }
+
+/* pairing: QR on a white tile, or the connected phone */
+.pair { padding: 14px; }
+.scan { display: grid; justify-items: center; gap: 10px; }
+.qr {
+  width: 184px; height: 184px; padding: 9px; border-radius: 18px; background: #fff;
+  box-shadow: 0 14px 36px rgb(0 0 0 / 0.42), 0 0 0 1px rgb(var(--accent-rgb) / 0.35), 0 0 32px rgb(var(--accent-rgb) / 0.14);
+}
+.qr svg { display: block; width: 100%; height: 100%; }
+.qr-wait {
+  display: block; width: 100%; height: 100%; border-radius: 10px;
+  background: linear-gradient(100deg, #ececec 35%, #fafafa 50%, #ececec 65%) 0 0 / 300% 100%;
+  animation: shimmer 1.3s linear infinite;
+}
+.scan-hint { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.scan-hint .ic { width: 16px; height: 16px; }
+
+.device { display: flex; align-items: center; gap: 12px; }
+.device-ic {
+  display: grid; place-items: center; width: 42px; height: 42px; flex: none; border-radius: 14px;
+  background: var(--glass-light); color: var(--accent-ink);
+  box-shadow: 0 10px 24px rgb(var(--accent-rgb) / 0.25), inset 0 1px 0 rgb(255 255 255 / 0.45);
+}
+.device-t { flex: 1; min-width: 0; display: grid; line-height: 1.3; }
+.device-t b { overflow: hidden; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.device-t small { color: var(--ok); font-size: 12px; font-weight: 600; }
+.icon-btn {
+  display: grid; place-items: center; width: 34px; height: 34px; flex: none; padding: 0; border-radius: 11px;
+  border: 1px solid var(--glass-edge); background: rgb(255 255 255 / 0.06); color: var(--secondary);
+  transition: background 0.15s, color 0.15s;
+}
+.icon-btn:hover { background: rgb(255 255 255 / 0.12); color: var(--ink); }
+.icon-btn .ic { width: 16px; height: 16px; }
+
+/* controls */
+.panel { display: grid; gap: 4px; padding: 6px; }
+.row {
+  display: flex; align-items: center; gap: 11px; width: 100%; padding: 8px; border: 0; border-radius: 16px;
+  background: transparent; text-align: left; transition: background 0.15s;
+}
+.row:hover:not(:disabled) { background: rgb(255 255 255 / 0.05); }
+.row:disabled { cursor: default; opacity: 0.5; }
+.row-ic {
+  display: grid; place-items: center; width: 36px; height: 36px; flex: none; border-radius: 12px;
+  background: rgb(255 255 255 / 0.06); color: var(--secondary); transition: color 0.2s, background 0.2s;
+}
+.row[aria-checked='true'] .row-ic { background: rgb(var(--accent-rgb) / 0.12); color: var(--accent); }
+.row-t { flex: 1; min-width: 0; display: grid; line-height: 1.3; }
+.row-t b { font-size: 14px; font-weight: 650; }
+.row-t small { overflow: hidden; color: var(--muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.sw {
+  position: relative; width: 40px; height: 24px; flex: none; border-radius: 999px;
+  background: rgb(255 255 255 / 0.12); box-shadow: inset 0 0 0 1px var(--glass-edge); transition: background 0.2s var(--ease);
+}
+.sw i {
+  position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--secondary); transition: transform 0.2s var(--ease), background 0.2s;
+}
+.row[aria-checked='true'] .sw { background: var(--accent); box-shadow: 0 0 16px rgb(var(--accent-rgb) / 0.35); }
+.row[aria-checked='true'] .sw i { transform: translateX(16px); background: var(--accent-ink); }
+.row[aria-busy='true'] .sw i { animation: pulse 0.9s ease-in-out infinite; }
+
+.chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 4px 2px 6px; }
+.chip {
+  display: grid; justify-items: center; gap: 5px; padding: 10px 4px 9px; border-radius: 16px;
+  border: 1px solid var(--glass-edge); background: rgb(255 255 255 / 0.04); color: var(--secondary);
+  font-size: 12px; font-weight: 650; transition: background 0.15s, color 0.15s, transform 0.12s var(--ease);
+}
+.chip:hover { background: rgb(255 255 255 / 0.08); color: var(--ink); }
+.chip:active { transform: scale(0.97); }
+.chip .ic { width: 22px; height: 22px; }
+.chip[aria-checked='true'] {
+  border-color: rgb(255 255 255 / 0.3); background: var(--glass-light); color: var(--accent-ink);
+  box-shadow: 0 10px 24px rgb(var(--accent-rgb) / 0.22), inset 0 1px 0 rgb(255 255 255 / 0.45);
+}
+
+.note { margin: 2px 10px 6px; color: var(--warn); font-size: 12px; font-weight: 600; }
+.note button { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; }
+
+@keyframes pulse { 50% { opacity: 0.35; } }
+@keyframes shimmer { to { background-position: -300% 0; } }
