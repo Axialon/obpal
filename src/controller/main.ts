@@ -2,7 +2,7 @@ import { family } from '../family'
 import '../styles/base.css'
 import '../styles/controller.css'
 import {
-  b64url, DeviceLink, emptyState, encodeState, Flag, forgetAllPairs, getPair, listPairs, loadCertificate, Mode, OneEuro,
+  b64url, DeviceLink, emptyState, PadButton, encodeState, Flag, forgetAllPairs, getPair, listPairs, loadCertificate, Mode, OneEuro,
   parsePairingCode, qIdentity, qScale, relativeInView, STATE_BYTES, Tier, viewFrameAt,
   type Caps, type HostMsg, type Layout, type LinkStatus, type ModeId, type PairingCode, type Quat, type SceneNode, type ScenePerson, type TierId,
   type TrayControl,
@@ -14,7 +14,10 @@ import { GyroSmoother, playerSpaceRates, TiltStick } from './gyro'
 import { GamepadMode } from './gamepad'
 import { WiiPointer } from './pointing'
 import { icon, ICONS, logo, logoMark } from '../ui/icons'
-import { dismissHint, hint, repositionHints } from '../ui/hints'
+import { dismissHint, hint, repositionHints, setHintFrame } from '../ui/hints'
+import { HardwareButtons, type HwAction, type HwSource } from './hardware'
+import { OrientationLock } from './lock'
+import { uiRect, uiSize } from './uiframe'
 import { applyTheme, initialTheme, swatch, THEMES, themeById } from '../ui/themes'
 
 const app = document.getElementById('app')!
@@ -128,6 +131,76 @@ async function boot(code: PairingCode) {
     smooth: Number(store.get('obpal.smooth') ?? 0.5),
     left: store.get('obpal.left') === '1',
     style: (store.get('obpal.style') === 'match' ? 'match' : 'game') as Style,
+    /** Lock the screen's rotation while the gyro is on, so turning the phone never re-lays out the controls. */
+    lockWithGyro: store.get('obpal.lockgyro') !== '0',
+    headset: false,
+  }
+  // ---- screen lock (while steering with motion) and hardware buttons ----
+  const lock = new OrientationLock()
+  /** Whether the lock came from turning the gyro on (and so goes with it). */
+  let lockFromGyro = false
+  setHintFrame({ rect: uiRect, size: () => { const s = uiSize(); return { w: s.w, h: s.h } } })
+  lock.onChange = (reanchor) => {
+    applyLayout()
+    requestAnimationFrame(applyLayout)
+    if (reanchor && gyroOn) anchor()
+    renderLock()
+    requestAnimationFrame(repositionHints)
+  }
+  /** The compact landscape layout follows the UI's own shape, not the screen's, so a locked phone keeps its layout. */
+  function applyLayout() {
+    const { w, h } = uiSize()
+    document.documentElement.classList.toggle('land', w > h && h <= 520)
+  }
+  addEventListener('resize', applyLayout)
+  screen.orientation?.addEventListener?.('change', applyLayout)
+  applyLayout()
+  async function setLock(on: boolean, fromGyro = false) {
+    if (on) {
+      await lock.lock()
+      lockFromGyro = fromGyro
+      if (fromGyro) hint('lock', () => document.getElementById('lock'), 'Rotation is locked while the gyro is on · tap to unlock', { place: 'bottom', delay: 400 })
+    } else {
+      lock.unlock()
+      lockFromGyro = false
+    }
+    renderLock()
+  }
+  function renderLock() {
+    const b = document.getElementById('lock')
+    if (!b) return
+    b.setAttribute('aria-pressed', String(lock.locked))
+    b.setAttribute('aria-label', lock.locked ? 'Unlock screen rotation' : 'Lock screen rotation')
+    b.innerHTML = lock.locked ? ICONS.lock : ICONS.unlock
+  }
+  const hw = new HardwareButtons()
+  const HW_HELP: Record<HwSource, string> = {
+    volume: 'Volume keys work here: up = A · down = B',
+    keys: 'Keys work here: Enter = A · Esc = B · arrows = next / previous',
+    headset: 'Headset buttons work here: press = A · next / previous',
+  }
+  const hwAnnounced = new Set<HwSource>()
+  /** Set when the surface is built: the Wii face's B, held or released. */
+  let wiiB: (down: boolean) => void = () => {}
+  hw.onAction = (action: HwAction, down: boolean, source: HwSource) => {
+    if (!surface) return
+    if (down && !hwAnnounced.has(source)) { hwAnnounced.add(source); toast(HW_HELP[source]) }
+    if (mode === Mode.gamepad) {
+      gamepad.hardware(action === 'primary' ? PadButton.A : action === 'secondary' ? PadButton.B : action === 'next' ? PadButton.Right : PadButton.Left, down)
+      return
+    }
+    if (mode === Mode.point) {
+      if (action === 'secondary') return wiiB(down)
+      if (!down) return
+      tick()
+      link.sendCtl({ t: 'btn', id: action === 'primary' ? 'wii-a' : action === 'next' ? 'wii-plus' : 'wii-minus', ev: 'tap' })
+      return
+    }
+    // Rotate: the primary button switches the gyro (the 1:1 grab), the secondary sets the level or recentres.
+    if (!down) return
+    tick()
+    if (action === 'primary') setGyro(!gyroOn)
+    else if (action === 'secondary') recenterHere()
   }
   const motion = new Motion()
   const smoother = new GyroSmoother()
@@ -336,11 +409,22 @@ async function boot(code: PairingCode) {
     qf.forEach((f) => f.reset())
   }
 
+  /** The centre button: set the tilt level here, or recentre (Point: aim here = the middle of the screen). */
+  function recenterHere() {
+    smoother.reset()
+    if (mode === Mode.tilt) { if (motion.q) tilt.capture(motion.up()); toast('Level set') }
+    else if (mode === Mode.point) recenterPointer()
+    else link.sendCtl({ t: 'recenter' })
+  }
+
   function setGyro(on: boolean) {
     if (on && !motion.q) { toast('Motion is off on this phone'); return }
     if (on === gyroOn) return
     gyroOn = on
     smoother.reset()
+    // Steering with motion: the screen stops rotating until the gyro is off again (or the lock is tapped).
+    if (on && settings.lockWithGyro && !lock.locked) void setLock(true, true)
+    else if (!on && lockFromGyro) void setLock(false)
     if (on) {
       anchor()
       dismissHint('gyro')
@@ -381,6 +465,7 @@ async function boot(code: PairingCode) {
           <span class="host-ic">${logoMark()}</span>
           <span class="host-name"></span>
           <span class="sig" id="sig" data-q="direct" title="Connection"><i></i><i></i><i></i><b></b></span>
+          <button class="icon-btn glass lock-btn" id="lock" aria-label="Lock screen rotation" aria-pressed="false">${ICONS.unlock}</button>
           <button class="icon-btn glass" id="gear" aria-label="Settings">${ICONS.settings}</button>
         </header>
         <div class="banner glass" id="banner" hidden></div>
@@ -421,12 +506,9 @@ async function boot(code: PairingCode) {
     pad.onTap = (kind) => { link.sendCtl({ t: 'btn', id: 'pad', ev: kind }); tick(kind !== 'tap'); if (mode === Mode.point) dismissHint('point') }
     pad.onTouchChange = (touching) => { document.getElementById('pad')!.classList.toggle('active', touching); goFullscreen() }
     document.getElementById('gyro')!.addEventListener('click', () => { tick(); setGyro(!gyroOn) })
-    document.getElementById('center')!.addEventListener('click', () => {
-      tick()
-      smoother.reset()
-      if (mode === Mode.tilt) { if (motion.q) tilt.capture(motion.up()); toast('Level set') }
-      else link.sendCtl({ t: 'recenter' })
-    })
+    document.getElementById('center')!.addEventListener('click', () => { tick(); recenterHere() })
+    document.getElementById('lock')!.addEventListener('click', () => { tick(); dismissHint('lock'); void setLock(!lock.locked) })
+    renderLock()
     surface.querySelectorAll<HTMLButtonElement>('.modes button').forEach((b) => {
       b.onclick = () => { tick(); if (tab !== 'gamepad') lastTab = tab; tab = b.dataset.tab as Tab; setMode() }
     })
@@ -450,6 +532,7 @@ async function boot(code: PairingCode) {
       if (down) tick(true)
       link.sendCtl({ t: 'btn', id: 'wii-b', ev: down ? 'down' : 'up' })
     }
+    wiiB = b
     bBtn.addEventListener('pointerdown', (e) => {
       e.preventDefault()
       try { bBtn.setPointerCapture(e.pointerId) } catch { /* not a live pointer */ }
@@ -722,6 +805,9 @@ async function boot(code: PairingCode) {
         ${seatColor ? '<div class="seat-row"><span class="seat-dot"></span><span>Your colour in this scene</span></div>' : ''}
         <div class="accent-row" role="radiogroup" aria-label="Accent"${seatColor ? ' hidden' : ''}>${family.ACCENTS.map((a) => `<button class="bb-accent${a.id === 'product' ? ' product' : ''}" role="radio" data-accent="${a.id}" aria-checked="${family.getAccent() === a.id}" aria-label="${a.id === 'product' ? 'ob.Pal lime (default)' : a.name}" style="--sw:${a.color ?? '#c6ff34'}">${family.icons.check}</button>`).join('')}</div>
         <label class="row"><input type="checkbox" id="left"> Left-handed</label>
+        <label class="row"><input type="checkbox" id="lockgyro"> Lock rotation while the gyro is on</label>
+        <label class="row"><input type="checkbox" id="headset"> <span>Headset buttons<small>Earbud presses act as A, next and previous. Plays silent audio, which pauses music.</small></span></label>
+        <p class="hw-note" id="hw-note" hidden></p>
         <a class="support-link" href="/sponsor/" target="_blank" rel="noopener">${ICONS.heart}<span>Support ob.Pal</span></a>
         <button class="btn" id="forget" hidden>${ICONS.close}<span>Forget remembered screens</span></button>
         <div class="row gap"><button class="btn" id="disc">Disconnect</button><button class="btn primary" id="done">Done</button></div>
@@ -746,6 +832,22 @@ async function boot(code: PairingCode) {
     gain.oninput = () => { settings.gain = Number(gain.value); store.set('obpal.gain', gain.value); show() }
     smooth.oninput = () => { settings.smooth = Number(smooth.value); store.set('obpal.smooth', smooth.value); applySmooth(); show() }
     left.onchange = () => { settings.left = left.checked; store.set('obpal.left', left.checked ? '1' : '0'); surface?.classList.toggle('left', left.checked) }
+    const lockgyro = sheet.querySelector<HTMLInputElement>('#lockgyro')!
+    lockgyro.checked = settings.lockWithGyro
+    lockgyro.onchange = () => { settings.lockWithGyro = lockgyro.checked; store.set('obpal.lockgyro', lockgyro.checked ? '1' : '0') }
+    const headset = sheet.querySelector<HTMLInputElement>('#headset')!
+    headset.checked = settings.headset
+    headset.onchange = async () => {
+      settings.headset = headset.checked
+      if (headset.checked) {
+        if (!(await hw.enableHeadset(hostName))) { headset.checked = settings.headset = false; toast('Headset buttons aren’t available in this browser') }
+        else toast('Press your headset button to try it')
+      } else hw.disableHeadset()
+    }
+    const note = sheet.querySelector<HTMLElement>('#hw-note')!
+    const seen = [...hw.seen].map((s) => ({ volume: 'volume keys', keys: 'keys', headset: 'headset buttons' })[s])
+    note.hidden = !seen.length
+    note.textContent = seen.length ? `Working here: ${seen.join(', ')}` : ''
     sheet.querySelectorAll<HTMLButtonElement>('.theme-opt').forEach((b) => {
       b.onclick = () => {
         tick()

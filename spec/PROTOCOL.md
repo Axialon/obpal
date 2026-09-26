@@ -97,7 +97,7 @@ Unknown message types and fields MUST be ignored.
 | 4 | u32 | capture time, µs, device session clock |
 | 8 | u8 | mode: 0 hold (1:1 match), 1 orbit (game-style gyro rotate, rate-based via aim), 2 point (Wii-style, see below), 3 tilt, 4 pad, 5 gamepad (§5) |
 | 9 | u8 | grab id; increments on each clutch press |
-| 10 | u8 | tier (bits 0–1: 0 touch, 1 tilt, 2 compass, 3 gyro); screen angle / 90 (bits 2–3) |
+| 10 | u8 | tier (bits 0–1: 0 touch, 1 tilt, 2 compass, 3 gyro); screen angle / 90 (bits 2–3): the controls' orientation, which is the locked one while the device locks rotation for motion control |
 | 11 | u8 | active touches |
 | 12 | i16×4 | qAbs, Q15: screen frame → Earth (x east, y north, z up) |
 | 20 | i16×4 | qRel, Q15: rotation since grab in **view space** (x right, y up, z toward the user); identity when not clutched |

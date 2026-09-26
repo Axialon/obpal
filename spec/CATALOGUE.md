@@ -22,6 +22,15 @@ It does not become a one-off mode. The wire formats are in [PROTOCOL.md](PROTOCO
 
 **Categories** order the phone's UI. Controller comes first, then Motion, then Pointer, Touch and 3D. A host declares which utilities it accepts in its layout (`utilities: string[]`; absent means all). The phone offers only those.
 
+**Device buttons.** A device may also drive its current mode with hardware buttons, wherever its browser allows. Each button fires a *primary* action (A, or switching the gyro in Rotate), a *secondary* one (B held in Point and Gamepad, or recentre in Rotate), or *next* and *previous*:
+- volume keys, when the browser passes them to the page (some Android browsers; never iOS);
+- keys from a Bluetooth keyboard, remote or clicker: Enter or Space, Escape, the arrows, and Page Up and Down;
+- headset and earbud buttons through Media Session. This is opt-in, because it plays a silent track that takes the audio focus.
+
+These buttons need no new wire format: they press what the device's own controls press.
+
+**Rotation lock.** While a device steers with its motion, turning it must not re-lay out or remap its controls. Turning the gyro on locks the screen's rotation, and a lock button unlocks it. Where there's a native lock (Android, in fullscreen), the device uses it. Elsewhere the page counter-rotates itself, reads touches in its own frame, and reports the locked orientation in STATE.
+
 ## 2. Routes: where a motion utility goes
 
 | Route | Meaning |

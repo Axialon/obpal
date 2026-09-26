@@ -7,6 +7,13 @@ const live = new Map<string, { el: HTMLElement; place: () => void }>()
 const queue: { id: string; show: () => void }[] = []
 const visible = (t: Element | null) => !!t && !!(t as HTMLElement).offsetParent
 
+/** Where hints measure: the viewport by default; the controller's own frame while its UI is counter-rotated. */
+let frame = {
+  rect: (el: Element): { left: number; top: number; width: number; height: number } => el.getBoundingClientRect(),
+  size: () => ({ w: innerWidth, h: innerHeight }),
+}
+export function setHintFrame(f: typeof frame) { frame = f }
+
 const seen = (id: string) => { try { return sessionStorage.getItem(KEY + id) === '1' } catch { return false } }
 const markSeen = (id: string) => { try { sessionStorage.setItem(KEY + id, '1') } catch { /* private mode */ } }
 
@@ -33,18 +40,19 @@ export function hint(id: string, anchor: () => Element | null, text: string, opt
       const t = anchor()
       el.classList.toggle('away', !visible(t))
       if (!t || !visible(t)) return
-      const r = t.getBoundingClientRect()
-      const b = el.getBoundingClientRect()
+      const r = frame.rect(t)
+      const b = frame.rect(el)
+      const { w: vw, h: vh } = frame.size()
       const gap = 12
       let x = 0
       let y = 0
       if (place === 'top' || place === 'bottom') {
-        x = Math.min(innerWidth - b.width - 12, Math.max(12, r.left + r.width / 2 - b.width / 2))
-        y = place === 'top' ? r.top - b.height - gap : r.bottom + gap
+        x = Math.min(vw - b.width - 12, Math.max(12, r.left + r.width / 2 - b.width / 2))
+        y = place === 'top' ? r.top - b.height - gap : r.top + r.height + gap
         el.style.setProperty('--arrow', `${r.left + r.width / 2 - x}px`)
       } else {
-        y = Math.min(innerHeight - b.height - 12, Math.max(12, r.top + r.height / 2 - b.height / 2))
-        x = place === 'left' ? r.left - b.width - gap : r.right + gap
+        y = Math.min(vh - b.height - 12, Math.max(12, r.top + r.height / 2 - b.height / 2))
+        x = place === 'left' ? r.left - b.width - gap : r.left + r.width + gap
         el.style.setProperty('--arrow', `${r.top + r.height / 2 - y}px`)
       }
       el.style.left = `${x}px`

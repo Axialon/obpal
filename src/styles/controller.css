@@ -78,7 +78,7 @@ body { letter-spacing: -0.006em; background: var(--page); }
 .tray-btn.text .tray-label { font-size: 13.5px; color: var(--ink); }
 .tray-btn[aria-pressed='true'] { color: var(--accent-soft); background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.36), rgb(var(--accent2-rgb) / 0.12)); border-color: rgb(var(--accent-rgb) / 0.5); }
 .tray-btn[aria-pressed='true'] .tray-label { color: var(--accent-soft); }
-.tray-btn.select { flex-direction: row; gap: 10px; padding: 0 10px 0 8px; min-width: 0; max-width: 62vw; border-color: rgb(var(--accent-rgb) / 0.45); background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.26), rgb(var(--hl-rgb) / 0.04)); color: var(--ink); }
+.tray-btn.select { flex-direction: row; gap: 10px; padding: 0 10px 0 8px; min-width: 0; max-width: calc(var(--ui-vw, 1vw) * 62); border-color: rgb(var(--accent-rgb) / 0.45); background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.26), rgb(var(--hl-rgb) / 0.04)); color: var(--ink); }
 .sel-thumb { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 13px; background: rgb(var(--base-rgb) / 0.55); border: 1px solid rgb(var(--hl-rgb) / 0.1); font-size: 18px; font-weight: 800; overflow: hidden; }
 .sel-thumb img { width: 36px; height: 36px; object-fit: contain; }
 /* Shared scene: this device's colour (its accent), the same as its cursor and halo on the screen. */
@@ -103,19 +103,18 @@ body { letter-spacing: -0.006em; background: var(--page); }
 .surface.no-motion .gyro { opacity: 0.45; }
 
 /* ---- landscape: controls on the thumb side ---- */
-@media (orientation: landscape) and (max-height: 520px) {
-  .surface { display: grid; grid-template-columns: 1fr minmax(240px, 38%); grid-template-rows: auto auto auto 1fr auto; column-gap: 14px; row-gap: 10px; padding-left: calc(16px + env(safe-area-inset-left)); padding-right: calc(16px + env(safe-area-inset-right)); }
-  .bar, .banner { grid-column: 1 / -1; }
-  .pad { grid-column: 1; grid-row: 2 / 6; }
-  .modes { grid-column: 2; grid-row: 2; }
-  .styles { grid-column: 2; grid-row: 3; }
-  .tray { grid-column: 2; grid-row: 4; flex-wrap: wrap; align-content: start; overflow: visible; -webkit-mask-image: none; mask-image: none; margin-right: 0; padding-right: 0; }
-  .dock { grid-column: 2; grid-row: 5; }
-  .gyro, .icon-btn.square { min-height: 62px; }
-  .surface.left { grid-template-columns: minmax(240px, 38%) 1fr; }
-  .surface.left .pad { grid-column: 2; }
-  .surface.left .modes, .surface.left .styles, .surface.left .tray, .surface.left .dock { grid-column: 1; }
-}
+/* Compact landscape layout: set by the controller from the UI's own shape (it stays put while rotation is locked). */
+:root.land .surface { display: grid; grid-template-columns: 1fr minmax(240px, 38%); grid-template-rows: auto auto auto 1fr auto; column-gap: 14px; row-gap: 10px; padding-left: calc(16px + env(safe-area-inset-left)); padding-right: calc(16px + env(safe-area-inset-right)); }
+:root.land .bar, :root.land .banner { grid-column: 1 / -1; }
+:root.land .pad { grid-column: 1; grid-row: 2 / 6; }
+:root.land .modes { grid-column: 2; grid-row: 2; }
+:root.land .styles { grid-column: 2; grid-row: 3; }
+:root.land .tray { grid-column: 2; grid-row: 4; flex-wrap: wrap; align-content: start; overflow: visible; -webkit-mask-image: none; mask-image: none; margin-right: 0; padding-right: 0; }
+:root.land .dock { grid-column: 2; grid-row: 5; }
+:root.land .gyro, :root.land .icon-btn.square { min-height: 62px; }
+:root.land .surface.left { grid-template-columns: minmax(240px, 38%) 1fr; }
+:root.land .surface.left .pad { grid-column: 2; }
+:root.land .surface.left .modes, :root.land .surface.left .styles, :root.land .surface.left .tray, :root.land .surface.left .dock { grid-column: 1; }
 
 /* ---- toast ---- */
 .toast { position: fixed; left: 50%; bottom: calc(112px + env(safe-area-inset-bottom)); transform: translate(-50%, 10px); opacity: 0; padding: 10px 16px; border-radius: 16px; font-weight: 650; font-size: 14px; pointer-events: none; transition: opacity 0.2s var(--ease), transform 0.25s var(--ease); max-width: 86vw; text-align: center; z-index: 40; }
@@ -138,7 +137,7 @@ body { letter-spacing: -0.006em; background: var(--page); }
 .sheet .gap { justify-content: flex-end; }
 .sheet .meta { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 
-.sheet.picker { max-height: min(82vh, 760px); padding: 10px 0 0; gap: 0; grid-template-rows: auto auto 1fr; overflow: hidden; }
+.sheet.picker { max-height: min(calc(var(--ui-vh, 1vh) * 82), 760px); padding: 10px 0 0; gap: 0; grid-template-rows: auto auto 1fr; overflow: hidden; }
 .picker-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px 12px 22px; }
 .picker-head h2 { font-family: var(--font-display); margin: 0; font-size: 20px; font-weight: 750; letter-spacing: -0.025em; }
 .picker-list { overflow-y: auto; touch-action: pan-y; overscroll-behavior: contain; padding: 0 14px calc(16px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch; }
@@ -213,7 +212,7 @@ body { letter-spacing: -0.006em; background: var(--page); }
 .wii-part-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wii-part-value { font-family: var(--font-data); font-variant-numeric: tabular-nums; opacity: 0.85; }
 .wii-a {
-  width: min(42vw, 150px); aspect-ratio: 1; border-radius: 50%; border: 1px solid rgb(var(--hl-rgb) / 0.3);
+  width: min(calc(var(--ui-vw, 1vw) * 42), 150px); aspect-ratio: 1; border-radius: 50%; border: 1px solid rgb(var(--hl-rgb) / 0.3);
   background: var(--glass-light); color: var(--accent-ink); font: 800 44px/1 var(--font-display); letter-spacing: -0.02em;
   box-shadow: 0 18px 44px -14px rgb(var(--accent-rgb) / 0.7), inset 0 2px 0 rgb(255 255 255 / 0.45), inset 0 -6px 14px rgb(0 0 0 / 0.12);
   touch-action: manipulation; transition: transform 0.1s var(--ease), box-shadow 0.2s var(--ease);
@@ -248,15 +247,21 @@ body { letter-spacing: -0.006em; background: var(--page); }
 @container modes (max-width: 216px) {
   .modes button > span { display: none; }
 }
-@media (orientation: landscape) and (max-height: 520px) {
-  .tray-btn:not(.select):not(.text) { min-width: 50px; width: 50px; height: 50px; padding: 0; }
-  .tray-btn:not(.select):not(.text) .tray-label { display: none; }
-  .tray-btn.select { height: 50px; max-width: 100%; gap: 4px; padding: 0 6px 0 7px; }
-  .tray-btn.select .sel-thumb { width: 36px; height: 36px; }
-  .tray-btn.select .sel-v { display: none; }
-  .gyro, .icon-btn.square { min-height: 50px; }
-  .gyro { border-radius: 20px; gap: 10px; padding: 0 12px; }
-  .gyro-ic { width: 34px; height: 34px; border-radius: 12px; }
-  .gyro-ic .ic { width: 22px; height: 22px; }
-  .gyro-label { font-size: 15px; }
-}
+/* Compact landscape layout: set by the controller from the UI's own shape (it stays put while rotation is locked). */
+:root.land .tray-btn:not(.select):not(.text) { min-width: 50px; width: 50px; height: 50px; padding: 0; }
+:root.land .tray-btn:not(.select):not(.text) .tray-label { display: none; }
+:root.land .tray-btn.select { height: 50px; max-width: 100%; gap: 4px; padding: 0 6px 0 7px; }
+:root.land .tray-btn.select .sel-thumb { width: 36px; height: 36px; }
+:root.land .tray-btn.select .sel-v { display: none; }
+:root.land .gyro, :root.land .icon-btn.square { min-height: 50px; }
+:root.land .gyro { border-radius: 20px; gap: 10px; padding: 0 12px; }
+:root.land .gyro-ic { width: 34px; height: 34px; border-radius: 12px; }
+:root.land .gyro-ic .ic { width: 22px; height: 22px; }
+:root.land .gyro-label { font-size: 15px; }
+
+/* Rotation lock (./lock.ts). Without a native lock the page turns back against the screen, so the controls stay put. */
+html.vlock { --ui-vw: calc(var(--ui-w) / 100); --ui-vh: calc(var(--ui-h) / 100); overflow: hidden; }
+html.vlock body { position: fixed; left: 50%; top: 50%; width: var(--ui-w); height: var(--ui-h); min-height: 0; margin: 0; overflow: hidden; transform: translate(-50%, -50%) rotate(var(--ui-rot)); transform-origin: 50% 50%; }
+.lock-btn[aria-pressed='true'] { color: var(--accent-ink); background: var(--glass-light); border-color: rgb(255 255 255 / 0.3); box-shadow: 0 6px 18px rgb(var(--accent-rgb) / 0.3); }
+.row small { display: block; color: var(--muted); font-size: 12px; font-weight: 500; line-height: 1.35; margin-top: 2px; }
+.hw-note { margin: 0; color: var(--accent-text); font-size: 12.5px; font-weight: 650; }

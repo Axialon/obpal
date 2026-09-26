@@ -1,3 +1,5 @@
+import { toUi } from './uiframe'
+
 export type TapKind = 'tap' | 'double' | 'long'
 
 /**
@@ -43,11 +45,12 @@ export class Trackpad {
   private down = (e: PointerEvent) => {
     e.preventDefault()
     try { this.el.setPointerCapture(e.pointerId) } catch { /* synthetic events */ }
-    this.pts.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    const at = toUi(e.clientX, e.clientY)
+    this.pts.set(e.pointerId, at)
     this.touches = this.pts.size
     if (this.pts.size === 1) {
       this.downAt = performance.now()
-      this.downPos = { x: e.clientX, y: e.clientY }
+      this.downPos = { ...at }
       this.moved = false
       this.longFired = false
       this.clearLong()
@@ -65,14 +68,15 @@ export class Trackpad {
   private move = (e: PointerEvent) => {
     const p = this.pts.get(e.pointerId)
     if (!p) return
-    const dx = e.clientX - p.x
-    const dy = e.clientY - p.y
-    p.x = e.clientX
-    p.y = e.clientY
+    const at = toUi(e.clientX, e.clientY)
+    const dx = at.x - p.x
+    const dy = at.y - p.y
+    p.x = at.x
+    p.y = at.y
     if (this.pts.size === 1) {
       this.pad1[0] += dx
       this.pad1[1] += dy
-      if (Math.hypot(e.clientX - this.downPos.x, e.clientY - this.downPos.y) > 8) { this.moved = true; this.clearLong() }
+      if (Math.hypot(at.x - this.downPos.x, at.y - this.downPos.y) > 8) { this.moved = true; this.clearLong() }
     } else if (this.pts.size === 2 && this.two) {
       const m = this.measure()
       this.pad2[0] += m.cx - this.two.cx

@@ -3,6 +3,8 @@ const s = (d: string) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"
 
 export const ICONS: Record<string, string> = {
   rotate: s('<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/>'),
+  lock: s('<rect x="5.5" y="10.5" width="13" height="9.5" rx="2.6"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/><path d="M12 14.4v2" stroke-width="2.2"/>'),
+  unlock: s('<rect x="5.5" y="10.5" width="13" height="9.5" rx="2.6"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 6.6-1.6"/><path d="M12 14.4v2" stroke-width="2.2"/>'),
   point: s('<circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2.4"/><path d="M12 1.8v3M12 19.2v3M1.8 12h3M19.2 12h3"/>'),
   tilt: s('<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.2"/><path d="M3.6 10.6h6.2M14.2 10.6h6.2M12 14.2v6.3"/>'),
   match: s('<path d="M12 3.2 19.8 7.6v8.8L12 20.8 4.2 16.4V7.6L12 3.2Z"/><path d="M4.2 7.6 12 12l7.8-4.4M12 12v8.8"/>'),

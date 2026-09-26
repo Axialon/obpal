@@ -5,6 +5,7 @@ import {
   utilityKey, wheelVector,
   type Contribution, type MotionUtility, type Profile, type ProfileId, type ProfileOverrides, type Route, type UtilitySettings,
 } from '@obpal/core'
+import { toUi, uiRect } from './uiframe'
 import { hapticsKind, tick } from './haptics'
 import { GyroSmoother, playerSpaceRates, TiltStick } from './gyro'
 import type { Motion } from './motion'
@@ -267,12 +268,13 @@ class Stick {
     capture(this.zone, e)
     this.id = e.pointerId
     const R = this.measure()
-    const r = this.zone.getBoundingClientRect()
+    const r = uiRect(this.zone)
+    const at = toUi(e.clientX, e.clientY)
     this.box = { left: r.left, top: r.top }
-    const x = e.clientX - r.left
-    const y = e.clientY - r.top
+    const x = at.x - r.left
+    const y = at.y - r.top
     this.c = [r.width > 2 * R ? clamp(x, R, r.width - R) : r.width / 2, r.height > 2 * R ? clamp(y, R, r.height - R) : r.height / 2]
-    this.start = [e.clientX, e.clientY]
+    this.start = [at.x, at.y]
     this.at = performance.now()
     this.moved = false
     this.base.style.left = `${this.c[0]}px`
@@ -284,9 +286,10 @@ class Stick {
   private move = (e: PointerEvent) => { if (e.pointerId === this.id) this.track(e) }
 
   private track(e: PointerEvent) {
-    const dx = e.clientX - this.box.left - this.c[0]
-    const dy = e.clientY - this.box.top - this.c[1]
-    if (!this.moved && Math.hypot(e.clientX - this.start[0], e.clientY - this.start[1]) > TAP_SLOP) this.moved = true
+    const at = toUi(e.clientX, e.clientY)
+    const dx = at.x - this.box.left - this.c[0]
+    const dy = at.y - this.box.top - this.c[1]
+    if (!this.moved && Math.hypot(at.x - this.start[0], at.y - this.start[1]) > TAP_SLOP) this.moved = true
     this.value = shapeStick(dx / this.travel, dy / this.travel)
     if (this.driven) return // the pump draws thumb + motion together
     const m = Math.hypot(dx, dy)
@@ -472,6 +475,14 @@ export class GamepadMode {
   }
 
   /** Host rumble (dual-rumble semantics). Android vibrates; iOS web pages can't vibrate outside a tap, so the layer's border pulses. */
+  /** A hardware button (a volume key, a headset button, a keyboard key) holding a pad button. */
+  hardware(button: number, down: boolean) {
+    const key = -1000 - button
+    if (down) this.held.set(key, bit(button))
+    else this.held.delete(key)
+    this.changed()
+  }
+
   rumble(strong: number, weak: number, ms: number) {
     const s = clamp(Number(strong) || 0, 0, 1)
     const w = clamp(Number(weak) || 0, 0, 1)
@@ -840,7 +851,7 @@ export class GamepadMode {
     let c: Vec2 = [0, 0]
     let dead = 0
     const measure = () => {
-      const r = el.getBoundingClientRect()
+      const r = uiRect(el)
       c = [r.left + r.width / 2, r.top + r.height / 2]
       dead = r.width * 0.12
     }
@@ -850,7 +861,8 @@ export class GamepadMode {
       for (const a of arms) a.classList.toggle('on', (m & bit(Number(a.dataset.bit))) !== 0)
     }
     const aim = (e: PointerEvent) => {
-      const bits = dpadBits(e.clientX - c[0], e.clientY - c[1], dead)
+      const at = toUi(e.clientX, e.clientY)
+      const bits = dpadBits(at.x - c[0], at.y - c[1], dead)
       const prev = ids.get(e.pointerId) ?? 0
       if (bits === prev) return
       ids.set(e.pointerId, bits)
@@ -888,7 +900,7 @@ export class GamepadMode {
       this.trig[i] = v
       fill.style.transform = `scaleY(${v})`
     }
-    const measure = () => { const r = el.getBoundingClientRect(); top = r.top; height = r.height }
+    const measure = () => { const r = uiRect(el); top = r.top; height = r.height }
     const release = () => { id = null; this.trig[i] = 0; el.classList.remove('on'); fill.style.transform = '' }
     const down = (e: PointerEvent) => {
       if (id !== null) return
@@ -897,11 +909,11 @@ export class GamepadMode {
       measure()
       el.classList.add('on')
       tick()
-      this.trig[i] = triggerDepth(e.clientY, top, height)
+      this.trig[i] = triggerDepth(toUi(e.clientX, e.clientY).y, top, height)
       fill.style.transform = `scaleY(${this.trig[i]})`
       this.changed()
     }
-    const move = (e: PointerEvent) => { if (e.pointerId === id) set(triggerDepth(e.clientY, top, height)) }
+    const move = (e: PointerEvent) => { if (e.pointerId === id) set(triggerDepth(toUi(e.clientX, e.clientY).y, top, height)) }
     const up = (e: PointerEvent) => {
       if (e.pointerId !== id) return
       release()

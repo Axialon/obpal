@@ -2,11 +2,19 @@ import { qAxisAngle, qConj, qRotate, quatFromDeviceOrientation, type Quat, type 
 
 const D2R = Math.PI / 180
 
-export function screenAngle(): number {
+/** The screen's actual orientation angle (degrees, 0/90/180/270). */
+export function actualScreenAngle(): number {
   const so = typeof screen !== 'undefined' ? screen.orientation : undefined
   const a = so && typeof so.angle === 'number' ? so.angle : Number((window as unknown as { orientation?: number }).orientation ?? 0)
   return ((a % 360) + 360) % 360
 }
+
+let lockedAngle: number | null = null
+/** While the page counter-rotates to stay locked (./lock.ts), motion reads the angle it was locked at. */
+export function setLockedScreenAngle(a: number | null) { lockedAngle = a }
+
+/** The angle of the UI's frame: the locked angle while the page counter-rotates, else the screen's. */
+export function screenAngle(): number { return lockedAngle ?? actualScreenAngle() }
 
 /** Normalizes W3C motion events into a screen-frame orientation quaternion and gyro rates. */
 export class Motion {
