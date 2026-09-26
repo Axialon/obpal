@@ -104,6 +104,20 @@ The mappings are typed config objects:
 - Key bindings, thresholds and mouse speed: `DEFAULT_KEYS` in `src/shared/keys.ts`. To make another key bindable, add a row to the `KEYS` table there.
 - 3D gains, rates and the pan style (`'right'` or `'shift'` drag): `DEFAULT_VIEWER` in `src/shared/viewer.ts`.
 
+### Motion: Aim, Steer and Point (the control catalogue)
+
+In the phone's Gamepad mode the Motion chips follow the [control catalogue](../spec/CATALOGUE.md): **Aim** (gyro turn rate), **Steer** (tilt angle) and **Point** (a Wii-style pointer). Hold a chip for its options (route, sensitivity, deadzone jump, invert Y); the profile pill picks a profile (Default, Flight, Driving, Shooter, Pointer). The extension suggests a profile per site from `src/shared/sites.ts` (tesana.com and play.tesana.ai suggest Flight); the phone applies it unless you chose one yourself.
+
+| Utility | Page receives |
+|---|---|
+| Aim → right stick (Default, Flight) | right-stick values that clear the game's deadzone with a small turn |
+| Aim → mouse (Shooter) | `movementX`/`movementY` under pointer lock; the right stick otherwise |
+| Steer → fly (Flight) | tilt = right-stick X, tip forward/back = right-stick Y, like a yoke |
+| Steer → wheel (Default, Driving) | tilt = left-stick X |
+| Point | a lime cursor where the phone points; A clicks (`pointerdown`, `mousedown`, `up`, `click`) and holding B drags, through frames and open shadow roots; under pointer lock the pointer becomes relative mouse movement and no cursor is drawn; with the edge turn on, the right stick deflects toward the edge the cursor is near |
+
+While A or B click at the cursor they are not also gamepad buttons.
+
 ### Pages with frames
 
 The controller is visible in every bridged frame, as a real one would be. Keys go only to the focused frame. 3D input goes to the frame with the largest canvas.

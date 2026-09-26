@@ -2,17 +2,19 @@
  * MAIN-world page script, injected by the service worker into each bridged frame of the controlled tab.
  * It runs in the page's own JavaScript realm, which is what lets it
  *   (a) patch navigator.getGamepads with the phone's virtual controller (the @obpal/host shim), and
- *   (b, c) dispatch pointer, wheel and keyboard events whose legacy fields (keyCode, which) page code can read.
+ *   (b, c) dispatch pointer, wheel and keyboard events whose legacy fields (keyCode, which) page code can read,
+ *   (d) draw the Wii-style pointer and click, drag or move the mouse where the phone points.
  * It listens only to its own frame's bridge: same window, same origin, CHANNEL, and the session id it bound to.
  */
-import type { PadState } from '@obpal/core'
+import { addStick, type PadState } from '@obpal/core'
 import { installGamepadShim } from '@obpal/host/gamepad'
 import { MIN_VIEW_AREA, PAGE_VERSION, TARGET_MODES, type TargetMode } from '../shared/constants'
 import { KeyMapper, keyInit, pressCharCode, type KeyEdge, type KeysOutput, type Mods, type MouseButton } from '../shared/keys'
 import { clamp, type PadInput } from '../shared/math'
-import { envelope, readDown, type DeltaTuple, type InputFrame, type PadTuple, type UpMsg } from '../shared/messages'
+import { envelope, readDown, type DeltaTuple, type InputFrame, type PadTuple, type PointerTuple, type UpMsg } from '../shared/messages'
+import { pointerAim, PointerMapper, type PointerAct } from '../shared/pointer'
 import { DragSynth, viewerMotion, type Deltas, type Rect, type SynthEvent } from '../shared/viewer'
-import { deepActiveElement, deepElementFromPoint, largestView } from './dom'
+import { deepActiveElement, deepElementFromPoint, deepHit, largestView, type Hit } from './dom'
 
 interface PageHandle { version: number; announce: () => void; destroy: () => void }
 
@@ -50,7 +52,8 @@ function createPage(): PageHandle {
     rumble: (s: number, w: number, ms: number) => { if (sid) post({ t: 'rumble', s, w, ms }) },
   }
 
-  function setPad(p: PadTuple | null) {
+  /** The pad as the page sees it; `extra` is the pointer's edge turn, added to the right stick. */
+  function setPad(p: PadTuple | null, extra: readonly [number, number] = ZERO) {
     if (!shim) shim = { uninstall: installGamepadShim(source), timer: undefined }
     clearTimeout(shim.timer)
     shim.timer = undefined
@@ -60,7 +63,8 @@ function createPage(): PageHandle {
       return
     }
     seq = (seq + 1) & 0xffff
-    pad = { flags: 0, seq, t: Math.round(performance.now() * 1000) >>> 0, buttons: p[0], axes: [p[1], p[2], p[3], p[4]], triggers: [p[5], p[6]] }
+    const [rx, ry] = extra[0] || extra[1] ? addStick([p[3], p[4]], [extra[0], extra[1]]) : [p[3], p[4]]
+    pad = { flags: 0, seq, t: Math.round(performance.now() * 1000) >>> 0, buttons: p[0], axes: [p[1], p[2], rx, ry], triggers: [p[5], p[6]] }
     // Games that wait for gamepadconnected must have registered their listener: expose after load, on a press.
     if (!exposed && document.readyState !== 'loading' && gesture(p)) exposed = true
   }
@@ -81,11 +85,11 @@ function createPage(): PageHandle {
 
   let compatBlocked = false
 
-  function pointer(ptype: string, mtype: string, target: EventTarget, x: number, y: number, dx: number, dy: number, button: number, buttons: number, shift = false) {
+  function pointer(ptype: string, mtype: string, target: EventTarget, x: number, y: number, dx: number, dy: number, button: number, buttons: number, shift = false, view: Window = window) {
     const init: PointerEventInit = {
-      bubbles: true, cancelable: true, composed: true, view: window,
+      bubbles: true, cancelable: true, composed: true, view,
       clientX: x, clientY: y,
-      screenX: window.screenX + x, screenY: window.screenY + Math.max(0, window.outerHeight - window.innerHeight) + y,
+      screenX: view.screenX + x, screenY: view.screenY + Math.max(0, view.outerHeight - view.innerHeight) + y,
       movementX: dx, movementY: dy, button, buttons,
       shiftKey: shift || mods.shift, ctrlKey: mods.ctrl, altKey: mods.alt, metaKey: false,
       pointerId: POINTER_ID, pointerType: 'mouse', isPrimary: true, width: 1, height: 1, pressure: buttons ? 0.5 : 0,
@@ -125,7 +129,9 @@ function createPage(): PageHandle {
   }
 
   function runViewer(f: InputFrame, now: number) {
-    const motion = viewerMotion({ pad: padInput(f.p), deltas: deltasOf(f.d), tilt: f.tl, dtMs: f.dt })
+    const d = deltasOf(f.d) ?? (f.pt ? { aim: ZERO, pad1: ZERO, pad2: ZERO, zoom: 0 } : null)
+    if (d && f.pt) d.aim = pointerAim(f.pt, lastPt) // a pointing phone in gamepad mode aims the drag the same way
+    const motion = viewerMotion({ pad: padInput(f.p), deltas: d, tilt: f.tl, dtMs: f.dt })
     fire(synth.step(now, motion, viewArea(now)))
     if (synth.busy && synthTimer === undefined) {
       // Frames stop when input stops, so a timer lifts the button after the idle delay.
@@ -168,7 +174,8 @@ function createPage(): PageHandle {
 
   function runKeys(f: InputFrame) {
     const d = f.d
-    applyKeys(mapper.update({ pad: padInput(f.p), tilt: f.tl, aim: d ? [d[0], d[1]] : ZERO, pad1: d ? [d[2], d[3]] : ZERO, dtMs: f.dt }))
+    const aim: readonly [number, number] = f.pt ? pointerAim(f.pt, lastPt) : d ? [d[0], d[1]] : ZERO
+    applyKeys(mapper.update({ pad: padInput(f.p), tilt: f.tl, aim, pad1: d ? [d[2], d[3]] : ZERO, dtMs: f.dt }))
   }
 
   function applyKeys(out: KeysOutput) {
@@ -253,6 +260,82 @@ function createPage(): PageHandle {
     dot = null
   }
 
+  // ---- (d) Wii-style pointer: a cursor where the phone points; A clicks, B drags; a gyro mouse under lock ---------
+
+  const wii = new PointerMapper()
+  let lastPt: PointerTuple | null = null
+  let ring: HTMLElement | null = null
+  let ptrDown: Hit | null = null
+
+  /** The pointer this frame: the mapper decides what to do, this fires it. Returns the edge turn for the pad. */
+  function runPointer(pt: PointerTuple | null): readonly [number, number] {
+    const out = wii.update({ pt, w: innerWidth, h: innerHeight, locked: !!document.pointerLockElement })
+    applyActs(out.acts)
+    return out.stick
+  }
+
+  function applyActs(acts: PointerAct[]) {
+    for (const a of acts) {
+      if (a.type === 'cursor') showRing(a.x, a.y, a.grab, a.off)
+      else if (a.type === 'hide') hideRing()
+      else if (a.type === 'hover') {
+        const h = deepHit(a.x, a.y)
+        pointer('pointermove', 'mousemove', h.el, h.x, h.y, a.dx, a.dy, -1, 0, false, h.view)
+      } else if (a.type === 'down') {
+        const h = document.pointerLockElement ? lockHit() : deepHit(a.x, a.y)
+        ptrDown = h
+        pointer('pointerdown', 'mousedown', h.el, h.x, h.y, 0, 0, 0, 1, false, h.view)
+      } else if (a.type === 'drag') {
+        const h = ptrDown?.el.isConnected ? ptrDown : deepHit(a.x, a.y)
+        pointer('pointermove', 'mousemove', h.el, a.x - h.ox, a.y - h.oy, a.dx, a.dy, -1, 1, false, h.view)
+      } else if (a.type === 'up') {
+        const h = ptrDown?.el.isConnected ? ptrDown : document.pointerLockElement ? lockHit() : deepHit(a.x, a.y)
+        const x = a.x - h.ox
+        const y = a.y - h.oy
+        const init = pointer('pointerup', 'mouseup', h.el, x, y, 0, 0, 0, 0, false, h.view)
+        // A real click follows a press and release on the same element (or one that contains where the release landed).
+        if (a.click && (document.pointerLockElement || h.el.contains(deepHit(a.x, a.y).el))) {
+          h.el.dispatchEvent(new MouseEvent('click', { ...init, button: 0, buttons: 0, detail: 1 }))
+        }
+        ptrDown = null
+      } else if (a.type === 'lock') {
+        const h = lockHit()
+        pointer('pointermove', 'mousemove', h.el, h.x, h.y, a.dx, a.dy, -1, a.buttons, false, h.view)
+      }
+    }
+  }
+
+  /** Under pointer lock every mouse event goes to the element that captured the mouse. */
+  function lockHit(): Hit {
+    const el = document.pointerLockElement ?? document.body ?? document.documentElement
+    return { el, view: window, x: Math.round(innerWidth / 2), y: Math.round(innerHeight / 2), ox: 0, oy: 0 }
+  }
+
+  /** The Wii cursor: a lime ring with a dot, filled while B holds, dimmed while the phone points off-screen. */
+  function showRing(x: number, y: number, grab: boolean, off: boolean) {
+    if (!(document.documentElement instanceof HTMLElement)) return
+    if (!ring) {
+      ring = document.createElement('obpal-link-pointer')
+      const css: Record<string, string> = {
+        position: 'fixed', left: '0', top: '0', width: '26px', height: '26px', margin: '-13px 0 0 -13px', display: 'block', 'box-sizing': 'border-box',
+        'border-radius': '50%', border: '3px solid #c6ff34', background: 'radial-gradient(circle, #c6ff34 0 3px, transparent 3.5px)',
+        'box-shadow': '0 0 0 2px rgba(10,10,10,.8), inset 0 0 0 2px rgba(10,10,10,.8), 0 0 16px rgba(198,255,52,.7)',
+        'pointer-events': 'none', 'z-index': '2147483647', transition: 'opacity .2s, background .12s, border-width .12s', 'will-change': 'transform',
+      }
+      for (const [k, v] of Object.entries(css)) ring.style.setProperty(k, v, 'important')
+      document.documentElement.appendChild(ring)
+    }
+    ring.style.setProperty('transform', `translate(${x}px, ${y}px)${off ? ' scale(.7)' : ''}`, 'important')
+    ring.style.setProperty('opacity', off ? '0.45' : '1', 'important')
+    ring.style.setProperty('background', grab ? '#c6ff34' : 'radial-gradient(circle, #c6ff34 0 3px, transparent 3.5px)', 'important')
+    ring.dataset.grab = grab ? '1' : '0'
+  }
+
+  function hideRing() {
+    ring?.remove()
+    ring = null
+  }
+
   // ---- frames, release, lifecycle ------------------------------------------------------------------
 
   function onFrame(f: InputFrame) {
@@ -263,9 +346,10 @@ function createPage(): PageHandle {
       release()
       mode = next
     }
-    if (mode === 'gamepad') setPad(f.p)
+    if (mode === 'gamepad') setPad(f.p, runPointer(f.pt ?? null))
     else if (mode === 'viewer') runViewer(f, now)
     else runKeys(f)
+    lastPt = f.pt ?? null
     if (watchdog === undefined) watchdog = setInterval(checkStale, 250)
   }
 
@@ -277,13 +361,16 @@ function createPage(): PageHandle {
     watchdog = undefined
   }
 
-  /** Let go of everything held in any mode: keys, mouse buttons, a drag, the virtual pad. */
+  /** Let go of everything held in any mode: keys, mouse buttons, a drag, the pointer, the virtual pad. */
   function release() {
     fire(synth.reset())
     applyKeys(mapper.releaseAll())
+    applyActs(wii.release())
+    lastPt = null
     mods = NO_MODS
     if (pad || shim) dropPad()
     hideCursor()
+    hideRing()
   }
 
   function onMessage(e: MessageEvent) {

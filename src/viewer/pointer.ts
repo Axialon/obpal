@@ -34,13 +34,20 @@ export class ScreenPointer {
   /** Pixels per radian near the centre, for a screen `w` wide. */
   static scale(w: number) { return w / 2 / Math.tan(POINT_HALF_FOV * D2R) }
 
+  /** Where a pointing ray (yaw + = right, pitch + = up, degrees) meets a `w` × `h` screen: x = cx + tan(yaw)·K. */
+  static project(yaw: number, pitch: number, w: number, h: number): { x: number; y: number; off: boolean } {
+    const K = ScreenPointer.scale(w)
+    const lim = (a: number) => Math.max(-LIMIT, Math.min(LIMIT, a)) * D2R
+    const x = w / 2 + Math.tan(lim(yaw)) * K
+    const y = h / 2 - Math.tan(lim(pitch)) * K
+    return { x, y, off: x < 0 || x > w || y < 0 || y > h }
+  }
+
   step(dAim: readonly [number, number], dPad: readonly [number, number], w: number, h: number): PointerStep {
     const K = ScreenPointer.scale(w)
     this.aim[0] += dAim[0] - (dPad[0] / K) * R2D
     this.aim[1] += dAim[1] - (dPad[1] / K) * R2D
-    const lim = (a: number) => Math.max(-LIMIT, Math.min(LIMIT, a)) * D2R
-    const x = w / 2 + Math.tan(lim(-this.aim[0])) * K
-    const y = h / 2 - Math.tan(lim(this.aim[1])) * K
+    const { x, y } = ScreenPointer.project(-this.aim[0], this.aim[1], w, h)
     const dx = this.last ? x - this.last.x : 0
     const dy = this.last ? y - this.last.y : 0
     this.last = { x, y }

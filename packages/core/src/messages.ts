@@ -19,6 +19,10 @@ export interface Layout {
   tray: TrayControl[]
   /** Modes the host supports, in display order. */
   modes?: ModeId[]
+  /** Catalogue utilities the host accepts (CATALOGUE §1); absent means all of them. */
+  utilities?: string[]
+  /** A catalogue profile the host suggests for what it controls right now (CATALOGUE §3). */
+  profile?: string
 }
 
 export interface Caps {

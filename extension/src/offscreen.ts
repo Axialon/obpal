@@ -5,14 +5,21 @@
  * frames to the page bridges of the controlled tab over runtime ports: the controller to every frame, keys to
  * the focused frame, 3D drags to the frame with the largest canvas.
  */
-import { Mode, Remote, type Layout } from '@obpal/host'
+import { Mode, PointerFlag, pointerDelta, Remote, type Layout, type PointerState, type ProfileId } from '@obpal/host'
 import { APP_NAME, DEFAULT_MODE, PORT_NAME, SERVICE, isTargetMode, type TargetMode } from './shared/constants'
 import { parseConfig, parseFromPage, parseOffscreenRequest, type BgRequest, type ToPage } from './shared/messages'
-import { buildFrame, deltaTuple, frameSignature, isActive, padTuple, recipients, tiltTuple, type FrameInfo } from './shared/route'
+import {
+  buildFrame, deltaTuple, electFrame, frameSignature, isActive, padTuple, pointerTuple, recipients, tiltTuple, withoutClickButtons, withRelativeAim,
+  type FrameInfo,
+} from './shared/route'
+import { suggestForFrames } from './shared/sites'
 
 interface Link extends FrameInfo {
   port: chrome.runtime.Port
   tabId: number
+  /** The frame's host name, for the site's suggested profile. */
+  host: string
+  lock: boolean
   lastSent: number
   wasActive: boolean
   sig: string
@@ -37,12 +44,25 @@ const layout: Layout = {
     },
   ],
 }
+/** The layout with the site's suggested catalogue profile (CATALOGUE §3), when the table has one. */
+const layoutFor = (profile: ProfileId | null): Layout => (profile ? { ...layout, profile } : layout)
 
 let remote: Remote | null = null
 let config: { tabId: number | null; mode: TargetMode } = { tabId: null, mode: DEFAULT_MODE }
 let configured = false
 const links = new Set<Link>()
 let lastTargets = new Set<Link>()
+let suggested: ProfileId | null = null
+
+const hostOf = (url: string | undefined) => { try { return url ? new URL(url).hostname : '' } catch { return '' } }
+
+/** The controlled tab's frames changed: suggest the profile the site table has for them, if it differs. */
+function syncSuggestion() {
+  const next = suggestForFrames([...links].filter((l) => l.tabId === config.tabId).map((l) => ({ frameId: l.frameId, host: l.host })))
+  if (next === suggested) return
+  suggested = next
+  remote?.setLayout(layoutFor(next))
+}
 
 const toBg = (m: BgRequest): Promise<unknown> => chrome.runtime.sendMessage(m).catch(() => undefined)
 
@@ -62,10 +82,14 @@ chrome.runtime.onConnect.addListener((port) => {
     port.disconnect()
     return
   }
-  const link: Link = { port, tabId, frameId: port.sender?.frameId ?? 0, focus: false, focusAt: 0, area: 0, lastSent: 0, wasActive: false, sig: '' }
+  const link: Link = {
+    port, tabId, frameId: port.sender?.frameId ?? 0, host: hostOf(port.sender?.url), lock: false,
+    focus: false, focusAt: 0, area: 0, lastSent: 0, wasActive: false, sig: '',
+  }
   links.add(link)
   port.onMessage.addListener((raw: unknown) => onPageMessage(link, raw))
   port.onDisconnect.addListener(() => forget(link))
+  syncSuggestion()
 })
 
 function applyConfig(tabId: number | null, mode: TargetMode) {
@@ -81,11 +105,13 @@ function applyConfig(tabId: number | null, mode: TargetMode) {
     for (const l of links) l.sig = ''
     remote?.setValues({ target: mode })
   }
+  syncSuggestion()
 }
 
 function forget(l: Link) {
   links.delete(l)
   lastTargets.delete(l)
+  syncSuggestion()
 }
 
 function onPageMessage(link: Link, raw: unknown) {
@@ -95,6 +121,7 @@ function onPageMessage(link: Link, raw: unknown) {
     if (m.focus && !link.focus) link.focusAt = performance.now()
     link.focus = m.focus
     link.area = m.area
+    link.lock = m.lock === true
   } else {
     rumble(m.s, m.w, m.ms)
   }
@@ -126,12 +153,31 @@ function post(l: Link, m: ToPage) {
   try { l.port.postMessage(m) } catch { forget(l) }
 }
 
+// A relative pointer (Aim routed to the mouse) as a turn rate: the change between packets over the device's own clock.
+let lastPtr: PointerState | null = null
+let relRate: [number, number] = [0, 0]
+let relAt = 0
+function relativeRate(ptr: PointerState | null, now: number): [number, number] {
+  if (!ptr || !(ptr.flags & PointerFlag.relative)) { lastPtr = ptr; relRate = [0, 0]; return relRate }
+  if (ptr !== lastPtr) {
+    if (lastPtr && lastPtr.flags & PointerFlag.relative) {
+      const [dy, dp] = pointerDelta(ptr, lastPtr)
+      const dtMs = Math.min(100, Math.max(8, ((ptr.t - lastPtr.t) >>> 0) / 1000))
+      relRate = [(dy * 1000) / dtMs, (dp * 1000) / dtMs]
+    }
+    lastPtr = ptr
+    relAt = now
+  } else if (now - relAt > 150) relRate = [0, 0]
+  return relRate
+}
+
 function tick() {
   const r = remote
   if (!r) return
   const now = performance.now()
   const f = r.consume(now) // consume every tick so deltas never pile up
   const pad = r.pad
+  const ptr = r.pointer
   if (config.tabId === null || !links.size) {
     lastTargets.clear()
     return
@@ -146,16 +192,26 @@ function tick() {
   }
   lastTargets = targets
 
-  const p = padTuple(pad)
+  // The pointer (CATALOGUE §4): one frame draws the cursor (a pointer-locked frame, else the one with the game's
+  // canvas). While the Wii cursor is up, A and B click at it, so they leave the pad. A relative pointer with no
+  // pointer lock becomes the right stick here; other targets take pointer changes as aim deltas.
+  const gamepad = config.mode === 'gamepad'
+  const relative = !!ptr && (ptr.flags & PointerFlag.relative) !== 0
+  const ptFrame = ptr ? electFrame([...links], 'pointer') : null
+  const rate = relativeRate(ptr, now)
+  let p = padTuple(pad)
+  if (gamepad && relative && !ptFrame?.lock) p = withRelativeAim(p, rate)
+  if (gamepad && ptr && !relative) p = withoutClickButtons(p)
+  const pt = ptr && (!gamepad || !relative || ptFrame?.lock) ? pointerTuple(ptr, pad?.buttons ?? 0) : null
   const tl = tiltTuple(f.connected && !pad && f.mode === Mode.tilt ? f.tilt : null)
   const d = deltaTuple(f)
-  const active = isActive(p, d, tl)
+  const active = isActive(p, d, tl, pt)
   const sig = frameSignature(config.mode, p, tl)
   for (const l of targets) {
     // Stream while there is input; otherwise send changes at once and a heartbeat every HEARTBEAT_MS.
     if (!active && l.sig === sig && now - l.lastSent < HEARTBEAT_MS) continue
     const dt = l.wasActive ? Math.min(50, now - l.lastSent) : TICK_MS
-    post(l, buildFrame(config.mode, dt, p, d, tl))
+    post(l, buildFrame(config.mode, dt, p, d, tl, gamepad && l !== ptFrame ? null : pt))
     l.lastSent = now
     l.wasActive = active
     l.sig = sig
@@ -177,7 +233,7 @@ function startClock() {
 }
 
 async function boot() {
-  const r = await Remote.create({ appName: APP_NAME, service: SERVICE, layout })
+  const r = await Remote.create({ appName: APP_NAME, service: SERVICE, layout: layoutFor(suggested) })
   remote = r
   const report = () => void toBg({ to: 'bg', type: 'link', link: { status: r.status, url: r.pairingUrl, device: r.deviceName } })
   r.on('status', report)

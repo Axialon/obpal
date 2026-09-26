@@ -248,6 +248,8 @@ async function boot(p: NonNullable<ReturnType<typeof parsePairing>>) {
     if (m.t === 'rumble') return gamepad.rumble(m.strong, m.weak, m.ms)
     if (m.t === 'welcome') { hostName = m.name; layout = m.layout }
     else if (m.t === 'layout') layout = m.layout
+    // The catalogue side of the layout: which motion utilities the host takes, and the profile it suggests for what it controls.
+    if (m.t === 'welcome' || m.t === 'layout') gamepad.setHost({ name: hostName, profile: layout.profile, utilities: layout.utilities })
     else if (m.t === 'state') {
       Object.assign(values, m.values)
       if (typeof m.values.theme === 'string') { applyTheme(themeById(m.values.theme)); syncThemeRows() }
@@ -640,7 +642,7 @@ async function boot(p: NonNullable<ReturnType<typeof parsePairing>>) {
 
   function pump(dt: number) {
     if (!link.ready) return
-    if (mode === Mode.gamepad && gamepad.pump()) return // gamepad mode sends PAD packets instead of STATE
+    if (mode === Mode.gamepad && gamepad.pump(dt)) return // gamepad mode sends PAD (and POINTER) packets instead of STATE
     const now = performance.now()
     const touches = pad?.touches ?? 0
     const pointing = mode === Mode.point && !!motion.q // Wii-style pointing is always live

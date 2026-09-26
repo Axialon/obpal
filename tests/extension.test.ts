@@ -239,7 +239,7 @@ describe('messages: validation', () => {
     expect(sanitizeRumble('1', 0, 10)).toBeNull()
     expect(sanitizeRumble(Number.NaN, 0, 10)).toBeNull()
     expect(parseFromPage({ t: 'rumble', s: 0.5, w: 0.2, ms: 100 })).toEqual({ t: 'rumble', s: 0.5, w: 0.2, ms: 100 })
-    expect(parseFromPage({ t: 'rep', focus: true, area: 1234.4 })).toEqual({ t: 'rep', focus: true, area: 1234 })
+    expect(parseFromPage({ t: 'rep', focus: true, area: 1234.4 })).toEqual({ t: 'rep', focus: true, area: 1234, lock: false })
     expect(parseFromPage({ t: 'rep', focus: 'yes', area: 1 })).toBeNull()
     expect(parseFromPage({ t: 'rep', focus: true, area: -5 })).toBeNull()
   })

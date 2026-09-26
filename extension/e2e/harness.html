@@ -12,10 +12,22 @@
 <body>
   <!-- What a game or 3D viewer would receive from ob.Pal Link: the extension's end-to-end test reads window.__log / __pad(). -->
   <canvas id="stage"></canvas>
+  <!-- A button a Wii-style pointer can click: a quarter of the way across, halfway down. -->
+  <button id="target" style="position: fixed; left: 20%; top: 45%; width: 10%; height: 10%; z-index: 1; font: inherit">Target</button>
   <div id="out"></div>
   <script>
-    const log = { pointer: [], wheel: 0, keys: [], pads: [], mouse: [0, 0] }
+    const log = { pointer: [], wheel: 0, keys: [], pads: [], mouse: [0, 0], clicks: [], aWhilePointing: 0 }
     const stage = document.getElementById('stage')
+    const target = document.getElementById('target')
+    for (const t of ['pointerdown', 'pointerup', 'click']) target.addEventListener(t, (e) => { if (t === 'click') log.clicks.push({ x: e.clientX, y: e.clientY, button: e.button, detail: e.detail }) })
+    // The Wii cursor the extension draws (an <obpal-link-pointer> element), if any, and where it is.
+    window.__pointer = () => {
+      const r = document.querySelector('obpal-link-pointer')
+      const m = r && r.style.transform.match(/translate\(([-\d.]+)px, ([-\d.]+)px\)/)
+      return m ? { x: Number(m[1]), y: Number(m[2]), grab: r.dataset.grab === '1' } : null
+    }
+    // A must not reach the game as a pad button while it clicks at the cursor.
+    setInterval(() => { const p = window.__pad(); if (p && p.pressed[0] && document.querySelector('obpal-link-pointer')) log.aWhilePointing++ }, 8)
     for (const t of ['pointerdown', 'pointermove', 'pointerup']) {
       stage.addEventListener(t, (e) => log.pointer.push({ t, buttons: e.buttons, button: e.button, mx: e.movementX, my: e.movementY, id: e.pointerId }))
     }

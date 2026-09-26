@@ -3,7 +3,7 @@
  * sent on the unreliable "st" channel alongside or instead of STATE while a device is in gamepad mode.
  *
  * Layout (24 bytes, little-endian):
- *   0 u8  header 0x12 (version 1, type 2)    1 u8  flags (b0 gyro aim, b1 tilt steer)
+ *   0 u8  header 0x12 (version 1, type 2)    1 u8  flags (b0 gyro aim, b1 tilt steer, b2 point)
  *   2 u16 seq                                4 u32 capture time, microseconds
  *   8 u32 buttons (bit i = standard button i)
  *  12 i16 LX  14 i16 LY  16 i16 RX  18 i16 RY  (-1..1 as Q15; +X right, +Y down, as in the Gamepad API)
@@ -20,7 +20,8 @@ export const PadButton = {
 export type PadButtonId = (typeof PadButton)[keyof typeof PadButton]
 export const PAD_BUTTON_COUNT = 17
 
-export const PadFlag = { gyroAim: 1, tiltSteer: 2 } as const
+/** flags: b0 gyro aim is on, b1 tilt steering is on, b2 the Wii-style pointer is on (POINTER packets follow). */
+export const PadFlag = { gyroAim: 1, tiltSteer: 2, point: 4 } as const
 
 export interface PadState {
   flags: number
@@ -68,5 +69,5 @@ export function decodePad(buf: ArrayBuffer): PadState | null {
   }
 }
 
-/** Packet type from the first byte (0x11 STATE, 0x12 PAD, …) without decoding. */
+/** Packet type from the first byte (0x11 STATE, 0x12 PAD, 0x14 POINTER, …) without decoding. */
 export const packetType = (buf: ArrayBuffer) => (buf.byteLength ? new DataView(buf).getUint8(0) : 0)

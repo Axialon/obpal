@@ -6,8 +6,9 @@
  *  - keys go to the one focused frame,
  *  - 3D drags go to the frame with the largest visible canvas / <model-viewer>.
  */
+import { mixStick, PadButton, rateToUnit, type PointerState } from '@obpal/core'
 import { MIN_VIEW_AREA, TARGET_MODES, type TargetMode } from './constants'
-import type { DeltaTuple, InputFrame, ModeIndex, PadTuple } from './messages'
+import type { DeltaTuple, InputFrame, ModeIndex, PadTuple, PointerTuple } from './messages'
 
 export interface FrameInfo {
   /** Browser frame id; 0 is the top frame. */
@@ -18,13 +19,20 @@ export interface FrameInfo {
   focusAt: number
   /** Largest visible canvas / model-viewer, CSS px². */
   area: number
+  /** Reported by the frame: it holds the pointer lock (the game captured the mouse). */
+  lock?: boolean
 }
 
-export type Role = 'keys' | 'viewer'
+/** keys: the focused frame. viewer: the largest canvas. pointer: a pointer-locked frame, else the largest canvas. */
+export type Role = 'keys' | 'viewer' | 'pointer'
 
 export function electFrame<T extends FrameInfo>(frames: readonly T[], role: Role): T | null {
   if (!frames.length) return null
   const top = frames.find((f) => f.frameId === 0) ?? frames[0]
+  if (role === 'pointer') {
+    const locked = frames.find((f) => f.lock)
+    if (locked) return locked
+  }
   let best: T | null = null
   for (const f of frames) {
     if (role === 'keys' ? f.focus && (!best || f.focusAt > best.focusAt) : f.area >= MIN_VIEW_AREA && (!best || f.area > best.area)) best = f
@@ -61,6 +69,34 @@ export function deltaTuple(f: FrameDeltas): DeltaTuple | null {
   return d.some((v) => v !== 0) ? d : null
 }
 
+/** The pointer for a page, with the A / B bits of the pad that click at it. */
+export function pointerTuple(p: PointerState | null, buttons: number): PointerTuple | null {
+  if (!p) return null
+  return [round(p.yaw, 100), round(p.pitch, 100), p.gen & 0xff, p.flags & 0xff, buttons & 3]
+}
+
+/** The A and B bits removed: while they click at the cursor they are not also gamepad buttons (CATALOGUE §4). */
+export function withoutClickButtons(p: PadTuple | null): PadTuple | null {
+  if (!p) return null
+  const out: PadTuple = [...p]
+  out[0] = (p[0] & ~((1 << PadButton.A) | (1 << PadButton.B))) >>> 0
+  return out
+}
+
+/**
+ * Aim on the mouse route without pointer lock: the host finishes the route on the right stick (CATALOGUE §3, shooter),
+ * turning the change of aim per second into a deflection with the default deadzone jump. Signs: yaw + = right, pitch + = up.
+ */
+export function withRelativeAim(p: PadTuple | null, rateDps: readonly [number, number], deadzone = 0.2): PadTuple | null {
+  if (!p) return null
+  const v = rateToUnit(-rateDps[0], rateDps[1])
+  const [rx, ry] = mixStick([p[3], p[4]], [{ v, deadzone }])
+  const out: PadTuple = [...p]
+  out[3] = round(rx, 1e4)
+  out[4] = round(ry, 1e4)
+  return out
+}
+
 export function tiltTuple(t: readonly number[] | null): [number, number] | null {
   if (!t) return null
   const v: [number, number] = [round(Math.max(-1, Math.min(1, t[0])), 1e3), round(Math.max(-1, Math.min(1, t[1])), 1e3)]
@@ -68,16 +104,18 @@ export function tiltTuple(t: readonly number[] | null): [number, number] | null 
 }
 
 /** Is anything being pressed or moved? Active input streams at the full rate; idle input only heartbeats. */
-export function isActive(p: PadTuple | null, d: DeltaTuple | null, tl: [number, number] | null): boolean {
-  if (d || tl) return true
+export function isActive(p: PadTuple | null, d: DeltaTuple | null, tl: [number, number] | null, pt: PointerTuple | null = null): boolean {
+  if (d || tl || pt) return true
   if (!p) return false
   return p[0] !== 0 || p.slice(1).some((v) => Math.abs(v) > 0.02)
 }
 
 export const modeIndex = (mode: TargetMode) => TARGET_MODES.indexOf(mode) as ModeIndex
 
-export function buildFrame(mode: TargetMode, dt: number, p: PadTuple | null, d: DeltaTuple | null, tl: [number, number] | null): InputFrame {
-  return { t: 'in', m: modeIndex(mode), dt: round(Math.max(0, Math.min(1000, dt)), 10), p, d, tl }
+export function buildFrame(mode: TargetMode, dt: number, p: PadTuple | null, d: DeltaTuple | null, tl: [number, number] | null, pt: PointerTuple | null = null): InputFrame {
+  const f: InputFrame = { t: 'in', m: modeIndex(mode), dt: round(Math.max(0, Math.min(1000, dt)), 10), p, d, tl }
+  if (pt) f.pt = pt
+  return f
 }
 
 /** Identity of the held (non-delta) state; a change is sent at once even when idle. */

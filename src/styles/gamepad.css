@@ -77,18 +77,56 @@ html.gp-mode .hint { display: none !important; }
 .gp-guide .ic { width: 24px; height: 24px; }
 .gp .gp-guide.on { color: var(--accent-ink); }
 
-/* ---- centre: View / Menu, motion chips ---- */
-.gp-mid { grid-area: mid; display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 12px; min-height: 0; }
+/* ---- centre: View / Menu, then the Motion category: Aim / Steer / Point chips, the profile and the centre button ---- */
+.gp-mid { grid-area: mid; display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 12px; min-height: 0; container: gpmid / inline-size; }
 .gp-center { display: flex; gap: clamp(16px, 5vmin, 28px); margin-top: 8%; }
 .gp .gp-sm { width: 46px; height: 46px; border-radius: 50%; }
 .gp-sm .ic { width: 19px; height: 19px; }
-.gp-chips { display: flex; gap: 8px; }
-.gp .gp-chip { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 13px 0 10px; border-radius: 999px; font-size: 12px; font-weight: 750; letter-spacing: 0; color: var(--muted); }
-.gp-chip .ic { width: 17px; height: 17px; }
+/* chips on one line, the profile and centre button on the next; the centre button keeps its slot while hidden, so nothing
+   shifts under a finger when a chip turns on (a shift would land the release on the profile pill) */
+.gp-motion { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; }
+.gp-chips, .gp-tools { display: flex; flex-wrap: nowrap; justify-content: center; gap: 6px; }
+.gp .gp-centre[hidden] { display: inline-flex; visibility: hidden; pointer-events: none; }
+.gp .gp-chip { display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 13px 0 10px; border-radius: 999px; font-size: 12px; font-weight: 750; letter-spacing: 0; color: var(--muted); }
+.gp-chip .ic, .gp-chip-ic { width: 18px; height: 18px; display: block; flex: none; }
+.gp-chip-ic .ic { width: 100%; height: 100%; }
 .gp .gp-chip[aria-pressed='true'] { background: var(--glass-light); color: var(--accent-ink); border-color: rgb(var(--accent-rgb) / 0.7); box-shadow: 0 8px 24px rgb(var(--accent-rgb) / 0.28), inset 0 1px 0 var(--glass-edge); }
-.gp-chip[data-chip='aim'][aria-pressed='true'] .ic { animation: gp-spin 3.5s linear infinite; }
-.gp.no-motion .gp-chip { opacity: 0.45; }
+.gp .gp-chip.hold { transform: scale(0.94); border-color: rgb(var(--accent-rgb) / 0.55); }
+.gp-chip[data-chip='motion.aim'][aria-pressed='true'] .ic { animation: gp-spin 3.5s linear infinite; }
+.gp-chip[data-chip='motion.point'][aria-pressed='true'] .ic { animation: gp-pulse 1.8s var(--ease) infinite; }
+.gp .gp-prof { color: var(--accent-text); border-color: rgb(var(--accent-rgb) / 0.35); }
+.gp .gp-centre { width: 38px; padding: 0; justify-content: center; }
+.gp.no-motion .gp-chip:not(.gp-prof) { opacity: 0.45; }
 @keyframes gp-spin { to { transform: rotate(360deg); } }
+@keyframes gp-pulse { 50% { transform: scale(1.18); } }
+/* tight middle column (landscape): chips keep their icon only, like the mode tabs */
+@container gpmid (max-width: 340px) {
+  .gp-chip > span { display: none; }
+  .gp .gp-chip { width: 40px; padding: 0; justify-content: center; }
+}
+
+/* ---- sheets: a chip's options (route, sensitivity, deadzone jump, invert) and the profile picker ---- */
+.gp-sheet .sheet-title { display: flex; align-items: center; gap: 10px; }
+.gp-sheet .sheet-title .gp-chip-ic { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 11px; color: var(--accent-text); background: rgb(var(--accent-rgb) / 0.14); border: 1px solid var(--glass-edge); }
+.gp-sheet .sheet-title .gp-chip-ic .ic { width: 20px; height: 20px; }
+.gp-sheet h2 { font-family: var(--font-display); margin: 0; font-size: 20px; font-weight: 750; letter-spacing: -0.025em; }
+.gp-sheet .sheet-sub { margin-left: auto; font-size: 12px; font-weight: 650; color: var(--muted); letter-spacing: 0.02em; }
+.gp-sheet .routes { display: flex; gap: 6px; }
+.gp-sheet .routes button { flex: 1; min-width: 0; height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border-radius: 16px; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.03); color: var(--muted); font-size: 11px; font-weight: 700; touch-action: manipulation; transition: all 0.2s var(--ease); }
+.gp-sheet .routes button .ic { width: 20px; height: 20px; }
+.gp-sheet .routes button[aria-checked='true'] { background: var(--glass-light); color: var(--accent-ink); border-color: rgb(255 255 255 / 0.32); box-shadow: 0 10px 26px rgb(var(--accent-rgb) / 0.22), inset 0 1px 0 rgb(255 255 255 / 0.5); }
+.gp-sheet .pick-grid.profiles { grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.gp-sheet .pick { padding: 10px 2px 8px; gap: 6px; }
+.gp-sheet .pick-art { width: 44px; height: 44px; border-radius: 14px; color: var(--secondary); }
+.gp-sheet .pick-art .ic { width: 22px; height: 22px; }
+.gp-sheet .pick[aria-selected='true'] .pick-art { color: var(--accent-text); }
+.gp-sheet .pick-tag { position: absolute; top: -6px; right: -4px; padding: 2px 6px; border-radius: 999px; font-size: 9px; font-weight: 750; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent-ink); background: var(--accent); }
+.gp-sheet .pick-for { margin: -6px 2px 0; font-size: 12.5px; color: var(--secondary); text-align: center; min-height: 1.4em; }
+@media (orientation: landscape) and (max-height: 520px) {
+  .gp-sheet-wrap { place-items: center; }
+  .gp-sheet { width: min(560px, 100%); gap: 12px; padding-bottom: 14px; }
+  .gp-sheet .routes button { height: 44px; flex-direction: row; gap: 6px; }
+}
 
 /* ---- sides: floating sticks under the D-pad and the face buttons ---- */
 .gp-side { position: relative; min-width: 0; min-height: 0; }
@@ -190,6 +228,7 @@ html.gp-mode .hint { display: none !important; }
   }
   .gp-cue { display: grid; }
   .gp-mid { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 10px 18px; }
+  .gp-motion { flex-basis: 100%; }
   .gp-center { margin-top: 0; gap: 14px; }
   .gp-stick { --rx: 44%; --ry: 30%; }
   .gp-side.r .gp-stick { --rx: 42%; --ry: 74%; }

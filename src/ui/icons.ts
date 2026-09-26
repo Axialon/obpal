@@ -44,6 +44,15 @@ export const ICONS: Record<string, string> = {
   view: s('<rect x="3.5" y="5.5" width="11" height="9" rx="2"/><path d="M17.5 9.5h1a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-.5"/>'),
   menu: s('<path d="M5 7.5h14M5 12h14M5 16.5h14"/>'),
   guide: s('<path d="M4.5 11.2 12 4.8l7.5 6.4"/><path d="M6.8 9.6v8.2A1.2 1.2 0 0 0 8 19h8a1.2 1.2 0 0 0 1.2-1.2V9.6"/><path d="M10.2 19v-4.2h3.6V19"/>'),
+  // motion catalogue: routes and profiles
+  plane: s('<path d="M3.5 12.2 20.2 4.4l-4.4 15.4-4.2-6.3-8.1-1.3Z"/><path d="M11.6 13.5 20.2 4.4"/>'),
+  wheel: s('<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.6"/><path d="M12 3.5v5.9M4.7 15.3l5-2.3M19.3 15.3l-5-2.3"/>'),
+  cursor: s('<path d="M6 4.2 18.4 12.6l-5.3 1.1 2.7 5.4-2.5 1.2-2.7-5.4L6.6 18.6Z"/>'),
+  mouse: s('<rect x="7" y="3.5" width="10" height="17" rx="5"/><path d="M12 3.5v6.2M7 9.7h10"/>'),
+  stick: s('<circle cx="12" cy="7.8" r="3.8"/><path d="M12 11.6v4.6M5.5 19.5h13M8.2 16.2h7.6"/>'),
+  stickL: s('<circle cx="12" cy="7.8" r="3.8"/><path d="M12 11.6v4.6M5.5 19.5h13M8.2 16.2h7.6"/><path d="M3.5 4.5v6h3.6" stroke-width="2"/>'),
+  stickR: s('<circle cx="12" cy="7.8" r="3.8"/><path d="M12 11.6v4.6M5.5 19.5h13M8.2 16.2h7.6"/><path d="M17.2 10.5v-6h2.2a1.6 1.6 0 0 1 0 3.2h-2.2l2.8 2.8" stroke-width="2"/>'),
+  fly: s('<path d="M4 15.5c2.2-1.6 5-2.5 8-2.5s5.8.9 8 2.5"/><path d="M12 13V7.5M9.5 9.2 12 6.5l2.5 2.7"/><path d="M4.5 19h15"/>'),
 }
 
 export const icon = (name: string | undefined) => (name && ICONS[name]) || ''

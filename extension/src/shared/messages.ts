@@ -24,6 +24,11 @@ import { clamp } from './math'
 export type PadTuple = [buttons: number, lx: number, ly: number, rx: number, ry: number, lt: number, rt: number]
 /** Deltas since the previous frame: phone aim (deg, + left/up), trackpad and two-finger pan (px), pinch (log2). */
 export type DeltaTuple = [aimYaw: number, aimPitch: number, pad1x: number, pad1y: number, pad2x: number, pad2y: number, zoom: number]
+/**
+ * Where the phone points (PROTOCOL §6): yaw (+ right) and pitch (+ up) in degrees, the recentre generation, the packet's
+ * flags (bit 1 relative, bit 2 edge turn), and the A / B buttons (bits 0 / 1) that click at the cursor.
+ */
+export type PointerTuple = [yaw: number, pitch: number, gen: number, flags: number, ab: number]
 /** Target mode on the wire: index into TARGET_MODES. */
 export type ModeIndex = 0 | 1 | 2
 
@@ -37,14 +42,16 @@ export interface InputFrame {
   d: DeltaTuple | null
   /** Tilt stick [steer + right, pitch + top toward the user] while the phone is in Tilt mode. */
   tl: [number, number] | null
+  /** The pointer, to the one frame that draws the cursor (or has pointer lock); absent otherwise. */
+  pt?: PointerTuple | null
 }
 
 /** Offscreen -> page. rel: release anything held but stay bound. off: release and restore native APIs. */
 export type ToPage = InputFrame | { t: 'rel' } | { t: 'off' }
 
-/** Page bridge -> offscreen, over the port. rep: this frame's focus and largest visible 3D canvas (px²). */
+/** Page bridge -> offscreen, over the port. rep: this frame's focus, largest visible 3D canvas (px²) and pointer lock. */
 export type FromPage =
-  | { t: 'rep'; focus: boolean; area: number }
+  | { t: 'rep'; focus: boolean; area: number; lock?: boolean }
   | Rumble
 
 export interface Rumble { t: 'rumble'; s: number; w: number; ms: number }
@@ -66,21 +73,27 @@ export function isPadTuple(x: unknown): x is PadTuple {
 
 export const isDeltaTuple = (x: unknown): x is DeltaTuple => tuple(x, 7) && x.every((v) => within(v, -MAX_DELTA, MAX_DELTA))
 const isTilt = (x: unknown): x is [number, number] => tuple(x, 2) && within(x[0], -1, 1) && within(x[1], -1, 1)
+export const isPointerTuple = (x: unknown): x is PointerTuple =>
+  tuple(x, 5) && within(x[0], -400, 400) && within(x[1], -400, 400) &&
+  Number.isInteger(x[2]) && within(x[2], 0, 255) && Number.isInteger(x[3]) && within(x[3], 0, 255) && Number.isInteger(x[4]) && within(x[4], 0, 3)
 
 /** Validate an input frame and return a clean copy (unknown fields dropped), or null. */
 export function parseInputFrame(x: unknown): InputFrame | null {
   if (!isObj(x) || x.t !== 'in') return null
-  const { m, dt, p, d, tl } = x
+  const { m, dt, p, d, tl, pt } = x
   if ((m !== 0 && m !== 1 && m !== 2) || !within(dt, 0, 1000)) return null
   if (p !== null && !isPadTuple(p)) return null
   if (d !== null && !isDeltaTuple(d)) return null
   if (tl !== null && !isTilt(tl)) return null
-  return {
+  if (pt !== undefined && pt !== null && !isPointerTuple(pt)) return null
+  const f: InputFrame = {
     t: 'in', m, dt,
     p: p ? [...p] : null,
     d: d ? [...d] : null,
     tl: tl ? [tl[0], tl[1]] : null,
   }
+  if (pt) f.pt = [...pt]
+  return f
 }
 
 export function parseToPage(x: unknown): ToPage | null {
@@ -96,7 +109,7 @@ export function sanitizeRumble(s: unknown, w: unknown, ms: unknown): Rumble | nu
 
 export function parseFromPage(x: unknown): FromPage | null {
   if (!isObj(x)) return null
-  if (x.t === 'rep' && typeof x.focus === 'boolean' && within(x.area, 0, 1e9)) return { t: 'rep', focus: x.focus, area: Math.round(x.area) }
+  if (x.t === 'rep' && typeof x.focus === 'boolean' && within(x.area, 0, 1e9)) return { t: 'rep', focus: x.focus, area: Math.round(x.area), lock: x.lock === true }
   if (x.t === 'rumble') return sanitizeRumble(x.s, x.w, x.ms)
   return null
 }

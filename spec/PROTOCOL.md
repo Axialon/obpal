@@ -2,7 +2,7 @@
 
 An open protocol for pairing a **control device** (phone, tablet, custom hardware) with a **host** (web page, native bridge, any app) and streaming control state. 3D manipulation is the first profile, but the protocol isn't tied to it: new controls, modes and device types go in the capability and layout layers, without changing the transport.
 
-Status: draft, implemented by `packages/core` and `packages/host`. Keywords follow RFC 2119.
+Status: draft, implemented by `packages/core` and `packages/host`. Keywords follow RFC 2119. The controls built on these packets, their routes and profiles are in [CATALOGUE.md](CATALOGUE.md).
 
 ## 1. Roles and transport
 
@@ -48,7 +48,7 @@ Unknown message types and fields MUST be ignored.
 - `lock{reason}`
 - `rumble{strong, weak, ms}`: vibrate the device, Gamepad API dual-rumble semantics (magnitudes 0–1, at most 5000 ms). Devices that cannot vibrate MAY show it visually.
 
-**Layout:** `{v:1, modes:[modeId…], tray:[{id, label, type?: "button"|"toggle"|"select", icon?, options?: [{value, label, group?, detail?, image?, glyph?, color?}], add?}]}`. The device renders the layout. The host alone decides what an `id` does. The reserved id `pad` carries trackpad taps. A `select` with `add: true` belongs to a host that composes scenes: devices offer a second action on each option that adds it alongside the current one, sent as `value{id, v, add: true}`.
+**Layout:** `{v:1, modes:[modeId…], tray:[{id, label, type?: "button"|"toggle"|"select", icon?, options?: [{value, label, group?, detail?, image?, glyph?, color?}], add?}], utilities?: [utilityId…], profile?: string}`. The device renders the layout. The host alone decides what an `id` does. The reserved id `pad` carries trackpad taps. A `select` with `add: true` belongs to a host that composes scenes: devices offer a second action on each option that adds it alongside the current one, sent as `value{id, v, add: true}`. `utilities` lists the catalogue utilities the host accepts (CATALOGUE §1; absent means all) and `profile` suggests a catalogue profile for whatever the host controls right now (CATALOGUE §3); a host MAY send a new `layout` whenever either changes.
 
 ## 4. STATE packet (`st`, 76 bytes, little-endian)
 
@@ -92,7 +92,7 @@ A full game controller in the W3C *standard* gamepad layout (Xbox-style), sent o
 | Off | Type | Field |
 |---|---|---|
 | 0 | u8 | `0x12`: version 1, type PAD |
-| 1 | u8 | flags: bit 0 gyro aim feeds the right stick, bit 1 tilt steering feeds the left stick |
+| 1 | u8 | flags: bit 0 gyro aim is on, bit 1 tilt steering is on, bit 2 the Wii-style pointer is on (POINTER packets follow, §6) |
 | 2 | u16 | seq (serial arithmetic, as STATE) |
 | 4 | u32 | capture time, µs, device session clock |
 | 8 | u32 | buttons, bit *i* = standard button *i*: 0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB, 6 LT, 7 RT, 8 View, 9 Menu, 10 L3, 11 R3, 12–15 D-pad up/down/left/right, 16 Guide |
@@ -106,8 +106,33 @@ PAD carries positions, not accumulators: each packet is the whole controller. De
 
 Hosts MAY expose PAD to web content as a standard `Gamepad` (`mapping: "standard"`, 17 buttons, 4 axes); `@obpal/host` ships `installGamepadShim` for this.
 
-## 6. Extending
+## 6. POINTER packet (`st`, 16 bytes, little-endian)
+
+Where the device points, sent beside PAD while a pointing utility is on: the catalogue's `motion.point` (the Wii-style cursor) or `motion.aim` routed to the mouse (CATALOGUE §2). Devices send it at the PAD cadence, right after each PAD.
+
+| Off | Type | Field |
+|---|---|---|
+| 0 | u8 | `0x14`: version 1, type POINTER |
+| 1 | u8 | flags: bit 0 valid (the device has an orientation), bit 1 relative, bit 2 edge turn requested |
+| 2 | u16 | seq (serial arithmetic, as STATE) |
+| 4 | u32 | capture time, µs, device session clock |
+| 8 | i16 | yaw, 0.01° (+ = right) |
+| 10 | i16 | pitch, 0.01° (+ = up) |
+| 12 | u8 | recentre generation; increments on each recentre |
+| 13 | u8 | reserved (0) |
+| 14 | u16 | reserved (0) |
+
+**Absolute** (flag bit 1 clear): yaw and pitch are the pointing angles since the device's last recentre, with the Point-mode geometry of §4 (the axis is the top edge or the back, chosen at recentre; twisting about it moves nothing). A lost packet costs nothing and a recentre puts the cursor back in the middle. Hosts project them: `x = cx + tan(yaw) · K`, `y = cy − tan(pitch) · K`, `K = (width / 2) / tan(16°)`. The cursor's buttons come from PAD: A (button 0) clicks, B (button 1) holds. A PAD packet with flag bit 2 clear ends the pointer at once.
+
+**Relative** (flag bit 1 set): the angles are an integrated turn (they only ever grow, wrapping the int16), and only their change carries meaning: hosts difference consecutive packets with wrap-around and turn the change into mouse movement (or a stick deflection), skipping the difference across a change of generation.
+
+**Edge turn** (flag bit 2): the device asks page hosts for the Wii shooter's edge turn (CATALOGUE §4). Hosts MAY ignore it.
+
+**Staleness:** a pointer stream ends 300 ms after its last packet; hosts MUST then drop the cursor (or the mouse) rather than hold it.
+
+## 7. Extending
 
 - New device classes (wheels, pedals, knobs, custom hardware) declare `caps` and reuse the STATE fields they need. Anything else goes in new ctl messages.
-- The high nibble of byte 0 carries the packet version and the low nibble the type (`0x11` STATE, `0x12` PAD), so a batched v2 STATE or a native 200 Hz variant can use `0x21`. Receivers MUST ignore packet types they don't know.
+- New kinds of control go into the catalogue (CATALOGUE §5) with a stable id, and reuse PAD, STATE or POINTER fields where they can; a new packet type is the last resort.
+- The high nibble of byte 0 carries the packet version and the low nibble the type (`0x11` STATE, `0x12` PAD, `0x14` POINTER), so a batched v2 STATE or a native 200 Hz variant can use `0x21`. Receivers MUST ignore packet types they don't know.
 - Future work: a short-code pairing flow (commit-reveal ECDH with a SAS compared on both screens), resume without rescanning, a WSS relay fallback, and a registry of controller profiles.

@@ -9,7 +9,7 @@ export const PORT_NAME = 'obpal-link/page'
 /** window.postMessage channel id shared by the isolated-world bridge and the MAIN-world page script. */
 export const CHANNEL = 'obpal-link/v1'
 /** Bumped whenever the bridge <-> page protocol changes, so a stale page script replaces itself. */
-export const PAGE_VERSION = 1
+export const PAGE_VERSION = 2
 
 /** What the phone drives in the controlled tab. Index order is the wire encoding (InputFrame.m). */
 export const TARGET_MODES = ['gamepad', 'viewer', 'keys'] as const

@@ -1,9 +1,16 @@
 import '../styles/gamepad.css'
-import { emptyPad, encodePad, PAD_BYTES, PadButton, PadFlag } from '@obpal/core'
+import {
+  addStick as mixAdd, emptyPad, emptyPointer, encodePad, encodePointer, flyVector, isProfileId, mixStick, MOTION_UTILITIES, offeredMotion,
+  PAD_BYTES, PadButton, PadFlag, POINTER_BYTES, PointerFlag, PROFILE_IDS, PROFILES, rateToUnit, resolveProfile, ROUTES, shapeVector, Utility,
+  utilityKey, wheelVector,
+  type Contribution, type MotionUtility, type Profile, type ProfileId, type ProfileOverrides, type Route, type UtilitySettings,
+} from '@obpal/core'
 import { hapticsKind, tick } from './haptics'
 import { GyroSmoother, playerSpaceRates, TiltStick } from './gyro'
 import type { Motion } from './motion'
+import { WiiPointer } from './pointing'
 import { ICONS } from '../ui/icons'
+import type { FamilyApi } from '../family'
 
 type Vec2 = [number, number]
 
@@ -28,9 +35,14 @@ const IDLE_MS = 66 // 15 Hz while nothing is held
 const MIN_GAP_MS = 12 // stay near 60 Hz whatever rate the motion sensor fires at
 const HANDOFF_MS = 250 // see GamepadMode.pump()
 const MAX_RUMBLE_MS = 5000 // the Gamepad API's playEffect limit
+const LONG_PRESS_MS = 460 // holding a motion chip opens its options
 
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v)
 const bit = (b: number) => 1 << b
+const store = {
+  get: (k: string) => { try { return localStorage.getItem(k) } catch { return null } },
+  set: (k: string, v: string | null) => { try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v) } catch { /* private mode */ } },
+}
 
 // ---- pure helpers (unit tested) -------------------------------------------------
 
@@ -56,12 +68,7 @@ export function gyroToStick(yawDps: number, pitchDps: number, gain = 1): Vec2 {
 }
 
 /** Sum of two stick vectors, clamped to the unit circle (a thumb plus gyro can't exceed a full deflection). */
-export function addStick(a: Vec2, b: Vec2): Vec2 {
-  const x = a[0] + b[0]
-  const y = a[1] + b[1]
-  const m = Math.hypot(x, y)
-  return m > 1 ? [x / m, y / m] : [x, y]
-}
+export const addStick = (a: Vec2, b: Vec2): Vec2 => mixAdd(a, b)
 
 /** Trigger value from the finger's height inside the trigger (client px): the top is a light touch, sliding down pulls harder. */
 export function triggerDepth(y: number, top: number, height: number, floor = TRIGGER.floor, travel = TRIGGER.travel): number {
@@ -98,7 +105,73 @@ export function rumblePattern(strong: number, weak: number, ms: number): number 
   return out
 }
 
+/** What the motion utilities feed the sticks with, this tick. Null while a utility is off or its sensor is missing. */
+export interface MotionInputs {
+  /** Aim: player-space turn rates, degrees/second (yaw + = turning left, pitch + = tipping up). */
+  rates: readonly [number, number] | null
+  /** Steer: the tilt stick [steer + = right, pitch + = top edge toward the user] in −1…1. */
+  tilt: readonly [number, number] | null
+}
+
+export interface Composed {
+  /** [LX, LY, RX, RY] as the Gamepad API reads them (+Y down). */
+  axes: [number, number, number, number]
+  /** Aim routed to the mouse: turn rates to integrate, degrees/second, + = right and + = up. Null otherwise. */
+  mouse: [number, number] | null
+}
+
+/**
+ * The catalogue's routes and response (CATALOGUE §2) from the thumbs and the motion utilities to the four axes.
+ * Each utility is shaped by its own gain, curve and invert, then mixed into the stick its route names; a stick with
+ * motion on it gets one deadzone jump so small deliberate motions land past the game's deadzone.
+ */
+export function composeSticks(left: Vec2, right: Vec2, m: MotionInputs, profile: Profile, gain = 1): Composed {
+  const L: Contribution[] = []
+  const R: Contribution[] = []
+  let mouse: [number, number] | null = null
+  const shape = (v: Vec2, s: UtilitySettings): Vec2 => shapeVector(v, { gain: s.gain * gain, curve: s.curve, invertY: s.invertY })
+  if (m.rates) {
+    const s = profile.aim
+    if (s.route === 'mouse') mouse = [-m.rates[0] * s.gain * gain, m.rates[1] * s.gain * gain * (s.invertY ? -1 : 1)]
+    else (s.route === 'stick.left' ? L : R).push({ v: shape(rateToUnit(m.rates[0], m.rates[1]), s), deadzone: s.deadzone })
+  }
+  if (m.tilt) {
+    const s = profile.steer
+    const base = s.route === 'stick.wheel' ? wheelVector(m.tilt) : flyVector(m.tilt)
+    const target = s.route === 'stick.wheel' || s.route === 'stick.left' ? L : R
+    target.push({ v: shape(base, s), deadzone: s.deadzone })
+  }
+  const l = mixStick(left, L)
+  const r = mixStick(right, R)
+  return { axes: [l[0], l[1], r[0], r[1]], mouse }
+}
+
+/** Where a remembered profile choice lives: per host, and per suggestion the host makes (a suggestion is per site). */
+export const profileKey = (host: string, suggested: string | null) => `obpal.profile.${host}|${suggested ?? ''}`
+
+/** The profile in effect: the user's choice for this host and suggestion, else the host's suggestion, else default. */
+export function activeProfile(chosen: string | null, suggested: string | null | undefined): ProfileId {
+  if (isProfileId(chosen)) return chosen
+  if (isProfileId(suggested)) return suggested
+  return 'default'
+}
+
 // ---- layer markup -----------------------------------------------------------------
+
+const ROUTE_META: Record<Route, { label: string; icon: string }> = {
+  'stick.right': { label: 'R stick', icon: 'stickR' },
+  'stick.left': { label: 'L stick', icon: 'stickL' },
+  'stick.fly': { label: 'Fly', icon: 'fly' },
+  'stick.wheel': { label: 'Wheel', icon: 'wheel' },
+  mouse: { label: 'Mouse', icon: 'mouse' },
+  pointer: { label: 'Cursor', icon: 'cursor' },
+}
+const PROFILE_ICON: Record<ProfileId, string> = { default: 'gamepad', flight: 'plane', driving: 'wheel', shooter: 'point', pointer: 'cursor' }
+const UTILITY_META: Record<MotionUtility, { label: string; title: string }> = {
+  'motion.aim': { label: 'Aim', title: 'Gyro aim: turning the phone turns the view' },
+  'motion.steer': { label: 'Steer', title: 'Tilt steering: hold the phone tilted' },
+  'motion.point': { label: 'Point', title: 'Wii-style pointer: the cursor is where the phone points' },
+}
 
 function layerHtml(): string {
   const B = PadButton
@@ -124,9 +197,12 @@ function layerHtml(): string {
       </div>
       <div class="gp-mid">
         <div class="gp-center">${round('gp-sm', B.View, 'View', ICONS.view)}${round('gp-sm', B.Menu, 'Menu', ICONS.menu)}</div>
-        <div class="gp-chips">
-          <button class="gp-chip" data-chip="aim" aria-pressed="false" aria-label="Gyro aim (right stick)">${ICONS.gyro}<span>Aim</span></button>
-          <button class="gp-chip" data-chip="steer" aria-pressed="false" aria-label="Tilt steering (left stick)">${ICONS.tilt}<span>Steer</span></button>
+        <div class="gp-motion" role="group" aria-label="Motion">
+          <div class="gp-chips"></div>
+          <div class="gp-tools">
+            <button class="gp-chip gp-prof" data-act="profile" aria-haspopup="dialog" aria-label="Profile"></button>
+            <button class="gp-chip gp-centre" data-act="centre" aria-label="Centre here" hidden>${ICONS.center}</button>
+          </div>
         </div>
       </div>
       <div class="gp-side r">
@@ -147,6 +223,13 @@ function listen(el: HTMLElement, down: Handler, move: Handler | null, up: Handle
 function capture(el: HTMLElement, e: PointerEvent) {
   e.preventDefault()
   try { el.setPointerCapture(e.pointerId) } catch { /* synthetic events */ }
+}
+/** A sheet opened under a held finger: the finger lifting off lands a click on whatever is now beneath it. Drop that one click. */
+function swallowNextClick() {
+  const stop = (e: Event) => { e.stopPropagation(); e.preventDefault(); off() }
+  const off = () => { document.removeEventListener('click', stop, true); clearTimeout(t) }
+  const t = setTimeout(off, 1200)
+  document.addEventListener('click', stop, true)
 }
 
 // ---- floating thumbstick ---------------------------------------------------------------
@@ -272,16 +355,22 @@ export interface GamepadDeps {
   fullscreen?: () => void
 }
 
+/** What the host declared about itself: its name, and the catalogue fields of its layout. */
+export interface HostInfo { name: string; profile?: string; utilities?: string[] }
+
 /**
  * Gamepad mode: a full-screen Xbox-style controller (floating sticks with click, D-pad, ABXY, bumpers, analog triggers,
- * View / Menu / Guide) with optional gyro aim on the right stick and tilt steering on the left stick's X axis.
- * Streams PAD packets (packages/core/src/pad.ts) in place of STATE while it is active.
+ * View / Menu / Guide) with the catalogue's Motion utilities: gyro Aim, tilt Steer and the Wii-style Point, each routed
+ * by the active profile (CATALOGUE §2–3). Streams PAD packets (packages/core/src/pad.ts) in place of STATE while it is
+ * active, and POINTER packets beside them while a pointing utility is on.
  */
 export class GamepadMode {
   private el: HTMLElement | null = null
   private active = false
   private readonly pad = emptyPad()
   private readonly buf = new ArrayBuffer(PAD_BYTES)
+  private readonly ptr = emptyPointer()
+  private readonly ptrBuf = new ArrayBuffer(POINTER_BYTES)
   /** Button bits per pointer; each pointer is captured by exactly one control. */
   private readonly held = new Map<number, number>()
   private clicks: { bit: number; until: number }[] = []
@@ -289,15 +378,20 @@ export class GamepadMode {
   private readonly trig: Vec2 = [0, 0]
   private resets: (() => void)[] = []
   private remeasures: (() => void)[] = []
-  private aim = false
-  private steer = false
-  private gyro: Vec2 = [0, 0]
-  private steerX = 0
+  private readonly on = new Set<MotionUtility>()
+  private offered: MotionUtility[] = [...MOTION_UTILITIES]
+  private host: HostInfo = { name: '' }
+  private profileId: ProfileId = 'default'
+  private profile: Profile = PROFILES.default
+  private inputs: MotionInputs = { rates: null, tilt: null }
+  private mouseAcc: Vec2 = [0, 0]
   private readonly smoother = new GyroSmoother()
-  private readonly tilt = new TiltStick()
+  private readonly tilt = new TiltStick(4, 30, 1) // linear: the profile's curve shapes it
+  private readonly wii = new WiiPointer()
   private lastSend = 0
   private handoffUntil = 0
   private rumbleTimer: ReturnType<typeof setTimeout> | undefined
+  private sheet: HTMLElement | null = null
 
   constructor(private readonly deps: GamepadDeps) {
     document.addEventListener('visibilitychange', () => {
@@ -306,6 +400,7 @@ export class GamepadMode {
       else this.relevel()
     })
     addEventListener('resize', () => { for (const f of this.remeasures) f() })
+    this.applyProfile(this.profileId)
   }
 
   /** Build the layer inside the control surface. Call again whenever the surface is rebuilt. */
@@ -324,10 +419,11 @@ export class GamepadMode {
     this.bindDpad(el.querySelector<HTMLElement>('.gp-dpad')!)
     this.sticks = [...el.querySelectorAll<HTMLElement>('.gp-stick')].map((z, i) => new Stick(z, () => this.click(i ? PadButton.R3 : PadButton.L3)))
     for (const s of this.sticks) { this.resets.push(() => s.reset()); this.remeasures.push(() => s.remeasure()) }
-    el.querySelectorAll<HTMLElement>('[data-chip]').forEach((c) => { c.onclick = () => { tick(); this.toggle(c.dataset.chip === 'aim' ? 'aim' : 'steer') } })
     el.querySelector<HTMLElement>('[data-act="exit"]')!.onclick = () => { tick(); this.deps.exit() }
     el.querySelector<HTMLElement>('[data-act="settings"]')!.onclick = () => { tick(); this.deps.openSettings() }
-    this.paintChips()
+    el.querySelector<HTMLElement>('[data-act="profile"]')!.onclick = () => { tick(); this.openProfiles() }
+    el.querySelector<HTMLElement>('[data-act="centre"]')!.onclick = () => { tick(); this.recentre(); this.deps.toast('Centred') }
+    this.renderChips()
     el.hidden = !this.active
     surface.classList.toggle('gp-on', this.active)
     document.documentElement.classList.toggle('gp-mode', this.active)
@@ -342,19 +438,34 @@ export class GamepadMode {
   }
 
   /**
+   * The host introduced itself or changed its layout: offer only the utilities it accepts, and apply its suggested
+   * profile unless the user chose one for this host (and this suggestion) before.
+   */
+  setHost(h: HostInfo) {
+    this.host = h
+    this.offered = offeredMotion(h.utilities)
+    for (const u of [...this.on]) if (!this.offered.includes(u)) this.on.delete(u)
+    const suggested = isProfileId(h.profile) ? h.profile : null
+    this.applyProfile(activeProfile(store.get(profileKey(h.name, suggested)), suggested))
+    this.renderChips()
+  }
+
+  /**
    * One tick of the state pump (each motion sample, or every 16 ms without motion). Sends a PAD packet: about 60 Hz while
    * anything is held or motion is steering, 15 Hz at rest. Returns true when the tick is fully handled and no STATE should
    * be sent. Right after entering gamepad mode it returns false for a moment, so the caller's STATE packets (which now
    * carry mode = gamepad) tell the host to stop applying the previous mode's gyro or tilt; after that only PAD is sent.
    */
-  pump(): boolean {
+  pump(dtMs = 16.7): boolean {
     if (!this.active) return false
     const now = performance.now()
-    this.sampleMotion()
+    this.sampleMotion(dtMs)
     this.compose(now)
     const [lx, ly, rx, ry] = this.pad.axes
-    this.sticks[0]?.show(this.steer ? [lx, ly] : null)
-    this.sticks[1]?.show(this.aim ? [rx, ry] : null)
+    const L = this.contributes('stick.left') || (this.on.has(Utility.steer) && this.profile.steer.route === 'stick.wheel')
+    const R = this.contributes('stick.right') || (this.on.has(Utility.steer) && this.profile.steer.route === 'stick.fly')
+    this.sticks[0]?.show(L ? [lx, ly] : null)
+    this.sticks[1]?.show(R ? [rx, ry] : null)
     const gap = now - this.lastSend
     if (gap >= MIN_GAP_MS && (gap >= IDLE_MS || this.busy(now))) this.sendPad(now)
     return now >= this.handoffUntil
@@ -382,6 +493,7 @@ export class GamepadMode {
       this.lastSend = 0
       this.relevel()
     } else {
+      this.closeSheet()
       this.releaseAll()
       this.pulse(0, 0)
       // Leave the host a neutral pad, so nothing keeps moving until its pad times out.
@@ -390,69 +502,95 @@ export class GamepadMode {
     }
   }
 
+  /** The pose right now is neutral: level for Steer, and the centre of the screen for Point. */
   private relevel() {
-    const { motion } = this.deps
     this.smoother.reset()
-    if (this.steer && motion.q) this.tilt.capture(motion.up())
+    this.recentre()
   }
 
-  private toggle(which: 'aim' | 'steer') {
+  private recentre() {
     const { motion } = this.deps
-    if (which === 'aim') {
-      if (!this.aim && !motion.hasGyro) return this.deps.toast('Motion is off on this phone')
-      this.aim = !this.aim
-      this.smoother.reset()
-    } else {
-      if (!this.steer && !motion.q) return this.deps.toast('Motion is off on this phone')
-      this.steer = !this.steer
-      if (this.steer) this.tilt.capture(motion.up()) // the pose right now is straight ahead
-    }
+    if (!motion.q) return
+    if (this.on.has(Utility.steer)) this.tilt.capture(motion.up())
+    if (this.on.has(Utility.point)) { this.wii.recenter(motion.q); this.ptr.gen = (this.ptr.gen + 1) & 0xff }
+    this.mouseAcc = [0, 0]
+  }
+
+  private toggle(u: MotionUtility, on = !this.on.has(u)) {
+    const { motion } = this.deps
+    if (on && !this.on.has(u)) {
+      if ((u === Utility.aim && !motion.hasGyro) || !motion.q) return this.deps.toast('Motion is off on this phone')
+      this.on.add(u)
+      if (u === Utility.aim) this.smoother.reset()
+      if (u === Utility.steer) this.tilt.capture(motion.up()) // the pose right now is straight ahead
+      if (u === Utility.point) { this.wii.recenter(motion.q); this.ptr.gen = (this.ptr.gen + 1) & 0xff }
+    } else if (!on) this.on.delete(u)
     this.paintChips()
     this.changed()
   }
 
-  private paintChips() {
-    this.el?.querySelectorAll<HTMLElement>('[data-chip]').forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.chip === 'aim' ? this.aim : this.steer)))
+  /** Does any motion utility currently feed this stick? */
+  private contributes(route: Route): boolean {
+    return (this.on.has(Utility.aim) && this.profile.aim.route === route) || (this.on.has(Utility.steer) && this.profile.steer.route === route)
   }
 
-  private sampleMotion() {
+  private get pointing() { return this.on.has(Utility.point) && !!this.deps.motion.q }
+  private get gyroMouse() { return this.on.has(Utility.aim) && this.profile.aim.route === 'mouse' && this.deps.motion.hasGyro }
+
+  private sampleMotion(dtMs: number) {
     const { motion, settings } = this.deps
     this.smoother.smoothBelow = 4 + 8 * settings.smooth
-    this.gyro = [0, 0]
-    if (this.aim && motion.hasGyro && motion.flowing) {
-      const [yaw, pitch] = this.smoother.apply(...playerSpaceRates(motion.gyro, motion.up()))
-      this.gyro = gyroToStick(yaw, pitch, settings.gain)
-    }
-    this.steerX = this.steer && motion.q ? this.tilt.stick(motion.up(), settings.gain)[0] : 0
+    this.wii.setSteadiness(settings.smooth)
+    this.inputs = { rates: null, tilt: null }
+    if (this.on.has(Utility.aim) && motion.hasGyro && motion.flowing) this.inputs.rates = this.smoother.apply(...playerSpaceRates(motion.gyro, motion.up()))
+    if (this.on.has(Utility.steer) && motion.q) this.inputs.tilt = this.tilt.stick(motion.up(), 1)
+    if (this.pointing) this.wii.update(motion.q!, dtMs / 1000)
+    const { axes, mouse } = composeSticks(this.sticks[0]?.value ?? [0, 0], this.sticks[1]?.value ?? [0, 0], this.inputs, this.profile, settings.gain)
+    this.pad.axes = axes
+    if (mouse) { this.mouseAcc[0] += (mouse[0] * dtMs) / 1000; this.mouseAcc[1] += (mouse[1] * dtMs) / 1000 }
   }
 
   private compose(now: number) {
     const p = this.pad
-    const l = this.sticks[0]?.value ?? [0, 0]
-    const r = this.sticks[1]?.value ?? [0, 0]
-    const L = this.steerX ? addStick(l, [this.steerX, 0]) : l
-    const R = this.gyro[0] || this.gyro[1] ? addStick(r, this.gyro) : r
-    p.axes = [L[0], L[1], R[0], R[1]]
     p.triggers = [this.trig[0], this.trig[1]]
     let m = 0
     for (const b of this.held.values()) m |= b
     this.clicks = this.clicks.filter((c) => c.until > now)
     for (const c of this.clicks) m |= bit(c.bit)
     p.buttons = m >>> 0
-    p.flags = (this.aim ? PadFlag.gyroAim : 0) | (this.steer ? PadFlag.tiltSteer : 0)
+    p.flags = (this.on.has(Utility.aim) ? PadFlag.gyroAim : 0) | (this.on.has(Utility.steer) ? PadFlag.tiltSteer : 0) | (this.pointing ? PadFlag.point : 0)
   }
 
   private busy(now: number) {
-    return this.aim || this.steer || this.held.size > 0 || this.trig[0] > 0 || this.trig[1] > 0 ||
+    return this.on.size > 0 || this.held.size > 0 || this.trig[0] > 0 || this.trig[1] > 0 ||
       this.sticks.some((s) => s.touching) || this.clicks.some((c) => c.until > now)
   }
 
-  /** Same conventions as STATE: u16 seq per packet, capture time in µs on the session clock. */
+  /** Same conventions as STATE: u16 seq per packet, capture time in µs on the session clock. A POINTER follows while pointing. */
   private sendPad(now: number) {
     const p = this.pad
     p.seq = (p.seq + 1) & 0xffff
     p.t = Math.round((now - this.deps.t0) * 1000) >>> 0
     if (this.deps.send(encodePad(p, this.buf))) this.lastSend = now
+    if (this.pointing || this.gyroMouse) this.sendPointer(p.t)
+  }
+
+  /** Point: the absolute Wii aim (scaled by its gain). Aim on the mouse route: the integrated turn, only its change matters. */
+  private sendPointer(t: number) {
+    const q = this.ptr
+    const s = this.profile.point
+    q.seq = (q.seq + 1) & 0xffff
+    q.t = t
+    if (this.pointing) {
+      q.flags = PointerFlag.valid | (s.edgeTurn ? PointerFlag.edgeTurn : 0)
+      q.yaw = this.wii.aim[0] * s.gain
+      q.pitch = this.wii.aim[1] * s.gain * (s.invertY ? -1 : 1)
+    } else {
+      q.flags = PointerFlag.valid | PointerFlag.relative
+      q.yaw = this.mouseAcc[0]
+      q.pitch = this.mouseAcc[1]
+    }
+    this.deps.send(encodePointer(q, this.ptrBuf))
   }
 
   private sendNeutral() {
@@ -461,7 +599,9 @@ export class GamepadMode {
     p.axes = [0, 0, 0, 0]
     p.triggers = [0, 0]
     p.flags = 0
-    this.sendPad(performance.now())
+    p.seq = (p.seq + 1) & 0xffff
+    p.t = Math.round((performance.now() - this.deps.t0) * 1000) >>> 0
+    if (this.deps.send(encodePad(p, this.buf))) this.lastSend = performance.now()
   }
 
   /** A button edge: send now rather than on the next tick. */
@@ -484,6 +624,195 @@ export class GamepadMode {
     this.clicks = []
     this.trig[0] = this.trig[1] = 0
   }
+
+  // ---- profiles and the motion chips --------------------------------------------------
+
+  private overrides(id: ProfileId): ProfileOverrides {
+    try { return (JSON.parse(store.get(`obpal.motion.${id}`) ?? '{}') as ProfileOverrides) ?? {} } catch { return {} }
+  }
+
+  /** Make a profile current. Its `on` utilities switch on (when the phone can drive them); the rest stay as they were. */
+  private applyProfile(id: ProfileId) {
+    const changed = id !== this.profileId
+    this.profileId = id
+    this.profile = resolveProfile(id, this.overrides(id))
+    if (changed) for (const u of this.profile.on) if (this.offered.includes(u) && this.deps.motion.q) this.toggle(u, true)
+    this.paintChips()
+  }
+
+  /** The user picked a profile: remembered for this host and suggestion; picking the suggestion itself forgets the choice. */
+  private chooseProfile(id: ProfileId) {
+    const suggested = isProfileId(this.host.profile) ? this.host.profile : null
+    store.set(profileKey(this.host.name, suggested), id === suggested ? null : id)
+    this.applyProfile(id)
+    this.changed()
+  }
+
+  private saveOverride(u: MotionUtility, patch: Partial<UtilitySettings>) {
+    const key = utilityKey(u)
+    const over = this.overrides(this.profileId)
+    over[key] = { ...over[key], ...patch }
+    store.set(`obpal.motion.${this.profileId}`, JSON.stringify(over))
+    this.profile = resolveProfile(this.profileId, over)
+    if (this.on.has(Utility.steer) && patch.route) this.tilt.capture(this.deps.motion.up())
+    this.paintChips()
+    this.changed()
+  }
+
+  private resetOverride(u: MotionUtility) {
+    const over = this.overrides(this.profileId)
+    delete over[utilityKey(u)]
+    store.set(`obpal.motion.${this.profileId}`, JSON.stringify(over))
+    this.profile = resolveProfile(this.profileId, over)
+    this.paintChips()
+    this.changed()
+  }
+
+  private renderChips() {
+    const row = this.el?.querySelector<HTMLElement>('.gp-chips')
+    if (!row) return
+    row.innerHTML = this.offered.map((u) => `<button class="gp-chip" data-chip="${u}" aria-pressed="false" aria-haspopup="dialog" title="${UTILITY_META[u].title}"><i class="gp-chip-ic"></i><span>${UTILITY_META[u].label}</span></button>`).join('')
+    row.querySelectorAll<HTMLElement>('[data-chip]').forEach((c) => this.bindChip(c, c.dataset.chip as MotionUtility))
+    this.paintChips()
+  }
+
+  /** A tap toggles the utility; holding the chip opens its options. */
+  private bindChip(el: HTMLElement, u: MotionUtility) {
+    let id: number | null = null
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let opened = false
+    const down = (e: PointerEvent) => {
+      if (id !== null) return
+      capture(el, e)
+      id = e.pointerId
+      opened = false
+      el.classList.add('hold')
+      timer = setTimeout(() => { opened = true; el.classList.remove('hold'); tick(true); swallowNextClick(); this.openOptions(u) }, LONG_PRESS_MS)
+    }
+    const up = (e: PointerEvent) => {
+      if (e.pointerId !== id) return
+      id = null
+      clearTimeout(timer)
+      el.classList.remove('hold')
+      if (!opened && e.type === 'pointerup') { tick(); this.toggle(u) }
+    }
+    listen(el, down, null, up)
+  }
+
+  private paintChips() {
+    const el = this.el
+    if (!el) return
+    const route = (u: MotionUtility) => this.profile[utilityKey(u)].route
+    el.querySelectorAll<HTMLElement>('[data-chip]').forEach((c) => {
+      const u = c.dataset.chip as MotionUtility
+      c.setAttribute('aria-pressed', String(this.on.has(u)))
+      c.dataset.route = route(u)
+      const ic = u === Utility.aim && route(u) !== 'mouse' ? 'gyro' : u === Utility.steer && route(u).startsWith('stick.') && route(u) !== 'stick.fly' && route(u) !== 'stick.wheel' ? 'tilt' : ROUTE_META[route(u)].icon
+      c.querySelector('.gp-chip-ic')!.innerHTML = ICONS[ic]
+    })
+    const prof = el.querySelector<HTMLElement>('[data-act="profile"]')
+    if (prof) {
+      prof.innerHTML = `${ICONS[PROFILE_ICON[this.profileId]]}<span>${this.profile.name}</span>`
+      prof.setAttribute('aria-label', `Profile: ${this.profile.name}`)
+    }
+    const centre = el.querySelector<HTMLElement>('[data-act="centre"]')
+    if (centre) centre.hidden = !(this.on.has(Utility.steer) || this.on.has(Utility.point))
+  }
+
+  // ---- sheets: utility options, profile picker --------------------------------------------
+
+  private openSheet(label: string, body: string): HTMLElement {
+    this.closeSheet()
+    const wrap = document.createElement('div')
+    wrap.className = 'sheet-wrap gp-sheet-wrap'
+    wrap.innerHTML = `<div class="sheet gp-sheet glass" role="dialog" aria-label="${label}"><div class="grip" aria-hidden="true"></div>${body}</div>`
+    wrap.onclick = (e) => { if (e.target === wrap) this.closeSheet() }
+    wrap.querySelector<HTMLButtonElement>('[data-act="done"]')?.addEventListener('click', () => this.closeSheet())
+    document.body.appendChild(wrap)
+    this.sheet = wrap
+    return wrap
+  }
+
+  private closeSheet() {
+    const s = this.sheet
+    if (!s) return
+    this.sheet = null
+    s.classList.add('out')
+    setTimeout(() => s.remove(), 200)
+  }
+
+  /** A utility's options: route, sensitivity, deadzone jump, invert Y (and the edge turn for Point). */
+  private openOptions(u: MotionUtility) {
+    const key = utilityKey(u)
+    const s = this.profile[key]
+    const routes = ROUTES[u]
+    const seg = routes.length > 1
+      ? `<div class="routes" role="radiogroup" aria-label="Route">${routes.map((r) => `<button role="radio" data-route="${r}" aria-checked="${r === s.route}">${ICONS[ROUTE_META[r].icon]}<span>${ROUTE_META[r].label}</span></button>`).join('')}</div>`
+      : ''
+    const jump = u !== Utility.point
+      ? `<label class="bb-field"><span>Deadzone jump</span><output id="gp-dz"></output><input class="bb-range" type="range" id="gp-dead" min="0" max="0.4" step="0.02"></label>`
+      : ''
+    const edge = u === Utility.point ? `<label class="row"><input type="checkbox" id="gp-edge"> Edge turn</label>` : ''
+    const wrap = this.openSheet(`${UTILITY_META[u].label} options`, `
+      <div class="sheet-title"><i class="gp-chip-ic">${ICONS[ROUTE_META[s.route].icon]}</i><h2>${UTILITY_META[u].label}</h2><span class="sheet-sub">${this.profile.name}</span></div>
+      ${seg}
+      <label class="bb-field"><span>Sensitivity</span><output id="gp-gv"></output><input class="bb-range" type="range" id="gp-gain" min="0.25" max="3" step="0.05"></label>
+      ${jump}
+      <label class="row"><input type="checkbox" id="gp-inv"> Invert Y</label>
+      ${edge}
+      <div class="row gap"><button class="btn" data-act="reset">Reset</button><button class="btn primary" data-act="done">Done</button></div>`)
+    const $ = <T extends HTMLElement>(id: string) => wrap.querySelector<T>(`#${id}`)
+    const gain = $<HTMLInputElement>('gp-gain')!
+    const dead = $<HTMLInputElement>('gp-dead')
+    const inv = $<HTMLInputElement>('gp-inv')!
+    const edgeBox = $<HTMLInputElement>('gp-edge')
+    const show = () => {
+      const cur = this.profile[key]
+      gain.value = String(cur.gain)
+      if (dead) dead.value = String(cur.deadzone)
+      inv.checked = cur.invertY
+      if (edgeBox) edgeBox.checked = cur.edgeTurn
+      $('gp-gv')!.textContent = `${Number(gain.value).toFixed(2).replace(/0$/, '')}×`
+      if (dead) $('gp-dz')!.textContent = Number(dead.value).toFixed(2)
+      wrap.querySelectorAll<HTMLElement>('[data-route]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.route === cur.route)))
+      wrap.querySelector('.sheet-title .gp-chip-ic')!.innerHTML = ICONS[ROUTE_META[cur.route].icon]
+      const fam = (window as Window & { BlackboxesFamily?: FamilyApi }).BlackboxesFamily
+      fam?.syncRanges(wrap) // accent fill of the ranges
+    }
+    show()
+    gain.oninput = () => { this.saveOverride(u, { gain: Number(gain.value) }); show() }
+    if (dead) dead.oninput = () => { this.saveOverride(u, { deadzone: Number(dead.value) }); show() }
+    inv.onchange = () => { tick(); this.saveOverride(u, { invertY: inv.checked }) }
+    if (edgeBox) edgeBox.onchange = () => { tick(); this.saveOverride(u, { edgeTurn: edgeBox.checked }) }
+    wrap.querySelectorAll<HTMLElement>('[data-route]').forEach((b) => { b.onclick = () => { tick(); this.saveOverride(u, { route: b.dataset.route as Route }); show() } })
+    wrap.querySelector<HTMLElement>('[data-act="reset"]')!.onclick = () => { tick(); this.resetOverride(u); show() }
+  }
+
+  /** The profile picker: the built-ins, the host's suggestion marked. */
+  private openProfiles() {
+    const suggested = isProfileId(this.host.profile) ? this.host.profile : null
+    const cells = PROFILE_IDS.map((id) => {
+      const p = PROFILES[id]
+      return `<button class="pick" data-profile="${id}" aria-selected="${id === this.profileId}" title="${p.for}">
+        <span class="pick-art">${ICONS[PROFILE_ICON[id]]}</span><span class="pick-name">${p.name}</span>${id === suggested ? '<span class="pick-tag">suggested</span>' : ''}</button>`
+    }).join('')
+    const wrap = this.openSheet('Profile', `
+      <div class="sheet-title"><i class="gp-chip-ic">${ICONS[PROFILE_ICON[this.profileId]]}</i><h2>Profile</h2><span class="sheet-sub">${this.host.name || ''}</span></div>
+      <div class="pick-grid profiles">${cells}</div>
+      <p class="pick-for" id="gp-for">${PROFILES[this.profileId].for}</p>`)
+    wrap.querySelectorAll<HTMLElement>('[data-profile]').forEach((b) => {
+      b.onclick = () => {
+        tick()
+        this.chooseProfile(b.dataset.profile as ProfileId)
+        wrap.querySelectorAll<HTMLElement>('[data-profile]').forEach((c) => c.setAttribute('aria-selected', String(c === b)))
+        wrap.querySelector('#gp-for')!.textContent = this.profile.for
+        wrap.querySelector('.sheet-title .gp-chip-ic')!.innerHTML = ICONS[PROFILE_ICON[this.profileId]]
+        setTimeout(() => this.closeSheet(), 260)
+      }
+    })
+  }
+
+  // ---- pad controls ------------------------------------------------------------------------
 
   private bindButton(el: HTMLElement, b: number) {
     const ids = new Set<number>()

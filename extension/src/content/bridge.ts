@@ -78,6 +78,7 @@ function startBridge(): BridgeHandle {
       addEventListener('resize', report)
       document.addEventListener('focusin', report, true)
       document.addEventListener('visibilitychange', report)
+      document.addEventListener('pointerlockchange', report)
       addEventListener('load', onLoadCapture, true)
       frames.observe(document, { childList: true, subtree: true })
       reportTimer = setInterval(report, 700)
@@ -126,6 +127,7 @@ function startBridge(): BridgeHandle {
     removeEventListener('resize', report)
     document.removeEventListener('focusin', report, true)
     document.removeEventListener('visibilitychange', report)
+    document.removeEventListener('pointerlockchange', report)
     removeEventListener('load', onLoadCapture, true)
     frames.disconnect()
     toMain({ t: 'off' })
@@ -146,8 +148,8 @@ function startBridge(): BridgeHandle {
     reportFrames()
     if (!port) return
     const view = largestView()
-    const rep: FromPage = { t: 'rep', focus: document.hasFocus() && !isFrameElement(deepActiveElement()), area: Math.round(view?.area ?? 0) }
-    const key = `${rep.focus}|${Math.round(rep.area / 1000)}`
+    const rep: FromPage = { t: 'rep', focus: document.hasFocus() && !isFrameElement(deepActiveElement()), area: Math.round(view?.area ?? 0), lock: !!document.pointerLockElement }
+    const key = `${rep.focus}|${Math.round(rep.area / 1000)}|${rep.lock}`
     if (key === lastReport) return
     lastReport = key
     send(rep)

@@ -26,14 +26,44 @@ export function largestView(): { el: Element; rect: Rect; area: number } | null 
 }
 
 /** Hit-test through open shadow roots, so <model-viewer> and other web components get events on their inner surface. */
-export function deepElementFromPoint(x: number, y: number): Element | null {
-  let el = document.elementFromPoint(x, y)
+export function deepElementFromPoint(x: number, y: number, doc: Document = document): Element | null {
+  let el = doc.elementFromPoint(x, y)
   for (let i = 0; el?.shadowRoot && i < 16; i++) {
     const inner = el.shadowRoot.elementFromPoint(x, y)
     if (!inner || inner === el) break
     el = inner
   }
   return el
+}
+
+/** An element under a point, with the window it lives in and the point in that window's client coordinates. */
+export interface Hit { el: Element; view: Window; x: number; y: number; ox: number; oy: number }
+
+/**
+ * Hit-test through open shadow roots and into same-origin frames (a cross-origin frame stays the target itself), so a
+ * click at a cursor lands on the element a real mouse would hit. ox/oy turn this window's coordinates into the target
+ * window's: local = (x − ox, y − oy).
+ */
+export function deepHit(x: number, y: number): Hit {
+  let view: Window = window
+  let doc: Document = document
+  let ox = 0
+  let oy = 0
+  for (let i = 0; i < 8; i++) {
+    const el = deepElementFromPoint(x - ox, y - oy, doc) ?? doc.body ?? doc.documentElement
+    let inner: Document | null = null
+    let win: Window | null = null
+    if (el instanceof HTMLIFrameElement || (view !== window && (el as Element).tagName === 'IFRAME') || (el as Element).tagName === 'FRAME') {
+      try { inner = (el as HTMLIFrameElement).contentDocument; win = (el as HTMLIFrameElement).contentWindow } catch { inner = null }
+    }
+    if (!inner || !win) return { el, view, x: x - ox, y: y - oy, ox, oy }
+    const r = el.getBoundingClientRect()
+    ox += r.left + (el as HTMLElement).clientLeft
+    oy += r.top + (el as HTMLElement).clientTop
+    view = win
+    doc = inner
+  }
+  return { el: doc.body ?? doc.documentElement, view, x: x - ox, y: y - oy, ox, oy }
 }
 
 /** The focused element, looking inside open shadow roots. */

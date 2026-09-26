@@ -9,7 +9,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
-import { Mode, Remote, type Layout, type ModeId } from '@obpal/host'
+import { Mode, PointerFlag, Remote, type Layout, type ModeId, type PadState, type PointerState } from '@obpal/host'
 import { CATALOG, CATEGORIES, DEFAULT_ITEM, LOCAL_CATEGORY, type CatalogItem } from './catalog'
 import { localFolder } from './local-folder'
 import { applyGamepad, type GamepadContext } from './gamepad-input'
@@ -851,6 +851,7 @@ function syncPhoneModels() {
 }
 const MODE_LABEL: Partial<Record<ModeId, string>> = { [Mode.tilt]: 'Tilt', [Mode.hold]: '1:1', [Mode.point]: 'Point', [Mode.orbit]: 'Gyro', [Mode.gamepad]: 'Gamepad' }
 let remote: Remote | null = null
+const emptyPadState: PadState = { flags: 0, seq: 0, t: 0, buttons: 0, axes: [0, 0, 0, 0], triggers: [0, 0] }
 let pointerOn = false
 const pointer = { x: innerWidth / 2, y: innerHeight / 2 }
 const pointerEl = $('pointer')
@@ -927,6 +928,54 @@ function setPointer(on: boolean) {
   pointerEl.hidden = !on
   grabbing = false
   if (on) recenterPointer()
+}
+
+/**
+ * Gamepad mode with the phone's Point utility on (PROTOCOL §6): the same Wii cursor, at the absolute angle the phone sends.
+ * A selects (a part, else focus), holding B grabs, as in Point mode; both then leave the pad, so the pad mapping does not
+ * also frame or reset the view. Returns the pad the gamepad mapping should see.
+ */
+let padPointing = false
+let padAB = 0
+function padPointer(pad: PadState, pt: PointerState | null): PadState {
+  if (!pt) {
+    if (padPointing) { padPointing = false; grabbing = false; if (!pointerOn) { pointerEl.hidden = true; parts.hover(null, null) } }
+    return pad
+  }
+  if (!padPointing) { padPointing = true; padAB = pad.buttons & 3; pointerEl.hidden = false }
+  const { x: vx, y: vy, off } = ScreenPointer.project(pt.yaw, pt.pitch, innerWidth, innerHeight)
+  const px = Math.min(innerWidth - 14, Math.max(14, vx))
+  const py = Math.min(innerHeight - 14, Math.max(14, vy))
+  const dx = px - pointer.x
+  const dy = py - pointer.y
+  const a = pad.buttons & 1
+  const b = pad.buttons & 2
+  const sel = parts.selected?.movable ? parts.selected : null
+  if (b && !(padAB & 2)) {
+    grabbing = true
+    if (parts.hovered?.movable && !parts.holdsHovered()) parts.select(parts.hovered)
+    remote?.feedback({ haptic: 'tick' })
+  }
+  if (!b) grabbing = false
+  if (grabbing && (dx || dy)) {
+    if (sel) parts.move(dx, dy)
+    else void controls.rotate(-dx * 0.006, -dy * 0.006, true)
+  }
+  pointer.x = px
+  pointer.y = py
+  if (a && !(padAB & 1)) {
+    if (parts.pick()) renderScene(false)
+    else if (parts.selected) { parts.select(null); renderScene(false) }
+    else focusAtPointer()
+  }
+  padAB = pad.buttons & 3
+  pointerEl.style.transform = `translate(${px}px, ${py}px)`
+  pointerEl.style.setProperty('--ang', `${Math.atan2(vy - py, vx - px)}rad`)
+  pointerEl.classList.toggle('off', off)
+  pointerEl.classList.toggle('grab', grabbing)
+  pointerEl.classList.toggle('on-part', !!parts.hovered)
+  if (!grabbing) parts.hover(off ? null : px, off ? null : py)
+  return { ...pad, buttons: pad.buttons & ~3 }
 }
 
 const raycaster = new THREE.Raycaster()
@@ -1041,7 +1090,10 @@ function loop(now: number) {
   lastFrame = now
   if (remote) {
     const pad = remote.pad
-    if (pad) applyGamepad(pad, dt, gamepadCtx)
+    if (pad) {
+      const pt = remote.pointer
+      applyGamepad(padPointer(pad, pt && !(pt.flags & PointerFlag.relative) ? pt : null), dt, gamepadCtx)
+    } else if (padPointing) padPointer({ ...emptyPadState, buttons: 0 }, null)
     const f = remote.consume(now)
     if (f.connected) {
       // 1:1 match: while the gyro is on, the object copies the phone's rotation since it was turned on.

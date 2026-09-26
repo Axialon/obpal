@@ -1,5 +1,6 @@
 import {
-  accumDelta, bindMac, certFingerprint, decodePad, decodeState, PAD_HEADER, packetType, type PadState, DEFAULT_SERVICE, encodePairing, equalBytes,
+  accumDelta, bindMac, certFingerprint, decodePad, decodePointer, decodeState, PAD_HEADER, PadFlag, packetType, type PadState,
+  POINTER_HEADER, PointerFlag, type PointerState, DEFAULT_SERVICE, encodePairing, equalBytes,
   fetchIceServers, Flag, Mode, newSecret, PROTO, qIdentity, qSlerp, roomIdFor, roomSocketUrl,
   sdpFingerprint, seqNewer, SignalClient, Tier,
   type Caps, type DeviceMsg, type HostMsg, type Layout, type ModeId, type Quat, type SignalIn,
@@ -67,6 +68,8 @@ const isObpalOrigin = () =>
   (/(^|\.)blackboxes\.(net|dev)$/.test(location.hostname) || location.hostname === 'localhost' || location.hostname === '127.0.0.1')
 
 export const DEFAULT_LAYOUT: Layout = { v: 1, tray: [], modes: [Mode.tilt, Mode.hold, Mode.point] }
+/** A pointer stream that stops (the utility was switched off, the phone went away) is gone after this long. */
+const POINTER_STALE_MS = 300
 
 /** Continuous (unwrapped) accumulator totals, so the host can interpolate them in time. */
 interface Acc { aim: [number, number]; pad1: [number, number]; pad2: [number, number]; zoom: number; twist: number }
@@ -100,6 +103,8 @@ export class Remote {
   private latest: WireState | null = null
   private padState: PadState | null = null
   private padAt = 0
+  private ptr: PointerState | null = null
+  private ptrAt = 0
   private stateAt = 0
   private latestAcc: Acc | null = null
   private outAcc: Acc | null = null
@@ -178,7 +183,9 @@ export class Remote {
       ctl.onmessage = (e) => void this.onCtl(peer, e.data)
       st.onmessage = (e) => {
         if (!peer.bound || this.active !== peer || !(e.data instanceof ArrayBuffer)) return
-        if (packetType(e.data) === PAD_HEADER) this.onPad(e.data)
+        const type = packetType(e.data)
+        if (type === PAD_HEADER) this.onPad(e.data)
+        else if (type === POINTER_HEADER) this.onPointer(e.data)
         else this.onState(e.data)
       }
       await pc.setRemoteDescription(d.offer)
@@ -274,6 +281,26 @@ export class Remote {
     return this.padState
   }
 
+  private onPointer(data: ArrayBuffer) {
+    const p = decodePointer(data)
+    if (!p || !(p.flags & PointerFlag.valid) || (this.ptr && !seqNewer(p.seq, this.ptr.seq))) return
+    this.ptr = p
+    this.ptrAt = performance.now()
+  }
+
+  /**
+   * Where the phone points (PROTOCOL §6) while a pointing utility is on, else null. Absolute pointers (the Wii-style
+   * cursor) end the moment the pad says Point is off; any pointer ends after a short silence.
+   */
+  get pointer(): PointerState | null {
+    const p = this.ptr
+    if (!p) return null
+    const pad = this.padState
+    const off = pad && this.padLive && !(p.flags & PointerFlag.relative) && !(pad.flags & PadFlag.point) && this.padAt >= this.ptrAt
+    if (off || performance.now() - this.ptrAt > POINTER_STALE_MS) { this.ptr = null; return null }
+    return p
+  }
+
   /** Vibrate the phone (Gamepad API dual-rumble semantics). */
   rumble(strong: number, weak: number, ms: number) {
     if (this.active) this.send(this.active, { t: 'rumble', strong, weak, ms })
@@ -282,6 +309,8 @@ export class Remote {
   private resetStream() {
     this.padState = null
     this.padAt = 0
+    this.ptr = null
+    this.ptrAt = 0
     this.stateAt = 0
     this.latest = null
     this.latestAcc = null
