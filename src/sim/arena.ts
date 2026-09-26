@@ -1,0 +1,281 @@
+/**
+ * Faction arena (CATALOGUE §7, system.gamepad-slots): four player slots in one shared scene. Each device claims a slot
+ * (Player 1–4, one per faction) and drives its puck: tilt or the left stick to roll, a drag to push, a tap or A to
+ * dash. Knock the others off the ring to score. The same slots are what ob.Pal Link will give a browser game: one
+ * gamepad per phone.
+ */
+import '../styles/base.css'
+import '../styles/sim.css'
+import * as THREE from 'three'
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+import { Mode, type Frame, type Layout, type PadState } from '@obpal/host'
+import { applyTheme, initialTheme } from '../ui/themes'
+import { startSimScene, type SimScene } from './scene'
+
+applyTheme(initialTheme())
+const $ = (id: string) => document.getElementById(id)!
+
+const RING = 1.7
+const PUCK = 0.17
+
+interface Slot {
+  id: string
+  name: string
+  faction: string
+  model: string
+  spawn: THREE.Vector2
+  group: THREE.Group
+  ring: THREE.Mesh
+  pos: THREE.Vector2
+  vel: THREE.Vector2
+  falling: number
+  dashAt: number
+  lastHitBy: string | null
+  lastHitAt: number
+  points: number
+  flash: number
+}
+
+const renderer = new THREE.WebGLRenderer({ canvas: $('stage') as HTMLCanvasElement, antialias: true })
+renderer.setPixelRatio(Math.min(2, Math.max(1.5, devicePixelRatio)))
+renderer.toneMapping = THREE.ACESFilmicToneMapping
+const scene = new THREE.Scene()
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture
+scene.background = new THREE.Color('#06080c')
+const camera = new THREE.PerspectiveCamera(40, 1, 0.05, 60)
+camera.position.set(0, 4.3, 3.4)
+camera.lookAt(0, 0, 0.15)
+
+// The ring: a glass disc with a glowing edge over the void.
+const disc = new THREE.Mesh(new THREE.CylinderGeometry(RING, RING, 0.08, 128), new THREE.MeshStandardMaterial({ color: '#10141c', metalness: 0.3, roughness: 0.55 }))
+disc.position.y = -0.04
+scene.add(disc)
+const edge = new THREE.Mesh(new THREE.TorusGeometry(RING, 0.018, 12, 160), new THREE.MeshStandardMaterial({ color: '#0b0f14', emissive: '#c6ff34', emissiveIntensity: 0.9 }))
+edge.rotation.x = Math.PI / 2
+scene.add(edge)
+const inner = new THREE.Mesh(new THREE.RingGeometry(0.34, 0.36, 96), new THREE.MeshBasicMaterial({ color: '#2a3342', side: THREE.DoubleSide }))
+inner.rotation.x = -Math.PI / 2
+inner.position.y = 0.001
+scene.add(inner)
+
+const FACTIONS = [
+  { faction: 'CVC', model: '/models/cvc/CVC_insignia.glb' },
+  { faction: 'CC', model: '/models/cvc/CC_insignia.glb' },
+  { faction: 'K9C', model: '/models/cvc/K9C_insignia.glb' },
+  { faction: 'MMC', model: '/models/cvc/MMC_insignia.glb' },
+]
+const loader = new GLTFLoader()
+const slots: Slot[] = FACTIONS.map((f, i) => {
+  const a = Math.PI / 4 + (i * Math.PI) / 2
+  const spawn = new THREE.Vector2(Math.cos(a) * RING * 0.55, Math.sin(a) * RING * 0.55)
+  const group = new THREE.Group()
+  const puck = new THREE.Mesh(new THREE.CylinderGeometry(PUCK, PUCK * 1.05, 0.07, 64), new THREE.MeshStandardMaterial({ color: '#171c25', metalness: 0.7, roughness: 0.3 }))
+  puck.position.y = 0.035
+  group.add(puck)
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(PUCK * 1.02, 0.012, 10, 80), new THREE.MeshStandardMaterial({ color: '#0b0f14', emissive: '#5b6472', emissiveIntensity: 1 }))
+  ring.rotation.x = Math.PI / 2
+  ring.position.y = 0.07
+  group.add(ring)
+  group.visible = false
+  scene.add(group)
+  // The faction's insignia rides on top of its puck.
+  loader.load(f.model, (g) => {
+    const m = g.scene
+    const box = new THREE.Box3().setFromObject(m)
+    const size = box.getSize(new THREE.Vector3())
+    const k = (PUCK * 1.5) / Math.max(size.x, size.y, size.z)
+    m.scale.setScalar(k)
+    box.setFromObject(m)
+    const c = box.getCenter(new THREE.Vector3())
+    m.position.sub(c)
+    const holder = new THREE.Group()
+    holder.add(m)
+    holder.position.y = 0.07 + (box.max.y - box.min.y) / 2
+    holder.name = 'insignia'
+    group.add(holder)
+  })
+  return { id: `p${i + 1}`, name: `Player ${i + 1} · ${f.faction}`, faction: f.faction, model: f.model, spawn, group, ring, pos: spawn.clone(), vel: new THREE.Vector2(), falling: 0, dashAt: -9, lastHitBy: null, lastHitAt: 0, points: 0, flash: 0 }
+})
+const slotOf = (id: string) => slots.find((s) => s.id === id)!
+Object.assign(window, { __arena: { slots } })
+
+// ---- the shared scene ----
+
+const layout: Layout = { v: 1, modes: [Mode.tilt, Mode.gamepad], tray: [{ id: 'dash', label: 'Dash', type: 'button', icon: 'spin' }] }
+let sim: SimScene | null = null
+void startSimScene({
+  appName: 'ob.Pal faction arena',
+  layout,
+  nodes: slots.map((s) => ({ id: s.id, name: s.name, kind: 'slot', group: 'Players' })),
+  approval: false,
+  howTo: () => 'Tilt to roll · drag to push · tap to dash',
+  changed: () => { spawnHeld(); renderScore() },
+}).then((s) => {
+  sim = s
+  s.remote.on('button', ({ id, ev }, who) => {
+    const node = s.claims.held(who.id)
+    if (!node) return
+    if (id === 'dash' || (id === 'pad' && ev === 'tap')) dash(slotOf(node), who.id)
+  })
+  renderScore()
+})
+$('reset-scores').onclick = () => { for (const s of slots) s.points = 0; renderScore(); sim?.log('Scores reset') }
+
+/** A slot that just got a player enters at its spawn point; an empty one leaves the ring. */
+function spawnHeld() {
+  for (const s of slots) {
+    const who = sim?.claims.holder(s.id)
+    if (who && !s.group.visible) { respawn(s); s.flash = 1 }
+    if (!who && s.group.visible) s.group.visible = false
+  }
+}
+function respawn(s: Slot) {
+  s.pos.copy(s.spawn)
+  s.vel.set(0, 0)
+  s.falling = 0
+  s.lastHitBy = null
+  s.group.position.set(s.pos.x, 0, s.pos.y)
+  s.group.visible = true
+}
+function dash(s: Slot, who: string) {
+  const now = performance.now() / 1000
+  if (now - s.dashAt < 1.1 || s.falling) return
+  s.dashAt = now
+  const dir = s.vel.lengthSq() > 1e-4 ? s.vel.clone().normalize() : s.spawn.clone().negate().normalize()
+  s.vel.addScaledVector(dir, 2.6)
+  s.flash = Math.max(s.flash, 0.7)
+  sim?.remote.feedback({ haptic: 'tick' }, who)
+}
+
+/** The direction a player steers, from whatever its device sends. */
+function steer(f: Frame, pad: PadState | null): THREE.Vector2 {
+  if (pad) return new THREE.Vector2(pad.axes[0], pad.axes[1])
+  const d = new THREE.Vector2(f.tilt[0], f.tilt[1])
+  if (f.pad1[0] || f.pad1[1]) d.add(new THREE.Vector2(f.pad1[0], f.pad1[1]).multiplyScalar(0.08))
+  return d
+}
+
+const padA = new Map<string, number>()
+let last = 0
+function loop(now: number) {
+  const dt = last ? Math.min(0.033, (now - last) / 1000) : 0
+  last = now
+  const t = now / 1000
+  const active = slots.filter((s) => s.group.visible)
+  for (const s of active) {
+    const who = sim?.claims.holder(s.id)
+    if (!who || !sim) continue
+    if (s.falling) continue
+    const f = sim.remote.consumeOf(who, now)
+    const pad = sim.remote.padOf(who)
+    // A on a gamepad dashes, once per press.
+    const a = pad ? pad.buttons & 1 : 0
+    if (a && !padA.get(who)) dash(s, who)
+    padA.set(who, a)
+    const d = steer(f, pad)
+    if (d.lengthSq() > 1) d.normalize()
+    s.vel.addScaledVector(d, 3.4 * dt)
+  }
+  // Rolling: drag, a speed cap, then collisions between pucks.
+  for (const s of active) {
+    if (s.falling) continue
+    s.vel.multiplyScalar(Math.exp(-1.5 * dt))
+    const sp = s.vel.length()
+    if (sp > 3.2) s.vel.multiplyScalar(3.2 / sp)
+    s.pos.addScaledVector(s.vel, dt)
+  }
+  for (let i = 0; i < active.length; i++) {
+    for (let j = i + 1; j < active.length; j++) {
+      const a = active[i]
+      const b = active[j]
+      if (a.falling || b.falling) continue
+      const n = b.pos.clone().sub(a.pos)
+      const dist = n.length()
+      if (dist >= PUCK * 2 || dist < 1e-6) continue
+      n.divideScalar(dist)
+      const push = (PUCK * 2 - dist) / 2
+      a.pos.addScaledVector(n, -push)
+      b.pos.addScaledVector(n, push)
+      const rel = a.vel.clone().sub(b.vel).dot(n)
+      if (rel > 0) {
+        const imp = rel * 0.95
+        a.vel.addScaledVector(n, -imp)
+        b.vel.addScaledVector(n, imp)
+        const ha = sim?.claims.holder(a.id)
+        const hb = sim?.claims.holder(b.id)
+        a.lastHitBy = hb ?? null
+        b.lastHitBy = ha ?? null
+        a.lastHitAt = b.lastHitAt = t
+        a.flash = b.flash = Math.max(0.5, Math.min(1, rel / 2))
+        if (ha) sim?.remote.rumble(Math.min(1, rel / 3), 0.4, 90, ha)
+        if (hb) sim?.remote.rumble(Math.min(1, rel / 3), 0.4, 90, hb)
+      }
+    }
+  }
+  // Over the edge: the puck falls; whoever hit it last in the past 3 s scores.
+  for (const s of active) {
+    if (!s.falling && s.pos.length() > RING + PUCK * 0.4) {
+      s.falling = t
+      const by = s.lastHitBy && t - s.lastHitAt < 3 ? s.lastHitBy : null
+      const scorer = by ? slots.find((o) => sim?.claims.holder(o.id) === by) : null
+      if (scorer) { scorer.points++; scorer.flash = 1; sim?.log(`${sim.nameOf(by!)} knocked ${sim.nameOf(sim.claims.holder(s.id))} off`, sim.colorOf(by!)) }
+      else sim?.log(`${sim.nameOf(sim.claims.holder(s.id))} rolled off`, sim.colorOf(sim.claims.holder(s.id)))
+      const who = sim?.claims.holder(s.id)
+      if (who) sim?.remote.rumble(1, 1, 260, who)
+      renderScore()
+    }
+    if (s.falling) {
+      s.group.position.y -= 3 * dt * (t - s.falling + 0.2)
+      if (t - s.falling > 1.2) respawn(s)
+    }
+    if (!s.falling) s.group.position.set(s.pos.x, 0, s.pos.y)
+    // The puck wears its player's colour, flashes on a hit, and its insignia turns.
+    const who = sim?.claims.holder(s.id)
+    const mat = s.ring.material as THREE.MeshStandardMaterial
+    mat.emissive.set(who ? sim!.colorOf(who) : '#5b6472')
+    s.flash = Math.max(0, s.flash - dt / 0.6)
+    mat.emissiveIntensity = 1.4 + 3 * s.flash
+    s.ring.scale.setScalar(1 + 0.3 * s.flash)
+    const ins = s.group.getObjectByName('insignia')
+    if (ins) ins.rotation.y = t * 0.9 + Number(s.id.slice(1))
+  }
+  ;(edge.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.8 + 0.2 * Math.sin(t * 2)
+  renderer.render(scene, camera)
+  requestAnimationFrame(loop)
+}
+
+function renderScore() {
+  const held = sim?.claims.snapshot() ?? {}
+  $('score').replaceChildren(...slots.map((s) => {
+    const li = document.createElement('li')
+    const who = held[s.id]
+    li.classList.toggle('held', !!who)
+    li.innerHTML = '<span class="fx"></span><span><b></b><small></small></span><span class="pts"></span>'
+    const fx = li.querySelector<HTMLElement>('.fx')!
+    fx.textContent = s.faction
+    fx.style.background = who ? sim!.colorOf(who) : 'rgb(var(--hl-rgb) / 0.15)'
+    li.querySelector('b')!.textContent = `Player ${s.id.slice(1)}`
+    li.querySelector('small')!.textContent = who ? sim!.nameOf(who) : 'Open: pick it on your phone'
+    li.querySelector('.pts')!.textContent = String(s.points)
+    return li
+  }))
+}
+
+function resize() {
+  const w = innerWidth
+  const h = innerHeight
+  renderer.setSize(w, h, false)
+  camera.aspect = w / h
+  // Keep the whole ring in view on narrow screens, and centred beside (or above) the panel.
+  camera.position.set(0, w < h ? 6.4 : 4.3, w < h ? 5 : 3.4)
+  camera.lookAt(0, 0, 0.15)
+  const panel = document.querySelector('.sim-panel')!.getBoundingClientRect()
+  if (w > 860) camera.setViewOffset(w, h, -panel.right / 2, 0, w, h)
+  else camera.setViewOffset(w, h, 0, (h - panel.top) / 2, w, h)
+  camera.updateProjectionMatrix()
+}
+addEventListener('resize', resize)
+resize()
+renderScore()
+requestAnimationFrame(loop)

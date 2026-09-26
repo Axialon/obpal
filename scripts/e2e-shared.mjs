@@ -133,6 +133,24 @@ try {
     return `B was told "${toast}"; ${colours}`
   })
 
+  await check('letting go shows: the chip on the phone flashes and fades out, and its control area flashes', async () => {
+    // B lets go of Budget by picking it again in its scene list.
+    await claimOn(b, 'Budget')
+    const seen = await b.page.evaluate(() => new Promise((res) => {
+      const chip = document.getElementById('pad-part')
+      const area = document.getElementById('pad')
+      const got = { leaving: chip.classList.contains('leaving'), flash: area.classList.contains('ctl-flash'), hiddenAtOnce: chip.hidden }
+      setTimeout(() => res({ ...got, hiddenAfter: chip.hidden }), 800)
+    }))
+    if (!seen.leaving || seen.hiddenAtOnce) throw new Error(`chip ${JSON.stringify(seen)}`)
+    if (!seen.flash) throw new Error('the control area did not flash')
+    if (!seen.hiddenAfter) throw new Error('the chip stayed after fading')
+    const s = await scene()
+    if (s.holds.some((h) => h.part === 'Budget')) throw new Error('Budget still held')
+    await claimOn(b, 'Budget')
+    return 'faded out over ~0.56 s'
+  })
+
   await check('a phone that leaves frees what it held, and the lead passes on', async () => {
     await a.page.close()
     const s = await until('A gone', async () => { const v = await scene(); return v.people.length === 1 ? v : null }, 15000)

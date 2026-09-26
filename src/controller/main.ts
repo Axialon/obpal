@@ -156,6 +156,10 @@ async function boot(code: PairingCode) {
   let layout: Layout = { v: 1, tray: [] }
   /** In a shared scene (CATALOGUE §5): this device's colour, who's in the scene, what can be claimed and who holds what. */
   let seatColor = ''
+  /** The part chip's current content and the part last shown as held, to animate changes of control. */
+  let chipKey = ''
+  let chipTimer: ReturnType<typeof setTimeout> | undefined
+  let heldShown = ''
   let scene: { you: string; people: ScenePerson[]; nodes: SceneNode[]; held: Record<string, string> } | null = null
   let lastSend = 0
   let wasLevel = true
@@ -499,11 +503,34 @@ async function boot(code: PairingCode) {
       wiiPart.querySelector('.wii-part-value')!.textContent = part && values.partLive === true ? String(values.partValue ?? '') : ''
     }
     const chip = document.getElementById('pad-part')!
-    chip.hidden = !part && !hov
-    chip.classList.toggle('sel', !!part)
-    chip.querySelector('.pp-name')!.textContent = part || hov
     const live = !!part && values.partLive === true
-    chip.querySelector('.pp-tag')!.textContent = part ? (live ? String(values.partValue ?? '') : '') : 'tap'
+    const key = part ? `sel:${part}` : hov ? `hov:${hov}` : ''
+    if (key !== chipKey) {
+      const wasHeld = chipKey.startsWith('sel:')
+      chipKey = key
+      clearTimeout(chipTimer)
+      chip.classList.remove('flash', 'leaving')
+      void chip.offsetWidth
+      // Taking or letting go of something flashes the chip; when nothing is left it flashes and fades instead of vanishing.
+      if (key) { chip.hidden = false; if (part || wasHeld) chip.classList.add('flash') }
+      else if (!chip.hidden) {
+        chip.classList.add('leaving')
+        chipTimer = setTimeout(() => { if (!chipKey) chip.hidden = true; chip.classList.remove('leaving') }, 560)
+      }
+    }
+    if (key) {
+      chip.classList.toggle('sel', !!part)
+      chip.querySelector('.pp-name')!.textContent = part || hov
+      chip.querySelector('.pp-tag')!.textContent = part ? (live ? String(values.partValue ?? '') : '') : 'tap'
+    }
+    // A change of control (taken, handed over, taken back) flashes the whole control area in this device's colour.
+    if (part !== heldShown) {
+      heldShown = part
+      const area = document.getElementById('pad')
+      if (area) { area.classList.remove('ctl-flash'); void area.offsetWidth; area.classList.add('ctl-flash') }
+    }
+    // 1:1 turns what you hold (the whole model only when you hold nothing): say so once.
+    if (part && mode === Mode.hold) hint('hold-part', () => document.getElementById('pad-part'), `1:1 turns ${part} · × to turn the whole model`, { place: 'bottom', delay: 300 })
     if (hov && !part) hint('parts-phone', () => document.getElementById('pad-part'), 'Tap to select, then drag, pinch or twist it', { place: 'bottom', delay: 300 })
 
     // Visual gesture legend instead of instructions.
@@ -692,7 +719,8 @@ async function boot(code: PairingCode) {
         <label class="bb-field"><span>Sensitivity</span><output id="gv"></output><input class="bb-range" type="range" id="gain" min="0.5" max="3" step="0.1"></label>
         <label class="bb-field"><span>Steadiness</span><output id="sv"></output><input class="bb-range" type="range" id="smooth" min="0" max="1" step="0.05"></label>
         <div class="theme-row" role="radiogroup" aria-label="Surface">${THEMES.map((t) => `<button class="theme-opt" role="radio" data-theme="${t.id}" aria-checked="${document.documentElement.dataset.theme === t.id}">${swatch(t)}<span>${t.name}</span></button>`).join('')}</div>
-        <div class="accent-row" role="radiogroup" aria-label="Accent">${family.ACCENTS.map((a) => `<button class="bb-accent${a.id === 'product' ? ' product' : ''}" role="radio" data-accent="${a.id}" aria-checked="${family.getAccent() === a.id}" aria-label="${a.id === 'product' ? 'ob.Pal lime (default)' : a.name}" style="--sw:${a.color ?? '#c6ff34'}">${family.icons.check}</button>`).join('')}</div>
+        ${seatColor ? '<div class="seat-row"><span class="seat-dot"></span><span>Your colour in this scene</span></div>' : ''}
+        <div class="accent-row" role="radiogroup" aria-label="Accent"${seatColor ? ' hidden' : ''}>${family.ACCENTS.map((a) => `<button class="bb-accent${a.id === 'product' ? ' product' : ''}" role="radio" data-accent="${a.id}" aria-checked="${family.getAccent() === a.id}" aria-label="${a.id === 'product' ? 'ob.Pal lime (default)' : a.name}" style="--sw:${a.color ?? '#c6ff34'}">${family.icons.check}</button>`).join('')}</div>
         <label class="row"><input type="checkbox" id="left"> Left-handed</label>
         <a class="support-link" href="/sponsor/" target="_blank" rel="noopener">${ICONS.heart}<span>Support ob.Pal</span></a>
         <button class="btn" id="forget" hidden>${ICONS.close}<span>Forget remembered screens</span></button>

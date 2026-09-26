@@ -1023,7 +1023,8 @@ async function startRemote() {
     if (id === 'model') { const item = CATALOG.find((i) => i.id === v); if (item) void selectItem(item, add) }
     else if (id === 'spin' || id === 'grid' || id === 'glow') { view[id] = !!v; applyView() }
     else if (id === 'theme') setTheme(themeById(String(v)))
-    else if (id === 'accent') setAccent(String(v))
+    // A device's colour is its identity in a shared scene: its accent choice stays on the device.
+    else if (id === 'accent' && !remote?.shared) setAccent(String(v))
     else if (id === 'light') setPreset(String(v))
   })
   remote.on('button', ({ id, ev }, who) => {
@@ -1213,6 +1214,7 @@ function applySeat(s: Seat, f: Frame, dt: number) {
   const lead = isLead(s)
   const h = s.hand
   const sel = h.selected?.movable ? h.selected : null
+  if (sel && (f.clutch || f.touching || (f.mode === Mode.tilt && (f.tilt[0] || f.tilt[1])) || f.aim[0] || f.aim[1] || f.twist || f.zoom)) parts.active(h)
   // 1:1 match: while the gyro is on, what the seat drives copies the phone's rotation since it was turned on.
   const target = sel && !parts.live_(sel) ? sel.object : lead && !sel ? holder : null
   const matching = f.clutch && f.mode === Mode.hold && !!target

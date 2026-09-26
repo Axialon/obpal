@@ -114,7 +114,6 @@ body.multi .pointer .pt-name { display: block; }
 }
 @media (max-width: 860px) {
   .topbar { padding: 0 14px; grid-template-columns: auto 1fr; }
-  .chip { display: none; }
   .tools { grid-column: 2; }
   .catalog { left: 14px; top: 82px; width: min(340px, calc(100vw - 28px)); bottom: 14px; }
   .caption { bottom: 170px; }

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="description" content="A simulated robot arm you and others control with your phones, one joint each: scan to join, hold the pad to move. Deadman, limits, watchdog, e-stop and approval, as for a real arm." />
+    <title>Robot arm sim · ob.Pal</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&family=JetBrains+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/family/family.css" />
+    <script type="module" src="/src/sim/arm.ts"></script>
+  </head>
+  <body class="sim">
+    <canvas id="stage" aria-label="Simulated robot arm"></canvas>
+    <header class="sim-top">
+      <div class="sim-left">
+        <a class="logo" href="/" aria-label="ob.Pal"><img class="mark" src="/logo-mark.svg" alt="" /><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span></a>
+        <a class="sim-crumb" href="/sim/">Sims</a>
+      </div>
+      <div class="chip glass" id="chip" hidden>
+        <button class="chip-who" id="chip-who" aria-label="People in this scene">
+          <span class="chip-people" id="chip-people"></span>
+          <span class="chip-text" id="chip-text"></span>
+        </button>
+        <button class="chip-x" id="chip-invite" aria-label="Invite another device" aria-pressed="false" data-icon="plus"></button>
+        <button class="chip-x" id="chip-disc" aria-label="Disconnect everyone" data-icon="close"></button>
+      </div>
+    </header>
+
+    <aside class="sim-panel glass" aria-label="Arm">
+      <p class="eyebrow">system.robot-arm · simulated</p>
+      <h1>Robot arm</h1>
+      <p class="sim-lede">Scan the code to join. Pick a joint from your phone's scene list, then hold a finger on the pad and tilt or drag to move it. One person per joint.</p>
+      <ul class="nodes" id="nodes"></ul>
+      <div class="safety">
+        <button class="estop" id="estop">Stop<kbd>Space</kbd></button>
+        <button class="btn" id="home-all">Home</button>
+      </div>
+      <details class="log-wrap" open><summary>Record: who held what</summary><ol class="log" id="log"></ol></details>
+    </aside>
+
+    <div class="stopped-banner" role="alert"><b id="stop-by">Stopped</b><button class="btn primary" id="resume">Resume</button></div>
+    <div class="people glass" id="people" hidden role="dialog" aria-label="People in this scene">
+      <ul class="people-list" id="people-list"></ul>
+      <label class="sim-auto"><input type="checkbox" id="auto-allow" /> Let everyone in without asking</label>
+      <button class="people-new" id="invite-new">New invite link</button>
+    </div>
+    <div class="v-pair" id="pair"></div>
+    <p class="note" id="note" role="status"></p>
+    <p class="sim-badge">Simulated · no hardware connected</p>
+  </body>
+</html>

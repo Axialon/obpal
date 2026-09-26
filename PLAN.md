@@ -382,6 +382,8 @@ r.on('button', e => ...); r.sample(frameTime); r.setLayout(json);
 | C | `bridge.xr` (WebXR controllers and hands, one participant per hand), then `bridge.joycon` and `bridge.wiimote` over WebHID |
 | D | `system.robot-arm`: a reference bridge (ROS 2 through rosbridge, against a simulated arm first), with host approval, deadman, limits in the bridge, a 200 ms watchdog, e-stop on every device, and a claim log |
 
+Public sims (2026-09-26): [/sim/](https://obpal.blackboxes.net/sim/) hosts the robot arm (phase D's envelope, simulated) and the faction arena (phase B's slots), so the public can try both before the bridges ship.
+
 **Queued (owner, 2026-09-26; after the usage reset):**
 - **Embedding for developers and AI agents.** A drop-in way to add ob.Pal to any app or page: a script tag or web component, the npm package, and agent-readable docs (llms.txt, typed examples). A page's code decides which 3D models are controllable, and any of them can then be taken over through a QR code or link.
 - **Branded QR codes.** ob.Pal's own QR design (mark, dot style, colour) as brand identity: the product is free, so the code is the marketing. Each code stays scannable and unique to its scene.

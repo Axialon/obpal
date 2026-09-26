@@ -104,6 +104,8 @@ Several devices can control one scene at once. Each joins with the scene's invit
   - A node held by someone else can't be claimed. The device gets a bump and a toast naming who holds it.
   - A participant holds one node at a time: claiming another releases the first.
   - A claim ends on release, when the participant leaves, and when the host removes the node or takes it back.
+- **What input drives.** A participant's input drives the node it holds: 1:1 turns it, Tilt and Gyro turn it, and the trackpad moves it. Holding nothing, the lead's input drives the view and the whole scene, and everyone else's only moves their cursor. Letting go (× on the device) hands 1:1 back to the whole scene.
+- **Showing a change of control.** When a node is taken, handed over or let go, the screen's halo flashes and a released halo lingers as it fades. The device's control area flashes in its colour, and its held-part chip fades out instead of vanishing.
 - **Invite.** The pairing QR or link. Anyone with it can join, up to 8 devices, until the host makes a new link. That stops the old one without dropping anyone connected. The host sees everyone in the scene and can remove a participant.
 - **The screen.** The person at the host is a participant too (id `host`). The mouse claims nodes the same way, and can take a node back from anyone.
 - Hosts that don't list nodes keep the one-device behaviour: a new device takes over.
@@ -132,9 +134,9 @@ A control system is a kind of host. It decides what its nodes are, which utiliti
 | id | Host | Nodes | Takes | Status |
 |---|---|---|---|---|
 | `system.scene3d` | ob.Pal Viewer | Each object, its movable parts, and the view (the lead's) | Point, Hold, Steer and Tilt, the trackpad, the gamepad | Shared scenes shipped |
-| `system.gamepad-slots` | ob.Pal Link in a browser game | Player 1–4 gamepad slots | `pad` and the Motion utilities | Planned. Each participant claims a slot, so a local-multiplayer game gets one pad per phone. |
+| `system.gamepad-slots` | ob.Pal Link in a browser game | Player 1–4 gamepad slots | `pad` and the Motion utilities | Public sim at [/sim/arena/](https://obpal.blackboxes.net/sim/arena/). In ob.Pal Link: planned. Each participant claims a slot, so a local-multiplayer game gets one pad per phone. |
 | `system.desktop` | ob.Pal Desktop | The allowed program in front (keyboard, mouse) | The Keys and mouse routes | Shipped, one participant |
-| `system.robot-arm` | A bridge beside the arm's control software | The joints, the tool pose (end effector), the gripper | Hold → tool orientation. Steer → joint or tool velocity. The triggers → the gripper. | Planned |
+| `system.robot-arm` | A bridge beside the arm's control software | The joints, the tool pose (end effector), the gripper | Hold → tool orientation. Steer → joint or tool velocity. The triggers → the gripper. | Public sim at [/sim/arm/](https://obpal.blackboxes.net/sim/arm/), with the whole safety envelope. A hardware bridge is planned. |
 
 **`system.robot-arm`.** The host is a small bridge next to the arm's own control software. It is a web page using `@obpal/host` or ob.Pal Desktop, and it speaks the arm's interface:
 - ROS 2 (through rosbridge, or `ros2_control` topics);
@@ -149,6 +151,16 @@ Nodes map to the arm: one participant can steer the tool while another works the
 - **E-stop:** every participant's device and the host show a stop control that halts every node at once.
 - **Approval:** the host approves each participant before its first claim. Having the link isn't enough.
 - **Record:** the bridge logs who held which node, and when.
+
+**The sim** (`src/sim/arm.ts`) is the reference for this envelope. Five joints and a gripper are nodes.
+- **Deadman:** a finger on the trackpad, the 1:1 grab held, or a stick deflected.
+- **Input:** dragging moves the joint, tilting drives it, and 1:1 turns it like a dial.
+- **Limits:** speed and acceleration caps, and joint limits.
+- **Watchdog:** 200 ms without input stops the joint.
+- **E-stop:** a Stop button on every phone's tray, and on the screen (Space). Only the screen resumes.
+- **Approval:** the screen lets each person in before their first claim.
+
+`Claims` in `@obpal/host` gives any control system the same one-per-node rules.
 
 ## 8. Adding to the catalogue
 

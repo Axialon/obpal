@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="description" content="Public sims for ob.Pal's control catalogue: a robot arm several phones drive joint by joint, a four-player arena, and a shared 3D scene. Open one on a screen and scan it with your phones." />
+    <title>Sims · ob.Pal</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&family=JetBrains+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/family/family.css" />
+    <link rel="stylesheet" href="/src/styles/base.css" />
+    <link rel="stylesheet" href="/src/styles/landing.css" />
+    <link rel="stylesheet" href="/src/styles/pages.css" />
+    <script type="module" src="/src/landing/main.ts"></script>
+  </head>
+  <body>
+    <main class="land">
+      <header class="page-top">
+        <a class="logo" href="/" aria-label="ob.Pal"><img class="mark" src="/logo-mark.svg" alt=""><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span></a>
+        <nav><a href="/view/">Viewer</a><a href="/link/">Extension</a></nav>
+      </header>
+
+      <section class="hero">
+        <p class="eyebrow">Sims · try the control catalogue</p>
+        <h1>Take control, together.</h1>
+        <p class="lede">Open a sim on a screen, then scan its code with your phone. Up to eight phones share one scene. Each holds its own part, and nobody can take what someone else is holding.</p>
+      </section>
+
+      <section class="modes-grid sims" aria-label="Sims">
+        <a class="sim-card" href="/sim/arm/">
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16M7 20v-3h6v3M10 17l-2-6 7-4 2 3"/><circle cx="8" cy="11" r="1.6"/><circle cx="15" cy="7" r="1.6"/><path d="M17 10l2.5-.5M17 10l1.6 2"/></svg>
+          <h2>Robot arm</h2>
+          <p>Five joints and a gripper, one person per joint. Hold the pad to move, pick up the blocks together. Deadman, limits, watchdog, e-stop and approval work as they would for a real arm.</p>
+          <span class="tag">system.robot-arm</span>
+        </a>
+        <a class="sim-card" href="/sim/arena/">
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.4"/><circle cx="9" cy="10" r="1.8"/><circle cx="15" cy="14.5" r="1.8"/><path d="M10.6 11.2 13.4 13.4"/></svg>
+          <h2>Faction arena</h2>
+          <p>Up to four players on one screen, a phone each. Claim a slot, tilt to roll, tap to dash, knock the others off the ring. The per-phone gamepad slots browser games get next.</p>
+          <span class="tag">system.gamepad-slots</span>
+        </a>
+        <a class="sim-card" href="/view/">
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 19.8 7.6v8.8L12 20.8 4.2 16.4V7.6L12 3.2Z"/><path d="M4.2 7.6 12 12l7.8-4.4M12 12v8.8"/></svg>
+          <h2>Shared 3D scene</h2>
+          <p>The Viewer with several phones: each takes a part of a model by pointing at it or from its scene list, in its own colour.</p>
+          <span class="tag">system.scene3d</span>
+        </a>
+        <article class="sim-card soon">
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M7.2 7.2h9.6a4.2 4.2 0 0 1 4.1 3.4l.9 4.6a2.5 2.5 0 0 1-4.3 2.2l-2.1-2.3H8.6l-2.1 2.3a2.5 2.5 0 0 1-4.3-2.2l.9-4.6a4.2 4.2 0 0 1 4.1-3.4Z"/></svg>
+          <h2>Controller bridges</h2>
+          <p>Next: a gamepad, a Joy-Con, a Wii Remote or VR controllers, connected to your phone or PC, join these sims as players of their own.</p>
+          <span class="tag">bridge.* · coming</span>
+        </article>
+      </section>
+
+      <section class="note-card">
+        <h2>How to play</h2>
+        <p>Open a sim on a computer or TV. Scan its code with your phone's camera; nothing to install. Everyone else scans the same code, or the invite from the <b>+</b> at the top. Pick what you'll control from your phone's scene list.</p>
+      </section>
+
+      <footer class="foot">Part of <a href="/">ob.Pal</a> and the <a href="https://ecosystem.blackboxes.net">Blackboxes</a> ecosystem. <a href="https://github.com/Axialon/obpal/blob/main/spec/CATALOGUE.md">Control catalogue</a> · <a href="/privacy/">Privacy</a></footer>
+    </main>
+  </body>
+</html>

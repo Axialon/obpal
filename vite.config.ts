@@ -64,7 +64,7 @@ export default defineConfig({
         // Controller floor from PLAN.md: Safari 15, Chromium 95, Firefox 115.
         target: ['safari15', 'chrome95', 'firefox115', 'edge95'],
         rollupOptions: {
-          input: { index: 'index.html', controller: 'p/index.html', viewer: 'view/index.html', sponsor: 'sponsor/index.html', donate: 'donate/index.html', link: 'link/index.html', privacy: 'privacy/index.html' },
+          input: { index: 'index.html', controller: 'p/index.html', viewer: 'view/index.html', sponsor: 'sponsor/index.html', donate: 'donate/index.html', link: 'link/index.html', privacy: 'privacy/index.html', sims: 'sim/index.html', simArm: 'sim/arm/index.html', simArena: 'sim/arena/index.html' },
         },
       },
     },

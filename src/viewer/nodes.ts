@@ -43,6 +43,12 @@ export interface Hand {
   selected: Part | null
   halo: THREE.Mesh
   haloOpacity: number
+  /** 1 when control just changed (taken, handed over, let go), easing to 0: the halo pops, then settles. */
+  flash: number
+  /** The part this hand just let go of: its halo lingers there while it fades. */
+  fade: Part | null
+  /** 1 while the hand's device is turning or moving what it holds. */
+  busy: number
 }
 
 interface Pose { p: THREE.Vector3; q: THREE.Quaternion; s: THREE.Vector3 }
@@ -106,7 +112,7 @@ export class Parts {
       halo.renderOrder = 999
       halo.visible = false
       this.scene.add(halo)
-      h = { id, color: color ?? '#c6ff34', hovered: null, selected: null, halo, haloOpacity: 0 }
+      h = { id, color: color ?? '#c6ff34', hovered: null, selected: null, halo, haloOpacity: 0, flash: 0, fade: null, busy: 0 }
       this.hands.set(id, h)
     } else if (color && color !== h.color) this.recolor(h, color)
     return h
@@ -123,6 +129,9 @@ export class Parts {
     this.hands.delete(id)
     if (this.cardHand === h) this.cardHand = this.host
   }
+
+  /** A hand's device is driving what it holds this frame: its halo brightens. */
+  active(h: Hand) { h.busy = 1 }
 
   /** Every hand holding something, the screen's included. */
   holders(): Hand[] { return [...this.hands.values()].filter((h) => h.selected) }
@@ -355,11 +364,18 @@ export class Parts {
       if (h !== this.host) return false
       const lost = holder.selected!
       holder.selected = null
+      holder.flash = 1
+      holder.fade = lost
       this.hooks.changed(holder)
       this.hooks.taken?.(holder, lost)
     }
     const was = h.selected
     h.selected = part
+    // A change of control shows: the new halo pops in, and a released one flashes and lingers as it fades.
+    if (was?.object !== part?.object) {
+      h.flash = 1
+      h.fade = part ? null : was?.movable ? was : null
+    }
     if (was && was.object !== part?.object) this.settle(was.object)
     if (part) this.settle(part.object)
     if (part) this.cardHand = h
@@ -456,20 +472,26 @@ export class Parts {
       s.hl += (s.hlTarget - s.hl) * k
       o.scale.copy(s.base.s).multiplyScalar(s.user * s.hl)
     }
-    // One halo per hand, in its colour.
+    // One halo per hand, in its colour. In quickly; out slowly, flashing and widening as it goes.
     for (const h of this.hands.values()) {
       const sel = h.selected
-      h.haloOpacity += ((sel?.movable ? 0.9 : 0) - h.haloOpacity) * k
-      ;(h.halo.material as THREE.MeshBasicMaterial).opacity = h.haloOpacity
-      h.halo.visible = h.haloOpacity > 0.02
-      if (sel && h.halo.visible) {
-        const sphere = new THREE.Box3().setFromObject(sel.object).getBoundingSphere(new THREE.Sphere())
+      const shown = sel ?? h.fade
+      h.flash = Math.max(0, h.flash - dt / 0.7)
+      h.busy = Math.max(0, h.busy - dt / 0.3)
+      h.haloOpacity += ((sel?.movable ? 0.9 : 0) - h.haloOpacity) * (sel ? k : 1 - Math.exp(-dt * 4.5))
+      const opacity = Math.min(1, h.haloOpacity + 0.45 * h.flash + 0.1 * h.busy)
+      ;(h.halo.material as THREE.MeshBasicMaterial).opacity = opacity
+      h.halo.visible = !!shown && opacity > 0.02
+      if (!sel && h.haloOpacity < 0.02 && h.flash <= 0) h.fade = null
+      if (shown && h.halo.visible) {
+        const sphere = new THREE.Box3().setFromObject(shown.object).getBoundingSphere(new THREE.Sphere())
+        const sel = shown
         h.halo.position.copy(sphere.center)
         h.halo.quaternion.copy(this.camera.quaternion)
         // A participant's halo is finer and closer than the screen's own, so several holds don't crowd the model.
         const own = h === this.host
         h.halo.geometry = sel.kind === 'object' ? this.rings.object : own ? this.rings.part : this.rings.shared
-        h.halo.scale.setScalar(Math.max(0.08, sphere.radius * (sel.kind === 'object' ? 1.04 : own ? 1.35 : 1.2)))
+        h.halo.scale.setScalar(Math.max(0.08, sphere.radius * (sel.kind === 'object' ? 1.04 : own ? 1.35 : 1.2) * (1 + 0.16 * h.flash)))
       }
     }
     const part = this.cardHand.selected ?? this.host.hovered
