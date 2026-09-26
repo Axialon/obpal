@@ -1,6 +1,8 @@
 # ob-pal: phone as a 3D remote (plan, 2026-09-25)
 
 > **Status (2026-09-25):** decided: solo build, web-3D-first launch, MIT license (matching Blackboxes). The MVP vertical slice is live at https://obpal.blackboxes.net: pairing, the Rotate and Point modes, the trackpad, trays, and the hosted viewer. Still to do before relay coverage: a TURN key. The wire protocol is written up in [spec/PROTOCOL.md](spec/PROTOCOL.md).
+>
+> **2026-09-26:** the controller is an offline-capable PWA (service worker, versioned cache), and a phone that paired once with ob.Pal Link reconnects over the LAN through a **direct code** with no server involved (PROTOCOL.md §2a). Connecting is front-loaded: the phone's offer is built while signaling connects, the extension keeps its link warm from browser start, and both sides give the service 1.5 s before switching to the direct path.
 
 > Vision: scan once and the phone becomes a remote for 3D objects and on-screen navigation. It works through the gyroscope, swipe/trackpad gestures and button trays, on as many phone, OS and screen combinations as possible, and is built from existing tech.
 
@@ -128,9 +130,11 @@ flowchart LR
   - Host and phone run a commit-then-reveal ECDH.
   - Both screens show a 4-emoji code to compare, and the host user clicks "Allow <device>?". **A code alone never grants control.**
   - Installed iOS Home Screen apps need this path: they don't share Safari's storage, and Camera scans always open the browser.
-- **Resume (v1):**
-  - A per-pair secret is stored at enrolment, so returning phones reconnect without a rescan.
-  - Safari's 7-day storage cap means a rescan is sometimes still needed. That is expected.
+- **Remembered host, direct code (shipped with ob.Pal Link, 2026-09-26):**
+  - After an online pairing the host hands the phone a pairing id and key inside the DTLS channel; both keep their own certificate (IndexedDB) and the other's fingerprint.
+  - With the service unreachable the host shows a direct code: its live ICE credentials and host candidates plus a nonce. The phone answers with credentials derived from the key and the nonce, the host learns the phone's address from its connectivity checks (peer-reflexive), and DTLS pins both remembered fingerprints. No server, and nothing for a phone that never paired.
+  - Safari's 7-day storage cap means a rescan (online) is sometimes still needed. That is expected.
+- **Resume over the room service (v1):** the same pairing key could let a returning phone rejoin without a rescan when the service is up.
 - **After screen lock:** on `visibilitychange`:
   - if the connection is still up, resume;
   - if it is `disconnected`, run `restartIce()` over the always-connected host DO socket;
@@ -312,9 +316,11 @@ r.on('button', e => ...); r.sample(frameTime); r.setLayout(json);
 | Any | Mainland China | – | No Cloudflare TURN there | Out of scope |
 
 **Fallback ladders:**
-- **Transport:** LAN host → STUN → TURN UDP (3478/443) → TURN TCP → TURN TLS 443. In v1, a WSS relay through the DO is added as the last resort.
+- **Transport:** LAN host → STUN → TURN UDP (3478/443) → TURN TCP → TURN TLS 443. In v1, a WSS relay through the DO is added as the last resort. The phone offers with host + STUN candidates at once and waits at most 250 ms for TURN credentials; a failed attempt rebuilds with TURN.
+- **Signaling:** room service (1.5 s to answer) → direct code over the LAN for a remembered phone (host candidates only: same network, multicast DNS) → later, the native helper as a LAN endpoint that needs no SDP changes on the phone (ICE-lite, credentials read from the STUN USERNAME).
 - **Sensors:** events → touch-only in the MVP. In v1: Generic Sensor → events → compass/tilt → touch.
-- **Pairing:** camera QR → short code + approval → (v1) remembered host.
+- **Pairing:** camera QR (online) → direct code (remembered host, no service) → short code + approval (later).
+- **Controller page:** network → service worker cache (after one visit; installs as an app).
 - **Keep-awake:** Wake Lock → NoSleep.js → fast resume.
 
 ## 9. Security (minimal, correct)
@@ -397,14 +403,15 @@ addons/blender      OSC add-on (v1)
 | Browser↔browser P2P fails more than expected | Budget 15–30% relayed (AirConsole saw ~14% of routers fail P2P); TURN cost negligible |
 | 60 Hz web sensor ceiling | Enough for orbit, rotate and point. Native shell gated on measured benefit |
 | Bridge OS friction (SmartScreen, macOS TCC, UIPI, Wayland) | Stable signing identity, guided permission wizard, UIPI warning, libei fallback |
-| Cloudflare dependency | Established P2P sessions survive a signaling outage; the room is small and re-hostable; coturn documented |
+| Cloudflare dependency | Established P2P sessions survive a signaling outage; a remembered phone reconnects through the direct code with no service at all; the room is small and re-hostable; coturn documented |
+| Chrome removes ICE-credential SDP munging (`WebRTC-NoSdpMangleUfrag`, announced, date unset) | Only the phone side of the direct code depends on it and it detects the rejection (`InvalidModificationError`) and falls back to the online path; iOS Safari unaffected; the native helper takes over as an ICE-lite LAN endpoint that needs no munging |
 | Battery and thermals | Gate at ≤10% battery per hour on the oldest full-tier iPhone; dark UI; 15 Hz idle |
 
 ## 13. Open decisions (owner)
 
 1. **Launch focus.** Web 3D viewers (recommended), desktop DCC/CAD (pulls the bridge into the MVP), or presenter/TV.
 2. **Team size.** 2 engineers means about 5 weeks for the MVP; solo means about 7.
-3. **Cloud-dependent pairing.** Recommended: accept it. Offline mode is v2.
+3. **Cloud-dependent pairing.** Recommended: accept it for the first pairing. Done: a remembered phone reconnects over the LAN with no service (direct code); a first pairing still needs the service.
 4. **Licensing.** Recommended: open-source the protocol and SDK at minimum.
 5. **Name and domain.** Must be fixed before beta.
 6. **Bridge stack.** Go + pion (recommended; its TURN-over-TLS support was checked) or Electron reusing the TS SDK.

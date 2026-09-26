@@ -1,18 +1,25 @@
 /**
  * Offscreen document (reason WEB_RTC). An MV3 service worker cannot hold an RTCPeerConnection, so the ob.Pal
- * Remote lives here: the pairing QR payload, signaling, and the WebRTC link to the phone.
- * About 60 times a second it samples the phone (remote.pad and remote.consume()) and streams compact input
- * frames to the page bridges of the controlled tab over runtime ports: the controller to every frame, keys to
- * the focused frame, 3D drags to the frame with the largest canvas.
+ * Remote lives here: the pairing QR payload, signaling, and the WebRTC link to the phone. It keeps a persistent
+ * DTLS certificate and remembers paired phones, so when the room service is unreachable it publishes a direct
+ * LAN code instead (see the popup), and a remembered phone connects with no server at all.
+ * About 60 times a second, and immediately when a packet arrives, it samples the phone (remote.pad and
+ * remote.consume()) and streams compact input frames to the page bridges of the controlled tab over runtime
+ * ports: the controller to every frame, keys to the focused frame, 3D drags to the frame with the largest canvas.
  */
-import { Mode, PointerFlag, pointerDelta, Remote, type Layout, type PointerState, type ProfileId } from '@obpal/host'
+import { Mode, PointerFlag, pointerDelta, Remote, type Frame, type Layout, type PointerState, type ProfileId } from '@obpal/host'
+import type { PadState } from '@obpal/core'
 import { APP_NAME, DEFAULT_MODE, PORT_NAME, SERVICE, isTargetMode, type TargetMode } from './shared/constants'
-import { parseConfig, parseFromPage, parseOffscreenRequest, type BgRequest, type ToPage } from './shared/messages'
+import { KeyMapper } from './shared/keys'
+import type { PadInput } from './shared/math'
+import { parseConfig, parseFromPage, parseOffscreenRequest, type BgRequest, type LinkState, type PadTuple, type ToPage } from './shared/messages'
+import { buildNativeFrame, HeldState, isIdleFrame, NATIVE_HEARTBEAT_MS, NATIVE_PORT_NAME } from './shared/native'
 import {
   buildFrame, deltaTuple, electFrame, frameSignature, isActive, padTuple, pointerTuple, recipients, tiltTuple, withoutClickButtons, withRelativeAim,
   type FrameInfo,
 } from './shared/route'
 import { suggestForFrames } from './shared/sites'
+import { DEFAULT_VIEWER } from './shared/viewer'
 
 interface Link extends FrameInfo {
   port: chrome.runtime.Port
@@ -26,6 +33,8 @@ interface Link extends FrameInfo {
 }
 
 const TICK_MS = 1000 / 60
+/** A clock tick this soon after a packet-driven one is skipped: packets set the pace while input flows. */
+const TICK_MIN_GAP_MS = 6
 const HEARTBEAT_MS = 250
 const RUMBLE_GAP_MS = 50
 
@@ -40,6 +49,7 @@ const layout: Layout = {
         { value: 'gamepad', label: 'Controller', glyph: '✚', detail: 'Gamepad API games' },
         { value: 'viewer', label: '3D', glyph: '◆', detail: 'Rotate, pan and zoom 3D views' },
         { value: 'keys', label: 'Keys', glyph: '⌨', detail: 'Keyboard and mouse games' },
+        { value: 'pc', label: 'PC', glyph: '▭', detail: 'Keyboard and mouse for programs you allow' },
       ],
     },
   ],
@@ -66,12 +76,17 @@ function syncSuggestion() {
 
 const toBg = (m: BgRequest): Promise<unknown> => chrome.runtime.sendMessage(m).catch(() => undefined)
 
-chrome.runtime.onMessage.addListener((raw: unknown, sender: chrome.runtime.MessageSender) => {
+chrome.runtime.onMessage.addListener((raw: unknown, sender: chrome.runtime.MessageSender, respond: (r: unknown) => void) => {
   if (sender.id !== chrome.runtime.id || sender.tab) return
   const req = parseOffscreenRequest(raw)
   if (!req) return
-  if (req.type === 'config') applyConfig(req.tabId, req.mode)
-  else remote?.disconnect()
+  switch (req.type) {
+    case 'config': applyConfig(req.tabId, req.mode); break
+    case 'unpair': remote?.disconnect(); break
+    case 'forget': void remote?.forget(req.id); break
+    case 'lan': remote?.selectLan(req.id); break
+    case 'diag': respond(remote?.diag() ?? null); return true
+  }
 })
 
 // Page bridges connect here directly, so 60 Hz input never has to wake the service worker.
@@ -103,9 +118,85 @@ function applyConfig(tabId: number | null, mode: TargetMode) {
   }
   if (modeChanged) {
     for (const l of links) l.sig = ''
+    if (mode !== 'pc') pcLetGo()
     remote?.setValues({ target: mode })
   }
   syncSuggestion()
+}
+
+// ---- PC target: phone state -> keyboard/mouse actions -> the service worker -> ob.Pal Desktop ------------
+// The Keys mapping (shared/keys.ts) decides what is held; the frame carries that whole desired state plus this
+// tick's mouse motion, so the helper (which enforces the per-program scope) can never be left with a stuck key.
+
+const pc = {
+  mapper: new KeyMapper(),
+  held: new HeldState(),
+  port: null as chrome.runtime.Port | null,
+  lastTick: 0,
+  lastSent: 0,
+  retryAt: 0,
+  retryMs: 250,
+}
+
+function pcPort(): chrome.runtime.Port | null {
+  if (pc.port) return pc.port
+  const now = performance.now()
+  if (now < pc.retryAt) return null
+  let port: chrome.runtime.Port
+  try {
+    port = chrome.runtime.connect({ name: NATIVE_PORT_NAME }) // wakes the service worker if it idled out
+  } catch {
+    pc.retryAt = now + pc.retryMs
+    pc.retryMs = Math.min(pc.retryMs * 2, 5000)
+    return null
+  }
+  pc.port = port
+  pc.retryMs = 250
+  port.onDisconnect.addListener(() => {
+    void chrome.runtime.lastError
+    if (pc.port === port) pc.port = null
+    pc.retryAt = performance.now() + pc.retryMs
+    pc.retryMs = Math.min(pc.retryMs * 2, 5000)
+  })
+  return port
+}
+
+const tupleToPad = (p: PadTuple | null): PadInput | null => (p ? { buttons: p[0], axes: [p[1], p[2], p[3], p[4]], triggers: [p[5], p[6]] } : null)
+
+function pcTick(f: Frame, pad: PadState | null, ptr: PointerState | null, now: number) {
+  const dt = pc.lastTick ? Math.min(50, now - pc.lastTick) : TICK_MS
+  pc.lastTick = now
+  // Aim routed to the mouse (a relative pointer, CATALOGUE §2) lands on the right stick here, as it does on a page
+  // without pointer lock: the Keys mapping then turns the stick into relative mouse motion.
+  const relative = !!ptr && (ptr.flags & PointerFlag.relative) !== 0
+  const padIn: PadInput | null = relative && pad ? tupleToPad(withRelativeAim(padTuple(pad), relativeRate(ptr, now))) : pad
+  const tilt = f.connected && !pad && f.mode === Mode.tilt ? f.tilt : null
+  const out = pc.mapper.update({ pad: padIn, tilt, aim: f.aim, pad1: f.pad1, dtMs: dt })
+  pc.held.apply(out)
+  // A pinch scrolls, as in the 3D target: pinching out is wheel-up (negative deltaY), in 1/120 notch units.
+  const wheel = Math.round(-f.zoom * DEFAULT_VIEWER.wheelPerZoom * 1.2)
+  const frame = buildNativeFrame(pc.held, out.move, [0, wheel])
+  if (isIdleFrame(frame) && now - pc.lastSent < NATIVE_HEARTBEAT_MS) return
+  const port = pcPort()
+  if (!port) return
+  try {
+    port.postMessage(frame)
+    pc.lastSent = now
+  } catch {
+    pc.port = null
+  }
+}
+
+/** Leaving the PC target: nothing stays held, and the worker closes the helper port (which releases too). */
+function pcLetGo() {
+  pc.mapper.releaseAll()
+  pc.held.clear()
+  pc.lastTick = 0
+  const port = pc.port
+  pc.port = null
+  if (!port) return
+  try { port.postMessage(buildNativeFrame(pc.held, [0, 0])) } catch { /* gone */ }
+  try { port.disconnect() } catch { /* gone */ }
 }
 
 function forget(l: Link) {
@@ -153,6 +244,8 @@ function post(l: Link, m: ToPage) {
   try { l.port.postMessage(m) } catch { forget(l) }
 }
 
+let lastTick = 0
+
 // A relative pointer (Aim routed to the mouse) as a turn rate: the change between packets over the device's own clock.
 let lastPtr: PointerState | null = null
 let relRate: [number, number] = [0, 0]
@@ -175,9 +268,11 @@ function tick() {
   const r = remote
   if (!r) return
   const now = performance.now()
+  lastTick = now
   const f = r.consume(now) // consume every tick so deltas never pile up
   const pad = r.pad
   const ptr = r.pointer
+  if (config.mode === 'pc') pcTick(f, pad, ptr, now)
   if (config.tabId === null || !links.size) {
     lastTargets.clear()
     return
@@ -191,6 +286,7 @@ function tick() {
     l.sig = ''
   }
   lastTargets = targets
+  if (config.mode === 'pc') return // no page frames: the PC target goes through the helper
 
   // The pointer (CATALOGUE §4): one frame draws the cursor (a pointer-locked frame, else the one with the game's
   // canvas). While the Wii cursor is up, A and B click at it, so they leave the pad. A relative pointer with no
@@ -206,23 +302,30 @@ function tick() {
   const tl = tiltTuple(f.connected && !pad && f.mode === Mode.tilt ? f.tilt : null)
   const d = deltaTuple(f)
   const active = isActive(p, d, tl, pt)
-  const sig = frameSignature(config.mode, p, tl)
+  const mode = config.mode
+  const sig = frameSignature(mode, p, tl)
   for (const l of targets) {
     // Stream while there is input; otherwise send changes at once and a heartbeat every HEARTBEAT_MS.
     if (!active && l.sig === sig && now - l.lastSent < HEARTBEAT_MS) continue
     const dt = l.wasActive ? Math.min(50, now - l.lastSent) : TICK_MS
-    post(l, buildFrame(config.mode, dt, p, d, tl, gamepad && l !== ptFrame ? null : pt))
+    post(l, buildFrame(mode, dt, p, d, tl, gamepad && l !== ptFrame ? null : pt))
     l.lastSent = now
     l.wasActive = active
     l.sig = sig
   }
 }
 
+/** Clock ticks keep heartbeats and rate inputs going; a packet from the phone is sampled the moment it lands. */
+function clockTick() {
+  if (performance.now() - lastTick < TICK_MIN_GAP_MS) return
+  tick()
+}
+
 function startClock() {
-  const fallback = () => setInterval(tick, TICK_MS)
+  const fallback = () => setInterval(clockTick, TICK_MS)
   try {
     const worker = new Worker(new URL('./ticker.ts', import.meta.url), { type: 'module' })
-    worker.onmessage = tick
+    worker.onmessage = clockTick
     worker.onerror = () => {
       worker.terminate()
       fallback()
@@ -233,15 +336,18 @@ function startClock() {
 }
 
 async function boot() {
-  const r = await Remote.create({ appName: APP_NAME, service: SERVICE, layout: layoutFor(suggested) })
+  const r = await Remote.create({ appName: APP_NAME, service: SERVICE, layout: layoutFor(suggested), remember: true })
   remote = r
-  const report = () => void toBg({ to: 'bg', type: 'link', link: { status: r.status, url: r.pairingUrl, device: r.deviceName } })
+  const state = (): LinkState => ({ status: r.status, url: r.pairingUrl, device: r.deviceName, lan: r.lanUrl, lanFor: r.lanFor, pairs: r.remembered })
+  const report = () => void toBg({ to: 'bg', type: 'link', link: state() })
   r.on('status', report)
+  r.on('lan', report)
   r.on('connect', () => {
     report()
     r.setValues({ target: config.mode })
   })
   r.on('disconnect', report)
+  r.on('input', tick)
   // The phone's tray picker switches the target mode; the service worker stores it and pushes it back as config.
   r.on('value', ({ id, v }) => {
     if (id === 'target' && isTargetMode(v)) void toBg({ to: 'bg', type: 'mode', mode: v })
@@ -254,5 +360,5 @@ async function boot() {
 
 boot().catch((e: unknown) => {
   console.error('[ob.Pal Link] could not start the phone link', e)
-  void toBg({ to: 'bg', type: 'link', link: { status: 'offline', url: '', device: null } })
+  void toBg({ to: 'bg', type: 'link', link: { status: 'offline', url: '', device: null, lan: '', lanFor: null, pairs: [] } })
 })

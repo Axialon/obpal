@@ -16,6 +16,8 @@ code { font-family: var(--font-data); font-size: 0.92em; padding: 1px 6px; borde
 .note-card { margin: 8px 0 0; padding: 22px; border-radius: 22px; border: 1px solid rgb(var(--accent-rgb) / 0.3); background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.1), rgb(var(--hl-rgb) / 0.02)); }
 .note-card h2 { font-family: var(--font-display); font-size: 18px; margin: 0 0 6px; letter-spacing: -0.02em; }
 .note-card p { margin: 0; color: var(--secondary); }
+.note-card p + p { margin-top: 14px; }
+kbd { font: 600 0.82em/1 var(--font-mono, ui-monospace, monospace); padding: 2px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--glass); white-space: nowrap; }
 
 /* Privacy policy */
 .prose { max-width: 720px; padding: 56px 0 24px; }

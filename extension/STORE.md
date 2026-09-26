@@ -52,6 +52,9 @@ Everything the Developer Dashboard asks for, ready to paste. Registering the dev
   - It's requested only when the user turns on "All sites" in the popup, and it's off by default.
   - It lets control reach game iframes served from other domains, and keeps control as the page navigates.
   - The user can revoke it from the popup.
+- **Optional permission nativeMessaging:**
+  - It's requested only when the user first chooses the PC target in the popup, and it's off by default.
+  - It lets the extension start and talk to one native host, ob.Pal Desktop (`net.blackboxes.obpal`, the user installs it), which turns the phone's controller input into keyboard and mouse input for programs the user allows one by one. The extension never runs anything else and the helper has no network access.
 
 **Remote code:** No. All code is bundled, and extension pages use `script-src 'self'`.
 

@@ -24,6 +24,14 @@ const CONTENT_SCRIPTS = [
 
 const icons = Object.fromEntries(ICON_SIZES.map((s: number) => [String(s), `icons/icon-${s}.png`]))
 
+/**
+ * The extension's public key, which fixes its ID (jnnpcnoilofjaffabnhecfokjjknlemg) for every unpacked and
+ * packed copy, so the ob.Pal Desktop helper's native messaging manifest can allow it by ID. The matching
+ * private key is not in the repository (extension/scripts/key.mjs makes and reads it); a fork that cannot
+ * use it makes its own pair, puts the new ID in desktop/src/win/install.rs, and reinstalls the helper.
+ */
+const EXTENSION_KEY = 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzYnsUcmTpnHdiAFCNZ+Pre5xIlcJE5af7+QJauRqGZBUCGhbfKwLhzSKdlUXxaPzil+G/bbhsaomm6Z701TufnMoyYWpIl6SwHxPR8XxtUiFKZLkVlYNbptp1oOl53onNGx2XrgGCHnX6hBH6gGvS+gVWDtvOCKFzcH+XmkqM/YkwmHuIhkepm3TMervmAa5aPpWTr0LeXbtrGJ3jjVjjuqogXJsKbUyMSCKY8AJ3isVUIM3xc93+EL0M8Yk2E2yuBNogEMtW00XYWsBbNBot6eNKlg6plTi1XpS8LGy52hm1PElGp1pd6F91Rp45YupcH6li69qk5lBdrhHh1/pSwIDAQAB'
+
 const manifest = {
   manifest_version: 3,
   name: 'ob.Pal Link',
@@ -32,10 +40,14 @@ const manifest = {
   description: 'Your phone as a controller for any website: Gamepad API games, 3D viewers and keyboard games. Pair by QR.',
   minimum_chrome_version: '120',
   homepage_url: 'https://obpal.blackboxes.net',
+  key: EXTENSION_KEY,
   icons,
   action: { default_title: 'ob.Pal Link', default_popup: 'popup.html', default_icon: icons },
   background: { service_worker: 'background.js', type: 'module' },
+  options_ui: { page: 'options.html', open_in_tab: true },
   permissions: ['offscreen', 'storage', 'activeTab', 'scripting'],
+  // The PC target talks to the ob.Pal Desktop helper; asked for when the PC target is first chosen.
+  optional_permissions: ['nativeMessaging'],
   host_permissions: ['https://obpal.blackboxes.net/*'],
   optional_host_permissions: ['<all_urls>'],
   // Bundled code only: no eval, no remote scripts; network limited to the ob.Pal service.
@@ -55,10 +67,11 @@ function verifyDist(dir: string) {
   const problems: string[] = []
   if (m.manifest_version !== 3) problems.push('manifest_version is not 3')
   const refs = new Set<string>([
-    m.action.default_popup, m.background.service_worker, ...Object.values(m.icons), ...Object.values(m.action.default_icon),
+    m.action.default_popup, m.background.service_worker, m.options_ui.page, ...Object.values(m.icons), ...Object.values(m.action.default_icon),
     'offscreen.html', ...CONTENT_SCRIPTS.map((c) => c.file),
   ])
-  for (const html of ['popup.html', 'offscreen.html']) {
+  if (!/^[A-Za-z0-9+/]+=*$/.test(m.key) || m.key.length < 300) problems.push('manifest key is not a base64 public key')
+  for (const html of ['popup.html', 'offscreen.html', 'options.html']) {
     for (const [, ref] of read(html).matchAll(/\b(?:src|href)="\/?([^"?#:]+)"/g)) refs.add(ref)
   }
   for (const file of walk(dir).filter((f) => f.endsWith('.js'))) {
@@ -124,6 +137,7 @@ export default defineConfig({
       input: {
         popup: resolve(root, 'popup.html'),
         offscreen: resolve(root, 'offscreen.html'),
+        options: resolve(root, 'options.html'),
         background: resolve(root, 'src/background.ts'),
       },
       output: {

@@ -13,5 +13,5 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src", "packages/*/src", "tests"],
-  "exclude": ["tests/worker"]
+  "exclude": ["tests/worker", "src/sw/sw.ts"]
 }

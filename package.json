@@ -7,7 +7,7 @@
   "description": "Turn any phone into a remote for 3D and on-screen navigation: gyro, trackpad and button trays over WebRTC.",
   "scripts": {
     "dev": "vite",
-    "typecheck": "tsc -p tsconfig.json && tsc -p worker/tsconfig.json && tsc -p extension/tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p src/sw/tsconfig.json && tsc -p worker/tsconfig.json && tsc -p extension/tsconfig.json",
     "build": "pnpm run typecheck && vite build",
     "build:extension": "pnpm --filter @obpal/extension run build",
     "preview": "vite preview",
@@ -16,6 +16,7 @@
     "sync:family": "node scripts/sync-family.mjs",
     "pack:extension": "pnpm run build:extension && pnpm --filter @obpal/extension run pack",
     "e2e:extension": "vite build && pnpm run build:extension && pnpm --filter @obpal/extension run e2e",
+    "bench:extension": "vite build && pnpm run build:extension && node extension/scripts/bench.mjs",
     "icons": "node scripts/brand-icons.mjs"
   },
   "dependencies": {

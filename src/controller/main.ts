@@ -2,9 +2,9 @@ import { family } from '../family'
 import '../styles/base.css'
 import '../styles/controller.css'
 import {
-  DeviceLink, emptyState, encodeState, Flag, Mode, OneEuro, parsePairing, qIdentity, qScale, relativeInView,
-  STATE_BYTES, Tier, viewFrameAt,
-  type Caps, type HostMsg, type Layout, type LinkStatus, type ModeId, type Quat, type TierId, type TrayControl,
+  b64url, DeviceLink, emptyState, encodeState, Flag, forgetAllPairs, getPair, listPairs, loadCertificate, Mode, OneEuro,
+  parsePairingCode, qIdentity, qScale, relativeInView, STATE_BYTES, Tier, viewFrameAt,
+  type Caps, type HostMsg, type Layout, type LinkStatus, type ModeId, type PairingCode, type Quat, type TierId, type TrayControl,
 } from '@obpal/core'
 import { Motion, motionSupported, requestMotionPermission, screenAngle } from './motion'
 import { Trackpad } from './trackpad'
@@ -30,9 +30,12 @@ document.body.insertAdjacentHTML('afterbegin', '<div class="aurora" aria-hidden=
 document.addEventListener('gesturestart', (e) => e.preventDefault())
 document.addEventListener('touchmove', (e) => { if ((e.target as Element | null)?.closest?.('.pad, .dock')) e.preventDefault() }, { passive: false })
 
-/** The pairing secret arrives in the URL fragment; keep it for reloads in this tab only, and clear the address bar. */
-function takePairing() {
-  const fromHash = parsePairing(location.hash)
+/**
+ * The code (an online pairing secret, or a direct LAN code) arrives in the URL fragment; keep it for reloads in
+ * this tab only, and clear the address bar.
+ */
+function takePairing(): PairingCode | null {
+  const fromHash = parsePairingCode(location.hash)
   if (fromHash) {
     try { sessionStorage.setItem('obpal.pair', location.hash.slice(1)) } catch { /* ignore */ }
     history.replaceState(null, '', location.pathname)
@@ -40,10 +43,16 @@ function takePairing() {
   }
   try {
     const s = sessionStorage.getItem('obpal.pair')
-    return s ? parsePairing(s) : null
+    return s ? parsePairingCode(s) : null
   } catch {
     return null
   }
+}
+
+// The controller keeps working with no internet after one visit: a service worker caches this page and its assets.
+// Registered once the link has had a head start, so it never competes with connecting.
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  setTimeout(() => navigator.serviceWorker.register('/p/sw.js', { scope: '/p/' }).catch(() => { /* optional */ }), 2500)
 }
 
 async function deviceName(): Promise<string> {
@@ -75,7 +84,7 @@ function screenMessage(opts: { title: string; body: string; spinner?: boolean; a
 
 // Scanning a new code while this tab is open only changes the fragment; re-pair with a clean load.
 addEventListener('hashchange', () => {
-  if (!parsePairing(location.hash)) return
+  if (!parsePairingCode(location.hash)) return
   try { sessionStorage.setItem('obpal.pair', location.hash.slice(1)) } catch { /* ignore */ }
   location.replace(location.pathname)
 })
@@ -100,7 +109,19 @@ function syncThemeRows() {
 type Tab = 'rotate' | 'point' | 'gamepad'
 type Style = 'game' | 'match'
 
-async function boot(p: NonNullable<ReturnType<typeof parsePairing>>) {
+async function boot(code: PairingCode) {
+  // This phone's own DTLS identity, kept across sessions so a screen can pin it and reconnect over the LAN.
+  // It loads while the link starts signaling; the peer connection waits for it.
+  const own = loadCertificate('device').then((c) => c.cert, () => null)
+  // A direct code only works for a screen this phone paired with online before (that is where the key came from).
+  const pair = code.v === 2 ? await getPair(b64url(code.lan.id)) : null
+  if (code.v === 2 && !pair) {
+    return screenMessage({
+      title: 'Pair online once first',
+      art: ICONS.phone,
+      body: 'Scan the regular code on your screen while both are online. From then on, the direct code works without internet.',
+    })
+  }
   const settings = {
     gain: Number(store.get('obpal.gain') ?? 1) || 1,
     smooth: Number(store.get('obpal.smooth') ?? 0.5),
@@ -155,13 +176,17 @@ async function boot(p: NonNullable<ReturnType<typeof parsePairing>>) {
   applySmooth()
 
   const caps = (): Caps => ({ tier, sensorApi: motionSupported() ? 'events' : 'none', haptics: hapticsKind(), platform: navigator.platform || 'unknown' })
-  const link = new DeviceLink({ service: location.origin, pairing: p, caps, name: await deviceName() })
+  const name = deviceName()
+  const link = code.v === 2
+    ? new DeviceLink({ lan: code.lan, pair: pair!, cert: own, caps, name })
+    : new DeviceLink({ service: location.origin, pairing: code.pairing, remember: true, cert: own, caps, name })
   // Gamepad mode: Xbox-style controller streaming PAD packets (./gamepad.ts).
   const gamepad = new GamepadMode({ motion, settings, t0, send: (b) => link.sendState(b), toast, openSettings, fullscreen: goFullscreen, exit: () => { tab = lastTab; setMode() } })
 
-  screenMessage({ title: 'Connecting', body: 'Finding your screen…', spinner: true })
+  screenMessage({ title: 'Connecting', body: code.v === 2 ? 'Reaching your screen over Wi-Fi…' : 'Finding your screen…', spinner: true })
   link.on('status', onStatus)
   link.on('message', onHost)
+  link.on('pair', () => toast('Remembered · works without internet next time'))
   link.on('stats', ({ path, rttMs }) => {
     const sig = document.getElementById('sig')
     if (!sig) return
@@ -238,6 +263,18 @@ async function boot(p: NonNullable<ReturnType<typeof parsePairing>>) {
     if (s === 'host-mismatch') {
       surface = null
       return screenMessage({ title: "Couldn't verify this screen", art: ICONS.close, body: 'Scan the code on your screen again.' })
+    }
+    if (s === 'lan-failed') {
+      surface = null
+      return screenMessage({ title: "Couldn't reach the screen", art: ICONS.close, body: 'Both need the same Wi-Fi. Scan the direct code on the screen again: each one works once.' })
+    }
+    if (s === 'lan-unsupported') {
+      surface = null
+      return screenMessage({ title: 'Not in this browser', art: ICONS.close, body: 'This browser blocks the direct Wi-Fi link. Use the regular code when online, or another browser.' })
+    }
+    if (s === 'unreachable') {
+      surface = null
+      return screenMessage({ title: 'ob.Pal is out of reach', body: 'Still trying. If the screen shows a direct code, scan that one instead.', spinner: true })
     }
     const text = s === 'waiting-host' ? 'Waiting for the screen' : 'Reconnecting…'
     if (surface) banner(text)
@@ -592,9 +629,14 @@ async function boot(p: NonNullable<ReturnType<typeof parsePairing>>) {
         <div class="accent-row" role="radiogroup" aria-label="Accent">${family.ACCENTS.map((a) => `<button class="bb-accent${a.id === 'product' ? ' product' : ''}" role="radio" data-accent="${a.id}" aria-checked="${family.getAccent() === a.id}" aria-label="${a.id === 'product' ? 'ob.Pal lime (default)' : a.name}" style="--sw:${a.color ?? '#c6ff34'}">${family.icons.check}</button>`).join('')}</div>
         <label class="row"><input type="checkbox" id="left"> Left-handed</label>
         <a class="support-link" href="/sponsor/" target="_blank" rel="noopener">${ICONS.heart}<span>Support ob.Pal</span></a>
+        <button class="btn" id="forget" hidden>${ICONS.close}<span>Forget remembered screens</span></button>
         <div class="row gap"><button class="btn" id="disc">Disconnect</button><button class="btn primary" id="done">Done</button></div>
       </div>`
     document.body.appendChild(sheet)
+    // Screens this phone can reach with a direct code; forgetting them means pairing online again.
+    const forget = sheet.querySelector<HTMLButtonElement>('#forget')!
+    void listPairs().then((ps) => { forget.hidden = ps.length === 0 })
+    forget.onclick = () => { tick(); void forgetAllPairs().then(() => { forget.hidden = true; toast('Forgotten') }) }
     const gain = sheet.querySelector<HTMLInputElement>('#gain')!
     const smooth = sheet.querySelector<HTMLInputElement>('#smooth')!
     const left = sheet.querySelector<HTMLInputElement>('#left')!

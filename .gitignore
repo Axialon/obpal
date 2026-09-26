@@ -10,3 +10,4 @@ extension/release/
 .open-source-deny
 *.pem
 .claude/launch.json
+desktop/target/

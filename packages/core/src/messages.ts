@@ -32,9 +32,16 @@ export interface Caps {
   platform: string
 }
 
+/**
+ * A remembered pairing, handed to the device in `welcome` after an online pairing (inside the DTLS-protected
+ * channel, so only the two peers ever see the key). It is what a later direct LAN connection is built on.
+ */
+export interface PairGrant { id: string; key: string }
+
 /** Reliable control-channel messages (JSON on the "ctl" DataChannel). Unknown fields are ignored. */
 export type DeviceMsg =
-  | { t: 'hello'; proto: number; caps: Caps; mac: string; name: string }
+  /** pair: the pairing id when connecting through a direct LAN code. */
+  | { t: 'hello'; proto: number; caps: Caps; mac: string; name: string; pair?: string }
   | { t: 'btn'; id: string; ev: 'tap' | 'down' | 'up' | 'double' | 'long' }
   | { t: 'value'; id: string; v: number | boolean | string; add?: boolean }
   | { t: 'mode'; m: ModeId }
@@ -43,7 +50,8 @@ export type DeviceMsg =
   | { t: 'bye' }
 
 export type HostMsg =
-  | { t: 'welcome'; proto: number; name: string; layout: Layout }
+  /** pair: present when the host remembers this device (it can reconnect over the LAN without the room service). */
+  | { t: 'welcome'; proto: number; name: string; layout: Layout; pair?: PairGrant }
   | { t: 'layout'; layout: Layout }
   | { t: 'state'; values: Record<string, number | boolean | string> }
   | { t: 'feedback'; haptic?: 'tick' | 'bump'; toast?: string }

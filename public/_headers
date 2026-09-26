@@ -3,3 +3,7 @@
   Referrer-Policy: no-referrer
   Permissions-Policy: accelerometer=(self), gyroscope=(self), magnetometer=(self), screen-wake-lock=(self), fullscreen=(self)
   X-Frame-Options: SAMEORIGIN
+
+# The controller's service worker: browsers check it on every visit, so it must never be served from a stale cache.
+/p/sw.js
+  Cache-Control: no-cache

@@ -1,0 +1,113 @@
+/**
+ * A local stand-in for obpal.blackboxes.net, for the extension's end-to-end test and the connection bench:
+ * an HTTPS server (a throwaway self-signed cert made in ./tls on first run, never committed; the browsers run with
+ * --ignore-certificate-errors) that serves the
+ * site build (dist/client: the controller page, its assets, the service worker) and proxies the room service
+ * (/r/* WebSockets and /api/*) to production. So the phone runs this checkout's controller code while the
+ * extension pairs through the real signaling service.
+ *
+ * setOffline(true) makes the service unreachable (proxied requests refused, sockets closed) without touching the
+ * static files, so the phone can be taken "off the internet" while the page itself still loads from the cache.
+ */
+import { mkdir, readFile, stat } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { createServer, request as httpsRequest } from 'node:https'
+import { connect as tlsConnect } from 'node:tls'
+import { extname, join, normalize, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const here = fileURLToPath(new URL('.', import.meta.url))
+export const UPSTREAM = 'obpal.blackboxes.net'
+export const LOCAL_PORT = 5176
+const MIME = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png',
+  '.glb': 'model/gltf-binary', '.txt': 'text/plain',
+}
+
+/** The stand-in's certificate: made with openssl the first time (the *.pem files are gitignored). */
+async function ensureCert() {
+  const dir = join(here, 'tls'), cert = join(dir, 'cert.pem'), key = join(dir, 'key.pem')
+  if (!existsSync(cert) || !existsSync(key)) {
+    await mkdir(dir, { recursive: true })
+    const args = ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-days', '3650',
+      '-subj', '/CN=ob.Pal e2e local', '-addext', `subjectAltName=IP:127.0.0.1,DNS:localhost,DNS:${UPSTREAM}`, '-keyout', key, '-out', cert]
+    try {
+      execFileSync('openssl', args, { stdio: 'ignore' })
+    } catch {
+      throw new Error(`The e2e stand-in needs a throwaway TLS certificate; install openssl or run:
+  openssl ${args.map((a) => (/[\s:,/=]/.test(a) ? JSON.stringify(a) : a)).join(' ')}`)
+    }
+  }
+  return Promise.all([readFile(cert), readFile(key)])
+}
+
+export async function startLocal({ dist = resolve(here, '../../dist/client'), port = LOCAL_PORT } = {}) {
+  const [cert, key] = await ensureCert()
+  let offline = false
+  let sockets = new Set()
+
+  async function serveFile(pathname, res) {
+    let file = normalize(join(dist, pathname))
+    if (!file.startsWith(normalize(dist))) { res.writeHead(403); return res.end() }
+    try {
+      if ((await stat(file)).isDirectory()) file = join(file, 'index.html')
+    } catch {
+      if (!extname(file)) file += '/index.html'
+    }
+    try {
+      const body = await readFile(file)
+      const headers = { 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream', 'Cache-Control': file.endsWith('sw.js') ? 'no-cache' : 'public, max-age=60' }
+      res.writeHead(200, headers)
+      res.end(body)
+    } catch {
+      res.writeHead(404, { 'Content-Type': 'text/plain' })
+      res.end('not found')
+    }
+  }
+
+  const server = createServer({ cert, key }, (req, res) => {
+    const url = new URL(req.url ?? '/', 'https://local')
+    if (url.pathname.startsWith('/api/')) {
+      if (offline) { res.writeHead(503); return res.end() }
+      const up = httpsRequest({ host: UPSTREAM, port: 443, method: req.method, path: req.url, headers: { ...req.headers, host: UPSTREAM } }, (r) => {
+        res.writeHead(r.statusCode ?? 502, r.headers)
+        r.pipe(res)
+      })
+      up.on('error', () => { res.writeHead(502); res.end() })
+      req.pipe(up)
+      return
+    }
+    void serveFile(decodeURIComponent(url.pathname), res)
+  })
+  // WebSocket rooms: splice the TLS client socket to the upstream at the byte level once the upgrade request is rewritten.
+  server.on('upgrade', (req, socket, head) => {
+    if (!req.url?.startsWith('/r/') || offline) { socket.destroy(); return }
+    const up = tlsConnect({ host: UPSTREAM, port: 443, servername: UPSTREAM }, () => {
+      const lines = [`${req.method} ${req.url} HTTP/1.1`]
+      for (let i = 0; i < req.rawHeaders.length; i += 2) {
+        const k = req.rawHeaders[i]
+        lines.push(`${k}: ${k.toLowerCase() === 'host' ? UPSTREAM : req.rawHeaders[i + 1]}`)
+      }
+      up.write(lines.join('\r\n') + '\r\n\r\n')
+      if (head.length) up.write(head)
+      socket.pipe(up).pipe(socket)
+    })
+    sockets.add(socket)
+    const drop = () => { sockets.delete(socket); socket.destroy(); up.destroy() }
+    up.on('error', drop)
+    socket.on('error', drop)
+    socket.on('close', () => sockets.delete(socket))
+  })
+  await new Promise((r, j) => { server.once('error', j); server.listen(port, '127.0.0.1', r) })
+  return {
+    origin: `https://127.0.0.1:${port}`,
+    /** Refuse the room service (and drop live sockets) or bring it back. */
+    setOffline(v) {
+      offline = v
+      if (v) for (const s of sockets) s.destroy()
+    },
+    close: () => new Promise((r) => { for (const s of sockets) s.destroy(); server.close(() => r()) }),
+  }
+}

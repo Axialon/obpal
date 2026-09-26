@@ -1,10 +1,9 @@
 import {
-  accumDelta, bindMac, certFingerprint, decodePad, decodePointer, decodeState, PAD_HEADER, PadFlag, packetType, type PadState,
-  POINTER_HEADER, PointerFlag, type PointerState, DEFAULT_SERVICE, encodePairing, equalBytes,
-  fetchIceServers, Flag, Mode, newSecret, PROTO, qIdentity, qSlerp, roomIdFor, roomSocketUrl,
-  sdpFingerprint, seqNewer, SignalClient, Tier,
-  type Caps, type DeviceMsg, type HostMsg, type Layout, type ModeId, type Quat, type SignalIn,
-  type SignalPayload, type TierId, type WireState,
+  accumDelta, b64url, bindMac, candidatesOf, certFingerprint, decodePad, decodePointer, decodeState, DEFAULT_SERVICE, encodeLanPairing, encodePairing, equalBytes,
+  fetchIceServers, Flag, forgetPair, fromB64url, lanAnswerSdp, lanContext, lanIceCredentials, listPairs, loadCertificate, Mode, newSecret, PAD_HEADER, PadFlag, packetType,
+  POINTER_HEADER, PointerFlag, PROTO, putPair, qIdentity, qSlerp, randomBytes, readLocalIce, roomIdFor, roomSocketUrl, sdpFingerprint, seqNewer, SignalClient, Tier,
+  type Caps, type DeviceMsg, type HostMsg, type Layout, type ModeId, type PadState, type PairGrant, type PointerState, type Quat, type SignalIn,
+  type SignalPayload, type StoredPair, type TierId, type WireState,
 } from '@obpal/core'
 
 export type HostStatus = 'starting' | 'ready' | 'connecting' | 'connected' | 'offline'
@@ -18,6 +17,11 @@ export interface RemoteOptions {
   layout?: Layout
   /** 'smooth' interpolates motion one sensor period behind (default); 'direct' uses the newest sample. */
   latency?: 'smooth' | 'direct'
+  /**
+   * Keep a persistent DTLS certificate and remember paired phones (IndexedDB). A remembered phone can then
+   * connect over the LAN through a direct code (lanUrl) when the room service is unreachable.
+   */
+  remember?: boolean
 }
 
 /** Everything a host needs per rendered frame. Deltas are since the previous consume() call. */
@@ -39,6 +43,12 @@ export interface Frame {
   twist: number
 }
 
+/** A remembered phone, as shown to people (no key material). */
+export interface PairSummary { id: string; name: string; at: number }
+
+/** Connection timeline for diagnostics and benches (epoch ms; 0 when it hasn't happened). */
+export interface LinkDiag { status: HostStatus; connectedAt: number; firstInputAt: number; direct: boolean }
+
 interface RemoteEvents {
   status: (s: HostStatus) => void
   connect: (info: { name: string; caps: Caps }) => void
@@ -50,6 +60,10 @@ interface RemoteEvents {
   recenter: () => void
   /** A phone entered (non-null) or left (null) gamepad mode. */
   pad: (connected: boolean) => void
+  /** A STATE or PAD packet just arrived from the active phone (sample now for the lowest latency). */
+  input: () => void
+  /** The direct LAN code or the remembered phones changed. */
+  lan: () => void
 }
 
 interface Peer {
@@ -61,6 +75,8 @@ interface Peer {
   bound: boolean
   name: string
   cands: RTCIceCandidateInit[]
+  /** Set for a direct LAN peer: which remembered pairing it must prove, and the nonce of its code. */
+  lan?: { pair: StoredPair; nonce: Uint8Array }
 }
 
 const isObpalOrigin = () =>
@@ -70,6 +86,9 @@ const isObpalOrigin = () =>
 export const DEFAULT_LAYOUT: Layout = { v: 1, tray: [], modes: [Mode.tilt, Mode.hold, Mode.point] }
 /** A pointer stream that stops (the utility was switched off, the phone went away) is gone after this long. */
 const POINTER_STALE_MS = 300
+
+/** How long the direct code's offer may gather host candidates before the code is published. */
+const LAN_GATHER_MS = 800
 
 /** Continuous (unwrapped) accumulator totals, so the host can interpolate them in time. */
 interface Acc { aim: [number, number]; pad1: [number, number]; pad2: [number, number]; zoom: number; twist: number }
@@ -100,6 +119,13 @@ export class Remote {
   private sig!: SignalClient
   private peers = new Map<string, Peer>()
   private active: Peer | null = null
+  private pairs: StoredPair[] = []
+  /** The pending direct-code offer: a peer connection waiting for the remembered phone's checks. */
+  private lan: { peer: Peer; url: string; pairId: string } | null = null
+  private lanChoice: string | null = null
+  private lanBusy: Promise<void> = Promise.resolve()
+  private connectedAt = 0
+  private firstInputAt = 0
   private latest: WireState | null = null
   private padState: PadState | null = null
   private padAt = 0
@@ -117,7 +143,7 @@ export class Remote {
   private lastMode: ModeId | null = null
   private lostTimer: ReturnType<typeof setTimeout> | null = null
   private handlers: { [K in keyof RemoteEvents]: RemoteEvents[K][] } = {
-    status: [], connect: [], disconnect: [], button: [], value: [], mode: [], recenter: [], pad: [],
+    status: [], connect: [], disconnect: [], button: [], value: [], mode: [], recenter: [], pad: [], input: [], lan: [],
   }
   private cards: { el: HTMLElement; status: HTMLElement; compact: boolean }[] = []
 
@@ -133,12 +159,20 @@ export class Remote {
   }
 
   private async init() {
-    this.cert = await RTCPeerConnection.generateCertificate({ name: 'ECDSA', namedCurve: 'P-256' } as EcKeyGenParams)
-    this.fp = await certFingerprint(this.cert)
+    if (this.opts.remember) {
+      const c = await loadCertificate('host')
+      this.cert = c.cert
+      this.fp = c.fp
+      this.pairs = await listPairs()
+    } else {
+      this.cert = await RTCPeerConnection.generateCertificate({ name: 'ECDSA', namedCurve: 'P-256' } as EcKeyGenParams)
+      this.fp = await certFingerprint(this.cert)
+    }
     this.roomId = await roomIdFor(this.secret)
     this.pairingUrl = `${this.service}/p/#${encodePairing({ secret: this.secret, fp: this.fp })}`
     this.sig = new SignalClient(roomSocketUrl(this.service, this.roomId, 'host'))
     this.sig.onmessage = (m) => this.onSignal(m)
+    // Unreachable within the connect budget counts as offline at once: the direct code takes over on the popup.
     this.sig.onstatus = (open) => {
       if (open && this.status !== 'connected') this.setStatus('ready')
       if (!open && this.status !== 'connected') this.setStatus('offline')
@@ -146,6 +180,7 @@ export class Remote {
     this.sig.connect()
     // TURN credentials are only minted for rooms with a live host, so fetch after joining.
     setTimeout(async () => { this.ice = await fetchIceServers(this.service, this.roomId) }, 400)
+    void this.prepareLan()
   }
 
   on<K extends keyof RemoteEvents>(ev: K, fn: RemoteEvents[K]) { this.handlers[ev].push(fn); return this }
@@ -159,9 +194,125 @@ export class Remote {
     this.emit('status', s)
   }
 
+  // ---- remembered phones and the direct LAN code -------------------------------------------------------------
+
+  /** Phones this host remembers, newest first. */
+  get remembered(): PairSummary[] { return this.pairs.map((p) => ({ id: p.id, name: p.peerName, at: p.at })) }
+  /** The direct code URL (empty until a remembered phone exists and the offer has gathered). */
+  get lanUrl() { return this.lan?.url ?? '' }
+  /** Which remembered phone the direct code is for. */
+  get lanFor() { return this.lan?.pairId ?? null }
+  /** True while the room service can't be reached (the direct code is the way in). */
+  get offline() { return this.status === 'offline' }
+
+  diag(): LinkDiag {
+    return { status: this.status, connectedAt: this.connectedAt, firstInputAt: this.firstInputAt, direct: !!this.active?.lan }
+  }
+
+  /** Make the direct code for another remembered phone. */
+  selectLan(id: string) {
+    if (!this.pairs.some((p) => p.id === id) || this.lan?.pairId === id) return
+    this.lanChoice = id
+    void this.prepareLan()
+  }
+
+  /** Forget a remembered phone: it can only pair online again. */
+  async forget(id: string) {
+    this.pairs = this.pairs.filter((p) => p.id !== id)
+    if (this.lanChoice === id) this.lanChoice = null
+    await forgetPair(id)
+    if (this.lan?.pairId === id) this.discardLan()
+    this.emit('lan')
+    void this.prepareLan()
+  }
+
+  private discardLan() {
+    const l = this.lan
+    this.lan = null
+    if (l) this.dropPeer(l.peer.id)
+  }
+
+  /** After an online pairing: a (new) key for this phone, kept here and handed to it in `welcome`. Stored in the background. */
+  private rememberDevice(peer: Peer, name: string): PairGrant | null {
+    if (!this.opts.remember || !peer.fp) return null
+    const existing = this.pairs.find((p) => equalBytes(p.peerFp, peer.fp!))
+    const key = randomBytes(32)
+    const rec: StoredPair = { id: existing?.id ?? b64url(randomBytes(16)), key, peerFp: peer.fp, peerName: name, at: Date.now() }
+    this.pairs = [rec, ...this.pairs.filter((p) => p.id !== rec.id)]
+    void putPair(rec).then(() => this.emit('lan'))
+    return { id: rec.id, key: b64url(key) }
+  }
+
+  /**
+   * Prepare the direct code: an offer with this host's real ICE credentials and host candidates, already paired
+   * with a synthetic answer holding the remembered phone's fingerprint and the ICE credentials both sides derive
+   * from the pairing key and a fresh nonce. Its connection then waits for the phone's connectivity checks.
+   */
+  private prepareLan(): Promise<void> {
+    this.lanBusy = this.lanBusy.then(() => this.buildLan()).catch(() => {})
+    return this.lanBusy
+  }
+
+  private async buildLan() {
+    if (!this.opts.remember) return
+    const pair = this.pairs.find((p) => p.id === this.lanChoice) ?? this.pairs[0]
+    if (!pair) { if (this.lan) { this.discardLan(); this.emit('lan') } return }
+    if (this.lan?.pairId === pair.id && this.lan.peer.pc.connectionState === 'new') return
+    this.discardLan()
+    const nonce = randomBytes(16)
+    const id = `lan:${b64url(nonce).slice(0, 8)}`
+    const pc = new RTCPeerConnection({ iceServers: [], certificates: [this.cert] })
+    const peer = this.addPeer(id, pc, pair.peerFp)
+    peer.lan = { pair, nonce }
+    const gathered = new Set<string>()
+    pc.onicecandidate = (e) => { if (e.candidate) gathered.add(e.candidate.candidate) }
+    const offer = await pc.createOffer()
+    await pc.setLocalDescription(offer)
+    await new Promise<void>((r) => {
+      const done = () => { if (pc.iceGatheringState === 'complete') r() }
+      pc.addEventListener('icegatheringstatechange', done)
+      setTimeout(r, LAN_GATHER_MS)
+    })
+    const local = readLocalIce(pc.localDescription?.sdp)
+    const cands = local?.cands.length ? local.cands : candidatesOf([...gathered].join('\n'))
+    if (!local || !cands.length || this.peers.get(id) !== peer) { this.dropPeer(id); return }
+    const creds = await lanIceCredentials(pair.key, nonce)
+    await pc.setRemoteDescription({ type: 'answer', sdp: lanAnswerSdp({ ...creds, fp: pair.peerFp }) })
+    if (this.peers.get(id) !== peer) return
+    this.lan = { peer, pairId: pair.id, url: `${this.service}/p/#${encodeLanPairing({ id: fromB64url(pair.id), nonce, ufrag: local.ufrag, pwd: local.pwd, cands })}` }
+    this.emit('lan')
+  }
+
+  // ---- signaling and peers ------------------------------------------------------------------------------------
+
   private onSignal(m: SignalIn) {
     if (m.t === 'peer' && m.ev === 'leave') this.dropPeer(m.id)
     if (m.t === 'sig') void this.onPayload(m.from, m.d)
+  }
+
+  /** One peer connection with the two pre-negotiated channels, wired into this host. */
+  private addPeer(id: string, pc: RTCPeerConnection, fp: Uint8Array | null): Peer {
+    const ctl = pc.createDataChannel('ctl', { negotiated: true, id: 0 })
+    const st = pc.createDataChannel('st', { negotiated: true, id: 1, ordered: false, maxRetransmits: 0 })
+    st.binaryType = 'arraybuffer'
+    const peer: Peer = { id, pc, ctl, st, fp, bound: false, name: 'Phone', cands: [] }
+    this.peers.set(id, peer)
+    pc.onconnectionstatechange = () => {
+      const s = pc.connectionState
+      if ((s === 'failed' || s === 'closed' || s === 'disconnected') && this.active === peer) this.scheduleLost()
+      // A direct-code attempt that died before binding: its code is spent, make a fresh one.
+      if ((s === 'failed' || s === 'closed') && !peer.bound && this.lan?.peer === peer) { this.lan = null; this.dropPeer(id); void this.prepareLan() }
+      if (s === 'connected' && this.active === peer && this.lostTimer) { clearTimeout(this.lostTimer); this.lostTimer = null }
+    }
+    ctl.onmessage = (e) => void this.onCtl(peer, e.data)
+    st.onmessage = (e) => {
+      if (!peer.bound || this.active !== peer || !(e.data instanceof ArrayBuffer)) return
+      const type = packetType(e.data)
+      if (type === PAD_HEADER) this.onPad(e.data)
+      else if (type === POINTER_HEADER) this.onPointer(e.data)
+      else this.onState(e.data)
+    }
+    return peer
   }
 
   private async onPayload(id: string, d: SignalPayload) {
@@ -169,25 +320,8 @@ export class Remote {
       this.dropPeer(id)
       if (this.status !== 'connected') this.setStatus('connecting')
       const pc = new RTCPeerConnection({ iceServers: this.ice, certificates: [this.cert] })
-      const ctl = pc.createDataChannel('ctl', { negotiated: true, id: 0 })
-      const st = pc.createDataChannel('st', { negotiated: true, id: 1, ordered: false, maxRetransmits: 0 })
-      st.binaryType = 'arraybuffer'
-      const peer: Peer = { id, pc, ctl, st, fp: sdpFingerprint(d.offer.sdp), bound: false, name: 'Phone', cands: [] }
-      this.peers.set(id, peer)
+      const peer = this.addPeer(id, pc, sdpFingerprint(d.offer.sdp))
       pc.onicecandidate = (e) => { if (e.candidate) this.sig.send({ t: 'sig', to: id, d: { cand: e.candidate.toJSON() } }) }
-      pc.onconnectionstatechange = () => {
-        const s = pc.connectionState
-        if ((s === 'failed' || s === 'closed' || s === 'disconnected') && this.active === peer) this.scheduleLost()
-        if (s === 'connected' && this.active === peer && this.lostTimer) { clearTimeout(this.lostTimer); this.lostTimer = null }
-      }
-      ctl.onmessage = (e) => void this.onCtl(peer, e.data)
-      st.onmessage = (e) => {
-        if (!peer.bound || this.active !== peer || !(e.data instanceof ArrayBuffer)) return
-        const type = packetType(e.data)
-        if (type === PAD_HEADER) this.onPad(e.data)
-        else if (type === POINTER_HEADER) this.onPointer(e.data)
-        else this.onState(e.data)
-      }
       await pc.setRemoteDescription(d.offer)
       for (const c of peer.cands.splice(0)) await pc.addIceCandidate(c).catch(() => {})
       const answer = await pc.createAnswer()
@@ -207,12 +341,12 @@ export class Remote {
     try { m = JSON.parse(data) } catch { return }
     if (!peer.bound) {
       if (m.t !== 'hello' || !peer.fp) return
-      const expected = await bindMac(this.secret, peer.fp, this.fp, this.roomId)
-      if (!equalBytes(new TextEncoder().encode(expected), new TextEncoder().encode(m.mac))) {
-        this.send(peer, { t: 'lock', reason: 'rejected' })
-        setTimeout(() => this.dropPeer(peer.id), 200)
-        return
-      }
+      // Online: the code's secret and the room. Direct: the remembered pairing key and the code's nonce.
+      const expected = peer.lan
+        ? await bindMac(peer.lan.pair.key, peer.fp, this.fp, lanContext(peer.lan.nonce))
+        : await bindMac(this.secret, peer.fp, this.fp, this.roomId)
+      if (peer.lan && m.pair !== peer.lan.pair.id) { this.reject(peer); return }
+      if (!equalBytes(new TextEncoder().encode(expected), new TextEncoder().encode(m.mac))) { this.reject(peer); return }
       peer.bound = true
       peer.name = String(m.name || 'Phone').slice(0, 40)
       const prev = this.active
@@ -223,10 +357,23 @@ export class Remote {
       this.active = peer
       this.resetStream()
       this.deviceName = peer.name
+      this.connectedAt = Date.now()
+      this.firstInputAt = 0
       if (this.lostTimer) { clearTimeout(this.lostTimer); this.lostTimer = null }
-      this.send(peer, { t: 'welcome', proto: PROTO, name: this.opts.appName, layout: this.layout })
+      let pair: PairGrant | undefined
+      if (peer.lan) {
+        // The code is used up: the next connection needs a fresh nonce and offer.
+        this.lan = null
+        peer.lan.pair.at = Date.now()
+        peer.lan.pair.peerName = peer.name
+        void putPair(peer.lan.pair)
+      } else {
+        pair = this.rememberDevice(peer, peer.name) ?? undefined
+      }
+      this.send(peer, { t: 'welcome', proto: PROTO, name: this.opts.appName, layout: this.layout, ...(pair ? { pair } : {}) })
       this.setStatus('connected')
       this.emit('connect', { name: peer.name, caps: m.caps })
+      void this.prepareLan()
       return
     }
     if (this.active !== peer) return
@@ -238,6 +385,11 @@ export class Remote {
       case 'ping': this.send(peer, { t: 'pong', t0: m.t0 }); break
       case 'bye': this.dropPeer(peer.id); break
     }
+  }
+
+  private reject(peer: Peer) {
+    this.send(peer, { t: 'lock', reason: 'rejected' })
+    setTimeout(() => this.dropPeer(peer.id), 200)
   }
 
   private unwrapMs(t: number): number {
@@ -261,7 +413,9 @@ export class Remote {
     this.latest = s
     this.latestAcc = acc
     this.stateAt = now
+    if (!this.firstInputAt) this.firstInputAt = Date.now()
     if (s.mode !== this.lastMode) { this.lastMode = s.mode; this.emit('mode', s.mode) }
+    this.emit('input')
   }
 
   private onPad(data: ArrayBuffer) {
@@ -270,7 +424,9 @@ export class Remote {
     const was = this.padLive
     this.padState = p
     this.padAt = performance.now()
+    if (!this.firstInputAt) this.firstInputAt = Date.now()
     if (!was) this.emit('pad', true)
+    this.emit('input')
   }
 
   private get padLive() { return !!this.padState && performance.now() - this.padAt < 1500 }
@@ -286,6 +442,8 @@ export class Remote {
     if (!p || !(p.flags & PointerFlag.valid) || (this.ptr && !seqNewer(p.seq, this.ptr.seq))) return
     this.ptr = p
     this.ptrAt = performance.now()
+    if (!this.firstInputAt) this.firstInputAt = Date.now()
+    this.emit('input')
   }
 
   /**
@@ -417,6 +575,7 @@ export class Remote {
   }
 
   destroy() {
+    this.lan = null
     for (const id of [...this.peers.keys()]) this.dropPeer(id)
     this.sig?.close()
     for (const c of this.cards) c.el.remove()
@@ -439,6 +598,7 @@ export class Remote {
     const p = this.peers.get(id)
     if (!p) return
     this.peers.delete(id)
+    if (this.lan?.peer === p) this.lan = null
     try { p.pc.close() } catch { /* closed */ }
     if (this.active === p) {
       this.active = null

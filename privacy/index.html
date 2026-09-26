@@ -36,7 +36,7 @@
           <li><b>Your files stay yours.</b> Models you open are read in your browser and never uploaded.</li>
         </ul>
 
-        <p>This policy covers ob.Pal at obpal.blackboxes.net: the website, the phone controller that opens in your phone's browser, the 3D viewer, and the ob.Pal Link browser extension.</p>
+        <p>This policy covers ob.Pal at obpal.blackboxes.net: the website, the phone controller that opens in your phone's browser, the 3D viewer, the ob.Pal Link browser extension, and the ob.Pal Desktop helper for Windows.</p>
 
         <h2>Pairing and the connection</h2>
         <p>The QR code holds a one-time pairing secret. It sits in the part of the link that browsers never send to a server, so it stays on your two devices. The ob.Pal signaling service only sees a room identifier derived from it.</p>
@@ -47,7 +47,8 @@
         <ul>
           <li><b>Only the tab you switch on.</b> It sends your phone's input into the tab you turned on with <b>This tab</b>, and nowhere else. With <b>All sites</b> turned on, a small bridge also loads in other tabs so control can follow the page as it navigates, but it stays idle there.</li>
           <li><b>Doesn't read your browsing.</b> It doesn't read page content, your browsing history or what you type. Its only job is to create input events from your phone in the controlled page.</li>
-          <li><b>Local storage only.</b> It remembers the mode you picked (Controller, 3D or Keys). Until the browser closes, it also keeps which tab is controlled and whether your phone is connected. All of this stays in the browser.</li>
+          <li><b>Local storage only.</b> It remembers the mode you picked (Controller, 3D, Keys or PC). Until the browser closes, it also keeps which tab is controlled and whether your phone is connected. All of this stays in the browser.</li>
+          <li><b>Remembered phones stay on your devices.</b> After you pair a phone online, the extension and the phone each keep a pairing key and the other device's connection certificate fingerprint, so the phone can connect directly over your local network when the internet is down. Neither leaves the device, and you can forget a phone in the popup or in the phone's settings.</li>
           <li><b>Talks only to ob.Pal and your phone.</b> Its only network use is the ob.Pal service (for pairing and relay credentials) and the direct connection to your phone. It loads no remote code and has no analytics.</li>
         </ul>
         <table class="perms">
@@ -57,7 +58,11 @@
           <tr><td>Active tab, scripting</td><td>When you click the extension on a page, it can control that page, and only that page.</td></tr>
           <tr><td>obpal.blackboxes.net</td><td>Pairing and relay credentials.</td></tr>
           <tr><td>All sites (optional, off by default)</td><td>Only if you turn it on: reaches game frames served from other domains and keeps control across navigation. You can turn it off again in the popup.</td></tr>
+          <tr><td>Native messaging (optional, off by default)</td><td>Only if you pick the PC target: talks to ob.Pal Desktop on your computer.</td></tr>
         </table>
+
+        <h2>The ob.Pal Desktop helper</h2>
+        <p>ob.Pal Desktop is an optional Windows program that lets your phone type and move the mouse in desktop programs. The extension talks to it on your computer only; it has no network access of its own. It does nothing until you pick <b>PC</b>, and it sends input only to programs you have allowed, one by one, while they are in front. It never sends input to the browser itself or to programs running as administrator, and <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Backspace</kbd> stops it at once. The list of allowed programs and a short activity log (start and stop times and counts, never what was typed) are kept in your Windows profile (<code>%APPDATA%\obpal</code>), and you can remove programs in the extension's options.</p>
 
         <h2>The viewer and your files</h2>
         <p>Models you open, drop in or add from a connected folder are read and displayed in your browser and never uploaded. When you connect a folder, the browser remembers your permission on this device until you disconnect the folder.</p>

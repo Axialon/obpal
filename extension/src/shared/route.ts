@@ -7,7 +7,7 @@
  *  - 3D drags go to the frame with the largest visible canvas / <model-viewer>.
  */
 import { mixStick, PadButton, rateToUnit, type PointerState } from '@obpal/core'
-import { MIN_VIEW_AREA, TARGET_MODES, type TargetMode } from './constants'
+import { MIN_VIEW_AREA, PAGE_MODES, type PageMode, type TargetMode } from './constants'
 import type { DeltaTuple, InputFrame, ModeIndex, PadTuple, PointerTuple } from './messages'
 
 export interface FrameInfo {
@@ -40,8 +40,9 @@ export function electFrame<T extends FrameInfo>(frames: readonly T[], role: Role
   return best ?? top
 }
 
-/** Which frames get input frames in a mode: every frame for the controller, one elected frame otherwise. */
+/** Which frames get input frames in a mode: every frame for the controller, one elected frame otherwise, none for the PC. */
 export function recipients<T extends FrameInfo>(frames: readonly T[], mode: TargetMode): T[] {
+  if (mode === 'pc') return []
   if (mode === 'gamepad') return [...frames]
   const f = electFrame(frames, mode === 'keys' ? 'keys' : 'viewer')
   return f ? [f] : []
@@ -110,9 +111,9 @@ export function isActive(p: PadTuple | null, d: DeltaTuple | null, tl: [number, 
   return p[0] !== 0 || p.slice(1).some((v) => Math.abs(v) > 0.02)
 }
 
-export const modeIndex = (mode: TargetMode) => TARGET_MODES.indexOf(mode) as ModeIndex
+export const modeIndex = (mode: PageMode) => PAGE_MODES.indexOf(mode) as ModeIndex
 
-export function buildFrame(mode: TargetMode, dt: number, p: PadTuple | null, d: DeltaTuple | null, tl: [number, number] | null, pt: PointerTuple | null = null): InputFrame {
+export function buildFrame(mode: PageMode, dt: number, p: PadTuple | null, d: DeltaTuple | null, tl: [number, number] | null, pt: PointerTuple | null = null): InputFrame {
   const f: InputFrame = { t: 'in', m: modeIndex(mode), dt: round(Math.max(0, Math.min(1000, dt)), 10), p, d, tl }
   if (pt) f.pt = pt
   return f

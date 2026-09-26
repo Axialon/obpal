@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#0a0a0a" />
-    <meta name="description" content="ob.Pal Link: a browser extension that turns your phone into a gamepad, 3D mouse or keyboard for any website. Pair by QR, no app." />
+    <meta name="description" content="ob.Pal Link: a browser extension that turns your phone into a gamepad, 3D mouse or keyboard for any website, and for the desktop programs you allow. Pair by QR, no app." />
     <title>ob.Pal Link: your phone controls any website</title>
     <link rel="icon" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -27,12 +27,12 @@
       <section class="hero">
         <p class="eyebrow">Browser extension · Chrome, Edge, Brave, Opera, Vivaldi, Arc</p>
         <h1>Your phone controls any website.</h1>
-        <p class="lede">ob.Pal Link turns your phone into a gamepad for browser games, a 3D mouse for model viewers, or a keyboard for keyboard games. Scan a QR code to pair; there's no app to install.</p>
+        <p class="lede">ob.Pal Link turns your phone into a gamepad for browser games, a 3D mouse for model viewers, or a keyboard for keyboard games, and with ob.Pal Desktop, for the programs on your PC you allow. Scan a QR code to pair; there's no app to install.</p>
         <div class="cta">
           <a class="btn primary" href="https://github.com/Axialon/obpal-link/releases/latest/download/obpal-link.zip">Download ob.Pal Link</a>
           <a class="btn" href="#install">How to install</a>
         </div>
-        <p class="fine">Version 1.1.0 · free, MIT licensed · Chrome Web Store listing on its way</p>
+        <p class="fine">Version 1.2.0 · free, MIT licensed · Chrome Web Store listing on its way</p>
       </section>
 
       <section class="modes-grid" aria-label="What your phone becomes">
@@ -51,6 +51,11 @@
           <h2>Keys</h2>
           <p>Sticks become WASD and the arrow keys, buttons become Space, Enter and the rest, and the right stick moves the mouse.</p>
         </article>
+        <article>
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.4" width="18" height="12.2" rx="2.4"/><path d="M12 16.6v3M8.5 19.6h7"/></svg>
+          <h2>PC</h2>
+          <p>Keyboard and mouse for the desktop programs you allow, one by one, through ob.Pal Desktop on Windows. <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Backspace</kbd> stops everything.</p>
+        </article>
       </section>
 
       <section class="steps" id="install" aria-label="Install">
@@ -59,9 +64,20 @@
         <article><span>3</span><h2>Pair</h2><p>On the page you want to control, click the ob.Pal Link icon. Scan the code with your phone, then turn on <b>This tab</b>.</p></article>
       </section>
 
+      <section class="note-card" id="desktop">
+        <h2>PC control on Windows</h2>
+        <p>Download <b>ob.Pal Desktop</b>, unzip it into a folder you'll keep and double-click <b>install.cmd</b>. In the extension, pick <b>PC</b>, bring the program you want to control to the front and click <b>Allow</b>. Nothing reaches a program you haven't allowed, and it never touches the browser or programs running as administrator.</p>
+        <p class="cta"><a class="btn" href="https://github.com/Axialon/obpal-link/releases/latest/download/obpal-desktop-windows-x64.zip">Download ob.Pal Desktop</a></p>
+      </section>
+
+      <section class="note-card">
+        <h2>Works without internet</h2>
+        <p>A phone you've paired once connects straight over your Wi-Fi when the internet is down: the popup shows a direct code, and the controller opens from your phone's cache.</p>
+      </section>
+
       <section class="note-card">
         <h2>Private by design</h2>
-        <p>No accounts and no analytics. Input goes from your phone to your computer over an encrypted connection, and the extension only acts in the tab you switch on. <a href="/privacy/">Privacy policy</a></p>
+        <p>No accounts and no analytics. Input goes from your phone to your computer over an encrypted connection, and the extension only acts in the tab you switch on, or the programs you allow. <a href="/privacy/">Privacy policy</a></p>
       </section>
 
       <footer class="foot">Part of <a href="/">ob.Pal</a> and the <a href="https://ecosystem.blackboxes.net">Blackboxes</a> ecosystem. <a href="https://github.com/Axialon/obpal">Source</a> · <a href="https://github.com/Axialon/obpal-link">Releases</a> · <a href="/privacy/">Privacy</a> · <a href="mailto:hello@obpal.blackboxes.net">hello@obpal.blackboxes.net</a></footer>

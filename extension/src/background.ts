@@ -6,11 +6,13 @@
  *  - With the optional "All sites" permission it also registers the bridge for new frames and navigations.
  *  - State: target mode in storage.local; controlled tab and link status in storage.session (the popup reads both).
  */
+import { NativeBridge } from './native'
 import { DEFAULT_MODE, isTargetMode, type TargetMode } from './shared/constants'
 import {
   allowedFrom, parseBgRequest, parseLink, senderKind,
   type BgRequest, type BridgeRequest, type LinkState, type OffscreenRequest,
 } from './shared/messages'
+import { NATIVE_PORT_NAME, parseNativeFrame } from './shared/native'
 
 const OFFSCREEN_PATH = 'offscreen.html'
 const BRIDGE_JS = 'bridge.js'
@@ -18,6 +20,8 @@ const PAGE_JS = 'page.js'
 const REGISTERED_ID = 'obpal-link-bridge'
 const ALL_SITES: chrome.permissions.Permissions = { origins: ['<all_urls>'] }
 const SELF = { id: chrome.runtime.id, origin: chrome.runtime.getURL('').replace(/\/$/, '') }
+/** The PC target: the native messaging port to ob.Pal Desktop, connected while the target is PC. */
+const native = new NativeBridge()
 
 // ---- state -------------------------------------------------------------------------------------
 
@@ -51,7 +55,7 @@ async function hasOffscreen(): Promise<boolean> {
 async function ensureOffscreen() {
   if (await hasOffscreen()) return
   creating ??= (async () => {
-    await chrome.storage.session.set({ link: { status: 'starting', url: '', device: null } satisfies LinkState })
+    await chrome.storage.session.set({ link: { status: 'starting', url: '', device: null, lan: '', lanFor: null, pairs: [] } satisfies LinkState })
     await chrome.offscreen.createDocument({
       url: OFFSCREEN_PATH,
       reasons: ['WEB_RTC'],
@@ -167,10 +171,20 @@ async function handle(msg: BgRequest, sender: chrome.runtime.MessageSender): Pro
     case 'mode':
       await chrome.storage.local.set({ mode: msg.mode })
       await pushConfig()
+      await native.sync(msg.mode)
       return { ok: true }
+    case 'pc-connect': case 'pc-allow': case 'pc-scope': case 'pc-forget': case 'pc-pause': case 'pc-resume': case 'pc-stats':
+      return native.handle(msg)
     case 'unpair':
       await toOffscreen({ to: 'offscreen', type: 'unpair' })
       return { ok: true }
+    case 'forget':
+    case 'lan':
+      await ensureOffscreen()
+      await toOffscreen({ to: 'offscreen', type: msg.type, id: msg.id })
+      return { ok: true }
+    case 'diag':
+      return (await toOffscreen({ to: 'offscreen', type: 'diag' })) ?? null
     case 'link':
       await chrome.storage.session.set({ link: msg.link })
       await refreshBadge()
@@ -207,6 +221,22 @@ chrome.runtime.onMessage.addListener((raw: unknown, sender, respond) => {
   return true
 })
 
+// PC target: the offscreen link streams action frames over a port (60 Hz while there is input, a heartbeat
+// otherwise), which also keeps this worker alive while the helper port is open.
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== NATIVE_PORT_NAME) return
+  const s = port.sender
+  if (senderKind({ id: s?.id, url: s?.url, tabId: s?.tab?.id }, SELF) !== 'offscreen') {
+    port.disconnect()
+    return
+  }
+  void targetMode().then((mode) => native.sync(mode))
+  port.onMessage.addListener((raw: unknown) => {
+    const f = parseNativeFrame(raw)
+    if (f) native.frame(f)
+  })
+})
+
 // ---- tab and permission lifecycle --------------------------------------------------------------
 
 chrome.tabs.onRemoved.addListener((tabId) => {
@@ -237,8 +267,14 @@ chrome.permissions.onAdded.addListener(() => {
     await syncRegistration()
     const tabId = await controlledTab()
     if (tabId !== null) await injectBridge(tabId).catch(() => {}) // now reaches cross-origin frames too
+    await native.sync(await targetMode()) // nativeMessaging granted: the PC target can start
   })()
 })
-chrome.permissions.onRemoved.addListener(() => void syncRegistration())
-chrome.runtime.onStartup.addListener(() => void syncRegistration())
-chrome.runtime.onInstalled.addListener(() => void syncRegistration())
+chrome.permissions.onRemoved.addListener(() => void Promise.all([syncRegistration(), targetMode().then((m) => native.sync(m))]))
+// Keep the link warm from browser start: the pairing code (and, with no internet, the direct code) is ready the
+// moment the popup opens, and a remembered phone can connect before anyone clicks anything.
+const warm = () => void Promise.all([syncRegistration(), ensureOffscreen().catch(() => {})])
+chrome.runtime.onStartup.addListener(warm)
+chrome.runtime.onInstalled.addListener(warm)
+// Every start of this worker (browser start, or woken after idling): reconnect the helper if the target is PC.
+void targetMode().then((mode) => native.sync(mode))

@@ -17,6 +17,7 @@ import { PAD_BUTTON_COUNT } from '@obpal/core'
 import type { HostStatus } from '@obpal/host'
 import { CHANNEL, isTargetMode, SERVICE, type TargetMode } from './constants'
 import { clamp } from './math'
+import { parsePcRequest, type PcRequest } from './native'
 
 // ---- input frames (offscreen -> page) --------------------------------------------------------
 
@@ -153,14 +154,37 @@ export function readUp(data: unknown): { sid: string; m: UpMsg } | null {
 export type LinkStatus = HostStatus
 const STATUSES: readonly LinkStatus[] = ['starting', 'ready', 'connecting', 'connected', 'offline']
 
-/** The phone link as the popup shows it. url is the pairing URL (QR payload). */
-export interface LinkState { status: LinkStatus; url: string; device: string | null }
+/** A phone the link remembers (it can connect over the LAN with the direct code). */
+export interface RememberedPhone { id: string; name: string; at: number }
+
+/**
+ * The phone link as the popup shows it. url is the pairing URL (QR payload); lan the direct LAN code for the
+ * remembered phone lanFor (empty when there is none); pairs the remembered phones, newest first.
+ */
+export interface LinkState { status: LinkStatus; url: string; device: string | null; lan: string; lanFor: string | null; pairs: RememberedPhone[] }
+
+/** Pairing ids are 16 random bytes, base64url. */
+export const PAIR_ID_RE = /^[A-Za-z0-9_-]{22}$/
+const isPairId = (v: unknown): v is string => typeof v === 'string' && PAIR_ID_RE.test(v)
+
+function parsePhone(x: unknown): RememberedPhone | null {
+  if (!isObj(x) || !isPairId(x.id) || typeof x.name !== 'string' || x.name.length > 60 || !within(x.at, 0, 1e14)) return null
+  return { id: x.id, name: x.name, at: x.at }
+}
 
 export function parseLink(x: unknown): LinkState | null {
   if (!isObj(x) || !STATUSES.includes(x.status as LinkStatus) || typeof x.url !== 'string') return null
-  if (x.url !== '' && (!x.url.startsWith(`${SERVICE}/p/#`) || x.url.length > 512)) return null
+  if (x.url !== '' && (!x.url.startsWith(`${SERVICE}/p/#1.`) || x.url.length > 512)) return null
   if (x.device !== null && (typeof x.device !== 'string' || x.device.length > 60)) return null
-  return { status: x.status as LinkStatus, url: x.url, device: x.device }
+  const lan = x.lan ?? ''
+  if (typeof lan !== 'string' || (lan !== '' && (!lan.startsWith(`${SERVICE}/p/#2.`) || lan.length > 1024))) return null
+  const lanFor = x.lanFor ?? null
+  if (lanFor !== null && !isPairId(lanFor)) return null
+  const rawPairs = x.pairs ?? []
+  if (!Array.isArray(rawPairs) || rawPairs.length > 32) return null
+  const pairs = rawPairs.map(parsePhone)
+  if (pairs.some((p) => !p)) return null
+  return { status: x.status as LinkStatus, url: x.url, device: x.device, lan, lanFor, pairs: pairs as RememberedPhone[] }
 }
 
 /** To the service worker. */
@@ -169,19 +193,30 @@ export type BgRequest =
   | { to: 'bg'; type: 'enable'; tabId: number; on: boolean }
   | { to: 'bg'; type: 'mode'; mode: TargetMode }
   | { to: 'bg'; type: 'unpair' }
+  /** Forget a remembered phone. */
+  | { to: 'bg'; type: 'forget'; id: string }
+  /** Make the direct code for this remembered phone. */
+  | { to: 'bg'; type: 'lan'; id: string }
+  /** The link's connection timeline (answered with LinkDiag from @obpal/host, or null). */
+  | { to: 'bg'; type: 'diag' }
   | { to: 'bg'; type: 'link'; link: LinkState }
   | { to: 'bg'; type: 'offscreen-ready' }
   | { to: 'bg'; type: 'hello' }
   | { to: 'bg'; type: 'rescan' }
   /** The controlled tab's top frame: visible frames from other sites (the largest one's host, and whether it dominates the page). */
   | { to: 'bg'; type: 'frames'; count: number; host: string; big: boolean }
+  /** PC target: allowlist and helper control from the popup and options page (shared/native.ts). */
+  | PcRequest
 export type BgRequestType = BgRequest['type']
 
 export function parseBgRequest(x: unknown): BgRequest | null {
   if (!isObj(x) || x.to !== 'bg') return null
+  if (typeof x.type === 'string' && x.type.startsWith('pc-')) return parsePcRequest(x)
   switch (x.type) {
-    case 'ensure': case 'unpair': case 'offscreen-ready': case 'hello': case 'rescan':
+    case 'ensure': case 'unpair': case 'offscreen-ready': case 'hello': case 'rescan': case 'diag':
       return { to: 'bg', type: x.type }
+    case 'forget': case 'lan':
+      return isPairId(x.id) ? { to: 'bg', type: x.type, id: x.id } : null
     case 'enable':
       return Number.isInteger(x.tabId) && within(x.tabId, 0, 2 ** 31) && typeof x.on === 'boolean'
         ? { to: 'bg', type: 'enable', tabId: x.tabId, on: x.on } : null
@@ -203,10 +238,15 @@ export function parseBgRequest(x: unknown): BgRequest | null {
 export type OffscreenRequest =
   | { to: 'offscreen'; type: 'config'; tabId: number | null; mode: TargetMode }
   | { to: 'offscreen'; type: 'unpair' }
+  | { to: 'offscreen'; type: 'forget'; id: string }
+  | { to: 'offscreen'; type: 'lan'; id: string }
+  /** Answered with the link's connection timeline (see LinkDiag in @obpal/host). */
+  | { to: 'offscreen'; type: 'diag' }
 
 export function parseOffscreenRequest(x: unknown): OffscreenRequest | null {
   if (!isObj(x) || x.to !== 'offscreen') return null
-  if (x.type === 'unpair') return { to: 'offscreen', type: 'unpair' }
+  if (x.type === 'unpair' || x.type === 'diag') return { to: 'offscreen', type: x.type }
+  if (x.type === 'forget' || x.type === 'lan') return isPairId(x.id) ? { to: 'offscreen', type: x.type, id: x.id } : null
   const cfg = parseConfig(x)
   return x.type === 'config' && cfg ? { to: 'offscreen', type: 'config', ...cfg } : null
 }
@@ -245,11 +285,22 @@ export const ALLOWED_SENDERS: Record<BgRequestType, readonly SenderKind[]> = {
   enable: ['extension'],
   mode: ['extension', 'offscreen'],
   unpair: ['extension'],
+  forget: ['extension'],
+  lan: ['extension'],
+  diag: ['extension'],
   link: ['offscreen'],
   'offscreen-ready': ['offscreen'],
   hello: ['page'],
   rescan: ['page'],
   frames: ['page'],
+  // Only extension UI (popup, options) changes what the PC helper may do. Never a page, never the phone.
+  'pc-connect': ['extension'],
+  'pc-allow': ['extension'],
+  'pc-scope': ['extension'],
+  'pc-forget': ['extension'],
+  'pc-pause': ['extension'],
+  'pc-resume': ['extension'],
+  'pc-stats': ['extension'],
 }
 
 export const allowedFrom = (type: BgRequestType, kind: SenderKind) => ALLOWED_SENDERS[type].includes(kind)
