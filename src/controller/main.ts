@@ -4,7 +4,8 @@ import '../styles/controller.css'
 import {
   b64url, DeviceLink, emptyState, encodeState, Flag, forgetAllPairs, getPair, listPairs, loadCertificate, Mode, OneEuro,
   parsePairingCode, qIdentity, qScale, relativeInView, STATE_BYTES, Tier, viewFrameAt,
-  type Caps, type HostMsg, type Layout, type LinkStatus, type ModeId, type PairingCode, type Quat, type TierId, type TrayControl,
+  type Caps, type HostMsg, type Layout, type LinkStatus, type ModeId, type PairingCode, type Quat, type SceneNode, type ScenePerson, type TierId,
+  type TrayControl,
 } from '@obpal/core'
 import { Motion, motionSupported, requestMotionPermission, screenAngle } from './motion'
 import { Trackpad } from './trackpad'
@@ -153,6 +154,9 @@ async function boot(code: PairingCode) {
   let pad: Trackpad | null = null
   let hostName = 'Screen'
   let layout: Layout = { v: 1, tray: [] }
+  /** In a shared scene (CATALOGUE §5): this device's colour, who's in the scene, what can be claimed and who holds what. */
+  let seatColor = ''
+  let scene: { you: string; people: ScenePerson[]; nodes: SceneNode[]; held: Record<string, string> } | null = null
   let lastSend = 0
   let wasLevel = true
   let tilted = false
@@ -260,6 +264,14 @@ async function boot(code: PairingCode) {
       surface = null
       return screenMessage({ title: 'Another phone took over', art: ICONS.phone, body: 'One phone controls a screen at a time.', action: { label: 'Take back control', run: () => location.reload() } })
     }
+    if (s === 'removed') {
+      surface = null
+      return screenMessage({ title: 'You left the scene', art: ICONS.close, body: 'The screen removed this device. Scan its code again if they invite you back.' })
+    }
+    if (s === 'full') {
+      surface = null
+      return screenMessage({ title: 'This scene is full', art: ICONS.phone, body: 'Up to 8 devices can join at once.', action: { label: 'Try again', run: () => location.reload() } })
+    }
     if (s === 'host-mismatch') {
       surface = null
       return screenMessage({ title: "Couldn't verify this screen", art: ICONS.close, body: 'Scan the code on your screen again.' })
@@ -290,7 +302,16 @@ async function boot(code: PairingCode) {
     else if (m.t === 'state') {
       Object.assign(values, m.values)
       if (typeof m.values.theme === 'string') { applyTheme(themeById(m.values.theme)); syncThemeRows() }
-      if (typeof m.values.accent === 'string') { family.setAccent(m.values.accent); syncThemeRows() }
+      // A shared scene gives this device a colour of its own: wear it as the accent for this session, not as a preference.
+      if (typeof m.values.color === 'string' && /^#[0-9a-f]{6}$/i.test(m.values.color)) {
+        seatColor = m.values.color.toLowerCase()
+        const a = family.ACCENTS.find((x) => x.color?.toLowerCase() === seatColor)
+        if (a) { family.applyAccent(a.id); syncThemeRows() }
+      }
+      if (typeof m.values.accent === 'string' && !seatColor) { family.setAccent(m.values.accent); syncThemeRows() }
+    }
+    else if (m.t === 'scene' && typeof m.you === 'string' && Array.isArray(m.people) && m.held && typeof m.held === 'object') {
+      scene = { you: m.you, people: m.people.slice(0, 16), nodes: Array.isArray(m.nodes) ? m.nodes.slice(0, 64) : scene?.nodes ?? [], held: m.held }
     }
     else if (m.t === 'feedback') {
       if (m.toast) toast(m.toast)
@@ -504,10 +525,51 @@ async function boot(code: PairingCode) {
       : `<span style="color:${/^#[0-9a-f]{3,8}$/i.test(o.color ?? '') ? o.color : 'var(--accent)'}">${esc(o.glyph ?? o.label.slice(0, 1))}</span>`
   }
 
+  /** Who holds a node, as this device should read it. */
+  function holderOf(node: string): ScenePerson | null {
+    const id = scene?.held[node]
+    return id ? scene!.people.find((p) => p.id === id) ?? null : null
+  }
+
+  /** The scene list as a picker: each node with who holds it; picking one claims it, picking yours lets it go. */
+  function sceneControl(): TrayControl {
+    const mine = Object.entries(scene?.held ?? {}).find(([, who]) => who === scene?.you)?.[0]
+    return {
+      id: '__scene', label: 'Scene', type: 'select',
+      options: (scene?.nodes ?? []).map((n) => {
+        const by = holderOf(n.id)
+        return {
+          value: n.id, label: n.name, group: n.group || undefined,
+          detail: n.id === mine ? 'Yours: tap to let go' : by ? `${by.name} has it` : 'Free',
+          glyph: by ? initialsOf(by.name) : n.kind === 'object' ? '◆' : '•', color: by?.color,
+        }
+      }),
+    }
+  }
+
+  const initialsOf = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('') || '•'
+
   function renderTray() {
     const tray = document.getElementById('tray')
     if (!tray) return
     tray.innerHTML = ''
+    // In a shared scene, what you hold (or the scene list, to claim something) comes first.
+    if (scene && scene.nodes.length) {
+      const c = sceneControl()
+      const mine = Object.entries(scene.held).find(([, who]) => who === scene!.you)?.[0]
+      const node = scene.nodes.find((n) => n.id === mine)
+      const b = document.createElement('button')
+      b.className = 'tray-btn select glass scene-btn'
+      b.setAttribute('aria-label', node ? `Holding ${node.name}. Open the scene list` : 'Open the scene list')
+      b.setAttribute('aria-haspopup', 'dialog')
+      b.innerHTML = `<span class="sel-thumb"><span class="seat-dot"></span></span><span class="sel-v"></span>${ICONS.chevron}`
+      b.querySelector('.sel-v')!.textContent = node?.name ?? `Scene · ${scene.people.length}`
+      b.addEventListener('pointerdown', () => tick())
+      b.onclick = () => openPicker({ ...c, label: `Scene · ${scene!.people.length} here` }, (v) => {
+        link.sendCtl({ t: 'claim', node: v === mine ? null : v })
+      }, mine)
+      tray.appendChild(b)
+    }
     for (const c of layout.tray) {
       const b = document.createElement('button')
       b.className = c.type === 'select' ? 'tray-btn select glass' : 'tray-btn glass'
@@ -535,11 +597,14 @@ async function boot(code: PairingCode) {
       }
       tray.appendChild(b)
     }
-    tray.hidden = layout.tray.length === 0
+    tray.hidden = layout.tray.length === 0 && !(scene && scene.nodes.length)
   }
 
-  /** Bottom sheet for 'select' tray controls: thumbnails grouped by collection. */
-  function openPicker(c: TrayControl) {
+  /**
+   * Bottom sheet for 'select' tray controls: thumbnails grouped by collection. `onPick` replaces sending the value
+   * (the scene list claims nodes), and `current` marks the chosen option when it isn't a host value.
+   */
+  function openPicker(c: TrayControl, onPick?: (value: string) => void, current?: string) {
     const wrap = document.createElement('div')
     wrap.className = 'sheet-wrap'
     wrap.innerHTML = `<div class="sheet picker glass" role="dialog"><div class="grip" aria-hidden="true"></div><div class="picker-head"><h2></h2><button class="icon-btn glass" id="pick-close" aria-label="Close">${ICONS.close}</button></div><div class="picker-list"></div></div>`
@@ -562,12 +627,13 @@ async function boot(code: PairingCode) {
       }
       const cell = document.createElement('button')
       cell.className = 'pick'
-      cell.setAttribute('aria-selected', String(values[c.id] === o.value))
+      cell.setAttribute('aria-selected', String((current ?? values[c.id]) === o.value))
       cell.innerHTML = `<span class="pick-art">${thumb(o)}</span><span class="pick-name"></span>`
       cell.querySelector('.pick-name')!.textContent = o.label
       cell.title = o.detail ?? o.label
       cell.onclick = () => {
         tick()
+        if (onPick) { onPick(o.value); close(); return }
         values[c.id] = o.value
         link.sendCtl({ t: 'value', id: c.id, v: o.value })
         renderTray()

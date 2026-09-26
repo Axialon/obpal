@@ -1,10 +1,13 @@
 import {
-  accumDelta, b64url, bindMac, candidatesOf, certFingerprint, decodePad, decodePointer, decodeState, DEFAULT_SERVICE, encodeLanPairing, encodePairing, equalBytes,
-  fetchIceServers, Flag, forgetPair, fromB64url, lanAnswerSdp, lanContext, lanIceCredentials, listPairs, loadCertificate, Mode, newSecret, PAD_HEADER, PadFlag, packetType,
-  POINTER_HEADER, PointerFlag, PROTO, putPair, qIdentity, qSlerp, randomBytes, readLocalIce, roomIdFor, roomSocketUrl, sdpFingerprint, seqNewer, SignalClient, Tier,
-  type Caps, type DeviceMsg, type HostMsg, type Layout, type ModeId, type PadState, type PairGrant, type PointerState, type Quat, type SignalIn,
-  type SignalPayload, type StoredPair, type TierId, type WireState,
+  b64url, bindMac, candidatesOf, certFingerprint, DEFAULT_SERVICE, encodeLanPairing, encodePairing, equalBytes,
+  fetchIceServers, forgetPair, fromB64url, lanAnswerSdp, lanContext, lanIceCredentials, listPairs, loadCertificate, MAX_NODE_ID, Mode, newSecret, PAD_HEADER,
+  packetType, POINTER_HEADER, PROTO, putPair, randomBytes, readLocalIce, roomIdFor, roomSocketUrl, sdpFingerprint, SignalClient,
+  type Caps, type DeviceMsg, type HostMsg, type Layout, type ModeId, type PadState, type PairGrant, type PointerState, type SceneNode,
+  type ScenePerson, type SignalIn, type SignalPayload, type StoredPair,
 } from '@obpal/core'
+import { Stream, type Frame } from './stream'
+
+export type { Frame } from './stream'
 
 export type HostStatus = 'starting' | 'ready' | 'connecting' | 'connected' | 'offline'
 
@@ -22,26 +25,15 @@ export interface RemoteOptions {
    * connect over the LAN through a direct code (lanUrl) when the room service is unreachable.
    */
   remember?: boolean
+  /**
+   * How many devices control the scene at once (CATALOGUE §5). 1, the default: a device that connects takes over from
+   * the one before. More: a shared scene, where each device is a participant with its own input, colour and claim.
+   */
+  seats?: number
 }
 
-/** Everything a host needs per rendered frame. Deltas are since the previous consume() call. */
-export interface Frame {
-  connected: boolean
-  mode: ModeId
-  tier: TierId
-  /** True while the user holds the grab control; qRel is then the phone's rotation since grabbing. */
-  clutch: boolean
-  grab: number
-  qRel: Quat
-  touching: boolean
-  aim: [number, number]
-  /** Racing-style tilt stick in [-1, 1]: [steer (+ = right), pitch (+ = top toward the user)]. A position, not a delta. */
-  tilt: [number, number]
-  pad1: [number, number]
-  pad2: [number, number]
-  zoom: number
-  twist: number
-}
+/** A device in the scene (CATALOGUE §5). The lead is the oldest; while it holds nothing it drives the shared view. */
+export interface Participant { id: string; name: string; color: string; lead: boolean; since: number; caps: Caps | null }
 
 /** A remembered phone, as shown to people (no key material). */
 export interface PairSummary { id: string; name: string; at: number }
@@ -51,17 +43,24 @@ export interface LinkDiag { status: HostStatus; connectedAt: number; firstInputA
 
 interface RemoteEvents {
   status: (s: HostStatus) => void
+  /** A device connected to an empty scene (with one seat: every device that takes over). */
   connect: (info: { name: string; caps: Caps }) => void
+  /** The last device left. */
   disconnect: () => void
-  button: (e: { id: string; ev: string }) => void
+  /** A participant joined or left (fired with one seat too). */
+  join: (p: Participant) => void
+  leave: (p: Participant) => void
+  button: (e: { id: string; ev: string }, who: Participant) => void
   /** add: the phone asked to add this option alongside the current one (tray select with `add`). */
-  value: (e: { id: string; v: number | boolean | string; add?: boolean }) => void
-  mode: (m: ModeId) => void
-  recenter: () => void
-  /** A phone entered (non-null) or left (null) gamepad mode. */
-  pad: (connected: boolean) => void
-  /** A STATE or PAD packet just arrived from the active phone (sample now for the lowest latency). */
-  input: () => void
+  value: (e: { id: string; v: number | boolean | string; add?: boolean }, who: Participant) => void
+  mode: (m: ModeId, who: Participant) => void
+  recenter: (who: Participant) => void
+  /** A device entered (true) or left (false) gamepad mode. */
+  pad: (connected: boolean, who: Participant) => void
+  /** A STATE or PAD packet just arrived (sample now for the lowest latency). */
+  input: (who: Participant) => void
+  /** A device asked to claim a node (null: release). The host decides, then publishes the outcome with setScene(). */
+  claim: (e: { node: string | null }, who: Participant) => void
   /** The direct LAN code or the remembered phones changed. */
   lan: () => void
 }
@@ -77,6 +76,13 @@ interface Peer {
   cands: RTCIceCandidateInit[]
   /** Set for a direct LAN peer: which remembered pairing it must prove, and the nonce of its code. */
   lan?: { pair: StoredPair; nonce: Uint8Array }
+  stream: Stream
+  color: string
+  since: number
+  caps: Caps | null
+  lost: ReturnType<typeof setTimeout> | null
+  /** The node list version this peer last received. */
+  nodesSent: number
 }
 
 const isObpalOrigin = () =>
@@ -84,30 +90,24 @@ const isObpalOrigin = () =>
   (/(^|\.)blackboxes\.(net|dev)$/.test(location.hostname) || location.hostname === 'localhost' || location.hostname === '127.0.0.1')
 
 export const DEFAULT_LAYOUT: Layout = { v: 1, tray: [], modes: [Mode.tilt, Mode.hold, Mode.point] }
-/** A pointer stream that stops (the utility was switched off, the phone went away) is gone after this long. */
-const POINTER_STALE_MS = 300
 
 /** How long the direct code's offer may gather host candidates before the code is published. */
 const LAN_GATHER_MS = 800
 
-/** Continuous (unwrapped) accumulator totals, so the host can interpolate them in time. */
-interface Acc { aim: [number, number]; pad1: [number, number]; pad2: [number, number]; zoom: number; twist: number }
-const zeroAcc = (): Acc => ({ aim: [0, 0], pad1: [0, 0], pad2: [0, 0], zoom: 0, twist: 0 })
-function combineAcc(a: Acc, b: Acc, k: number): Acc {
-  return {
-    aim: [a.aim[0] + b.aim[0] * k, a.aim[1] + b.aim[1] * k],
-    pad1: [a.pad1[0] + b.pad1[0] * k, a.pad1[1] + b.pad1[1] * k],
-    pad2: [a.pad2[0] + b.pad2[0] * k, a.pad2[1] + b.pad2[1] * k],
-    zoom: a.zoom + b.zoom * k,
-    twist: a.twist + b.twist * k,
-  }
-}
-const lerpAcc = (a: Acc, b: Acc, t: number) => combineAcc(a, combineAcc(b, a, -1), t)
+/**
+ * Participant colours in a shared scene, in the order they're handed out: the Blackboxes family accents (sky, rose,
+ * amber, mint, lavender, lime, turquoise, candy), so a device can wear its colour as its accent. The screen's own
+ * colour is skipped.
+ */
+export const PARTICIPANT_COLORS = ['#38bdf8', '#fb7185', '#fcd34d', '#6ee7b7', '#d2c3f6', '#c6ff34', '#99e1d9', '#b2d5e5']
+
+const quiet = { mode: () => {}, pad: () => {}, input: () => {} }
 
 /** Host side of an ob-pal link, for any web page. */
 export class Remote {
   status: HostStatus = 'starting'
   pairingUrl = ''
+  /** The lead device's name (the only device's, with one seat). */
   deviceName: string | null = null
   readonly service: string
   private layout: Layout
@@ -118,6 +118,7 @@ export class Remote {
   private ice: RTCIceServer[] = []
   private sig!: SignalClient
   private peers = new Map<string, Peer>()
+  /** With one seat, the device in control; in a shared scene, the lead. */
   private active: Peer | null = null
   private pairs: StoredPair[] = []
   /** The pending direct-code offer: a peer connection waiting for the remembered phone's checks. */
@@ -126,26 +127,18 @@ export class Remote {
   private lanBusy: Promise<void> = Promise.resolve()
   private connectedAt = 0
   private firstInputAt = 0
-  private latest: WireState | null = null
-  private padState: PadState | null = null
-  private padAt = 0
-  private ptr: PointerState | null = null
-  private ptrAt = 0
-  private stateAt = 0
-  private latestAcc: Acc | null = null
-  private outAcc: Acc | null = null
-  private outMode: ModeId | null = null
-  private lastConsumeAt = 0
-  private buf: { t: number; s: WireState; acc: Acc }[] = []
-  private offsets: [number, number][] = []
-  private tBase = 0
-  private tLast = -1
-  private lastMode: ModeId | null = null
-  private lostTimer: ReturnType<typeof setTimeout> | null = null
+  private idle = new Stream(quiet)
+  /** The last values set for everyone, sent to each participant as it joins a shared scene. */
+  private values: Record<string, number | boolean | string> = {}
+  private host: ScenePerson = { id: 'host', name: 'Screen', color: '#c6ff34' }
+  private nodes: SceneNode[] = []
+  private nodesVersion = 0
+  private held: Record<string, string> = {}
+  private scenePending = false
   private handlers: { [K in keyof RemoteEvents]: RemoteEvents[K][] } = {
-    status: [], connect: [], disconnect: [], button: [], value: [], mode: [], recenter: [], pad: [], input: [], lan: [],
+    status: [], connect: [], disconnect: [], join: [], leave: [], button: [], value: [], mode: [], recenter: [], pad: [], input: [], claim: [], lan: [],
   }
-  private cards: { el: HTMLElement; status: HTMLElement; compact: boolean }[] = []
+  private cards: { el: HTMLElement; status: HTMLElement; qr: HTMLElement; link: HTMLAnchorElement | null; compact: boolean }[] = []
 
   private constructor(private opts: RemoteOptions) {
     this.service = (opts.service ?? (isObpalOrigin() ? location.origin : DEFAULT_SERVICE)).replace(/\/$/, '')
@@ -158,6 +151,10 @@ export class Remote {
     return r
   }
 
+  private get seats() { return Math.max(1, Math.min(8, Math.floor(this.opts.seats ?? 1))) }
+  /** A shared scene: several devices at once, each with its own claim. */
+  get shared() { return this.seats > 1 }
+
   private async init() {
     if (this.opts.remember) {
       const c = await loadCertificate('host')
@@ -168,6 +165,12 @@ export class Remote {
       this.cert = await RTCPeerConnection.generateCertificate({ name: 'ECDSA', namedCurve: 'P-256' } as EcKeyGenParams)
       this.fp = await certFingerprint(this.cert)
     }
+    await this.openRoom()
+    void this.prepareLan()
+  }
+
+  /** Join the signaling room of the current secret: the invite the pairing code carries. */
+  private async openRoom() {
     this.roomId = await roomIdFor(this.secret)
     this.pairingUrl = `${this.service}/p/#${encodePairing({ secret: this.secret, fp: this.fp })}`
     this.sig = new SignalClient(roomSocketUrl(this.service, this.roomId, 'host'))
@@ -179,8 +182,24 @@ export class Remote {
     }
     this.sig.connect()
     // TURN credentials are only minted for rooms with a live host, so fetch after joining.
-    setTimeout(async () => { this.ice = await fetchIceServers(this.service, this.roomId) }, 400)
-    void this.prepareLan()
+    const room = this.roomId
+    setTimeout(async () => { const ice = await fetchIceServers(this.service, room); if (room === this.roomId) this.ice = ice }, 400)
+  }
+
+  /**
+   * A new invite: the old code and link stop working, and everyone connected stays. Devices that joined but haven't
+   * finished connecting have to scan again.
+   */
+  async resetInvite() {
+    const old = this.sig
+    this.secret = newSecret()
+    old.onmessage = () => {}
+    old.onstatus = () => {}
+    old.close()
+    for (const p of [...this.peers.values()]) if (!p.bound && !p.lan) this.dropPeer(p.id)
+    await this.openRoom()
+    for (const c of this.cards) this.renderQr(c)
+    this.renderCards()
   }
 
   on<K extends keyof RemoteEvents>(ev: K, fn: RemoteEvents[K]) { this.handlers[ev].push(fn); return this }
@@ -295,25 +314,35 @@ export class Remote {
     const ctl = pc.createDataChannel('ctl', { negotiated: true, id: 0 })
     const st = pc.createDataChannel('st', { negotiated: true, id: 1, ordered: false, maxRetransmits: 0 })
     st.binaryType = 'arraybuffer'
-    const peer: Peer = { id, pc, ctl, st, fp, bound: false, name: 'Phone', cands: [] }
+    const peer: Peer = {
+      id, pc, ctl, st, fp, bound: false, name: 'Phone', cands: [], color: this.host.color, since: 0, caps: null, lost: null, nodesSent: -1,
+      stream: new Stream({
+        mode: (m) => this.emit('mode', m, this.participant(peer)),
+        pad: (on) => this.emit('pad', on, this.participant(peer)),
+        input: () => { if (!this.firstInputAt) this.firstInputAt = Date.now(); this.emit('input', this.participant(peer)) },
+      }, this.opts.latency),
+    }
     this.peers.set(id, peer)
     pc.onconnectionstatechange = () => {
       const s = pc.connectionState
-      if ((s === 'failed' || s === 'closed' || s === 'disconnected') && this.active === peer) this.scheduleLost()
+      if ((s === 'failed' || s === 'closed' || s === 'disconnected') && peer.bound) this.scheduleLost(peer)
       // A direct-code attempt that died before binding: its code is spent, make a fresh one.
       if ((s === 'failed' || s === 'closed') && !peer.bound && this.lan?.peer === peer) { this.lan = null; this.dropPeer(id); void this.prepareLan() }
-      if (s === 'connected' && this.active === peer && this.lostTimer) { clearTimeout(this.lostTimer); this.lostTimer = null }
+      if (s === 'connected' && peer.lost) { clearTimeout(peer.lost); peer.lost = null }
     }
     ctl.onmessage = (e) => void this.onCtl(peer, e.data)
     st.onmessage = (e) => {
-      if (!peer.bound || this.active !== peer || !(e.data instanceof ArrayBuffer)) return
+      if (!this.listening(peer) || !(e.data instanceof ArrayBuffer)) return
       const type = packetType(e.data)
-      if (type === PAD_HEADER) this.onPad(e.data)
-      else if (type === POINTER_HEADER) this.onPointer(e.data)
-      else this.onState(e.data)
+      if (type === PAD_HEADER) peer.stream.onPad(e.data)
+      else if (type === POINTER_HEADER) peer.stream.onPointer(e.data)
+      else peer.stream.onState(e.data)
     }
     return peer
   }
+
+  /** Whether a bound device's input counts: every participant in a shared scene, only the device in control otherwise. */
+  private listening(peer: Peer) { return peer.bound && (this.shared || this.active === peer) }
 
   private async onPayload(id: string, d: SignalPayload) {
     if ('offer' in d) {
@@ -347,19 +376,31 @@ export class Remote {
         : await bindMac(this.secret, peer.fp, this.fp, this.roomId)
       if (peer.lan && m.pair !== peer.lan.pair.id) { this.reject(peer); return }
       if (!equalBytes(new TextEncoder().encode(expected), new TextEncoder().encode(m.mac))) { this.reject(peer); return }
+      if (this.shared && this.bound().length >= this.seats) {
+        this.send(peer, { t: 'lock', reason: 'full' })
+        setTimeout(() => this.dropPeer(peer.id), 200)
+        return
+      }
       peer.bound = true
       peer.name = String(m.name || 'Phone').slice(0, 40)
-      const prev = this.active
-      if (prev && prev !== peer) {
-        this.send(prev, { t: 'lock', reason: 'taken-over' })
-        setTimeout(() => this.dropPeer(prev.id), 300)
+      peer.caps = m.caps ?? null
+      peer.since = Date.now()
+      if (this.shared) {
+        peer.color = this.freeColor(peer)
+        if (!this.active) this.active = peer
+      } else {
+        const prev = this.active
+        if (prev && prev !== peer) {
+          this.send(prev, { t: 'lock', reason: 'taken-over' })
+          setTimeout(() => this.dropPeer(prev.id), 300)
+        }
+        this.active = peer
       }
-      this.active = peer
-      this.resetStream()
-      this.deviceName = peer.name
+      peer.stream.reset()
+      this.deviceName = this.active?.name ?? null
       this.connectedAt = Date.now()
       this.firstInputAt = 0
-      if (this.lostTimer) { clearTimeout(this.lostTimer); this.lostTimer = null }
+      if (peer.lost) { clearTimeout(peer.lost); peer.lost = null }
       let pair: PairGrant | undefined
       if (peer.lan) {
         // The code is used up: the next connection needs a fresh nonce and offer.
@@ -371,17 +412,27 @@ export class Remote {
         pair = this.rememberDevice(peer, peer.name) ?? undefined
       }
       this.send(peer, { t: 'welcome', proto: PROTO, name: this.opts.appName, layout: this.layout, ...(pair ? { pair } : {}) })
+      // A shared scene's settings so far, and this participant's colour (a device wears it as its accent).
+      if (this.shared) this.send(peer, { t: 'state', values: { ...this.values, color: peer.color } })
+      const first = this.status !== 'connected'
       this.setStatus('connected')
-      this.emit('connect', { name: peer.name, caps: m.caps })
+      if (first || !this.shared) this.emit('connect', { name: peer.name, caps: m.caps })
+      this.emit('join', this.participant(peer))
+      this.renderCards()
+      this.sceneChanged()
       void this.prepareLan()
       return
     }
-    if (this.active !== peer) return
+    if (!this.listening(peer)) return
+    const who = this.participant(peer)
     switch (m.t) {
-      case 'btn': this.emit('button', { id: m.id, ev: m.ev }); break
-      case 'value': this.emit('value', { id: m.id, v: m.v, add: m.add === true }); break
-      case 'mode': this.emit('mode', m.m); break
-      case 'recenter': this.emit('recenter'); break
+      case 'btn': this.emit('button', { id: m.id, ev: m.ev }, who); break
+      case 'value': this.emit('value', { id: m.id, v: m.v, add: m.add === true }, who); break
+      case 'mode': this.emit('mode', m.m, who); break
+      case 'recenter': this.emit('recenter', who); break
+      case 'claim':
+        if (this.shared && (m.node === null || (typeof m.node === 'string' && m.node.length <= MAX_NODE_ID))) this.emit('claim', { node: m.node }, who)
+        break
       case 'ping': this.send(peer, { t: 'pong', t0: m.t0 }); break
       case 'bye': this.dropPeer(peer.id); break
     }
@@ -392,186 +443,116 @@ export class Remote {
     setTimeout(() => this.dropPeer(peer.id), 200)
   }
 
-  private unwrapMs(t: number): number {
-    if (this.tLast >= 0 && t < this.tLast && this.tLast - t > 0x80000000) this.tBase += 0x100000000
-    this.tLast = t
-    return (this.tBase + t) / 1000
+  // ---- participants -------------------------------------------------------------------------------------------
+
+  /** Bound devices, oldest first. */
+  private bound(): Peer[] {
+    return [...this.peers.values()].filter((p) => p.bound).sort((a, b) => a.since - b.since)
   }
 
-  private onState(data: unknown) {
-    if (!(data instanceof ArrayBuffer)) return
-    const s = decodeState(data)
-    if (!s || (this.latest && !seqNewer(s.seq, this.latest.seq))) return
-    const now = performance.now()
-    const dev = this.unwrapMs(s.t)
-    this.offsets.push([now, now - dev])
-    while (this.offsets.length && now - this.offsets[0][0] > 2000) this.offsets.shift()
-    const offset = Math.min(...this.offsets.map((o) => o[1]))
-    const acc = this.latest && this.latestAcc ? combineAcc(this.latestAcc, accumDelta(s, this.latest), 1) : zeroAcc()
-    this.buf.push({ t: dev + offset, s, acc })
-    if (this.buf.length > 40) this.buf.shift()
-    this.latest = s
-    this.latestAcc = acc
-    this.stateAt = now
-    if (!this.firstInputAt) this.firstInputAt = Date.now()
-    if (s.mode !== this.lastMode) { this.lastMode = s.mode; this.emit('mode', s.mode) }
-    this.emit('input')
+  private participant(p: Peer): Participant {
+    return { id: p.id, name: p.name, color: p.color, lead: p === this.active, since: p.since, caps: p.caps }
   }
 
-  private onPad(data: ArrayBuffer) {
-    const p = decodePad(data)
-    if (!p || (this.padState && !seqNewer(p.seq, this.padState.seq))) return
-    const was = this.padLive
-    this.padState = p
-    this.padAt = performance.now()
-    if (!this.firstInputAt) this.firstInputAt = Date.now()
-    if (!was) this.emit('pad', true)
-    this.emit('input')
+  /** Everyone controlling the scene, oldest (the lead) first. */
+  get participants(): Participant[] { return this.bound().map((p) => this.participant(p)) }
+
+  private freeColor(peer: Peer): string {
+    const used = new Set([this.host.color.toLowerCase(), ...this.bound().filter((p) => p !== peer).map((p) => p.color)])
+    return PARTICIPANT_COLORS.find((c) => !used.has(c)) ?? PARTICIPANT_COLORS[used.size % PARTICIPANT_COLORS.length]
   }
 
-  private get padLive() { return !!this.padState && performance.now() - this.padAt < 1500 }
-
-  /** Latest controller state while the phone is in gamepad mode (null otherwise). */
-  get pad(): PadState | null {
-    if (this.padState && !this.padLive) { this.padState = null; this.emit('pad', false) }
-    return this.padState
+  /** The peers a message for `who` goes to: that participant, else everyone in a shared scene, else the device in control. */
+  private targets(who?: string): Peer[] {
+    if (who) { const p = this.peers.get(who); return p?.bound ? [p] : [] }
+    return this.shared ? this.bound() : this.active ? [this.active] : []
   }
 
-  private onPointer(data: ArrayBuffer) {
-    const p = decodePointer(data)
-    if (!p || !(p.flags & PointerFlag.valid) || (this.ptr && !seqNewer(p.seq, this.ptr.seq))) return
-    this.ptr = p
-    this.ptrAt = performance.now()
-    if (!this.firstInputAt) this.firstInputAt = Date.now()
-    this.emit('input')
+  // ---- input --------------------------------------------------------------------------------------------------
+
+  /** Latest controller state while the device in control (the lead) is in gamepad mode (null otherwise). */
+  get pad(): PadState | null { return this.active?.stream.pad ?? null }
+  /** Where the device in control (the lead) points (PROTOCOL §6) while a pointing utility is on, else null. */
+  get pointer(): PointerState | null { return this.active?.stream.pointer ?? null }
+
+  /** Read the device in control's (the lead's) input for this frame. Call once per rendered frame. */
+  consume(now = performance.now()): Frame {
+    return (this.active?.stream ?? this.idle).consume(now, this.status === 'connected')
+  }
+
+  /** One participant's gamepad state, pointer and frame (shared scenes). */
+  padOf(who: string): PadState | null { const p = this.peers.get(who); return p?.bound ? p.stream.pad : null }
+  pointerOf(who: string): PointerState | null { const p = this.peers.get(who); return p?.bound ? p.stream.pointer : null }
+  consumeOf(who: string, now = performance.now()): Frame {
+    const p = this.peers.get(who)
+    return (p?.bound ? p.stream : this.idle).consume(now, !!p?.bound)
+  }
+
+  // ---- output -------------------------------------------------------------------------------------------------
+
+  /** Vibrate a device (Gamepad API dual-rumble semantics): `who`, else the device in control. */
+  rumble(strong: number, weak: number, ms: number, who?: string) {
+    const p = who ? this.peers.get(who) : this.active
+    if (p?.bound) this.send(p, { t: 'rumble', strong, weak, ms })
+  }
+
+  /** The tray and modes: for `who`, else for everyone. */
+  setLayout(layout: Layout, who?: string) {
+    if (!who) this.layout = layout
+    for (const p of this.targets(who)) this.send(p, { t: 'layout', layout })
+  }
+
+  /** Sync toggle/label state shown on devices: for `who`, else for everyone. */
+  setValues(values: Record<string, number | boolean | string>, who?: string) {
+    if (!who) Object.assign(this.values, values)
+    for (const p of this.targets(who)) this.send(p, { t: 'state', values })
+  }
+
+  /** A haptic tick or bump and an optional toast: for `who`, else for the device in control. */
+  feedback(f: { haptic?: 'tick' | 'bump'; toast?: string }, who?: string) {
+    const p = who ? this.peers.get(who) : this.active
+    if (p?.bound) this.send(p, { t: 'feedback', ...f })
+  }
+
+  // ---- shared scene -------------------------------------------------------------------------------------------
+
+  /** How the screen appears among the participants (CATALOGUE §5: the screen is participant `host`). */
+  setHostPerson(p: { name?: string; color?: string }) {
+    this.host = { ...this.host, ...p, id: 'host' }
+    this.sceneChanged()
   }
 
   /**
-   * Where the phone points (PROTOCOL §6) while a pointing utility is on, else null. Absolute pointers (the Wii-style
-   * cursor) end the moment the pad says Point is off; any pointer ends after a short silence.
+   * Publish the scene: what can be claimed (omit `nodes` to keep the last list) and who holds what (node id ->
+   * participant id, `host` for the screen). Every participant receives it.
    */
-  get pointer(): PointerState | null {
-    const p = this.ptr
-    if (!p) return null
-    const pad = this.padState
-    const off = pad && this.padLive && !(p.flags & PointerFlag.relative) && !(pad.flags & PadFlag.point) && this.padAt >= this.ptrAt
-    if (off || performance.now() - this.ptrAt > POINTER_STALE_MS) { this.ptr = null; return null }
-    return p
+  setScene(s: { nodes?: SceneNode[]; held: Record<string, string> }) {
+    if (s.nodes) { this.nodes = s.nodes.map((n) => ({ ...n, id: n.id.slice(0, MAX_NODE_ID) })); this.nodesVersion++ }
+    this.held = { ...s.held }
+    this.sceneChanged()
   }
 
-  /** Vibrate the phone (Gamepad API dual-rumble semantics). */
-  rumble(strong: number, weak: number, ms: number) {
-    if (this.active) this.send(this.active, { t: 'rumble', strong, weak, ms })
-  }
-
-  private resetStream() {
-    this.padState = null
-    this.padAt = 0
-    this.ptr = null
-    this.ptrAt = 0
-    this.stateAt = 0
-    this.latest = null
-    this.latestAcc = null
-    this.outAcc = null
-    this.outMode = null
-    this.buf = []
-    this.offsets = []
-    this.tBase = 0
-    this.tLast = -1
-    this.lastMode = null
-  }
-
-  /** Read input for this frame. Call once per rendered frame (e.g. inside requestAnimationFrame). */
-  consume(now = performance.now()): Frame {
-    const s = this.latest
-    const frame: Frame = {
-      connected: this.status === 'connected', mode: s?.mode ?? Mode.hold, tier: s?.tier ?? Tier.touch,
-      clutch: false, grab: s?.grab ?? 0, qRel: qIdentity(), touching: false,
-      aim: [0, 0], tilt: [0, 0], pad1: [0, 0], pad2: [0, 0], zoom: 0, twist: 0,
-    }
-    if (!s || !this.buf.length) return frame
-    // Gamepad mode: PAD packets replace STATE, so the last STATE (a held tilt, a gyro grab) must not keep driving
-    // the view even if every hand-off STATE was lost on the unreliable channel.
-    if (this.padLive && this.padAt > this.stateAt) { frame.mode = Mode.gamepad; return frame }
-
-    // Sample everything one sensor period behind and interpolate, so motion is even from frame to frame
-    // regardless of network jitter. 'direct' uses the newest packet instead.
-    let ai = this.buf.length - 1
-    let bi = -1
-    let alpha = 0
-    if (this.opts.latency !== 'direct') {
-      const target = now - 1000 / 60
-      ai = 0
-      for (let i = this.buf.length - 1; i >= 0; i--) {
-        if (this.buf[i].t <= target) {
-          ai = i
-          if (i + 1 < this.buf.length) {
-            bi = i + 1
-            alpha = Math.min(1, Math.max(0, (target - this.buf[i].t) / Math.max(1, this.buf[bi].t - this.buf[i].t)))
-          }
-          break
-        }
+  private sceneChanged() {
+    if (!this.shared || this.scenePending) return
+    this.scenePending = true
+    queueMicrotask(() => {
+      this.scenePending = false
+      const people: ScenePerson[] = [this.host, ...this.bound().map((p) => ({ id: p.id, name: p.name, color: p.color, ...(p === this.active ? { lead: true } : {}) }))]
+      for (const p of this.bound()) {
+        const m: HostMsg = { t: 'scene', you: p.id, people, held: this.held }
+        if (p.nodesSent !== this.nodesVersion) { m.nodes = this.nodes; p.nodesSent = this.nodesVersion }
+        this.send(p, m)
       }
+    })
+  }
+
+  /** Disconnect a participant (it can't rejoin by itself; a new invite keeps it out), or with no `who` everyone. */
+  disconnect(who?: string) {
+    const list = who ? this.targets(who) : this.bound()
+    for (const p of list) {
+      this.send(p, { t: 'lock', reason: who ? 'removed' : 'host-closed' })
+      setTimeout(() => this.dropPeer(p.id), 200)
     }
-    const A = this.buf[ai]
-    const B = bi >= 0 ? this.buf[bi] : null
-    const accNow = B ? lerpAcc(A.acc, B.acc, alpha) : A.acc
-    // After a stall (hidden tab, long frame) drop the backlog instead of applying it as one jump. Point mode is the
-    // exception: its aim is where the phone points (absolute), so the cursor catches up rather than falling out of step.
-    const fresh = !!this.outAcc && now - this.lastConsumeAt < 250
-    const d = fresh ? combineAcc(accNow, this.outAcc!, -1) : zeroAcc()
-    if (!fresh && this.outAcc && this.outMode === Mode.point && A.s.mode === Mode.point) {
-      d.aim = [accNow.aim[0] - this.outAcc.aim[0], accNow.aim[1] - this.outAcc.aim[1]]
-    }
-    this.outAcc = accNow
-    this.outMode = A.s.mode
-    this.lastConsumeAt = now
-    frame.aim = d.aim
-    frame.pad1 = d.pad1
-    frame.pad2 = d.pad2
-    frame.zoom = d.zoom
-    frame.twist = d.twist
-    frame.touching = (s.flags & Flag.touching) !== 0
-
-    const a = A.s
-    const b = B?.s
-    frame.mode = a.mode
-    frame.tilt = b ? [a.tilt[0] + (b.tilt[0] - a.tilt[0]) * alpha, a.tilt[1] + (b.tilt[1] - a.tilt[1]) * alpha] : a.tilt
-    frame.clutch = (a.flags & Flag.clutch) !== 0
-    frame.grab = a.grab
-    frame.qRel = a.qRel
-    if (b && frame.clutch && (b.flags & Flag.clutch) && b.grab === a.grab) frame.qRel = qSlerp(a.qRel, b.qRel, Math.min(1, Math.max(0, alpha)))
-    // No STATE for 250 ms (phone backgrounded, network stall): ease rate controls to rest over 150 ms instead of
-    // leaving a tilt latched. The phone sends at least 15 Hz while connected, so this only trips on a real gap.
-    const silent = now - this.stateAt
-    if (silent > 250) {
-      const k = Math.max(0, 1 - (silent - 250) / 150)
-      frame.tilt = [frame.tilt[0] * k, frame.tilt[1] * k]
-      frame.touching = false
-    }
-    return frame
-  }
-
-  setLayout(layout: Layout) {
-    this.layout = layout
-    if (this.active) this.send(this.active, { t: 'layout', layout })
-  }
-
-  /** Sync toggle/label state shown on the phone. */
-  setValues(values: Record<string, number | boolean | string>) {
-    if (this.active) this.send(this.active, { t: 'state', values })
-  }
-
-  feedback(f: { haptic?: 'tick' | 'bump'; toast?: string }) {
-    if (this.active) this.send(this.active, { t: 'feedback', ...f })
-  }
-
-  /** Disconnect the current phone (it can rescan to reconnect). */
-  disconnect() {
-    const p = this.active
-    if (!p) return
-    this.send(p, { t: 'lock', reason: 'host-closed' })
-    setTimeout(() => this.dropPeer(p.id), 200)
   }
 
   destroy() {
@@ -586,11 +567,11 @@ export class Remote {
     if (peer.ctl.readyState === 'open') peer.ctl.send(JSON.stringify(m))
   }
 
-  private scheduleLost() {
-    if (this.lostTimer) return
-    this.lostTimer = setTimeout(() => {
-      this.lostTimer = null
-      if (this.active && this.active.pc.connectionState !== 'connected') this.dropPeer(this.active.id)
+  private scheduleLost(peer: Peer) {
+    if (peer.lost) return
+    peer.lost = setTimeout(() => {
+      peer.lost = null
+      if (peer.pc.connectionState !== 'connected') this.dropPeer(peer.id)
     }, 4000)
   }
 
@@ -598,16 +579,26 @@ export class Remote {
     const p = this.peers.get(id)
     if (!p) return
     this.peers.delete(id)
+    if (p.lost) { clearTimeout(p.lost); p.lost = null }
     if (this.lan?.peer === p) this.lan = null
     try { p.pc.close() } catch { /* closed */ }
-    if (this.active === p) {
-      this.active = null
-      this.deviceName = null
-      this.resetStream()
+    if (!p.bound) return
+    const who = this.participant(p)
+    p.bound = false
+    // What it held is free again.
+    for (const [node, holder] of Object.entries(this.held)) if (holder === id) delete this.held[node]
+    if (this.active === p) this.active = this.shared ? this.bound()[0] ?? null : null
+    this.deviceName = this.active?.name ?? null
+    this.emit('leave', who)
+    this.renderCards()
+    if (!this.bound().length) {
       this.setStatus(this.sig?.open ? 'ready' : 'offline')
       this.emit('disconnect')
     }
+    this.sceneChanged()
   }
+
+  // ---- pairing card -------------------------------------------------------------------------------------------
 
   /**
    * Render the pairing card into an element. 'full' shows numbered steps; 'compact' is visual-first:
@@ -629,26 +620,30 @@ export class Remote {
         ${opts.testLink === false ? '' : `<a class="obpal-link" target="_blank" rel="noopener" title="Open the controller on this device">${compact ? `${open}<span>This device</span>` : 'Open the controller on this device'}</a>`}
       </div>`
     card.querySelector('.obpal-title-text')!.textContent = opts.title ?? (compact ? 'Scan to control' : 'Use your phone as a remote')
-    const link = card.querySelector<HTMLAnchorElement>('.obpal-link')
-    if (link) link.href = this.pairingUrl
-    void import('uqr').then(({ renderSVG }) => {
-      card.querySelector('.obpal-qr')!.innerHTML = renderSVG(this.pairingUrl, { border: 2, ecc: 'M' })
-    })
     el.appendChild(card)
-    this.cards.push({ el: card, status: card.querySelector('.obpal-status')!, compact })
+    const entry = { el: card, status: card.querySelector<HTMLElement>('.obpal-status')!, qr: card.querySelector<HTMLElement>('.obpal-qr')!, link: card.querySelector<HTMLAnchorElement>('.obpal-link'), compact }
+    this.cards.push(entry)
+    this.renderQr(entry)
     this.renderCards()
     return card
   }
 
+  private renderQr(c: { qr: HTMLElement; link: HTMLAnchorElement | null }) {
+    const url = this.pairingUrl
+    if (c.link) c.link.href = url
+    void import('uqr').then(({ renderSVG }) => { if (url === this.pairingUrl) c.qr.innerHTML = renderSVG(url, { border: 2, ecc: 'M' }) })
+  }
+
   private renderCards() {
+    const n = this.bound().length
     const text: Record<HostStatus, string> = {
       starting: 'Starting…',
       ready: 'Waiting for your phone',
       connecting: 'Phone found, connecting…',
-      connected: `Connected${this.deviceName ? ` to ${this.deviceName}` : ''}`,
+      connected: n > 1 ? `${n} devices connected` : `Connected${this.deviceName ? ` to ${this.deviceName}` : ''}`,
       offline: 'Offline, retrying…',
     }
-    const short: Record<HostStatus, string> = { starting: 'Starting', ready: 'Waiting', connecting: 'Connecting', connected: 'Connected', offline: 'Offline' }
+    const short: Record<HostStatus, string> = { starting: 'Starting', ready: 'Waiting', connecting: 'Connecting', connected: n > 1 ? `${n} connected` : 'Connected', offline: 'Offline' }
     for (const c of this.cards) {
       c.status.textContent = (c.compact ? short : text)[this.status]
       c.status.dataset.s = this.status

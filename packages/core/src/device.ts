@@ -9,7 +9,7 @@ import { putPair, type StoredPair } from './store'
 
 export type LinkStatus =
   | 'signaling' | 'unreachable' | 'waiting-host' | 'connecting' | 'securing' | 'connected'
-  | 'reconnecting' | 'taken-over' | 'host-mismatch' | 'lan-failed' | 'lan-unsupported' | 'closed'
+  | 'reconnecting' | 'taken-over' | 'host-mismatch' | 'lan-failed' | 'lan-unsupported' | 'removed' | 'full' | 'closed'
 
 export interface DeviceLinkEvents {
   status: (s: LinkStatus) => void
@@ -267,7 +267,12 @@ export class DeviceLink {
       if (m.pair && 'pairing' in this.opts && this.opts.remember) void this.remember(m.pair, m.name)
     }
     if (m.t === 'pong') this.rttMs = Math.round(performance.now() - m.t0)
-    if (m.t === 'lock') { this.teardown(); this.setStatus(m.reason === 'taken-over' ? 'taken-over' : 'waiting-host') }
+    if (m.t === 'lock') {
+      this.teardown()
+      // Removed or turned away: leave the room too, so this device neither rejoins nor holds one of its places.
+      if (m.reason === 'removed' || m.reason === 'full') { this.sig?.close(); this.setStatus(m.reason) }
+      else this.setStatus(m.reason === 'taken-over' ? 'taken-over' : 'waiting-host')
+    }
     this.emit('message', m)
   }
 

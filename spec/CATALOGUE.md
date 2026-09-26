@@ -1,6 +1,6 @@
 # ob.Pal control catalogue (v1)
 
-Every controller surface is built from **utilities** in one catalogue. Every host maps utilities to **outputs** through **profiles**. A new kind of control (a wheel, a keyboard page, a pedal) becomes a new catalogue entry with:
+Every controller surface is built from **utilities** in one catalogue. Every host maps utilities to **outputs** through **profiles**. Several devices can share one scene, each controlling its own node (§5). Other controllers join through a phone or PC as **bridges** (§6), and what a scene controls, down to real machines, is a **control system** (§7). A new kind of control (a wheel, a keyboard page, a pedal) becomes a new catalogue entry with:
 - a stable id;
 - a category;
 - a wire encoding;
@@ -93,12 +93,69 @@ Pointing uses a POINTER packet (PROTOCOL §6):
 - Near an edge of the screen, the right stick deflects toward that edge, in proportion to how far into the last 12% the cursor is.
 - This is the Wii shooter scheme: the view turns when you point at its edge.
 
-## 5. Adding to the catalogue
+## 5. Shared scenes: participants, nodes and claims
 
-A new utility needs all of the following:
-1. A row in §1 with a stable id and category.
+Several devices can control one scene at once. Each joins with the scene's invite and controls the node it claims, and a node has one controller at a time. The messages are in PROTOCOL §3.
+
+- **Participant.** A device joined to the scene, or a controller a device bridges (§6). The host gives each one an id, a name and a colour, and the device's own controls take on that colour.
+- **Lead.** The first participant. While it holds nothing, its input drives the shared view (the camera). When it leaves, the next oldest becomes lead.
+- **Node.** Something a participant can control: an object or part in a 3D scene, a gamepad slot in a game, a joint of a robot arm. The host lists its nodes in `scene`, each with an id, a name and a kind.
+- **Claim.** A participant takes a node by pointing at it and pressing A, or by picking it from the scene list on the device.
+  - A node held by someone else can't be claimed. The device gets a bump and a toast naming who holds it.
+  - A participant holds one node at a time: claiming another releases the first.
+  - A claim ends on release, when the participant leaves, and when the host removes the node or takes it back.
+- **Invite.** The pairing QR or link. Anyone with it can join, up to 8 devices, until the host makes a new link. That stops the old one without dropping anyone connected. The host sees everyone in the scene and can remove a participant.
+- **The screen.** The person at the host is a participant too (id `host`). The mouse claims nodes the same way, and can take a node back from anyone.
+- Hosts that don't list nodes keep the one-device behaviour: a new device takes over.
+
+Systems that move real things (§7) also require the host to approve each participant before its first claim, and add their own safety envelope.
+
+## 6. Bridges: other controllers through a phone or PC
+
+A bridge forwards a controller connected to a phone, PC or headset into the scene as a participant of its own. So a Switch Pro Controller, a DualSense or a VR controller claims its own node beside the phone that bridges it.
+- The bridging device runs the controller page.
+- The host sees one more participant, named after both (for example "Alex · Pro Controller").
+- A bridge reuses the utilities and wire formats above: it is a new source of input, not a new kind of control.
+- Wire (planned): a `seat` message opens a sub-participant on the bridging device's connection, and that sub-participant's packets carry its seat index.
+
+| id | Controller | Runs on | Reads | Becomes | Status |
+|---|---|---|---|---|---|
+| `bridge.gamepad` | Any Gamepad API controller: Xbox, DualSense, Switch Pro, Joy-Con pairs, 8BitDo | Phone or PC browser (Bluetooth or USB) | Gamepad API, standard mapping | `pad` | Planned |
+| `bridge.joycon` | Joy-Con and Switch Pro, with motion | Chromium on a PC (WebHID) | HID reports: buttons, sticks, 6-axis IMU | `pad`, plus Aim and Steer from its gyro | Planned |
+| `bridge.wiimote` | Wii Remote and Nunchuk | Chromium on a PC (WebHID) | HID reports: buttons, IR camera, accelerometer | `pad`, plus absolute Point from the IR camera | Planned |
+| `bridge.xr` | VR controllers and tracked hands (Quest, Vision Pro, Pico) | The headset's browser (WebXR) | Each hand's 6DoF pose, trigger, grip, stick, buttons | `motion.hold` (1:1 pose) and `pad`, one participant per hand | Planned |
+
+## 7. Control systems: what a scene controls
+
+A control system is a kind of host. It decides what its nodes are, which utilities drive each one, and what is safe.
+
+| id | Host | Nodes | Takes | Status |
+|---|---|---|---|---|
+| `system.scene3d` | ob.Pal Viewer | Each object, its movable parts, and the view (the lead's) | Point, Hold, Steer and Tilt, the trackpad, the gamepad | Shared scenes shipped |
+| `system.gamepad-slots` | ob.Pal Link in a browser game | Player 1–4 gamepad slots | `pad` and the Motion utilities | Planned. Each participant claims a slot, so a local-multiplayer game gets one pad per phone. |
+| `system.desktop` | ob.Pal Desktop | The allowed program in front (keyboard, mouse) | The Keys and mouse routes | Shipped, one participant |
+| `system.robot-arm` | A bridge beside the arm's control software | The joints, the tool pose (end effector), the gripper | Hold → tool orientation. Steer → joint or tool velocity. The triggers → the gripper. | Planned |
+
+**`system.robot-arm`.** The host is a small bridge next to the arm's own control software. It is a web page using `@obpal/host` or ob.Pal Desktop, and it speaks the arm's interface:
+- ROS 2 (through rosbridge, or `ros2_control` topics);
+- a vendor SDK (UR RTDE, xArm, Dobot);
+- a serial servo controller;
+- MQTT or OSC.
+
+Nodes map to the arm: one participant can steer the tool while another works the gripper, but never two on the same joint. The safety envelope is part of the item, not an option:
+- **Deadman:** a node moves only while its participant holds the grab control. Letting go stops it.
+- **Limits:** joint ranges, velocity and acceleration caps, and a workspace box are enforced in the bridge, never on the phone.
+- **Watchdog:** 200 ms without input stops the node, as the desktop helper releases everything when frames stop.
+- **E-stop:** every participant's device and the host show a stop control that halts every node at once.
+- **Approval:** the host approves each participant before its first claim. Having the link isn't enough.
+- **Record:** the bridge logs who held which node, and when.
+
+## 8. Adding to the catalogue
+
+A new utility, bridge or control system needs all of the following:
+1. A row in §1, §6 or §7 with a stable id and a category.
 2. Its wire encoding, reusing PAD, STATE or POINTER fields where possible. A new packet type is the last resort, and hosts ignore unknown types.
-3. Its routes and response parameters in §2.
-4. Host semantics.
+3. Its routes and response parameters (§2), or for a control system its nodes and what drives each one.
+4. Host semantics, and for anything physical its safety envelope.
 5. Its place in the built-in profiles.
-6. Tests: a codec round trip, the route maths, and one end-to-end case in `extension/scripts/e2e.mjs`.
+6. Tests: a codec round trip, the route maths, and one end-to-end case (`extension/scripts/e2e.mjs`, or the viewer's shared-scene test).

@@ -38,6 +38,15 @@ export interface Caps {
  */
 export interface PairGrant { id: string; key: string }
 
+/** Someone in a shared scene (CATALOGUE §5): a device, or the screen itself (id "host"). */
+export interface ScenePerson { id: string; name: string; color: string; lead?: boolean }
+
+/** Something in a shared scene one participant at a time can control. */
+export interface SceneNode { id: string; name: string; kind: string; group?: string }
+
+/** Longest node id a device may send in `claim`. */
+export const MAX_NODE_ID = 64
+
 /** Reliable control-channel messages (JSON on the "ctl" DataChannel). Unknown fields are ignored. */
 export type DeviceMsg =
   /** pair: the pairing id when connecting through a direct LAN code. */
@@ -46,6 +55,8 @@ export type DeviceMsg =
   | { t: 'value'; id: string; v: number | boolean | string; add?: boolean }
   | { t: 'mode'; m: ModeId }
   | { t: 'recenter' }
+  /** Claim a node listed in `scene` (null releases what this device holds). */
+  | { t: 'claim'; node: string | null }
   | { t: 'ping'; t0: number }
   | { t: 'bye' }
 
@@ -56,7 +67,13 @@ export type HostMsg =
   | { t: 'state'; values: Record<string, number | boolean | string> }
   | { t: 'feedback'; haptic?: 'tick' | 'bump'; toast?: string }
   | { t: 'pong'; t0: number }
-  | { t: 'lock'; reason: 'taken-over' | 'host-closed' | 'rejected' }
+  /**
+   * A shared scene: who is in it, what can be controlled (omitted when unchanged) and who holds what (node id ->
+   * participant id). `you` is the receiver's own id.
+   */
+  | { t: 'scene'; you: string; people: ScenePerson[]; nodes?: SceneNode[]; held: Record<string, string> }
+  /** removed: the host removed this device, which must not rejoin by itself. full: the scene has no free place. */
+  | { t: 'lock'; reason: 'taken-over' | 'host-closed' | 'rejected' | 'removed' | 'full' }
   /** Rumble (Gamepad API 'dual-rumble' semantics): magnitudes 0..1 for duration ms. */
   | { t: 'rumble'; strong: number; weak: number; ms: number }
 

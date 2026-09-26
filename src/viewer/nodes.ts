@@ -32,6 +32,19 @@ const humanize = (n: string) => n.replace(/^node-/, '').replace(/[_-]+/g, ' ').r
 const fmt = (v: number) => (Math.abs(v) >= 10000 ? v.toLocaleString('en', { maximumFractionDigits: 0 }) : v.toLocaleString('en', { maximumFractionDigits: 2 }))
 const inside = (o: THREE.Object3D, ancestor: THREE.Object3D) => { for (let a: THREE.Object3D | null = o; a; a = a.parent) if (a === ancestor) return true; return false }
 
+/**
+ * Who hovers and holds parts: the screen's own mouse (id "host") or a participant of a shared scene (CATALOGUE §5).
+ * A part is held by one hand at a time.
+ */
+export interface Hand {
+  readonly id: string
+  color: string
+  hovered: Part | null
+  selected: Part | null
+  halo: THREE.Mesh
+  haloOpacity: number
+}
+
 interface Pose { p: THREE.Vector3; q: THREE.Quaternion; s: THREE.Vector3 }
 interface Live { base: Pose; user: number; hl: number; hlTarget: number }
 /** One object in the scene: its loaded root, the group that places it, and what describes it. */
@@ -39,42 +52,95 @@ interface Model { wrap: THREE.Object3D; engine: string | null; name: string; lin
 
 /** Picks, describes and manipulates the objects in the viewer and their parts. */
 export class Parts {
-  hovered: Part | null = null
-  selected: Part | null = null
+  /** The screen's own hand (the mouse). hovered / selected below are its. */
+  readonly host: Hand
+  private hands = new Map<string, Hand>()
   private models = new Map<THREE.Object3D, Model>()
   private live = new Map<THREE.Object3D, Live>()
   private raycaster = new THREE.Raycaster()
-  private halo: THREE.Mesh
   /** Part halo, and a finer one for whole objects (a ring that size would read as a band). */
-  private rings = { part: new THREE.RingGeometry(0.9, 1, 96), object: new THREE.RingGeometry(0.975, 1, 160) }
-  private haloOpacity = 0
+  private rings = { part: new THREE.RingGeometry(0.9, 1, 96), object: new THREE.RingGeometry(0.975, 1, 160), shared: new THREE.RingGeometry(0.955, 1, 128) }
   private card: HTMLElement
+  /** The hand whose part the card shows: the screen's own, else whoever picked something last. */
+  private cardHand: Hand
   private cardPos = new THREE.Vector2(-9999, -9999)
   private cardShown = false
   private tmpV = new THREE.Vector3()
   private tmpQ = new THREE.Quaternion()
   private shown: Part | null = null
 
-  constructor(private camera: THREE.PerspectiveCamera, scene: THREE.Scene, private hooks: { changed: (hover: Part | null, sel: Part | null) => void }) {
+  constructor(
+    private camera: THREE.PerspectiveCamera,
+    private scene: THREE.Scene,
+    private hooks: {
+      /** A hand's hover or selection changed. */
+      changed: (hand: Hand) => void
+      /** The screen took a part a participant was holding. */
+      taken?: (from: Hand, part: Part) => void
+    },
+  ) {
     this.raycaster.params.Line = { threshold: 0.015 }
     this.raycaster.params.Points = { threshold: 0.015 }
-    this.halo = new THREE.Mesh(
-      this.rings.part,
-      new THREE.MeshBasicMaterial({ color: '#c6ff34', transparent: true, opacity: 0, depthTest: false, depthWrite: false, toneMapped: false, side: THREE.DoubleSide }),
-    )
-    this.halo.renderOrder = 999
-    this.halo.visible = false
-    scene.add(this.halo)
+    this.host = this.hand('host', '#c6ff34')
+    this.cardHand = this.host
     this.card = document.createElement('div')
     this.card.className = 'node-card glass'
     this.card.setAttribute('role', 'status')
     this.card.innerHTML = '<div class="nc-head"><span class="nc-dot"></span><strong class="nc-title"></strong><button class="nc-x" aria-label="Release part">×</button></div><div class="nc-rows"></div><div class="nc-range" hidden><i></i></div><div class="nc-foot"></div>'
-    this.card.querySelector<HTMLButtonElement>('.nc-x')!.onclick = () => this.select(null)
+    this.card.querySelector<HTMLButtonElement>('.nc-x')!.onclick = () => this.select(null, this.cardHand)
     document.body.appendChild(this.card)
   }
 
+  /** The screen's hover and selection (the mouse). */
+  get hovered() { return this.host.hovered }
+  get selected() { return this.host.selected }
+
+  /** A hand, created on first use: `host` for the mouse, or a participant's id. */
+  hand(id: string, color?: string): Hand {
+    let h = this.hands.get(id)
+    if (!h) {
+      const halo = new THREE.Mesh(
+        this.rings.part,
+        new THREE.MeshBasicMaterial({ color: color ?? '#c6ff34', transparent: true, opacity: 0, depthTest: false, depthWrite: false, toneMapped: false, side: THREE.DoubleSide }),
+      )
+      halo.renderOrder = 999
+      halo.visible = false
+      this.scene.add(halo)
+      h = { id, color: color ?? '#c6ff34', hovered: null, selected: null, halo, haloOpacity: 0 }
+      this.hands.set(id, h)
+    } else if (color && color !== h.color) this.recolor(h, color)
+    return h
+  }
+
+  /** A participant left: let go of what it held and remove its halo. */
+  dropHand(id: string) {
+    const h = this.hands.get(id)
+    if (!h || h === this.host) return
+    this.select(null, h)
+    this.hover(null, null, h)
+    this.scene.remove(h.halo)
+    ;(h.halo.material as THREE.Material).dispose()
+    this.hands.delete(id)
+    if (this.cardHand === h) this.cardHand = this.host
+  }
+
+  /** Every hand holding something, the screen's included. */
+  holders(): Hand[] { return [...this.hands.values()].filter((h) => h.selected) }
+
+  /** The hand holding this part's object, if any. */
+  holderOf(part: Part | null | undefined): Hand | null {
+    if (!part) return null
+    for (const h of this.hands.values()) if (h.selected?.object === part.object) return h
+    return null
+  }
+
+  private recolor(h: Hand, color: string) {
+    h.color = color
+    ;(h.halo.material as THREE.MeshBasicMaterial).color.set(color)
+  }
+
   setAccent(hex: string) {
-    ;(this.halo.material as THREE.MeshBasicMaterial).color.set(hex)
+    this.recolor(this.host, hex)
   }
 
   // ---- the scene's objects ----------------------------------------------------------------------------------
@@ -98,15 +164,16 @@ export class Parts {
   remove(root: THREE.Object3D) {
     const m = this.models.get(root)
     if (!m) return
-    if (this.selected?.root === root) this.select(null)
-    if (this.hovered?.root === root) { this.hovered = null; this.hooks.changed(null, this.selected) }
+    for (const h of this.hands.values()) {
+      if (h.selected?.root === root) this.select(null, h)
+      if (h.hovered?.root === root) { h.hovered = null; this.hooks.changed(h) }
+    }
     for (const o of [...this.live.keys()]) if (inside(o, m.wrap)) this.live.delete(o)
     this.models.delete(root)
   }
 
   clear() {
-    this.select(null)
-    this.hover(null, null)
+    for (const h of this.hands.values()) { this.select(null, h); this.hover(null, null, h) }
     this.live.clear()
     this.models.clear()
   }
@@ -127,6 +194,36 @@ export class Parts {
     if (!m) return null
     return { object: m.wrap, kind: 'object', title: m.name, rows: [], related: [m.tradeoff ? 'Live trade-off model' : 'Whole object'], movable: true, root }
   }
+
+  /**
+   * What a device can claim from its scene list: each object, then its semantic parts (engine pillars and submodules),
+   * or for a plain model its named top-level parts.
+   */
+  listable(limit = 48): Part[] {
+    const out: Part[] = []
+    for (const [root, m] of this.models) {
+      if (out.length >= limit) break
+      const whole = this.objectPart(root)
+      if (whole) out.push(whole)
+      const seen = new Set<THREE.Object3D>()
+      root.traverse((o) => {
+        const u = o.userData as { pillarKey?: unknown; isSubmodule?: boolean }
+        if (out.length >= limit || (typeof u?.pillarKey !== 'string' && !u?.isSubmodule)) return
+        const p = this.resolve(o)
+        if (p?.movable && !seen.has(p.object)) { seen.add(p.object); out.push(p) }
+      })
+      if (!seen.size) {
+        for (const c of root.children) {
+          if (out.length >= limit) break
+          if (meaningful(c.name)) out.push({ object: c, kind: 'part', title: humanize(c.name), rows: [], related: [m.name], movable: true, root })
+        }
+      }
+    }
+    return out
+  }
+
+  /** The object a part belongs to, by name (the scene list's grouping). */
+  groupOf(part: Part): string { return this.models.get(part.root)?.name ?? '' }
 
   /** Forget an object's resting pose after the scene moved it, so a reset returns it to the new place. */
   rebase(o: THREE.Object3D) {
@@ -178,20 +275,31 @@ export class Parts {
 
   // ---- picking and selection --------------------------------------------------------------------------------
 
-  /** Pick at screen coordinates (CSS px); null clears the hover. */
-  hover(x: number | null, y: number | null) {
+  /** Pick at screen coordinates (CSS px) for a hand (the screen's by default); null clears its hover. */
+  hover(x: number | null, y: number | null, h: Hand = this.host) {
     let next: Part | null = null
     if (x != null && y != null && this.models.size) {
       const ndc = new THREE.Vector2((x / innerWidth) * 2 - 1, -(y / innerHeight) * 2 + 1)
       this.raycaster.setFromCamera(ndc, this.camera)
-      const hit = this.raycaster.intersectObjects([...this.models.keys()], true).find((h) => (h.object as THREE.Mesh).isMesh)
+      const hit = this.raycaster.intersectObjects([...this.models.keys()], true).find((i) => (i.object as THREE.Mesh).isMesh)
       if (hit) next = this.resolve(hit.object)
     }
-    if (next?.object === this.hovered?.object && next?.kind === this.hovered?.kind) return
-    if (this.hovered && this.hovered.object !== this.selected?.object) this.state(this.hovered.object).hlTarget = 1
-    this.hovered = next
-    if (next?.movable) this.state(next.object).hlTarget = 1.1
-    this.hooks.changed(this.hovered, this.selected)
+    if (next?.object === h.hovered?.object && next?.kind === h.hovered?.kind) return
+    const was = h.hovered
+    h.hovered = next
+    if (was) this.settle(was.object)
+    if (next) this.settle(next.object)
+    this.hooks.changed(h)
+  }
+
+  /** An object's highlight from every hand: held (grown, or only haloed as a whole object), hovered, or resting. */
+  private settle(o: THREE.Object3D) {
+    let target = 1
+    for (const h of this.hands.values()) {
+      if (h.selected?.object === o && h.selected.movable) { target = h.selected.kind === 'object' ? 1 : 1.14; break }
+      if (h.hovered?.object === o && h.hovered.movable) target = 1.1
+    }
+    this.state(o).hlTarget = target
   }
 
   /** Screen position of the nearest movable semantic part within radius (aim assist for gyro pointing). */
@@ -210,40 +318,55 @@ export class Parts {
     return best
   }
 
-  selectHovered(): boolean {
-    if (!this.hovered) return false
-    this.select(this.hovered)
-    return true
+  selectHovered(h: Hand = this.host): boolean {
+    if (!h.hovered) return false
+    return this.select(h.hovered, h)
   }
 
   /**
-   * Pick what's under the cursor, stepping between a part and its whole object: the first pick selects the
-   * part, picking the selected part again selects the whole object, and again goes back to the part.
+   * Pick what's under a hand's cursor, stepping between a part and its whole object: the first pick selects the
+   * part, picking the selected part again selects the whole object, and again goes back to the part. 'held': someone
+   * else holds it (only the screen can take a part back).
    */
-  pick(): boolean {
-    const h = this.hovered
-    if (!h?.movable) return false
-    const sel = this.selected
-    if (sel?.kind === 'object' && sel.root === h.root) this.select(h)
-    else if (sel?.object === h.object) this.select(this.objectPart(h.root))
-    else this.select(h)
+  pickFor(h: Hand = this.host): 'picked' | 'held' | 'none' {
+    const hov = h.hovered
+    if (!hov?.movable) return 'none'
+    const sel = h.selected
+    const next = sel?.kind === 'object' && sel.root === hov.root ? hov : sel?.object === hov.object ? this.objectPart(hov.root) : hov
+    return this.select(next, h) ? 'picked' : 'held'
+  }
+
+  pick(h: Hand = this.host): boolean { return this.pickFor(h) !== 'none' }
+
+  /** Whether dragging from the hovered part moves the hand's selection (the part itself, or its whole object). */
+  holdsHovered(h: Hand = this.host): boolean {
+    const hov = h.hovered
+    const sel = h.selected
+    return !!hov && !!sel && (sel.object === hov.object || (sel.kind === 'object' && sel.root === hov.root))
+  }
+
+  /**
+   * Select a part for a hand (null lets go). A part another hand holds is refused (false), except for the screen,
+   * which takes it back. A whole object is marked by the halo alone: growing it would shove its neighbours.
+   */
+  select(part: Part | null, h: Hand = this.host): boolean {
+    const holder = this.holderOf(part)
+    if (part && holder && holder !== h) {
+      if (h !== this.host) return false
+      const lost = holder.selected!
+      holder.selected = null
+      this.hooks.changed(holder)
+      this.hooks.taken?.(holder, lost)
+    }
+    const was = h.selected
+    h.selected = part
+    if (was && was.object !== part?.object) this.settle(was.object)
+    if (part) this.settle(part.object)
+    if (part) this.cardHand = h
+    else if (this.cardHand === h) this.cardHand = this.holders()[0] ?? this.host
+    this.card.classList.toggle('pinned', !!this.cardHand.selected)
+    this.hooks.changed(h)
     return true
-  }
-
-  /** Whether dragging from the hovered part moves the current selection (the part itself, or its whole object). */
-  holdsHovered(): boolean {
-    const h = this.hovered
-    const sel = this.selected
-    return !!h && !!sel && (sel.object === h.object || (sel.kind === 'object' && sel.root === h.root))
-  }
-
-  select(part: Part | null) {
-    if (this.selected && this.selected.object !== part?.object) this.state(this.selected.object).hlTarget = this.selected.object === this.hovered?.object ? 1.1 : 1
-    this.selected = part
-    // A whole object is marked by the halo alone: growing it would shove its neighbours.
-    if (part?.movable) this.state(part.object).hlTarget = part.kind === 'object' ? 1 : 1.14
-    this.card.classList.toggle('pinned', !!part)
-    this.hooks.changed(this.hovered, this.selected)
   }
 
   private state(o: THREE.Object3D): Live {
@@ -264,9 +387,9 @@ export class Parts {
 
   // ---- manipulation -----------------------------------------------------------------------------------------
 
-  /** Move the selected part in the view plane by screen pixels. */
-  move(dx: number, dy: number) {
-    const part = this.selected
+  /** Move a hand's selected part in the view plane by screen pixels. */
+  move(dx: number, dy: number, h: Hand = this.host) {
+    const part = h.selected
     if (!part?.movable || (!dx && !dy)) return
     if (this.live_(part)) { this.tradeoffOf(part)!.nudge(part.key!, dx, dy, this.camera); return }
     const o = part.object
@@ -282,27 +405,27 @@ export class Parts {
     o.position.add(b.sub(a))
   }
 
-  /** Scale the selected part by 2^log2 (pinch). */
-  scaleBy(log2: number) {
-    if (!this.selected?.movable || !log2 || this.live_(this.selected)) return
-    const s = this.state(this.selected.object)
+  /** Scale a hand's selected part by 2^log2 (pinch). */
+  scaleBy(log2: number, h: Hand = this.host) {
+    if (!h.selected?.movable || !log2 || this.live_(h.selected)) return
+    const s = this.state(h.selected.object)
     s.user = THREE.MathUtils.clamp(s.user * Math.pow(2, log2), 0.3, 4)
   }
 
-  /** Rotate the selected part by a world-space rotation. */
-  rotateWorld(q: THREE.Quaternion) {
-    const o = this.selected?.movable && !this.live_(this.selected) ? this.selected.object : null
+  /** Rotate a hand's selected part by a world-space rotation. */
+  rotateWorld(q: THREE.Quaternion, h: Hand = this.host) {
+    const o = h.selected?.movable && !this.live_(h.selected) ? h.selected.object : null
     if (!o) return
     const pw = o.parent!.getWorldQuaternion(this.tmpQ)
     const local = pw.clone().invert().multiply(q).multiply(pw)
     o.quaternion.premultiply(local)
   }
 
-  /** Twist the selected part about the view axis (degrees, + = clockwise on screen). */
-  twist(deg: number) {
+  /** Twist a hand's selected part about the view axis (degrees, + = clockwise on screen). */
+  twist(deg: number, h: Hand = this.host) {
     if (!deg) return
     const axis = new THREE.Vector3(0, 0, 1).applyQuaternion(this.camera.quaternion)
-    this.rotateWorld(new THREE.Quaternion().setFromAxisAngle(axis, THREE.MathUtils.degToRad(-deg)))
+    this.rotateWorld(new THREE.Quaternion().setFromAxisAngle(axis, THREE.MathUtils.degToRad(-deg)), h)
   }
 
   /** A pillar whose position is its value (a live trade-off model). */
@@ -315,8 +438,8 @@ export class Parts {
     if (this.shown) this.fill(this.shown)
   }
 
-  resetSelected() {
-    const sel = this.selected
+  resetSelected(h: Hand = this.host) {
+    const sel = h.selected
     if (this.live_(sel)) { this.tradeoffOf(sel)!.reset(sel!.key); return }
     const o = sel?.object
     if (!o) return
@@ -333,19 +456,23 @@ export class Parts {
       s.hl += (s.hlTarget - s.hl) * k
       o.scale.copy(s.base.s).multiplyScalar(s.user * s.hl)
     }
-    const sel = this.selected
-    const showHalo = !!sel?.movable
-    this.haloOpacity += ((showHalo ? 0.9 : 0) - this.haloOpacity) * k
-    ;(this.halo.material as THREE.MeshBasicMaterial).opacity = this.haloOpacity
-    this.halo.visible = this.haloOpacity > 0.02
-    if (sel && this.halo.visible) {
-      const sphere = new THREE.Box3().setFromObject(sel.object).getBoundingSphere(new THREE.Sphere())
-      this.halo.position.copy(sphere.center)
-      this.halo.quaternion.copy(this.camera.quaternion)
-      this.halo.geometry = sel.kind === 'object' ? this.rings.object : this.rings.part
-      this.halo.scale.setScalar(Math.max(0.08, sphere.radius * (sel.kind === 'object' ? 1.04 : 1.35)))
+    // One halo per hand, in its colour.
+    for (const h of this.hands.values()) {
+      const sel = h.selected
+      h.haloOpacity += ((sel?.movable ? 0.9 : 0) - h.haloOpacity) * k
+      ;(h.halo.material as THREE.MeshBasicMaterial).opacity = h.haloOpacity
+      h.halo.visible = h.haloOpacity > 0.02
+      if (sel && h.halo.visible) {
+        const sphere = new THREE.Box3().setFromObject(sel.object).getBoundingSphere(new THREE.Sphere())
+        h.halo.position.copy(sphere.center)
+        h.halo.quaternion.copy(this.camera.quaternion)
+        // A participant's halo is finer and closer than the screen's own, so several holds don't crowd the model.
+        const own = h === this.host
+        h.halo.geometry = sel.kind === 'object' ? this.rings.object : own ? this.rings.part : this.rings.shared
+        h.halo.scale.setScalar(Math.max(0.08, sphere.radius * (sel.kind === 'object' ? 1.04 : own ? 1.35 : 1.2)))
+      }
     }
-    const part = sel ?? this.hovered
+    const part = this.cardHand.selected ?? this.host.hovered
     if (!part) {
       if (this.cardShown) { this.card.classList.remove('in'); this.cardShown = false }
       return

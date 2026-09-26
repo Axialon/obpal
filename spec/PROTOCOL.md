@@ -67,6 +67,7 @@ Unknown message types and fields MUST be ignored.
 - `value{id, v, add?}`: `add: true` when the user added a select option alongside the current one (see Layout)
 - `mode{m}`
 - `recenter`
+- `claim{node}`: claim a node the host listed in `scene`; `null` releases what this device holds (CATALOGUE §5). Hosts that list no nodes ignore it.
 - `ping{t0}`
 - `bye`
 
@@ -76,7 +77,12 @@ Unknown message types and fields MUST be ignored.
 - `state{values}`
 - `feedback{haptic?: tick|bump, toast?}`
 - `pong{t0}`
-- `lock{reason}`
+- `scene{you, people, nodes?, held}`: a shared scene (CATALOGUE §5). Sent to every participant when anyone joins, leaves, claims or releases.
+  - `you`: the receiving participant's id.
+  - `people: [{id, name, color, lead?}]`: everyone in the scene, including the screen (`host`).
+  - `nodes: [{id, name, kind, group?}]`: what can be claimed; omitted when unchanged.
+  - `held: {nodeId: participantId}`: who holds what.
+- `lock{reason}`: `taken-over` (a one-device host gave control to another device), `host-closed`, `rejected` (binding failed), `removed` (the host removed this participant, which then MUST NOT rejoin by itself), `full` (the scene has no free place).
 - `rumble{strong, weak, ms}`: vibrate the device, Gamepad API dual-rumble semantics (magnitudes 0–1, at most 5000 ms). Devices that cannot vibrate MAY show it visually.
 
 **Layout:** `{v:1, modes:[modeId…], tray:[{id, label, type?: "button"|"toggle"|"select", icon?, options?: [{value, label, group?, detail?, image?, glyph?, color?}], add?}], utilities?: [utilityId…], profile?: string}`. The device renders the layout. The host alone decides what an `id` does. The reserved id `pad` carries trackpad taps. A `select` with `add: true` belongs to a host that composes scenes: devices offer a second action on each option that adds it alongside the current one, sent as `value{id, v, add: true}`. `utilities` lists the catalogue utilities the host accepts (CATALOGUE §1; absent means all) and `profile` suggests a catalogue profile for whatever the host controls right now (CATALOGUE §3); a host MAY send a new `layout` whenever either changes.
@@ -190,6 +196,7 @@ A browser-extension host that drives programs outside the browser talks to a nat
 ## 8. Extending
 
 - New device classes (wheels, pedals, knobs, custom hardware) declare `caps` and reuse the STATE fields they need. Anything else goes in new ctl messages.
-- New kinds of control go into the catalogue (CATALOGUE §5) with a stable id, and reuse PAD, STATE or POINTER fields where they can; a new packet type is the last resort.
+- Shared scenes (CATALOGUE §5) use `scene` and `claim`. Input packets need no change: the host knows which participant each connection belongs to. A device that bridges several controllers (CATALOGUE §6) will open sub-participants with a `seat{op, seat, name, kind}` message, and their packets will carry the seat index.
+- New kinds of control go into the catalogue (CATALOGUE §8) with a stable id, and reuse PAD, STATE or POINTER fields where they can; a new packet type is the last resort.
 - The high nibble of byte 0 carries the packet version and the low nibble the type (`0x11` STATE, `0x12` PAD, `0x14` POINTER), so a batched v2 STATE or a native 200 Hz variant can use `0x21`. Receivers MUST ignore packet types they don't know.
 - Future work: a short-code pairing flow (commit-reveal ECDH with a SAS compared on both screens), resume without rescanning over the room service (the direct code of §2a already covers the LAN), a WSS relay fallback, and a registry of controller profiles.

@@ -16,6 +16,7 @@
     "sync:family": "node scripts/sync-family.mjs",
     "pack:extension": "pnpm run build:extension && pnpm --filter @obpal/extension run pack",
     "e2e:extension": "vite build && pnpm run build:extension && pnpm --filter @obpal/extension run e2e",
+    "e2e:shared": "vite build && node scripts/e2e-shared.mjs",
     "bench:extension": "vite build && pnpm run build:extension && node extension/scripts/bench.mjs",
     "icons": "node scripts/brand-icons.mjs"
   },

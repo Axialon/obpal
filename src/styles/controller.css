@@ -81,6 +81,8 @@ body { letter-spacing: -0.006em; background: var(--page); }
 .tray-btn.select { flex-direction: row; gap: 10px; padding: 0 10px 0 8px; min-width: 0; max-width: 62vw; border-color: rgb(var(--accent-rgb) / 0.45); background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.26), rgb(var(--hl-rgb) / 0.04)); color: var(--ink); }
 .sel-thumb { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 13px; background: rgb(var(--base-rgb) / 0.55); border: 1px solid rgb(var(--hl-rgb) / 0.1); font-size: 18px; font-weight: 800; overflow: hidden; }
 .sel-thumb img { width: 36px; height: 36px; object-fit: contain; }
+/* Shared scene: this device's colour (its accent), the same as its cursor and halo on the screen. */
+.seat-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.22), 0 0 14px rgb(var(--accent-rgb) / 0.6); }
 .sel-v { font-size: 14px; font-weight: 700; letter-spacing: -0.012em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tray-btn.select > .ic { width: 16px; height: 16px; color: var(--accent-soft); }
 
@@ -175,6 +177,8 @@ body { letter-spacing: -0.006em; background: var(--page); }
 .pad-part .pp-x { display: none; width: 26px; height: 26px; place-items: center; border: 0; border-radius: 50%; background: rgb(0 0 0 / 0.12); color: inherit; }
 .pad-part .pp-x .ic { width: 14px; height: 14px; }
 .pad-part.sel { background: var(--glass-light) !important; color: var(--accent-ink); border-color: rgb(255 255 255 / 0.3) !important; }
+/* The held value reads in the chip's own ink on any accent. */
+.pad-part.sel .pp-tag { color: currentColor; opacity: 0.72; }
 .pad-part.sel .pp-dot { background: var(--accent-ink); box-shadow: none; }
 .pad-part.sel .pp-x { display: grid; }
 

@@ -371,7 +371,22 @@ r.on('button', e => ...); r.sample(frameTime); r.setLayout(json);
 - Virtual HID (HIDMaestro, spacenavd).
 - Android Direct mode.
 - Native shell, one Expo app with a Kotlin module, **only** if it wins more than 10 ms or iOS haptics are required.
-- Offline WebTransport LAN mode (Safari 26.4+); multi-controller rooms.
+- Offline WebTransport LAN mode (Safari 26.4+).
+
+**Shared scenes, bridges and control systems (from 2026-09-26; CATALOGUE §5–7):**
+
+| Phase | Work |
+|---|---|
+| A | Shared scenes in the Viewer (`system.scene3d`): invites, participants with colours, one claim per node, a cursor per participant, a scene list on the phone, and remove / new link on the screen |
+| B | `system.gamepad-slots` in ob.Pal Link (one pad per phone, Player 1–4) and `bridge.gamepad` (Gamepad API controllers through a phone or PC, one participant each) |
+| C | `bridge.xr` (WebXR controllers and hands, one participant per hand), then `bridge.joycon` and `bridge.wiimote` over WebHID |
+| D | `system.robot-arm`: a reference bridge (ROS 2 through rosbridge, against a simulated arm first), with host approval, deadman, limits in the bridge, a 200 ms watchdog, e-stop on every device, and a claim log |
+
+**Queued (owner, 2026-09-26; after the usage reset):**
+- **Embedding for developers and AI agents.** A drop-in way to add ob.Pal to any app or page: a script tag or web component, the npm package, and agent-readable docs (llms.txt, typed examples). A page's code decides which 3D models are controllable, and any of them can then be taken over through a QR code or link.
+- **Branded QR codes.** ob.Pal's own QR design (mark, dot style, colour) as brand identity: the product is free, so the code is the marketing. Each code stays scannable and unique to its scene.
+- **Non-blocking, host-branded pairing.** The invite sits in the page without covering the scene and takes on the host site's brand (colours, type, placement).
+- **Trackpad depth field.** The phone trackpad's dot matrix responds to a swipe with a 3D depth-field effect.
 
 ## 11. Dev loop & repo layout
 

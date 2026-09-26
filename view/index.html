@@ -22,10 +22,13 @@
         <button class="switch-btn" id="t-switch" aria-label="Blackboxes apps" data-tip="Blackboxes apps"></button>
       </div>
       <div class="chip glass" id="chip" hidden>
-        <span class="chip-ic" data-icon="phone"></span>
-        <span class="chip-text" id="chip-text"></span>
+        <button class="chip-who" id="chip-who" aria-label="People in this scene" data-tip="People">
+          <span class="chip-people" id="chip-people"></span>
+          <span class="chip-text" id="chip-text"></span>
+        </button>
         <span class="chip-mode" id="chip-mode"></span>
-        <button class="chip-x" id="chip-disc" aria-label="Disconnect phone" data-tip="Disconnect" data-icon="close"></button>
+        <button class="chip-x" id="chip-invite" aria-label="Invite another device" aria-pressed="false" data-tip="Invite" data-icon="plus"></button>
+        <button class="chip-x" id="chip-disc" aria-label="Disconnect everyone" data-tip="Disconnect" data-icon="close"></button>
       </div>
       <nav class="tools glass" id="tools" aria-label="View options">
         <button class="tool t2" id="t-grid" aria-label="Grid" aria-pressed="true" data-tip="Grid · G" data-icon="grid"></button>
@@ -57,6 +60,10 @@
     <div class="bb-menu bb-glass switcher" id="switcher" aria-label="Blackboxes apps" hidden></div>
     <div class="themes glass" id="themes" role="radiogroup" aria-label="Theme" hidden></div>
     <div class="lighting glass" id="lighting" aria-label="Lighting" hidden><div class="lt-presets" id="lt-presets"></div><div class="lt-sliders" id="lt-sliders"></div><button class="lt-reset" id="lt-reset">Reset</button></div>
+    <div class="people glass" id="people" hidden role="dialog" aria-label="People in this scene">
+      <ul class="people-list" id="people-list"></ul>
+      <button class="people-new" id="invite-new">New invite link</button>
+    </div>
     <div class="v-pair" id="pair"></div>
     <div class="pointer" id="pointer" hidden></div>
     <div class="loading glass" id="loading" hidden><span class="ring" aria-hidden="true"></span><span id="loading-text"></span></div>

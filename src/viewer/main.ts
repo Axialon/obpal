@@ -9,11 +9,11 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
-import { Mode, PointerFlag, Remote, type Layout, type ModeId, type PadState, type PointerState } from '@obpal/host'
+import { Mode, PointerFlag, Remote, type Frame, type Layout, type ModeId, type PadState, type Participant, type PointerState } from '@obpal/host'
 import { CATALOG, CATEGORIES, DEFAULT_ITEM, LOCAL_CATEGORY, type CatalogItem } from './catalog'
 import { localFolder } from './local-folder'
 import { applyGamepad, type GamepadContext } from './gamepad-input'
-import { ENGINE_OF, Parts, type Part } from './nodes'
+import { ENGINE_OF, Parts, type Hand, type Part } from './nodes'
 import { ScreenPointer } from './pointer'
 import { Tradeoff } from './tradeoff'
 import { LIGHT_CONTROLS, LIGHT_PRESETS, loadLighting, saveLighting, type Lighting } from './lighting'
@@ -131,18 +131,28 @@ scene.add(shadow)
 const holder = new THREE.Group()
 scene.add(holder)
 
-// Parts of the current model: hover cards, selection and per-part manipulation.
-let lastPart = ''
-let lastHover = ''
+// Parts of the current model: hover cards, selection and per-part manipulation, for the screen and each device.
+const partsSent = new Map<string, string>()
 const parts = new Parts(camera, scene, {
-  changed: (hover: Part | null, sel: Part | null) => {
-    const focus = sel ?? hover
+  changed: (hand) => {
+    // The trade-off model highlights what the screen is on, else what the hand that just changed holds.
+    const lead = parts.selected || parts.hovered ? parts.host : hand
+    const focus = lead.selected ?? lead.hovered
     for (const e of sceneObjects) e.tradeoff?.setFocus(focus?.root === e.obj ? focus.key ?? null : null)
-    const part = sel?.title ?? ''
-    const hov = hover?.title ?? ''
-    if (part !== lastPart || hov !== lastHover) { lastPart = part; lastHover = hov; remote?.setValues({ part, hoverPart: hov, ...pillarValues() }) }
-    if (hover?.movable && !pointerOn) hint('parts', () => document.querySelector('.node-card'), 'Click to select · drag to move · double-click to reset', { place: 'bottom', delay: 900 })
+    if (hand.id !== 'host') {
+      // Each device hears about its own hand: what it holds and what its cursor is on.
+      const part = hand.selected?.title ?? ''
+      const hov = hand.hovered?.title ?? ''
+      if (partsSent.get(hand.id) !== `${part}\n${hov}`) {
+        partsSent.set(hand.id, `${part}\n${hov}`)
+        remote?.setValues({ part, hoverPart: hov, ...pillarValues(hand) }, hand.id)
+      }
+    } else if (hand.hovered?.movable && !anyPointer()) {
+      hint('parts', () => document.querySelector('.node-card'), 'Click to select · drag to move · double-click to reset', { place: 'bottom', delay: 900 })
+    }
+    publishScene()
   },
+  taken: (from, part) => remote?.feedback({ haptic: 'bump', toast: `The screen took ${part.title}` }, from.id),
 })
 
 // The composer renders off-screen, where the canvas's built-in anti-aliasing does not apply: use 4x MSAA targets.
@@ -655,9 +665,9 @@ function note(text: string) {
 
 // ---- live trade-off models: engine pillars re-solve as they move --------------------------------
 
-/** The selected part's live value, for the phone (empty unless it is a pillar of a live trade-off model). */
-function pillarValues() {
-  const sel = parts.selected
+/** A hand's held part's live value, for its phone (empty unless it is a pillar of a live trade-off model). */
+function pillarValues(hand: Hand = parts.host) {
+  const sel = hand.selected
   const live = sel && parts.live_(sel) ? parts.tradeoffOf(sel)!.describe(sel.key!) : null
   return { partLive: !!live, partValue: live?.text ?? '' }
 }
@@ -665,7 +675,10 @@ let pillarTimer: ReturnType<typeof setTimeout> | undefined
 /** Values change continuously while dragging: send at most ~10 updates a second. */
 function sendPillar() {
   if (pillarTimer) return
-  pillarTimer = setTimeout(() => { pillarTimer = undefined; remote?.setValues(pillarValues()) }, 100)
+  pillarTimer = setTimeout(() => {
+    pillarTimer = undefined
+    for (const h of parts.holders()) if (h.id !== 'host') remote?.setValues(pillarValues(h), h.id)
+  }, 100)
 }
 
 // ---- mouse: hover cards, select, drag parts ---------------------------------------
@@ -679,7 +692,7 @@ canvas.addEventListener('pointermove', (e) => {
     lastXY = [e.clientX, e.clientY]
     return
   }
-  if (e.pointerType === 'mouse' && e.buttons === 0 && !pointerOn) parts.hover(e.clientX, e.clientY)
+  if (e.pointerType === 'mouse' && e.buttons === 0 && !anyPointer()) parts.hover(e.clientX, e.clientY)
   canvas.style.cursor = parts.hovered?.movable ? (parts.selected?.object === parts.hovered.object ? 'grab' : 'pointer') : ''
 })
 canvas.addEventListener('pointerdown', (e) => {
@@ -713,7 +726,7 @@ const endDrag = (e: PointerEvent) => {
 canvas.addEventListener('pointerup', endDrag)
 canvas.addEventListener('pointercancel', () => { dragging = false; controls.enabled = true })
 canvas.addEventListener('dblclick', () => { if (parts.selected) parts.resetSelected() })
-canvas.addEventListener('pointerleave', () => { if (!dragging && !pointerOn) parts.hover(null, null) })
+canvas.addEventListener('pointerleave', () => { if (!dragging && !anyPointer()) parts.hover(null, null) })
 
 // ---- toolbar and keyboard ---------------------------------------------------
 
@@ -738,6 +751,7 @@ function setTheme(t: Theme, sync = true) {
 function setAccent(id: string, sync = true) {
   family.setAccent(id)
   parts.setAccent(family.accentColor())
+  remote?.setHostPerson({ color: family.accentColor() })
   applySceneTheme(theme)
   if (!$('themes').hidden) $('themes').innerHTML = family.themeMenu()
   if (sync) remote?.setValues({ accent: family.getAccent() })
@@ -850,42 +864,161 @@ function syncPhoneModels() {
   remote?.setLayout(layout)
 }
 const MODE_LABEL: Partial<Record<ModeId, string>> = { [Mode.tilt]: 'Tilt', [Mode.hold]: '1:1', [Mode.point]: 'Point', [Mode.orbit]: 'Gyro', [Mode.gamepad]: 'Gamepad' }
-let remote: Remote | null = null
 const emptyPadState: PadState = { flags: 0, seq: 0, t: 0, buttons: 0, axes: [0, 0, 0, 0], triggers: [0, 0] }
-let pointerOn = false
-const pointer = { x: innerWidth / 2, y: innerHeight / 2 }
-const pointerEl = $('pointer')
-/** Wii-style pointing (./pointer.ts). A selects, holding B grabs (a part, a live pillar, or the view), + / - zoom. */
-const aimPointer = new ScreenPointer()
-let grabbing = false
-let lastHoverObj: THREE.Object3D | null = null
-function recenterPointer() { aimPointer.recenter(); pointer.x = innerWidth / 2; pointer.y = innerHeight / 2 }
+let remote: Remote | null = null
+
+// ---- shared scene: every connected device is a seat, with its own cursor and hand (CATALOGUE §5) ----
+
+/** One device in the scene: its cursor, its grab and motion state, and the hand that holds its part. */
+interface Seat {
+  who: Participant
+  hand: Hand
+  el: HTMLElement
+  aim: ScreenPointer
+  pointerOn: boolean
+  x: number
+  y: number
+  grabbing: boolean
+  wasClutch: boolean
+  base: THREE.Quaternion
+  lastGrab: number
+  lastHoverObj: THREE.Object3D | null
+  padPointing: boolean
+  padAB: number
+  /** Gamepad contexts: the lead's drives the view and the scene; everyone else's only moves what it holds. */
+  gpLead: GamepadContext
+  gpOwn: GamepadContext
+}
+const seats = new Map<string, Seat>()
+const pointerTemplate = $('pointer')
+/** The lead drives the shared view (the camera, the whole scene) while it holds nothing. */
+const isLead = (s: Seat) => !!remote?.participants.find((p) => p.id === s.who.id)?.lead
+const anyPointer = () => [...seats.values()].some((s) => s.pointerOn || s.padPointing)
+const anyClutch = () => [...seats.values()].some((s) => s.wasClutch)
+const rgbOf = (hex: string) => { const n = parseInt(hex.slice(1), 16); return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}` }
+const clampX = (x: number) => Math.min(innerWidth - 14, Math.max(14, x))
+const clampY = (y: number) => Math.min(innerHeight - 14, Math.max(14, y))
+
+function addSeat(who: Participant): Seat {
+  const el = pointerTemplate.cloneNode(true) as HTMLElement
+  el.removeAttribute('id')
+  el.hidden = true
+  el.style.setProperty('--accent', who.color)
+  el.style.setProperty('--accent-rgb', rgbOf(who.color))
+  const tag = document.createElement('span')
+  tag.className = 'pt-name'
+  tag.textContent = who.name
+  el.appendChild(tag)
+  document.body.appendChild(el)
+  const s = {
+    who, hand: parts.hand(who.id, who.color), el, aim: new ScreenPointer(), pointerOn: false, x: innerWidth / 2, y: innerHeight / 2,
+    grabbing: false, wasClutch: false, base: new THREE.Quaternion(), lastGrab: -1, lastHoverObj: null, padPointing: false, padAB: 0,
+  } as Seat
+  s.gpLead = leadGamepad(s)
+  s.gpOwn = ownGamepad(s)
+  seats.set(who.id, s)
+  return s
+}
+
+function removeSeat(id: string) {
+  const s = seats.get(id)
+  if (!s) return
+  s.el.remove()
+  parts.dropHand(id)
+  seats.delete(id)
+}
+
+function recenterSeat(s: Seat) { s.aim.recenter(); s.x = innerWidth / 2; s.y = innerHeight / 2 }
+
+function setSeatPointer(s: Seat, on: boolean) {
+  s.pointerOn = on
+  s.el.hidden = !on && !s.padPointing
+  s.grabbing = false
+  if (on) recenterSeat(s)
+  else if (!s.padPointing) parts.hover(null, null, s.hand)
+}
+
+/** Who holds a part, as a device should hear it. */
+function holderName(h: Hand | null) {
+  if (!h) return 'Someone'
+  return h === parts.host ? 'The screen' : seats.get(h.id)?.who.name ?? 'Someone'
+}
+
+function heldFeedback(s: Seat, part: Part | null) {
+  remote?.feedback({ haptic: 'bump', toast: `${holderName(parts.holderOf(part))} has ${part?.title ?? 'that'}` }, s.who.id)
+}
+
+/** A (or a tap): take what's under the cursor, let go on empty space, and for the lead, focus the view there. */
+function seatSelect(s: Seat) {
+  const r = parts.pickFor(s.hand)
+  if (r === 'picked') { renderScene(false); remote?.feedback({ haptic: 'tick' }, s.who.id) }
+  else if (r === 'held') heldFeedback(s, s.hand.hovered)
+  else if (s.hand.selected) { parts.select(null, s.hand); renderScene(false) }
+  else if (isLead(s)) focusAt(s)
+}
+
+/** Holding B grabs: what the cursor is on (if nobody else has it), else what the seat already holds. */
+function seatGrab(s: Seat, down: boolean) {
+  s.grabbing = down
+  if (!down) return
+  const hov = s.hand.hovered
+  if (hov?.movable && !parts.holdsHovered(s.hand) && !parts.select(hov, s.hand)) { s.grabbing = false; heldFeedback(s, hov); return }
+  remote?.feedback({ haptic: 'tick' }, s.who.id)
+}
+
+/** A grab drags what the seat holds; the lead, holding nothing, turns the view. */
+function dragBy(s: Seat, dx: number, dy: number) {
+  if (s.hand.selected?.movable) parts.move(dx, dy, s.hand)
+  else if (isLead(s)) void controls.rotate(-dx * 0.006, -dy * 0.006, true)
+}
+
+function drawCursor(s: Seat, px: number, py: number, vx: number, vy: number, off: boolean) {
+  s.el.style.transform = `translate(${px}px, ${py}px)`
+  s.el.style.setProperty('--ang', `${Math.atan2(vy - py, vx - px)}rad`)
+  s.el.classList.toggle('off', off)
+  s.el.classList.toggle('grab', s.grabbing)
+  s.el.classList.toggle('on-part', !!s.hand.hovered)
+}
 
 async function startRemote() {
-  remote = await Remote.create({ appName: 'ob.Pal Viewer', layout })
-  Object.assign(window, { __obpal: remote, __viewer: { holder, camera, controls, view } })
+  remote = await Remote.create({ appName: 'ob.Pal Viewer', layout, seats: 8 })
+  remote.setHostPerson({ name: 'Screen', color: family.accentColor() })
+  Object.assign(window, { __obpal: remote, __viewer: { holder, camera, controls, view, seats, parts } })
   remote.mountPairing($('pair'), { variant: 'compact' })
   hint('pair', () => $('pair'), 'Scan with your phone camera to take control', { place: 'top', delay: 1400 })
-  remote.on('connect', ({ name }) => {
+  remote.on('connect', () => {
     dismissHint('pair')
     $('pair').hidden = true
     $('chip').hidden = false
-    $('chip-text').textContent = name
     remote!.setValues({ model: current?.id ?? '', spin: view.spin, grid: view.grid, glow: view.glow, theme: theme.id, accent: family.getAccent(), light: lighting.preset })
-    note(`${name} connected`)
   })
   remote.on('disconnect', () => {
     $('chip').hidden = true
     $('pair').hidden = false
-    setPointer(false)
-    note('Phone disconnected')
+    togglePeople(false)
   })
-  remote.on('mode', (m) => {
-    setPointer(m === Mode.point)
-    if (m !== Mode.point) parts.hover(null, null)
-    $('chip-mode').textContent = MODE_LABEL[m] ?? ''
+  remote.on('join', (p) => {
+    addSeat(p)
+    renderPeople()
+    // Only the invite card's own scan closes it: a join from elsewhere leaves it open for the next person.
+    if ($('pair').dataset.invite === 'open') setInvite(false)
+    note(`${p.name} joined`)
+    publishScene(true)
   })
-  remote.on('recenter', recenterPointer)
+  remote.on('leave', (p) => {
+    removeSeat(p.id)
+    renderPeople()
+    note(`${p.name} left`)
+    publishScene()
+  })
+  remote.on('mode', (m, who) => {
+    const s = seats.get(who.id)
+    if (!s) return
+    setSeatPointer(s, m === Mode.point)
+    if (m !== Mode.point) parts.hover(null, null, s.hand)
+    if (isLead(s)) $('chip-mode').textContent = MODE_LABEL[m] ?? ''
+  })
+  remote.on('recenter', (who) => { const s = seats.get(who.id); if (s) recenterSeat(s) })
   remote.on('value', ({ id, v, add }) => {
     if (id === 'model') { const item = CATALOG.find((i) => i.id === v); if (item) void selectItem(item, add) }
     else if (id === 'spin' || id === 'grid' || id === 'glow') { view[id] = !!v; applyView() }
@@ -893,115 +1026,264 @@ async function startRemote() {
     else if (id === 'accent') setAccent(String(v))
     else if (id === 'light') setPreset(String(v))
   })
-  remote.on('button', ({ id, ev }) => {
-    if (id === 'reset') resetView()
-    else if (id === 'frame') frameModel()
-    else if (id === 'part-release') parts.select(null)
-    else if (id === 'wii-a' && pointerOn) {
-      if (parts.pick()) renderScene(false)
-      else if (parts.selected) { parts.select(null); renderScene(false) }
-      else focusAtPointer()
-    } else if (id === 'wii-b' && pointerOn) {
-      grabbing = ev === 'down'
-      if (grabbing && parts.hovered?.movable && !parts.holdsHovered()) parts.select(parts.hovered)
-      if (grabbing) remote?.feedback({ haptic: 'tick' })
-    } else if ((id === 'wii-plus' || id === 'wii-minus') && pointerOn) {
-      const k = id === 'wii-plus' ? 1 : -1
-      if (parts.selected && !parts.live_(parts.selected)) parts.scaleBy(k * 0.25)
-      else void controls.dolly(controls.distance * (k > 0 ? 1 - 1 / 1.25 : 1 - 1.25), true)
-    }
-    else if (id === 'pad') {
-      if (ev === 'double') { if (parts.selected) parts.resetSelected(); else frameModel() }
-      else if (ev === 'long') { if (parts.selected) parts.select(null); else resetView() }
-      else if (ev === 'tap' && pointerOn) {
-        if (parts.pick()) renderScene(false)
-        else if (parts.selected) { parts.select(null); renderScene(false) }
-        else focusAtPointer()
-      }
-    }
+  remote.on('button', ({ id, ev }, who) => {
+    const s = seats.get(who.id)
+    if (s) seatButton(s, id, ev)
+  })
+  // A device picked a node from its scene list (null: let go).
+  remote.on('claim', ({ node }, who) => {
+    const s = seats.get(who.id)
+    if (!s) return
+    if (node === null) { parts.select(null, s.hand); renderScene(false); return }
+    const part = nodeParts.get(node)
+    if (!part) { remote?.feedback({ haptic: 'bump', toast: 'That’s no longer in the scene' }, who.id); return }
+    if (parts.select(part, s.hand)) { renderScene(false); remote?.feedback({ haptic: 'tick' }, who.id) }
+    else heldFeedback(s, part)
   })
   $('chip-disc').onclick = () => remote?.disconnect()
+  $('chip-invite').onclick = () => setInvite($('pair').dataset.invite !== 'open')
+  $('chip-who').onclick = () => togglePeople()
+  $('invite-new').onclick = async () => {
+    await remote?.resetInvite()
+    note('New invite link: the old code no longer works')
+  }
 }
 
-function setPointer(on: boolean) {
-  pointerOn = on
-  pointerEl.hidden = !on
-  grabbing = false
-  if (on) recenterPointer()
+function seatButton(s: Seat, id: string, ev: string) {
+  const lead = isLead(s)
+  const h = s.hand
+  if (id === 'reset') { if (h.selected) parts.resetSelected(h); else if (lead) resetView() }
+  else if (id === 'frame') { if (lead) frameModel() }
+  else if (id === 'part-release') { parts.select(null, h); renderScene(false) }
+  else if (id === 'wii-a' && s.pointerOn) seatSelect(s)
+  else if (id === 'wii-b' && s.pointerOn) seatGrab(s, ev === 'down')
+  else if ((id === 'wii-plus' || id === 'wii-minus') && s.pointerOn) {
+    const k = id === 'wii-plus' ? 1 : -1
+    if (h.selected && !parts.live_(h.selected)) parts.scaleBy(k * 0.25, h)
+    else if (lead) void controls.dolly(controls.distance * (k > 0 ? 1 - 1 / 1.25 : 1 - 1.25), true)
+  } else if (id === 'pad') {
+    if (ev === 'double') { if (h.selected) parts.resetSelected(h); else if (lead) frameModel() }
+    else if (ev === 'long') { if (h.selected) { parts.select(null, h); renderScene(false) } else if (lead) resetView() }
+    else if (ev === 'tap' && s.pointerOn) seatSelect(s)
+  }
+}
+
+// ---- the scene's nodes and who holds them, published to every device ----
+
+const nodeParts = new Map<string, Part>()
+
+/** Tell every device what it can claim (after the scene's objects change) and who holds what. */
+function publishScene(nodesChanged = false) {
+  if (!remote?.shared) return
+  if (nodesChanged) {
+    nodeParts.clear()
+    for (const p of parts.listable()) nodeParts.set(p.object.uuid, p)
+  }
+  const held: Record<string, string> = {}
+  for (const h of parts.holders()) held[h.selected!.object.uuid] = h.id
+  const nodes = nodesChanged ? [...nodeParts].map(([id, p]) => ({ id, name: p.title, kind: p.kind, group: parts.groupOf(p) })) : undefined
+  remote.setScene({ held, ...(nodes ? { nodes } : {}) })
+  renderPeople()
+}
+
+// ---- presence: who's in the scene, the invite, and removing someone ----
+
+const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('') || '•'
+
+function renderPeople() {
+  const list = remote?.participants ?? []
+  const dots = $('chip-people')
+  dots.replaceChildren(...list.map((p) => {
+    const d = document.createElement('span')
+    d.className = 'person'
+    d.style.setProperty('--c', p.color)
+    d.textContent = initials(p.name)
+    return d
+  }))
+  $('chip-text').textContent = list.length === 1 ? list[0].name : `${list.length} people`
+  document.body.classList.toggle('multi', list.length > 1)
+  const rows = $('people-list')
+  rows.replaceChildren(...list.map((p) => {
+    const li = document.createElement('li')
+    const held = seats.get(p.id)?.hand.selected
+    li.innerHTML = '<span class="person"></span><span class="pp-text"><b></b><small></small></span><button class="chip-x" data-icon="close"></button>'
+    const dot = li.querySelector<HTMLElement>('.person')!
+    dot.style.setProperty('--c', p.color)
+    dot.textContent = initials(p.name)
+    li.querySelector('b')!.textContent = p.name
+    li.querySelector('small')!.textContent = [p.lead ? 'Drives the view' : '', held ? `Holding ${held.title}` : ''].filter(Boolean).join(' · ') || 'Free'
+    const x = li.querySelector<HTMLButtonElement>('button')!
+    x.innerHTML = ICONS.close
+    x.setAttribute('aria-label', `Remove ${p.name}`)
+    x.onclick = () => { remote?.disconnect(p.id); note(`Removed ${p.name}`) }
+    return li
+  }))
+}
+
+function togglePeople(on = $('people').hidden) {
+  $('people').hidden = !on
+  if (on) setInvite(false)
+}
+
+/** The invite card: the pairing QR and link, shown on demand while devices are connected. */
+function setInvite(on: boolean) {
+  if (remote?.status !== 'connected') return
+  $('pair').hidden = !on
+  $('pair').dataset.invite = on ? 'open' : ''
+  $('chip-invite').setAttribute('aria-pressed', String(on))
+  if (on) $('people').hidden = true
 }
 
 /**
- * Gamepad mode with the phone's Point utility on (PROTOCOL §6): the same Wii cursor, at the absolute angle the phone sends.
- * A selects (a part, else focus), holding B grabs, as in Point mode; both then leave the pad, so the pad mapping does not
- * also frame or reset the view. Returns the pad the gamepad mapping should see.
+ * Gamepad mode with the phone's Point utility on (PROTOCOL §6): the seat's Wii cursor, at the absolute angle the phone
+ * sends. A selects, holding B grabs, as in Point mode; both then leave the pad, so the pad mapping does not also frame
+ * or reset the view. Returns the pad the gamepad mapping should see.
  */
-let padPointing = false
-let padAB = 0
-function padPointer(pad: PadState, pt: PointerState | null): PadState {
+function seatPadPointer(s: Seat, pad: PadState, pt: PointerState | null): PadState {
   if (!pt) {
-    if (padPointing) { padPointing = false; grabbing = false; if (!pointerOn) { pointerEl.hidden = true; parts.hover(null, null) } }
+    if (s.padPointing) { s.padPointing = false; s.grabbing = false; if (!s.pointerOn) { s.el.hidden = true; parts.hover(null, null, s.hand) } }
     return pad
   }
-  if (!padPointing) { padPointing = true; padAB = pad.buttons & 3; pointerEl.hidden = false }
+  if (!s.padPointing) { s.padPointing = true; s.padAB = pad.buttons & 3; s.el.hidden = false }
   const { x: vx, y: vy, off } = ScreenPointer.project(pt.yaw, pt.pitch, innerWidth, innerHeight)
-  const px = Math.min(innerWidth - 14, Math.max(14, vx))
-  const py = Math.min(innerHeight - 14, Math.max(14, vy))
-  const dx = px - pointer.x
-  const dy = py - pointer.y
+  const px = clampX(vx)
+  const py = clampY(vy)
   const a = pad.buttons & 1
   const b = pad.buttons & 2
-  const sel = parts.selected?.movable ? parts.selected : null
-  if (b && !(padAB & 2)) {
-    grabbing = true
-    if (parts.hovered?.movable && !parts.holdsHovered()) parts.select(parts.hovered)
-    remote?.feedback({ haptic: 'tick' })
-  }
-  if (!b) grabbing = false
-  if (grabbing && (dx || dy)) {
-    if (sel) parts.move(dx, dy)
-    else void controls.rotate(-dx * 0.006, -dy * 0.006, true)
-  }
-  pointer.x = px
-  pointer.y = py
-  if (a && !(padAB & 1)) {
-    if (parts.pick()) renderScene(false)
-    else if (parts.selected) { parts.select(null); renderScene(false) }
-    else focusAtPointer()
-  }
-  padAB = pad.buttons & 3
-  pointerEl.style.transform = `translate(${px}px, ${py}px)`
-  pointerEl.style.setProperty('--ang', `${Math.atan2(vy - py, vx - px)}rad`)
-  pointerEl.classList.toggle('off', off)
-  pointerEl.classList.toggle('grab', grabbing)
-  pointerEl.classList.toggle('on-part', !!parts.hovered)
-  if (!grabbing) parts.hover(off ? null : px, off ? null : py)
+  if (b && !(s.padAB & 2)) seatGrab(s, true)
+  if (!b) s.grabbing = false
+  if (s.grabbing && (px !== s.x || py !== s.y)) dragBy(s, px - s.x, py - s.y)
+  s.x = px
+  s.y = py
+  if (a && !(s.padAB & 1)) seatSelect(s)
+  s.padAB = pad.buttons & 3
+  drawCursor(s, px, py, vx, vy, off)
+  if (!s.grabbing) parts.hover(off ? null : px, off ? null : py, s.hand)
   return { ...pad, buttons: pad.buttons & ~3 }
 }
 
 const raycaster = new THREE.Raycaster()
-function focusAtPointer() {
-  const ndc = new THREE.Vector2((pointer.x / innerWidth) * 2 - 1, -(pointer.y / innerHeight) * 2 + 1)
+/** Orbit about the point under a seat's cursor (the lead's). */
+function focusAt(s: Seat) {
+  const ndc = new THREE.Vector2((s.x / innerWidth) * 2 - 1, -(s.y / innerHeight) * 2 + 1)
   raycaster.setFromCamera(ndc, camera)
   const hit = raycaster.intersectObject(holder, true)[0]
-  pointerEl.classList.remove('pulse')
-  void pointerEl.offsetWidth
-  pointerEl.classList.add('pulse')
+  s.el.classList.remove('pulse')
+  void s.el.offsetWidth
+  s.el.classList.add('pulse')
   if (hit) {
     void controls.setOrbitPoint(hit.point.x, hit.point.y, hit.point.z)
-    remote?.feedback({ haptic: 'tick' })
+    remote?.feedback({ haptic: 'tick' }, s.who.id)
   }
 }
 
-// ---- gamepad: a phone in gamepad mode drives the view (mapping in ./gamepad-input.ts) ----
+// ---- gamepad: a phone in gamepad mode (mapping in ./gamepad-input.ts) ----
 
-const gamepadCtx: GamepadContext = {
-  controls, camera, holder, frame: frameModel, step: stepItem,
-  // B is "back", as in games: release a selected part first, otherwise reset the view.
-  reset: () => { if (parts.selected) parts.select(null); else resetView() },
-  // The right stick turns a selected part, or the whole model.
-  turn: (q) => { if (parts.selected?.movable) parts.rotateWorld(q); else holder.quaternion.premultiply(q) },
-  toggle: (k) => { view[k] = !view[k]; applyView() },
-  toggleCatalog: () => setCatalog($('catalog').dataset.state === 'rail'),
+/** The lead: sticks drive the view and the scene, as with one phone. */
+function leadGamepad(s: Seat): GamepadContext {
+  return {
+    controls, camera, holder, frame: frameModel, step: stepItem,
+    // B is "back", as in games: release what it holds first, otherwise reset the view.
+    reset: () => { if (s.hand.selected) parts.select(null, s.hand); else resetView() },
+    // The right stick turns what it holds, or the whole model.
+    turn: (q) => { if (s.hand.selected?.movable) parts.rotateWorld(q, s.hand); else holder.quaternion.premultiply(q) },
+    toggle: (k) => { view[k] = !view[k]; applyView() },
+    toggleCatalog: () => setCatalog($('catalog').dataset.state === 'rail'),
+  }
+}
+
+/** Everyone else steers only what they hold: the left stick moves it, the triggers and D-pad scale it, the right stick turns it. */
+function ownGamepad(s: Seat): GamepadContext {
+  const noop = () => {}
+  return {
+    controls: {
+      rotate: (az: number, polar: number) => { if (s.hand.selected) parts.move(-az * 290, -polar * 410, s.hand) },
+      dolly: (d: number) => { if (s.hand.selected && controls.distance > 0) parts.scaleBy(d / controls.distance, s.hand) },
+      get distance() { return controls.distance },
+    },
+    camera, holder, frame: noop, step: noop, toggle: noop, toggleCatalog: noop,
+    reset: () => { if (s.hand.selected) { parts.select(null, s.hand); renderScene(false) } },
+    turn: (q) => parts.rotateWorld(q, s.hand),
+  }
+}
+
+/** Apply one seat's frame: what it holds follows its phone; the lead, holding nothing, moves the view and the scene. */
+function applySeat(s: Seat, f: Frame, dt: number) {
+  if (!f.connected) return
+  const lead = isLead(s)
+  const h = s.hand
+  const sel = h.selected?.movable ? h.selected : null
+  // 1:1 match: while the gyro is on, what the seat drives copies the phone's rotation since it was turned on.
+  const target = sel && !parts.live_(sel) ? sel.object : lead && !sel ? holder : null
+  const matching = f.clutch && f.mode === Mode.hold && !!target
+  if (matching && target) {
+    if (!s.wasClutch || f.grab !== s.lastGrab) { s.base.copy(target.quaternion); s.lastGrab = f.grab }
+    camQ.copy(camera.quaternion)
+    camQi.copy(camQ).invert()
+    qRel.set(f.qRel[0], f.qRel[1], f.qRel[2], f.qRel[3])
+    const world = tmpQ.copy(camQ).multiply(qRel).multiply(camQi)
+    if (target === holder) target.quaternion.copy(world).multiply(s.base)
+    else {
+      const pw = target.parent!.getWorldQuaternion(new THREE.Quaternion())
+      target.quaternion.copy(pw.clone().invert().multiply(world).multiply(pw)).multiply(s.base)
+    }
+  }
+  s.wasClutch = matching
+  camRight.set(1, 0, 0).applyQuaternion(camera.quaternion)
+  // Rate gyro (protocol mode 1): yaw about the world vertical, pitch about the camera's right axis.
+  if (f.mode === Mode.orbit && (f.aim[0] || f.aim[1])) {
+    const qa = new THREE.Quaternion().setFromAxisAngle(WORLD_UP, f.aim[0] * GAME_GAIN * D2R)
+    const qb = new THREE.Quaternion().setFromAxisAngle(camRight, f.aim[1] * GAME_GAIN * D2R)
+    if (sel) { parts.rotateWorld(qa, h); parts.rotateWorld(qb, h) }
+    else if (lead) { holder.quaternion.premultiply(qa); holder.quaternion.premultiply(qb) }
+  }
+  // Racing tilt: what it drives keeps turning while the phone is tilted, and stops when it is level again.
+  if (f.mode === Mode.tilt && (f.tilt[0] || f.tilt[1])) {
+    const qa = new THREE.Quaternion().setFromAxisAngle(WORLD_UP, f.tilt[0] * TILT_YAW_RATE * dt * D2R)
+    const qb = new THREE.Quaternion().setFromAxisAngle(camRight, f.tilt[1] * TILT_PITCH_RATE * dt * D2R)
+    // A live trade-off pillar: tipping the phone away from you raises its value, towards you lowers it.
+    if (sel && parts.live_(sel)) parts.tradeoffOf(sel)!.drive(sel.key!, -f.tilt[1], dt)
+    else if (sel) { parts.rotateWorld(qa, h); parts.rotateWorld(qb, h) }
+    else if (lead) { holder.quaternion.premultiply(qa); holder.quaternion.premultiply(qb) }
+  }
+  if (f.mode === Mode.point) {
+    // Where the phone points; a phone without motion sensors steers with its trackpad instead.
+    const { x: vx, y: vy, dx, dy, off } = s.aim.step(f.aim, sel ? [0, 0] : [f.pad1[0] * 1.2, f.pad1[1] * 1.2], innerWidth, innerHeight)
+    // Holding B drags what it grabbed: a part (or a live pillar's value), otherwise (the lead) the view.
+    if (s.grabbing && (dx || dy)) dragBy(s, dx, dy)
+    let px = clampX(vx)
+    let py = clampY(vy)
+    // Aim assist (display only): when nearly still, the cursor settles onto a nearby node.
+    const m = !s.grabbing && !off && Math.hypot(f.aim[0], f.aim[1]) < 0.12 ? parts.magnet(px, py) : null
+    if (m) { px += (m.x - px) * 0.5; py += (m.y - py) * 0.5 }
+    s.x = px
+    s.y = py
+    drawCursor(s, px, py, vx, vy, off)
+    if (!s.grabbing) parts.hover(off ? null : px, off ? null : py, h)
+    if (sel && !s.grabbing && (f.pad1[0] || f.pad1[1])) parts.move(f.pad1[0] * 1.4, f.pad1[1] * 1.4, h)
+    // Like the Wii: a short buzz as the cursor crosses onto something it can pick up.
+    const ho = h.hovered?.movable ? h.hovered.object : null
+    if (ho && ho !== s.lastHoverObj) remote?.feedback({ haptic: 'tick' }, s.who.id)
+    s.lastHoverObj = ho
+  } else if (sel && (f.pad1[0] || f.pad1[1])) {
+    parts.move(f.pad1[0] * 1.4, f.pad1[1] * 1.4, h)
+  } else if (lead && (f.pad1[0] || f.pad1[1])) {
+    void controls.rotate(-f.pad1[0] * 0.008, -f.pad1[1] * 0.008, true)
+  }
+  if (f.pad2[0] || f.pad2[1]) {
+    if (sel) parts.move(f.pad2[0], f.pad2[1], h)
+    else if (lead) {
+      const k = controls.distance * 0.0022
+      void controls.truck(-f.pad2[0] * k, -f.pad2[1] * k, true)
+    }
+  }
+  if (f.zoom) { if (sel) parts.scaleBy(f.zoom, h); else if (lead) void controls.dolly(controls.distance * (1 - Math.pow(2, -f.zoom)), true) }
+  if (f.twist && sel) parts.twist(f.twist, h)
+  else if (f.twist && lead) {
+    towardViewer.set(0, 0, 1).applyQuaternion(camera.quaternion)
+    holder.quaternion.premultiply(tmpQ.setFromAxisAngle(towardViewer, -f.twist * D2R))
+    if (matching) s.base.premultiply(tmpQ)
+  }
 }
 
 // ---- frame loop -------------------------------------------------------------
@@ -1009,7 +1291,6 @@ const gamepadCtx: GamepadContext = {
 const camQ = new THREE.Quaternion()
 const camQi = new THREE.Quaternion()
 const qRel = new THREE.Quaternion()
-const base = new THREE.Quaternion()
 const tmpQ = new THREE.Quaternion()
 const tmpV = new THREE.Vector3()
 const towardViewer = new THREE.Vector3()
@@ -1018,8 +1299,6 @@ const camRight = new THREE.Vector3()
 const GAME_GAIN = 1.6
 const TILT_YAW_RATE = 160 // degrees/second at full steer
 const TILT_PITCH_RATE = 110
-let lastGrab = -1
-let wasClutch = false
 let lastFrame = 0
 
 // Render above screen resolution (supersampling) for crisp edges, and back off automatically if the GPU can't keep 60 fps.
@@ -1089,84 +1368,17 @@ function loop(now: number) {
   const dt = lastFrame ? Math.min((now - lastFrame) / 1000, 0.1) : 0
   lastFrame = now
   if (remote) {
-    const pad = remote.pad
-    if (pad) {
-      const pt = remote.pointer
-      applyGamepad(padPointer(pad, pt && !(pt.flags & PointerFlag.relative) ? pt : null), dt, gamepadCtx)
-    } else if (padPointing) padPointer({ ...emptyPadState, buttons: 0 }, null)
-    const f = remote.consume(now)
-    if (f.connected) {
-      // 1:1 match: while the gyro is on, the object copies the phone's rotation since it was turned on.
-      const matching = f.clutch && f.mode === Mode.hold
-      if (matching) {
-        if (!wasClutch || f.grab !== lastGrab) { base.copy(holder.quaternion); lastGrab = f.grab }
-        camQ.copy(camera.quaternion)
-        camQi.copy(camQ).invert()
-        qRel.set(f.qRel[0], f.qRel[1], f.qRel[2], f.qRel[3])
-        holder.quaternion.copy(camQ).multiply(qRel).multiply(camQi).multiply(base)
-      }
-      wasClutch = matching
-      camRight.set(1, 0, 0).applyQuaternion(camera.quaternion)
-      // Rate gyro (protocol mode 1): yaw about the world vertical, pitch about the camera's right axis.
-      if (f.mode === Mode.orbit && (f.aim[0] || f.aim[1])) {
-        holder.quaternion.premultiply(tmpQ.setFromAxisAngle(WORLD_UP, f.aim[0] * GAME_GAIN * D2R))
-        holder.quaternion.premultiply(tmpQ.setFromAxisAngle(camRight, f.aim[1] * GAME_GAIN * D2R))
-      }
-      // Racing tilt: the model keeps turning while the phone is tilted, and stops when it is level again.
-      const sel = parts.selected?.movable ? parts.selected : null
-      if (f.mode === Mode.tilt && (f.tilt[0] || f.tilt[1])) {
-        const qa = new THREE.Quaternion().setFromAxisAngle(WORLD_UP, f.tilt[0] * TILT_YAW_RATE * dt * D2R)
-        const qb = new THREE.Quaternion().setFromAxisAngle(camRight, f.tilt[1] * TILT_PITCH_RATE * dt * D2R)
-        // A live trade-off pillar: tipping the phone away from you raises its value, towards you lowers it.
-        if (sel && parts.live_(sel)) parts.tradeoffOf(sel)!.drive(sel.key!, -f.tilt[1], dt)
-        else if (sel) { parts.rotateWorld(qa); parts.rotateWorld(qb) }
-        else { holder.quaternion.premultiply(qa); holder.quaternion.premultiply(qb) }
-      }
-      if (f.mode === Mode.point) {
-        // Where the phone points; a phone without motion sensors steers with its trackpad instead.
-        const { x: vx, y: vy, dx, dy, off } = aimPointer.step(f.aim, sel ? [0, 0] : [f.pad1[0] * 1.2, f.pad1[1] * 1.2], innerWidth, innerHeight)
-        // Holding B drags what it grabbed: a part (or a live pillar's value), otherwise the view.
-        if (grabbing && (dx || dy)) {
-          if (sel) parts.move(dx, dy)
-          else void controls.rotate(-dx * 0.006, -dy * 0.006, true)
-        }
-        let px = Math.min(innerWidth - 14, Math.max(14, vx))
-        let py = Math.min(innerHeight - 14, Math.max(14, vy))
-        // Aim assist (display only): when nearly still, the cursor settles onto a nearby node.
-        const m = !grabbing && !off && Math.hypot(f.aim[0], f.aim[1]) < 0.12 ? parts.magnet(px, py) : null
-        if (m) { px += (m.x - px) * 0.5; py += (m.y - py) * 0.5 }
-        pointer.x = px
-        pointer.y = py
-        pointerEl.style.transform = `translate(${px}px, ${py}px)`
-        pointerEl.style.setProperty('--ang', `${Math.atan2(vy - py, vx - px)}rad`)
-        pointerEl.classList.toggle('off', off)
-        pointerEl.classList.toggle('grab', grabbing)
-        pointerEl.classList.toggle('on-part', !!parts.hovered)
-        if (!grabbing) parts.hover(off ? null : px, off ? null : py)
-        if (sel && !grabbing && (f.pad1[0] || f.pad1[1])) parts.move(f.pad1[0] * 1.4, f.pad1[1] * 1.4)
-        // Like the Wii: a short buzz as the cursor crosses onto something you can pick up.
-        const ho = parts.hovered?.movable ? parts.hovered.object : null
-        if (ho && ho !== lastHoverObj) remote?.feedback({ haptic: 'tick' })
-        lastHoverObj = ho
-      } else if (sel && (f.pad1[0] || f.pad1[1])) {
-        parts.move(f.pad1[0] * 1.4, f.pad1[1] * 1.4)
-      } else if (f.pad1[0] || f.pad1[1]) {
-        void controls.rotate(-f.pad1[0] * 0.008, -f.pad1[1] * 0.008, true)
-      }
-      if (f.pad2[0] || f.pad2[1]) {
-        const k = controls.distance * 0.0022
-        void controls.truck(-f.pad2[0] * k, -f.pad2[1] * k, true)
-      }
-      if (f.zoom) { if (sel) parts.scaleBy(f.zoom); else void controls.dolly(controls.distance * (1 - Math.pow(2, -f.zoom)), true) }
-      if (f.twist && sel) parts.twist(f.twist)
-      else if (f.twist) {
-        towardViewer.set(0, 0, 1).applyQuaternion(camera.quaternion)
-        holder.quaternion.premultiply(tmpQ.setFromAxisAngle(towardViewer, -f.twist * D2R))
-        if (matching) base.premultiply(tmpQ)
-      }
+    for (const seat of seats.values()) {
+      const id = seat.who.id
+      const pad = remote.padOf(id)
+      if (pad) {
+        const pt = remote.pointerOf(id)
+        applyGamepad(seatPadPointer(seat, pad, pt && !(pt.flags & PointerFlag.relative) ? pt : null), dt, isLead(seat) ? seat.gpLead : seat.gpOwn)
+      } else if (seat.padPointing) seatPadPointer(seat, { ...emptyPadState, buttons: 0 }, null)
+      applySeat(seat, remote.consumeOf(id, now), dt)
     }
   }
-  if (view.spin && !wasClutch) holder.rotateOnWorldAxis(WORLD_UP, dt * 0.5)
+  if (view.spin && !anyClutch()) holder.rotateOnWorldAxis(WORLD_UP, dt * 0.5)
   // Fluid model entrance: ease each new model up from 86% scale.
   if (pop < 1) {
     pop = Math.min(1, pop + dt / 0.45)
