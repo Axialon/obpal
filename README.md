@@ -15,7 +15,8 @@ Phone (HTTPS web app)  ──WebRTC DataChannels──▶  Host (web page with @
 - **Phone** (`/p`): reads the W3C motion sensors and runs a multi-touch trackpad and host-defined button trays. It streams a 76-byte state packet at 60 Hz over an unreliable DataChannel and sends buttons over a reliable one.
 - **Pairing:** the QR carries a 128-bit secret and the host's DTLS certificate fingerprint, in the URL fragment so it never reaches a server. The phone checks that the host's certificate matches the QR fingerprint. It then proves it knows the secret with an HMAC bound to both certificates. The signaling server only sees a hash of the secret.
 - **No internet:** the controller page works offline after one visit (service worker), and a phone that paired once with the ob.Pal Link extension reconnects over the LAN through a direct code, with no server at all (see [spec/PROTOCOL.md §2a](spec/PROTOCOL.md)).
-- **Host SDK** (`packages/host`): `Remote.create()`, `mountPairing(el)`, and `consume()` once per frame, which returns interpolated rotation, pointer, orbit, pan, zoom and twist.
+- **Host SDK** (`packages/host`): `Remote.create()`, `new PairingChip({ remote })` (the QR code and a short code to type, in a corner, in the page's look), and `consume()` once per frame, which returns interpolated rotation, pointer, orbit, pan, zoom and twist.
+- **Short code:** beside the QR code, ten digits to type at obpal.blackboxes.net/p. The service keeps only the first five; the last five are the secret of a PAKE the two devices run over their DTLS channel, one attempt per code (see [spec/PROTOCOL.md §2b](spec/PROTOCOL.md)).
 
 See [PLAN.md](PLAN.md) for the architecture, compatibility matrix and roadmap, and [spec/PROTOCOL.md](spec/PROTOCOL.md) for the wire protocol.
 
@@ -31,13 +32,13 @@ One tag, no build step ([demo](https://obpal.blackboxes.net/embed/); attributes,
 Or the SDK itself:
 
 ```js
-import { Remote, Mode } from '@obpal/host'
+import { Remote, Mode, PairingChip } from '@obpal/host'
 
 const remote = await Remote.create({
   appName: 'My Viewer',
   layout: { v: 1, modes: [Mode.hold, Mode.point], tray: [{ id: 'reset', label: 'Reset' }] },
 })
-remote.mountPairing(document.getElementById('pair'))
+new PairingChip({ remote }) // the QR code and the short code, in a corner
 remote.on('button', ({ id }) => { if (id === 'reset') resetView() })
 
 function frame(now) {

@@ -155,10 +155,10 @@
           <article class="build-card code-card">
             <h3>Build with it</h3>
             <p>Any web page can take a phone as its controller. This page does, with the same SDK.</p>
-            <pre><code><span class="k">import</span> { Remote } <span class="k">from</span> <span class="s">'@obpal/host'</span>
+            <pre><code><span class="k">import</span> { Remote, PairingChip } <span class="k">from</span> <span class="s">'@obpal/host'</span>
 
 <span class="k">const</span> remote = <span class="k">await</span> Remote.<span class="f">create</span>({ appName: <span class="s">'My scene'</span> })
-remote.<span class="f">mountPairing</span>(document.<span class="f">querySelector</span>(<span class="s">'#pair'</span>))
+<span class="k">new</span> <span class="f">PairingChip</span>({ remote }) <span class="c">// the code, in a corner</span>
 
 <span class="f">requestAnimationFrame</span>(<span class="k">function</span> <span class="f">frame</span>(now) {
   <span class="k">const</span> f = remote.<span class="f">consume</span>(now)

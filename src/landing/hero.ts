@@ -78,11 +78,16 @@ export interface Hero {
   /** The sound's state, hits and output level (the ?debug=audio readout, tests). */
   audio(): GlassStats
   /** Where each marble is on screen, how lit, how high it is (em, above the floor) and what it's on (for tests). */
-  tips(): { id: string; x: number; y: number; life: number; h: number; on: number }[]
+  tips(): { id: string; x: number; y: number; life: number; h: number; on: number; held: boolean }[]
   /** Where the full stop's landing spot is on screen (for tests), once the field is up. */
   dot(): { x: number; y: number } | null
   /** The buttons marbles can roll onto now, in the order tips() counts them (on: 1000 + index): their text (tests). */
   pads(): string[]
+  /**
+   * A marble's outline as drawn (hero px: its extreme points), and the play area its outline keeps to: the hero's
+   * sides, and top and bottom (tests).
+   */
+  outline(id: string): { left: number; right: number; top: number; bottom: number; area: { left: number; right: number; top: number; bottom: number } } | null
   /** How the field draws (the ?debug=gfx readout, tests): its canvas and buffer, and the governor's step. */
   gfx(): (Gfx & { level: number; steps: Step[]; pinned: boolean }) | null
 }
@@ -153,7 +158,34 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     // The ladder for this size first, so the canvas is never drawn past its pixel budget, not even for a frame.
     rescale()
     field.layout(m.lines, W, H, m.box)
+    const play = playArea()
+    field.play(play.top, play.bottom)
     field.render()
+  }
+
+  /**
+   * What of the hero the marbles may use: what's on screen with the page at its top. Below the page's bar where it
+   * covers the hero's top (a marble under it would be hidden), down to the bottom of the screen with the browser's own
+   * bars showing (100svh), or the hero's bottom if that comes first. (On a phone the hero is taller than the screen.)
+   */
+  function playArea() {
+    const hr = hero.getBoundingClientRect()
+    const docTop = hr.top + scrollY
+    // The bar is the page's first thing: with the page at its top it covers 0 … its height.
+    const bar = document.querySelector<HTMLElement>('header.top')
+    const top = bar ? Math.max(0, bar.offsetHeight - docTop) : 0
+    return { top, bottom: Math.min(hr.height, screenHeight() - docTop) }
+  }
+  let probe: HTMLElement | null = null
+  /** The screen's height with the browser's bars showing (100svh: at the top of the page, they are). */
+  function screenHeight() {
+    if (!probe) {
+      probe = document.createElement('div')
+      probe.setAttribute('aria-hidden', 'true')
+      probe.style.cssText = 'position:fixed;left:0;top:0;width:0;height:100vh;height:100svh;visibility:hidden;pointer-events:none'
+      document.body.appendChild(probe)
+    }
+    return probe.getBoundingClientRect().height || innerHeight
   }
 
   const me = () => field!.orb('me', LIME)
@@ -524,12 +556,19 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       return f.orbs().map((o) => {
         const p = f.project(o.orb.x, o.orb.y, o.orb.z)
         const s = f.surface(o.orb.x, o.orb.z)
-        // What it's on: a letter, a button (1000 + its number: pads()), the floor (-1), or nothing yet (in the air, -2).
+        // What it's on: a letter, a button (1000 + its number: pads()), the floor (-1), or nothing yet (in the air, -2);
+        // held: sitting on the rim of a letter's counter.
         const on = Math.abs(o.orb.y - o.orb.r - s.h) < 0.01 && Math.abs(o.orb.vy) < 0.5 ? s.id : -2
-        return { id: o.id, x: p.x, y: p.y, life: o.life, h: o.orb.y - o.orb.r, on }
+        return { id: o.id, x: p.x, y: p.y, life: o.life, h: o.orb.y - o.orb.r, on, held: !!o.orb.held }
       })
     },
     pads: () => padEls.map((el) => el.textContent?.trim() ?? ''),
+    outline: (id) => {
+      const o = field?.outline(id)
+      if (!o) return null
+      const a = playArea()
+      return { ...o, area: { left: 0, right: W, top: a.top, bottom: a.bottom } }
+    },
     dot: () => {
       if (!field) return null
       const l = field.letters()

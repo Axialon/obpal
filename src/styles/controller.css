@@ -22,6 +22,22 @@ body.live .aurora i { animation-play-state: paused; }
 .msg p { color: var(--secondary); margin: 0 0 6px; font-size: 14.5px; line-height: 1.55; max-width: 320px; }
 .msg p b { color: var(--ink); font-weight: 650; }
 .msg .btn { margin-top: 10px; }
+/* The start page's short code (PROTOCOL §2b): one big field, grouped as people read it. */
+.msg-card.start { gap: 10px; }
+.code-form { display: flex; flex-direction: column; align-items: stretch; gap: 10px; width: 100%; max-width: 320px; margin-top: 8px; }
+.code-in { width: 100%; height: 64px; padding: 0 12px; border-radius: 18px; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.06);
+  color: var(--ink); font: 700 28px/1 var(--font-data, var(--font)); letter-spacing: 0.08em; text-align: center; font-variant-numeric: tabular-nums;
+  caret-color: var(--accent); outline: none; transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease); }
+.code-in::placeholder { color: rgb(var(--hl-rgb) / 0.22); }
+.code-in:focus { border-color: rgb(var(--accent-rgb) / 0.75); box-shadow: 0 0 0 4px rgb(var(--accent-rgb) / 0.16); }
+.code-in[aria-invalid='true'] { border-color: rgb(251 113 133 / 0.8); }
+.code-in[readonly] { opacity: 0.7; }
+.code-form .btn { margin-top: 0; }
+.code-form .btn:disabled { opacity: 0.45; filter: saturate(0.5); }
+.code-say { min-height: 1.5em; margin: 0 !important; font-size: 13.5px !important; }
+.code-say.bad { color: #fb7185 !important; }
+.start-foot { margin: 6px 0 0 !important; font-size: 13px !important; opacity: 0.8; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .spinner { width: 30px; height: 30px; border-radius: 50%; border: 2.5px solid rgb(var(--hl-rgb) / 0.15); border-top-color: var(--accent); animation: spin 0.85s linear infinite; margin-bottom: 10px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -455,3 +471,103 @@ body.resting .rest { display: grid; }
   0% { box-shadow: 0 0 0 0 rgb(var(--accent-rgb) / 0.6), 0 18px 40px -10px rgb(var(--accent-rgb) / 0.55), 0 10px 26px rgb(0 0 0 / 0.3), inset 0 1px 0 rgb(255 255 255 / 0.5); }
   100% { box-shadow: 0 0 0 18px rgb(var(--accent-rgb) / 0), 0 18px 40px -10px rgb(var(--accent-rgb) / 0.55), 0 10px 26px rgb(0 0 0 / 0.3), inset 0 1px 0 rgb(255 255 255 / 0.5); }
 }
+
+/* ---- physical buttons (./buttons.ts): the notice, the Buttons sheet, the badges on bound controls ----
+   Each source has its light: keys lime, volume lavender, a headset sky, a pad amber, Back rose. Tints are for rings,
+   fills and dots; text stays in the surface's ink, so light and dark surfaces both read. */
+[data-src='keys'] { --src: var(--accent-rgb); }
+[data-src='volume'] { --src: 179 164 255; }
+[data-src='media'] { --src: 56 189 248; }
+[data-src='pad'] { --src: 245 176 38; }
+[data-src='back'] { --src: 244 63 94; }
+
+/* A device recognised, or an input nothing uses: over the bar for a few seconds, never over the controls below it. */
+.bt-notice { position: fixed; z-index: 26; top: calc(6px + env(safe-area-inset-top)); left: 50%; width: min(470px, calc(100% - 16px)); transform: translateX(-50%);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 7px 6px 7px 8px; border-radius: 20px; animation: bt-drop 0.34s var(--ease); }
+/* Near-solid, like the sheets: the bar it covers must not read through it. */
+.bt-notice.glass { background: linear-gradient(160deg, rgb(var(--surface-rgb)), var(--sheet)); box-shadow: var(--glass-shadow), 0 14px 34px rgb(0 0 0 / 0.28); }
+.bt-notice.out { animation: fade-out 0.2s var(--ease) forwards; }
+@keyframes bt-drop { from { transform: translate(-50%, -16px); opacity: 0; } }
+.bt-n-ic { flex: none; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 12px; background: rgb(var(--src) / 0.22); color: var(--ink); box-shadow: inset 0 0 0 1px rgb(var(--src) / 0.5); }
+.bt-n-ic .ic { width: 19px; height: 19px; }
+.bt-n-txt { flex: 1; min-width: 0; display: grid; line-height: 1.25; }
+.bt-n-txt b { font-size: 14px; font-weight: 750; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bt-n-txt span { font-size: 12.5px; font-weight: 600; color: var(--secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bt-n-go, .bt-n-pick { flex: none; height: 36px; padding: 0 13px; border-radius: 12px; font-size: 13.5px; font-weight: 750; touch-action: manipulation; }
+.bt-n-go { border: 1px solid rgb(255 255 255 / 0.3); background: var(--glass-light); color: var(--accent-ink); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.45); }
+.bt-n-pick { min-width: 40px; padding: 0 10px; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.08); color: var(--ink); }
+.bt-n-go:active, .bt-n-pick:active { transform: scale(0.96); }
+/* A bind offer: the choices get a row of their own under the input. */
+.bt-n-picks { order: 5; flex: 1 1 100%; display: flex; gap: 6px; padding: 0 0 1px 46px; overflow-x: auto; scrollbar-width: none; }
+.bt-n-picks::-webkit-scrollbar { display: none; }
+.bt-n-picks .bt-n-go { margin-left: auto; }
+.bt-n-x { order: 4; flex: none; width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 10px; background: transparent; color: var(--muted); }
+.bt-n-x .ic { width: 16px; height: 16px; }
+
+/* Settings → Buttons: the sources that have worked here, and the way in. */
+.set-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 58px; padding: 0 12px 0 14px; border-radius: 18px; color: var(--ink); text-align: left; touch-action: manipulation; }
+.set-row > .ic:first-child { width: 22px; height: 22px; color: var(--accent-text); }
+.set-row > span:not(.set-srcs) { flex: 1; min-width: 0; display: grid; font-size: 14.5px; font-weight: 700; letter-spacing: -0.01em; }
+.set-row small { font-size: 12px; font-weight: 550; color: var(--muted); }
+.set-row > .ic:last-child { width: 18px; height: 18px; color: var(--muted); }
+.set-srcs { display: flex; gap: 4px; }
+.set-srcs i { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 9px; background: rgb(var(--src) / 0.2); color: var(--ink); }
+.set-srcs .ic { width: 15px; height: 15px; }
+
+/* The Buttons sheet: the controller's controls as chips carrying what's bound to them; tap one, then press a button. */
+.sheet.btns { gap: 14px; }
+.bt-title { display: flex; align-items: baseline; gap: 10px; margin: -2px 2px 0; }
+.bt-title h2 { margin: 0; font-family: var(--font-display); font-size: 22px; font-weight: 750; letter-spacing: -0.03em; }
+.bt-ctl { font-size: 13px; font-weight: 650; color: var(--muted); }
+.bt-grids { display: grid; gap: 14px; }
+.bt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 8px; }
+.bt-c { min-height: 64px; display: grid; align-content: center; justify-items: center; gap: 6px; padding: 8px 4px; border-radius: 18px; border: 1px solid var(--glass-edge);
+  background: linear-gradient(160deg, rgb(var(--hl-rgb) / 0.08), rgb(var(--hl-rgb) / 0.02)); color: var(--ink); touch-action: manipulation;
+  transition: transform 0.12s var(--ease), background 0.2s, border-color 0.2s, box-shadow 0.2s; }
+.bt-c:active { transform: scale(0.96); }
+.bt-c b { font: 750 17px/1.05 var(--font-display); letter-spacing: -0.02em; text-align: center; overflow-wrap: anywhere; }
+.bt-grid.more .bt-c b { font-size: 13.5px; }
+.bt-c.on { background: var(--glass-light); border-color: rgb(255 255 255 / 0.3); color: var(--accent-ink); animation: bt-listen 1.4s ease-in-out infinite; }
+.bt-c.found { border-color: rgb(var(--accent-rgb) / 0.85); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.22), 0 10px 24px rgb(var(--accent-rgb) / 0.18); }
+@keyframes bt-listen { 0%, 100% { box-shadow: 0 10px 26px rgb(var(--accent-rgb) / 0.26); } 50% { box-shadow: 0 0 0 6px rgb(var(--accent-rgb) / 0.16), 0 10px 26px rgb(var(--accent-rgb) / 0.3); } }
+.bt-bs { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; min-height: 17px; }
+/* An input as a badge: in the sheet's chips, and on the controls themselves. */
+.bt-bs i, .hw-badges i { display: block; padding: 0 5px; border-radius: 6px; font: 750 10.5px/17px var(--font-data, var(--font)); font-style: normal; white-space: nowrap;
+  background: rgb(var(--base-rgb) / 0.78); color: var(--ink); box-shadow: inset 0 0 0 1.5px rgb(var(--src, var(--hl-rgb)) / 0.75); }
+.bt-bs i.more, .hw-badges i.more { box-shadow: inset 0 0 0 1px var(--glass-edge); color: var(--muted); }
+.bt-c.on .bt-bs i { background: rgb(0 0 0 / 0.12); color: var(--accent-ink); box-shadow: none; }
+.bt-line { margin: -4px 2px; min-height: 1.4em; font-size: 13px; font-weight: 650; color: var(--secondary); }
+.bt-line:empty { display: none; }
+.bt-undo { margin-left: 6px; padding: 3px 10px; border-radius: 9px; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.08); color: var(--accent-text); font-size: 12.5px; font-weight: 750; }
+/* Everything the phone can hear, to pick from for the control waiting. */
+.bt-assign { display: grid; gap: 10px; padding: 12px; border-radius: 20px; background: rgb(var(--hl-rgb) / 0.04); border: 1px dashed rgb(var(--accent-rgb) / 0.45); animation: rise 0.24s var(--ease); }
+.bt-og { display: grid; grid-template-columns: 30px 1fr; gap: 8px; align-items: start; }
+.bt-og-ic { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 10px; background: rgb(var(--src) / 0.2); color: var(--ink); }
+.bt-og-ic .ic { width: 16px; height: 16px; }
+.bt-og-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.bt-o { height: 30px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.05); color: var(--secondary); font: 650 12.5px var(--font); touch-action: manipulation; }
+.bt-o.seen { color: var(--ink); border-color: rgb(var(--src) / 0.55); }
+.bt-o[aria-pressed='true'] { background: var(--glass-light); color: var(--accent-ink); border-color: rgb(255 255 255 / 0.3); }
+.bt-og[data-src='volume'] .bt-o:not(.seen) { opacity: 0.6; }
+/* What reaches this phone: one row per source, with one honest line each. */
+.bt-srcs { display: grid; gap: 6px; }
+.bt-src { display: flex; align-items: center; gap: 12px; padding: 8px 12px 8px 8px; border-radius: 16px; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.03); }
+.bt-src-ic { flex: none; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 11px; background: rgb(var(--hl-rgb) / 0.06); color: var(--muted); }
+.bt-src.lit .bt-src-ic { background: rgb(var(--src) / 0.22); color: var(--ink); box-shadow: inset 0 0 0 1px rgb(var(--src) / 0.5); }
+.bt-src-ic .ic { width: 18px; height: 18px; }
+.bt-src-t { flex: 1; min-width: 0; display: grid; line-height: 1.3; }
+.bt-src-t b { font-size: 13.5px; font-weight: 700; }
+.bt-src-t small { font-size: 12px; font-weight: 550; color: var(--muted); }
+.bt-src.off .bt-src-t small { color: var(--secondary); }
+.bt-src.paused .bt-src-t small { color: var(--warn); }
+[data-bb-theme='light'] .bt-src.paused .bt-src-t small { color: #b45309; }
+.bt-src input { flex: none; width: 22px; height: 22px; accent-color: var(--accent); }
+.sheet .actions .armed { background: rgb(239 68 68 / 0.92); border-color: transparent; color: #fff; }
+
+/* Badges on the controls: in a corner, never in the way of a touch; over the top of a round button. */
+.hw-badges { position: absolute; top: 7px; right: 7px; z-index: 3; display: flex; gap: 3px; pointer-events: none; animation: fade 0.3s var(--ease); }
+.hw-badges i.used { opacity: 0.5; }
+.wii-a, .wii-b, .wii-round, .mouse-round, .gyro, .icon-btn.square, .tray-btn { position: relative; }
+.wii-a > .hw-badges, .wii-round > .hw-badges, .mouse-round > .hw-badges { top: -9px; right: auto; left: 50%; transform: translateX(-50%); }
+.tray-btn > .hw-badges { top: 4px; right: 4px; }
+@media (prefers-reduced-motion: reduce) { .bt-c.on { animation: none; } }

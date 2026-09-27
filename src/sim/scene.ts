@@ -4,7 +4,7 @@
  * Each sim supplies its nodes and what their input does.
  */
 import type { SceneNode } from '@obpal/core'
-import { Claims, Remote, type Layout, type Participant } from '@obpal/host'
+import { Claims, PairingChip, Remote, type Layout, type Participant } from '@obpal/host'
 import { family } from '../family'
 import { ICONS } from '../ui/icons'
 
@@ -61,8 +61,9 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   let nodes = o.nodes
   const nodeName = (id: string) => { const n = nodes.find((x) => x.id === id); return n ? o.label?.(n) ?? n.name : id }
   remote.setHostPerson({ name: 'Screen', color: family.accentColor() })
-  remote.mountPairing($('pair'), { variant: 'compact' })
-  Object.assign(window, { __obpal: remote, __sim: { claims, approved } })
+  // The pairing chip: open while nobody is here, closed by itself as a phone comes in; the people chip's + opens it.
+  const chip = new PairingChip({ remote, open: true, testLink: true, onToggle: (open) => $('chip-invite').setAttribute('aria-pressed', String(open)) })
+  Object.assign(window, { __obpal: remote, __sim: { claims, approved, chip } })
 
   const autoAllow = $('auto-allow') as HTMLInputElement | null
   const allowed = (id: string) => !o.approval || approved.has(id) || !!autoAllow?.checked
@@ -170,16 +171,8 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
     $('people').classList.toggle('asking', pending.size > 0)
   }
 
-  const setInvite = (on: boolean) => {
-    if (remote.status !== 'connected') return
-    $('pair').hidden = !on
-    $('pair').dataset.invite = on ? 'open' : ''
-    $('chip-invite').setAttribute('aria-pressed', String(on))
-    if (on) $('people').hidden = true
-  }
-
-  remote.on('connect', () => { $('pair').hidden = true; $('chip').hidden = false })
-  remote.on('disconnect', () => { $('chip').hidden = true; $('pair').hidden = false; $('people').hidden = true })
+  remote.on('connect', () => { $('chip').hidden = false })
+  remote.on('disconnect', () => { $('chip').hidden = true; chip.expand(); $('people').hidden = true })
   remote.on('join', (p) => {
     people.set(p.id, p)
     log(`${p.name} joined`, p.color)
@@ -189,7 +182,6 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
       $('people').hidden = false
       remote.feedback({ toast: 'Waiting for the screen to let you in' }, p.id)
     }
-    if ($('pair').dataset.invite === 'open') setInvite(false)
     publish()
     o.joined?.(p)
   })
@@ -210,8 +202,8 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   })
   autoAllow?.addEventListener('change', () => { if (autoAllow.checked) { for (const id of pending) approved.add(id); pending.clear() } renderPeople() })
   $('chip-disc').onclick = () => remote.disconnect()
-  $('chip-invite').onclick = () => setInvite($('pair').dataset.invite !== 'open')
-  $('chip-who').onclick = () => { const p = $('people'); p.hidden = !p.hidden; if (!p.hidden) setInvite(false) }
+  $('chip-invite').onclick = () => { chip.toggle(); if (chip.expanded) $('people').hidden = true }
+  $('chip-who').onclick = () => { const p = $('people'); p.hidden = !p.hidden; if (!p.hidden) chip.collapse() }
   $('invite-new').onclick = async () => { await remote.resetInvite(); note('New invite link: the old code no longer works') }
   document.querySelectorAll<HTMLElement>('[data-icon]').forEach((el) => el.insertAdjacentHTML('afterbegin', ICONS[el.dataset.icon!] ?? ''))
 

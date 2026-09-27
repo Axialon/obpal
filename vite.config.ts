@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { build, defineConfig, type Plugin } from 'vite'
 import { cloudflare } from '@cloudflare/vite-plugin'
 import { checkProfile, CONTROLLER_ID, CONTROLLER_IDS, CONTROLLERS, MOTION_UTILITIES, PROFILE_IDS, PROFILE_LIMITS, PROFILES, ROUTES, utilityKey } from './packages/core/src/catalogue'
+import { APP_ACTIONS, BUTTON_TARGET, DEFAULT_BUTTONS, INPUT_ID, INPUT_OPTIONS, KEY_TARGETS, SMART_BUTTONS } from './packages/core/src/buttons'
 import { Mode } from './packages/core/src/state'
 import { BRIDGE_ROWS, EMBED, REPO, SYSTEM_ROWS, UTILITY_ROWS } from './src/catalogue/data'
 
@@ -99,7 +100,8 @@ function embedScript(): Plugin {
 
 /**
  * The control catalogue as files for people and AI agents, made from the code so they can't drift from it:
- * /catalogue.json (utilities, routes, built-in and community profiles, systems, bridges) and /profile.schema.json.
+ * /catalogue.json (utilities, controllers, routes, built-in and community profiles, button bindings, systems, bridges) and
+ * /profile.schema.json.
  * Community profiles are catalogue/profiles/<id>.json; the build checks each with checkProfile() and stops on a bad one.
  */
 function catalogueFiles(): Plugin {
@@ -129,7 +131,7 @@ function catalogueFiles(): Plugin {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     $id: 'https://obpal.blackboxes.net/profile.schema.json',
     title: 'ob.Pal controller profile',
-    description: `A named set of motion settings a phone applies (CATALOGUE §3). Check one with checkProfile() in @obpal/core, then add it as catalogue/profiles/<id>.json in ${REPO}.`,
+    description: `A named set of motion settings, and optionally button bindings, a phone applies (CATALOGUE §3). Check one with checkProfile() in @obpal/core, then add it as catalogue/profiles/<id>.json in ${REPO}.`,
     type: 'object',
     required: ['id', 'name', 'for', 'on', 'aim', 'steer', 'point'],
     additionalProperties: false,
@@ -139,6 +141,14 @@ function catalogueFiles(): Plugin {
       for: { type: 'string', minLength: 1, maxLength: PROFILE_LIMITS.for, description: 'What it is for, one line' },
       on: { type: 'array', uniqueItems: true, items: { enum: [...MOTION_UTILITIES] }, description: 'Utilities it switches on when it applies' },
       ...Object.fromEntries(MOTION_UTILITIES.map((u) => [utilityKey(u), settings(ROUTES[u])])),
+      controller: { enum: [...CONTROLLER_IDS], description: 'The controller it tunes (CATALOGUE §9.1); absent: face.gamepad' },
+      buttons: {
+        type: 'object',
+        maxProperties: PROFILE_LIMITS.buttons,
+        propertyNames: { pattern: INPUT_ID.source },
+        additionalProperties: { type: 'string', pattern: BUTTON_TARGET.source },
+        description: 'Physical inputs (key:<code>, media:<action>, pad:b<i>, back) bound to the controller’s controls (its `controls` in catalogue.json), a key on the screen (key-<code>), tray:<id>, app:<action> or none. Only what differs from its defaults (CATALOGUE §3).',
+      },
     },
   })
   const modeName = new Map(Object.entries(Mode).map(([name, m]) => [m, name]))
@@ -155,7 +165,18 @@ function catalogueFiles(): Plugin {
     controllers: CONTROLLER_IDS.map((id) => ({ ...CONTROLLERS[id], modes: CONTROLLERS[id].modes.map((m) => modeName.get(m)) })),
     controllerId: CONTROLLER_ID.source,
     routes: ROUTES,
-    limits: { gain: PROFILE_LIMITS.gain, curve: PROFILE_LIMITS.curve, deadzone: PROFILE_LIMITS.deadzone, id: PROFILE_LIMITS.id.source, name: PROFILE_LIMITS.name, for: PROFILE_LIMITS.for },
+    limits: { gain: PROFILE_LIMITS.gain, curve: PROFILE_LIMITS.curve, deadzone: PROFILE_LIMITS.deadzone, id: PROFILE_LIMITS.id.source, name: PROFILE_LIMITS.name, for: PROFILE_LIMITS.for, buttons: PROFILE_LIMITS.buttons },
+    // Physical buttons (CATALOGUE §3, `buttons`): the inputs a phone can hear, what they press on each controller by
+    // default and, for a kind of device the phone recognises, on top of that.
+    buttons: {
+      inputId: INPUT_ID.source,
+      target: BUTTON_TARGET.source,
+      inputs: INPUT_OPTIONS,
+      keys: KEY_TARGETS,
+      app: APP_ACTIONS,
+      defaults: DEFAULT_BUTTONS,
+      smart: SMART_BUTTONS,
+    },
     profiles: PROFILE_IDS.map((id) => PROFILES[id]),
     community: community(),
     systems: SYSTEM_ROWS,
@@ -195,7 +216,7 @@ export default defineConfig({
         // Controller floor from PLAN.md: Safari 15, Chromium 95, Firefox 115.
         target: ['safari15', 'chrome95', 'firefox115', 'edge95'],
         rollupOptions: {
-          input: { index: 'index.html', controller: 'p/index.html', viewer: 'view/index.html', sponsor: 'sponsor/index.html', donate: 'donate/index.html', link: 'link/index.html', privacy: 'privacy/index.html', sims: 'sim/index.html', simArm: 'sim/arm/index.html', simArena: 'sim/arena/index.html', catalogue: 'catalogue/index.html', embed: 'embed/index.html' },
+          input: { index: 'index.html', controller: 'p/index.html', viewer: 'view/index.html', sponsor: 'sponsor/index.html', donate: 'donate/index.html', link: 'link/index.html', privacy: 'privacy/index.html', sims: 'sim/index.html', simArm: 'sim/arm/index.html', simArena: 'sim/arena/index.html', catalogue: 'catalogue/index.html', embed: 'embed/index.html', buttons: 'buttons/index.html' },
         },
       },
     },

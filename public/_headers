@@ -1,8 +1,17 @@
+# Every page and file. HSTS: HTTPS only, for a year, on this host alone (no includeSubDomains, no preload: nothing
+# here speaks for other hosts). Permissions-Policy: what the pages may use, the phone's motion sensors and wake lock
+# (the controller), full screen, the screen's camera (a glow it follows), WebXR (3D tracking on Android) and USB serial
+# (the arm sim's real arm); everything else off. The Content-Security-Policy here is the part every page shares (no
+# framing by other sites, no plugins, no base-URL rewrites); each page's own policy (scripts, connections and the rest)
+# comes with the page (vite.config.ts).
 /*
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
-  Permissions-Policy: accelerometer=(self), gyroscope=(self), magnetometer=(self), screen-wake-lock=(self), fullscreen=(self)
+  Strict-Transport-Security: max-age=31536000
+  Permissions-Policy: accelerometer=(self), gyroscope=(self), magnetometer=(self), screen-wake-lock=(self), fullscreen=(self), camera=(self), xr-spatial-tracking=(self), serial=(self), microphone=(), geolocation=(), payment=(), usb=(), hid=(), bluetooth=(), midi=(), display-capture=(), browsing-topics=()
   X-Frame-Options: SAMEORIGIN
+  Content-Security-Policy: frame-ancestors 'self'; object-src 'none'; base-uri 'self'
+  Cross-Origin-Opener-Policy: same-origin
 
 # The controller's service worker: browsers check it on every visit, so it must never be served from a stale cache.
 /p/sw.js

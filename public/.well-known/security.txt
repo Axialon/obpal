@@ -1,0 +1,5 @@
+Contact: mailto:hello@obpal.blackboxes.net
+Expires: 2027-09-26T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://obpal.blackboxes.net/.well-known/security.txt
+Policy: https://github.com/Axialon/obpal/blob/main/SECURITY.md

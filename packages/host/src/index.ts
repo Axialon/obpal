@@ -9,3 +9,4 @@ export {
 } from '@obpal/core'
 export { handMove, handTurn, headingOf } from './hand'
 export { findBlob, GlowCamera, GlowFollower, glowMove, hsv, hueOf, type Blob } from './glow'
+export { PairingChip, type ChipCorner, type PairingChipOptions } from './chip'

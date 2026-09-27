@@ -21,7 +21,7 @@ import {
   Vector3, Vector4, WebGLRenderer, WebGLRenderTarget, type Material, type Texture,
 } from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
-import { collide, inside, nearest, newOrb, roundedRect, sidesAt, step, surfaceAt, toss, type Footprint, type Orb } from './bounce'
+import { collide, inside, nearest, newOrb, roundedRect, step, surfaceAt, toss, withinWalls, type Footprint, type Orb, type Wall } from './bounce'
 import { glassScale, type GpuSample, type Step } from './governor'
 import { BEVEL, LETTER_H, layoutLetters, TOP, tourStops } from './letters'
 
@@ -44,6 +44,12 @@ const STEER = { omega: 4.6, zeta: 0.78, air: 0.3 }
 /** Hits slower than this (em/s) are silent; this fast is the hardest there is. */
 const HIT_MIN = 0.7
 const HIT_MAX = 7
+/**
+ * A knock against the edge of the screen: slower than this (em/s) is rolling along it or leaning on it (silent), and a
+ * marble is heard at most this often against the same edge (s).
+ */
+const WALL_MIN = 0.8
+const WALL_GAP = 0.25
 /** The rounded edge a letter's top has (em). */
 const EDGE = 0.016
 /** Buttons are steps this high (em), and footprints up to CLIMB high can be rolled onto (./bounce.ts). */
@@ -58,8 +64,8 @@ const UV = new Color('#5c3ef5')
 const INK = new Color('#f1edff')
 const LIME = new Color('#c6ff34')
 
-export type HitKind = 'letter' | 'floor' | 'marble' | 'button'
-/** A marble hit something: what (a button: which), how hard (0…1), and where. */
+export type HitKind = 'letter' | 'floor' | 'marble' | 'button' | 'wall'
+/** A marble hit something (the edge of the screen: a wall): what (a button: which), how hard (0…1), and where. */
 export interface Hit { orb: string; other?: string; kind: HitKind; pad?: number; strength: number; x: number; y: number; z: number }
 
 /** A button in the hero, as the marbles' world sees it: its box on the canvas (CSS px) and its corners' radius. */
@@ -83,8 +89,9 @@ export interface FieldOrb {
   /** How it has turned as it rolled (the twist inside shows it), and how fast it turns (rad/s, as an axis). */
   spin: Quaternion
   omega: Vector3
-  /** When it last made itself heard (s, the field's clock), so rolling along a letter doesn't rattle. */
+  /** When it last made itself heard (s, the field's clock), so rolling along a letter doesn't rattle; and against each edge. */
   heardAt: number
+  wallAt: number[]
   /** What it last rested or rolled on (a surface id: bounce.ts), so arriving on a button is noticed. */
   on: number
 }
@@ -146,6 +153,13 @@ export interface Field {
    * them (the canvas is over the page there) and the dots stay under them. Call when they move.
    */
   pads(rects: PadRect[]): void
+  /**
+   * What of the canvas the marbles may use, top to bottom (canvas px; its sides are the canvas's): what's on screen
+   * when the page is at its top, below the bar over it. Each marble's outline, as drawn, stays within it.
+   */
+  play(top: number, bottom: number): void
+  /** A marble's outline as drawn, on the canvas (px): its leftmost, rightmost, topmost and bottommost points. */
+  outline(id: string): { left: number; right: number; top: number; bottom: number } | null
   /** Toss a marble up at `vy` (em/s): now if it's on something, else as soon as it touches down. */
   toss(o: FieldOrb, vy: number): void
   /** A marble, created on first use, in a colour. */
@@ -283,8 +297,12 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
   let pads: Footprint[] = []
   let solid: Footprint[] = []
   let bounds: [number, number, number, number] = [-10, -10, 10, 10]
-  /** The field's sides, far and near: the floor on screen narrows toward its bottom edge (bounce.ts StepOptions). */
-  let sides: [number, number, number, number] | undefined
+  /**
+   * The edges of what's on screen, as walls (./bounce.ts): the planes through the camera and the canvas's sides, and
+   * the top and bottom of what the marbles may use (play()). Left, right, top, bottom.
+   */
+  let walls: Wall[] = []
+  let playTop = 0, playBottom = Infinity
   let W = 1, H = 1
   let celebrateAt = -1
   let clock = 0
@@ -508,7 +526,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
     scene.add(marble, halo)
     const start = letters.length ? letters[letters.length - 1].fp.spot : [0, 0]
     const orb = newOrb(start[0], start[1], ORB_R, surfaceAt(footprints, start[0], start[1]).h)
-    const fo: FieldOrb = { id, orb, color: c, life: 0, live: false, push: null, marble, halo, shadow, caustic, pool, spin: new Quaternion(), omega: new Vector3(), heardAt: -1, on: -1 }
+    const fo: FieldOrb = { id, orb, color: c, life: 0, live: false, push: null, marble, halo, shadow, caustic, pool, spin: new Quaternion(), omega: new Vector3(), heardAt: -1, wallAt: [-1, -1, -1, -1], on: -1 }
     orbMap.set(id, fo)
     return fo
   }
@@ -566,11 +584,10 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
     camera.setViewOffset(W, H, W / 2 - (box.x + box.w / 2), H / 2 - (box.y + box.h / 2), W, H)
     camera.updateProjectionMatrix()
     camera.updateMatrixWorld()
-    // The field is what the camera sees of the floor: a wedge, narrower along the screen's bottom edge than its top,
-    // so a marble rolling into a bottom corner stays on screen.
+    // What the camera sees of the floor, for the dots; the marbles keep to the walls.
     const pts = [[0, 0], [W, 0], [0, H], [W, H]].map(([sx, sy]) => rawFloorAt(sx, sy))
     bounds = [Math.min(...pts.map((p) => p.x)), Math.min(...pts.map((p) => p.z)), Math.max(...pts.map((p) => p.x)), Math.max(...pts.map((p) => p.z))]
-    sides = [pts[0].x, pts[1].x, pts[2].x, pts[3].x]
+    buildWalls()
     // The dots cover the field (a little wider apart on a phone).
     const gap = opts.coarse ? 0.26 : 0.2
     const verts: number[] = []
@@ -590,6 +607,27 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
     ray.setFromCamera(new Vector2((sx / W) * 2 - 1, -(sy / H) * 2 + 1), camera)
     const hit = new Vector3()
     return ray.ray.intersectPlane(plane, hit) ? { x: hit.x, z: hit.z } : { x: 0, z: 0 }
+  }
+
+  /** The way the camera looks through a point on the canvas (px). */
+  function lookThrough(sx: number, sy: number): Vector3 {
+    ray.setFromCamera(new Vector2((sx / W) * 2 - 1, -(sy / H) * 2 + 1), camera)
+    return ray.ray.direction.clone()
+  }
+
+  // ---- the edges of the screen, as walls: a marble's outline, as drawn, just touches them ----
+  // Each is the plane through the camera and one edge of the play area on the canvas: a sphere touching that plane
+  // looks, on screen, like a circle touching that edge.
+  function buildWalls() {
+    const top = Math.max(0, Math.min(H, playTop)), bottom = Math.max(top + 1, Math.min(H, playBottom))
+    const mid = lookThrough(W / 2, (top + bottom) / 2)
+    const eye = camera.position
+    const edge = (a: [number, number], b: [number, number]): Wall => {
+      const n = new Vector3().crossVectors(lookThrough(a[0], a[1]), lookThrough(b[0], b[1])).normalize()
+      if (n.dot(mid) < 0) n.negate()
+      return { n: [n.x, n.y, n.z], d: -n.dot(eye) }
+    }
+    walls = [edge([0, top], [0, bottom]), edge([W, top], [W, bottom]), edge([0, top], [W, top]), edge([0, bottom], [W, bottom])]
   }
 
   // ---- the page's buttons, as low steps: each one's top is its box on screen, found on the plane at its height ----
@@ -662,10 +700,10 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
       fit(box)
     },
     floorAt(sx, sy) {
+      // Where a marble resting on the floor there would be, kept inside the walls (so a target at the very edge is
+      // where it stops, its outline touching the edge).
       const p = rawFloorAt(sx, sy)
-      const z = Math.max(bounds[1] + ORB_R, Math.min(bounds[3] - ORB_R, p.z))
-      const [x0, x1] = sidesAt({ bounds, sides }, z)
-      return { x: Math.max(x0 + ORB_R, Math.min(x1 - ORB_R, p.x)), z }
+      return withinWalls(walls, p.x, ORB_R, p.z, ORB_R)
     },
     pointAt(sx, sy) {
       const t = rawFloorAt(sx, sy, tops)
@@ -706,6 +744,31 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
       buildPads()
       // A marble on a button that moved (or went) is free to roll, or fall, again.
       for (const o of orbMap.values()) if (o.on >= PAD_ID || surfaceAt(solid, o.orb.x, o.orb.z).id >= PAD_ID) o.orb.resting = false
+    },
+    play(top, bottom) {
+      if (top === playTop && bottom === playBottom) return
+      playTop = top
+      playBottom = bottom
+      buildWalls()
+      // Marbles now past an edge come back inside it.
+      for (const o of orbMap.values()) o.orb.resting = false
+    },
+    outline(id) {
+      const o = orbMap.get(id)
+      if (!o) return null
+      // Points all over the sphere as drawn (a little bigger the higher it is), onto the canvas: their extremes.
+      const b = o.orb, rho = ORB_R * (1 + DEPTH * Math.max(0, b.y - b.r))
+      const out = { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity }
+      for (let i = 0; i < 48; i++) {
+        const lat = -Math.PI / 2 + (Math.PI * (i + 0.5)) / 48
+        for (let j = 0; j < 96; j++) {
+          const lon = (2 * Math.PI * j) / 96
+          const p = field.project(b.x + rho * Math.cos(lat) * Math.cos(lon), b.y + rho * Math.sin(lat), b.z + rho * Math.cos(lat) * Math.sin(lon))
+          out.left = Math.min(out.left, p.x); out.right = Math.max(out.right, p.x)
+          out.top = Math.min(out.top, p.y); out.bottom = Math.max(out.bottom, p.y)
+        }
+      }
+      return out
     },
     toss: (o, vy) => { toss(o.orb, vy, solid) },
     orb: (id, color) => orbMap.get(id) ?? makeOrb(id, color),
@@ -758,15 +821,22 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
       const hits: Hit[] = []
       for (const o of all) {
         // Real time whatever the frame rate: a long frame (a slow phone, a busy page) is caught up in 60 Hz steps.
-        const r = { landed: null as number | null, bumped: null as number | null, impact: 0, moving: false }
+        const r = { landed: null as number | null, bumped: null as number | null, impact: 0, wall: null as number | null, wallImpact: 0, moving: false }
         for (let left = Math.min(dt, 0.12); left > 1e-6; left -= 1 / 60) {
-          const q = step(o.orb, solid, Math.min(left, 1 / 60), { hop: HOP, bounds, sides, push: o.push ?? undefined, climb: CLIMB, ...STEER })
+          const q = step(o.orb, solid, Math.min(left, 1 / 60), { hop: HOP, bounds, walls, grow: DEPTH, push: o.push ?? undefined, climb: CLIMB, ...STEER })
           if (q.landed !== null) r.landed = q.landed
           if (q.bumped !== null) r.bumped = q.bumped
           r.impact = Math.max(r.impact, q.impact)
+          if (q.wall !== null && q.wallImpact > r.wallImpact) { r.wall = q.wall; r.wallImpact = q.wallImpact }
           r.moving = q.moving
         }
         const b = o.orb
+        // A knock against the edge of the screen: a glass tap, as hard as it came in; rolling along it or leaning on
+        // it is quiet (too slow, and not again so soon against the same edge).
+        if (r.wall !== null && r.wallImpact > WALL_MIN && clock - o.wallAt[r.wall] > WALL_GAP) {
+          o.wallAt[r.wall] = clock
+          hits.push({ orb: o.id, kind: 'wall', strength: strength(r.wallImpact), x: b.x, y: b.y, z: b.z })
+        }
         if (r.landed !== null) {
           // Every bounce sends a ring of light out through the dots and the letters, stronger the harder it lands.
           const impact = Math.min(1, r.impact / 5)

@@ -128,14 +128,16 @@ describe('the glass sound', () => {
     for (let i = 0; i < 60; i++) g.hit('floor', 0.5, 0)
     expect(g.stats()).toMatchObject({ played: 28, skipped: 32 })
   })
-  it('every kind of hit makes a sound, a gentle one too', () => {
+  it('every kind of hit makes a sound, a gentle one too, and is counted as its kind (a wall: the edge of the screen)', () => {
     env.allowed = true
     const g = make()
-    for (const kind of ['letter', 'floor', 'marble', 'button'] as const) {
+    for (const kind of ['letter', 'floor', 'marble', 'button', 'wall'] as const) {
       const before = env.voices
       g.hit(kind, 0, 0)
       expect(env.voices).toBeGreaterThan(before)
     }
+    g.hit('wall', 1, -1)
+    expect(g.stats().kinds).toEqual({ letter: 1, floor: 1, marble: 1, button: 1, wall: 2 })
   })
   it('without Web Audio there is no sound, and nothing breaks', () => {
     delete (globalThis as { AudioContext?: unknown }).AudioContext

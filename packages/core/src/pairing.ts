@@ -62,12 +62,20 @@ export async function roomIdFor(secret: Uint8Array): Promise<string> {
   return b64url(new Uint8Array(d)).slice(0, 22)
 }
 
-/** SHA-256 DTLS fingerprint from an SDP blob. */
+/**
+ * The SHA-256 DTLS fingerprint an SDP blob commits to, read strictly: the description must have exactly one media
+ * section and exactly one `a=fingerprint` line (at session level or in that section, so it is the one DTLS checks),
+ * and it must be a well-formed sha-256 fingerprint. Anything else is null. A description that says more (a second
+ * fingerprint anywhere, one hidden in another line's text, a second media section) could show one fingerprint to
+ * this parser and another to DTLS, which is how someone relaying between two DTLS sessions would pass a check.
+ */
 export function sdpFingerprint(sdp: string | undefined | null): Uint8Array | null {
-  const m = /a=fingerprint:sha-256 ([0-9A-Fa-f:]+)/i.exec(sdp ?? '')
-  if (!m) return null
-  const hex = m[1].split(':')
-  return hex.length === 32 ? Uint8Array.from(hex.map((h) => parseInt(h, 16))) : null
+  const lines = (sdp ?? '').split(/\r?\n/)
+  if (lines.filter((l) => l.startsWith('m=')).length !== 1) return null
+  const fps = lines.filter((l) => l.startsWith('a=fingerprint:'))
+  if (fps.length !== 1) return null
+  const m = /^a=fingerprint:sha-256 ((?:[0-9A-Fa-f]{2}:){31}[0-9A-Fa-f]{2})$/i.exec(fps[0].trimEnd())
+  return m ? Uint8Array.from(m[1].split(':').map((h) => parseInt(h, 16))) : null
 }
 
 /** Fingerprint as SDP writes it: upper-case hex pairs joined by colons. */

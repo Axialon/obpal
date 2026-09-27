@@ -39,11 +39,20 @@ export interface Layout {
   /** A catalogue profile the host suggests for what it controls right now (CATALOGUE §3). */
   profile?: string
   /**
-   * Tray buttons the device's hardware buttons press (CATALOGUE §1): primary is volume up, Enter or a headset press;
-   * secondary is volume down or Esc; next and prev are arrows, Page Up/Down or a headset's skip. A bound button sends
-   * btn{tap} when pressed. Unbound ones keep the mode's own use; gamepad mode keeps them as A, B and the d-pad.
+   * Tray buttons the device's physical buttons press, by the four actions devices knew before `buttons` (CATALOGUE §1):
+   * primary is Enter, Space, one headset press or a pad's A; secondary Esc, Backspace or a pad's B; next and prev the
+   * arrows, Page Up/Down, two or three headset presses or a pad's D-pad. (A keyboard's volume keys count as primary and
+   * secondary; a phone's own never reach a browser page.) A bound button sends btn{tap} when pressed. Unbound ones keep
+   * the controller's own use, and the gamepad keeps them as A, B and the d-pad. Devices read it as `buttons`
+   * (hostButtons() in @obpal/core).
    */
   keys?: Partial<Record<HardwareKey, string>>
+  /**
+   * What the host suggests physical inputs press (CATALOGUE §3, `buttons`): input id (`key:Enter`, `media:nexttrack`,
+   * `pad:b4`, `back`) -> a control of the device's controller, a key (`key-<code>`, where the tray has a keyboard),
+   * `tray:<id>`, `app:<action>` or `none`. It outranks the controller's defaults, and a person's own bindings outrank it.
+   */
+  buttons?: Record<string, string>
   /**
    * The Point face. wii (the default): A selects, hold B to grab, - / + zoom, home centres. mouse (for a host that
    * drives a mouse pointer): a mouse's Left and Right (btn mouse-left / mouse-right, down and up) either side of a
@@ -95,6 +104,13 @@ export const MAX_NODE_ID = 64
 export type DeviceMsg =
   /** pair: the pairing id when connecting through a direct LAN code. */
   | { t: 'hello'; proto: number; caps: Caps; mac: string; name: string; pair?: string }
+  /**
+   * Joining by short code (PROTOCOL §2b): the code's handle, the ticket the room service gave with the room, and this
+   * device's share of the exchange on the code's secret. No mac: the exchange proves the code instead.
+   */
+  | { t: 'hello'; proto: number; caps: Caps; name: string; code: string; ticket: string; pake: string }
+  /** The short-code exchange's last step: this device's confirmation. */
+  | { t: 'pake'; mac: string }
   | { t: 'btn'; id: string; ev: 'tap' | 'down' | 'up' | 'double' | 'long' }
   /** Typing on the device's keyboard (a `keyboard` tray control): delete `del` characters before the caret, then type `s` ('\n' is Enter). */
   | { t: 'text'; s: string; del?: number }
@@ -113,8 +129,14 @@ export type DeviceMsg =
   | { t: 'bye' }
 
 export type HostMsg =
-  /** pair: present when the host remembers this device (it can reconnect over the LAN without the room service). */
-  | { t: 'welcome'; proto: number; name: string; layout: Layout; pair?: PairGrant }
+  /**
+   * pair: present when the host remembers this device (it can reconnect over the LAN without the room service).
+   * invite: for a device that joined by short code, the online pairing code (as in the QR link's fragment), so it can
+   * reconnect and reload like a phone that scanned.
+   */
+  | { t: 'welcome'; proto: number; name: string; layout: Layout; pair?: PairGrant; invite?: string }
+  /** The short-code exchange (PROTOCOL §2b): the host's share and its confirmation. */
+  | { t: 'pake'; y: string; mac: string }
   | { t: 'layout'; layout: Layout }
   | { t: 'state'; values: Record<string, number | boolean | string> }
   | { t: 'feedback'; haptic?: 'tick' | 'bump'; toast?: string }
@@ -132,9 +154,21 @@ export type HostMsg =
 /** Signaling envelope exchanged with the room service (JSON over WebSocket). */
 export type SignalIn =
   | { t: 'welcome'; id: string; role: 'host' | 'device'; host: boolean }
-  | { t: 'peer'; ev: 'join' | 'leave'; id: string; role?: 'host' | 'device' }
+  /** leave: `clean` when the page closed its socket (it left); otherwise the socket was lost, which a peer connection may outlive. */
+  | { t: 'peer'; ev: 'join' | 'leave'; id: string; role?: 'host' | 'device'; clean?: boolean }
   | { t: 'sig'; from: string; d: SignalPayload }
   | { t: 'error'; code: string }
+  /**
+   * Short codes, to the host (PROTOCOL §2b). A new handle for this room (`code`, until `exp`); or `ev: 'used'`: a
+   * device looked up `code` and got `ticket`, and `next` is the handle that replaces it; or an `error`: 'busy' or
+   * 'slow-down' with the seconds to wait before asking again, or 'work' with a challenge to solve first.
+   */
+  | {
+    t: 'code'; code?: string; exp?: number; ev?: 'used'; ticket?: string; next?: { code: string; exp: number }
+    error?: 'busy' | 'slow-down' | 'work'; retry?: number
+    /** With error 'work': the proof of work to bring back with the next claim (PROTOCOL §2b). */
+    challenge?: string; bits?: number
+  }
 
 export type SignalPayload =
   | { offer: RTCSessionDescriptionInit }

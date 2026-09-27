@@ -5,7 +5,7 @@
  */
 import type { Layout, SceneNode } from '@obpal/core'
 import { Claims } from './claims'
-import { createChip, type Chip, type ChipOptions } from './element-chip'
+import { PairingChip, type PairingChipOptions } from './chip'
 import { Remote, type Frame, type HostStatus, type Participant } from './remote'
 
 export { embedLayout, parseCorner, parseFlag, parseScheme, parseSeats } from './embed-attrs'
@@ -18,7 +18,7 @@ export interface HostStart {
   service?: string
   seats: number
   layout: Layout
-  chip: Omit<ChipOptions, 'remote' | 'onToggle'>
+  chip: Omit<PairingChipOptions, 'remote' | 'onToggle'>
   /** Fire `obpal-<name>` on the element; false when a listener cancelled it. */
   emit: (name: string, detail: object, cancelable?: boolean) => boolean
   status: (s: HostStatus) => void
@@ -36,7 +36,7 @@ export interface ElementHost {
   holding(who: string): string | null
   held(): Record<string, string>
   setLayout(layout: Layout): void
-  setChip(chip: Omit<ChipOptions, 'remote' | 'onToggle'>): void
+  setChip(chip: Omit<PairingChipOptions, 'remote' | 'onToggle'>): void
   expand(open: boolean): void
   destroy(): void
 }
@@ -119,7 +119,7 @@ export async function startHost(o: HostStart): Promise<{ host: ElementHost } | {
     else take(node, who.id)
   })
 
-  let chip: Chip = createChip({ remote, ...o.chip, onToggle: o.toggled })
+  let chip = new PairingChip({ remote, ...o.chip, onToggle: o.toggled })
 
   const host: ElementHost = {
     remote,
@@ -154,7 +154,7 @@ export async function startHost(o: HostStart): Promise<{ host: ElementHost } | {
     setChip(opts) {
       const open = chip.expanded
       chip.destroy()
-      chip = createChip({ remote, ...opts, open, onToggle: o.toggled })
+      chip = new PairingChip({ remote, ...opts, open, onToggle: o.toggled })
     },
     expand(open) { if (open !== chip.expanded) { if (open) chip.expand(); else chip.collapse() } },
     destroy() {

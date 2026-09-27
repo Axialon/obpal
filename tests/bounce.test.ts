@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { G, collide, flightTime, hopTo, inside, landingSpot, nearest, newOrb, roundedRect, sidesAt, step, surfaceAt, toss, type Footprint, type Orb } from '../src/landing/bounce'
+import { G, collide, counterOf, flightTime, hopTo, inside, landingSpot, nearest, newOrb, roundedRect, sidesAt, step, surfaceAt, toss, withinWalls, type Footprint, type Orb, type Wall } from '../src/landing/bounce'
+import { layoutLetters, TOP } from '../src/landing/letters'
 
 const ring = (...pts: number[]) => Float64Array.from(pts)
 /** An "o": a square 2 wide with a square hole 1 wide, standing `height` tall at (cx, cz). */
@@ -325,5 +326,178 @@ describe("a button's outline", () => {
     // Square corners: the box itself.
     const sq = roundedRect(0, 0, 10, 10, 0, 1)
     expect(sq).toEqual([0, 0, 10, 0, 10, 10, 0, 10])
+  })
+})
+
+describe("a letter's counters (the holes in o, p, e)", () => {
+  const R = 0.2
+  const opts = (extra: { push?: [number, number] } = {}) => ({ hop: 0.8, bounds: [-30, -30, 30, 30] as [number, number, number, number], climb: 0.1, omega: 4.6, zeta: 0.78, air: 0.3, ...extra })
+  /** A glyph laid out alone, and each of its counters' deepest point (the widest circle that fits in it) and width. */
+  const glyph = (ch: string) => {
+    const [l] = layoutLetters([ch])
+    const found: { x: number; z: number; a: number }[] = []
+    const b = l.fp.box, steps = 60
+    for (let i = 0; i <= steps; i++) {
+      for (let j = 0; j <= steps; j++) {
+        const x = b[0] + ((b[2] - b[0]) * i) / steps, z = b[1] + ((b[3] - b[1]) * j) / steps
+        const hole = counterOf(l.fp, x, z)
+        if (!hole) continue
+        const a = nearest({ ...l.fp, rings: [hole] }, x, z).d
+        const at = found.find((f) => counterOf(l.fp, f.x, f.z) === hole)
+        if (!at) found.push({ x, z, a })
+        else if (a > at.a) Object.assign(at, { x, z, a })
+      }
+    }
+    return { fp: l.fp, counters: found }
+  }
+  /** Run, and the most it moved in any one 60 Hz frame (em). */
+  const still = (o: Orb, fps: Footprint[], seconds: number, extra: { push?: [number, number] } = {}) => {
+    let most = 0
+    for (let t = 0; t < seconds; t += 1 / 60) {
+      const p = [o.x, o.y, o.z]
+      step(o, fps, 1 / 60, opts(extra))
+      most = Math.max(most, Math.hypot(o.x - p[0], o.y - p[1], o.z - p[2]))
+    }
+    return most
+  }
+  const SHAPES = ['o', 'p', 'e', 'a', 'b', 'd', 'g', 'q', 'P', 'R', 'A', 'B', 'D', 'Q', '0', '6', '8', '9', 'O']
+  it('a marble that comes down on any counter rests there without a tremor (under 0.1 px a frame at 100 px an em) for 2 s', () => {
+    for (const ch of SHAPES) {
+      const { fp, counters } = glyph(ch)
+      expect(counters.length, ch).toBeGreaterThan(0)
+      for (const c of counters) {
+        const o = newOrb(c.x, c.z, R)
+        Object.assign(o, { y: TOP + R + 0.3, resting: false })
+        still(o, [fp], 3)
+        const most = still(o, [fp], 2)
+        expect(most, `${ch}: moved ${most} em in a frame`).toBeLessThan(0.001)
+        expect(counterOf(fp, o.x, o.z), ch).not.toBeNull()
+        if (c.a < R) {
+          // Narrower than the marble: it sits on the rim, above the floor, below the letter's top.
+          expect(o.y, ch).toBeGreaterThan(R + 0.02)
+          expect(o.y, ch).toBeLessThan(TOP + R)
+          expect(o.held, ch).toBe(true)
+        } else expect(o.y, ch).toBeCloseTo(R, 3)
+      }
+    }
+  })
+  it('tilted toward a side (a few degrees, steadily), it rides up over the rim and out', () => {
+    for (const ch of ['o', 'p', 'e', 'a', 'P', 'O']) {
+      const { fp, counters } = glyph(ch)
+      for (const push of [[3, 0], [-3, 0], [0, 3], [0, -3]] as [number, number][]) {
+        const c = counters[0]
+        const o = newOrb(c.x, c.z, R)
+        Object.assign(o, { y: TOP + R + 0.2, resting: false })
+        still(o, [fp], 2)
+        still(o, [fp], 3, { push })
+        expect(counterOf(fp, o.x, o.z), `${ch} tilted ${push}`).toBeNull()
+      }
+    }
+  })
+  it('steered to somewhere outside, it leaves the same way; steered back into it, it goes in and stays calm', () => {
+    const { fp, counters } = glyph('o')
+    const c = counters[0]
+    const o = newOrb(c.x, c.z, R)
+    Object.assign(o, { y: TOP + R + 0.2, resting: false })
+    still(o, [fp], 2)
+    // The middle of the o's stroke right of the counter.
+    let x0 = c.x
+    while (!inside(fp, x0, c.z)) x0 += 0.002
+    let x1 = x0
+    while (inside(fp, x1, c.z)) x1 += 0.002
+    o.target = { x: (x0 + x1) / 2, z: c.z }
+    still(o, [fp], 3)
+    expect(counterOf(fp, o.x, o.z)).toBeNull()
+    expect(o.y).toBeCloseTo(TOP + R, 3)
+    expect(Math.abs(o.x - (x0 + x1) / 2)).toBeLessThan(0.02)
+    // Back in, pointed at the counter's middle: it goes in, and stays there, still.
+    o.target = { x: c.x, z: c.z }
+    still(o, [fp], 4)
+    expect(counterOf(fp, o.x, o.z)).not.toBeNull()
+    expect(still(o, [fp], 2)).toBeLessThan(0.001)
+  })
+  it('rolling across the letter\'s top with nobody steering or tilting it, it doesn\'t drop into the counter', () => {
+    const { fp, counters } = glyph('o')
+    const c = counters[0]
+    // On the o's stroke, left of the counter, rolling right toward it.
+    const o = newOrb(fp.spot[0], fp.spot[1], R, TOP)
+    const toward = Math.sign(c.x - o.x) || 1
+    o.resting = false
+    o.vx = 1.2 * toward
+    for (let t = 0; t < 2; t += 1 / 60) {
+      step(o, [fp], 1 / 60, opts())
+      if (counterOf(fp, o.x, o.z)) expect(o.y).toBeGreaterThan(TOP + R - 0.011)
+    }
+  })
+  it('tilted across it, it rolls in and out the far side', () => {
+    const { fp, counters } = glyph('o')
+    const c = counters[0]
+    const o = newOrb(fp.spot[0], fp.spot[1], R, TOP)
+    o.resting = false
+    const toward = Math.sign(c.x - o.x) || 1
+    let wasIn = false
+    for (let t = 0; t < 3; t += 1 / 60) {
+      step(o, [fp], 1 / 60, opts({ push: [4 * toward, 0] }))
+      if (counterOf(fp, o.x, o.z)) wasIn = true
+    }
+    expect(wasIn).toBe(true)
+    expect(counterOf(fp, o.x, o.z)).toBeNull()
+    expect((o.x - c.x) * toward).toBeGreaterThan(0.2)
+  })
+})
+
+describe('the walls (the edges of the screen, as planes through the camera)', () => {
+  const R = 0.2
+  const unit = (x: number, y: number, z: number): [number, number, number] => { const l = Math.hypot(x, y, z); return [x / l, y / l, z / l] }
+  // A side wall at x = -3 (inward +x), and the screen's bottom edge: a plane tilted toward the viewer, through (0, 0, 4).
+  const side: Wall = { n: [1, 0, 0], d: 3 }
+  const bn = unit(0, 0.33, -0.94)
+  const bottom: Wall = { n: bn, d: -(bn[2] * 4) }
+  const walls = [side, bottom]
+  const dist = (w: Wall, o: Orb) => w.n[0] * o.x + w.n[1] * o.y + w.n[2] * o.z + w.d
+  const opts = (extra: { push?: [number, number]; grow?: number } = {}) => ({ hop: 0.8, bounds: BOUNDS, walls, grow: 0.3, ...extra })
+  it('tipped into an edge, the marble stops with its outline just touching it, and the knock is reported', () => {
+    for (const [i, push] of [[0, [-9, 0]], [1, [0, 9]]] as [number, [number, number]][]) {
+      const o = newOrb(0, 0, R)
+      o.resting = false
+      let knock = 0, which = -1
+      for (let t = 0; t < 3; t += 1 / 60) {
+        const r = step(o, [], 1 / 60, opts({ push }))
+        if (r.wall !== null && r.wallImpact > knock) { knock = r.wallImpact; which = r.wall }
+      }
+      expect(which).toBe(i)
+      expect(knock).toBeGreaterThan(3)
+      // Pressed there: the plane touches the sphere as it's drawn (on the floor, its own radius).
+      expect(dist(walls[i], o)).toBeCloseTo(R, 3)
+    }
+  })
+  it('leaning on an edge, or rolling along it, knocks only faintly (the field hears nothing under 0.8 em/s)', () => {
+    const o = newOrb(-3 + R, 0, R)
+    o.resting = false
+    let most = 0
+    for (let t = 0; t < 2; t += 1 / 60) {
+      // Pressed into the side and rolling along it toward the viewer.
+      const r = step(o, [], 1 / 60, opts({ push: [-6, 2] }))
+      if (t > 0.3) most = Math.max(most, r.wallImpact)
+    }
+    expect(most).toBeLessThan(0.3)
+    expect(dist(side, o)).toBeCloseTo(R, 3)
+  })
+  it('in the air it is drawn bigger, so it keeps further in', () => {
+    const o = newOrb(-2.5, 0, R)
+    Object.assign(o, { y: 1 + R, resting: false, vx: -8, vy: 0 })
+    let closest = Infinity
+    for (let t = 0; t < 0.3; t += 1 / 120) {
+      step(o, [], 1 / 120, opts())
+      if (o.y > R + 0.3) closest = Math.min(closest, dist(side, o) - R * (1 + 0.3 * (o.y - R)))
+    }
+    expect(closest).toBeGreaterThan(-1e-6)
+  })
+  it('a point is brought inside them for a marble resting there', () => {
+    const p = withinWalls(walls, -5, R, 6, R)
+    const o = { ...newOrb(p.x, p.z, R) }
+    expect(dist(side, o)).toBeGreaterThanOrEqual(R - 1e-9)
+    expect(dist(bottom, o)).toBeGreaterThanOrEqual(R - 1e-9)
+    expect(Math.min(dist(side, o), dist(bottom, o))).toBeCloseTo(R, 6)
   })
 })

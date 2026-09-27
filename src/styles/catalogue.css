@@ -38,6 +38,20 @@
 .errs { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .errs:empty { display: none; }
 .errs li { padding: 8px 12px; border-radius: 12px; background: rgb(251 113 133 / 0.12); color: #fda4af; font-size: 13px; }
+/* The builder's buttons: one row per binding, what's pressed and what it does. */
+.bld-btns { grid-column: 1 / -1; margin: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 16px; display: grid; gap: 10px; }
+.bld-btns legend { padding: 0 6px; color: var(--ink); font: 700 13.5px var(--font); }
+.bld-btns legend code { margin-left: 6px; font-size: 11px; }
+.bld-note { margin: 0; color: var(--muted); font-size: 12.5px; }
+.brows { display: grid; gap: 8px; }
+.brows:empty { display: none; }
+.brow { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.brow > span { color: var(--muted); font-weight: 700; }
+.brow .btray { grid-column: 3; grid-row: 2; }
+.bld .brow select, .bld .brow input { width: 100%; }
+.bdel { width: 34px; height: 34px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 10px; background: rgb(var(--hl-rgb) / 0.04); color: var(--muted); font-size: 18px; line-height: 1; }
+.bdel:hover { color: var(--ink); }
+.bld-btns > .btn { justify-self: start; min-height: 38px; }
 .bld-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .bld-actions .btn { text-decoration: none; }
 .bld-actions .off { opacity: 0.45; pointer-events: none; }

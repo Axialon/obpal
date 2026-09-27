@@ -85,16 +85,95 @@ export class SignalClient {
 
 const STUN: RTCIceServer[] = [{ urls: 'stun:stun.cloudflare.com:3478' }]
 
-/** ICE servers for a room: STUN, plus TURN when the service mints credentials. Falls back to STUN within the timeout. */
-export async function fetchIceServers(service: string, roomId: string, timeoutMs = REACH_TIMEOUT_MS): Promise<RTCIceServer[]> {
+/**
+ * A room's ICE servers: STUN, plus TURN when the service mints credentials, and when those lapse (`expires`, epoch
+ * ms; absent without TURN). Falls back to STUN within the timeout.
+ */
+export interface IceSet { servers: RTCIceServer[]; turn: boolean; expires?: number }
+
+/** How long before TURN credentials lapse a host asks for fresh ones (a relay drops an allocation once they have). */
+export const ICE_REFRESH_BEFORE_MS = 10 * 60_000
+/** Without TURN (none minted, or the lookup failed), ask again this often: the service may have one later. */
+export const ICE_RETRY_MS = 10 * 60_000
+
+export async function fetchIce(service: string, roomId: string, timeoutMs = REACH_TIMEOUT_MS): Promise<IceSet> {
   try {
     const r = await fetch(`${service}/api/ice?room=${encodeURIComponent(roomId)}`, { cache: 'no-store', signal: AbortSignal.timeout(timeoutMs) })
     if (r.ok) {
-      const j = (await r.json()) as { iceServers?: RTCIceServer[] }
-      if (Array.isArray(j.iceServers) && j.iceServers.length) return j.iceServers
+      const j = (await r.json()) as { iceServers?: RTCIceServer[]; turn?: boolean; expires?: number }
+      if (Array.isArray(j.iceServers) && j.iceServers.length) {
+        const expires = typeof j.expires === 'number' && j.expires > Date.now() ? j.expires : undefined
+        return { servers: j.iceServers, turn: j.turn === true, ...(expires ? { expires } : {}) }
+      }
     }
   } catch { /* fall through to STUN */ }
-  return STUN
+  return { servers: STUN, turn: false }
+}
+
+/** ICE servers for a room (see fetchIce). */
+export async function fetchIceServers(service: string, roomId: string, timeoutMs = REACH_TIMEOUT_MS): Promise<RTCIceServer[]> {
+  return (await fetchIce(service, roomId, timeoutMs)).servers
+}
+
+/**
+ * When to ask for a room's ICE servers again: shortly before TURN credentials lapse (credentials that say nothing
+ * about it are taken to last a day), else after ICE_RETRY_MS. Never sooner than a minute.
+ */
+export function iceRefreshIn(set: Pick<IceSet, 'turn' | 'expires'>, now = Date.now()): number {
+  const lapses = set.expires ?? (set.turn ? now + 24 * 3600_000 : 0)
+  return Math.max(60_000, lapses ? Math.min(lapses - now - ICE_REFRESH_BEFORE_MS, 2 ** 31 - 1) : ICE_RETRY_MS)
+}
+
+/**
+ * What a live connection's own statistics say about it (W3C webrtc-stats), for a connection badge that claims only what
+ * is true: the path the selected ICE pair takes, its round trip, and how DTLS secures it.
+ */
+export interface LinkInfo {
+  /**
+   * lan: both ends' host candidates (the same network). nat: peer to peer through a router found with STUN (a server
+   * reflexive candidate). direct: peer to peer otherwise (an address learnt from the other side's checks). relay: a
+   * TURN server carries it. unknown: no selected pair yet.
+   */
+  path: 'lan' | 'nat' | 'direct' | 'relay' | 'unknown'
+  /** How this end reaches its relay: udp, tcp or tls (TURN over TLS). */
+  relayProtocol?: string
+  /** The pair's round trip as ICE measures it, ms. */
+  rttMs?: number
+  /** The DTLS version agreed ('DTLS 1.2', 'DTLS 1.3') and its cipher suite, where the browser reports them. */
+  dtls?: string
+  cipher?: string
+  /** Every transport (ICE and DTLS) is connected: the channels are encrypted and authenticated end to end. */
+  secure: boolean
+}
+
+const DTLS_VERSIONS: Record<string, string> = { FEFD: 'DTLS 1.2', FEFC: 'DTLS 1.3' }
+
+export async function linkInfo(pc: RTCPeerConnection): Promise<LinkInfo> {
+  const secure = pc.connectionState === 'connected'
+  try {
+    const stats = await pc.getStats()
+    let transport: any
+    stats.forEach((s) => { if (s.type === 'transport' && (s.selectedCandidatePairId || !transport)) transport = s })
+    let pair: any = transport?.selectedCandidatePairId ? stats.get(transport.selectedCandidatePairId) : undefined
+    if (!pair) stats.forEach((s) => { if (s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded') pair = s })
+    const local = pair ? stats.get(pair.localCandidateId) : undefined
+    const remote = pair ? stats.get(pair.remoteCandidateId) : undefined
+    const types = [local?.candidateType, remote?.candidateType]
+    const path: LinkInfo['path'] = !pair ? 'unknown'
+      : types.includes('relay') ? 'relay'
+        : types[0] === 'host' && types[1] === 'host' ? 'lan'
+          : types.includes('srflx') ? 'nat' : 'direct'
+    const version = typeof transport?.tlsVersion === 'string' ? transport.tlsVersion.toUpperCase() : ''
+    return {
+      path, secure,
+      ...(path === 'relay' && typeof local?.relayProtocol === 'string' ? { relayProtocol: local.relayProtocol } : {}),
+      ...(typeof pair?.currentRoundTripTime === 'number' ? { rttMs: Math.round(pair.currentRoundTripTime * 1000) } : {}),
+      ...(DTLS_VERSIONS[version] ? { dtls: DTLS_VERSIONS[version] } : {}),
+      ...(typeof transport?.dtlsCipher === 'string' ? { cipher: transport.dtlsCipher } : {}),
+    }
+  } catch {
+    return { path: 'unknown', secure }
+  }
 }
 
 /** Which path the selected ICE pair uses. */

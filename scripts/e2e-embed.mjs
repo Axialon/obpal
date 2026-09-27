@@ -1,13 +1,14 @@
 /**
  * The embed end to end (PLAN §10 step 3): the /embed/ demo (a plain three.js scene with <obpal-remote>) from this
- * checkout's build, served by the local stand-in (signaling proxied to production), and emulated phones.
+ * checkout's build, served by the local stand-in, and emulated phones. The stand-in's room service is this checkout's
+ * worker (scripts/local-worker.mjs, `wrangler dev` on OBPAL_E2E_WORKER_PORT, 5189 by default), for the short code.
  *   - The demo: a phone pairs through the element's code; the page hears obpal-connect and obpal-join, gives it a shape,
  *     and a drag on the phone moves it. The phone says which controller it uses (mode{c}); its tray button is an
  *     obpal-button; its scene list claims another shape; the gyro turns what it holds 1:1; leaving is an obpal-leave.
  *   - Another site: embed.js and its lazy parts load cross-origin (with the CORS headers public/_headers sends) under a
- *     strict Content Security Policy, beside hostile page CSS. Nothing loads before a person is there; two elements pair
- *     separately; nothing is blocked, nothing leaks into the page's styles, and a phone opens the controller the page
- *     suggests first.
+ *     strict Content Security Policy that also enforces Trusted Types, beside hostile page CSS. Nothing loads before a
+ *     person is there; two elements pair separately; nothing is blocked, nothing leaks into the page's styles, a phone
+ *     opens the controller the page suggests first, and another joins the second element by typing its short code.
  *   - Without WebRTC the element says so (unsupported) and the scene runs on.
  * Port 5180 (OBPAL_E2E_PORT to change it). Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>.
  * --headed to watch. OBPAL_SHOTS=<dir> saves screenshots of the demo and the phone.
@@ -15,6 +16,7 @@
 import { join } from 'node:path'
 import { chromium, devices } from 'playwright'
 import { startLocal } from '../extension/e2e/local.mjs'
+import { startWorker } from './local-worker.mjs'
 
 const HEADED = process.argv.includes('--headed')
 const SHOTS = process.env.OBPAL_SHOTS || ''
@@ -50,7 +52,8 @@ async function check(name, fn) {
   }
 }
 
-const local = await startLocal({ port: PORT })
+const worker = await startWorker({ port: Number(process.env.OBPAL_E2E_WORKER_PORT) || 5189 })
+const local = await startLocal({ port: PORT, upstream: worker.origin })
 const browser = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
 let exitCode = 0
 try {
@@ -230,6 +233,8 @@ try {
     `connect-src ${local.origin} ${local.origin.replace('https', 'wss')}`,
     "img-src 'none'",
     "base-uri 'none'",
+    // No markup may be parsed from strings: the chip builds its elements and its QR code.
+    "require-trusted-types-for 'script'",
   ].join('; ')
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Another site</title>
 <style nonce="e2e">
@@ -303,7 +308,7 @@ try {
   await check('the hostile page CSS doesn’t reach the chips', async () => {
     const look = await site.evaluate(() => [...document.querySelectorAll('obpal-remote')].map((e) => {
       const root = e.shadowRoot.querySelector('.obpal-chip').shadowRoot
-      const chip = root.querySelector('.chip')
+      const chip = root.querySelector('.pill')
       const cs = getComputedStyle(chip)
       const qr = root.querySelector('.qr')
       const r = chip.getBoundingClientRect()
@@ -313,8 +318,9 @@ try {
       if (l.h !== 44 || l.size !== '14px' || l.color === 'rgb(255, 0, 255)' || l.bg === 'rgb(255, 255, 0)' || l.spacing !== 'normal') throw new Error(JSON.stringify(look))
     }
     // The code's plate at its laid-out size (the card may still be growing in).
-    if (look[1].qr !== 184) throw new Error(`the right chip’s code is ${look[1].qr}px`)
-    if (SHOTS) await site.screenshot({ path: join(SHOTS, 'embed-another-site.png') })
+    if (look[1].qr !== 168) throw new Error(`the right chip’s code is ${look[1].qr}px`)
+    // In front, so it draws frames and the opened card finishes coming in.
+    if (SHOTS) { await site.bringToFront(); await sleep(500); await site.screenshot({ path: join(SHOTS, 'embed-another-site.png') }) }
     return look.map((l) => `${l.h}px chip, ${l.size}, ${l.bottom}px from the bottom`).join('; ')
   })
 
@@ -327,6 +333,25 @@ try {
     if (right) throw new Error('the phone joined the other element too')
     await p.ctx.close()
     return `the phone opened ${tab} (${joined.join(', ') || '…'} → face.wii: ${who})`
+  })
+
+  await check('the second element shows a short code under Trusted Types, and a phone that types it joins that element', async () => {
+    const shown = await until('its code', () => site.evaluate(() => {
+      const root = document.getElementById('right').shadowRoot.querySelector('.obpal-chip').shadowRoot
+      const box = root.querySelector('.code-box')
+      return box && !box.hidden && !box.hasAttribute('data-wait') ? { code: root.querySelector('.code').textContent, at: root.querySelector('.site').textContent } : null
+    }), 10000)
+    const ctx = await browser.newContext({ ...devices['Pixel 7'], ignoreHTTPSErrors: true })
+    const page = await ctx.newPage()
+    await page.goto(`${local.origin}/p/`)
+    await page.locator('#code-in').pressSequentially(shown.code, { delay: 20 })
+    await page.locator('.modes').waitFor({ timeout: 25000 })
+    const joined = await until('the right element joined', () => site.evaluate(() => document.getElementById('right').participants.length), 10000)
+    const v = await site.evaluate(() => window.__site.violations)
+    await ctx.close()
+    if (v.length) throw new Error(`CSP or Trusted Types violations: ${v.join(' | ')}`)
+    if (siteErrors.length) throw new Error(siteErrors.join(' | '))
+    return `typed ${shown.code} at ${shown.at}; ${joined} on the right element; no violations`
   })
 
   await check('removing an element ends its remote; one moved in the page keeps it', async () => {
@@ -376,6 +401,7 @@ try {
 } finally {
   await browser.close().catch(() => {})
   await local.close()
+  await worker.close()
 }
 
 const failed = results.filter((r) => !r.ok)

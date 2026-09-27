@@ -9,7 +9,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
-import { GlowFollower, handMove, headingOf, Mode, PointerFlag, Remote, type Frame, type Layout, type ModeId, type PadState, type Participant, type PointerState } from '@obpal/host'
+import { GlowFollower, handMove, headingOf, Mode, PairingChip, PointerFlag, Remote, type Frame, type Layout, type ModeId, type PadState, type Participant, type PointerState } from '@obpal/host'
 import { CATALOG, CATEGORIES, DEFAULT_ITEM, LOCAL_CATEGORY, type CatalogItem } from './catalog'
 import { localFolder } from './local-folder'
 import { applyGamepad, type GamepadContext } from './gamepad-input'
@@ -866,6 +866,8 @@ function syncPhoneModels() {
 const MODE_LABEL: Partial<Record<ModeId, string>> = { [Mode.tilt]: 'Tilt', [Mode.hold]: '1:1', [Mode.point]: 'Point', [Mode.orbit]: 'Gyro', [Mode.gamepad]: 'Gamepad' }
 const emptyPadState: PadState = { flags: 0, seq: 0, t: 0, buttons: 0, axes: [0, 0, 0, 0], triggers: [0, 0] }
 let remote: Remote | null = null
+/** The pairing chip: the QR code and the short code, in the bottom-right corner. */
+let pairChip: PairingChip | null = null
 
 // ---- shared scene: every connected device is a seat, with its own cursor and hand (CATALOGUE §5) ----
 
@@ -986,24 +988,20 @@ async function startRemote() {
   remote = await Remote.create({ appName: 'ob.Pal Viewer', layout, seats: 8 })
   remote.setHostPerson({ name: 'Screen', color: family.accentColor() })
   Object.assign(window, { __obpal: remote, __viewer: { holder, camera, controls, view, seats, parts } })
-  remote.mountPairing($('pair'), { variant: 'compact' })
-  hint('pair', () => $('pair'), 'Scan with your phone camera to take control', { place: 'top', delay: 1400 })
+  // Open while nobody is here; it closes by itself as a phone comes in, and the + in the people chip opens it again.
+  pairChip = new PairingChip({ remote, open: true, testLink: true, onToggle: (open) => $('chip-invite').setAttribute('aria-pressed', String(open)) })
   remote.on('connect', () => {
-    dismissHint('pair')
-    $('pair').hidden = true
     $('chip').hidden = false
     remote!.setValues({ model: current?.id ?? '', spin: view.spin, grid: view.grid, glow: view.glow, theme: theme.id, accent: family.getAccent(), light: lighting.preset })
   })
   remote.on('disconnect', () => {
     $('chip').hidden = true
-    $('pair').hidden = false
+    pairChip?.expand()
     togglePeople(false)
   })
   remote.on('join', (p) => {
     addSeat(p)
     renderPeople()
-    // Only the invite card's own scan closes it: a join from elsewhere leaves it open for the next person.
-    if ($('pair').dataset.invite === 'open') setInvite(false)
     note(`${p.name} joined`)
     publishScene(true)
   })
@@ -1044,7 +1042,7 @@ async function startRemote() {
     else heldFeedback(s, part)
   })
   $('chip-disc').onclick = () => remote?.disconnect()
-  $('chip-invite').onclick = () => setInvite($('pair').dataset.invite !== 'open')
+  $('chip-invite').onclick = () => { pairChip?.toggle(); if (pairChip?.expanded) $('people').hidden = true }
   $('chip-who').onclick = () => togglePeople()
   $('invite-new').onclick = async () => {
     await remote?.resetInvite()
@@ -1127,16 +1125,7 @@ function renderPeople() {
 
 function togglePeople(on = $('people').hidden) {
   $('people').hidden = !on
-  if (on) setInvite(false)
-}
-
-/** The invite card: the pairing QR and link, shown on demand while devices are connected. */
-function setInvite(on: boolean) {
-  if (remote?.status !== 'connected') return
-  $('pair').hidden = !on
-  $('pair').dataset.invite = on ? 'open' : ''
-  $('chip-invite').setAttribute('aria-pressed', String(on))
-  if (on) $('people').hidden = true
+  if (on && remote?.status === 'connected') pairChip?.collapse()
 }
 
 /**

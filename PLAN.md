@@ -125,11 +125,24 @@ flowchart LR
 5. **Sensor tier classification** (about 500 ms) decides which modes are enabled. The host then pushes its layout.
 
 **Other paths:**
-- **Short code (MVP, for Quest/Vision Pro/TVs and installed iOS PWAs):**
-  - The user types a 6-digit code into the PWA. The code is rate-limited in the DO.
-  - Host and phone run a commit-then-reveal ECDH.
-  - Both screens show a 4-emoji code to compare, and the host user clicks "Allow <device>?". **A code alone never grants control.**
+- **Short code (built 2026-09-27; PROTOCOL §2b), for TVs, headsets, a phone across the room and installed iOS PWAs:**
+  - Every pairing UI shows a code beside the QR code: ten digits (`482 193 7056`), to type at `obpal.blackboxes.net/p`.
+  - The first five digits are a handle the worker keeps for one room, ten minutes and one lookup; the last five are a secret the host picks and never sends. Every code has the one length and starts 1 to 9, so no code is the start of another (security review, 2026-09-27: a 9-or-10-digit scheme let a slow typist spend a stranger's shorter code).
+  - The phone looks the handle up (it is spent as it's found, and the host shows its replacement at once), joins the room, and runs a PAKE on the secret with the host over the DTLS channel: CPace's construction on X25519, bound to both DTLS fingerprints. One attempt per code; the host then hands the phone the QR link's pairing code, so it reconnects like a scanned phone.
+  - Rate-limited in the worker's Codes object (not the per-location Rate Limiting binding), per network: an address (IPv4, or an IPv6 /64), an IPv6 /56 and a wide network (IPv6 /48, IPv4 /24), for misses, codes spent, new codes and live codes. While a limit holds, every answer is the same. Pressure from everyone together never switches pairing off: past a budget of 10 misses a minute, every lookup brings a proof of work (Hashcash-style, no third party), and past 18,000 live codes so does every new code. The numbers and the maths are in PROTOCOL §2b: at the budget, blind guessing lands 0.59 joins a year with 1,000 live codes.
+  - Any host that grants control of a computer (Link's PC target, when Link takes short codes) must not take a short code alone: it asks for the QR code, or for an extra confirmation on the computer. A code is worth a moment of one screen's control; a whole PC is worth more.
+  - Changed from the first design (a 6-digit code, commit-then-reveal ECDH, a 4-emoji comparison and an "Allow <device>?" click): the PAKE gives the same one-guess bound with nothing for two people to compare, and the service never learns enough to use a code. The screen still shows who joined and can remove them.
   - Installed iOS Home Screen apps need this path: they don't share Safari's storage, and Camera scans always open the browser.
+
+**Pairing UX: what the best do, and what ob.Pal takes from it (research 2026-09-27):**
+- *Two ways in, on one card.* Netflix's and YouTube's TV sign-in and the OAuth device flow show a QR code with a short code, and RFC 8628 says the code must still show when a QR code is offered: the QR for the phone in hand, the code for a TV, a headset or someone across the room. The chip shows both, the QR code first.
+- *A short, plain address to type,* as netflix.com/tv8, youtube.com/activate, jackbox.tv and kahoot.it: `obpal.blackboxes.net/p`, no scheme.
+- *Codes people can read, say and type.* Kahoot's PIN and Netflix's code are digits; RFC 8628 suggests digits or vowel-free letters, grouped (`019-450-730`), case-free, separators ignored; Jackbox had to filter the words its random letters made. Ten digits, grouped 3, 3, 4: a phone's number pad, no case, nothing to misread; the field takes spaces, dashes, paste, and O or I for 0 or 1, and the tenth digit sends it.
+- *Short-lived, one-time, quietly replaced.* Kahoot PINs end with the game, RFC 8628 codes expire and are rate-limited, Chromecast's guest PIN changed daily, WhatsApp's login QR refreshes itself. The chip never shows "expired": a used or lapsed code is replaced where it stood.
+- *Trust by saying who and what.* Apple TV's sign-in and the Switch's phone pairing say which device is joining. The chip names the phone ("Connected · Pixel 8"), and says waiting, connecting or offline in words and a dot.
+- *Out of the way.* Spotify Connect's device picker is a small icon that opens on demand. The chip is a corner pill: it opens to the card, closes by itself once a phone is in, and doesn't cover the scene unless asked.
+- *A branded QR code still has to scan.* Logo guidance: ECC Q or H for a centred mark, a quiet zone, dark on light. The code uses ECC Q and keeps its eyes nearly as dark as its ink (paler eyes and an accent rim both cost reads in testing); two decoders prove it (tests/qr.test.ts).
+- Sources: RFC 8628 §6.1; Jackbox, "Room [CENSORED] Codes"; Kahoot help centre; netflix.com/tv8; Chromecast guest mode; Nintendo Switch smart-device transfer; Apple, "Simplify sign in for your tvOS apps" (WWDC21); QR logo and error-correction guides.
 - **Remembered host, direct code (shipped with ob.Pal Link, 2026-09-26):**
   - After an online pairing the host hands the phone a pairing id and key inside the DTLS channel; both keep their own certificate (IndexedDB) and the other's fingerprint.
   - With the service unreachable the host shows a direct code: its live ICE credentials and host candidates plus a nonce. The phone answers with credentials derived from the key and the nonce, the host learns the phone's address from its connectivity checks (peer-reflexive), and DTLS pins both remembered fingerprints. No server, and nothing for a phone that never paired.
@@ -222,7 +235,7 @@ flowchart LR
 ```js
 import { Remote } from '@obpal/host'; import { threeObject, cameraControls } from '@obpal/host/adapters';
 const r = await Remote.create({ appName: 'Part Viewer', layout: 'orbit-inspect' });
-r.mountPairing(el);                 // QR + short code + status
+new PairingChip({ remote: r });     // QR + short code + status, in a corner
 threeObject(r, mesh, { camera });   // Hold -> quaternion
 cameraControls(r, controls);        // trackpad orbit/pan/dolly
 r.on('button', e => ...); r.sample(frameTime); r.setLayout(json);
@@ -307,7 +320,7 @@ r.on('button', e => ...); r.sample(frameTime); r.setLayout(json);
 | Any | Any | Phone on cellular | STUN, else TURN | Yes |
 | Any | Corporate laptop, UDP blocked | Corp | TURN TLS 443 | Partial (TCP judder) |
 | Any | macOS Chrome host, Local Network denied | Home | TURN | Yes (+latency) |
-| Any | Quest / Galaxy XR / Vision Pro browser | Home | Short code → P2P (a phone can't scan a code shown inside a headset) | Once the short code is built (§4, step 8b) |
+| Any | Quest / Galaxy XR / Vision Pro browser | Home | Short code → P2P (a phone can't scan a code shown inside a headset) | The short code is built (§4, 2026-09-27); try it on a headset (step 8b) |
 | Any | Samsung TV, Tizen 10 (2026) or 9 (2025) | Home | P2P: Samsung lists WebRTC on 2026 sets, and as partial on 2025 sets | Test on a set (step 8b) |
 | Any | Older Tizen; LG webOS (WebRTC only for LG's partner apps) | Home | WSS relay build (v1) | v1 |
 | Any | Google TV / Chromecast | Home | A Cast receiver page: P2P if it gets DataChannels, else the WSS relay | Research (step 8b) |
@@ -322,7 +335,7 @@ TVs, headsets, AR glasses and watches, as hosts and as controllers: [spec/RESEAR
 - **Transport:** LAN host → STUN → TURN UDP (3478/443) → TURN TCP → TURN TLS 443. In v1, a WSS relay through the DO is added as the last resort. The phone offers with host + STUN candidates at once and waits at most 250 ms for TURN credentials; a failed attempt rebuilds with TURN.
 - **Signaling:** room service (1.5 s to answer) → direct code over the LAN for a remembered phone (host candidates only: same network, multicast DNS) → later, the native helper as a LAN endpoint that needs no SDP changes on the phone (ICE-lite, credentials read from the STUN USERNAME).
 - **Sensors:** events → touch-only in the MVP. In v1: Generic Sensor → events → compass/tilt → touch.
-- **Pairing:** camera QR (online) → direct code (remembered host, no service) → short code + approval (later).
+- **Pairing:** camera QR or short code (online) → direct code (remembered host, no service).
 - **Controller page:** network → service worker cache (after one visit; installs as an app).
 - **Keep-awake:** Wake Lock → NoSleep.js → fast resume.
 
@@ -331,7 +344,7 @@ TVs, headsets, AR glasses and watches, as hosts and as controllers: [spec/RESEAR
 - **Threat model:** remote-input tools have a history of RCE (Unified Remote EDB-49587, Remote Mouse CVE-2021-27569..27574). The signaling server, TURN and the network are untrusted.
 - **The secret:** `S` lives only in the QR fragment and is stripped at once. Pairing secrets expire in 5 minutes.
 - **Authentication:** DTLS fingerprint pinned from the QR, plus the HMAC channel binding. No input is accepted before binding.
-- **Short code:** commit-reveal ECDH, emoji comparison, and host approval. Rate-limited in the DO, not via the per-location Rate Limiting binding.
+- **Short code:** the service keeps a handle, never the secret; a PAKE (CPace on X25519, bound to both DTLS fingerprints) proves the secret, one attempt per code, and the host shows who joined. Rate-limited in the Codes object, not via the per-location Rate Limiting binding (PROTOCOL §2b).
 - **Session rules:** single-controller lock; takeover needs host approval.
 - **TURN abuse controls:** TURN credentials are short-lived and issued only to joined room members. The SDK uses site keys bound to allowed Origins. Per-IP and per-room quotas, and an alarm on TURN egress.
 - **Bridge:** executes only host-side profile actions, never raw key sequences from the phone. Signed installers and updates. Emitters bind to loopback. Fuzz the codec and DO before v1.
@@ -545,6 +558,7 @@ Scheduled 2026-09-27: phase B lands with step 5b (the controller hub, below), an
 4. Trackpad depth field.
 5. Shared view: scenes and robot cameras visible to every phone. Owner, 2026-09-27: "the scene can be shared across connected easily for viewing whats happening and able to use the connected device for control as now".
 5b. **The controller catalogue in the phone, and the controller hub** (owner, 2026-09-27; added here, see below): pick any controller the screen takes, with its profiles, and use several at once, a Bluetooth pad through the phone included.
+5b.1b. **Buttons: a phone's physical inputs mapped to the controller** (owner, 2026-09-27: "i noticed headphone buttons utilized but no way to map physical phone buttons to the controller experience"; later: "map what can be mapped and available as options or smart use based on received input"). BUILT 2026-09-27, ahead of the picker it sits beside (below).
 6. Music room sim, after the shared view. Owner, 2026-09-27: "a sim for music room with the gyro action for playing them, mainly different kinds of drums and tone generating with contacts etc to showcase responsiveness with multiple people in the same scene". Research first (latency budget, instrument UX, audio synthesis) to do both "tastefully and keeping high quality of experience". Its drum pads and tone keys arrive as catalogue controllers in 5b's picker (CATALOGUE §9.1).
 7. Arms.
 8. Bluetooth research.
@@ -576,6 +590,13 @@ Scheduled 2026-09-27: phase B lands with step 5b (the controller hub, below), an
    - **Short code** (decided 2026-09-27; the design is in §4 "Short code"). Every pairing also shows a short code, to type on the phone's start page at obpal.blackboxes.net. It serves TVs, headsets and a phone across the room.
      - It is short-lived, uses an unambiguous alphabet, is rate-limited in the worker, and reaches the same session as the QR link.
      - The chip shows the QR and the code together from the embed's first release.
+   - **Status 2026-09-27 (lane P): the branded QR, the chip and the short code are built.**
+     - `brandedQr` / `brandedQrElement` (packages/host/src/qr.ts): dots, rounded finders with accent-tinted eyes, the mark in the middle, ECC Q; read back by jsQR and ZXing over sizes, four surfaces, twelve accents and blur, and wherever uqr's plain code of the same density reads. `plainQr` stays as the fallback.
+     - `PairingChip` (packages/host/src/chip.ts): the corner chip and its card, and a `panel` variant for a page's own frame. It takes the page's accent, font, surface and radius and follows theme changes; it's a button and a labelled group, Escape closes it, reduced motion stills it. Built from elements with a constructed stylesheet (no parsed markup), so it works under a strict CSP with Trusted Types.
+     - On it: the Viewer, the sims, the home hero (as a panel in its glass) and `<obpal-remote>`, whose `code` attribute now works.
+     - The short code: the worker's Codes object, the host's and phone's sides of the exchange, and the code field on the phone's start page.
+     - Tests: tests/code.test.ts (RFC 7748 and RFC 9380 vectors, the exchange), tests/worker/codes.test.ts (the book and its limits), tests/qr.test.ts; e2e:code (a phone joins by typing the code) and e2e:embed run against this checkout's worker (`wrangler dev`, scripts/local-worker.mjs), since production doesn't have the Codes object until the next deploy.
+     - Deploy note: wrangler.jsonc adds the `CODES` Durable Object (migration v2, a new SQLite class). Until the worker is deployed, pages show the QR code alone.
 2. **Trackpad depth field.** The phone trackpad's dot matrix answers a swipe with a 3D depth-of-field ripple: dots near the finger rise and sharpen, far ones soften. Canvas, and it's cool on a phone.
 3. **Arms.** Per-model geometry (SO-101 first), a serial bridge in ob.Pal Desktop, arm-to-arm collision in the sim, and a camera view of a remote arm.
 
@@ -622,7 +643,7 @@ flowchart LR
   - The phone shows how many people are in a scene, not who.
   - ob.Pal Link takes one phone at a time.
   - One person's second device counts as a second person.
-  - Nothing is relayed. The phone never reads a Bluetooth pad (the Gamepad API is used only to show the phone to games), `seat` is a planned line in PROTOCOL §8, and the four bridges are catalogue rows without code. Only Bluetooth keyboards, remotes, clickers and headset buttons reach the phone, as four hardware actions.
+  - Nothing is relayed. The phone reads a pad's buttons since 5b.1b, but only to press its own controls (bindings), not as a pad of its own: its sticks go nowhere yet, `seat` is a planned line in PROTOCOL §8, and the four bridges are catalogue rows without code.
 
 **The plan** (the design is CATALOGUE §9):
 1. **The contract, with step 3 (the embed).** Controller ids in the catalogue (`face.gamepad`, `face.wii`, …), `layout.controllers`, and `mode{m, c, p}`, in `packages/core` and the specs. The embed names controllers by these ids from its first release.
@@ -632,6 +653,14 @@ flowchart LR
    - Profiles sit under it: the host's suggestion, the built-ins, the host's own, community profiles from /catalogue.json, and the person's own (the builder's "Use on my phone").
    - Every host sends `utilities` and `controllers`.
    - The first new entry is the steering wheel.
+   - **5b.1b: Buttons.** BUILT 2026-09-27 (research and design: [spec/RESEARCH-BUTTONS.md](spec/RESEARCH-BUTTONS.md); CATALOGUE §1 and §3).
+     - What reaches a page: keys (keyboards, clickers, a selfie remote's Enter), headset presses (one, two, three) through Media Session, pads through the Gamepad API, and Back on Android. A phone's own volume and side keys reach no browser page.
+     - Core (`packages/core/src/buttons.ts`): input ids, each controller's `controls`, default bindings as data, `layout.buttons` (with `layout.keys` read as it), and `controller` and `buttons` in profiles (checked, in the schema and /catalogue.json, 32 at most).
+     - Phone: one stream of inputs (`src/controller/inputs.ts`; pads read from the start, so a pad's B no longer closes the tab in Chrome on Android), then the layers: the controller's defaults, smart defaults, the host's, the profile's, the person's own (`obpal.buttons.<profile id>`), which always win.
+     - Smart use with no setup: a source's first input this session tells what it is (a clicker, a selfie remote, a pad, a headset, a keyboard), its smart defaults for the controller apply at once, and a notice says what it now does, with Change. An unbound input from a known source offers a one-tap bind.
+     - The Buttons sheet (Settings → Buttons): press a control then a button, or press a button to find it; every input listed to pick; Undo and Reset; one honest line per source; the headset switch with its paused state; Back as a button; Test your buttons (/buttons/). Badges on bound controls. A buttons table in the /catalogue/ builder.
+     - Tests: unit (inference, layers, defaults, profiles) and e2e:phone (a clicker and a standard pad work with no setup; the one-tap bind; the sheet).
+     - Waiting on the owner's phones (/buttons/): whether a faint track keeps headset control alive with the screen off on Android, and makes Firefox work; which clip-on pads say "standard"; Esc on Android.
 3. **5b.2: the hub.** This is phase B of "Shared scenes, bridges and control systems" above.
    - People here, on the phone.
    - A Bluetooth or USB pad through the phone, with no install (the Gamepad API in Android's and iOS's browsers): as the phone's own gamepad, or as a player of its own (`seat`, `bridge.gamepad`).
@@ -653,7 +682,7 @@ The quick scan, with sources, is [spec/RESEARCH-DEVICES.md](spec/RESEARCH-DEVICE
 - **Headsets are the nearest.**
   - Quest's and Galaxy XR's browsers have full WebXR input, so `bridge.xr` can start there. Pico needs testing.
   - Vision Pro is VR only. Its hands arrive as gaze-and-pinch pointers, and developers report that PS VR2 controllers reach Safari only as gamepads, without pose.
-  - Headsets need the short code (§4, not built) both ways: a phone can't scan a code shown inside a headset, and a headset can't scan the code on a screen.
+  - Headsets need the short code (§4, built 2026-09-27) both ways: a phone can't scan a code shown inside a headset, and a headset can't scan the code on a screen.
 - **TVs as hosts.**
   - Samsung (WebRTC on 2026 sets, partial on 2025) and a Google Cast receiver are the cheapest to try.
   - LG (WebRTC only for its partners) and older Samsung sets need the WSS relay (§7a, v1).
@@ -665,8 +694,10 @@ The quick scan, with sources, is [spec/RESEARCH-DEVICES.md](spec/RESEARCH-DEVICE
 - **AR glasses** are mostly displays for a phone or PC, which stays the host. Android XR wired glasses (XREAL's Aura, due in fall 2026) should get Chrome's WebXR. Meta's Neural Band reaches Web Apps as a few fixed gestures, in a developer preview.
 - **Profiles.** Reuse the Gamepad API's standard mapping for pads, the WebXR Input Profiles registry's ids and models for headset controllers, and SDL's mapping format and button names for raw pads. Borrow OpenXR's and Steam Input's split between actions and bindings for host mappings (CATALOGUE §9.6).
 
+**Buttons and 8b.** The only way to a phone's own volume keys is a native Android app: a WebView shell whose activity catches them (`dispatchKeyEvent`) and hands them to the controller page (spec/RESEARCH-BUTTONS.md, "Native paths"). A TWA can't: the page runs in the browser's own activity. So the Wear OS app's phone half, which a watch app ships beside anyway, doubles as that shell: the watch link, the volume keys, media buttons and pads, all into the same page. iOS has no acceptable path (camera-only APIs, or App Review guideline 2.5.9).
+
 **Order within 8b:**
-1. The short code. It can move earlier if headsets matter sooner.
+1. The short code: built in step 3 (2026-09-27); try it on headsets and TVs here.
 2. Headsets: first as hosts, then `bridge.xr`.
 3. A TV host: Tizen, a Cast receiver, and the relay.
 4. A Wear OS app.

@@ -13,6 +13,8 @@ import { mkdir, readFile, stat } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { createServer, request as httpsRequest } from 'node:https'
+import { request as httpRequest } from 'node:http'
+import { connect as netConnect } from 'node:net'
 import { connect as tlsConnect } from 'node:tls'
 import { extname, join, normalize, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -43,7 +45,15 @@ async function ensureCert() {
   return Promise.all([readFile(cert), readFile(key)])
 }
 
-export async function startLocal({ dist = resolve(here, '../../dist/client'), port = LOCAL_PORT } = {}) {
+/**
+ * `port`: OBPAL_E2E_PORT, else 5176, so a run can sit beside another. `upstream` (or OBPAL_E2E_UPSTREAM): the room service
+ * to proxy to instead of production, http or https, such as this checkout's own worker under `wrangler dev`
+ * (scripts/local-worker.mjs).
+ */
+export async function startLocal({ dist = resolve(here, '../../dist/client'), port = Number(process.env.OBPAL_E2E_PORT) || LOCAL_PORT, upstream = process.env.OBPAL_E2E_UPSTREAM || `https://${UPSTREAM}` } = {}) {
+  const target = new URL(upstream)
+  const secure = target.protocol === 'https:'
+  const targetPort = Number(target.port) || (secure ? 443 : 80)
   const [cert, key] = await ensureCert()
   let offline = false
   let sockets = new Set()
@@ -71,7 +81,9 @@ export async function startLocal({ dist = resolve(here, '../../dist/client'), po
     const url = new URL(req.url ?? '/', 'https://local')
     if (url.pathname.startsWith('/api/')) {
       if (offline) { res.writeHead(503); return res.end() }
-      const up = httpsRequest({ host: UPSTREAM, port: 443, method: req.method, path: req.url, headers: { ...req.headers, host: UPSTREAM } }, (r) => {
+      // The stand-in plays the service's own origin: a page it serves calls the API same-origin, as it would there.
+      const origin = req.headers.origin === `https://127.0.0.1:${port}` ? { origin: target.origin } : {}
+      const up = (secure ? httpsRequest : httpRequest)({ host: target.hostname, port: targetPort, method: req.method, path: req.url, headers: { ...req.headers, host: target.host, ...origin } }, (r) => {
         res.writeHead(r.statusCode ?? 502, r.headers)
         r.pipe(res)
       })
@@ -84,16 +96,17 @@ export async function startLocal({ dist = resolve(here, '../../dist/client'), po
   // WebSocket rooms: splice the TLS client socket to the upstream at the byte level once the upgrade request is rewritten.
   server.on('upgrade', (req, socket, head) => {
     if (!req.url?.startsWith('/r/') || offline) { socket.destroy(); return }
-    const up = tlsConnect({ host: UPSTREAM, port: 443, servername: UPSTREAM }, () => {
+    const opened = () => {
       const lines = [`${req.method} ${req.url} HTTP/1.1`]
       for (let i = 0; i < req.rawHeaders.length; i += 2) {
         const k = req.rawHeaders[i]
-        lines.push(`${k}: ${k.toLowerCase() === 'host' ? UPSTREAM : req.rawHeaders[i + 1]}`)
+        lines.push(`${k}: ${k.toLowerCase() === 'host' ? target.host : req.rawHeaders[i + 1]}`)
       }
       up.write(lines.join('\r\n') + '\r\n\r\n')
       if (head.length) up.write(head)
       socket.pipe(up).pipe(socket)
-    })
+    }
+    const up = secure ? tlsConnect({ host: target.hostname, port: targetPort, servername: target.hostname }, opened) : netConnect({ host: target.hostname, port: targetPort }, opened)
     sockets.add(socket)
     const drop = () => { sockets.delete(socket); socket.destroy(); up.destroy() }
     up.on('error', drop)

@@ -4,7 +4,7 @@
 
 ## Put it on any page: one tag
 
-Copy this into a page. The element shows a "Scan to control" chip in a corner; a phone that scans its code controls the page. It draws only in its shadow root, needs no inline scripts or styles, and several can share a page.
+Copy this into a page. The element shows a "Scan to control" chip in a corner; a phone that scans its QR code, or types its short code at obpal.blackboxes.net/p (for a TV, a headset or a phone across the room), controls the page. It draws only in its shadow root, needs no inline scripts or styles, and several can share a page.
 
 ```html
 <script type="module" src="https://obpal.blackboxes.net/embed.js"></script>
@@ -38,14 +38,14 @@ Copy this into a page. The element shows a "Scan to control" chip in a corner; a
 - `pal.layout = { tray: [{ id: 'reset', label: 'Reset', icon: 'reset' }] }` adds tray buttons (and any other layout field: `keys`, `toss`, `point`, `wheel`).
 - `await pal.ready` gives the `Remote` (the host SDK below), or null where the browser can't host a phone (no WebRTC, or not https): the element then draws nothing and `pal.status` is `unsupported`.
 - Without the element: `const remote = await window.obpal.remote({ appName: 'My scene' })`.
-- Content Security Policy: `script-src https://obpal.blackboxes.net; connect-src https://obpal.blackboxes.net wss://obpal.blackboxes.net`.
+- Content Security Policy: `script-src https://obpal.blackboxes.net; connect-src https://obpal.blackboxes.net wss://obpal.blackboxes.net`. It also works where the page enforces Trusted Types (`require-trusted-types-for 'script'`): it parses no markup.
 - See it working: https://obpal.blackboxes.net/embed/ (a plain three.js scene using the element).
 
 ## Use it in a page: the host SDK
 
 The SDK is `@obpal/host`, in the repo at packages/host (its README has typed examples, the element included). It isn't on npm yet; its package.json is ready for it.
 
-- `const remote = await Remote.create({ appName, layout })`, then `remote.mountPairing(element)` shows the QR code and link.
+- `const remote = await Remote.create({ appName, layout })`, then `new PairingChip({ remote })` shows the pairing chip: the QR code and the short code, in a corner, in the page's own accent and font (options: `corner`, `accent`, `open`, `variant: 'panel'` for a place of your own, and more in the README).
 - Each frame, `remote.consume(now)` returns what the phone does:
   - `qRel`: its rotation while held (1:1);
   - `tilt`: a stick from tilting;
@@ -76,7 +76,7 @@ The SDK is `@obpal/host`, in the repo at packages/host (its README has typed exa
 ## Add a controller profile
 
 1. Read /profile.schema.json, or the `limits` and `routes` in /catalogue.json.
-2. Write the profile: a new lowercase `id`, `name`, `for` (one line), `on` (utilities it switches on), and `aim`, `steer` and `point` settings. Each setting has `route`, `gain`, `curve`, `deadzone`, `invertY` and `edgeTurn`.
+2. Write the profile: a new lowercase `id`, `name`, `for` (one line), `on` (utilities it switches on), and `aim`, `steer` and `point` settings. Each setting has `route`, `gain`, `curve`, `deadzone`, `invertY` and `edgeTurn`. Optionally `controller` (a controller id) and `buttons`: physical inputs (`key:PageDown`, `media:nexttrack`, `pad:b4`, `back`) bound to that controller's `controls`, `key-<code>`, `tray:<id>`, `app:<action>` or `none` (the `buttons` part of /catalogue.json lists them all, with the defaults).
 3. Check it with the schema, or with `checkProfile()` from `@obpal/core` (it says what's wrong).
 4. Add it as `catalogue/profiles/<id>.json` to https://github.com/Axialon/obpal in a pull request; the build checks it again. Or open an issue with the JSON. The builder at https://obpal.blackboxes.net/catalogue/#build does both for people.
 

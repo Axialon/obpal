@@ -23,12 +23,22 @@ It does not become a one-off mode. The wire formats are in [PROTOCOL.md](PROTOCO
 
 **Categories** order the phone's UI. Controller comes first, then Motion, then Pointer, Touch and 3D. A host declares which utilities it accepts in its layout (`utilities: string[]`; absent means all). The phone offers only those.
 
-**Device buttons.** A device may also drive its current mode with hardware buttons, wherever its browser allows. Each button fires a *primary* action (A, or switching the gyro in Rotate), a *secondary* one (B held in Point and Gamepad, or recentre in Rotate), or *next* and *previous*:
-- volume keys, when the browser passes them to the page (some Android browsers; never iOS);
-- keys from a Bluetooth keyboard, remote or clicker: Enter or Space, Escape, the arrows, and Page Up and Down;
-- headset and earbud buttons through Media Session. This is opt-in, because it plays a silent track that takes the audio focus.
+**Device buttons.** A device also presses its controller's controls with the physical inputs its browser lets a page hear ([RESEARCH-BUTTONS.md](RESEARCH-BUTTONS.md) has the matrix):
+- keys from a Bluetooth keyboard, remote, presentation clicker or a selfie remote's Enter button;
+- headset and earbud buttons through Media Session: one, two and three presses. This is opt-in, because it plays a silent track that takes the audio focus and pauses the person's music;
+- clip-on and Bluetooth pads through the Gamepad API: every button, and each stick pushed past half way;
+- Back on Android, caught once per touch (an opt-in).
 
-These buttons need no new wire format: they press what the device's own controls press.
+A phone's own volume and side keys never reach a browser page: Chrome, Firefox and every iOS browser keep them. Only a native app has them (PLAN step 8b). A keyboard's own volume keys may arrive, and count as keys.
+
+Each input is **bound** to a control of the controller in use, a key on the screen, a tray button, or one of the phone's own actions (§3, `buttons`). The bindings come in layers, each changing only what it names:
+1. the controller's defaults (`DEFAULT_BUTTONS` in `packages/core/src/buttons.ts`), which are what the four hardware actions did before: Enter, Space, one headset press or a pad's A are the *primary* control (A, Left, or switching the gyro), Esc, Backspace or a pad's B the *secondary* one (B, holding the wheel, or the level), and the arrows, Page Up and Down, two and three headset presses or a pad's D-pad *next* and *previous*; on the gamepad a pad's buttons pass straight through;
+2. **smart defaults**, per kind of device and per controller: the first input from a source each session tells what it is (arrows or Page Up and Down only: a presentation clicker; a lone Enter or volume up: a selfie remote; a pad with the standard mapping: a pad; media actions: a headset; anything else: a keyboard). Its smart defaults apply at once, and a notice says what it now does. A clicker's next and previous press the screen's arrow keys where it takes typing, so a presentation on a PC moves on;
+3. the host's suggestion: `layout.buttons`, and `layout.keys` read as it (PROTOCOL §3);
+4. the profile's `buttons`;
+5. the person's own, from the Buttons sheet or a one-tap bind offered for an input nothing uses. These always win.
+
+Bindings need no new wire format: a bound input presses what the device's own control presses.
 
 **Rotation lock.** While a device steers with its motion, turning it must not re-lay out or remap its controls. Turning the gyro on locks the screen's rotation, and a lock button unlocks it. Where there's a native lock (Android, in fullscreen), the device uses it. Elsewhere the page counter-rotates itself, reads touches in its own frame, and reports the locked orientation in STATE.
 
@@ -80,6 +90,18 @@ A profile is a named set of utility settings. The **host** owns what each output
 - The phone remembers choices per host, and per suggestion the host makes (a suggestion stands for a site or program, so a choice made on one site never overrides another site's suggestion). Picking the suggested profile again forgets the choice.
 - A profile's `on` utilities switch on when it applies (`pointer` turns Point on); the others keep their state.
 - Options a user changes on a chip (route, sensitivity, deadzone jump, invert Y, edge turn) are remembered per profile.
+
+**Controller and buttons** (optional in any profile; `checkProfile()` and /profile.schema.json check both):
+- `controller`: the controller the profile tunes (§9.1). Absent, it's `face.gamepad`, as for every built-in.
+- `buttons`: physical inputs bound on that controller, only where they differ from its defaults (§1, "Device buttons"), at most 32. Each key is an input id: `key:<KeyboardEvent.code>` (`key:PageDown`), `media:<action>` (`media:playpause` is one headset press, `media:nexttrack` two, `media:previoustrack` three), `pad:b<i>` or `pad:a<i>+`/`pad:a<i>-` by the standard mapping (`pad:raw:…` for a pad the browser can't map), or `back`. Each value is one of the controller's `controls` (ControllerSpec in `packages/core`, and /catalogue.json), a key on the screen (`key-ArrowRight`, from the keyboard control's key row), `tray:<id>`, `app:gyro|recentre|next|prev|keyboard`, or `none` to take an input away.
+
+On the phone, the Buttons sheet (Settings → Buttons) binds by pressing a control and then a button, or picking the button from a list of everything the phone can hear. The person's own bindings are kept per profile and controller (`obpal.buttons.<profile id>`), and the smart defaults per kind and controller beside them.
+
+```json
+{ "id": "presenter", "name": "Presenter", "for": "Slides from a clicker or earbuds", "controller": "face.mouse", "on": ["motion.point"],
+  "aim": {…}, "steer": {…}, "point": {…},
+  "buttons": { "key:PageDown": "key-ArrowRight", "key:PageUp": "key-ArrowLeft", "media:nexttrack": "key-ArrowRight", "media:playpause": "left" } }
+```
 
 ## 4. Host semantics for `motion.point`
 
@@ -304,7 +326,7 @@ Planned:
   - On a phone, it saves to the phone's own profiles. The controller page shares them, because both pages are on obpal.blackboxes.net.
   - On a computer, it shows a QR code that carries the profile to the phone in the URL fragment, so the profile never reaches a server.
   - Changes made on the phone (a long press on a chip) are saved per profile, as today.
-- **Wider profiles.** Today a profile tunes the Gamepad's three motion utilities. Profiles will name the controller they tune (`controller: 'face.wii'`) and grow with it: the Wii remote's gain and edge turn, the trackpad's speed, button remaps. `checkProfile()` and /profile.schema.json stay the one check.
+- **Wider profiles.** A profile tunes the Gamepad's three motion utilities, and names the controller it tunes (`controller`) with its button bindings (`buttons`, §3: built 2026-09-27). It will grow with it: the Wii remote's gain and edge turn, the trackpad's speed. `checkProfile()` and /profile.schema.json stay the one check.
 - **On the host: mappings.** What a control finally does belongs to the host (§3). Some hosts already carry that as data: ob.Pal Link's Keys and whole-PC tables (`DEFAULT_KEYS` and `DESKTOP_KEYS` in `extension/src/shared/keys.ts`), and its per-site suggestions (`sites.ts`).
   - Planned, mappings become catalogue entries too, as `catalogue/mappings/<id>.json`, checked at build like profiles. A mapping says what each catalogue control does for one site or program: a key, the mouse, a gamepad button.
   - A host offers its mappings as an ordinary `select` in the tray, so switching one needs no new wire.

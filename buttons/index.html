@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en" class="site">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a0718" />
+    <meta name="description" content="Which of your phone's buttons a web page can use: volume keys, headset buttons, remotes, clickers, gamepads and Back. Press them and see." />
+    <title>Buttons · ob.Pal</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&family=JetBrains+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/family/family.css" />
+    <link rel="stylesheet" href="/src/styles/base.css" />
+    <link rel="stylesheet" href="/src/styles/site.css" />
+    <link rel="stylesheet" href="/src/styles/buttons.css" />
+    <script type="module" src="/src/buttons/main.ts"></script>
+  </head>
+  <body>
+    <main class="bt">
+      <header class="bt-top">
+        <a class="logo" href="/" aria-label="ob.Pal home"><span class="mark-slot" data-mark></span></a>
+        <button class="switch-btn" id="t-switch" type="button" aria-label="Blackboxes apps" title="Blackboxes apps"></button>
+        <h1>Buttons</h1>
+        <button class="bt-icon" id="clear" type="button" aria-label="Clear" title="Clear"></button>
+        <button class="bt-icon" id="fs" type="button" aria-label="Fullscreen" title="Fullscreen" aria-pressed="false" hidden></button>
+      </header>
+      <p class="bt-env" id="env"></p>
+
+      <section class="bt-hero glass" id="hero" aria-live="polite">
+        <div class="bt-ring" aria-hidden="true"></div>
+        <div class="bt-last" id="last">Press</div>
+        <div class="bt-sub" id="sub">volume · headset · remote · pad · back</div>
+      </section>
+
+      <section class="bt-srcs" id="srcs" aria-label="What reached the page"></section>
+
+      <section class="bt-togs" aria-label="Tests">
+        <button class="bt-tog" id="hold" type="button" aria-pressed="true"><span>Hold volume</span></button>
+        <button class="bt-tog" id="headset" type="button" aria-pressed="false"><span>Headset</span></button>
+        <button class="bt-tog" id="back" type="button" aria-pressed="false"><span>Catch Back</span></button>
+      </section>
+      <div class="bt-track" id="track" role="radiogroup" aria-label="Silent track" hidden>
+        <button type="button" role="radio" data-track="1s" aria-checked="false">1 s</button>
+        <button type="button" role="radio" data-track="10s" aria-checked="true">10 s</button>
+        <button type="button" role="radio" data-track="faint" aria-checked="false">10 s faint</button>
+      </div>
+      <p class="bt-note" id="note"></p>
+      <div class="bt-ask glass" id="ask" hidden>
+        <span id="ask-q">Did the volume move?</span>
+        <button type="button" data-moved="1">Yes</button>
+        <button type="button" data-moved="0">No</button>
+      </div>
+
+      <section class="bt-pads" id="pads" aria-label="Gamepads"></section>
+
+      <section class="bt-log glass" aria-label="Every input, newest first"><ol id="log"></ol></section>
+
+      <section class="bt-sum glass" aria-label="Summary">
+        <code id="sum"></code>
+        <div class="bt-sum-row">
+          <button class="btn primary" id="copy" type="button">Copy</button>
+          <button class="btn" id="share" type="button" hidden>Share</button>
+        </div>
+      </section>
+    </main>
+    <div class="bb-menu bb-glass switcher" id="switcher" aria-label="Blackboxes apps" hidden></div>
+  </body>
+</html>

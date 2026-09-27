@@ -7,6 +7,7 @@ import {
   type Caps, type ControllerId, type HostMsg, type Layout, type LinkStatus, type ModeId, type PairingCode, type Quat, type SceneNode,
   type ScenePerson, type TierId, type TrayControl,
 } from '@obpal/core'
+import { formatCode, lookupCode, normalizeCode, splitCode } from '@obpal/core'
 import { Motion, motionSupported, requestMotionPermission, screenAngle } from './motion'
 import { Trackpad } from './trackpad'
 import { hapticsKind, tick } from './haptics'
@@ -19,7 +20,8 @@ import { KeyboardDock } from './keyboard'
 import { sheetExits } from './sheet'
 import { calmMarks, icon, ICONS, logo, logoMark } from '../ui/icons'
 import { dismissHint, hint, repositionHints, setHintFrame } from '../ui/hints'
-import { HardwareButtons, type HwAction, type HwSource } from './hardware'
+import { PhysicalInputs } from './inputs'
+import { Buttons, BUTTONS_GLYPH, sourceStack } from './buttons'
 import { Tracker } from './track'
 import { EARTH_TO_POSE, ImuTracker, toPoseFrame } from './imu3d'
 import { encodePose, POSE_BYTES, PoseFlag, qMul } from '@obpal/core'
@@ -101,15 +103,90 @@ addEventListener('hashchange', () => {
   location.replace(location.pathname)
 })
 
+/** How the phone came: a code from the URL (scanned), or a short code typed on the start page (PROTOCOL §2b). */
+type Join = PairingCode | { v: 'code'; code: { handle: string; secret: string; room: string; ticket: string } }
+
 const pairing = takePairing()
-if (!pairing) {
-  screenMessage({
-    title: 'Scan the code on your screen',
-    art: ICONS.phone,
-    body: `Open <b>${esc(location.host)}/view</b> on the screen you want to control, then point your camera at the code.`,
+if (!pairing) startPage()
+else void boot(pairing)
+
+/**
+ * The start page, when the phone came with no code: scan the one on the screen, or type the short code beside it.
+ * Typing is forgiving: spaces, dashes and pasted text are fine, O and I read as 0 and 1, and a whole code (ten digits;
+ * no code is the start of another) goes by itself.
+ */
+function startPage() {
+  screenMessage({ title: 'Scan the code on your screen', art: ICONS.phone, body: 'Or type the code shown beside it.' })
+  const card = app.querySelector('.msg-card')!
+  card.classList.add('start')
+  card.insertAdjacentHTML('beforeend', `
+    <form class="code-form" id="code-form" novalidate>
+      <label class="sr" for="code-in">Code from your screen</label>
+      <input class="code-in" id="code-in" type="text" inputmode="numeric" autocomplete="off" autocorrect="off" autocapitalize="characters"
+        spellcheck="false" enterkeyhint="go" placeholder="000 000 0000" maxlength="24" aria-describedby="code-say" />
+      <button class="btn primary big" id="code-go" type="submit" disabled>Connect</button>
+      <p class="code-say" id="code-say" role="status"></p>
+    </form>
+    <p class="start-foot">Nothing on the screen yet? Open <b>${esc(location.host)}/view</b> there.</p>`)
+  const form = document.getElementById('code-form') as HTMLFormElement
+  const input = document.getElementById('code-in') as HTMLInputElement
+  const go = document.getElementById('code-go') as HTMLButtonElement
+  const say = document.getElementById('code-say')!
+  /** Digits only: every character that isn't one (or a lookalike letter) is left out. */
+  const clean = (s: string) => [...s].map((ch) => normalizeCode(ch) ?? '').join('').slice(0, 10)
+  let busy = false
+  let blockedUntil = 0
+  const tell = (text: string, bad = false) => { say.textContent = text; say.classList.toggle('bad', bad) }
+  const ready = () => { go.disabled = busy || clean(input.value).length < 10 || Date.now() < blockedUntil }
+
+  // Group as people read it (482 193 7056), keeping the caret after the same digit.
+  function regroup() {
+    const caret = input.selectionStart ?? input.value.length
+    const before = clean(input.value.slice(0, caret)).length
+    const next = formatCode(clean(input.value))
+    if (next === input.value) return
+    input.value = next
+    let at = 0
+    for (let seen = 0; at < next.length && seen < before; at++) if (next[at] !== ' ') seen++
+    input.setSelectionRange(at, at)
+  }
+
+  input.addEventListener('input', () => {
+    regroup()
+    tell('')
+    input.removeAttribute('aria-invalid')
+    ready()
+    // Every code is ten digits, so the tenth completes one: it goes at once, typed or pasted.
+    if (clean(input.value).length === 10) void submit()
   })
-} else {
-  void boot(pairing)
+  form.addEventListener('submit', (e) => { e.preventDefault(); void submit() })
+
+  async function submit() {
+    const digits = clean(input.value)
+    const parts = splitCode(digits)
+    if (!parts) return tell(digits.startsWith('0') ? 'Codes start with 1 to 9: check the first digit.' : 'A code has ten digits.', true)
+    if (busy || Date.now() < blockedUntil) return
+    busy = true
+    input.readOnly = true
+    go.textContent = 'Connecting…'
+    ready()
+    const r = await lookupCode(location.origin, parts.handle)
+    busy = false
+    input.readOnly = false
+    go.textContent = 'Connect'
+    if ('room' in r) return void boot({ v: 'code', code: { ...parts, room: r.room, ticket: r.ticket } })
+    input.setAttribute('aria-invalid', 'true')
+    if (r.error === 'no-code') tell('No screen shows that code. Check it: each code works once.', true)
+    else if (r.error === 'slow-down') {
+      blockedUntil = Date.now() + (r.retry ?? 60) * 1000
+      tell(`Too many tries. Try again in ${r.retry ?? 60} s.`, true)
+      setTimeout(() => { tell(''); ready() }, (r.retry ?? 60) * 1000)
+    } else tell('Can’t reach ob.Pal. Check your connection.', true)
+    ready()
+    input.focus()
+    input.select()
+  }
+  input.focus()
 }
 
 /** Mark the current surface and accent in the settings sheet, if it is open. */
@@ -127,7 +204,7 @@ const TAB_OF: Partial<Record<ControllerId, Tab>> = {
   [Controller.trackpad]: 'rotate', [Controller.hand]: 'track',
 }
 
-async function boot(code: PairingCode) {
+async function boot(code: Join) {
   // This phone's own DTLS identity, kept across sessions so a screen can pin it and reconnect over the LAN.
   // It loads while the link starts signaling; the peer connection waits for it.
   const own = loadCertificate('device').then((c) => c.cert, () => null)
@@ -147,7 +224,6 @@ async function boot(code: PairingCode) {
     style: (store.get('obpal.style') === 'match' ? 'match' : 'game') as Style,
     /** Lock the screen's rotation while the gyro is on, so turning the phone never re-lays out the controls. */
     lockWithGyro: store.get('obpal.lockgyro') !== '0',
-    headset: false,
     /** What 3D follows: the phone's own sensors (the default, Wii-style), its camera (Android WebXR) or a glow for the screen's camera. */
     track3d: (['motion', 'xr', 'glow'].includes(store.get('obpal.track3d') ?? '') ? store.get('obpal.track3d') : 'motion') as 'motion' | 'xr' | 'glow',
   }
@@ -210,17 +286,10 @@ async function boot(code: PairingCode) {
   tracker.onPose = (p, q, tracked) => {
     if (!link.ready) return
     poseSeq = (poseSeq + 1) & 0xffff
-    link.sendState(encodePose({ flags: (tracked ? PoseFlag.tracked : 0) | ((pad?.touches ?? 0) > 0 ? PoseFlag.touching : 0), seq: poseSeq, t: Math.round((performance.now() - t0) * 1000) >>> 0, p, q, gen: tracker.gen }, poseBuf))
+    link.sendState(encodePose({ flags: (tracked ? PoseFlag.tracked : 0) | ((pad?.touches ?? 0) > 0 || buttonHold ? PoseFlag.touching : 0), seq: poseSeq, t: Math.round((performance.now() - t0) * 1000) >>> 0, p, q, gen: tracker.gen }, poseBuf))
   }
   tracker.onEnd = () => { toast('3D tracking ended'); render() }
 
-  const hw = new HardwareButtons()
-  const HW_HELP: Record<HwSource, string> = {
-    volume: 'Volume keys work here: up = A · down = B',
-    keys: 'Keys work here: Enter = A · Esc = B · arrows = next / previous',
-    headset: 'Headset buttons work here: press = A · next / previous',
-  }
-  const hwAnnounced = new Set<HwSource>()
   /** Point's face on a PC (Layout.point 'mouse'): Left, Right and a wheel instead of A and B. */
   const mouseFace = new MouseFace({
     send: (m) => link.sendCtl(m),
@@ -249,55 +318,99 @@ async function boot(code: PairingCode) {
   /** Set when the surface is built: the Wii face's A and B, held or released. */
   let wiiA: (down: boolean) => void = () => {}
   let wiiB: (down: boolean) => void = () => {}
-  /** A tray button the screen bound this hardware button to (Layout.keys), outside gamepad mode. */
-  const boundTo = (action: HwAction) => {
-    const id = mode === Mode.gamepad ? undefined : layout.keys?.[action]
-    return id ? layout.tray.find((c) => c.id === id && (c.type ?? 'button') === 'button') : undefined
+  // ---- physical buttons: keys, headset, pads and Back, each pressing what it's bound to (./buttons.ts) ----
+  const inputs = new PhysicalInputs()
+  /** A button held as the 3D hand's deadman (its `hold` control): as a thumb on the pad. */
+  let buttonHold = false
+  const buttons = new Buttons({
+    inputs,
+    controller: () => controllerNow(),
+    // Profiles tune the gamepad today (CATALOGUE §3); the other controllers keep theirs under the default.
+    profile: () => (tab === 'gamepad' ? gamepad.profileInUse : 'default'),
+    layout: () => layout,
+    press: (target, down, tap) => press(target, down, tap),
+    canSwitch: () => shownTabs().length > 1,
+    typing: () => keyboard.open,
+    hostName: () => hostName,
+    feel: () => tick(),
+    toast: (text) => toast(text),
+  })
+  inputs.onInput = (id, down) => {
+    // Back caught while a sheet or the keyboard is open closes that first, as Back does (their history step).
+    if (id === 'back' && !buttons.sheetOpen && (document.querySelector('.sheet-wrap') || keyboard.open)) { if (down) history.back(); return true }
+    return surface || buttons.sheetOpen ? buttons.input(id, down) : false
   }
-  function hwHelp(source: HwSource) {
-    if (mode === Mode.point && mouseOn()) return { volume: 'Volume keys work here: up = click · down = hold the wheel', keys: 'Keys work here: Enter = click · Esc = hold the wheel · arrows = zoom', headset: 'Headset buttons work here: press = click' }[source]
-    const [a, b] = [boundTo('primary'), boundTo('secondary')]
-    if (!a && !b) return HW_HELP[source]
-    const names = { volume: ['Volume up', 'Volume down'], keys: ['Enter', 'Esc'], headset: ['Press', 'Next'] }[source]
-    return [a && `${names[0]} = ${a.label}`, b && source !== 'headset' && `${names[1]} = ${b.label}`].filter(Boolean).join(' · ')
+  /** A control's PAD button, on the gamepad and the steering wheel. */
+  const PAD_OF: Record<string, number> = {
+    a: PadButton.A, b: PadButton.B, x: PadButton.X, y: PadButton.Y, lb: PadButton.LB, rb: PadButton.RB, lt: PadButton.LT, rt: PadButton.RT,
+    view: PadButton.View, menu: PadButton.Menu, ls: PadButton.L3, rs: PadButton.R3, up: PadButton.Up, down: PadButton.Down,
+    left: PadButton.Left, right: PadButton.Right, guide: PadButton.Guide,
   }
-  hw.onAction = (action: HwAction, down: boolean, source: HwSource) => {
+  /**
+   * Press or let go of what a physical input is bound to, exactly as a thumb would (CATALOGUE §1): a control of the
+   * controller in use, a key on the screen, a tray button, or the phone's own action. `tap`: the input has no release of
+   * its own (a headset press, Back), so a PAD button is clicked rather than held.
+   */
+  function press(target: string, down: boolean, tap: boolean) {
     if (!surface) return
-    if (down && !hwAnnounced.has(source)) { hwAnnounced.add(source); toast(hwHelp(source)) }
-    const bound = boundTo(action)
-    if (bound) {
-      if (!down) return
-      tick()
-      link.sendCtl({ t: 'btn', id: bound.id, ev: 'tap' })
+    const once = (f: () => void) => { if (down) { tick(); f() } }
+    const send = (id: string) => link.sendCtl({ t: 'btn', id, ev: 'tap' })
+    if (target.startsWith('tray:')) return once(() => send(target.slice(5)))
+    if (target.startsWith('key-')) return once(() => send(target))
+    if (target.startsWith('app:')) return once(() => appAction(target.slice(4)))
+    const c = controllerNow()
+    if (c === Controller.gamepad || c === Controller.wheel) {
+      const b = PAD_OF[target]
+      if (b === undefined) return
+      if (!tap) gamepad.hardware(b, down)
+      else if (down) gamepad.tap(b)
       return
     }
-    if (mode === Mode.gamepad) {
-      gamepad.hardware(action === 'primary' ? PadButton.A : action === 'secondary' ? PadButton.B : action === 'next' ? PadButton.Right : PadButton.Left, down)
+    if (c === Controller.wii) {
+      if (target === 'a') { wiiA(down); return once(() => send('wii-a')) }
+      if (target === 'b') return wiiB(down)
+      if (target === 'minus' || target === 'plus') return once(() => send(`wii-${target}`))
+      if (target === 'home') return once(recenterPointer)
       return
     }
-    if (mode === Mode.point && mouseOn()) {
-      // The mouse face: volume up / Enter is Left, volume down / Esc holds the wheel, next and previous zoom.
-      if (action === 'primary') return mouseFace.button('left', down)
-      if (action === 'secondary') return mouseFace.hold(down)
-      if (!down) return
-      tick()
-      link.sendCtl({ t: 'btn', id: action === 'next' ? 'wii-plus' : 'wii-minus', ev: 'tap' })
+    if (c === Controller.mouse) {
+      if (target === 'left' || target === 'right') return mouseFace.button(target, down)
+      if (target === 'wheel') return mouseFace.hold(down)
+      if (target === 'middle') return once(() => send('mouse-middle'))
+      if (target === 'minus' || target === 'plus') return once(() => send(`wii-${target}`))
+      if (target === 'home') return once(recenterPointer)
       return
     }
-    if (mode === Mode.point) {
-      if (action === 'secondary') return wiiB(down)
-      if (action === 'primary') wiiA(down)
-      if (!down) return
-      tick()
-      link.sendCtl({ t: 'btn', id: action === 'primary' ? 'wii-a' : action === 'next' ? 'wii-plus' : 'wii-minus', ev: 'tap' })
+    if (c === Controller.hand) {
+      if (target === 'hold') {
+        buttonHold = down
+        document.getElementById('pad')?.classList.toggle('active', down)
+        pump(16.7)
+        return
+      }
+      if (target === 'recentre') return once(recenterHere)
       return
     }
-    // Rotate: the primary button switches the gyro (the 1:1 grab), the secondary sets the level or recentres.
-    if (!down) return
-    tick()
-    if (action === 'primary') setGyro(!gyroOn)
-    else if (action === 'secondary') recenterHere()
+    // The trackpad: its grab switches the gyro (the 1:1 grab), its level sets the level or recentres.
+    if (target === 'grab') return once(() => setGyro(!gyroOn))
+    if (target === 'level') return once(recenterHere)
   }
+  /** The phone's own actions a button can press (app:…). */
+  function appAction(a: string) {
+    if (a === 'gyro') setGyro(!gyroOn)
+    else if (a === 'recentre') recenterHere()
+    else if (a === 'keyboard') { if (layout.tray.some((c) => c.type === 'keyboard')) keyboard.show('tray') }
+    else if (a === 'next' || a === 'prev') {
+      const tabs = shownTabs()
+      const next = tabs[(tabs.indexOf(tab) + (a === 'next' ? 1 : tabs.length - 1)) % tabs.length]
+      if (!next || next === tab) return
+      if (tab !== 'gamepad') lastTab = tab
+      tab = next
+      setMode()
+    }
+  }
+  /** The tabs the bar shows now, in its order. */
+  const shownTabs = (): Tab[] => [...(surface?.querySelectorAll<HTMLElement>('.modes [data-tab]') ?? [])].filter((b) => !b.hidden).map((b) => b.dataset.tab as Tab)
   const motion = new Motion()
   const smoother = new GyroSmoother()
   const tilt = new TiltStick()
@@ -389,7 +502,11 @@ async function boot(code: PairingCode) {
   const name = deviceName()
   const link = code.v === 2
     ? new DeviceLink({ lan: code.lan, pair: pair!, cert: own, caps, name })
-    : new DeviceLink({ service: location.origin, pairing: code.pairing, remember: true, cert: own, caps, name })
+    : code.v === 'code'
+      ? new DeviceLink({ service: location.origin, code: code.code, remember: true, cert: own, caps, name })
+      : new DeviceLink({ service: location.origin, pairing: code.pairing, remember: true, cert: own, caps, name })
+  // In by short code, the screen hands over its regular code: kept for reloads, like a scanned one.
+  link.on('invite', (fragment) => { try { sessionStorage.setItem('obpal.pair', fragment) } catch { /* private mode */ } })
   // Gamepad mode: Xbox-style controller streaming PAD packets (./gamepad.ts).
   const gamepad = new GamepadMode({
     motion, settings, t0, send: (b) => link.sendState(b), toast, openSettings, fullscreen: goFullscreen, exit: () => { tab = lastTab; setMode() },
@@ -461,7 +578,7 @@ async function boot(code: PairingCode) {
     else motion.stop()
     return want
   }
-  function busy() { return gyroOn || mode === Mode.point || mode === Mode.track || mode === Mode.gamepad || (pad?.touches ?? 0) > 0 }
+  function busy() { return gyroOn || mode === Mode.point || mode === Mode.track || mode === Mode.gamepad || (pad?.touches ?? 0) > 0 || buttonHold }
   function rest(on: boolean) {
     if (on === resting) return
     resting = on
@@ -541,6 +658,13 @@ async function boot(code: PairingCode) {
       surface = null
       return screenMessage({ title: "Couldn't verify this screen", art: ICONS.close, body: 'Scan the code on your screen again.' })
     }
+    if (s === 'code-wrong') {
+      surface = null
+      return screenMessage({
+        title: 'That code didn’t match', art: ICONS.close, body: 'Each code works once. Type the new one your screen shows now.',
+        action: { label: 'Type it', run: () => location.replace(location.pathname) },
+      })
+    }
     if (s === 'lan-failed') {
       surface = null
       return screenMessage({ title: "Couldn't reach the screen", art: ICONS.close, body: 'Both need the same Wi-Fi. Scan the direct code on the screen again: each one works once.' })
@@ -595,6 +719,7 @@ async function boot(code: PairingCode) {
       if (m.haptic && hapticsKind() === 'vibrate') navigator.vibrate(m.haptic === 'bump' ? 20 : 9)
     }
     if (surface && m.t !== 'pong' && m.t !== 'feedback') { renderTray(); setMode() }
+    if (m.t === 'welcome' || m.t === 'layout') buttons.changed()
   }
 
   // ---- gyro toggle and modes -------------------------------------------------
@@ -639,6 +764,9 @@ async function boot(code: PairingCode) {
   function setMode() {
     const next = currentMode()
     if (next === mode) return render()
+    // Whatever a physical button held on the old controller lets go first.
+    buttons.releaseAll()
+    buttonHold = false
     mode = next
     if (mode !== Mode.track && tracker.active) void tracker.stop()
     const woke = syncMotion()
@@ -938,6 +1066,9 @@ async function boot(code: PairingCode) {
       : g('drag', 'orbit') + g('pan', 'pan') + g('pinch', 'zoom') + g('twist', 'roll')
     gamepad.sync({ active: mode === Mode.gamepad, offered: hostModes().includes(Mode.gamepad) })
     placeTyping()
+    // The controller may have changed: Back's arming follows its bindings, and the badges go on what's shown.
+    buttons.syncBack()
+    buttons.paint()
   }
 
   /**
@@ -1038,6 +1169,7 @@ async function boot(code: PairingCode) {
     for (const c of layout.tray) {
       const b = document.createElement('button')
       b.className = c.type === 'select' ? 'tray-btn select glass' : c.tone === 'stop' ? 'tray-btn glass text stop' : 'tray-btn glass'
+      b.dataset.id = c.id
       b.setAttribute('aria-label', c.label)
       if (c.type === 'select') {
         const cur = c.options?.find((o) => o.value === values[c.id])
@@ -1172,8 +1304,7 @@ async function boot(code: PairingCode) {
         <label class="row"><input type="checkbox" id="left"> Left-handed</label>
         <label class="row"><input type="checkbox" id="lockgyro"> Lock rotation while the gyro is on</label>
         <div class="row track3d" role="radiogroup" aria-label="3D follows"><span>3D follows</span>${(['motion', 'xr', 'glow'] as const).map((w) => `<button class="way-opt" role="radio" data-way="${w}" aria-checked="${settings.track3d === w}"><span>${{ motion: 'The phone’s motion', xr: 'Its camera (Android)', glow: 'A glow for the screen’s camera' }[w]}</span></button>`).join('')}</div>
-        <label class="row"><input type="checkbox" id="headset"> <span>Headset buttons<small>Earbud presses act as A, next and previous. Plays silent audio, which pauses music.</small></span></label>
-        <p class="hw-note" id="hw-note" hidden></p>
+        <button class="set-row glass" id="buttons-open">${BUTTONS_GLYPH}<span>Buttons<small>Headset, remote, clicker, pad</small></span><span class="set-srcs">${sourceStack(inputs)}</span>${ICONS.right}</button>
         <a class="support-link" href="/sponsor/" target="_blank" rel="noopener">${ICONS.heart}<span>Support ob.Pal</span></a>
         <button class="btn" id="forget" hidden>${ICONS.close}<span>Forget remembered screens</span></button>
         <div class="actions"><button class="btn" id="disc">Disconnect</button><button class="btn primary" id="done">Done</button></div>
@@ -1211,19 +1342,8 @@ async function boot(code: PairingCode) {
         render()
       }
     })
-    const headset = sheet.querySelector<HTMLInputElement>('#headset')!
-    headset.checked = settings.headset
-    headset.onchange = async () => {
-      settings.headset = headset.checked
-      if (headset.checked) {
-        if (!(await hw.enableHeadset(hostName))) { headset.checked = settings.headset = false; toast('Headset buttons aren’t available in this browser') }
-        else toast('Press your headset button to try it')
-      } else hw.disableHeadset()
-    }
-    const note = sheet.querySelector<HTMLElement>('#hw-note')!
-    const seen = [...hw.seen].map((s) => ({ volume: 'volume keys', keys: 'keys', headset: 'headset buttons' })[s])
-    note.hidden = !seen.length
-    note.textContent = seen.length ? `Working here: ${seen.join(', ')}` : ''
+    // Buttons: its sheet opens as Settings closes.
+    sheet.querySelector<HTMLButtonElement>('#buttons-open')!.onclick = () => { tick(); close(); buttons.open() }
     sheet.querySelectorAll<HTMLButtonElement>('.theme-opt').forEach((b) => {
       b.onclick = () => {
         tick()
@@ -1339,7 +1459,7 @@ async function boot(code: PairingCode) {
     st.buttons = gyroOn ? 1 : 0
     // 3D from the phone's own sensors: while the thumb is down, each sample is a pose (the host reads Frame.pose).
     if (mode === Mode.track && trackWay() === 'motion' && q) {
-      const held = touches > 0
+      const held = touches > 0 || buttonHold
       if (held) {
         const qp = qMul(EARTH_TO_POSE, q)
         if (!imuHeld) imu.anchor(qp)

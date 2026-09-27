@@ -12,12 +12,18 @@
  *     one and would let it start), then the marble's landing reaches the output (a meter at the end of the chain).
  *   - The marble rolls up onto a button in the hero, lights and presses it, and rolls off it again; the button never
  *     does its own thing.
+ *   - Pressed into each edge of what's on screen (tilted on phones, pointed at on computers), the marble's outline as
+ *     drawn meets the edge within a pixel, and its rim is there in the screenshot.
+ *   - A knock against the edge of the screen is heard; leaning on it is quiet.
+ *   - On a phone, tilted up from below the buttons, the marble rolls up onto them, across and off.
+ *   - A marble in a letter's counter rests there without a tremor, and leaves when pointed away.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch.
  */
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, devices } from 'playwright'
+import sharp from 'sharp'
 import { startLocal } from '../extension/e2e/local.mjs'
 
 const HEADED = process.argv.includes('--headed')
@@ -43,6 +49,54 @@ async function restingOnDot(page) {
   if (!a.t || !a.d || !b) return false
   return Math.hypot(b.x - a.t.x, b.y - a.t.y) < 0.5 && Math.hypot(b.x - a.d.x, b.y - a.d.y) < 6
 }
+const field3d = (page) => until('the 3D field', () => page.evaluate(() => document.documentElement.classList.contains('field3d')), 20000)
+const me = (page) => page.evaluate(() => window.__home.tips().find((t) => t.id === 'me'))
+/** Drive the marble (a tilt, a pointer) until it stops: still within 0.3 px over four looks. */
+async function settle(page, drive, timeout = 10000) {
+  let prev = null, same = 0
+  const end = Date.now() + timeout
+  while (Date.now() < end) {
+    await drive()
+    const t = await me(page)
+    if (prev && Math.hypot(t.x - prev.x, t.y - prev.y) < 0.3) { if (++same >= 4) return t } else same = 0
+    prev = t
+    await sleep(110)
+  }
+  return me(page)
+}
+/**
+ * A phone's tilt, as seen on its screen: tip(down, right) in degrees from how it was held when the tilt went on. Each
+ * reading wobbles a little, so every one is a real change and the tilt stays awake; held sideways, the phone's own
+ * axes are turned.
+ */
+function tilter(page) {
+  let angle = 0, k = 0
+  const send = (b, g) => page.evaluate(([b, g]) => dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 0, beta: b, gamma: g })), [b, g])
+  return {
+    async on() { angle = await page.evaluate(() => screen.orientation?.angle ?? 0); await send(40, 0) },
+    tip(down, right) {
+      k++
+      const w = (k % 2) * 4
+      const d = right ? down : down + Math.sign(down) * w, r = right ? right + Math.sign(right) * w : right
+      return angle === 90 ? send(40 + r, -d) : send(40 + d, r)
+    },
+  }
+}
+/**
+ * The brightest pixel (luminance 0…255) in the outermost 2 px inside an edge of the play area `a` (hero px), within
+ * 14 px of `at` along it: the marble's rim, if it's there; the night sky, if it isn't.
+ */
+async function rimAt(page, wall, at, a) {
+  const top = await page.evaluate(() => document.querySelector('.hero').getBoundingClientRect().top)
+  const clip = wall === 'left' ? { x: a.left, y: top + at - 14, width: 2, height: 28 }
+    : wall === 'right' ? { x: a.right - 2, y: top + at - 14, width: 2, height: 28 }
+    : wall === 'top' ? { x: at - 14, y: top + a.top, width: 28, height: 2 }
+    : { x: at - 14, y: top + a.bottom - 2, width: 28, height: 2 }
+  const { data, info } = await sharp(await page.screenshot({ clip })).raw().toBuffer({ resolveWithObject: true })
+  let best = 0
+  for (let i = 0; i < data.length; i += info.channels) best = Math.max(best, 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2])
+  return best
+}
 async function check(name, fn) {
   try {
     const detail = await fn()
@@ -54,7 +108,8 @@ async function check(name, fn) {
   }
 }
 
-const local = await startLocal()
+// OBPAL_E2E_PORT runs the stand-in elsewhere than its usual 5176, beside another run.
+const local = await startLocal({ port: Number(process.env.OBPAL_E2E_PORT) || undefined })
 const browsers = []
 let profile = ''
 try {
@@ -219,6 +274,143 @@ try {
     return `arm ${before.x.toFixed(0)},${before.y.toFixed(0)} → ${during.x.toFixed(0)},${during.y.toFixed(0)} with the page still; flick scrolled ${y2 - y1}px`
   })
 
+  await check("pressed into each edge of what's on screen, the marble's outline meets it (within a pixel), on phones and computers", async () => {
+    const PHONE = { isMobile: true, hasTouch: true, deviceScaleFactor: 3 }
+    const sizes = [
+      { name: '390x844', viewport: { width: 390, height: 844 }, ...PHONE },
+      { name: '360x800', viewport: { width: 360, height: 800 }, ...PHONE },
+      { name: '412x915', viewport: { width: 412, height: 915 }, ...PHONE },
+      { name: '844x390 sideways', viewport: { width: 844, height: 390 }, ...PHONE },
+      { name: '1366x768', viewport: { width: 1366, height: 768 } },
+      { name: '1920x1080', viewport: { width: 1920, height: 1080 } },
+    ]
+    const seen = []
+    for (const { name, ...size } of sizes) {
+      const ctx = await browser.newContext({ ...size, ignoreHTTPSErrors: true, reducedMotion: 'reduce' })
+      const page = await ctx.newPage()
+      await page.goto(`${local.origin}/?quality=low`)
+      await field3d(page)
+      await sleep(600)
+      const worst = { gap: 0, wall: '' }
+      const measure = async (wall) => {
+        const o = await page.evaluate(() => window.__home.outline('me'))
+        const a = o.area
+        const off = { left: o.left - a.left, right: a.right - o.right, top: o.top - a.top, bottom: a.bottom - o.bottom }[wall]
+        if (Math.abs(off) > 1) throw new Error(`${name}, ${wall}: the outline is ${off.toFixed(2)} px ${off > 0 ? 'short of' : 'past'} the edge (${JSON.stringify(o)})`)
+        if (Math.abs(off) >= Math.abs(worst.gap)) Object.assign(worst, { gap: off, wall })
+        // And it's drawn there: its rim is in the outermost 2 px of the screenshot, next to where it touches.
+        const t = await me(page)
+        const rim = await rimAt(page, wall, wall === 'left' || wall === 'right' ? t.y : t.x, a)
+        if (rim < 110) throw new Error(`${name}, ${wall}: no rim at the edge in the screenshot (brightest ${rim.toFixed(0)})`)
+      }
+      if (size.hasTouch) {
+        const tilt = tilter(page)
+        await page.locator('[data-hint]').tap()
+        // (Tapping the hint may have scrolled it into view: the page back at its top.)
+        await page.evaluate(() => scrollTo(0, 0))
+        await tilt.on()
+        await sleep(250)
+        // Hopped onto open floor (a tap there), then tipped into each side and toward you.
+        const open = await page.evaluate(() => { const q = document.querySelector('.quick li')?.getBoundingClientRect(); return q && q.bottom < innerHeight - 30 ? { x: q.right + 40, y: q.top + q.height / 2 } : { x: innerWidth * 0.78, y: innerHeight * 0.6 } })
+        await page.touchscreen.tap(open.x, open.y)
+        await sleep(1400)
+        // (Sideways, a little toward you too: along the bottom, clear of the headline.)
+        for (const [wall, down, right] of [['left', 6, -16], ['right', 6, 16], ['bottom', 14, 0]]) {
+          await settle(page, () => tilt.tip(down, right))
+          await measure(wall)
+          await tilt.tip(0, 0)
+        }
+        // The top: onto the headline's first letter, a short hop to the line above it, and tipped away from you.
+        const first = await page.evaluate(() => { const r = document.createRange(); const h = document.getElementById('hero-h'); r.setStart(h.firstChild, 0); r.setEnd(h.firstChild, 1); const b = r.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height * 0.6 } })
+        await page.touchscreen.tap(first.x, first.y)
+        await sleep(1400)
+        const line = await page.evaluate(() => { const e = document.querySelector('.hero .eyebrow').getBoundingClientRect(); return { x: e.left + 40, y: e.top + e.height / 2 } })
+        await page.touchscreen.tap(line.x, line.y)
+        await sleep(1400)
+        await settle(page, () => tilt.tip(-14, 0))
+        await measure('top')
+      } else {
+        // Pointed at each edge: at the sides, at the bottom of what's on screen, and just under the bar at the top.
+        const a = (await page.evaluate(() => window.__home.outline('me'))).area
+        for (const [wall, x, y] of [['left', 2, a.bottom * 0.62], ['right', a.right - 2, a.bottom * 0.62], ['bottom', a.right * 0.72, a.bottom - 2], ['top', a.right * 0.72, a.top + 3]]) {
+          await settle(page, () => page.mouse.move(x + Math.random(), y))
+          await measure(wall)
+        }
+      }
+      seen.push(`${name} ${worst.gap >= 0 ? '' : '+'}${Math.abs(worst.gap).toFixed(2)} px`)
+      await ctx.close()
+    }
+    return `the farthest from its edge: ${seen.join(', ')}`
+  })
+
+  await check('on a phone, a knock against the edge of the screen is heard, and leaning on it is quiet', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, ignoreHTTPSErrors: true, reducedMotion: 'reduce' })
+    const page = await ctx.newPage()
+    const cdp = await ctx.newCDPSession(page)
+    const audio = async () => (await cdp.send('Runtime.evaluate', { expression: `(() => { const a = window.__home.audio(); return { ...a, peakDb: Number.isFinite(a.peakDb) ? a.peakDb : -999 } })()`, returnByValue: true })).result.value
+    await page.goto(`${local.origin}/?debug=audio&quality=low`)
+    await field3d(page)
+    await sleep(600)
+    const tilt = tilter(page)
+    // The tap that switches the tilt on starts the sound too.
+    await page.locator('[data-hint]').tap()
+    await page.evaluate(() => scrollTo(0, 0))
+    await tilt.on()
+    await sleep(250)
+    const open = await page.evaluate(() => { const q = document.querySelector('.quick li').getBoundingClientRect(); return { x: q.right + 40, y: q.top + q.height / 2 } })
+    await page.touchscreen.tap(open.x, open.y)
+    await sleep(1600)
+    const before = await audio()
+    // Tipped hard to the right: across, and a knock against the side.
+    const knock = await until('a knock heard', async () => { await tilt.tip(0, 20); const a = await audio(); return a.kinds.wall > before.kinds.wall && a.peakDb > -30 ? a : null }, 8000, 90)
+    // Leaning on it, and rolling along it: no more knocks.
+    await settle(page, () => tilt.tip(0, 20))
+    const leaning = (await audio()).kinds.wall
+    const end = Date.now() + 1500
+    while (Date.now() < end) { await tilt.tip(8, 18); await sleep(90) }
+    const after = await audio()
+    await ctx.close()
+    if (knock.state !== 'on') throw new Error(`sound is ${knock.state}`)
+    if (after.kinds.wall !== leaning) throw new Error(`${after.kinds.wall - leaning} knock(s) while leaning on the side`)
+    return `${knock.kinds.wall - before.kinds.wall} knock(s) heard, peak ${knock.peakDb} dBFS; none while leaning on it and rolling along it`
+  })
+
+  await check('on a phone, tilted up from below the buttons, the marble rolls up onto them, across, and off; they do nothing', async () => {
+    const ctx = await browser.newContext({ ...devices['Pixel 7'], ignoreHTTPSErrors: true, reducedMotion: 'reduce' })
+    const page = await ctx.newPage()
+    await page.goto(`${local.origin}/?quality=low`)
+    await field3d(page)
+    await sleep(600)
+    await page.evaluate(() => { window.__acted = 0; document.addEventListener('click', (e) => { if (e.target.closest?.('.cta a, .cta button')) window.__acted++ }, true) })
+    const tilt = tilter(page)
+    await page.locator('[data-hint]').tap()
+    await page.evaluate(() => scrollTo(0, 0))
+    await tilt.on()
+    await sleep(250)
+    const pads = await page.evaluate(() => window.__home.pads())
+    const send = 1000 + pads.findIndex((p) => /send it/i.test(p)), see = 1000 + pads.findIndex((p) => /see what/i.test(p))
+    const open = await page.evaluate(() => { const q = document.querySelector('.quick li').getBoundingClientRect(); return { x: q.right + 40, y: q.top + q.height / 2 } })
+    await page.touchscreen.tap(open.x, open.y)
+    await sleep(1600)
+    const top = await page.evaluate(() => document.querySelector('[data-send]').getBoundingClientRect().top)
+    const path = []
+    const end = Date.now() + 7000
+    while (Date.now() < end) {
+      await tilt.tip(-10, 0)
+      const t = await me(page)
+      if (path.at(-1) !== t.on) path.push(t.on)
+      if (t.y < top - 30 && path.includes(send)) break
+      await sleep(90)
+    }
+    const acted = await page.evaluate(() => window.__acted)
+    await ctx.close()
+    const onSee = path.indexOf(see), onSend = path.indexOf(send)
+    if (onSee < 0 || onSend < onSee) throw new Error(`it went ${path.join(' → ')} (the buttons are ${see} and ${send})`)
+    if (path.at(-1) !== -1 && path.at(-1) !== -2) throw new Error(`it ended on ${path.at(-1)}`)
+    if (acted) throw new Error(`a button acted ${acted} time(s)`)
+    return `floor → "${pads[see - 1000]}" → "${pads[send - 1000]}" → floor above them; no button acted`
+  })
+
   const screenCtx = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true })
   const screen = await screenCtx.newPage()
   const screenErrors = []
@@ -248,11 +440,15 @@ try {
 
   let invite = ''
   await check('a computer shows a code once someone is there', async () => {
-    const before = await screen.evaluate(() => !!document.querySelector('.obpal-link'))
+    const before = await screen.evaluate(() => !!document.querySelector('.obpal-chip'))
     if (before) throw new Error('a code was made before anyone moved')
     await screen.mouse.move(300, 300)
     await screen.mouse.move(420, 260, { steps: 6 })
-    invite = await until('the code', () => screen.evaluate(() => document.querySelector('.obpal-link')?.href || ''), 20000)
+    // The pairing chip, as a panel in the hero's card: its QR code, and its link for this device.
+    invite = await until('the code', () => screen.evaluate(() => {
+      const root = document.querySelector('[data-pair-slot] .obpal-chip')?.shadowRoot
+      return root?.querySelector('.qr svg') ? root.querySelector('.here')?.href || '' : ''
+    }), 20000)
     return new URL(invite).pathname
   })
 
@@ -269,6 +465,37 @@ try {
     if (later.on !== on.on) throw new Error(`it rolled off letter ${on.on} onto ${later.on}`)
     if (Math.hypot(later.x - x, later.y - y) > 80) throw new Error(`it landed ${Math.hypot(later.x - x, later.y - y).toFixed(0)}px from the click`)
     return `on letter ${on.on}, ${Math.hypot(later.x - x, later.y - y).toFixed(0)}px from the click`
+  })
+
+  await check("in a letter's counter the marble rests without a tremor, and leaves when pointed away", async () => {
+    // The o of "Your": a click hops the marble onto it; pointed at the middle of its counter, it goes in.
+    const o = await screen.evaluate(() => { const r = document.createRange(); const h = document.getElementById('hero-h'); r.setStart(h.firstChild, 1); r.setEnd(h.firstChild, 2); const b = r.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height * 0.62, w: b.width } })
+    await screen.mouse.click(o.x - o.w * 0.3, o.y)
+    await sleep(1200)
+    await until('the marble in the counter', async () => { await screen.mouse.move(o.x + Math.random() * 0.5, o.y); return (await me(screen)).held }, 8000, 150)
+    // Left there (the mouse still): it settles, and stays in the counter.
+    await sleep(3200)
+    const held = await me(screen)
+    if (!held.held) throw new Error(`it didn't stay in the counter: ${JSON.stringify(held)}`)
+    // Still: its position read every frame for a second and a half.
+    const most = await screen.evaluate(() => new Promise((done) => {
+      const first = window.__home.tips().find((t) => t.id === 'me')
+      let prev = first, max = 0
+      const end = performance.now() + 1500
+      const frame = () => {
+        const t = window.__home.tips().find((q) => q.id === 'me')
+        max = Math.max(max, Math.hypot(t.x - prev.x, t.y - prev.y))
+        prev = t
+        if (performance.now() < end) requestAnimationFrame(frame); else done(max)
+      }
+      requestAnimationFrame(frame)
+    }))
+    if (most > 0.1) throw new Error(`it moved ${most.toFixed(3)} px in a frame while resting in the counter`)
+    // Pointed off to the right, past the letter: out over the rim, and away.
+    await settle(screen, () => screen.mouse.move(o.x + o.w * 2 + Math.random(), o.y))
+    const out = await me(screen)
+    if (out.held || out.x < o.x + o.w * 0.6) throw new Error(`still in the counter: ${JSON.stringify(out)}`)
+    return `in it at ${held.x.toFixed(0)},${held.y.toFixed(0)}, moving at most ${most.toFixed(3)} px a frame; out to ${out.x.toFixed(0)},${out.y.toFixed(0)}`
   })
 
   await check('the marble rolls up onto a button, lights and presses it, and rolls off it again; the button does nothing', async () => {

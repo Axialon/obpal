@@ -6,7 +6,8 @@ import { applyTheme, initialTheme } from '../ui/themes'
 import { calmMarks, mountMarks } from '../ui/icons'
 import { mountTopBar } from '../landing/topbar'
 import {
-  checkProfile, CONTROLLER_IDS, CONTROLLERS, MOTION_UTILITIES, PROFILE_IDS, PROFILE_LIMITS, PROFILES, ROUTES, utilityKey, type MotionUtility, type ProfileSpec,
+  APP_ACTIONS, checkProfile, Controller, CONTROLLER_IDS, CONTROLLERS, INPUT_OPTIONS, isControllerId, KEY_TARGETS, MOTION_UTILITIES, optionOf,
+  PROFILE_IDS, PROFILE_LIMITS, PROFILES, ROUTES, targetLabel, utilityKey, type ControllerId, type InputSource, type MotionUtility, type ProfileSpec,
 } from '@obpal/core'
 import { BRIDGE_ROWS, proposeUrl, SYSTEM_ROWS, UTILITY_ROWS, type CatalogueRow } from './data'
 
@@ -77,6 +78,53 @@ $('utils').innerHTML = MOTION_UTILITIES.map((u) => {
     </fieldset>`
 }).join('')
 
+// ---- the builder's buttons: what a phone's keys, headset, pad or Back press, where it differs from the controller's own ----
+
+const SOURCE_NAME: Record<InputSource, string> = { media: 'Headset', keys: 'Keys', pad: 'Pad', back: 'Back', volume: 'A keyboard’s volume keys' }
+const bctl = $<HTMLSelectElement>('bctl')
+for (const id of CONTROLLER_IDS) bctl.add(new Option(CONTROLLERS[id].name, id))
+const inputSelect = () => `<select class="bin" aria-label="Press">${INPUT_OPTIONS.map((g) => `<optgroup label="${esc(SOURCE_NAME[g.source])}">${g.ids.map((id) => `<option value="${esc(id)}">${esc(optionOf(id))}</option>`).join('')}</optgroup>`).join('')}</select>`
+/** What an input can press on the chosen controller: its controls, a key on the screen, the phone's own, a tray button, or nothing. */
+function targetOptions(c: ControllerId): string {
+  const opt = (t: string) => `<option value="${esc(t)}">${esc(targetLabel(c, t))}</option>`
+  return `<optgroup label="${esc(CONTROLLERS[c].name)}">${CONTROLLERS[c].controls.map(opt).join('')}</optgroup>`
+    + (c === Controller.keyboard ? '' : `<optgroup label="Keys on the screen">${KEY_TARGETS.map((t) => `<option value="${esc(t)}">Key ${esc(targetLabel(c, t))}</option>`).join('')}</optgroup>`)
+    + `<optgroup label="On the phone">${APP_ACTIONS.map((a) => opt(`app:${a}`)).join('')}</optgroup>`
+    + `<optgroup label="Other"><option value="tray:">A tray button…</option><option value="none">Nothing (takes it away)</option></optgroup>`
+}
+function addRow(input?: string, target?: string) {
+  const row = document.createElement('div')
+  row.className = 'brow'
+  row.innerHTML = `${inputSelect()}<span aria-hidden="true">→</span><select class="bto" aria-label="Does">${targetOptions(bctl.value as ControllerId)}</select>`
+    + `<input class="btray" placeholder="tray id" spellcheck="false" aria-label="Tray button id" hidden><button class="bdel" type="button" aria-label="Remove">×</button>`
+  const bin = row.querySelector<HTMLSelectElement>('.bin')!
+  const bto = row.querySelector<HTMLSelectElement>('.bto')!
+  const tray = row.querySelector<HTMLInputElement>('.btray')!
+  if (input) bin.value = input
+  if (target?.startsWith('tray:')) { bto.value = 'tray:'; tray.value = target.slice(5) } else if (target) bto.value = target
+  tray.hidden = bto.value !== 'tray:'
+  bto.addEventListener('change', () => { tray.hidden = bto.value !== 'tray:'; if (!tray.hidden) tray.focus() })
+  row.querySelector<HTMLButtonElement>('.bdel')!.onclick = () => { row.remove(); update() }
+  $('brows').appendChild(row)
+}
+function readButtons(): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const row of $('brows').querySelectorAll<HTMLElement>('.brow')) {
+    const input = row.querySelector<HTMLSelectElement>('.bin')!.value
+    const to = row.querySelector<HTMLSelectElement>('.bto')!.value
+    out[input] = to === 'tray:' ? `tray:${row.querySelector<HTMLInputElement>('.btray')!.value.trim()}` : to
+  }
+  return out
+}
+bctl.addEventListener('change', () => {
+  // The same bindings, offered what this controller can press (one it can't shows as the checker's error).
+  const kept = readButtons()
+  $('brows').innerHTML = ''
+  for (const [input, t] of Object.entries(kept)) addRow(input, t)
+  update()
+})
+$('badd').addEventListener('click', () => { addRow(); update() })
+
 /** Fill the form from a built-in (or community) profile, keeping what the person already named. */
 function load(p: ProfileSpec) {
   for (const box of $('on').querySelectorAll<HTMLInputElement>('input')) box.checked = (p.on as readonly string[]).includes(box.value)
@@ -88,6 +136,9 @@ function load(p: ProfileSpec) {
     ;(fs.querySelector('[name=edgeTurn]') as HTMLInputElement).checked = s.edgeTurn
   }
   if (!$<HTMLInputElement>('pfor').value) $<HTMLInputElement>('pfor').placeholder = p.for
+  bctl.value = p.controller && isControllerId(p.controller) ? p.controller : Controller.gamepad
+  $('brows').innerHTML = ''
+  for (const [input, t] of Object.entries(p.buttons ?? {})) addRow(input, t)
   update()
 }
 
@@ -100,12 +151,15 @@ function read(): unknown {
       invertY: v('invertY').checked, edgeTurn: v('edgeTurn').checked,
     }]
   }))
+  const buttons = readButtons()
   return {
     id: $<HTMLInputElement>('pid').value.trim(),
     name: $<HTMLInputElement>('pname').value.trim(),
     for: $<HTMLInputElement>('pfor').value.trim(),
     on: [...$('on').querySelectorAll<HTMLInputElement>('input:checked')].map((b) => b.value),
     ...settings,
+    ...(bctl.value !== Controller.gamepad ? { controller: bctl.value } : {}),
+    ...(Object.keys(buttons).length ? { buttons } : {}),
   }
 }
 

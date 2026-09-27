@@ -75,13 +75,8 @@ html.field3d .hero::after { opacity: 0; }
   background: linear-gradient(110deg, transparent 30%, rgb(var(--hl-rgb) / 0.06) 50%, transparent 70%) 0 0 / 250% 100%, rgb(var(--hl-rgb) / 0.03);
   animation: pair-shine 1.8s linear infinite; }
 @keyframes pair-shine { to { background-position: -250% 0, 0 0; } }
-/* The SDK's own card, fitted in: the code full width, the status under it. */
-.hero .pair .obpal-card { --obpal-ink: var(--ink); --obpal-muted: var(--muted); --obpal-accent: var(--bb-accent); --obpal-font: var(--font);
-  flex-direction: column; align-items: stretch; gap: 14px; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
-.hero .pair .obpal-qr { width: 100%; height: auto; aspect-ratio: 1; padding: 12px; border-radius: 20px; box-shadow: 0 0 0 1px rgb(var(--accent-rgb) / 0.35), 0 18px 40px -18px rgb(var(--accent-rgb) / 0.45); }
-.hero .pair .obpal-body { min-width: 0; gap: 8px; }
-.hero .pair .obpal-title { font: 750 16px/1.2 var(--font-display); }
-.hero .pair .obpal-ic { background: rgb(var(--accent-rgb) / 0.16); color: var(--accent-text); border-color: rgb(var(--accent-rgb) / 0.3); }
+/* The pairing chip (@obpal/host) as a panel in this glass: the site's lime, its UI font. */
+.hero .pair { --obpal-accent: var(--bb-accent); --obpal-font: var(--font); }
 .hero[data-live] .pair::before { background: linear-gradient(160deg, rgb(var(--accent-rgb) / 0.9), rgb(var(--accent-rgb) / 0.2) 50%, rgb(var(--haze-rgb) / 0.5)); }
 
 .hero-hint { position: absolute; left: 50%; bottom: 34px; z-index: 1; display: inline-flex; align-items: center; gap: 10px; padding: 10px 16px 10px 12px; border-radius: 999px;
@@ -197,7 +192,6 @@ html.played .play-cue { opacity: 0; }
   .pair { width: min(100%, 520px); display: grid; grid-template-columns: 180px minmax(0, 1fr); column-gap: 18px; align-items: center; }
   .pair-k { grid-column: 1 / -1; }
   .pair-slot { min-height: 0; }
-  .hero .pair .obpal-card { flex-direction: column; }
   .pair-note { margin: 0; }
   .show { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .build-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }

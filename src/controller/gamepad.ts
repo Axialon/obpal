@@ -382,6 +382,8 @@ export class GamepadMode {
   private clicks: { bit: number; until: number }[] = []
   private sticks: Stick[] = []
   private readonly trig: Vec2 = [0, 0]
+  /** The triggers as physical buttons hold them (all the way, or not at all). */
+  private readonly hwTrig: Vec2 = [0, 0]
   private resets: (() => void)[] = []
   private remeasures: (() => void)[] = []
   private readonly on = new Set<MotionUtility>()
@@ -477,15 +479,22 @@ export class GamepadMode {
     return now >= this.handoffUntil
   }
 
-  /** Host rumble (dual-rumble semantics). Android vibrates; iOS web pages can't vibrate outside a tap, so the layer's border pulses. */
-  /** A hardware button (a volume key, a headset button, a keyboard key) holding a pad button. */
+  /**
+   * A physical button (a key, a pad's button, a headset press) holding a pad button (./buttons.ts). The triggers go all
+   * the way down, as a pedal does.
+   */
   hardware(button: number, down: boolean) {
     const key = -1000 - button
     if (down) this.held.set(key, bit(button))
     else this.held.delete(key)
+    if (button === PadButton.LT || button === PadButton.RT) this.hwTrig[button === PadButton.LT ? 0 : 1] = down ? 1 : 0
     this.changed()
   }
 
+  /** A physical button with no release of its own (a headset press, Back): a click of a pad button. */
+  tap(button: number) { this.click(button) }
+
+  /** Host rumble (dual-rumble semantics). Android vibrates; iOS web pages can't vibrate outside a tap, so the layer's border pulses. */
   rumble(strong: number, weak: number, ms: number) {
     const s = clamp(Number(strong) || 0, 0, 1)
     const w = clamp(Number(weak) || 0, 0, 1)
@@ -566,7 +575,7 @@ export class GamepadMode {
 
   private compose(now: number) {
     const p = this.pad
-    p.triggers = [this.trig[0], this.trig[1]]
+    p.triggers = [Math.max(this.trig[0], this.hwTrig[0]), Math.max(this.trig[1], this.hwTrig[1])]
     let m = 0
     for (const b of this.held.values()) m |= b
     this.clicks = this.clicks.filter((c) => c.until > now)
@@ -576,7 +585,7 @@ export class GamepadMode {
   }
 
   private busy(now: number) {
-    return this.on.size > 0 || this.held.size > 0 || this.trig[0] > 0 || this.trig[1] > 0 ||
+    return this.on.size > 0 || this.held.size > 0 || this.trig[0] > 0 || this.trig[1] > 0 || this.hwTrig[0] > 0 || this.hwTrig[1] > 0 ||
       this.sticks.some((s) => s.touching) || this.clicks.some((c) => c.until > now)
   }
 
@@ -637,6 +646,7 @@ export class GamepadMode {
     this.held.clear()
     this.clicks = []
     this.trig[0] = this.trig[1] = 0
+    this.hwTrig[0] = this.hwTrig[1] = 0
   }
 
   // ---- profiles and the motion chips --------------------------------------------------

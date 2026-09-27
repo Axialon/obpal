@@ -1,7 +1,8 @@
 /**
  * ?debug=audio,gfx on the home page: a small readout in the corner, to read on a real device what the tests can't
  * hear or see there. audio: the audio context's state, the output's level (what reaches the speakers, from a meter at
- * the very end of the chain) and the hits played and skipped. gfx: the canvas and its drawing buffer, the quality step
+ * the very end of the chain) and the hits played (of each kind: a wall is the edge of the screen) and skipped. gfx:
+ * the canvas and its drawing buffer, the quality step
  * the governor chose, multisampling, and the GPU's time per frame where the browser can measure it.
  * Loaded only when asked for.
  */
@@ -24,7 +25,8 @@ export function mountDebug(kinds: Set<string>, src: { audio: () => GlassStats; g
       const a = src.audio()
       lines.push(`audio  ${a.state}  (context: ${a.context ?? 'not made yet'})`)
       lines.push(`level  ${dbs(a.levelDb)}   peak ${dbs(a.peakDb)}`)
-      lines.push(`hits   ${a.played} played, ${a.skipped} skipped`)
+      const kinds = Object.entries(a.kinds).filter(([, v]) => v > 0).map(([k, v]) => `${k} ${v}`).join(', ')
+      lines.push(`hits   ${a.played} played${kinds ? ` (${kinds})` : ''}, ${a.skipped} skipped`)
       if (a.rate) lines.push(`       ${a.rate} Hz, ${a.latencyMs} ms latency`)
     }
     if (kinds.has('gfx')) {

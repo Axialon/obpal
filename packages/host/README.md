@@ -105,13 +105,13 @@ Without the element, from the hosted script: `const remote = await window.obpal.
 ## The SDK
 
 ```ts
-import { Controller, Remote } from '@obpal/host'
+import { Controller, PairingChip, Remote } from '@obpal/host'
 
 const remote = await Remote.create({
   appName: 'My viewer',
   layout: { v: 1, controllers: [Controller.trackpad, Controller.wii], tray: [{ id: 'reset', label: 'Reset' }] },
 })
-remote.mountPairing(document.getElementById('pair')!, { variant: 'compact' })
+new PairingChip({ remote })
 remote.on('button', ({ id }) => { if (id === 'reset') resetView() })
 remote.on('mode', (mode, who) => console.log(`${who.name} uses ${who.controller}`))
 
@@ -126,6 +126,82 @@ requestAnimationFrame(function frame(now) {
 - Shared scenes: `Remote.create({ …, seats: 8 })`, `remote.setScene({ nodes, held })`, and `Claims` for one participant per node.
 - `remote.padOf(id)` is a standard gamepad; `installGamepadShim` shows it to Gamepad API code.
 - `withControllers(layout)` is what the SDK does to every layout it sends: it fills in `modes` (and the mouse face, the keyboard, the wheel's profile) from `controllers`, for phones that predate them.
+
+## The pairing chip
+
+`PairingChip` is the pairing UI: a small chip in a corner of the page (the ob.Pal mark, "Scan to control" and a status dot). It opens to show the QR code and the short code, and closes by itself once a phone is in, so it never covers the page. It takes on the page's look.
+
+```ts
+const chip = new PairingChip({
+  remote,                    // required: the Remote it pairs
+  corner: 'bottom-right',    // 'bottom-right' (default) | 'bottom-left' | 'top-right' | 'top-left' | 'inline'
+  variant: 'chip',           // 'chip' (default) | 'panel': the card's contents alone, always shown, in parent's frame
+  accent: '#ff5a1f',         // any CSS colour; default: the page's own accent (below), else ob.Pal lime
+  open: false,               // start open
+  label: 'Scan to control',  // the closed chip's words
+  parent: document.body,     // where chip.el goes: an element or a shadow root (default document.body)
+  offset: '16px',            // distance from the corner, for the four corners
+  scheme: 'auto',            // 'auto' (from the page) | 'light' | 'dark'
+  code: true,                // show the short code beside the QR
+  testLink: false,           // a link that opens the controller on this device
+  onToggle: (open) => {},    // it opened or closed
+})
+
+chip.el          // the chip's element (its own shadow root, so page CSS can't break it)
+chip.expanded    // whether it is open
+chip.expand()    // open it: QR, short code, status
+chip.collapse()  // close it
+chip.toggle()
+chip.refresh()   // read the page's look again (after a theme change it couldn't see)
+chip.destroy()   // remove it, and stop asking for a short code
+```
+
+`'inline'` leaves placement to the page: the chip sits where `parent` puts it. The four corners fix it to the viewport. `--obpal-offset` (or `--obpal-offset-x` and `--obpal-offset-y`) moves it from its corner, from the page's own CSS; ob.Pal's sims lift it above their bottom panel on phones that way.
+
+`variant: 'panel'` is for a page that gives pairing a place of its own (ob.Pal's home page does, in its hero): the QR code as wide as `parent`, the short code and the status under it, no chip and no frame of its own, and it stays open.
+
+**The page's look.** Unless the options say otherwise, the chip reads these from where it sits, again whenever the page's theme changes:
+
+| What | From |
+|---|---|
+| Accent | `--obpal-accent`, else `--accent`, `--primary`, `--color-primary` or `--brand` (a colour or an `R G B` triplet) |
+| Font | the inherited `font-family`, or `--obpal-font` |
+| Light or dark | `color-scheme`, else the page background's brightness |
+| Corner radius | `--obpal-radius`, else `--radius` or `--border-radius` (clamped to 6–28 px) |
+
+**Keyboard and screen readers.** The chip is a button (`aria-expanded`); Enter or Space opens and closes it, Escape closes it and keeps the focus on it. The QR is an image with a label, the code is read digit by digit, and the status is a polite live region. It opens on hover only with a mouse, and moves without animation under `prefers-reduced-motion`.
+
+**Strict pages.** The chip builds everything from elements (no `innerHTML`, `insertAdjacentHTML` or `DOMParser`) and styles itself with one constructed stylesheet, so it works under a Content Security Policy without `'unsafe-inline'` and where the page enforces Trusted Types (`require-trusted-types-for 'script'`).
+
+## The short code
+
+Beside the QR code the chip shows a short code, ten digits (`482 193 7056`), to type on the phone at `obpal.blackboxes.net/p`: for a TV or a headset, or a phone across the room. A code works once and for ten minutes at most; the chip shows a new one after each use. The room service never learns enough to use it: the last five digits never leave the two devices (PROTOCOL §2b). Under heavy use the service may ask the screen for a moment's proof of work before a new code; the Remote does it by itself.
+
+The chip asks for codes itself. Without it:
+
+```ts
+const release = remote.wantCode()   // keep a code live while something shows it
+remote.on('code', () => show(remote.code, remote.codeSite)) // '4821937056', 'obpal.blackboxes.net/p'
+release()                           // nothing shows it any more
+```
+
+`Remote.create({ …, shortCode: false })` turns codes off.
+
+## QR codes
+
+```ts
+import { brandedQr, brandedQrElement, plainQr, plainQrElement } from '@obpal/host/qr'
+
+brandedQr(remote.pairingUrl, { accent: '#ff5a1f' })        // SVG markup: round dots, rounded eyes, the mark in the middle
+brandedQrElement(remote.pairingUrl, { accent: '#ff5a1f' }) // the same as an <svg> element (no markup parsed)
+plainQr(remote.pairingUrl)                                 // plain squares, the fallback (plainQrElement as an element)
+```
+
+The branded code is ECC Q, dark modules on a light plate, and it darkens an accent until the eyes read nearly as dark as the ink, so every camera reads it. tests/qr.test.ts reads it back with jsQR and ZXing over sizes, surfaces, twelve accents and blur, and requires it to read wherever uqr's plain squares of the same density read. Keep it at 2.5 px a module or more (the chip draws a pairing link's code at 168 px); ECC H wants 3.5.
+
+## The older card
+
+`remote.mountPairing(el, { variant: 'compact' | 'full' })` still renders the earlier pairing card (plain QR, no short code) into an element of the page.
 
 **Developing your page on localhost:** the SDK takes a localhost page for ob.Pal's own development server and pairs through it. While you develop locally, pass `service: 'https://obpal.blackboxes.net'` to `Remote.create`, or to `defineObpalRemote({ service })` for the element. The hosted embed.js always pairs through the site it came from.
 

@@ -1,0 +1,115 @@
+/*
+ * The buttons diagnostic (/buttons/): the site's palette (site.css) in one phone-first column of glass. Each source
+ * has its light: keys lime, volume lavender, headset sky, pads amber, Back rose.
+ */
+html.site body {
+  background:
+    radial-gradient(120% 60% at 50% -12%, rgb(var(--uv-rgb) / 0.42), transparent 62%),
+    radial-gradient(80% 50% at 110% 100%, rgb(var(--haze-rgb) / 0.12), transparent 60%),
+    var(--page);
+  background-attachment: fixed;
+}
+.bt {
+  --c-keys: var(--accent-rgb);
+  --c-volume: var(--haze-rgb);
+  --c-media: 56 189 248;
+  --c-pad: 252 211 77;
+  --c-back: 251 113 133;
+  max-width: 620px; margin: 0 auto; display: grid; gap: 12px;
+  padding: max(8px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) calc(40px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+}
+/* A source's light, wherever one is shown (outranking each element's own default). */
+:is(.bt-hero, .bt-src, .bt-log li)[data-src='keys'] { --c: var(--c-keys); }
+:is(.bt-hero, .bt-src, .bt-log li)[data-src='volume'] { --c: var(--c-volume); }
+:is(.bt-hero, .bt-src, .bt-log li)[data-src='media'] { --c: var(--c-media); }
+:is(.bt-hero, .bt-src, .bt-log li)[data-src='pad'] { --c: var(--c-pad); }
+:is(.bt-hero, .bt-src, .bt-log li)[data-src='back'] { --c: var(--c-back); }
+
+.bt-top { display: flex; align-items: center; gap: 6px; min-height: 56px; }
+.bt-top .mark-slot, .bt-top .mark-slot svg { width: 36px; height: 36px; }
+.bt-top h1 { margin: 0 auto 0 2px; font: 800 21px/1 var(--font-display); letter-spacing: -0.03em; }
+.bt-icon { width: 42px; height: 42px; display: grid; place-items: center; flex: none; padding: 0; border-radius: 13px; border: 1px solid var(--line); background: rgb(var(--hl-rgb) / 0.04); color: var(--secondary); -webkit-tap-highlight-color: transparent; transition: color 0.2s, background 0.2s; }
+.bt-icon:hover { color: var(--ink); }
+.bt-icon[aria-pressed='true'] { color: var(--accent-text); background: rgb(var(--accent-rgb) / 0.14); border-color: rgb(var(--accent-rgb) / 0.4); }
+.bt-env { margin: -6px 2px 0; font: 600 12px/1.4 var(--font-data); color: var(--muted); overflow-wrap: anywhere; }
+
+/* The last input, as big as the screen allows, in its source's light. */
+.bt-hero { --c: var(--accent-rgb); position: relative; overflow: hidden; display: grid; place-items: center; align-content: center; gap: 8px; min-height: 210px; padding: 28px 16px; border-radius: 30px; text-align: center; }
+.bt-ring { position: absolute; left: 50%; top: 50%; width: 220px; height: 220px; margin: -110px 0 0 -110px; border-radius: 50%; background: radial-gradient(circle, rgb(var(--c) / 0.3), rgb(var(--c) / 0) 66%); box-shadow: inset 0 0 0 1px rgb(var(--c) / 0.22); opacity: 0.55; pointer-events: none; }
+.bt-hero.hit .bt-ring { animation: bt-hit 0.7s var(--ease) both; }
+@keyframes bt-hit { from { transform: scale(0.55); opacity: 1; } to { transform: scale(1.3); opacity: 0.55; } }
+.bt-last { position: relative; max-width: 100%; font: 800 clamp(54px, 18vw, 92px)/1 var(--font-display); letter-spacing: -0.045em; color: rgb(var(--c)); text-shadow: 0 0 30px rgb(var(--c) / 0.45); overflow-wrap: anywhere; }
+.bt-sub { position: relative; max-width: 100%; font: 600 13.5px/1.45 var(--font-data); color: var(--secondary); overflow-wrap: anywhere; }
+
+/* What reached the page, by source: lit once anything did. */
+.bt-srcs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.bt-src { --c: var(--hl-rgb); display: grid; justify-items: center; gap: 3px; padding: 12px 2px 10px; border-radius: 18px; border: 1px solid var(--line); background: rgb(var(--hl-rgb) / 0.03); color: var(--muted); transition: color 0.25s, border-color 0.25s, background 0.25s; }
+.bt-src .ic { width: 22px; height: 22px; }
+.bt-src b { font: 750 19px/1.1 var(--font-display); color: var(--ink); font-variant-numeric: tabular-nums; }
+.bt-src span { font-size: 11px; font-weight: 650; }
+.bt-src[data-on] { color: rgb(var(--c)); border-color: rgb(var(--c) / 0.45); background: linear-gradient(160deg, rgb(var(--c) / 0.18), rgb(var(--c) / 0.04)); }
+
+/* The opt-in tests. */
+.bt-togs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.bt-tog { display: grid; justify-items: center; align-content: center; gap: 7px; min-height: 78px; padding: 12px 6px; border-radius: 20px; border: 1px solid var(--glass-edge); background: var(--glass); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); box-shadow: var(--glass-shadow); color: var(--secondary); font-size: 12.5px; font-weight: 700; -webkit-tap-highlight-color: transparent; touch-action: manipulation; transition: transform 0.12s var(--ease), background 0.2s, color 0.2s; }
+.bt-tog .ic { width: 24px; height: 24px; }
+.bt-tog:active { transform: scale(0.97); }
+.bt-tog[aria-pressed='true'] { background: var(--glass-light); border-color: rgb(255 255 255 / 0.25); color: var(--accent-ink); box-shadow: 0 12px 30px rgb(var(--accent-rgb) / 0.22), inset 0 1px 0 rgb(255 255 255 / 0.45); }
+.bt-tog.failed { color: var(--bad); border-style: dashed; }
+.bt-track { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 4px; border-radius: 16px; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.04); }
+.bt-track button { height: 38px; border: 0; border-radius: 12px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 700; }
+.bt-track button[aria-checked='true'] { background: rgb(var(--c-media) / 0.2); color: rgb(var(--c-media)); }
+.bt-note { margin: -2px 4px 0; min-height: 1em; font-size: 12.5px; color: var(--muted); text-align: center; }
+.bt-note:empty { display: none; }
+.bt-ask { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 16px; border-radius: 18px; }
+.bt-ask span { flex: 1; font-size: 14px; font-weight: 650; }
+.bt-ask button { height: 40px; padding: 0 16px; border-radius: 12px; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.06); font-weight: 700; }
+.bt-ask button[data-moved='1'] { background: rgb(var(--c-volume) / 0.2); color: rgb(var(--c-volume)); }
+
+/* A connected pad: its buttons (lit when pressed, filled by how far) and its axes. */
+.bt-pads { display: grid; gap: 12px; }
+.bt-pads:empty { display: none; }
+.bt-pad { --c: var(--c-pad); display: grid; gap: 12px; padding: 16px; border-radius: 24px; }
+.bt-pad header { display: flex; align-items: center; gap: 12px; }
+.bt-pad header > span { display: grid; place-items: center; width: 40px; height: 40px; flex: none; border-radius: 13px; background: rgb(var(--c) / 0.16); color: rgb(var(--c)); }
+.bt-pad header div { display: grid; flex: 1; min-width: 0; }
+.bt-pad header b { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bt-pad header small { color: var(--muted); font: 600 11.5px var(--font-data); }
+.bt-pad header em { font-style: normal; font-size: 12px; color: var(--muted); }
+.bt-chip { height: 36px; padding: 0 14px; border-radius: 12px; border: 1px solid rgb(var(--c) / 0.45); background: rgb(var(--c) / 0.14); color: rgb(var(--c)); font-size: 13px; font-weight: 750; }
+.bt-pbtns { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 6px; }
+.bt-pb { position: relative; display: grid; place-items: center; height: 42px; overflow: hidden; border-radius: 12px; border: 1px solid var(--line); background: rgb(var(--hl-rgb) / 0.03); font: 700 12.5px var(--font-data); color: var(--secondary); transition: color 0.1s, background 0.1s; }
+.bt-pb i { position: absolute; inset: auto 0 0; height: calc(var(--v, 0) * 100%); background: rgb(var(--c) / 0.3); pointer-events: none; }
+.bt-pb.on { color: #1c1400; background: rgb(var(--c)); border-color: transparent; }
+.bt-paxes { display: grid; gap: 8px; }
+.bt-paxes:empty { display: none; }
+.bt-pa { display: grid; grid-template-columns: 30px 1fr 46px; align-items: center; gap: 10px; }
+.bt-pa em { font: 700 12px var(--font-data); font-style: normal; color: var(--muted); }
+.bt-pa b { font: 600 12.5px var(--font-data); text-align: right; font-variant-numeric: tabular-nums; }
+.bt-bar { position: relative; height: 8px; border-radius: 4px; background: rgb(var(--hl-rgb) / 0.08); }
+.bt-bar::before { content: ''; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: var(--line); }
+.bt-bar i { position: absolute; top: -4px; left: calc((var(--v, 0) + 1) * 50% - 8px); width: 16px; height: 16px; border-radius: 50%; background: rgb(var(--c)); box-shadow: 0 0 12px rgb(var(--c) / 0.5); }
+
+/* Every input, newest first. */
+.bt-log { padding: 6px; border-radius: 24px; }
+.bt-log ol { margin: 0; padding: 0; list-style: none; max-height: 46vh; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgb(var(--accent-rgb) / 0.35) transparent; }
+.bt-log li { --c: var(--hl-rgb); display: grid; grid-template-columns: 8px auto minmax(0, 1fr) auto; align-items: baseline; gap: 10px; padding: 9px 10px; border-bottom: 1px solid var(--line); }
+.bt-log li:last-child { border-bottom: 0; }
+.bt-log li > i { width: 8px; height: 8px; border-radius: 50%; background: rgb(var(--c)); box-shadow: 0 0 10px rgb(var(--c) / 0.6); align-self: center; }
+.bt-log li b { font: 750 16px/1.2 var(--font-display); letter-spacing: -0.02em; color: rgb(var(--c)); white-space: nowrap; }
+.bt-log li span { font: 500 12px/1.45 var(--font-data); color: var(--secondary); overflow-wrap: anywhere; }
+.bt-log li time { font: 500 11px var(--font-data); color: var(--muted); font-variant-numeric: tabular-nums; }
+.bt-log li[data-src='info'] b, .bt-log li[data-src='info'] > i { opacity: 0.35; }
+.bt-log li[data-src='info'] span { color: var(--muted); }
+.bt-log li.empty { display: block; padding: 18px; text-align: center; color: var(--muted); font-size: 13px; }
+
+/* The line to paste back. */
+.bt-sum { display: grid; gap: 10px; padding: 12px; border-radius: 24px; }
+.bt-sum code { display: block; padding: 12px 14px; border-radius: 16px; background: rgb(var(--hl-rgb) / 0.05); color: var(--ink); font-size: 12.5px; line-height: 1.55; white-space: normal; overflow-wrap: anywhere; -webkit-user-select: all; user-select: all; }
+.bt-sum-row { display: flex; gap: 8px; }
+.bt-sum-row .btn { flex: 1; }
+
+@media (min-width: 560px) {
+  .bt-hero { min-height: 240px; }
+  .bt-src span { font-size: 12px; }
+}

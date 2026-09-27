@@ -10,7 +10,7 @@
  * the sound is "blocked" and the hero's sound button says so. The state follows the audio context itself, so a system
  * interruption (a call on an iPhone) shows as blocked too, until the next tap.
  */
-export type GlassHit = 'letter' | 'floor' | 'marble' | 'button'
+export type GlassHit = 'letter' | 'floor' | 'marble' | 'button' | 'wall'
 
 /**
  * What the sound is doing: `on` (heard), `blocked` (wanted, but the browser is waiting for a click or a tap), `off`
@@ -29,8 +29,9 @@ export interface GlassStats {
   state: SoundState
   /** The audio context's own state (null: not made yet). */
   context: string | null
-  /** Hits heard, and hits that came while the sound was blocked or off (or over the rate limit). */
+  /** Hits heard (and of each kind), and hits that came while the sound was blocked or off (or over the rate limit). */
   played: number
+  kinds: Record<GlassHit, number>
   skipped: number
   /** The output's level now and its peak over the last second or so (dBFS; null without the meter, -Infinity silent). */
   levelDb: number | null
@@ -53,13 +54,18 @@ export interface Glass {
   stats(): GlassStats
 }
 
-/** The partials of each kind of hit: frequency ratios to its pitch, their loudness, and how long each rings (s). */
-const VOICES: Record<GlassHit, { pitch: [number, number]; modes: [number, number, number][]; body: number; knock: number; click: number }> = {
-  letter: { pitch: [1350, 1650], modes: [[1, 1, 0.07], [2.41, 0.45, 0.045], [3.98, 0.25, 0.03], [5.93, 0.12, 0.02]], body: 0.55, knock: 210, click: 0.5 },
-  floor: { pitch: [2100, 2500], modes: [[1, 1, 0.05], [2.76, 0.4, 0.035], [5.4, 0.2, 0.02]], body: 0.25, knock: 210, click: 0.6 },
-  marble: { pitch: [2900, 3500], modes: [[1, 1, 0.22], [2.76, 0.55, 0.14], [5.4, 0.3, 0.08], [8.93, 0.14, 0.05]], body: 0, knock: 0, click: 0.35 },
+/**
+ * The partials of each kind of hit: frequency ratios to its pitch, their loudness, and how long each rings (s); the
+ * knock under it and the click of the contact; and how loud the whole is against the others.
+ */
+const VOICES: Record<GlassHit, { pitch: [number, number]; modes: [number, number, number][]; body: number; knock: number; click: number; gain: number }> = {
+  letter: { pitch: [1350, 1650], modes: [[1, 1, 0.07], [2.41, 0.45, 0.045], [3.98, 0.25, 0.03], [5.93, 0.12, 0.02]], body: 0.55, knock: 210, click: 0.5, gain: 1 },
+  floor: { pitch: [2100, 2500], modes: [[1, 1, 0.05], [2.76, 0.4, 0.035], [5.4, 0.2, 0.02]], body: 0.25, knock: 210, click: 0.6, gain: 1 },
+  marble: { pitch: [2900, 3500], modes: [[1, 1, 0.22], [2.76, 0.55, 0.14], [5.4, 0.3, 0.08], [8.93, 0.14, 0.05]], body: 0, knock: 0, click: 0.35, gain: 1 },
   // A glass button: a short, bright tap over a small hollow knock.
-  button: { pitch: [2500, 2800], modes: [[1, 1, 0.055], [2.24, 0.45, 0.035], [3.93, 0.2, 0.02]], body: 0.45, knock: 330, click: 0.75 },
+  button: { pitch: [2500, 2800], modes: [[1, 1, 0.055], [2.24, 0.45, 0.035], [3.93, 0.2, 0.02]], body: 0.45, knock: 330, click: 0.75, gain: 1 },
+  // The edge of the screen: a tap on the glass of it, a little under a landing.
+  wall: { pitch: [3000, 3400], modes: [[1, 1, 0.045], [2.32, 0.4, 0.03], [4.1, 0.18, 0.018]], body: 0.3, knock: 380, click: 0.7, gain: 0.78 },
 }
 const STORE = 'obpal.sound'
 /** At most this many hits a second (a tumble of marbles stays a sound, not a roar). */
@@ -73,6 +79,7 @@ export function createGlass(opts: { meter?: boolean } = {}): Glass {
   let wanted = read() !== 'off'
   let shown: SoundState = soundState(!!AC, wanted, null)
   let played = 0, skipped = 0
+  const kinds: Record<GlassHit, number> = { letter: 0, floor: 0, marble: 0, button: 0, wall: 0 }
   let peak = 0, peakAt = 0
   const recent: number[] = []
 
@@ -110,6 +117,7 @@ export function createGlass(opts: { meter?: boolean } = {}): Glass {
       if (recent.length >= MAX_RATE) { skipped++; return }
       recent.push(now)
       played++
+      kinds[kind]++
       play(ctx, out, kind, strength, pan)
     },
     stats() {
@@ -120,7 +128,7 @@ export function createGlass(opts: { meter?: boolean } = {}): Glass {
         peakDb = db(peak)
       }
       const latency = ctx ? (ctx.outputLatency || 0) + (ctx.baseLatency || 0) : 0
-      return { state: shown, context: ctx?.state ?? null, played, skipped, levelDb, peakDb, rate: ctx?.sampleRate ?? null, latencyMs: ctx ? Math.round(latency * 1000) : null }
+      return { state: shown, context: ctx?.state ?? null, played, kinds: { ...kinds }, skipped, levelDb, peakDb, rate: ctx?.sampleRate ?? null, latencyMs: ctx ? Math.round(latency * 1000) : null }
     },
   }
 
@@ -200,7 +208,7 @@ function play(ctx: AudioContext, out: GainNode, kind: GlassHit, strength: number
   const t = now + 0.005
   const hit = ctx.createGain()
   // Loud enough to hear at any strength: a gentle touch is quieter (about 12 dB under a hard landing), never silent.
-  hit.gain.value = 0.14 + 0.56 * s * s
+  hit.gain.value = (0.14 + 0.56 * s * s) * v.gain
   // Harder hits are brighter: more of the high partials get through.
   const tone = ctx.createBiquadFilter()
   tone.type = 'lowpass'

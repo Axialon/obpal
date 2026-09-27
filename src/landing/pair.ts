@@ -9,7 +9,7 @@ import type { ScreenPointer } from '../viewer/pointer'
 export interface Paired { remote: Remote; Pointer: typeof ScreenPointer }
 
 export async function startPairing(slot: HTMLElement): Promise<Paired> {
-  const [{ Remote }, { Mode }, { ScreenPointer: Pointer }] = await Promise.all([import('@obpal/host'), import('@obpal/core'), import('../viewer/pointer')])
+  const [{ PairingChip, Remote }, { Mode }, { ScreenPointer: Pointer }] = await Promise.all([import('@obpal/host'), import('@obpal/core'), import('../viewer/pointer')])
   const remote = await Remote.create({
     appName: 'ob.Pal',
     // The phone is a tray first (its tilt rolls its marble, as on the phone's own page), then a pointer. Flicking it
@@ -18,8 +18,9 @@ export async function startPairing(slot: HTMLElement): Promise<Paired> {
     seats: 4,
   })
   slot.replaceChildren()
-  // 'This device' opens the phone controller in a tab: no phone at hand, and it still paints (with its trackpad).
-  remote.mountPairing(slot, { variant: 'compact', title: 'Scan to play' })
+  // The pairing chip as a panel in the hero's own glass: the QR code as wide as the card, the short code under it.
+  // 'Use this device' opens the phone controller in a tab: no phone at hand, and it still plays (with its trackpad).
+  new PairingChip({ remote, variant: 'panel', parent: slot, label: 'Scan to play', testLink: true })
   addEventListener('pagehide', () => remote.destroy(), { once: true })
   return { remote, Pointer }
 }

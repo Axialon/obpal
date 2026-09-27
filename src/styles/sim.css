@@ -33,8 +33,8 @@ body.sim #stage { position: fixed; inset: 0; width: 100vw; height: 100vh; displa
 .people .allow { height: 30px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--accent); color: var(--accent-ink, #0b0f14); font: 700 12.5px var(--font); cursor: pointer; }
 .sim-auto { display: flex; align-items: center; gap: 8px; margin: 8px 6px 0; color: var(--muted); font-size: 12.5px; }
 .people-new { width: 100%; height: 38px; margin-top: 8px; border: 1px solid var(--line); border-radius: 12px; background: rgb(var(--hl-rgb) / 0.05); color: var(--ink); font: 650 13px var(--font); cursor: pointer; }
-.v-pair { position: fixed; right: 20px; bottom: 20px; z-index: 4; }
-.v-pair .obpal-card { --obpal-accent: var(--accent); }
+/* The pairing chip (@obpal/host) in the bottom-right corner; on phones, above the sim's own panel. */
+:root { --obpal-offset: 20px; --obpal-radius: 26px; }
 
 /* The panel: what the scene controls, who holds it, and safety. */
 .sim-panel { position: fixed; left: 20px; top: 88px; bottom: 20px; z-index: 3; width: 330px; display: flex; flex-direction: column; gap: 14px; padding: 18px; border-radius: 26px; overflow: auto; }
@@ -162,6 +162,6 @@ body.stopped #stage { filter: saturate(0.4) brightness(0.8); transition: filter 
   .sim-top { padding: 0 12px; height: 64px; }
   .sim-crumb, .sim-badge { display: none; }
   .chip .chip-text { display: none; }
-  .v-pair { left: 12px; right: 12px; bottom: calc(44vh + 20px); }
+  :root { --obpal-offset-x: 12px; --obpal-offset-y: calc(44vh + 20px); }
 }
 @media (prefers-reduced-motion: reduce) { .note, body.stopped #stage { transition: none; } }

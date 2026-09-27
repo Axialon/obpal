@@ -3,6 +3,7 @@
  * and the controllers built from them. Data only; the phone offers what a host's layout allows and hosts finish each
  * route.
  */
+import { checkButtons, CONTROLS, MAX_BUTTONS } from './buttons'
 import type { Layout, TrayControl } from './messages'
 import type { Response } from './response'
 import { Mode, type ModeId } from './state'
@@ -48,6 +49,13 @@ export interface Profile {
   aim: UtilitySettings
   steer: UtilitySettings
   point: UtilitySettings
+  /** The controller the profile tunes (§9.1); absent: `face.gamepad`, as for every built-in. */
+  controller?: ControllerId
+  /**
+   * Physical inputs bound to that controller's controls (CATALOGUE §3, `buttons`): input id -> a control, a key on the
+   * screen (`key-<code>`), `tray:<id>`, `app:<action>` or `none`. Only what differs from the controller's defaults.
+   */
+  buttons?: Readonly<Record<string, string>>
 }
 
 export const PROFILE_IDS = ['default', 'flight', 'driving', 'shooter', 'pointer'] as const
@@ -116,11 +124,12 @@ export function offeredMotion(utilities: readonly string[] | undefined): MotionU
 export type ProfileSpec = Omit<Profile, 'id'> & { id: string }
 
 /** The ranges resolveProfile() keeps settings in, and the id a new profile may take. */
-export const PROFILE_LIMITS = { gain: [0.25, 4], curve: [0.5, 3], deadzone: [0, 0.5], id: /^[a-z][a-z0-9-]{1,31}$/, name: 40, for: 120 } as const
+export const PROFILE_LIMITS = { gain: [0.25, 4], curve: [0.5, 3], deadzone: [0, 0.5], id: /^[a-z][a-z0-9-]{1,31}$/, name: 40, for: 120, buttons: MAX_BUTTONS } as const
 
 /**
  * Check a proposed profile (spec/CATALOGUE.md §3; public/profile.schema.json says the same): every field present and
- * in range, routes the utility can take, an id that isn't a built-in's. Returns the profile, or what's wrong.
+ * in range, routes the utility can take, an id that isn't a built-in's, and, if it has them, a known controller and
+ * buttons that controller can press. Returns the profile, or what's wrong.
  */
 export function checkProfile(x: unknown): { profile: ProfileSpec | null; errors: string[] } {
   const errors: string[] = []
@@ -150,8 +159,22 @@ export function checkProfile(x: unknown): { profile: ProfileSpec | null; errors:
     for (const b of ['invertY', 'edgeTurn'] as const) if (typeof s[b] !== 'boolean') errors.push(`${key}.${b}: true or false`)
     settings[key] = { route: s.route as Route, gain: s.gain as number, curve: s.curve as number, deadzone: s.deadzone as number, invertY: !!s.invertY, edgeTurn: !!s.edgeTurn }
   }
+  let controller: ControllerId | undefined
+  if (o.controller !== undefined) {
+    if (isControllerId(o.controller)) controller = o.controller
+    else errors.push(`controller: one of ${CONTROLLER_IDS.join(', ')}`)
+  }
+  let buttons: Record<string, string> | undefined
+  if (o.buttons !== undefined) {
+    const b = checkButtons(controller ?? Controller.gamepad, o.buttons)
+    errors.push(...b.errors)
+    buttons = b.buttons ?? undefined
+  }
   if (errors.length) return { profile: null, errors }
-  return { profile: { id, name: (o.name as string).trim(), for: (o.for as string).trim(), on: on as MotionUtility[], ...settings }, errors }
+  return {
+    profile: { id, name: (o.name as string).trim(), for: (o.for as string).trim(), on: on as MotionUtility[], ...settings, ...(controller ? { controller } : {}), ...(buttons ? { buttons } : {}) },
+    errors,
+  }
 }
 
 // ---- controllers (CATALOGUE §9) -------------------------------------------------------------------------------------
@@ -183,37 +206,39 @@ export interface ControllerSpec {
   utilities: readonly UtilityId[]
   /** The modes it sends in (`mode{m}`), the one it opens in first; none for the keyboard, which types beside any of them. */
   modes: readonly ModeId[]
+  /** What a physical input may press on it (CATALOGUE §3, `buttons`): the ids a binding names. */
+  controls: readonly string[]
 }
 
 /** The controllers, in the picker's order: Controller, Pointer, Touch, 3D, Keys (CATALOGUE §9.1). */
 export const CONTROLLERS: Record<ControllerId, ControllerSpec> = {
   'face.gamepad': {
     id: 'face.gamepad', name: 'Gamepad', category: 'Controller', for: 'Sticks, D-pad, face buttons and triggers, with gyro aim, tilt steering and pointing',
-    utilities: [Utility.pad, Utility.aim, Utility.steer, Utility.point], modes: [Mode.gamepad],
+    utilities: [Utility.pad, Utility.aim, Utility.steer, Utility.point], modes: [Mode.gamepad], controls: CONTROLS['face.gamepad'],
   },
   'face.wheel': {
     id: 'face.wheel', name: 'Steering wheel', category: 'Controller', for: 'Tilt to steer, the triggers as pedals: the gamepad with the Driving profile',
-    utilities: [Utility.pad, Utility.steer], modes: [Mode.gamepad],
+    utilities: [Utility.pad, Utility.steer], modes: [Mode.gamepad], controls: CONTROLS['face.wheel'],
   },
   'face.wii': {
     id: 'face.wii', name: 'Wii remote', category: 'Pointer', for: 'Point at the screen: A selects, hold B to grab, − and + zoom',
-    utilities: [Utility.point], modes: [Mode.point],
+    utilities: [Utility.point], modes: [Mode.point], controls: CONTROLS['face.wii'],
   },
   'face.mouse': {
     id: 'face.mouse', name: 'Air mouse', category: 'Pointer', for: 'Point at the screen: Left and Right click, and a wheel scrolls',
-    utilities: [Utility.point], modes: [Mode.point],
+    utilities: [Utility.point], modes: [Mode.point], controls: CONTROLS['face.mouse'],
   },
   'face.trackpad': {
     id: 'face.trackpad', name: 'Trackpad', category: 'Touch', for: 'Drag, pan, pinch and twist; with the gyro on, turn things 1:1 or tilt them',
-    utilities: [Utility.trackpad, Utility.hold, Utility.tilt], modes: [Mode.tilt, Mode.hold],
+    utilities: [Utility.trackpad, Utility.hold, Utility.tilt], modes: [Mode.tilt, Mode.hold], controls: CONTROLS['face.trackpad'],
   },
   'face.hand': {
     id: 'face.hand', name: '3D hand', category: '3D', for: 'Hold the pad and move the phone: what you hold follows your hand',
-    utilities: [Utility.track], modes: [Mode.track],
+    utilities: [Utility.track], modes: [Mode.track], controls: CONTROLS['face.hand'],
   },
   'face.keyboard': {
     id: 'face.keyboard', name: 'Keyboard', category: 'Keys', for: 'The phone’s own keyboard types on the screen, with Esc, Tab, the arrows and Enter',
-    utilities: [], modes: [],
+    utilities: [], modes: [], controls: CONTROLS['face.keyboard'],
   },
 }
 export const CONTROLLER_IDS = Object.keys(CONTROLLERS) as ControllerId[]

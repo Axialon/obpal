@@ -1,11 +1,12 @@
 import {
   b64url, bindMac, candidatesOf, certFingerprint, controllerOf, CONTROLLERS, DEFAULT_SERVICE, encodeLanPairing, encodePairing, equalBytes,
-  fetchIceServers, forgetPair, fromB64url, isControllerId, lanAnswerSdp, lanContext, lanIceCredentials, listPairs, loadCertificate, MAX_NODE_ID, MAX_TEXT, MAX_TOSS, Mode, newSecret, PAD_HEADER,
+  fetchIce, forgetPair, iceRefreshIn, fromB64url, isControllerId, lanAnswerSdp, lanContext, lanIceCredentials, listPairs, loadCertificate, MAX_NODE_ID, MAX_TEXT, MAX_TOSS, Mode, newSecret, PAD_HEADER,
   packetType, POINTER_HEADER, POSE_HEADER, PROTO, putPair, randomBytes, readLocalIce, readMode, roomIdFor, roomSocketUrl, sdpFingerprint, SignalClient,
   withControllers,
   type Caps, type DeviceMsg, type HostMsg, type Layout, type ModeId, type PadState, type PairGrant, type PointerState, type SceneNode,
   type ScenePerson, type SignalIn, type SignalPayload, type StoredPair,
 } from '@obpal/core'
+import { CODE_SECRET_DIGITS, CodePake, isCodeHandle, randomDigits, solveWork } from '@obpal/core'
 import { Stream, type Frame } from './stream'
 
 export type { Frame } from './stream'
@@ -34,7 +35,15 @@ export interface RemoteOptions {
    * the one before. More: a shared scene, where each device is a participant with its own input, colour and claim.
    */
   seats?: number
+  /**
+   * Offer a short code beside the QR code (PROTOCOL §2b), while something shows it (wantCode, or a PairingChip).
+   * Default true.
+   */
+  shortCode?: boolean
 }
+
+/** A device's hello when it joins by short code. */
+type CodeHello = Extract<DeviceMsg, { t: 'hello'; code: string }>
 
 /**
  * A device in the scene (CATALOGUE §5). The lead is the oldest; while it holds nothing it drives the shared view.
@@ -78,6 +87,10 @@ interface RemoteEvents {
   claim: (e: { node: string | null }, who: Participant) => void
   /** The direct LAN code or the remembered phones changed. */
   lan: () => void
+  /** The short code changed (see `code`; empty when there's none). */
+  code: () => void
+  /** A new invite (resetInvite): the pairing link and the QR code changed. */
+  invite: () => void
 }
 
 interface Peer {
@@ -102,6 +115,18 @@ interface Peer {
   controller?: string
   profile?: string
   says: boolean
+}
+
+/**
+ * The room service as an origin: https, or http only on this machine (localhost, 127.0.0.1, [::1]). It becomes the
+ * pairing link, the QR code and the chip's link, so anything else (a javascript: or data: URL) is refused.
+ */
+export function serviceOrigin(service: string): string {
+  let u: URL | null = null
+  try { u = new URL(service) } catch { /* not a URL */ }
+  const local = !!u && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)
+  if (!u || !(u.protocol === 'https:' || (u.protocol === 'http:' && local))) throw new Error(`ob.Pal: the service must be an https URL, not "${service}"`)
+  return u.origin
 }
 
 const isObpalOrigin = () =>
@@ -135,6 +160,9 @@ export class Remote {
   private roomId = ''
   private cert!: RTCCertificate
   private ice: RTCIceServer[] = []
+  /** The next ICE server lookup (refreshIce). */
+  private iceTimer: ReturnType<typeof setTimeout> | null = null
+  private destroyed = false
   private sig!: SignalClient
   private peers = new Map<string, Peer>()
   /** With one seat, the device in control; in a shared scene, the lead. */
@@ -155,12 +183,29 @@ export class Remote {
   private held: Record<string, string> = {}
   private scenePending = false
   private handlers: { [K in keyof RemoteEvents]: RemoteEvents[K][] } = {
-    status: [], connect: [], disconnect: [], join: [], leave: [], button: [], text: [], toss: [], value: [], mode: [], recenter: [], pad: [], input: [], claim: [], lan: [],
+    status: [], connect: [], disconnect: [], join: [], leave: [], button: [], text: [], toss: [], value: [], mode: [], recenter: [], pad: [], input: [], claim: [], lan: [], code: [], invite: [],
   }
   private cards: { el: HTMLElement; status: HTMLElement; qr: HTMLElement; link: HTMLAnchorElement | null; compact: boolean }[] = []
+  /** The short code on show (PROTOCOL §2b): the room service's handle, this host's secret, and when it lapses. */
+  private shortCode: { handle: string; secret: string; exp: number } | null = null
+  /** Codes a device just looked up, each kept for that device's one attempt (with the ticket the service gave it). */
+  private spentCodes = new Map<string, { secret: string; ticket: string; until: number }>()
+  /** Codes taken off the screen in the last minute: a lookup made just before still gets its attempt. */
+  private recentCodes = new Map<string, { secret: string; until: number }>()
+  /** How many things show the code now. */
+  private codeWant = 0
+  /** The next ask (renewal, or a retry), and the wait for the service's answer to the last one. */
+  private codeTimer: ReturnType<typeof setTimeout> | null = null
+  private codeWait: ReturnType<typeof setTimeout> | null = null
+  /** Seconds before asking again after a refusal or no answer: doubles each time, to 5 minutes; 0 after a code. */
+  private codeBackoff = 0
+  /** A proof of work is being found for the service. */
+  private codeSolving = false
+  /** Peers part-way through the short-code exchange: their hello, and the confirmation they owe. */
+  private codeBinds = new Map<Peer, { hello: CodeHello; theirs: string }>()
 
   private constructor(private opts: RemoteOptions) {
-    this.service = (opts.service ?? (isObpalOrigin() ? location.origin : DEFAULT_SERVICE)).replace(/\/$/, '')
+    this.service = serviceOrigin(opts.service ?? (isObpalOrigin() ? location.origin : DEFAULT_SERVICE))
     this.layout = withControllers(opts.layout ?? DEFAULT_LAYOUT)
   }
 
@@ -198,11 +243,28 @@ export class Remote {
     this.sig.onstatus = (open) => {
       if (open && this.status !== 'connected') this.setStatus('ready')
       if (!open && this.status !== 'connected') this.setStatus('offline')
+      // The service forgets a code when this socket goes; a new socket asks again.
+      if (open) this.askCode()
+      else this.setCode(null)
     }
     this.sig.connect()
-    // TURN credentials are only minted for rooms with a live host, so fetch after joining.
-    const room = this.roomId
-    setTimeout(async () => { const ice = await fetchIceServers(this.service, room); if (room === this.roomId) this.ice = ice }, 400)
+    this.refreshIce(this.roomId)
+  }
+
+  /**
+   * Fetch the room's ICE servers, and again before their TURN credentials lapse: a relay drops an allocation whose
+   * credentials have run out, and a host can stay open for days (ob.Pal Link's lives as long as the browser). TURN is
+   * only minted for rooms with a live host, so the first fetch waits until this host has joined.
+   */
+  private refreshIce(room: string, delay = 400) {
+    if (this.iceTimer) clearTimeout(this.iceTimer)
+    this.iceTimer = setTimeout(async () => {
+      this.iceTimer = null
+      const set = await fetchIce(this.service, room)
+      if (room !== this.roomId || this.destroyed) return
+      this.ice = set.servers
+      this.refreshIce(room, iceRefreshIn(set))
+    }, delay)
   }
 
   /**
@@ -216,12 +278,16 @@ export class Remote {
     old.onstatus = () => {}
     old.close()
     for (const p of [...this.peers.values()]) if (!p.bound && !p.lan) this.dropPeer(p.id)
+    this.setCode(null)
+    this.spentCodes.clear()
     await this.openRoom()
     for (const c of this.cards) this.renderQr(c)
+    this.emit('invite')
     this.renderCards()
   }
 
   on<K extends keyof RemoteEvents>(ev: K, fn: RemoteEvents[K]) { this.handlers[ev].push(fn); return this }
+  off<K extends keyof RemoteEvents>(ev: K, fn: RemoteEvents[K]) { const l = this.handlers[ev]; const i = l.indexOf(fn); if (i >= 0) l.splice(i, 1); return this }
   private emit<K extends keyof RemoteEvents>(ev: K, ...args: Parameters<RemoteEvents[K]>) {
     for (const fn of this.handlers[ev]) (fn as (...a: unknown[]) => void)(...args)
   }
@@ -324,8 +390,23 @@ export class Remote {
   // ---- signaling and peers ------------------------------------------------------------------------------------
 
   private onSignal(m: SignalIn) {
-    if (m.t === 'peer' && m.ev === 'leave') this.dropPeer(m.id)
+    if (m.t === 'peer' && m.ev === 'leave') this.peerLeft(m.id, m.clean !== false)
     if (m.t === 'sig') void this.onPayload(m.from, m.d)
+    if (m.t === 'code') this.onCode(m)
+  }
+
+  /**
+   * A device's signaling socket went. A device that closed it (`clean`: it left or reloaded), or one still connecting,
+   * goes with it. A bound device whose socket was lost stays while its connection lives, since that doesn't run
+   * through the room service (and a phone that changes networks loses its socket first): it goes only if the
+   * connection fails too (scheduleLost). A service that doesn't say which counts as clean.
+   */
+  private peerLeft(id: string, clean: boolean) {
+    const p = this.peers.get(id)
+    if (!p) return
+    const s = p.pc.connectionState
+    if (clean || !p.bound || s === 'closed' || s === 'failed') return this.dropPeer(id)
+    if (s !== 'connected') this.scheduleLost(p)
   }
 
   /** One peer connection with the two pre-negotiated channels, wired into this host. */
@@ -373,6 +454,8 @@ export class Remote {
   private async onPayload(id: string, d: SignalPayload) {
     if ('offer' in d) {
       this.dropPeer(id)
+      // An offer that doesn't commit to exactly one fingerprint (the one DTLS will check) could never bind: no answer.
+      if (!sdpFingerprint(d.offer?.sdp)) return
       if (this.status !== 'connected') this.setStatus('connecting')
       const pc = new RTCPeerConnection({ iceServers: this.ice, certificates: [this.cert] })
       const peer = this.addPeer(id, pc, sdpFingerprint(d.offer.sdp))
@@ -395,13 +478,20 @@ export class Remote {
     let m: DeviceMsg
     try { m = JSON.parse(data) } catch { return }
     if (!peer.bound) {
-      if (m.t !== 'hello' || !peer.fp) return
-      // Online: the code's secret and the room. Direct: the remembered pairing key and the code's nonce.
-      const expected = peer.lan
-        ? await bindMac(peer.lan.pair.key, peer.fp, this.fp, lanContext(peer.lan.nonce))
-        : await bindMac(this.secret, peer.fp, this.fp, this.roomId)
-      if (peer.lan && m.pair !== peer.lan.pair.id) { this.reject(peer); return }
-      if (!equalBytes(new TextEncoder().encode(expected), new TextEncoder().encode(m.mac))) { this.reject(peer); return }
+      if (m.t === 'pake' || (m.t === 'hello' && 'code' in m)) {
+        // By short code: the exchange proves the code, then the device's hello goes on like a verified one.
+        const hello = await this.codeStep(peer, m)
+        if (!hello) return
+        m = hello
+      } else {
+        if (m.t !== 'hello' || !peer.fp) return
+        // Online: the code's secret and the room. Direct: the remembered pairing key and the code's nonce.
+        const expected = peer.lan
+          ? await bindMac(peer.lan.pair.key, peer.fp, this.fp, lanContext(peer.lan.nonce))
+          : await bindMac(this.secret, peer.fp, this.fp, this.roomId)
+        if (peer.lan && m.pair !== peer.lan.pair.id) { this.reject(peer); return }
+        if (!equalBytes(new TextEncoder().encode(expected), new TextEncoder().encode(m.mac))) { this.reject(peer); return }
+      }
       if (this.shared && this.bound().length >= this.seats) {
         this.send(peer, { t: 'lock', reason: 'full' })
         setTimeout(() => this.dropPeer(peer.id), 200)
@@ -437,7 +527,9 @@ export class Remote {
       } else {
         pair = this.rememberDevice(peer, peer.name) ?? undefined
       }
-      this.send(peer, { t: 'welcome', proto: PROTO, name: this.opts.appName, layout: this.layout, ...(pair ? { pair } : {}) })
+      // A device that came by short code gets the QR link's code, to reconnect and reload with like a scanned one.
+      const invite = 'code' in m ? encodePairing({ secret: this.secret, fp: this.fp }) : undefined
+      this.send(peer, { t: 'welcome', proto: PROTO, name: this.opts.appName, layout: this.layout, ...(pair ? { pair } : {}), ...(invite ? { invite } : {}) })
       // A shared scene's settings so far, and this participant's colour (a device wears it as its accent).
       if (this.shared) this.send(peer, { t: 'state', values: { ...this.values, color: peer.color } })
       const first = this.status !== 'connected'
@@ -481,8 +573,140 @@ export class Remote {
   }
 
   private reject(peer: Peer) {
+    this.codeBinds.delete(peer)
     this.send(peer, { t: 'lock', reason: 'rejected' })
     setTimeout(() => this.dropPeer(peer.id), 200)
+  }
+
+  // ---- the short code (PROTOCOL §2b) ----------------------------------------------------------------------------
+
+  /** The short code to type on a phone, digits only: '' while there's none (nothing shows one, or the service can't). */
+  get code(): string { return this.shortCode ? this.shortCode.handle + this.shortCode.secret : '' }
+
+  /** Where to type it: the controller's start page, without the scheme ("obpal.blackboxes.net/p"). */
+  get codeSite(): string { return `${this.service.replace(/^https?:\/\//, '')}/p` }
+
+  /** Keep a short code live while something shows it. Call the function it returns when nothing does any more. */
+  wantCode(): () => void {
+    if (this.opts.shortCode === false) return () => {}
+    this.codeWant++
+    if (this.codeWant === 1) this.askCode()
+    let done = false
+    return () => {
+      if (done) return
+      done = true
+      if (--this.codeWant > 0) return
+      if (this.shortCode) this.sig?.send({ t: 'code', op: 'drop' })
+      this.setCode(null)
+    }
+  }
+
+  /**
+   * Ask the room service for a handle (it replaces this room's last one), with a proof of work when the service asked
+   * for one. A service that doesn't answer (an older one, or a lost message) is asked again later, less often each time.
+   */
+  private askCode(work?: { c: string; x: string }) {
+    if (!this.codeWant || !this.sig?.open) return
+    if (this.codeTimer) { clearTimeout(this.codeTimer); this.codeTimer = null }
+    if (this.codeWait) clearTimeout(this.codeWait)
+    this.sig.send({ t: 'code', op: 'claim', ...(work ? { work } : {}) })
+    this.codeWait = setTimeout(() => { this.codeWait = null; this.retryCode() }, 15_000)
+  }
+
+  /** Show a handle from the service with a fresh secret (null: no code), and ask again before it lapses. */
+  private setCode(c: { code: string; exp: number } | null) {
+    if (this.codeTimer) { clearTimeout(this.codeTimer); this.codeTimer = null }
+    const had = this.code
+    const now = Date.now()
+    const shown = this.shortCode
+    if (shown && shown.handle !== c?.code) this.recentCodes.set(shown.handle, { secret: shown.secret, until: now + 60_000 })
+    for (const [h, r] of this.recentCodes) if (r.until < now) this.recentCodes.delete(h)
+    this.shortCode = c && this.codeWant ? { handle: c.code, secret: randomDigits(CODE_SECRET_DIGITS), exp: c.exp } : null
+    if (this.shortCode) this.codeTimer = setTimeout(() => this.askCode(), Math.max(5_000, this.shortCode.exp - now - 30_000))
+    if (this.code !== had) this.emit('code')
+  }
+
+  /** Ask again later: 15 s, doubling to 5 minutes, or what the service asked for if that's longer. */
+  private retryCode(seconds?: number) {
+    if (this.codeTimer) clearTimeout(this.codeTimer)
+    this.codeBackoff = Math.min(300, this.codeBackoff ? this.codeBackoff * 2 : 15)
+    this.codeTimer = setTimeout(() => this.askCode(), Math.min(300, Math.max(seconds ?? 0, this.codeBackoff)) * 1000)
+  }
+
+  /** The service asked for a proof of work before a new code: find one, then ask again with it. */
+  private async solveCode(challenge: string, bits: number) {
+    if (this.codeSolving) return
+    if (!(bits <= 24)) { this.retryCode(); return }
+    this.codeSolving = true
+    const x = await solveWork(challenge, bits)
+    this.codeSolving = false
+    if (x === null) this.retryCode()
+    else this.askCode({ c: challenge, x })
+  }
+
+  private onCode(m: Extract<SignalIn, { t: 'code' }>) {
+    const now = Date.now()
+    const work = m.error === 'work' && typeof m.challenge === 'string' && typeof m.bits === 'number'
+    if (m.ev === 'used') {
+      // A device looked a code up: it gets that code's one attempt (a code just taken off the screen counts too).
+      const cur = this.shortCode
+      const secret = cur && cur.handle === m.code ? cur.secret : this.recentCodes.get(String(m.code))?.secret
+      if (secret && typeof m.code === 'string' && typeof m.ticket === 'string') this.spentCodes.set(m.code, { secret, ticket: m.ticket, until: now + 60_000 })
+      for (const [h, s] of this.spentCodes) if (s.until < now) this.spentCodes.delete(h)
+      // Only the code on show gets replaced: a notice about an older one says nothing about what's on screen now.
+      if (!cur || cur.handle !== m.code) return
+      if (m.next) { this.codeBackoff = 0; this.setCode(m.next); return }
+      this.setCode(null)
+      if (work) void this.solveCode(m.challenge!, m.bits!)
+      else this.retryCode(m.retry)
+      return
+    }
+    if (this.codeWait) { clearTimeout(this.codeWait); this.codeWait = null }
+    if (isCodeHandle(m.code) && typeof m.exp === 'number') {
+      // A handle that came after nothing wanted one any more is handed straight back.
+      if (!this.codeWant) { this.sig?.send({ t: 'code', op: 'drop' }); return }
+      this.codeBackoff = 0
+      this.setCode({ code: m.code, exp: m.exp })
+    } else if (work) {
+      void this.solveCode(m.challenge!, m.bits!)
+    } else if (m.error) {
+      // Refused (busy, or slow down): whatever code was on show may be gone at the service, so it leaves the screen.
+      if (this.shortCode) this.sig?.send({ t: 'code', op: 'drop' })
+      this.setCode(null)
+      this.retryCode(m.retry)
+    }
+  }
+
+  /**
+   * The short-code exchange, host side. hello{code, ticket, pake}: the code must be one a device has just looked up,
+   * shown with that lookup's ticket, and it gets that code's one attempt. pake{mac}: the device's confirmation. Returns
+   * the device's hello once the code is proven.
+   */
+  private async codeStep(peer: Peer, m: DeviceMsg): Promise<CodeHello | null> {
+    if (m.t === 'pake') {
+      const b = this.codeBinds.get(peer)
+      if (!b) return null
+      this.codeBinds.delete(peer)
+      const enc = new TextEncoder()
+      if (typeof m.mac !== 'string' || !equalBytes(enc.encode(m.mac), enc.encode(b.theirs))) { this.reject(peer); return null }
+      return b.hello
+    }
+    if (m.t !== 'hello' || !('code' in m) || !peer.fp || this.codeBinds.has(peer)) return null
+    // The service's notice that the code was looked up can trail the device by a moment.
+    for (let i = 0; i < 30 && !this.spentCodes.has(m.code) && this.shortCode?.handle === m.code; i++) await new Promise((r) => setTimeout(r, 100))
+    const spent = this.spentCodes.get(m.code)
+    if (!spent || spent.until < Date.now() || spent.ticket !== m.ticket || typeof m.pake !== 'string') { this.reject(peer); return null }
+    this.spentCodes.delete(m.code)
+    let share: Uint8Array
+    try { share = fromB64url(m.pake) } catch { this.reject(peer); return null }
+    const pake = await CodePake.start('host', { secret: spent.secret, handle: m.code, room: this.roomId })
+    const macs = await pake.confirm(share, peer.fp, this.fp)
+    if (!macs || !this.peers.has(peer.id)) { this.reject(peer); return null }
+    this.codeBinds.set(peer, { hello: m, theirs: macs.theirs })
+    this.send(peer, { t: 'pake', y: b64url(pake.share), mac: macs.mine })
+    // A device that never confirms has had its attempt.
+    setTimeout(() => { if (this.codeBinds.has(peer)) this.reject(peer) }, 20_000)
+    return null
   }
 
   // ---- participants -------------------------------------------------------------------------------------------
@@ -602,7 +826,12 @@ export class Remote {
   }
 
   destroy() {
+    this.destroyed = true
+    if (this.iceTimer) { clearTimeout(this.iceTimer); this.iceTimer = null }
     this.lan = null
+    this.codeWant = 0
+    this.setCode(null)
+    if (this.codeWait) { clearTimeout(this.codeWait); this.codeWait = null }
     for (const id of [...this.peers.keys()]) this.dropPeer(id)
     this.sig?.close()
     for (const c of this.cards) c.el.remove()
