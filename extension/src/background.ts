@@ -166,6 +166,8 @@ async function handle(msg: BgRequest, sender: chrome.runtime.MessageSender): Pro
     case 'ensure':
       await ensureOffscreen()
       return { ok: true }
+    case 'version':
+      return { version: chrome.runtime.getManifest().version }
     case 'enable':
       return msg.on ? enableTab(msg.tabId) : disableTab(msg.tabId)
     case 'mode':

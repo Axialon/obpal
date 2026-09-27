@@ -460,7 +460,13 @@ Public sims (2026-09-26): [/sim/](https://obpal.blackboxes.net/sim/) hosts the r
   - A release frame waited up to 250 ms for the heartbeat; it now goes out at once.
   - The helper stayed up after leaving PC (locking its exe). It now closes unless the options page is open.
 - **Packaging.** `desktop/pack.mjs` builds the helper zip; `extension/scripts/zip.mjs` is shared with the extension packer.
-- **Not yet tried on the real PC** (tests: 43 helper units, 223 site/extension units, e2e 15/15 with the stub helper). Pointer feel (gains, Windows acceleration) needs the owner's hands. A later option: absolute Wii pointing for Point mode, and typing text from the phone.
+- **Clean uninstall (Desktop 0.2.1, same release; owner: deleting the folder needed Chrome closed, "not a good practice").**
+  - A running helper stops within a second of being uninstalled (its manifest gone), so nothing stays locked.
+  - `uninstall --purge` also removes `%APPDATA%\obpal`.
+  - `uninstall.cmd` asks first, then removes only the files it installed, and the folder if it's empty.
+  - `install` refuses a temporary copy (the zip opened without extracting).
+  - Why the owner had to reload the extension on every browser start: Chrome loaded it from `extension/dist`, which every build wipes. Owners and users load a release folder.
+- **Not yet tried on the real PC** (tests: 45 helper units, 223 site/extension units, e2e 15/15 with the stub helper). Pointer feel (gains, Windows acceleration) needs the owner's hands. A later option: absolute Wii pointing for Point mode, and typing text from the phone.
 
 **Next, in this order (owner OK'd 2026-09-27: "go ahead in that order"):**
 

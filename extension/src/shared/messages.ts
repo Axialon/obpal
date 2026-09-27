@@ -190,6 +190,8 @@ export function parseLink(x: unknown): LinkState | null {
 /** To the service worker. */
 export type BgRequest =
   | { to: 'bg'; type: 'ensure' }
+  /** The running service worker's version (answered with { version }). */
+  | { to: 'bg'; type: 'version' }
   | { to: 'bg'; type: 'enable'; tabId: number; on: boolean }
   | { to: 'bg'; type: 'mode'; mode: TargetMode }
   | { to: 'bg'; type: 'unpair' }
@@ -213,7 +215,7 @@ export function parseBgRequest(x: unknown): BgRequest | null {
   if (!isObj(x) || x.to !== 'bg') return null
   if (typeof x.type === 'string' && x.type.startsWith('pc-')) return parsePcRequest(x)
   switch (x.type) {
-    case 'ensure': case 'unpair': case 'offscreen-ready': case 'hello': case 'rescan': case 'diag':
+    case 'ensure': case 'version': case 'unpair': case 'offscreen-ready': case 'hello': case 'rescan': case 'diag':
       return { to: 'bg', type: x.type }
     case 'forget': case 'lan':
       return isPairId(x.id) ? { to: 'bg', type: x.type, id: x.id } : null
@@ -282,6 +284,7 @@ export function senderKind(s: { id?: string; url?: string; tabId?: number }, sel
 /** Which senders may make each request. Pages can only ask about their own tab; only extension UI changes state. */
 export const ALLOWED_SENDERS: Record<BgRequestType, readonly SenderKind[]> = {
   ensure: ['extension'],
+  version: ['extension'],
   enable: ['extension'],
   mode: ['extension', 'offscreen'],
   unpair: ['extension'],
@@ -305,3 +308,13 @@ export const ALLOWED_SENDERS: Record<BgRequestType, readonly SenderKind[]> = {
 }
 
 export const allowedFrom = (type: BgRequestType, kind: SenderKind) => ALLOWED_SENDERS[type].includes(kind)
+
+/**
+ * Is the running service worker older than the extension's files? An unpacked copy whose folder was replaced
+ * without a reload runs the old worker (and link document) under new pages: the popup then asks for a restart.
+ * `reply` is the worker's answer to 'version' (an old worker doesn't answer it).
+ */
+export function workerStale(reply: unknown, mine: string): boolean {
+  const v = isObj(reply) && typeof reply.version === 'string' ? reply.version : null
+  return v !== mine
+}

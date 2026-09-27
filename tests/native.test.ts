@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { KeyMapper, type KeysInput } from '../extension/src/shared/keys'
 import type { PadInput } from '../extension/src/shared/math'
-import { allowedFrom, parseBgRequest } from '../extension/src/shared/messages'
+import { allowedFrom, parseBgRequest, workerStale } from '../extension/src/shared/messages'
 import {
   buildNativeFrame, EMPTY_PC, HeldState, heldSignature, isIdleFrame, parseHelperMessage, parseNativeFrame, parsePcRequest, parsePcState,
   pcView, scopeLabel, toHelperRequest, type PcProgram, type PcState,
@@ -186,5 +186,18 @@ describe('PC target: requests from extension UI', () => {
       expect(allowedFrom(t, 'page')).toBe(false)
       expect(allowedFrom(t, 'offscreen')).toBe(false)
     }
+  })
+})
+
+describe('An unpacked copy updated without a reload', () => {
+  it('is caught by asking the running worker for its version', () => {
+    expect(parseBgRequest({ to: 'bg', type: 'version' })).toEqual({ to: 'bg', type: 'version' })
+    expect(allowedFrom('version', 'extension')).toBe(true)
+    expect(allowedFrom('version', 'page')).toBe(false)
+    expect(workerStale({ version: '1.3.1' }, '1.3.1')).toBe(false)
+    expect(workerStale({ version: '1.2.0' }, '1.3.1')).toBe(true)
+    // a worker from before 1.3.1 doesn't answer at all
+    expect(workerStale(undefined, '1.3.1')).toBe(true)
+    expect(workerStale({ ok: false, error: 'The message port closed before a response was received.' }, '1.3.1')).toBe(true)
   })
 })

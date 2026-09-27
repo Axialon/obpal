@@ -14,7 +14,7 @@ import './popup.css'
 import { renderSVG } from 'uqr'
 import { ICONS, logo } from '../../../src/ui/icons'
 import { DEFAULT_MODE, isTargetMode, TARGET_MODES, type TargetMode } from '../shared/constants'
-import { parseLink, type BgRequest, type LinkState, type LinkStatus } from '../shared/messages'
+import { parseLink, workerStale, type BgRequest, type LinkState, type LinkStatus } from '../shared/messages'
 import { DESKTOP_URL, EMPTY_PC, parsePcState, pcView, scopeLabel, type PcState, type PcView } from '../shared/native'
 import { LINK_ICONS } from './icons'
 
@@ -48,8 +48,10 @@ interface State {
   /** PC target: what the helper reports, mirrored by the service worker. */
   pc: PcState
   pcPermission: boolean
+  /** The running worker is older than these files: the folder was replaced without a reload. */
+  stale: boolean
 }
-const state: State = { link: null, tab: null, mode: DEFAULT_MODE, allSites: false, current: null, busy: false, notice: null, frames: null, code: 'auto', pc: { ...EMPTY_PC }, pcPermission: false }
+const state: State = { link: null, tab: null, mode: DEFAULT_MODE, allSites: false, current: null, busy: false, notice: null, frames: null, code: 'auto', pc: { ...EMPTY_PC }, pcPermission: false, stale: false }
 const parseFrames = (x: unknown): State['frames'] => {
   const f = x as State['frames']
   return f && typeof f === 'object' && Number.isInteger(f.tab) && Number.isInteger(f.count) && typeof f.host === 'string' ? f : null
@@ -180,7 +182,7 @@ function render() {
   renderPc()
 
   const note = $('note')
-  const notice = state.notice ?? offlineHint() ?? (state.mode === 'pc' ? null : framesHint())
+  const notice = staleHint() ?? state.notice ?? offlineHint() ?? (state.mode === 'pc' ? null : framesHint())
   note.hidden = !notice
   note.replaceChildren()
   if (notice) {
@@ -239,6 +241,11 @@ function offlineHint(): Notice | null {
  * The controlled page shows a frame from another site (a hosted game, most often) and "All sites" is off: the
  * extension can't reach inside it, so the phone's input would go nowhere. Offer the fix in one click.
  */
+/** New files, old worker: one click restarts the extension from its folder (as the reload button does). */
+function staleHint(): Notice | null {
+  return state.stale ? { text: 'ob.Pal Link was updated. Restart it to finish.', action: { label: 'Restart', run: () => chrome.runtime.reload() } } : null
+}
+
 function framesHint(): Notice | null {
   const f = state.frames
   const here = state.current?.id
@@ -463,6 +470,8 @@ async function init() {
   render()
   // With the PC target on, make sure the helper is up (the worker may have idled out) and reporting.
   if (state.mode === 'pc' && pcPermission) void send({ to: 'bg', type: 'pc-connect' })
+  state.stale = workerStale(await send({ to: 'bg', type: 'version' }), chrome.runtime.getManifest().version)
+  if (state.stale) render()
 }
 
 void init()
