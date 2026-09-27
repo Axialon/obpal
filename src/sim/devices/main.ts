@@ -205,6 +205,8 @@ function howTo(node: string) {
 
 void entry.view().then((m) => {
   view = m.createView(stage, logic)
+  if (sim) view.connect?.(sim)
+  stage.resize()
   stage.frame(view.framing)
   if (view.afterRender) stage.afterRender = () => view!.afterRender!()
   const resetView = document.createElement('button')
@@ -245,6 +247,7 @@ void startSimScene({
   left: (p) => dropCursor(p.id),
 }).then((s) => {
   sim = s
+  view?.connect?.(s)
   const seats = new Seats(s.remote, layout)
   s.remote.on('mode', () => { renderFaces(); renderUnits() })
   // For tests: the device, and what each participant's input looked like last frame.

@@ -146,6 +146,8 @@ export const KEY_TARGETS = ['key-Escape', 'key-Tab', 'key-ArrowLeft', 'key-Arrow
  * on the screen (KEY_TARGETS) where the screen takes typing.
  */
 export const CONTROLS = {
+  'face.drums': ['kick', 'snare', 'hat'],
+  'face.keys': ['note1', 'note2', 'note3', 'note4', 'note5', 'note6', 'note7', 'note8', 'sustain', 'octaveup', 'octavedown'],
   'face.gamepad': PAD_CONTROLS,
   'face.wheel': PAD_CONTROLS,
   'face.wii': ['a', 'b', 'minus', 'home', 'plus'],
@@ -228,6 +230,8 @@ export type ControllerKey = keyof typeof CONTROLS
  * nothing anywhere: catching it is an opt-in.
  */
 export const DEFAULT_BUTTONS: Record<ControllerKey, Readonly<Record<string, string>>> = {
+  'face.drums': fromActions({ primary: 'kick', secondary: 'snare', next: 'hat' }),
+  'face.keys': fromActions({ primary: 'note1', secondary: 'sustain', next: 'octaveup', prev: 'octavedown' }, ['sustain']),
   'face.gamepad': GAMEPAD_KEYS,
   // The steering wheel: the volume keys are the pedals, held.
   'face.wheel': { ...GAMEPAD_KEYS, 'key:AudioVolumeUp': 'rt', 'key:AudioVolumeDown': 'lt' },

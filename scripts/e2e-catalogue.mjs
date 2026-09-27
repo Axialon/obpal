@@ -67,7 +67,9 @@ async function screenAt(path, { width = 1280, height = 800 } = {}) {
   const page = await context.newPage()
   const errors = watch(page)
   await page.goto(`${ORIGIN}${path}`)
-  const invite = await until('invite link', () => page.evaluate(() => window.__obpal?.pairingUrl || ''), 20000)
+  const invite = await until('invite link', () => page.evaluate(() => window.__obpal?.pairingUrl || ''), 20000).catch(error => {
+    throw new Error(`${path}: ${error.message}; page errors: ${errors.join(' | ') || 'none'}`)
+  })
   await until('device ready', () => page.evaluate(() => !!window.__device), 10000)
   return { page, invite, errors, close: () => b.close() }
 }
@@ -158,13 +160,13 @@ try {
     await check('catalogue: every sim has a card, and their previews come alive', async () => {
       await page.goto(`${ORIGIN}/sim/`)
       const cards = await until('cards', () => page.evaluate(() => window.__sims?.cards().length), 10000)
-      if (cards < 24) throw new Error(`only ${cards} cards`)
+      if (cards < 33) throw new Error(`only ${cards} cards`)
       await until('a live preview', () => page.evaluate(() => document.querySelectorAll('.dcard-stage.live').length), 15000)
       const live = await page.evaluate(() => document.querySelectorAll('.dcard-stage.live').length)
       return `${cards} cards, ${live} previews live`
     })
     await check('catalogue: every new device has a live preview on the shared renderer', async () => {
-      for (const id of ['boat', ...deviceExercises.map(e => e.id)]) {
+      for (const id of ['boat', 'studio', ...deviceExercises.map(e => e.id)]) {
         const card = page.locator(`.dcard[data-id="${id}"]`)
         await card.scrollIntoViewIfNeeded()
         await until(`${id} preview`, () => card.locator('.dcard-stage.live').count(), 15000)
@@ -185,6 +187,74 @@ try {
       if (hand.includes('rover') || !hand.includes('drone')) throw new Error(`the 3D hand shows ${hand}`)
       await page.locator('.sims-chip[data-face=""]').click()
       return `keyboard: ${only}; Wii: ${wii.length} sims; 3D hand: ${hand.join(', ')}`
+    })
+    await check('catalogue: category, search and controller combine in shareable URLs and browser history', async () => {
+      await page.goto(`${ORIGIN}/sim/?category=vehicles&face=wheel&q=harbour`)
+      await until('the shared search', () => page.evaluate(() => window.__sims?.cards().join() === 'boat'))
+      if (await page.locator('#search').inputValue() !== 'harbour') throw new Error('search was not restored')
+      await page.locator('#search').fill('rudder')
+      await until('search in URL', () => page.url().includes('q=rudder')).catch(e => { throw new Error(`${e.message}: ${page.url()}`) })
+      if ((await page.evaluate(() => window.__sims.cards())).join() !== 'boat') throw new Error('activity search did not intersect')
+      await page.locator('[data-category="home"]').click()
+      if (await page.evaluate(() => window.__sims.cards().length)) throw new Error('category did not combine')
+      if (!(await page.locator('#none').isVisible())) throw new Error('empty view missing')
+      await page.goBack()
+      await until('back to the boat', () => page.evaluate(() => window.__sims.cards().join() === 'boat'))
+      if (await page.locator('[data-category="vehicles"]').getAttribute('aria-pressed') !== 'true') throw new Error('category did not restore')
+      await page.goForward()
+      await until('forward to the empty view', () => page.locator('#none').isVisible())
+      await page.locator('#clear-filters').click()
+      if (new URL(page.url()).search) throw new Error('clear left URL filters')
+    })
+    await check('catalogue: the studio is in Music, Featured and New, with searchable Drums and Keys filters', async () => {
+      await page.goto(`${ORIGIN}/sim/?q=drums`)
+      await until('drums finds the studio', () => page.evaluate(() => window.__sims?.cards().join() === 'studio'))
+      const card = page.locator('.dcard[data-id="studio"]')
+      if (!(await card.textContent()).includes('Music studio')) throw new Error('studio card missing its name')
+      await until('studio preview', () => card.locator('.dcard-stage.live').count())
+      for (const category of ['music', 'featured', 'new']) {
+        await page.locator(`[data-category="${category}"]`).click()
+        for (const face of ['drums', 'keys']) {
+          await page.locator(`.sims-chip[data-face="face.${face}"]`).click()
+          await until('studio filters applied', () => page.evaluate(() => window.__sims.cards().join() === 'studio'))
+          const params = new URL(page.url()).searchParams
+          if (params.get('category') !== category || params.get('face') !== face || params.get('q') !== 'drums') throw new Error('studio filter URL lost state')
+        }
+      }
+      await page.reload()
+      await until('studio filters restored', () => page.evaluate(() => window.__sims?.cards().join() === 'studio'))
+      if (await page.locator('#search').inputValue() !== 'drums') throw new Error('studio search was not restored')
+      if (await page.locator('.sims-chip[data-face="face.keys"]').getAttribute('aria-pressed') !== 'true') throw new Error('Keys filter was not restored')
+      await page.locator('#clear-filters').click()
+      await page.locator('[data-category="music"]').click()
+      if ((await page.evaluate(() => window.__sims.cards())).join() !== 'studio') throw new Error('Music category did not show the studio')
+    })
+    await check('catalogue: one renderer, only visible previews, at most 30 fps, and resizable reduced-motion stills', async () => {
+      await page.goto(`${ORIGIN}/sim/`)
+      await page.waitForSelector('.dcard-stage.live')
+      await page.evaluate(() => scrollTo(0, 0))
+      await page.waitForTimeout(300)
+      const stats = () => page.evaluate(() => window.__sims.previews())
+      const before = await stats()
+      if (before.renderers !== 1) throw new Error(`${before.renderers} renderers`)
+      const start = Date.now()
+      await page.waitForTimeout(1000)
+      const after = await stats(), max = Math.ceil((Date.now() - start) * 30 / 1000) + 1
+      for (const a of after.cards) {
+        const b = before.cards.find(c => c.id === a.id)
+        if (a.frames - b.frames > max) throw new Error(`${a.id} exceeded 30 fps`)
+        if (!a.visible && !b.visible && a.frames !== b.frames) throw new Error(`${a.id} drew offscreen`)
+      }
+      await page.emulateMedia({ reducedMotion: 'reduce' })
+      await page.waitForTimeout(150)
+      const still = await stats()
+      await page.waitForTimeout(250)
+      if (JSON.stringify((await stats()).cards.map(c => c.frames)) !== JSON.stringify(still.cards.map(c => c.frames))) throw new Error('stills animated')
+      await page.setViewportSize({ width: 390, height: 844 })
+      await until('resized still', async () => (await stats()).cards.some(c => c.visible && c.frames > still.cards.find(b => b.id === c.id).frames))
+      if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error('mobile horizontal overflow')
+      await page.setViewportSize({ width: 1280, height: 900 })
+      await page.emulateMedia({ reducedMotion: 'no-preference' })
     })
     await check('catalogue: each controller\'s count is the cards it shows; each kind of arm has a card, and its Try it opens the arm sim as that kind', async () => {
       // Every chip's number is how many cards it leaves showing.

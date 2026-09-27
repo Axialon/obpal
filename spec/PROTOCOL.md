@@ -273,6 +273,35 @@ A browser-extension host that drives programs outside the browser talks to a nat
 
 ## 8. Extending
 
+### Music values (optional)
+
+`face.drums` and `face.keys` are offered only by `layout.controllers`. Both use
+`mode{m:4,c:"face.drums"|"face.keys"}` and the existing reliable `ctl` channel.
+The default profile supplies physical-button bindings; no binary packet changes.
+Older hosts ignore these unrecognised value ids.
+
+- `value{id:"music.event",v:<JSON string>}` carries
+  `{op,seq,at,uncertainty,n,v,x}`. `op` is hit/on/off/bend/air/stop/alive; `seq`
+  is a nonnegative integer, `at` a capture time translated to the host monotonic
+  epoch in milliseconds (0 before sync), `uncertainty` the best clock RTT/2.
+  `n` is a drum index (0–12), MIDI note (24–108), or 127 for air note-off;
+  `v` is velocity/air brightness 0–1; `x` is bend −1–1 (two semitones).
+  Fields are required and finite, payload at most 256 characters. Drum indices
+  are kick, snare, closed/open hat, low/mid/high tom, crash, ride, conga, bongo,
+  cajón and djembe. Notes are scale-locked by the phone.
+- `value{id:"music.sync",v:<phone monotonic epoch>}` gets a targeted
+  `state{values:{"music.sync":<JSON string {at,host}>}}`. Phone time is
+  performance.timeOrigin + performance.now(); the lowest-RTT midpoint sample
+  estimates the offset. Wall-clock differences must not be treated as latency.
+- Alive every 250 ms while a music face is visible. Hosts release after 1 s
+  without music, on disconnect, mode/claim changes, and when hidden. Stop clears
+  all that participant's voices. Off always releases even under rate limiting.
+- The host schedules accepted attacks immediately, independently of rendering;
+  it does not queue attacks while audio is locked. Claims choose the voice/station.
+  A seat accepts at most 80 attacks per second and eight concurrent voices.
+
+See [MUSIC.md](MUSIC.md) for synthesis, budgets and measurement limits.
+
 - New device classes (wheels, pedals, knobs, custom hardware) declare `caps` and reuse the STATE fields they need. Anything else goes in new ctl messages.
 - Shared scenes (CATALOGUE §5) use `scene` and `claim`. Input packets need no change: the host knows which participant each connection belongs to. A device that bridges several controllers (CATALOGUE §6) will open sub-participants with a `seat{op, seat, name, kind}` message, and their packets will carry the seat index.
 - New kinds of control go into the catalogue (CATALOGUE §8) with a stable id, and reuse PAD, STATE or POINTER fields where they can; a new packet type is the last resort.

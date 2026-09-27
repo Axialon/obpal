@@ -10,8 +10,8 @@ const MODES = Object.values(Mode) as number[]
 
 describe('the controllers in the catalogue (CATALOGUE §9.1)', () => {
   it('each has a stable, well-formed id, known utilities and modes, in the picker’s category order', () => {
-    expect(CONTROLLER_IDS).toEqual(['face.gamepad', 'face.wheel', 'face.wii', 'face.mouse', 'face.trackpad', 'face.hand', 'face.keyboard'])
-    const order = ['Controller', 'Pointer', 'Touch', '3D', 'Keys']
+    expect(CONTROLLER_IDS).toEqual(['face.gamepad', 'face.wheel', 'face.wii', 'face.mouse', 'face.trackpad', 'face.hand', 'face.keyboard', 'face.drums', 'face.keys'])
+    const order = ['Controller', 'Pointer', 'Touch', '3D', 'Keys', 'Music']
     let last = 0
     for (const id of CONTROLLER_IDS) {
       const c = CONTROLLERS[id]

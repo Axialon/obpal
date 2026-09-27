@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os'
 import { join as joinPath } from 'node:path'
 import { chromium, devices } from 'playwright'
 import { cspCheck } from './csp-watch.mjs'
+import { runMusic } from './e2e-music.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
 
 const HEADED = process.argv.includes('--headed')
@@ -416,6 +417,10 @@ try {
     return out.join('; ')
   })
 
+  // Finished arm and arena sessions must not compete with the studio's eight-phone timing measurement.
+  await Promise.all(closers.map(c => c.close()))
+  closers.length = 0
+  await runMusic(local, check)
   await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {
   console.error(e)

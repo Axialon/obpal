@@ -7,6 +7,8 @@ import { ICONS } from '../ui/icons'
 
 /** Each controller's glyph, from the phone's own icon set: what its tab or tray button shows. */
 const GLYPH: Record<ControllerId, string> = {
+  'face.drums': 'tap',
+  'face.keys': 'keyboard',
   'face.gamepad': 'gamepad',
   'face.wheel': 'wheel',
   'face.wii': 'point',
@@ -18,6 +20,8 @@ const GLYPH: Record<ControllerId, string> = {
 
 /** Short names for a badge ("Wii remote" is "Wii"). */
 const SHORT: Record<ControllerId, string> = {
+  'face.drums': 'Drums',
+  'face.keys': 'Keys',
   'face.gamepad': 'Gamepad', 'face.wheel': 'Wheel', 'face.wii': 'Wii', 'face.mouse': 'Mouse', 'face.trackpad': 'Trackpad', 'face.hand': '3D hand', 'face.keyboard': 'Keyboard',
 }
 

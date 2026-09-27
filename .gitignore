@@ -17,3 +17,6 @@ extension/release/
 .claude/launch.json
 desktop/target/
 desktop/release/
+
+# Evidence from agents and e2e runs (screenshots, captures, logs): kept out of the repository.
+artifacts/

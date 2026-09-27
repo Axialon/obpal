@@ -12,6 +12,8 @@ It does not become a one-off mode. The wire formats are in [PROTOCOL.md](PROTOCO
 
 | id | Category | On the phone | Wire |
 |---|---|---|---|
+| `music.hit` | Music | Velocity pads and held acceleration-peak strikes | `value{music.event}` on ctl (PROTOCOL §8) |
+| `music.note` | Music | Scale degrees, note releases, sustain, tilt bend and held air expression | `value{music.event}` on ctl (PROTOCOL §8) |
 | `pad` | Controller | Standard gamepad face: sticks, D-pad, A/B/X/Y, bumpers, analog triggers, View / Menu / Guide | PAD 0x12 |
 | `motion.aim` | Motion | Gyro **turn rate** drives a look output. Moving the phone turns; holding it still stops. | Mixed into PAD axes, or a relative POINTER 0x14 (the `mouse` route) |
 | `motion.steer` | Motion | Tilt **angle** drives a stick. The tilt is held while the phone is held tilted. | Mixed into PAD axes |
@@ -230,14 +232,35 @@ A device is a row in one registry (`src/sim/devices/registry.ts`): data (`Device
 | Camera gimbal | `face.trackpad`, `face.hand` | Gyro 1:1 follows all three axes; held 3D orientation, drag / twist fallback; R records a take | Three nested axes and a live camera inset of a subject |
 | RC plane | `face.gamepad`, `face.trackpad` | Flight tilt / right stick banks and pitches, RT powers; trackpad tilt / drag and A / Space toggles engine | Gentle lift and glide, runway, hangar and sequential rings |
 | Slot cars (4) | `face.wheel`, `face.gamepad` | RT is throttle, steering is ignored; A / Space reslots a car | Lanes, lap counts and corner-speed derailments |
+| Robot dog (2) | `face.gamepad`, `face.trackpad` | Left stick or drag / tilt turns and trots; A / Space sits, B / S stands | Diagonal four-leg gait, a fenced yard and separate balls to chase |
+| Sorting cell (2) | `face.wii`, `face.trackpad`, `face.gamepad` | Point at a colour lane, drag sideways or use the left stick; A / Space sorts | Conveyor queue, travelling pusher, colour bins and correct / missed scores |
+| Kart track (4) | `face.wheel`, `face.gamepad` | Tilt / left stick steers, RT / LT power; A / Space drifts | Free steering, sliding grip, eight ordered gates, laps and ranked readouts |
+| Helicopter (2) | `face.gamepad`, `face.trackpad` | RT / LT collective, right stick / Flight tilt cyclic, left stick yaw; drag / tilt and two-finger height; A / T takes off or lands | Stabilised hover, helipads, sequential rings and gentle unpowered landing |
+| Submarine (2) | `face.gamepad`, `face.trackpad` | Left stick or drag / tilt drives; triggers or two-finger drag change ballast; A / Space pings | Buoyancy, drag, underwater shafts and finite wreck discovery with sonar |
+| Smart home room (4 appliances) | `face.trackpad`, `face.mouse` | Drag / twist or wheel adjusts the claimed appliance, tap / Left switches it; Movie / M and Morning / D set a room scene | Blinds, fan, television and thermostat sharing one furnished room |
+| Pinball (2 tables) | `face.gamepad`, `face.trackpad` | LB / A and RB / B flip; pull and release RT or drag down and lift to launch; rock side to side with Gyro Tilt, Y / N or Nudge | Analogue plunger, moving flippers, bounded collisions, bumpers and score |
+| Air hockey (2) | `face.trackpad`, `face.mouse` | Drag or point to place a mallet on its half; tap / Left / Space serves | Shared puck physics, speed-limited mallets, goals and scores |
 
-Every device suggests `buttons` for a headset press and a keyboard key (the rover honks on H or one headset press), and has Home: the tray's, or a pad's Guide. The watchdog clears manual drive when the holder's input goes quiet for 300 ms; boats coast and planes glide without power, and a vacuum already sent Home completes its dock route. Instruments wait for the music room (PLAN §10, step 6).
+Every device has Home: the tray's, or a pad's Guide. Devices suggest `buttons` for a headset press and a keyboard key (the rover honks on H or one headset press); the studio uses its music controllers' default bindings. The watchdog clears manual drive when the holder's input goes quiet for 300 ms; boats coast and planes glide without power, and a vacuum already sent Home completes its dock route. Music uses its own one-second note watchdog (below).
 
-The catalogue has 24 cards: these sixteen devices, six arm kinds, the arena and the Viewer. Device and arm cameras open close enough to play, with Overview one tap away and Reset view restoring the play camera. Vehicle cameras follow the controlled unit; orbit and zoom remain available. The furnished lamp room uses warm fill lighting. Previews share one renderer, with a still under reduced motion.
+Wave 4a and the music studio bring the catalogue to 33 playable cards: twenty-five devices, six arm kinds, the arena and the Viewer. The studio belongs to Music, Featured and New, and appears under both Drums and Keys filters. Each has one category: Robotics, Vehicles, Flying, Home, Camera and stage, Games, Industrial, Music or Space & science; Featured and New are additional collections. Search matches name, controller, description and mapping. Category, controller and search combine in `?category=vehicles&face=wheel&q=harbour`; the original `?face=` links still work, and browser Back / Forward restores the view. Categories scroll sideways with thin themed scrollbars on phones.
+
+Device and arm cameras open close enough to play, with Overview one tap away and Reset view restoring the play camera. Vehicle cameras follow the controlled unit; orbit and zoom remain available. The furnished lamp room uses warm fill lighting. Previews share one renderer, run only while on screen at no more than 30 fps, and become resizable stills under reduced motion. New models have named part groups and kit materials so the style rollout can replace their look independently of behaviour.
+
+Home keeps earned scores and resets only the held unit; room scenes deliberately affect all appliances. The sorting belt and pusher freeze when the input goes quiet, karts and submarines coast, helicopters land gently, and pinball releases held controls while the ball continues. Pinball's motion nudge uses a quick side-to-side reversal of the existing Tilt signal, with a cooldown and a touch button fallback; it adds no controller id or protocol field. These are forgiving play simulations rather than training models.
 
 The excavator uses the excavator control pattern (left swing / stick, right bucket / boom), as illustrated by [Caterpillar's joystick controls guide](https://www.cat.com/en_US/articles/for-owners/excavator-joystick-controls.html/). Its simplified sand transfer is a play task rather than a training simulator. Gimbal Record counts takes; it does not export video. All new models, textures, gobos and scenery are procedural work from the shared kit.
 
 ## 8. Adding to the catalogue
+
+The **Music studio** (`studio`, Music; `/sim/device/?d=studio`) adds eight seats:
+drum kit, hand drums, electronic pads, warm synth, piano, marimba, Air and a second
+percussion station. Its live preview is silent. It offers `face.drums` then
+`face.keys`; music arrives directly through ctl without waiting for a render frame.
+Claims choose the instrument, simultaneous players retain independent voices and
+colours, and the screen starts audio from a gesture. Notes stop on controller or
+claim changes, lost heartbeats, disconnect and screen hiding. Every sound is
+synthesised; the bounded bus and voice limits are described in [MUSIC.md](MUSIC.md).
 
 A new utility, bridge or control system needs all of the following:
 1. A row in §1, §6 or §7 with a stable id and a category.
@@ -275,9 +298,20 @@ The rows are data in `@obpal/core` (`Controller` and `CONTROLLERS`: each one's n
 | `face.hand` | 3D hand | `motion.track` | track · POSE | The 3D tab |
 | `face.keyboard` | Keyboard | Typing and a key row | `text`, `btn{key-…}` | The tray's Keyboard |
 | `face.wheel` | Steering wheel (new) | `pad`, with Steer on `stick.wheel` and the triggers as pedals | gamepad · PAD | Gamepad with the Driving profile |
+| `face.drums` | Drums | `music.hit`, orientation and acceleration | pad · ctl music values | Offered by the studio |
+| `face.keys` | Tone keys | `music.note`, tilt expression | pad · ctl music values | Offered by the studio |
 | `bridge.*` | A physical controller | §6 | As its bridge | Planned (§6) |
 
 ### 9.2 What a host takes
+
+Music adds two shipped faces: `face.drums` (Music: velocity pads, kit/hand layouts,
+held strike gestures; controls kick/snare/hat) and `face.keys` (Music: scale/key,
+octave, hold-to-sustain, tilt bend and held Air; controls note1–note8, sustain,
+octaveup/octavedown). Both use mode pad (4), with controller ids distinguishing
+them, and optional music values on ctl (PROTOCOL §8). They never appear through
+a modes-only fallback: a screen must explicitly name them in controllers. The
+default Buttons profile applies with the existing host/user precedence; no new
+motion profile is implied. On a switch, notes and sustain release before mode.
 
 **A controller works on a host when everything it sends, after its profile's routes (§2), is something the host takes.** A steering wheel works in any gamepad game, because its tilt is routed into the pad's left stick. The air mouse needs a host that takes `motion.point`.
 - **Takes:** `layout.utilities` lists the utilities the host takes; absent means all of them, as today. Today only the Gamepad's chips read it, and no host sends it. With the picker, every host should.

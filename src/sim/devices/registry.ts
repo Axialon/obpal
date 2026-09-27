@@ -11,6 +11,7 @@ import { MAZE_SPEC, MazeLogic } from './maze'
 import { PTZ_SPEC, PtzLogic } from './ptz'
 import { LAMP_SPEC, LampLogic } from './lamp'
 import { CLAW_SPEC, ClawLogic } from './claw'
+import { STUDIO_SPEC, StudioLogic } from './studio'
 import { BOAT_SPEC, BoatLogic } from './boat'
 
 import { SPOTLIGHTS_SPEC, SpotlightsLogic } from './spotlights'
@@ -30,6 +31,14 @@ import { GIMBAL_SPEC, GimbalLogic } from './gimbal'
 import { PLANE_SPEC, PlaneLogic } from './plane'
 
 import { SLOTCARS_SPEC, SlotcarsLogic } from './slotcars'
+import { DOG_SPEC, DogLogic } from './dog'
+import { SORTING_SPEC, SortingLogic } from './sorting'
+import { KART_SPEC, KartLogic } from './kart'
+import { HELICOPTER_SPEC, HelicopterLogic } from './helicopter'
+import { SUBMARINE_SPEC, SubmarineLogic } from './submarine'
+import { SMARTHOME_SPEC, SmarthomeLogic } from './smarthome'
+import { AIRHOCKEY_SPEC, AirhockeyLogic } from './airhockey'
+import { PINBALL_SPEC, PinballLogic } from './pinball'
 
 export interface DeviceEntry<L extends DeviceLogic = DeviceLogic> {
   spec: DeviceSpec
@@ -47,6 +56,7 @@ export const DEVICES: DeviceEntry[] = [
   entry({ spec: PTZ_SPEC, logic: () => new PtzLogic(), view: () => import('./ptz.view') }),
   entry({ spec: LAMP_SPEC, logic: () => new LampLogic(), view: () => import('./lamp.view') }),
   entry({ spec: CLAW_SPEC, logic: () => new ClawLogic(), view: () => import('./claw.view') }),
+  entry({ spec: STUDIO_SPEC, logic: () => new StudioLogic(), view: () => import('./studio.view') }),
   entry({ spec: BOAT_SPEC, logic: () => new BoatLogic(), view: () => import('./boat.view') }),
   entry({ spec: SPOTLIGHTS_SPEC, logic: () => new SpotlightsLogic(), view: () => import('./spotlights.view') }),
   entry({ spec: VACUUM_SPEC, logic: () => new VacuumLogic(), view: () => import('./vacuum.view') }),
@@ -57,6 +67,14 @@ export const DEVICES: DeviceEntry[] = [
   entry({ spec: GIMBAL_SPEC, logic: () => new GimbalLogic(), view: () => import('./gimbal.view') }),
   entry({ spec: PLANE_SPEC, logic: () => new PlaneLogic(), view: () => import('./plane.view') }),
   entry({ spec: SLOTCARS_SPEC, logic: () => new SlotcarsLogic(), view: () => import('./slotcars.view') }),
+  entry({ spec: DOG_SPEC, logic: () => new DogLogic(), view: () => import('./dog.view') }),
+  entry({ spec: SORTING_SPEC, logic: () => new SortingLogic(), view: () => import('./sorting.view') }),
+  entry({ spec: KART_SPEC, logic: () => new KartLogic(), view: () => import('./kart.view') }),
+  entry({ spec: HELICOPTER_SPEC, logic: () => new HelicopterLogic(), view: () => import('./helicopter.view') }),
+  entry({ spec: SUBMARINE_SPEC, logic: () => new SubmarineLogic(), view: () => import('./submarine.view') }),
+  entry({ spec: SMARTHOME_SPEC, logic: () => new SmarthomeLogic(), view: () => import('./smarthome.view') }),
+  entry({ spec: AIRHOCKEY_SPEC, logic: () => new AirhockeyLogic(), view: () => import('./airhockey.view') }),
+  entry({ spec: PINBALL_SPEC, logic: () => new PinballLogic(), view: () => import('./pinball.view') }),
 ]
 
 export const deviceById = (id: string | null | undefined) => DEVICES.find((d) => d.spec.id === id)

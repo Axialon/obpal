@@ -14,6 +14,9 @@ import { Trackpad } from './trackpad'
 import { hapticsKind, tick } from './haptics'
 import { GyroSmoother, playerSpaceRates, TiltStick } from './gyro'
 import { GamepadMode } from './gamepad'
+import { Drums } from './drums'
+import { Keys } from './keys'
+import { MusicWire } from './music'
 import { WiiPointer } from './pointing'
 import { MouseFace } from './mouseface'
 import { ScrollWheel } from './wheel'
@@ -196,11 +199,13 @@ function syncThemeRows() {
   document.querySelectorAll<HTMLElement>('.accent-row .bb-accent').forEach((o) => o.setAttribute('aria-checked', String(o.dataset.accent === family.getAccent())))
 }
 
-type Tab = 'rotate' | 'point' | 'gamepad' | 'track'
+type Tab = 'rotate' | 'point' | 'gamepad' | 'track' | 'drums' | 'keys'
 type Style = 'game' | 'match'
 
 /** The tab each catalogue controller is today (CATALOGUE §9.1); the keyboard is the tray's, beside any tab. */
 const TAB_OF: Partial<Record<ControllerId, Tab>> = {
+  [Controller.drums]: 'drums',
+  [Controller.keys]: 'keys',
   [Controller.gamepad]: 'gamepad', [Controller.wheel]: 'gamepad', [Controller.wii]: 'point', [Controller.mouse]: 'point',
   [Controller.trackpad]: 'rotate', [Controller.hand]: 'track',
 }
@@ -360,6 +365,8 @@ async function boot(code: Join) {
     if (target.startsWith('key-')) return once(() => send(target))
     if (target.startsWith('app:')) return once(() => appAction(target.slice(4)))
     const c = controllerNow()
+    if (c === Controller.drums) return drums.hardware(target, down)
+    if (c === Controller.keys) return keys.hardware(target, down, tap)
     if (c === Controller.gamepad || c === Controller.wheel) {
       const b = PAD_OF[target]
       if (b === undefined) return
@@ -466,6 +473,7 @@ async function boot(code: Join) {
   const hostModes = () => layout.modes ?? [Mode.hold, Mode.point]
   const styleAvailable = (s: Style) => hostModes().includes(s === 'game' ? Mode.tilt : Mode.hold)
   const currentMode = (): ModeId => {
+    if (tab === 'drums' || tab === 'keys') return Mode.pad
     if (tab === 'gamepad') return Mode.gamepad
     if (tab === 'point') return Mode.point
     if (tab === 'track') return Mode.track
@@ -478,6 +486,8 @@ async function boot(code: Join) {
    * the Driving profile is the steering wheel.
    */
   const controllerNow = (): ControllerId => {
+    if (tab === 'drums') return Controller.drums
+    if (tab === 'keys') return Controller.keys
     if (tab === 'gamepad') return gamepad.profileInUse === 'driving' ? Controller.wheel : Controller.gamepad
     if (tab === 'point') return mouseOn() ? Controller.mouse : Controller.wii
     return tab === 'track' ? Controller.hand : Controller.trackpad
@@ -511,6 +521,11 @@ async function boot(code: Join) {
       : new DeviceLink({ service: location.origin, pairing: code.pairing, remember: true, cert: own, caps, name })
   // In by short code, the screen hands over its regular code: kept for reloads, like a scanned one.
   link.on('invite', (fragment) => { try { sessionStorage.setItem('obpal.pair', fragment) } catch { /* private mode */ } })
+  const musicWire = new MusicWire(m => { if (link.ready) link.sendCtl(m) })
+  const drums = new Drums(musicWire, motion)
+  const keys = new Keys(musicWire, motion)
+  let sentController = ''
+  let musicActive = false
   // Gamepad mode: Xbox-style controller streaming PAD packets (./gamepad.ts).
   const gamepad = new GamepadMode({
     motion, settings, t0, send: (b) => link.sendState(b), toast, openSettings, fullscreen: goFullscreen, exit: () => { tab = lastTab; setMode() },
@@ -567,7 +582,7 @@ async function boot(code: Join) {
   // is driven; and after two minutes untouched the screen rests (black, and free to sleep) until a touch.
   function motionWanted() {
     // A screen that takes tosses listens for a flick in any mode, gyro on or not.
-    return document.visibilityState === 'visible' && !resting && (!tierSettled || gyroOn || mode === Mode.point || mode === Mode.track || mode === Mode.gamepad || !!layout.toss)
+    return document.visibilityState === 'visible' && !resting && (!tierSettled || gyroOn || mode === Mode.point || mode === Mode.track || mode === Mode.gamepad || tab === 'drums' || tab === 'keys' || !!layout.toss)
   }
   /** Start or stop the sensors to match what's needed; true if they just started. */
   function syncMotion(): boolean {
@@ -593,6 +608,8 @@ async function boot(code: Join) {
     // A host that bounces things (the home page's marbles) asks for tosses: the phone flicked upward, screen level.
     const tosses = new TossDetector()
     motion.onSample = (dt) => {
+      drums.sample()
+      keys.sample()
       if (anchorOnSample) { anchorOnSample = false; anchor() }
       if (recenterOnSample) { recenterOnSample = false; recenterPointer() }
       pump(dt)
@@ -642,6 +659,9 @@ async function boot(code: Join) {
     }
     // Whatever had the focus on the screen, or held this phone up there, it says so again once it's back.
     values.textField = false
+    keys.reset()
+    musicWire.use(false)
+    musicActive = false
     keyboard.setField(false)
     hostNotice = ''
     if (s === 'taken-over') {
@@ -710,6 +730,7 @@ async function boot(code: Join) {
       gamepad.setHost({ name: hostName, profile: layout.profile, utilities: layout.utilities })
       keyboard.offered(layout.tray.some((c) => c.type === 'keyboard'))
     } else if (m.t === 'state') {
+      if ('music.sync' in m.values) musicWire.reply(m.values['music.sync'])
       Object.assign(values, m.values)
       // A text or password field has the focus on the screen (textField 'text' or 'secret'): the Type prompt.
       if ('textField' in m.values) keyboard.setField(m.values.textField)
@@ -779,7 +800,8 @@ async function boot(code: Join) {
 
   function setMode() {
     const next = currentMode()
-    if (next === mode) return render()
+    if (next === mode && sentController === controllerNow()) return render()
+    if (musicActive) { keys.reset(); musicWire.event('stop') }
     // Whatever a physical button held on the old controller lets go first.
     buttons.releaseAll()
     buttonHold = false
@@ -801,6 +823,7 @@ async function boot(code: Join) {
 
   /** Tell the screen the mode, with the controller in use and, on the gamepad, the profile it applies (mode{m, c, p}). */
   function sendMode() {
+    sentController = controllerNow()
     link.sendCtl({ t: 'mode', m: mode, c: controllerNow(), ...(mode === Mode.gamepad ? { p: gamepad.profileInUse } : {}) })
   }
 
@@ -869,6 +892,15 @@ async function boot(code: Join) {
     document.body.classList.add('live')
     calmMarks(surface)
     gamepad.mount(surface)
+    drums.mount(surface)
+    keys.mount(surface)
+    // Music faces are catalogue entries: create their bar button only when the screen offers them.
+    for (const [id, label, glyph] of [['drums', 'Drums', 'tap'], ['keys', 'Keys', 'keyboard']]) {
+      const musicTab = document.createElement('button')
+      musicTab.type = 'button'; musicTab.dataset.tab = id; musicTab.setAttribute('role', 'tab'); musicTab.setAttribute('aria-label', label)
+      setMarkup(musicTab, html`${ICONS[glyph]}<span>${label}</span>`); musicTab.hidden = true
+      surface.querySelector('.modes')!.append(musicTab)
+    }
     mouseFace.bind(document.getElementById('mouse')!)
     keyboard.bind(app)
     // The trackpad's scroll wheel along its edge, for a screen that drives a mouse pointer (Layout.wheel).
@@ -974,6 +1006,16 @@ async function boot(code: Join) {
 
   function render() {
     if (!surface) return
+    for (const id of ['drums', 'keys'] as const) {
+      const offered = layout.controllers?.includes(Controller[id]) ?? false
+      surface.querySelector<HTMLElement>(`[data-tab=${id}]`)!.hidden = !offered
+      if (tab === id && !offered) { tab = suggestedTab() ?? 'rotate'; queueMicrotask(setMode) }
+    }
+    const isMusic = tab === 'drums' || tab === 'keys'
+    if (isMusic !== musicActive) { musicActive = isMusic; musicWire.use(isMusic) }
+    surface.classList.toggle('music-on', isMusic)
+    drums.sync(tab === 'drums', String(values.part ?? ''))
+    keys.sync(tab === 'keys', String(values.part ?? ''))
     surface.dataset.mode = String(mode)
     surface.classList.toggle('no-motion', tier === Tier.touch)
     surface.classList.toggle('gyro-on', gyroOn)

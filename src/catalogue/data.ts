@@ -5,6 +5,8 @@
 export interface CatalogueRow { id: string; name: string; what: string; status: 'Shipped' | 'Public sim' | 'Planned'; link?: string }
 
 export const UTILITY_ROWS: CatalogueRow[] = [
+  { id: 'music.hit', name: 'Drum hit', what: 'A velocity pad or acceleration peak plays a percussion voice', status: 'Shipped' },
+  { id: 'music.note', name: 'Tone note', what: 'Scale-locked notes with sustain, tilt bend and orientation expression', status: 'Shipped' },
   { id: 'pad', name: 'Gamepad', what: 'Sticks, D-pad, face buttons, bumpers and analog triggers', status: 'Shipped' },
   { id: 'motion.aim', name: 'Aim', what: 'Turning the phone turns a view, by the gyro’s rate', status: 'Shipped' },
   { id: 'motion.steer', name: 'Steer', what: 'Tilting the phone holds a stick over', status: 'Shipped' },

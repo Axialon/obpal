@@ -6,12 +6,12 @@
 import '../landing/site'
 import { CONTROLLERS, type ControllerId } from '@obpal/core'
 import { ICONS } from '../ui/icons'
-import { faceParam, PROPOSED, SIMS, suiting, type SimCard } from './catalogue'
+import { CATEGORIES, filterSims, filtersFrom, filtersUrl, PROPOSED, SIMS, type CollectionId, type SimCard, type SimFilters } from './catalogue'
 import { FACES, faceGlyph, faceShort } from './faces'
 import { mountPreviews, type PreviewSlot } from './previews'
 
 const $ = (id: string) => document.getElementById(id)!
-const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches
+const motion = matchMedia('(prefers-reduced-motion: reduce)')
 const EASE = 'cubic-bezier(0.2, 0.8, 0.2, 1)'
 
 /** A controller badge: its glyph and short name, the whole line on hover. */
@@ -38,7 +38,7 @@ function cardOf(card: SimCard): { el: HTMLElement; slot: PreviewSlot | null } {
   stage.tabIndex = -1
   stage.setAttribute('aria-hidden', 'true')
   stage.innerHTML = `<span class="dcard-ph">${faceGlyph(card.controllers[0])}</span><canvas></canvas><span class="dcard-kind"></span>`
-  stage.querySelector('.dcard-kind')!.textContent = card.kind
+  stage.querySelector('.dcard-kind')!.textContent = CATEGORIES.find(c => c.id === card.category)?.name ?? card.kind
   const body = document.createElement('div')
   body.className = 'dcard-body'
   body.innerHTML = '<h2></h2><p></p><ul class="dcard-faces"></ul><div class="dcard-foot"><a class="btn primary dcard-go"></a></div>'
@@ -54,8 +54,6 @@ function cardOf(card: SimCard): { el: HTMLElement; slot: PreviewSlot | null } {
   el.append(stage, body)
   if (!card.preview) return { el, slot: null }
   const slot: PreviewSlot = { canvas: stage.querySelector('canvas')!, load: card.preview }
-  el.addEventListener('pointerenter', () => { slot.hot = true })
-  el.addEventListener('pointerleave', () => { slot.hot = false })
   return { el, slot }
 }
 
@@ -75,33 +73,44 @@ function soonOf(card: SimCard) {
 
 const grid = $('sims')
 const made = SIMS.map(cardOf)
+motion.addEventListener('change', () => {
+  if (motion.matches) made.forEach(({ el }) => el.getAnimations().forEach(a => a.cancel()))
+})
 grid.replaceChildren(...made.map((m) => m.el))
 $('soon').replaceChildren(...PROPOSED.map(soonOf))
 $('soon').closest<HTMLElement>('.sims-next')!.hidden = PROPOSED.length === 0
-mountPreviews(made.flatMap((m) => (m.slot ? [m.slot] : [])))
+const previews = mountPreviews(made.flatMap((m) => (m.slot ? [m.slot] : [])))
 
 // ---- the filter: by controller ----
 
-let face: ControllerId | null = faceParam(new URLSearchParams(location.search).get('face'))
+let filters = filtersFrom(location.search)
+const search = $('search') as HTMLInputElement
 
 function chip(id: ControllerId | null) {
   const b = document.createElement('button')
   b.type = 'button'
   b.className = 'sims-chip'
   b.dataset.face = id ?? ''
-  const n = suiting(SIMS, id).length
   b.innerHTML = id ? faceGlyph(id) : ICONS.models
   const name = document.createElement('span')
   name.textContent = id ? faceShort(id) : 'All'
   const count = document.createElement('i')
-  count.textContent = String(n)
   b.append(name, count)
   b.title = id ? CONTROLLERS[id].for : 'Every sim'
-  b.disabled = n === 0
   b.onclick = () => setFace(id)
   return b
 }
 $('filter').replaceChildren(chip(null), ...FACES.map(chip))
+const collections: { id: CollectionId | null; name: string }[] = [{ id: null, name: 'All' }, { id: 'featured', name: 'Featured' }, { id: 'new', name: 'New' }, ...CATEGORIES]
+$('categories').replaceChildren(...collections.map(c => {
+  const b = document.createElement('button')
+  b.type = 'button'
+  b.className = 'sims-category'
+  b.textContent = c.name
+  b.dataset.category = c.id ?? ''
+  b.onclick = () => setFilters({ ...filters, category: c.id })
+  return b
+}))
 // The bar joins the top bar's glass once it sticks under it.
 const sentinel = document.createElement('div')
 sentinel.className = 'sims-sentinel'
@@ -109,35 +118,55 @@ document.querySelector('.sims-bar')!.before(sentinel)
 new IntersectionObserver(([e]) => document.querySelector('.sims-bar')!.classList.toggle('stuck', !e.isIntersecting), { rootMargin: '-65px 0px 0px 0px' }).observe(sentinel)
 
 /** Show the sims `next` suits, moving the cards that stay to their new places rather than jumping (FLIP). */
-function setFace(next: ControllerId | null, animate = true) {
-  face = next
-  const url = new URL(location.href)
-  if (face) url.searchParams.set('face', face.slice(5))
-  else url.searchParams.delete('face')
-  history.replaceState(null, '', url)
-  document.querySelectorAll<HTMLElement>('.sims-chip').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.face || null) === face)))
+function setFilters(next: SimFilters, animate = true, navigation: 'push' | 'replace' | 'none' = 'push') {
+  filters = next
+  const { face } = filters
+  const url = filtersUrl(new URL(location.href), filters)
+  if (navigation !== 'none' && url.href !== location.href) history[navigation === 'push' ? 'pushState' : 'replaceState'](null, '', url)
+  if (search.value.trim() !== filters.q) search.value = filters.q
+  document.querySelectorAll<HTMLElement>('.sims-category').forEach(b => b.setAttribute('aria-pressed', String((b.dataset.category || null) === filters.category)))
+  document.querySelectorAll<HTMLButtonElement>('.sims-chip').forEach(b => {
+    const id = b.dataset.face as ControllerId || null
+    const n = filterSims(SIMS, { ...filters, face: id }).length
+    b.setAttribute('aria-pressed', String(id === face))
+    b.querySelector('i')!.textContent = String(n)
+    b.disabled = n === 0 && id !== face && id !== null
+  })
   const cards = [...grid.children] as HTMLElement[]
   const before = new Map(cards.map((c) => [c, c.hidden ? null : c.getBoundingClientRect()]))
-  const fits = (el: HTMLElement) => !face || el.dataset.faces!.split(' ').includes(face)
+  const matches = new Set(filterSims(SIMS, filters).map(c => c.id))
+  const fits = (el: HTMLElement) => matches.has(el.dataset.id!)
   for (const c of cards) {
     c.hidden = !fits(c)
     c.querySelectorAll<HTMLElement>('.dcard-faces li').forEach((li) => li.classList.toggle('match', li.dataset.face === face))
   }
   document.querySelectorAll<HTMLElement>('.dsoon').forEach((c) => {
-    c.classList.toggle('dim', !fits(c))
+    c.classList.toggle('dim', !!face && !c.dataset.faces!.split(' ').includes(face))
     c.querySelectorAll<HTMLElement>('.dcard-faces li').forEach((li) => li.classList.toggle('match', li.dataset.face === face))
   })
   $('none').hidden = cards.some((c) => !c.hidden)
-  if (!animate || reduce) return
+  $('result-count').textContent = `${matches.size} ${matches.size === 1 ? 'sim' : 'sims'}`
+  $('clear-filters').hidden = !filters.category && !face && !filters.q
+  previews.refresh()
+  if (!animate || motion.matches) return
   for (const c of cards) {
     if (c.hidden) continue
     const a = before.get(c)
     const b = c.getBoundingClientRect()
-    if (!a) { c.animate([{ opacity: 0, transform: 'scale(0.96)' }, { opacity: 1, transform: 'none' }], { duration: 320, easing: EASE }); continue }
+    if (!a) { c.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180, easing: EASE }); continue }
     const dx = a.left - b.left
     const dy = a.top - b.top
-    if (Math.abs(dx) + Math.abs(dy) > 0.5) c.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 420, easing: EASE })
+    if (Math.abs(dx) + Math.abs(dy) > 0.5) c.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 220, easing: EASE })
   }
 }
-setFace(face, false)
-Object.assign(window, { __sims: { cards: () => [...grid.children].filter((c) => !(c as HTMLElement).hidden).map((c) => (c as HTMLElement).dataset.id), setFace } })
+function setFace(face: ControllerId | null) { setFilters({ ...filters, face }) }
+let searching = false
+search.addEventListener('input', () => {
+  setFilters({ ...filters, q: search.value.trim().slice(0, 160) }, false, searching ? 'replace' : 'push')
+  searching = true
+})
+search.addEventListener('blur', () => { searching = false })
+$('clear-filters').onclick = () => setFilters({ category: null, face: null, q: '' })
+addEventListener('popstate', () => { searching = false; setFilters(filtersFrom(location.search), false, 'none') })
+setFilters(filters, false, 'replace')
+Object.assign(window, { __sims: { cards: () => [...grid.children].filter((c) => !(c as HTMLElement).hidden).map((c) => (c as HTMLElement).dataset.id), setFace, previews: previews.stats } })

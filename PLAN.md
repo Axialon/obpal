@@ -428,6 +428,8 @@ Public sims (2026-09-26): [/sim/](https://obpal.blackboxes.net/sim/) hosts the r
 
   The catalogue page gets categories, search and filters, and every sim takes several players.
 
+  **Wave 4a built:** the robot dog, sorting cell, kart track, helicopter, submarine, smart home room, pinball and air hockey add eight devices; with the merged music studio there are now 33 playable cards. Each has several seats, phone mappings with touch fallbacks, Home, bounded behaviour and a close play view with Overview. Models use named kit-material groups, ready for the approved style rollout. The catalogue now combines category, controller and activity search in shareable URLs, with Back / Forward, a sideways category bar and one shared preview renderer capped at 30 fps for visible cards (stills under reduced motion). Mapping / limit tests and paired-phone catalogue exercises cover the additions; screenshots, budget measurements and the review viewer are in `artifacts/codex-wave4a/`. Camera slider / jib, table football / marble run and dedicated space / physics scenes remain for the next wave. Wave 2's studio is integrated into Music, Featured and New, with Drums and Keys filters and searchable controller names.
+
 Scheduled 2026-09-27: phase B lands with step 5b (the controller hub, below), and phase C after step 8b's research.
 
 **Robot arms: status (2026-09-26).**

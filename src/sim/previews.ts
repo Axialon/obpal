@@ -1,7 +1,7 @@
 /**
  * Live previews on the sim catalogue's cards. One WebGL renderer draws each card's small scene in turn and copies it
  * into the card's own canvas, so the page holds one GPU context however many cards it shows. Only cards on screen draw,
- * at up to 30 frames a second (a card under the pointer at the screen's full rate); under reduced motion each draws one
+ * at up to 30 frames a second; under reduced motion each draws one
  * still frame; nothing draws while the tab is hidden. three.js loads once the first card comes into view.
  */
 import type { Preview } from './devices/view'
@@ -9,28 +9,25 @@ import type { Preview } from './devices/view'
 export interface PreviewSlot {
   canvas: HTMLCanvasElement
   load: () => Promise<Preview>
-  /** Under the pointer: draws every frame. */
-  hot?: boolean
 }
 
-interface Live { slot: PreviewSlot; preview: Preview | null; loading: boolean; visible: boolean; drawn: boolean; ctx: CanvasRenderingContext2D | null }
+interface Live { slot: PreviewSlot; preview: Preview | null; loading: boolean; visible: boolean; drawn: boolean; frames: number; time: number; ctx: CanvasRenderingContext2D | null }
 
 const MAX_DPR = 2
 /** The slowest a visible preview updates, and the most it may fall behind in one step (s). */
 const FRAME_MS = 1000 / 30
 const MAX_DT = 0.05
 
-export function mountPreviews(slots: readonly PreviewSlot[]): { stop(): void } {
-  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches
-  const lives: Live[] = slots.map((slot) => ({ slot, preview: null, loading: false, visible: false, drawn: false, ctx: slot.canvas.getContext('2d') }))
+export function mountPreviews(slots: readonly PreviewSlot[]) {
+  const motion = matchMedia('(prefers-reduced-motion: reduce)')
+  const lives: Live[] = slots.map((slot) => ({ slot, preview: null, loading: false, visible: false, drawn: false, frames: 0, time: 0, ctx: slot.canvas.getContext('2d') }))
   let three: typeof import('three') | null = null
   let renderer: import('three').WebGLRenderer | null = null
   let env: import('three').Texture | null = null
   let starting: Promise<void> | null = null
   let failed = false
   let raf = 0
-  let last = 0
-  let lastDraw = 0
+  let stopped = false
 
   /** three.js, one renderer and the reflections every preview shares. */
   const start = () => (starting ??= (async () => {
@@ -75,33 +72,35 @@ export function mountPreviews(slots: readonly PreviewSlot[]): { stop(): void } {
     // The viewport sits at the bottom left of the drawing buffer (GL's origin), the top left of a 2D canvas's.
     l.ctx.clearRect(0, 0, c.width, c.height)
     l.ctx.drawImage(renderer.domElement, 0, full.y - c.height, c.width, c.height, 0, 0, c.width, c.height)
+    l.frames++
     if (!l.drawn) { l.drawn = true; c.closest('.dcard-stage')?.classList.add('live') }
   }
 
   const frame = (now: number) => {
     raf = 0
-    if (document.hidden || failed) return
-    const dt = last ? Math.min(MAX_DT, (now - last) / 1000) : 1 / 30
-    last = now
-    const due = now - lastDraw >= FRAME_MS - 2
-    if (due) lastDraw = now
+    if (document.hidden || failed || stopped) return
     const t = now / 1000
     for (const l of lives) {
-      if (!l.visible || !l.preview) continue
-      if (reduce) { if (!l.drawn) { size(l); draw(l, 4, 0) } continue }
-      if (!due && !l.slot.hot) continue
+      if (!l.visible || !l.preview || !onScreen(l)) continue
       size(l)
-      draw(l, t, due ? Math.max(dt, FRAME_MS / 1000) : dt)
+      if (motion.matches) { if (!l.drawn) draw(l, 4, 0); continue }
+      if (now - l.time < FRAME_MS) continue
+      draw(l, t, l.time ? Math.min(MAX_DT, (now - l.time) / 1000) : 1 / 30)
+      l.time = now
     }
-    if (!reduce && lives.some((l) => l.visible && l.preview)) raf = requestAnimationFrame(frame)
+    if (!motion.matches && lives.some((l) => l.visible && l.preview && onScreen(l))) raf = requestAnimationFrame(frame)
   }
-  const wake = () => { if (!raf && !document.hidden) raf = requestAnimationFrame(frame) }
+  const wake = () => { if (!raf && !document.hidden && !stopped) raf = requestAnimationFrame(frame) }
+  const onScreen = (l: Live) => {
+    const r = l.slot.canvas.getBoundingClientRect()
+    return r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth
+  }
 
   const load = async (l: Live) => {
     if (l.preview || l.loading) return
     l.loading = true
     await start()
-    if (failed || !three) return
+    if (failed || !three || stopped) return
     try {
       l.preview = await l.slot.load()
       l.preview.scene.environment = env
@@ -119,17 +118,30 @@ export function mountPreviews(slots: readonly PreviewSlot[]): { stop(): void } {
       if (l.visible) void load(l)
     }
     wake()
-  }, { rootMargin: '160px 0px' })
+  })
   for (const l of lives) io.observe(l.slot.canvas)
-  const onVisibility = () => { last = 0; wake() }
+  const refresh = () => {
+    for (const l of lives) {
+      l.visible = onScreen(l)
+      if (l.visible) void load(l)
+    }
+    wake()
+  }
+  const onVisibility = () => { lives.forEach(l => { l.time = 0 }); refresh() }
+  const resized = new ResizeObserver(() => { lives.forEach(size); refresh() })
+  for (const l of lives) resized.observe(l.slot.canvas)
   document.addEventListener('visibilitychange', onVisibility)
-  addEventListener('resize', wake)
+  motion.addEventListener('change', wake)
 
   return {
+    refresh,
+    stats: () => ({ renderers: renderer ? 1 : 0, cards: lives.map(l => ({ id: l.slot.canvas.closest<HTMLElement>('.dcard')?.dataset.id, visible: l.visible && onScreen(l), loaded: !!l.preview, frames: l.frames })) }),
     stop() {
+      stopped = true
       io.disconnect()
+      resized.disconnect()
       document.removeEventListener('visibilitychange', onVisibility)
-      removeEventListener('resize', wake)
+      motion.removeEventListener('change', wake)
       if (raf) cancelAnimationFrame(raf)
       renderer?.dispose()
       env?.dispose()

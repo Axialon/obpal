@@ -17,6 +17,8 @@ export const Utility = {
   trackpad: 'touch.trackpad',
   hold: 'motion.hold',
   tilt: 'motion.tilt',
+  drums: 'music.hit',
+  keys: 'music.note',
 } as const
 export type UtilityId = (typeof Utility)[keyof typeof Utility]
 
@@ -195,6 +197,8 @@ export const Controller = {
   trackpad: 'face.trackpad',
   hand: 'face.hand',
   keyboard: 'face.keyboard',
+  drums: 'face.drums',
+  keys: 'face.keys',
 } as const
 export type ControllerId = (typeof Controller)[keyof typeof Controller]
 
@@ -202,7 +206,7 @@ export interface ControllerSpec {
   id: ControllerId
   name: string
   /** Where the picker groups it (CATALOGUE §9.3). */
-  category: 'Controller' | 'Pointer' | 'Touch' | '3D' | 'Keys'
+  category: 'Controller' | 'Pointer' | 'Touch' | '3D' | 'Keys' | 'Music'
   /** What it is for, one line. */
   for: string
   /** The utilities it is built from (§1); the keyboard types (`text`) instead. */
@@ -242,6 +246,14 @@ export const CONTROLLERS: Record<ControllerId, ControllerSpec> = {
   'face.keyboard': {
     id: 'face.keyboard', name: 'Keyboard', category: 'Keys', for: 'The phone’s own keyboard types on the screen, with Esc, Tab, the arrows and Enter',
     utilities: [], modes: [], controls: CONTROLS['face.keyboard'],
+  },
+  'face.drums': {
+    id: 'face.drums', name: 'Drums', category: 'Music', for: 'Velocity pads and held strike gestures',
+    utilities: [Utility.drums, Utility.tilt], modes: [Mode.pad], controls: CONTROLS['face.drums'],
+  },
+  'face.keys': {
+    id: 'face.keys', name: 'Tone keys', category: 'Music', for: 'Scale-locked notes, tilt bend, sustain and an air instrument',
+    utilities: [Utility.keys, Utility.tilt], modes: [Mode.pad], controls: CONTROLS['face.keys'],
   },
 }
 export const CONTROLLER_IDS = Object.keys(CONTROLLERS) as ControllerId[]

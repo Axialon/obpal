@@ -25,6 +25,7 @@ Instructions for coding agents, Codex and others, working in this repository. A 
 - **Windows:** read the registry from PowerShell only, and never change it. Never install the helper, and never run its `--include-ignored` tests: they drive the real mouse and keyboard.
 - **Secrets and privacy:** never read, copy or print anything in `~/.obpal-keys`. Every tracked file goes into the public open-source snapshot, so keep keys, tokens, account ids, local paths, personal names and emails out of files and commits.
 - **Assets:** only what we make ourselves, or third-party material under a licence that allows it (CC0, MIT, OFL and the like), credited in `src/support/open-source.json`.
+- **Evidence:** screenshots, captures, measurements and logs go in `artifacts/`, which git ignores. Never commit them, and never make a test write into the repository; tests write to a temporary folder.
 - **Scope:** never delete recursively outside your worktree.
 
 ## Before you hand back

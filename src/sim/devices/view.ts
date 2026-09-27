@@ -9,8 +9,11 @@ export { box } from '../kit'
 import type { Theme } from '../../ui/themes'
 import type { DeviceLogic } from './types'
 import type { Framing, Stage } from './stage'
+import type { SimScene } from '../scene'
 
 export interface DeviceView {
+  /** Optional live service (audio, for example), attached once the shared scene is ready. */
+  connect?(sim: SimScene): void
   framing: Framing
   /** The whole playground, one tap from the closer play view. */
   overview?: Framing

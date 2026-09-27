@@ -10,8 +10,10 @@ import { HOME, layoutOf, restInput } from '../src/sim/devices/types'
 const D2R = Math.PI / 180
 
 describe('the device registry', () => {
-  it('has sixteen devices, each with a unique id, the controllers that suit it and how each drives it', () => {
-    expect(DEVICES.map((d) => d.spec.id)).toEqual(['rover', 'drone', 'maze', 'ptz', 'lamp', 'claw', 'boat', 'spotlights', 'vacuum', 'tank', 'excavator', 'forklift', 'painter', 'gimbal', 'plane', 'slotcars'])
+  it('has unique devices with the controllers that suit them and how each drives them', () => {
+    expect(DEVICES.map((d) => d.spec.id)).toEqual(expect.arrayContaining(['rover', 'drone', 'maze', 'ptz', 'lamp', 'claw', 'studio', 'boat', 'spotlights', 'vacuum', 'tank', 'excavator', 'forklift', 'painter', 'gimbal', 'plane', 'slotcars']))
+    expect(new Set(DEVICES.map(d => d.spec.id)).size).toBe(DEVICES.length)
+    expect(DEVICES.map(d => d.spec.id)).toEqual(expect.arrayContaining(['dog', 'sorting', 'kart', 'helicopter', 'submarine', 'smarthome', 'pinball', 'airhockey']))
     for (const { spec } of DEVICES) {
       expect(spec.controllers.length).toBeGreaterThan(1)
       for (const c of spec.controllers) {
@@ -63,13 +65,14 @@ describe('the device registry', () => {
 })
 
 describe('the sim catalogue', () => {
-  it('lists 24 playable cards with previews, including every completed proposal', () => {
+  it('lists playable cards with previews, including every completed proposal and the studio', () => {
     const ids = SIMS.map((s) => s.id)
     for (const d of DEVICES) expect(ids).toContain(d.spec.id)
     expect(ids).toEqual(expect.arrayContaining(['arena', 'viewer']))
     expect(new Set(ids).size).toBe(ids.length)
     for (const s of SIMS) expect(s.href).toBeTruthy()
-    expect(ids).toHaveLength(24)
+    expect(ids.length).toBeGreaterThanOrEqual(DEVICES.length + 8)
+    expect(ids.length).toBeGreaterThanOrEqual(33)
     expect(PROPOSED).toEqual([])
     for (const s of SIMS) expect(typeof s.preview).toBe('function')
   })

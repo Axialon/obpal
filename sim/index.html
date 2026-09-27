@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="site">
+<html lang="en" class="site sim-catalogue">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -46,17 +46,23 @@
     </nav>
     <main class="land sims-land">
       <section class="hero sims-hero">
-        <p class="eyebrow">Sims · the control catalogue</p>
-        <h1>Pick a device. Your phone drives&nbsp;it.</h1>
-        <p class="lede">Open one on a screen and scan its code: a unit is yours. Up to eight phones in one scene.</p>
+        <p class="eyebrow">The playground</p>
+        <h1>Pick a sim. Grab your phone.</h1>
+        <p class="lede">Open a scene, scan its code and take the controls.</p>
       </section>
 
-      <div class="sims-bar" role="group" aria-label="Show the sims a controller suits">
-        <div class="sims-filter" id="filter"></div>
+      <div class="sims-bar">
+        <div class="sims-categories" id="categories" role="group" aria-label="Sim categories"></div>
+        <div class="sims-tools">
+          <label class="sims-search"><span>Search sims</span><input id="search" type="search" placeholder="Name, controller or activity" maxlength="160" autocomplete="off" /></label>
+          <span id="result-count" role="status" aria-live="polite"></span>
+          <button id="clear-filters" type="button" hidden>Clear filters</button>
+        </div>
+        <div class="sims-filter" id="filter" role="group" aria-label="Controllers"></div>
       </div>
 
       <section class="sims-grid" id="sims" aria-label="Sims"></section>
-      <p class="sims-none" id="none" hidden>Nothing here takes that controller yet.</p>
+      <p class="sims-none" id="none" hidden>No sims match this view. Try another search or clear the filters.</p>
 
       <section class="sims-next" aria-labelledby="h-next">
         <h2 id="h-next">Next in the catalogue</h2>

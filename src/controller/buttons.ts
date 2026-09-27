@@ -80,6 +80,8 @@ const KIND_SHOWS: Record<DeviceKind, readonly string[]> = {
 }
 /** The controls a one-tap bind offers first, per controller. */
 const QUICK: Record<ControllerId, readonly string[]> = {
+  'face.drums': ['kick', 'snare', 'hat'],
+  'face.keys': ['note1', 'note3', 'note5', 'sustain'],
   'face.gamepad': ['a', 'b', 'x', 'y'], 'face.wheel': ['a', 'b', 'x', 'y'], 'face.wii': ['a', 'b', 'minus', 'plus'],
   'face.mouse': ['left', 'right', 'minus', 'plus'], 'face.trackpad': ['grab', 'level'], 'face.hand': ['hold', 'recentre'], 'face.keyboard': ['key-Enter', 'key-Escape'],
 }
@@ -609,4 +611,3 @@ export function sourceStack(inputs: PhysicalInputs): Content {
   if (inputs.padList().length) srcs.add('pad')
   return (['keys', 'media', 'pad', 'back'] as InputSource[]).filter((x) => srcs.has(x)).map((x) => html`<i data-src="${x}">${SOURCE_GLYPH[x]}</i>`)
 }
-

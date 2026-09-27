@@ -176,7 +176,7 @@ export function createStage(canvas: HTMLCanvasElement, theme: Theme): Stage {
       // The device sits in the middle of what the panel leaves free: beside it, or above it on a narrow screen.
       const panel = document.querySelector('.sim-panel')?.getBoundingClientRect()
       const top = 64
-      if (panel && w > 860) { camera.setViewOffset(w, h, -panel.right / 2, 0, w, h); free = { w: w - panel.right, h: h - top } }
+      if (panel && (w > 860 || panel.right < w / 2)) { camera.setViewOffset(w, h, -panel.right / 2, 0, w, h); free = { w: w - panel.right, h: h - top } }
       else if (panel) { camera.setViewOffset(w, h, 0, (h - panel.top) / 2, w, h); free = { w, h: panel.top - top } }
       else { camera.clearViewOffset(); free = { w, h } }
       camera.updateProjectionMatrix()

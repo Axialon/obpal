@@ -24,7 +24,7 @@ body.sim.dev { background: radial-gradient(120% 95% at 50% 36%, var(--stage-a, #
 
 /* Units: who holds each, with which controller, and a live readout. */
 .dev-units { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.dev-units li { display: grid; grid-template-columns: 12px 1fr auto; align-items: center; gap: 10px; padding: 9px 12px 9px 10px; border-radius: 14px; background: rgb(var(--hl-rgb) / 0.04); border: 1px solid transparent; transition: border-color 0.3s, background 0.3s; }
+.dev-units li { display: grid; grid-template-columns: 12px minmax(0, 0.9fr) minmax(0, 1.4fr); align-items: center; gap: 10px; padding: 9px 12px 9px 10px; border-radius: 14px; background: rgb(var(--hl-rgb) / 0.04); border: 1px solid transparent; transition: border-color 0.3s, background 0.3s; }
 .dev-units li.held { border-color: rgb(var(--hl-rgb) / 0.12); background: rgb(var(--hl-rgb) / 0.07); }
 .dev-units .dot { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 2px rgb(var(--hl-rgb) / 0.3); }
 .dev-units li.held .dot { box-shadow: 0 0 12px currentColor; }
@@ -32,7 +32,7 @@ body.sim.dev { background: radial-gradient(120% 95% at 50% 36%, var(--stage-a, #
 .dev-units .nn b { font-size: 13.5px; }
 .dev-units .nn small { display: flex; align-items: center; gap: 5px; overflow: hidden; color: var(--muted); font-size: 11.5px; white-space: nowrap; text-overflow: ellipsis; }
 .dev-units .nn small .ic { width: 13px; height: 13px; flex: none; color: var(--secondary, var(--muted)); }
-.dev-units .nv { font: 600 12.5px var(--font-data, var(--font)); font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
+.dev-units .nv { min-width: 0; font: 600 12.5px/1.4 var(--font-data, var(--font)); font-variant-numeric: tabular-nums; color: var(--ink); text-align: right; overflow-wrap: anywhere; }
 .safety { flex-wrap: wrap; }
 .safety .btn { display: inline-flex; flex: 1 1 calc(50% - 5px); min-width: 0; align-items: center; justify-content: center; gap: 8px; }
 .safety .btn .ic { width: 17px; height: 17px; }

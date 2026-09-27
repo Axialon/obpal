@@ -1,5 +1,13 @@
 /** Phone gestures for the second device collection; state is read only from the screen. */
 export const deviceExercises = [
+  { id: 'pinball', face: 'face.gamepad', hold: '.gp-trig[data-trig="1"]', field: 'balls', key: 'KeyN', button: 'actions', home: [['x', 0.59], ['z', 1.05], ['plunger', 0]] },
+  { id: 'airhockey', face: 'face.trackpad', drag: ['#pad', 65, -25], field: 'x', key: 'Space', button: 'actions', home: [['x', 0], ['z', 1.05]] },
+  { id: 'smarthome', face: 'face.trackpad', drag: ['#pad', 0, -55], field: 'target', key: 'KeyM', button: 'actions', home: [['target', 0.7]] },
+  { id: 'submarine', face: 'face.gamepad', drag: ['.gp-stick[data-stick="0"]', 15, -55], field: 'z', key: 'Space', button: 'actions', home: [['x', -1.8], ['y', 4], ['z', 4], ['v', 0]] },
+  { id: 'helicopter', face: 'face.gamepad', hold: '.gp-trig[data-trig="1"]', field: 'y', key: 'KeyT', button: 'actions', home: [['x', -2], ['y', 0.22], ['z', 4], ['vy', 0]] },
+  { id: 'kart', face: 'face.wheel', hold: '.gp-trig[data-trig="1"]', field: 'x', key: 'Space', button: 'actions', home: [['x', -0.7], ['z', 7], ['v', 0]] },
+  { id: 'sorting', face: 'face.wii', turn: true, field: 'aim', key: 'Space', button: 'actions', home: [['x', 0], ['push', 0]] },
+  { id: 'dog', face: 'face.gamepad', drag: ['.gp-stick[data-stick="0"]', 25, -55], field: 'z', key: 'Space', button: 'actions', home: [['x', -2.2], ['z', 2.2], ['v', 0]] },
   {
     id: 'slotcars',
     face: 'face.wheel',
@@ -124,9 +132,13 @@ export async function exerciseDevice(e, { device, check, at, until, turn, clean 
       await p.page.evaluate(() => document.querySelectorAll('.hint').forEach((h) => h.remove()))
       // Deliver a sensor sample after the controller's listeners are mounted.
       await turn(p, 9, 10, 2)
+      // Wait for sensor tracking and a stable, reachable pad before placing the held finger.
+      await p.page.locator('#track-start').waitFor({ state: 'hidden' })
+      await p.page.locator('#pad').click({ trial: true })
       const b = await p.page.locator('#pad').boundingBox()
       await p.touches('touchStart', [[b.x + b.width / 2, b.y + b.height / 2]])
       try {
+        await until('the hand pad is held', () => p.page.locator('#pad').evaluate(pad => pad.classList.contains('active')))
         // The first held pose anchors the stroke. Let it reach the screen before swinging the phone.
         await until('the held hand pose', async () => (await state()).q.slice(0, 3).some((v) => Math.abs(v) > 0.01)).catch(
           async (error) => {
@@ -196,6 +208,26 @@ export async function exerciseDevice(e, { device, check, at, until, turn, clean 
         `${error.message}: ${JSON.stringify(await state())}; inputs ${JSON.stringify(await at(s, () => window.__device.seen))}`,
       )
     })
+  })
+  if (e.id === 'pinball') await check('pinball: a quick phone tilt reversal nudges the cabinet', async () => {
+    await p.tab('rotate')
+    await p.page.locator('[data-style="game"]').click()
+    const gyro = p.page.locator('#gyro')
+    if (await gyro.getAttribute('aria-pressed') === 'true') await gyro.click()
+    // Tilt is held flat like a tray; an upright Wii grip cannot roll 30 degrees about gravity.
+    await p.cdp.send('DeviceOrientation.setDeviceOrientationOverride', { alpha: 10, beta: 0, gamma: 0 })
+    await p.page.waitForTimeout(150)
+    await gyro.click()
+    const before = (await state()).actions
+    // This phone joined in landscape: beta rocks across the screen's horizontal axis.
+    for (const beta of [40, -40, 40, -40]) {
+      await p.cdp.send('DeviceOrientation.setDeviceOrientationOverride', { alpha: 10, beta, gamma: 0 })
+      await p.page.waitForTimeout(120)
+    }
+    await until('cabinet nudged from Tilt', async () => (await state()).actions > before).catch(async error => {
+      throw new Error(`${error.message}: ${JSON.stringify(await at(s, () => window.__device.seen))}`)
+    })
+    await p.cdp.send('DeviceOrientation.setDeviceOrientationOverride', { alpha: 10, beta: 0, gamma: 0 })
   })
   await clean(e.id, s, p)
   await p.close()
