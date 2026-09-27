@@ -12,6 +12,7 @@ import { Controller, Mode, PadButton } from '@obpal/core'
 import { handMove, headingOf } from '@obpal/host'
 import { axis, clamp, DragStick, padStick, readable, wrapPi } from './input'
 import type { DeviceEvent, DeviceInput, DeviceLogic, DeviceSpec } from './types'
+import { InputSmoother, Spring } from '../kit/motion'
 
 export const DRONE_SPEC: DeviceSpec = {
   id: 'drone',
@@ -143,10 +144,13 @@ export function droneIntent(inp: DeviceInput, d: Drone, stick: DragStick, hand: 
 }
 
 const ease = (cur: number, target: number, dt: number, tau: number) => cur + (target - cur) * (1 - Math.exp(-dt / tau))
+const motion = new WeakMap<Drone, { pitch: Spring; roll: Spring; rotor: Spring }>()
 
 /** One step of a drone's flight (not its collisions). */
 export function stepDrone(d: Drone, i: DroneIntent, dt: number) {
   const D = DRONE
+  let m = motion.get(d)
+  if (!m) { m = { pitch: new Spring(d.pitch, .16), roll: new Spring(d.roll, .16), rotor: new Spring(d.rotor, .35) }; motion.set(d, m) }
   if (i.toggle) {
     if (d.phase === 'landed') d.phase = 'takeoff'
     else if (d.phase !== 'landing') { d.phase = 'landing'; d.spot = [d.x, d.z] }
@@ -158,7 +162,6 @@ export function stepDrone(d: Drone, i: DroneIntent, dt: number) {
   if (d.phase === 'home' && moving) d.phase = 'flying'
   switch (d.phase) {
     case 'landed':
-      d.rotor = Math.max(0, d.rotor - dt * 0.8)
       d.vx = d.vy = d.vz = 0
       break
     case 'takeoff':
@@ -195,7 +198,6 @@ export function stepDrone(d: Drone, i: DroneIntent, dt: number) {
   }
   const was = [d.vx, d.vz]
   if (d.phase !== 'landed') {
-    d.rotor = Math.min(1, d.rotor + dt * 2)
     d.vx = ease(d.vx, tx, dt, D.tau)
     d.vz = ease(d.vz, tz, dt, D.tau)
     d.vy = ease(d.vy, ty, dt, D.tau * 0.7)
@@ -216,9 +218,10 @@ export function stepDrone(d: Drone, i: DroneIntent, dt: number) {
   const fx = -Math.sin(d.yaw), fz = -Math.cos(d.yaw)
   const fwdA = ax * fx + az * fz + (d.vx * fx + d.vz * fz) * 0.9
   const rightA = ax * -fz + az * fx + (d.vx * -fz + d.vz * fx) * 0.9
-  d.pitch = ease(d.pitch, clamp(-fwdA * 0.09, -D.maxTilt, D.maxTilt), dt, 0.12)
-  d.roll = ease(d.roll, clamp(rightA * 0.09, -D.maxTilt, D.maxTilt), dt, 0.12)
-  d.spin += d.rotor * 60 * dt
+  d.pitch = m.pitch.step(clamp(-fwdA * 0.09, -D.maxTilt, D.maxTilt), dt)
+  d.roll = m.roll.step(clamp(rightA * 0.09, -D.maxTilt, D.maxTilt), dt)
+  d.rotor = m.rotor.step(d.phase === 'landed' ? 0 : 1, dt)
+  d.spin += m.rotor.travel * 60
 }
 
 /** Drones on their pads in a row at the front of the cage. */
@@ -247,6 +250,7 @@ export class DroneLogic implements DeviceLogic {
   readonly rings = RINGS
   private sticks: DragStick[]
   private hands: { anchor: HandAnchor | null }[]
+  private filters: InputSmoother[]
   private events: DeviceEvent[] = []
   private touching = new Map<string, number>()
 
@@ -254,12 +258,21 @@ export class DroneLogic implements DeviceLogic {
     this.drones = Array.from({ length: count }, (_, n) => onPad(n, count))
     this.sticks = this.drones.map(() => new DragStick())
     this.hands = this.drones.map(() => ({ anchor: null }))
+    this.filters = this.drones.map(() => new InputSmoother())
   }
 
   step(inputs: readonly (DeviceInput | null)[], dt: number) {
     this.drones.forEach((d, n) => {
       const inp = inputs[n]
       const intent = inp ? droneIntent(inp, d, this.sticks[n], this.hands[n]) : none()
+      // Taking over Home is an action: respond to the raw intent before filtering its continuous axes.
+      if (d.phase === 'home' && (Math.abs(intent.fwd) + Math.abs(intent.right) + Math.abs(intent.climb) + Math.abs(intent.turn) > .2 || intent.goal)) d.phase = 'flying'
+      const filter = this.filters[n]
+      if (!inp || (inp.pose && (!inp.pose.touching || !inp.pose.tracked)) || inp.recentred) filter.reset()
+      else {
+        for (const key of ['fwd', 'right', 'climb', 'turn'] as const) intent[key] = filter.sample(key, intent[key], dt)
+        if (intent.goal) intent.goal = intent.goal.map((v, j) => filter.sample(`goal${j}`, v, dt, [d.x, d.y, d.z][j])) as [number, number, number]
+      }
       if (!inp) { this.sticks[n].update(false, [0, 0]); this.hands[n].anchor = null }
       const before = d.phase
       const from: [number, number, number] = [d.x, d.y, d.z]
@@ -328,6 +341,7 @@ export class DroneLogic implements DeviceLogic {
   /** Home: fly back to the pad and land (from the pad, it's already there). */
   home(n: number) {
     const d = this.drones[n]
+    this.filters[n].reset()
     if (d.phase === 'landed') { d.x = d.home[0]; d.z = d.home[1]; d.yaw = 0; return }
     d.phase = 'home'
   }

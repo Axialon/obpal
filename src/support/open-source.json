@@ -13,6 +13,7 @@
     { "name": "Node.js", "by": "The OpenJS Foundation", "what": "Runs the tooling", "license": "MIT", "share": 5, "url": "https://nodejs.org", "give": "https://opencollective.com/nodejs", "packages": [] }
   ],
   "thanks": [
+    { "name": "meshoptimizer", "by": "Arseny Kapoulkine and contributors", "what": "Compresses the original Blender prototypes; three.js bundles its runtime decoder", "license": "MIT", "url": "https://github.com/zeux/meshoptimizer", "packages": ["meshoptimizer"] },
     { "name": "TypeScript, Playwright and windows-rs", "by": "Microsoft", "what": "Types, the end-to-end tests, and ob.Pal Desktop's Windows calls", "packages": ["typescript", "playwright"], "crates": ["windows"] },
     { "name": "Wrangler and Workers", "by": "Cloudflare", "what": "Where ob.Pal runs", "packages": ["wrangler", "@cloudflare/vite-plugin", "@cloudflare/workers-types"] },
     { "name": "DefinitelyTyped", "by": "Its contributors", "what": "Types for the browser extension", "packages": ["@types/chrome"] },

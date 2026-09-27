@@ -5,6 +5,7 @@
  * physics within its limits), with its look in a separate three.js view. Pure: no three.js, no DOM, so node tests it.
  */
 import { Mode, type ControllerId, type Layout, type ModeId, type PadState, type Quat, type TrayControl, type Vec3 } from '@obpal/core'
+import type { CategoryId } from '../catalogue'
 
 export interface DeviceSpec {
   /** Stable id: the sim's address (/sim/device/?d=<id>) and its catalogue card. */
@@ -16,6 +17,8 @@ export interface DeviceSpec {
   unitNames?: string[]
   /** Where the catalogue groups it: Vehicle, Flyer, Camera, Home, Game. */
   kind: string
+  /** The catalogue category; older devices use the catalogue's id map. */
+  category?: CategoryId
   /** One line for its card. */
   blurb: string
   /** What it shows about the control catalogue, one line. */

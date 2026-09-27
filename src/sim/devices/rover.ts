@@ -7,7 +7,8 @@
  * hardest from standstill; it coasts to a stop. It bumps off the fence and the other rovers, and shoves cones.
  */
 import { Controller, Mode, PadButton } from '@obpal/core'
-import { approach, axis, clamp, down, DragStick, readable, wrapPi } from './input'
+import { axis, clamp, down, DragStick, readable, wrapPi } from './input'
+import { InputSmoother, servo } from '../kit/motion'
 import type { DeviceEvent, DeviceInput, DeviceLogic, DeviceSpec } from './types'
 
 export const ROVER_SPEC: DeviceSpec = {
@@ -127,11 +128,14 @@ export function driveTo(r: Rover, tx: number, tz: number): RoverIntent {
 }
 
 /** One step of a rover's motion (not its collisions). */
+const steering = new WeakMap<Rover, number>()
 export function stepRover(r: Rover, i: RoverIntent, dt: number) {
+  if (dt <= 0) return
   const R = ROVER
   // The steering servo; at speed the wheels turn less far, so it stays on its wheels.
   const reach = R.steerMax * (1 - 0.45 * Math.min(1, Math.abs(r.v) / R.vmax))
-  r.steer = approach(r.steer, clamp(i.steer, -1, 1) * reach, R.steerRate, dt)
+  const joint = servo(r.steer, steering.get(r) ?? 0, clamp(i.steer, -1, 1) * reach, dt, { min: -R.steerMax, max: R.steerMax, vmax: R.steerRate, amax: R.steerRate * 10 }, .13)
+  r.steer = joint.position; steering.set(r, joint.velocity)
   const t = clamp(i.throttle, -1, 1)
   let a: number
   const slow = (rate: number) => -Math.sign(r.v) * Math.min(Math.abs(r.v) / dt, rate)
@@ -170,6 +174,7 @@ export class RoverLogic implements DeviceLogic {
   readonly rovers: Rover[]
   readonly cones: Cone[]
   private sticks: DragStick[]
+  private filters: InputSmoother[]
   private events: DeviceEvent[] = []
   /** Bumps already reported, so one knock rumbles once (pair key -> seconds left). */
   private touching = new Map<string, number>()
@@ -177,6 +182,7 @@ export class RoverLogic implements DeviceLogic {
   constructor(count = ROVER_SPEC.units) {
     this.rovers = Array.from({ length: count }, (_, n) => parked(n, count))
     this.sticks = this.rovers.map(() => new DragStick())
+    this.filters = this.rovers.map(() => new InputSmoother())
     // A slalom of cones across the yard, and two further back.
     const spots: [number, number][] = [[-3, -0.7], [-1.5, -1.2], [0, -0.7], [1.5, -1.2], [3, -0.7], [-2.2, -2.2], [2.2, -2.2], [-7.8, -3.8], [-7.8, 0], [7.8, -3.8], [7.8, 0]]
     this.cones = spots.map(([x, z]) => ({ x, z, vx: 0, vz: 0, home: [x, z] }))
@@ -192,6 +198,13 @@ export class RoverLogic implements DeviceLogic {
         if (inp.presses.includes('horn') || inp.presses.includes('pad') || inp.presses.includes('wii-a') || pressed(PadButton.A)) this.horn(n)
         if (inp.presses.includes('lights') || pressed(PadButton.X)) r.lights = !r.lights
       } else this.sticks[n].update(false, [0, 0])
+      const filter = this.filters[n]
+      const released = inp?.point && !inp.held.has('wii-b') && !inp.held.has('mouse-left')
+      if (!inp || intent.brake || inp.recentred || released || (!inp.pad && !inp.touching && !inp.spot && inp.mode !== Mode.tilt)) filter.reset()
+      else {
+        intent.steer = filter.sample('steer', intent.steer, dt)
+        intent.throttle = filter.sample('throttle', intent.throttle, dt)
+      }
       stepRover(r, intent, dt)
     })
     this.collide(dt)
@@ -284,6 +297,7 @@ export class RoverLogic implements DeviceLogic {
     const r = this.rovers[n]
     ;[r.x, r.z, r.h] = r.home
     r.v = r.steer = 0
+    steering.delete(r); this.filters[n].reset()
     r.braking = false
     this.sticks[n].update(false, [0, 0])
   }

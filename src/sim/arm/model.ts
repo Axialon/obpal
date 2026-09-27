@@ -44,6 +44,10 @@ export interface ArmModel {
   plate: THREE.Mesh
   /** Where held blocks sit, between the fingers. */
   grasp: THREE.Object3D
+  /** Secondary mechanisms after the authoritative pose has been applied. */
+  secondary?(dt: number): void
+  /** Optional live-page mesh upgrade; installing is synchronous so instances can be rebuilt atomically. */
+  upgrade?(): Promise<(() => void) | null>
   dispose(): void
 }
 

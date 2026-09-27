@@ -160,7 +160,7 @@ try {
     await check('catalogue: every sim has a card, and their previews come alive', async () => {
       await page.goto(`${ORIGIN}/sim/`)
       const cards = await until('cards', () => page.evaluate(() => window.__sims?.cards().length), 10000)
-      if (cards < 33) throw new Error(`only ${cards} cards`)
+      if (cards < 41) throw new Error(`only ${cards} cards`)
       await until('a live preview', () => page.evaluate(() => document.querySelectorAll('.dcard-stage.live').length), 15000)
       const live = await page.evaluate(() => document.querySelectorAll('.dcard-stage.live').length)
       return `${cards} cards, ${live} previews live`
@@ -228,6 +228,14 @@ try {
       await page.locator('#clear-filters').click()
       await page.locator('[data-category="music"]').click()
       if ((await page.evaluate(() => window.__sims.cards())).join() !== 'studio') throw new Error('Music category did not show the studio')
+    })
+    await check('catalogue: wave 4b is searchable within its categories and controllers', async () => {
+      const rows = [['football', 'games', 'gamepad', 'Table football'], ['marblerun', 'games', 'trackpad', 'Marble run'], ['planetary', 'space-science', 'gamepad', 'Planetary rover'], ['telescope', 'space-science', 'wii', 'Telescope mount'], ['pendulum', 'space-science', 'trackpad', 'Pendulum lab'], ['trebuchet', 'space-science', 'trackpad', 'Trebuchet'], ['slider', 'camera-stage', 'trackpad', 'Camera slider'], ['jib', 'camera-stage', 'gamepad', 'Jib crane']]
+      for (const [id, category, face, q] of rows) {
+        await page.goto(`${ORIGIN}/sim/?${new URLSearchParams({ category, face, q })}`)
+        await until(`${id} filtered card`, () => page.evaluate(id => window.__sims?.cards().join() === id, id))
+        await until(`${id} filtered preview`, () => page.locator(`.dcard[data-id="${id}"] .dcard-stage.live`).count())
+      }
     })
     await check('catalogue: one renderer, only visible previews, at most 30 fps, and resizable reduced-motion stills', async () => {
       await page.goto(`${ORIGIN}/sim/`)
@@ -570,7 +578,7 @@ try {
     await clean('boat', s, p)
     await p.close(); await s.close()
   }
-  for (const e of deviceExercises) if (wanted(e.id)) await exerciseDevice(e, { device, check, at, until, turn, clean })
+  for (const e of deviceExercises) if (wanted(e.id)) await exerciseDevice(e, { device, phone, heldBy, check, at, until, turn, clean })
   await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {
   console.error(e)

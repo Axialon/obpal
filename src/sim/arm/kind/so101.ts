@@ -7,8 +7,7 @@
 import type { ArmKind } from '../kin'
 import type { JointSpec } from '../model'
 import { serialKin, type SerialSpec } from '../serial'
-import { buildSerial } from '../serial3d'
-import { stuffOf } from '../shapes3d'
+import { buildSO101 } from '../so101.view'
 
 export const SO101_JOINTS: JointSpec[] = [
   { key: 'base', name: 'Base', min: -110, max: 110, home: 0, vmax: 90, amax: 300, unit: '°' },
@@ -52,7 +51,7 @@ export const SO101: SerialSpec = {
 export const so101: ArmKind = {
   id: 'so101',
   kin: serialKin(SO101, SO101_JOINTS),
-  build: (n, mats) => buildSerial(SO101, n, stuffOf(mats, '#eef1f5'), { plate: [0.24, 0.08, 0], plateRing: 0.17 }),
+  build: (n, mats) => buildSO101(SO101, n, mats),
   cell: { stand: 0.55, fence: 1.35, blocks: [0.12, 0.2], camera: [1.55, 1.45, 2.15], look: 0.22 },
   drive: { reach: [0.12, 0.8], height: [0.06, 0.95], hover: [0.15, 0.06, 0.5], scale: 1 },
   hardware: true,

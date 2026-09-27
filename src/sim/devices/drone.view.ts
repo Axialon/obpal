@@ -4,95 +4,89 @@
  */
 import * as THREE from 'three'
 import { DRONE, DroneLogic, PYLONS, RINGS, stepDrone, type Drone, type DroneIntent } from './drone'
-import { batch, bolt, cable, cylinder, floorMaterial, maker, plastic } from '../kit'
+import { batch, cable, cylinder, floorMaterial, plastic } from '../kit'
+import { carbon, ceramic, duct, lime, optic, polished, ring, shell, titanium, warmShell } from '../kit/surfaces'
+import { Spring } from '../kit/motion'
+import { instanceCopies } from '../kit/instances'
+import { finishPrototype, loadPrototype, prototypeNodes, retirePrototype } from '../kit/prototype'
 import type { Stage } from './stage'
 import type { Theme } from '../../ui/themes'
 import { blobShadow, box, mats, plate, previewScene, wear, type DeviceView, type Preview } from './view'
 
-interface DroneModel { root: THREE.Group; body: THREE.Group; gimbal: THREE.Group; props: THREE.Group[]; blurs: THREE.Mesh[]; light: THREE.MeshStandardMaterial; shadow: THREE.Mesh }
+interface DroneModel { root: THREE.Group; body: THREE.Group; gimbal: THREE.Group; props: THREE.Group[]; blurs: THREE.Mesh[]; blades: THREE.MeshStandardMaterial; light: THREE.MeshStandardMaterial; shadow: THREE.Mesh; pitch: Spring; roll: Spring; leads: THREE.Group; sway: Spring }
 
 /** The model is drawn 0.26 m in radius, then scaled to the drone's size in the logic. */
 const SCALE = DRONE.radius / 0.26
 
 function buildDrone(n: number): DroneModel {
-  const root = new THREE.Group()
-  const body = new THREE.Group()
-  body.scale.setScalar(SCALE)
-  root.add(body)
-  const shell = mats.body()
-  const dark = mats.dark()
+  const root = new THREE.Group(), body = new THREE.Group()
+  body.scale.setScalar(SCALE); root.add(body)
   const light = mats.glow()
-  const core = box(0.2, 0.07, 0.26, shell, 0.03)
-  core.castShadow = true
-  core.position.y = 0.09
-  const top = box(0.14, 0.03, 0.18, dark, 0.012)
-  top.position.y = 0.135
-  const strip = box(0.16, 0.012, 0.012, light, 0.004)
-  strip.position.set(0, 0.1, -0.132)
-  const tail = strip.clone()
-  tail.position.z = 0.132
-  const cam = new THREE.Mesh(new THREE.SphereGeometry(0.03, 20, 14), dark)
-  cam.position.set(0, 0.06, -0.14)
-  body.add(core, top, strip, tail, cam)
-  const mount = box(0.1, 0.055, 0.07, dark); mount.position.set(0, 0.04, -0.12); body.add(mount)
-  const lens = cylinder(0.018, 0.025, plastic('#244c65')); lens.rotation.x = Math.PI / 2; lens.position.set(0, 0.05, -0.167); body.add(lens)
-  const gimbal = new THREE.Group()
-  gimbal.position.set(0, 0.05, -0.14)
-  for (const part of [mount, cam, lens]) { part.position.sub(gimbal.position); gimbal.add(part) }
-  body.add(gimbal)
+  // A flattened capsule, split into six curved panels over a continuous carbon pressure hull.
+  const core = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), carbon)
+  core.scale.set(0.101, 0.06, 0.136); core.position.y = 0.102; core.castShadow = true; body.add(core)
+  for (let i = 0; i < 6; i++) {
+    const panel = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 10, i * Math.PI / 3 + 0.018, Math.PI / 3 - 0.036, 0.12, 1.48), i % 3 === 0 ? warmShell : ceramic)
+    panel.scale.set(0.108, 0.064, 0.14); panel.position.y = 0.104; panel.castShadow = true; body.add(panel)
+  }
+  const spine = shell(0.038, 0.19, 0.013, titanium); spine.rotation.x = Math.PI / 2; spine.position.y = 0.168; body.add(spine)
   for (const side of [-1, 1]) {
-    body.add(cable([[side * 0.085, 0.035, -0.1], [side * 0.11, 0.01, -0.15], [side * 0.11, 0.01, 0.16], [side * 0.085, 0.035, 0.1]], 0.008, mats.metal()))
-    const screw = bolt(0.006); screw.position.set(side * 0.07, 0.129, -0.075); body.add(screw)
+    const cheek = shell(0.018, 0.145, 0.042, titanium); cheek.rotation.x = Math.PI / 2; cheek.position.set(side * 0.093, 0.094, 0.005); body.add(cheek)
+    body.add(cable([[side * 0.067, 0.071, -.08], [side * .09, .012, -.12], [side * .09, .012, .12], [side * .067, .071, .08]], .007, polished))
+    const seam = box(.028, .003, .006, lime, .001); seam.position.set(side * .045, .155, -.07); body.add(seam)
   }
-  maker(body, 0, 0.153, -0.04, 0.035)
-  const props: THREE.Group[] = []
-  const blurs: THREE.Mesh[] = []
-  const bladeGeo = new THREE.BoxGeometry(0.2, 0.004, 0.022)
-  const blurMat = new THREE.MeshBasicMaterial({ color: '#e6ebf2', transparent: true, opacity: 0, depthWrite: false })
+  const gimbal = new THREE.Group(); gimbal.position.set(0, .065, -.132); body.add(gimbal)
+  const camera = shell(.067, .041, .049, carbon); gimbal.add(camera)
+  const window = shell(.043, .021, .008, optic); window.position.z = -.026; gimbal.add(window)
+  const eye = box(.022, .003, .009, lime, .001); eye.position.set(0, -.012, -.027); gimbal.add(eye)
+  const leads = new THREE.Group(); leads.position.set(.065, .067, .055); body.add(leads)
+  leads.add(cable([[0, 0, 0], [.012, -.025, .02], [.012, -.02, .045], [0, 0, .06]], .003, carbon))
+  batch(leads)
+  const props: THREE.Group[] = [], blurs: THREE.Mesh[] = []
+  const blades = titanium.clone(); blades.userData = {}; blades.transparent = true; blades.depthWrite = false
+  const blurMat = new THREE.MeshBasicMaterial({ color: '#b9c4c4', transparent: true, opacity: 0, depthWrite: false })
   for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
-    // An arm out to each motor, the motor, and its propeller.
-    const arm = box(0.2, 0.022, 0.03, dark, 0.008)
-    arm.position.set(x * 0.1, 0.09, z * 0.1)
-    arm.rotation.y = x * z > 0 ? -Math.PI / 4 : Math.PI / 4
-    const motor = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.032, 0.05, 20), mats.metal())
-    motor.position.set(x * 0.17, 0.1, z * 0.17)
-    const prop = new THREE.Group()
-    prop.position.set(x * 0.17, 0.13, z * 0.17)
-    const blade = new THREE.Mesh(bladeGeo, dark)
-    prop.add(blade, blade.clone().rotateY(Math.PI / 2))
-    const blur = new THREE.Mesh(new THREE.CircleGeometry(0.105, 32), blurMat)
-    blur.rotation.x = -Math.PI / 2
-    blur.position.copy(prop.position)
-    const guard = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.006, 8, 48), shell)
-    guard.rotation.x = Math.PI / 2
-    guard.position.copy(prop.position)
-    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.07, 6), dark)
-    foot.position.set(x * 0.08, 0.035, z * 0.1)
-    body.add(arm, motor, prop, blur, guard, foot)
-    const collar = cylinder(0.029, 0.008, dark); collar.position.set(x * 0.17, 0.113, z * 0.17); body.add(collar)
-    const cap = cylinder(0.012, 0.015); cap.position.y = 0.006; prop.add(cap)
-    batch(prop)
-    const lead = cable([[x * 0.05, 0.1, z * 0.04], [x * 0.11, 0.108, z * 0.11], [x * 0.16, 0.108, z * 0.16]], 0.003, plastic('#b5693b')); body.add(lead)
-    props.push(prop)
-    blurs.push(blur)
+    const arm = shell(.038, .19, .025, carbon); arm.rotation.set(Math.PI / 2, 0, x * z > 0 ? Math.PI / 4 : -Math.PI / 4); arm.position.set(x * .105, .086, z * .105); body.add(arm)
+    const casing = duct(.112, .038); casing.position.set(x * .17, .12, z * .17); body.add(casing)
+    const lip = ring(.106, .003, polished); lip.rotation.x = Math.PI / 2; lip.position.set(x * .17, .138, z * .17); body.add(lip)
+    const foot = cylinder(.008, .068, carbon, 8); foot.position.set(x * .08, .034, z * .10); body.add(foot)
+    const motor = cylinder(.027, .04, titanium, 24); motor.position.set(x * .17, .10, z * .17); body.add(motor)
+    // Fixed stators sit below three swept blades; the casing stays still as the rotor accelerates.
+    for (let j = 0; j < 5; j++) {
+      const a = j * Math.PI * 2 / 5
+      const fin = box(.075, .009, .004, carbon, .001); fin.rotation.y = -a
+      fin.position.set(x * .17 + Math.cos(a) * .06, .11, z * .17 + Math.sin(a) * .06); body.add(fin)
+    }
+    const prop = new THREE.Group(); prop.position.set(x * .17, .133, z * .17)
+    for (let j = 0; j < 3; j++) {
+      const blade = shell(.023, .087, .003, blades, .36); blade.rotation.x = Math.PI / 2
+      const rotor = new THREE.Group(); rotor.userData.static = true; rotor.rotation.y = j * Math.PI * 2 / 3
+      blade.position.z = .049; blade.rotation.z = -.22; rotor.add(blade); prop.add(rotor)
+    }
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(.016, 16, 10), polished); cap.scale.y = .45; prop.add(cap)
+    batch(prop, [], true)
+    const blur = new THREE.Mesh(new THREE.CircleGeometry(.098, 40), blurMat); blur.rotation.x = -Math.PI / 2; blur.position.copy(prop.position); blur.position.y += .001
+    body.add(prop, blur); props.push(prop); blurs.push(blur)
+    const lead = cable([[x * .06, .09, z * .04], [x * .1, .102, z * .10], [x * .16, .101, z * .16]], .0025, carbon); body.add(lead)
   }
-  const num = plate(n + 1, 0.07)
-  num.rotation.x = -Math.PI / 2
-  num.position.set(0, 0.152, 0.02)
-  body.add(num)
-  const shadow = blobShadow(0.3 * SCALE, 0.5)
-  batch(body, [...props, ...blurs])
-  return { root, body, gimbal, props, blurs, light, shadow }
+  const tail = box(.046, .006, .009, light, .002); tail.position.set(0, .095, .136); body.add(tail)
+  const num = plate(n + 1, .045); num.rotation.x = -Math.PI / 2; num.position.set(0, .177, .028); body.add(num)
+  num.name = 'number'
+  const shadow = blobShadow(.3 * SCALE, .5)
+  batch(body, [...props, ...blurs, gimbal, leads]); batch(gimbal)
+  return { root, body, gimbal, props, blurs, blades, light, shadow, pitch: new Spring(), roll: new Spring(), leads, sway: new Spring(0, .24) }
 }
 
-function placeDrone(m: DroneModel, d: Drone, color: string | null) {
+function placeDrone(m: DroneModel, d: Drone, color: string | null, dt: number) {
   m.root.position.set(d.x, d.y, d.z)
   m.root.rotation.y = d.yaw
   m.body.rotation.set(d.pitch, 0, -d.roll, 'YXZ')
-  m.gimbal.quaternion.copy(m.body.quaternion).invert()
+  m.gimbal.rotation.set(m.pitch.step(-d.pitch, dt), 0, m.roll.step(d.roll, dt), 'YXZ')
+  m.leads.rotation.z = m.sway.step(d.pitch * .45, dt)
   m.props.forEach((p, i) => { p.rotation.y = d.spin * (i % 3 === 0 ? 1 : -1) })
-  for (const b of m.blurs) { b.visible = d.rotor > 0.02; (b.material as THREE.MeshBasicMaterial).opacity = d.rotor * 0.28 }
-  for (const p of m.props) p.visible = d.rotor < 0.7
+  for (const b of m.blurs) (b.material as THREE.MeshBasicMaterial).opacity = d.rotor * 0.28
+  const fade = Math.max(0, Math.min(1, (d.rotor - .12) / .65))
+  m.blades.opacity = 1 - fade * fade * (3 - 2 * fade)
   wear(m.light, color, 0.5, 2.6)
   // The shadow stays on the floor, softer and wider the higher it flies.
   m.shadow.position.set(d.x, 0.003, d.z)
@@ -181,6 +175,30 @@ export function createView(stage: Stage, logic: DroneLogic): DeviceView {
   const rings = logic.rings.map((r) => { const m = buildRing(r); stage.scene.add(m.group); return m })
   const pads = logic.drones.map((d, n) => { const p = buildPad(n); p.group.position.set(d.home[0], 0, d.home[1]); stage.scene.add(p.group); return p })
   const models = logic.drones.map((_, n) => { const m = buildDrone(n); stage.scene.add(m.root, m.shadow); return m })
+  const copies = instanceCopies(stage.scene); copies.set(models.map(m => m.root))
+  models.forEach(m => { m.root.userData.prototype = 'procedural' })
+  void Promise.all(models.map(async m => {
+    const scene = await loadPrototype('drone')
+    if (!scene) return null
+    const nodes = prototypeNodes(scene, ['body', 'gimbal', 'leads', 'prop0', 'prop1', 'prop2', 'prop3'])
+    finishPrototype(scene, { owner: m.light, rotor: m.blades })
+    return nodes
+  })).then(rigs => {
+    if (rigs.some(r => !r) || !models.every(m => m.root.parent === stage.scene)) return
+    copies.clear()
+    rigs.forEach((rig, i) => {
+      const m = models[i], old = m.body, body = rig!.body as THREE.Group
+      body.scale.copy(old.scale)
+      body.add(...m.blurs, old.getObjectByName('number')!)
+      m.root.add(body); m.body = body
+      m.gimbal = rig!.gimbal as THREE.Group; m.leads = rig!.leads as THREE.Group
+      m.props = [rig!.prop0, rig!.prop1, rig!.prop2, rig!.prop3] as THREE.Group[]
+      retirePrototype(old)
+      m.root.userData.prototype = 'blender'
+    })
+    copies.set(models.map(m => m.root)); stage.view.invalidate()
+    performance.mark('obpal:drone:visible')
+  }).catch(() => { /* A malformed optional asset leaves the procedural models in place. */ })
   // The rings glow lavender on a dark surface, ultraviolet on the light one.
   let ringColor = '#b3a4ff'
   const setTheme = (t: Theme) => {
@@ -199,7 +217,7 @@ export function createView(stage: Stage, logic: DroneLogic): DeviceView {
     pickY: 0,
     update(colors, t, dt) {
       logic.drones.forEach((d, n) => {
-        placeDrone(models[n], d, colors[n])
+        placeDrone(models[n], d, colors[n], dt)
         wear(pads[n].glow, colors[n], 0.4, 1.8)
         // A ring flown through flashes in the pilot's colour.
         if (d.rings !== passed[n]) {
@@ -209,6 +227,7 @@ export function createView(stage: Stage, logic: DroneLogic): DeviceView {
           rings[i].mat.emissive.set(colors[n] ?? '#ffffff')
         }
       })
+      copies.update()
       rings.forEach((r, i) => {
         flash[i] = Math.max(0, flash[i] - dt * 1.2)
         if (!flash[i]) r.mat.emissive.set(ringColor)
@@ -242,7 +261,7 @@ export function preview(): Preview {
       const i: DroneIntent = { fwd: 0, right: 0, climb: 0, turn: 0, goal, toggle: false }
       stepDrone(d, i, dt)
       d.yaw = Math.atan2(-Math.cos(a), Math.sin(a))
-      placeDrone(m, d, '#c6ff34')
+      placeDrone(m, d, '#c6ff34', dt)
       ring.mat.emissiveIntensity = 1.5 + 0.3 * Math.sin(t * 2)
     },
   }

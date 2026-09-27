@@ -51,6 +51,7 @@ export function armPreview(id: ArmKindId): ArmPreview {
   const box = new THREE.Box3().setFromObject(model.root)
   const where = new THREE.Vector3()
   let at = 0
+  let previousTime: number | null = null
   return {
     object,
     size: { height: box.max.y, reach: reach + 0.1 },
@@ -67,6 +68,8 @@ export function armPreview(id: ArmKindId): ArmPreview {
       const r = reachDown(kin, yaw, reach, height, 0, null, pose)
       if (r) pose = r.pose
       put(pose, 1 + (held - 1) * grip)
+      model.secondary?.(previousTime === null ? 0 : Math.max(0, Math.min(.05, t - previousTime)))
+      previousTime = t
       // The block rides in the gripper once it's closed on it; else it sits on the spot it was last put down on.
       if (grip > 0.95) {
         model.grasp.getWorldPosition(where)

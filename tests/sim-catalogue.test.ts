@@ -72,7 +72,7 @@ describe('the sim catalogue', () => {
     expect(new Set(ids).size).toBe(ids.length)
     for (const s of SIMS) expect(s.href).toBeTruthy()
     expect(ids.length).toBeGreaterThanOrEqual(DEVICES.length + 8)
-    expect(ids.length).toBeGreaterThanOrEqual(33)
+    expect(ids.length).toBeGreaterThanOrEqual(41)
     expect(PROPOSED).toEqual([])
     for (const s of SIMS) expect(typeof s.preview).toBe('function')
   })

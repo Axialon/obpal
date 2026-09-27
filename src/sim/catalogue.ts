@@ -35,6 +35,7 @@ const deviceCards: SimCard[] = DEVICES.map((d) => ({
   id: d.spec.id,
   name: d.spec.name,
   kind: d.spec.kind,
+  category: d.spec.category,
   blurb: d.spec.blurb,
   teaches: d.spec.teaches,
   controllers: d.spec.controllers,
@@ -81,13 +82,21 @@ export type CategoryId = typeof CATEGORIES[number]['id']
 export type CollectionId = CategoryId | 'featured' | 'new'
 
 const categories: Record<string, CategoryId> = {
+  football: 'games',
+  marblerun: 'games',
+  planetary: 'space-science',
+  telescope: 'space-science',
+  pendulum: 'space-science',
+  trebuchet: 'space-science',
+  slider: 'camera-stage',
+  jib: 'camera-stage',
   rover: 'vehicles', drone: 'flying', maze: 'games', ptz: 'camera-stage', lamp: 'home', claw: 'games',
   boat: 'vehicles', spotlights: 'camera-stage', vacuum: 'home', tank: 'vehicles', excavator: 'industrial',
   forklift: 'industrial', painter: 'camera-stage', gimbal: 'camera-stage', plane: 'flying', slotcars: 'games',
   dog: 'robotics', sorting: 'industrial', kart: 'vehicles', helicopter: 'flying', submarine: 'vehicles',
   smarthome: 'home', pinball: 'games', airhockey: 'games', studio: 'music', arena: 'games', viewer: 'space-science',
 }
-const fresh = new Set(['dog', 'sorting', 'kart', 'helicopter', 'submarine', 'smarthome', 'pinball', 'airhockey', 'studio'])
+const fresh = new Set(['football', 'marblerun', 'planetary', 'telescope', 'pendulum', 'trebuchet', 'slider', 'jib', 'dog', 'sorting', 'kart', 'helicopter', 'submarine', 'smarthome', 'pinball', 'airhockey', 'studio'])
 const featured = new Set(['dog', 'kart', 'pinball', 'drone', 'arm-so101', 'lamp', 'studio'])
 
 export const SIMS: SimCard[] = [...deviceCards, ...ARM_CARDS, ...SCENES].map(c => ({

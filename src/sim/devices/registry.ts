@@ -39,6 +39,14 @@ import { SUBMARINE_SPEC, SubmarineLogic } from './submarine'
 import { SMARTHOME_SPEC, SmarthomeLogic } from './smarthome'
 import { AIRHOCKEY_SPEC, AirhockeyLogic } from './airhockey'
 import { PINBALL_SPEC, PinballLogic } from './pinball'
+import { FOOTBALL_SPEC, FootballLogic } from './football'
+import { MARBLERUN_SPEC, MarblerunLogic } from './marblerun'
+import { PLANETARY_SPEC, PlanetaryLogic } from './planetary'
+import { TELESCOPE_SPEC, TelescopeLogic } from './telescope'
+import { PENDULUM_SPEC, PendulumLogic } from './pendulum'
+import { TREBUCHET_SPEC, TrebuchetLogic } from './trebuchet'
+import { SLIDER_SPEC, SliderLogic } from './slider'
+import { JIB_SPEC, JibLogic } from './jib'
 
 export interface DeviceEntry<L extends DeviceLogic = DeviceLogic> {
   spec: DeviceSpec
@@ -50,6 +58,14 @@ export interface DeviceEntry<L extends DeviceLogic = DeviceLogic> {
 const entry = <L extends DeviceLogic>(e: DeviceEntry<L>) => e as unknown as DeviceEntry
 
 export const DEVICES: DeviceEntry[] = [
+  entry({ spec: JIB_SPEC, logic: () => new JibLogic(), view: () => import('./jib.view') }),
+  entry({ spec: SLIDER_SPEC, logic: () => new SliderLogic(), view: () => import('./slider.view') }),
+  entry({ spec: TREBUCHET_SPEC, logic: () => new TrebuchetLogic(), view: () => import('./trebuchet.view') }),
+  entry({ spec: PENDULUM_SPEC, logic: () => new PendulumLogic(), view: () => import('./pendulum.view') }),
+  entry({ spec: TELESCOPE_SPEC, logic: () => new TelescopeLogic(), view: () => import('./telescope.view') }),
+  entry({ spec: PLANETARY_SPEC, logic: () => new PlanetaryLogic(), view: () => import('./planetary.view') }),
+  entry({ spec: MARBLERUN_SPEC, logic: () => new MarblerunLogic(), view: () => import('./marblerun.view') }),
+  entry({ spec: FOOTBALL_SPEC, logic: () => new FootballLogic(), view: () => import('./football.view') }),
   entry({ spec: ROVER_SPEC, logic: () => new RoverLogic(), view: () => import('./rover.view') }),
   entry({ spec: DRONE_SPEC, logic: () => new DroneLogic(), view: () => import('./drone.view') }),
   entry({ spec: MAZE_SPEC, logic: () => new MazeLogic(), view: () => import('./maze.view') }),

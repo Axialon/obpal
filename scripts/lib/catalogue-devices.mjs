@@ -1,5 +1,13 @@
 /** Phone gestures for the second device collection; state is read only from the screen. */
 export const deviceExercises = [
+  { id: 'jib', face: 'face.gamepad', drag: ['.gp-stick[data-stick="0"]', 45, -25], field: 'swing', key: 'Space', button: 'actions', home: [['swing', 0], ['boom', 0.15], ['pan', 0]] },
+  { id: 'slider', face: 'face.trackpad', drag: ['#pad', 55, 0], field: 'x', key: 'Space', button: 'actions', home: [['x', 0], ['pan', 0], ['tilt', 0]] },
+  { id: 'trebuchet', face: 'face.trackpad', drag: ['#pad', 45, -25], field: 'weight', key: 'Space', button: 'actions', home: [['weight', 25], ['angle', 45], ['z', -1.8]] },
+  { id: 'pendulum', face: 'face.trackpad', drag: ['#pad', 50, -15], field: 'length', key: 'Space', button: 'actions', home: [['length', 1.2], ['angle', 0], ['omega', 0]] },
+  { id: 'telescope', face: 'face.wii', turn: true, field: 'pan', key: 'Space', button: 'actions', home: [['pan', 0], ['elevation', 0.4], ['zoom', 1]] },
+  { id: 'planetary', face: 'face.gamepad', drag: ['.gp-stick[data-stick="0"]', 15, -50], field: 'z', key: 'Space', button: 'actions', home: [['x', -2], ['z', 3], ['v', 0]] },
+  { id: 'marblerun', face: 'face.trackpad', drag: ['#pad', 45, -20], field: 'cursorX', key: 'Space', button: 'actions', home: [['cursorX', 2], ['cursorZ', 2], ['x', -1.16]] },
+  { id: 'football', face: 'face.gamepad', drag: ['.gp-stick[data-stick="0"]', 45, -40], field: 'x', key: 'Space', button: 'actions', home: [['x', 0], ['angle', 0]] },
   { id: 'pinball', face: 'face.gamepad', hold: '.gp-trig[data-trig="1"]', field: 'balls', key: 'KeyN', button: 'actions', home: [['x', 0.59], ['z', 1.05], ['plunger', 0]] },
   { id: 'airhockey', face: 'face.trackpad', drag: ['#pad', 65, -25], field: 'x', key: 'Space', button: 'actions', home: [['x', 0], ['z', 1.05]] },
   { id: 'smarthome', face: 'face.trackpad', drag: ['#pad', 0, -55], field: 'target', key: 'KeyM', button: 'actions', home: [['target', 0.7]] },
@@ -113,7 +121,7 @@ export const deviceExercises = [
   },
 ]
 
-export async function exerciseDevice(e, { device, check, at, until, turn, clean }) {
+export async function exerciseDevice(e, { device, phone, heldBy, check, at, until, turn, clean }) {
   const { s, p, face } = await device(e.id, { landscape: e.face === 'face.gamepad' })
   const state = () => at(s, () => window.__device.logic.units[0])
   await check(`${e.id}: its suggested controller moves the device`, async () => {
@@ -229,6 +237,10 @@ export async function exerciseDevice(e, { device, check, at, until, turn, clean 
     })
     await p.cdp.send('DeviceOrientation.setDeviceOrientationOverride', { alpha: 10, beta: 0, gamma: 0 })
   })
+  if (['football', 'marblerun', 'planetary', 'telescope', 'pendulum', 'trebuchet', 'slider', 'jib'].includes(e.id)) {
+    const { exerciseWave4b } = await import('./catalogue-wave4b.mjs')
+    await exerciseWave4b(e.id, { s, p, state, phone, heldBy, check, at, until, clean })
+  }
   await clean(e.id, s, p)
   await p.close()
   await s.close()

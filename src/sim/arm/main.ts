@@ -21,6 +21,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { batch, box, environment, floorMaterial, metal, palette, plastic, softKey } from '../kit'
 import { fixtures, payloadSpeed, STOCK } from './workspace'
 import { instanceCopies } from '../kit/instances'
+import { InputSmoother, servo } from '../kit/motion'
 import type { SceneNode } from '@obpal/core'
 import { Mode, PadButton, type Frame, type Layout, type PadState, type Quat } from '@obpal/host'
 import { applyTheme, initialTheme } from '../../ui/themes'
@@ -233,6 +234,10 @@ function addArm(): Arm | null {
   arms.push(arm)
   arms.sort((a, b) => a.n - b.n)
   armInstances.set(arms.map(a => a.model.root))
+  void model.upgrade?.().then(install => {
+    if (!install || !arms.some(a => a.model === model)) return
+    armInstances.clear(); install(); armInstances.set(arms.map(a => a.model.root)); view.invalidate()
+  }).catch(() => { /* Optional meshes must never prevent an arm from running. */ })
   refreshNodes()
   return arm
 }
@@ -929,6 +934,7 @@ function clawStep(a: Arm, now: number): string {
 }
 
 // ---- the loop ----
+const jointInputs = new WeakMap<Joint, InputSmoother>()
 
 function stepArm(a: Arm, now: number, dt: number) {
   const s = sim
@@ -965,6 +971,22 @@ function stepArm(a: Arm, now: number, dt: number) {
         if (c === null) { j.state = 'deadman'; if (!a.homing && j.spec.key !== 'gripper') j.target = null } else v = c
       }
     }
+    // The prototype's simulated joints share a damped response. The hardware path retains its existing controller.
+    if (KIND.id === 'so101' && !hw && !stopped) {
+      let filter = jointInputs.get(j)
+      if (!filter) { filter = new InputSmoother(); jointInputs.set(j, filter) }
+      const released = j.state === 'deadman' || j.state === 'watchdog' || (!who && !armWho && j.target === null)
+      if (released) filter.reset()
+      const target = j.target !== null ? filter.sample('target', j.target, dt, j.angle) : j.angle + (released ? 0 : filter.sample('velocity', v, dt)) * .2
+      const next = servo(j.angle, j.vel, target, dt, { ...j.spec, vmax: j.spec.vmax * cap, amax: j.spec.amax * cap })
+      j.angle = next.position; j.vel = next.velocity
+      const tolerance = j.spec.unit === '°' ? .05 : .002
+      if (j.target !== null && Math.abs(j.target - j.angle) < tolerance && Math.abs(j.vel) < tolerance * 6) { j.target = null; filter.reset() }
+      if ((v || j.target !== null) && (j.angle === j.spec.min || j.angle === j.spec.max)) j.state ||= 'limit'
+      a.model.apply[i](j.angle)
+      return
+    }
+    if (stopped) jointInputs.delete(j)
     // Following a target (the whole arm, 1:1, home, the gripper): a proportional approach under the same caps.
     if (j.target !== null && !stopped) {
       const e = j.target - j.angle
@@ -997,6 +1019,7 @@ function stepArm(a: Arm, now: number, dt: number) {
   // The blocks: a held one keeps the gripper from closing further; the rest are pushed, stop the arm, or are taken.
   holdStep(a)
   blockStep(a, was, gripWas, following)
+  a.model.secondary?.(dt)
   if (a.homing && a.joints.every((j) => j.target === null)) a.homing = false
   // Rings wear their controller's colour, and flash when control changes.
   a.joints.forEach((j, i) => paint(a.model.rings[i], s?.claims.controller(j.node), j, dt, Math.abs(j.vel) > 1e-3))
@@ -1006,7 +1029,8 @@ function stepArm(a: Arm, now: number, dt: number) {
 
 function paint(ring: THREE.Mesh, who: string | undefined, o: { flash: number }, dt: number, moving: boolean) {
   const mat = ring.material as THREE.MeshStandardMaterial
-  mat.emissive.set(who ? sim!.colorOf(who) || '#5b6472' : '#5b6472')
+  const idle = ring.userData.idleColor ?? '#5b6472'
+  mat.emissive.set(who ? sim!.colorOf(who) || idle : idle)
   o.flash = Math.max(0, o.flash - dt / 0.7)
   mat.emissiveIntensity = (who ? 1.4 : 0.25) + 2.2 * o.flash + (moving ? 0.6 : 0)
   ring.scale.setScalar(1 + 0.25 * o.flash)

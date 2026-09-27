@@ -21,7 +21,7 @@ export function instanceCopies(scene: THREE.Scene) {
         }
         o.children.forEach((c, i) => visit(c, `${path}/${i}`))
       }
-      copies.forEach(root => visit(root, ''))
+      copies.forEach(root => visit(root, root.userData.prototype ?? ''))
       for (const sources of buckets.values()) {
         if (sources.length < 2) continue
         const first = sources[0]
