@@ -34,6 +34,11 @@ const settleHint = () => {
   hintAway = window.setTimeout(() => hint.classList.add('gone'), 1400)
 }
 const hero = mountHero(heroEl, $<HTMLCanvasElement>('.hero-stage'), $('#hero-h'), { still, onInput: settleHint })
+// Playing with a phone brings sound: a button in the corner switches it on (browsers want a click for that) or off.
+const soundBtn = $<HTMLButtonElement>('[data-sound]')
+const showSound = () => { soundBtn.setAttribute('aria-pressed', String(hero.soundOn)); soundBtn.setAttribute('aria-label', hero.soundOn ? 'Sound on' : 'Sound off') }
+hero.onExperience = (on) => { soundBtn.hidden = !on; showSound() }
+soundBtn.addEventListener('click', async () => { await hero.sound(!hero.soundOn); showSound() })
 // For the end-to-end test (scripts/e2e-home.mjs), as the viewer exposes its own.
 Object.assign(window, { __home: { tips: () => hero.tips(), dot: () => hero.dot() } })
 
@@ -50,7 +55,7 @@ if (desk) {
         const live = () => {
           const n = remote.participants.length
           heroEl.toggleAttribute('data-live', n > 0)
-          if (n) { hint.classList.remove('gone'); hintText.textContent = n > 1 ? `${n} phones: point them at the screen` : 'Point your phone at the screen'; hintAway = 0; settleHint() }
+          if (n) { hint.classList.remove('gone'); hintText.textContent = n > 1 ? `${n} phones: point to roll, flick up to toss` : 'Point your phone to roll, flick it up to toss'; hintAway = 0; settleHint() }
         }
         remote.on('join', live)
         remote.on('leave', live)
@@ -82,12 +87,12 @@ if (desk) {
     hintText.textContent = 'Tap, then tilt your phone'
     hint.addEventListener('click', async () => {
       if (!(await hero.tilt())) return
-      hintText.textContent = 'Tilt your phone to roll the light'
+      hintText.textContent = 'Tilt to roll, flick up to toss'
       hintAway = 0
       for (const cue of document.querySelectorAll('.play-cue span')) cue.textContent = 'Tilt or hold to play'
     })
   } else {
-    hintText.textContent = 'Tap to bounce the light'
+    hintText.textContent = 'Tap to hop the marble'
     hint.addEventListener('click', () => hint.classList.add('gone'))
   }
 }

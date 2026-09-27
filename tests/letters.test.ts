@@ -31,7 +31,7 @@ describe('the opening', () => {
       expect(stops.length).toBe(new Set(letters.map((l) => l.word)).size + 1)
       const o = newOrb(stops[0].x, stops[0].z, 0.2)
       // As the hero does: dropped in over the first word, with the rest of the route to hop, then left to settle.
-      Object.assign(o, { y: 2.4, route: stops.slice(1), active: false, resting: false })
+      Object.assign(o, { y: 2.4, route: stops.slice(1), resting: false })
       const landedOn: number[] = []
       let t = 0
       for (; t < 20 && !o.resting; t += 1 / 60) {

@@ -33,6 +33,9 @@
 .hero-stage { opacity: 0; transition: opacity 0.6s var(--ease) 0.18s; }
 html.field3d .hero h1.lit { color: transparent; }
 html.field3d .hero-stage { opacity: 1; }
+/* The 3D field brings its own dots, which answer the marbles; the page's still ones step aside. */
+.hero::after { transition: opacity 0.6s var(--ease); }
+html.field3d .hero::after { opacity: 0; }
 @media (forced-colors: active) { html.field3d .hero h1.lit { color: CanvasText; } html.field3d .hero-stage { display: none; } }
 .hero .lede { margin: 0 0 32px; max-width: 34em; color: var(--secondary); font-size: clamp(17px, 1.5vw, 20px); line-height: 1.55; }
 .hero .cta { display: flex; flex-wrap: wrap; gap: 12px; }
@@ -79,6 +82,16 @@ html.field3d .hero-stage { opacity: 1; }
 .hero-hint .ic { width: 18px; height: 18px; color: var(--accent-text); }
 .hero-hint.gone { opacity: 0; transform: translate3d(-50%, 10px, 0); pointer-events: none; }
 @keyframes hint-bob { 0%, 100% { transform: translate3d(-50%, 0, 0); } 50% { transform: translate3d(-50%, -5px, 0); } }
+/* Sound, while playing with a phone: a glass button in the corner, on or off. */
+.hero-sound { position: absolute; right: max(var(--gut), 24px); bottom: 30px; z-index: 2; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border-radius: 50%;
+  border: 1px solid var(--line); background: rgb(var(--base-rgb) / 0.5); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); color: var(--secondary); cursor: pointer;
+  transition: color 0.2s var(--ease), border-color 0.2s var(--ease), box-shadow 0.3s var(--ease), transform 0.2s var(--ease); }
+.hero-sound:hover { color: var(--ink); border-color: rgb(var(--accent-rgb) / 0.45); }
+.hero-sound:active { transform: scale(0.94); }
+.hero-sound[aria-pressed="true"] { color: var(--accent-text); border-color: rgb(var(--accent-rgb) / 0.4); box-shadow: 0 0 0 4px rgb(var(--accent-rgb) / 0.08), 0 8px 24px -10px rgb(var(--accent-rgb) / 0.55); }
+.hero-sound .ic { width: 20px; height: 20px; }
+.hero-sound .when-on, .hero-sound[aria-pressed="true"] .when-off { display: none; }
+.hero-sound[aria-pressed="true"] .when-on { display: block; }
 
 /* ---- sections ------------------------------------------------------------------------------------------------ */
 

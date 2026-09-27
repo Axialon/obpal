@@ -3,7 +3,7 @@ import '../styles/base.css'
 import '../styles/controller.css'
 import {
   b64url, DeviceLink, emptyState, PadButton, encodeState, Flag, forgetAllPairs, getPair, listPairs, loadCertificate, Mode, OneEuro,
-  parsePairingCode, qIdentity, qScale, relativeInView, STATE_BYTES, Tier, viewFrameAt,
+  parsePairingCode, qIdentity, qScale, relativeInView, STATE_BYTES, Tier, TossDetector, viewFrameAt,
   type Caps, type HostMsg, type Layout, type LinkStatus, type ModeId, type PairingCode, type Quat, type SceneNode, type ScenePerson, type TierId,
   type TrayControl,
 } from '@obpal/core'
@@ -401,10 +401,17 @@ async function boot(code: PairingCode) {
   function begin() {
     started = true
     syncMotion()
+    // A host that bounces things (the home page's marbles) asks for tosses: the phone flicked upward, screen level.
+    const tosses = new TossDetector()
     motion.onSample = (dt) => {
       if (anchorOnSample) { anchorOnSample = false; anchor() }
       if (recenterOnSample) { recenterOnSample = false; recenterPointer() }
       pump(dt)
+      const a = motion.accel
+      if (!layout.toss || !a || !motion.q || !link.ready) return
+      const up = motion.up()
+      const v = tosses.sample(a[0] * up[0] + a[1] * up[1] + a[2] * up[2], dt / 1000)
+      if (v !== null) link.sendCtl({ t: 'toss', v: Math.round(v * 100) / 100 })
     }
     // Every frame while something is driven; otherwise a 15 Hz keep-alive.
     const loop = () => { if (!motion.flowing) pump(16.7); setTimeout(loop, busy() ? 16 : 66) }

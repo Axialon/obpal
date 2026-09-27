@@ -4,6 +4,8 @@
  *   - On phone widths the page never scrolls sideways (nothing reaches past the screen's edge).
  *   - On a computer, the hero makes a real code once someone is there; a phone that opens it joins the page.
  *   - The phone's own marble follows it (here by its trackpad, as a phone without motion sensors steers).
+ *   - A click hops the marble onto the letter clicked, where it stays; the phone flicked upward (or its A) tosses its
+ *     marble, and on a phone, a flick tosses the page's own marble once motion is on.
  *   - When the phone leaves, the page lets its marble go.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch.
  */
@@ -122,6 +124,16 @@ try {
     const left = await tip()
     for (let i = 1; i <= 16; i++) { await tilt(60 + i, -16 + i * 2.5); await sleep(40) }
     const moved = await until('the marble rolled with the tilt', async () => { const t = await tip(); return t.x - left.x > 60 && t.y - left.y > 20 ? t : null }, 4000)
+    // Flicked upward, screen level: the marble jumps (it never bounces by itself).
+    const flick = await page.evaluate(async () => {
+      const top = () => window.__home.tips().find((t) => t.id === 'me').h
+      const at = (a) => dispatchEvent(new DeviceMotionEvent('devicemotion', { acceleration: { x: 0, y: 0, z: a }, accelerationIncludingGravity: { x: 0, y: 0, z: 9.81 + a }, rotationRate: { alpha: 0, beta: 0, gamma: 0 }, interval: 16 }))
+      const wait = () => new Promise((r) => setTimeout(r, 16))
+      let peak = 0
+      for (const [a, n] of [[0, 6], [15, 5], [-15, 5], [0, 40]]) for (let i = 0; i < n; i++) { at(a); await wait(); peak = Math.max(peak, top()) }
+      return peak
+    })
+    if (!(flick > 0.3)) throw new Error(`a flick upward tossed the marble only ${flick.toFixed(2)} em up`)
     // Down the page, the scene on screen follows the tilt too: tipped left, the cursor goes to the far left,
     // where its own loop never takes it.
     await page.evaluate(() => document.querySelector('[data-scene="point"]').scrollIntoView({ block: 'center' }))
@@ -129,7 +141,7 @@ try {
     for (let i = 1; i <= 12; i++) { await tilt(76 - i * 2.5, 24 - i * 3.5); await sleep(40) }
     const dot = await until('the cursor followed the tilt', async () => { const c = await page.evaluate(() => { const d = document.querySelector('[data-scene="point"] svg circle[fill="#f4ffd6"]'); return { x: +d.getAttribute('cx'), y: +d.getAttribute('cy') } }); return c.x < 150 ? c : null }, 4000)
     await ctx.close()
-    return `stick ${left.x.toFixed(0)},${left.y.toFixed(0)} → ${moved.x.toFixed(0)},${moved.y.toFixed(0)}; pointing scene's cursor at ${dot.x.toFixed(0)},${dot.y.toFixed(0)}`
+    return `stick ${left.x.toFixed(0)},${left.y.toFixed(0)} → ${moved.x.toFixed(0)},${moved.y.toFixed(0)}; a flick tossed it ${flick.toFixed(2)} em up; pointing scene's cursor at ${dot.x.toFixed(0)},${dot.y.toFixed(0)}`
   })
 
   await check('on a phone, a scene plays under a held finger, a flick still scrolls, and a long press selects nothing', async () => {
@@ -214,6 +226,21 @@ try {
     return new URL(invite).pathname
   })
 
+  await check('a click hops the marble onto the letter clicked, and it stays there while the mouse does', async () => {
+    const letters = await screen.evaluate(() => { const r = document.createRange(); const h = document.getElementById('hero-h'); r.selectNodeContents(h); const b = r.getClientRects()[0]; return { x: b.left, y: b.top, w: b.width, h: b.height } })
+    // The middle of "phone" (the first line's second word), about halfway up its letters.
+    const x = letters.x + letters.w * 0.58, y = letters.y + letters.h * 0.55
+    await screen.mouse.move(x, y)
+    await screen.mouse.down()
+    await screen.mouse.up()
+    const on = await until('the marble resting on a letter', async () => { const t = await screen.evaluate(() => window.__home.tips().find((q) => q.id === 'me')); return t.on >= 0 ? t : null }, 8000)
+    await sleep(800)
+    const later = await screen.evaluate(() => window.__home.tips().find((q) => q.id === 'me'))
+    if (later.on !== on.on) throw new Error(`it rolled off letter ${on.on} onto ${later.on}`)
+    if (Math.hypot(later.x - x, later.y - y) > 80) throw new Error(`it landed ${Math.hypot(later.x - x, later.y - y).toFixed(0)}px from the click`)
+    return `on letter ${on.on}, ${Math.hypot(later.x - x, later.y - y).toFixed(0)}px from the click`
+  })
+
   const dir = await mkdtemp(join(tmpdir(), 'obpal-home-'))
   profile = dir
   const phoneCtx = await chromium.launchPersistentContext(dir, { ...devices['Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS })
@@ -227,6 +254,8 @@ try {
     await until('the hero live', () => screen.evaluate(() => document.querySelector('.hero').hasAttribute('data-live')), 5000)
     const hint = await screen.locator('[data-hint-text]').textContent()
     if (!/point your phone/i.test(hint ?? '')) throw new Error(`hint says "${hint}"`)
+    // Playing with a phone brings the sound button (sound itself waits for a click on the page).
+    await until('the sound button', () => screen.evaluate(() => !document.querySelector('[data-sound]').hidden), 5000)
     return hint
   })
 
@@ -244,6 +273,31 @@ try {
     const after = await until('the marble moved', async () => { const t = await tip(); return Math.hypot(t.x - before.x, t.y - before.y) > 20 ? t : null }, 5000)
     if (after.x <= before.x) throw new Error(`it went left (${before.x.toFixed(0)} → ${after.x.toFixed(0)}) for a swipe right`)
     return `stick ${before.x.toFixed(0)},${before.y.toFixed(0)} → ${after.x.toFixed(0)},${after.y.toFixed(0)}, lit ${after.life.toFixed(2)}`
+  })
+
+  await check("the phone flicked upward tosses its marble, and so does its A", async () => {
+    const tip = () => screen.evaluate(() => window.__home.tips().find((t) => t.id !== 'me'))
+    const high = async (what, go) => {
+      await until(`${what}: the marble settled`, async () => (await tip()).h < 0.25, 8000)
+      await go()
+      return until(what, async () => { const t = await tip(); return t.h > 0.3 ? t.h : null }, 5000)
+    }
+    // A phone lying flat that jerks upward and stops: the controller sees a toss and sends it.
+    const flick = await high('the flick tossed it', () => phone.evaluate(async () => {
+      dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 0, beta: 0, gamma: 0 }))
+      const at = (a) => dispatchEvent(new DeviceMotionEvent('devicemotion', { acceleration: { x: 0, y: 0, z: a }, accelerationIncludingGravity: { x: 0, y: 0, z: 9.81 + a }, rotationRate: { alpha: 0, beta: 0, gamma: 0 }, interval: 16 }))
+      const wait = () => new Promise((r) => setTimeout(r, 16))
+      for (const [a, n] of [[0, 8], [15, 5], [-15, 5], [0, 10]]) for (let i = 0; i < n; i++) { at(a); await wait() }
+    }))
+    const a = await high('A tossed it', async () => {
+      const cdp = await phoneCtx.newCDPSession(phone)
+      const b = await phone.locator('#wii-a').boundingBox()
+      const p = { x: b.x + b.width / 2, y: b.y + b.height / 2, id: 1 }
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [p] })
+      await sleep(60)
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    })
+    return `flick ${flick.toFixed(2)} em up, A ${a.toFixed(2)} em up`
   })
 
   await check('a phone that leaves lets its marble go', async () => {

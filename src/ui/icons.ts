@@ -51,6 +51,8 @@ export const ICONS: Record<string, string> = {
   plane: s('<path d="M3.5 12.2 20.2 4.4l-4.4 15.4-4.2-6.3-8.1-1.3Z"/><path d="M11.6 13.5 20.2 4.4"/>'),
   wheel: s('<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.6"/><path d="M12 3.5v5.9M4.7 15.3l5-2.3M19.3 15.3l-5-2.3"/>'),
   cursor: s('<path d="M6 4.2 18.4 12.6l-5.3 1.1 2.7 5.4-2.5 1.2-2.7-5.4L6.6 18.6Z"/>'),
+  sound: s('<path d="M4.5 9.6h3.1L12 6v12l-4.4-3.6H4.5Z"/><path d="M15.2 9.3a3.8 3.8 0 0 1 0 5.4M17.8 6.8a7.4 7.4 0 0 1 0 10.4"/>'),
+  mute: s('<path d="M4.5 9.6h3.1L12 6v12l-4.4-3.6H4.5Z"/><path d="M15.5 9.7l4.6 4.6M20.1 9.7l-4.6 4.6"/>'),
   mouse: s('<rect x="7" y="3.5" width="10" height="17" rx="5"/><path d="M12 3.5v6.2M7 9.7h10"/>'),
   stick: s('<circle cx="12" cy="7.8" r="3.8"/><path d="M12 11.6v4.6M5.5 19.5h13M8.2 16.2h7.6"/>'),
   stickL: s('<circle cx="12" cy="7.8" r="3.8"/><path d="M12 11.6v4.6M5.5 19.5h13M8.2 16.2h7.6"/><path d="M3.5 4.5v6h3.6" stroke-width="2"/>'),

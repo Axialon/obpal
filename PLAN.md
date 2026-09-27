@@ -481,9 +481,28 @@ Public sims (2026-09-26): [/sim/](https://obpal.blackboxes.net/sim/) hosts the r
 - A phone opens in a mode the screen takes (Point for the home page's try-out).
 - "Nothing to install" is gone.
 
+**Done 2026-09-27, later (owner: "the bounce should be only when we do the up down motion with the phone with screen level (with some weight...)", glass audio and collision vibration "in the experience mode", "the orb and the characters are too pixelated", the dots around the letters "do not interact well with the orb", the orb "slightly enlarged" as it bounces for depth):**
+- Commit c682646, deployed.
+- **Weight: no bounce by itself.**
+  - The mouse rolls the marble; a click hops it onto the letter clicked (snapped to its landing spot), and it stays there until the mouse moves on. A tap hops it too.
+  - A phone flicked upward, screen level, tosses it. This is a new protocol piece: layout `toss: true`, the device message `toss{v}` (m/s), and `TossDetector` in @obpal/core (a leaky velocity estimate, released on hard braking). On a paired phone, A tosses too.
+  - On the phone page, tilt rolls the marble and a flick tosses it. Marbles knock into each other.
+- **The experience** (a phone paired, or motion on):
+  - glass sounds synthesized in `glass.ts` (on a letter, the floor, or glass on glass), panned to where each hit happens;
+  - the phone gets a `rumble` for every hit its marble takes;
+  - a corner button switches sound on or off, because browsers only allow sound after a click.
+- **Sharp:**
+  - antialiasing and up to 2x pixels on phones too, stepped down if frames run slow;
+  - finer curves, and the top edge set inside the outline;
+  - `scripts/hero-font.mjs` merges the 34 glyphs whose outlines cross themselves into clean polygons (with Clipper's nonzero union), which removes the slivers on e, r, h and n.
+- **Glass:** the scene behind a marble shows through it, bent (upside down, drawn in); a thin ribbon inside turns as it rolls; it looks bigger the higher it rises; its shadow and caustic fall away from the light.
+- **Dots:** the still CSS dots step aside under the 3D field. The 3D dots part around a marble, glow in its light and lift with every ring.
+- The home page's first script no longer preloads three.js (the detector comes from `@obpal/core/toss`).
+- Tests: 245 unit tests; home e2e 12/12, including click-to-letter, a phone's flick and A, and a flick on the phone page. Phone e2e 4/4, on full Chromium; the headless shell can't lock the screen's orientation.
+
 **Next, owner's list of 2026-09-27 (after whole PC):**
 1. PC controls on the phone, the current step:
-   - a mouse face for Point (Left and Right click either side of B as the middle scroll bar);
+   - a mouse face for Point (Left and Right click either side of B as the middle scroll bar). Owner, later: study the best remote-mouse UX first, "needs better than A and B, needs dedicated icon/design implementation";
    - a trackpad scroll strip along the edge;
    - the gamepad's desktop mapping (no stray letters in text fields);
    - the phone keyboard (a `keyboard` tray control and the `text` message are in `packages/core`/`host`, uncommitted; `src/controller/typing.ts` is written);

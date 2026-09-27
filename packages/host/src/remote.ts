@@ -1,6 +1,6 @@
 import {
   b64url, bindMac, candidatesOf, certFingerprint, DEFAULT_SERVICE, encodeLanPairing, encodePairing, equalBytes,
-  fetchIceServers, forgetPair, fromB64url, lanAnswerSdp, lanContext, lanIceCredentials, listPairs, loadCertificate, MAX_NODE_ID, MAX_TEXT, Mode, newSecret, PAD_HEADER,
+  fetchIceServers, forgetPair, fromB64url, lanAnswerSdp, lanContext, lanIceCredentials, listPairs, loadCertificate, MAX_NODE_ID, MAX_TEXT, MAX_TOSS, Mode, newSecret, PAD_HEADER,
   packetType, POINTER_HEADER, POSE_HEADER, PROTO, putPair, randomBytes, readLocalIce, roomIdFor, roomSocketUrl, sdpFingerprint, SignalClient,
   type Caps, type DeviceMsg, type HostMsg, type Layout, type ModeId, type PadState, type PairGrant, type PointerState, type SceneNode,
   type ScenePerson, type SignalIn, type SignalPayload, type StoredPair,
@@ -53,6 +53,8 @@ interface RemoteEvents {
   button: (e: { id: string; ev: string }, who: Participant) => void
   /** Typing on the device's keyboard (a `keyboard` tray control): delete `del` characters, then type `s`. */
   text: (e: { s: string; del: number }, who: Participant) => void
+  /** The device was flicked upward (a layout with `toss`): how fast it went up, m/s. */
+  toss: (e: { v: number }, who: Participant) => void
   /** add: the phone asked to add this option alongside the current one (tray select with `add`). */
   value: (e: { id: string; v: number | boolean | string; add?: boolean }, who: Participant) => void
   mode: (m: ModeId, who: Participant) => void
@@ -138,7 +140,7 @@ export class Remote {
   private held: Record<string, string> = {}
   private scenePending = false
   private handlers: { [K in keyof RemoteEvents]: RemoteEvents[K][] } = {
-    status: [], connect: [], disconnect: [], join: [], leave: [], button: [], text: [], value: [], mode: [], recenter: [], pad: [], input: [], claim: [], lan: [],
+    status: [], connect: [], disconnect: [], join: [], leave: [], button: [], text: [], toss: [], value: [], mode: [], recenter: [], pad: [], input: [], claim: [], lan: [],
   }
   private cards: { el: HTMLElement; status: HTMLElement; qr: HTMLElement; link: HTMLAnchorElement | null; compact: boolean }[] = []
 
@@ -435,6 +437,9 @@ export class Remote {
         if (typeof m.s === 'string' && m.s.length <= MAX_TEXT && Number.isInteger(del) && del >= 0 && del <= MAX_TEXT && (m.s || del)) this.emit('text', { s: m.s, del }, who)
         break
       }
+      case 'toss':
+        if (typeof m.v === 'number' && m.v > 0 && m.v <= MAX_TOSS) this.emit('toss', { v: m.v }, who)
+        break
       case 'value': this.emit('value', { id: m.id, v: m.v, add: m.add === true }, who); break
       case 'mode': this.emit('mode', m.m, who); break
       case 'recenter': this.emit('recenter', who); break

@@ -44,7 +44,15 @@ export interface Layout {
    * scroll, or drag a finger along it), with - / + to zoom.
    */
   point?: 'wii' | 'mouse'
+  /**
+   * Send toss{v} when the device is flicked upward, screen level, the way you'd throw a ball off a tray: v is how fast
+   * it went up, m/s. For hosts that bounce things.
+   */
+  toss?: boolean
 }
+
+/** The fastest toss{v} a device reports (m/s). */
+export const MAX_TOSS = 4
 
 /** The longest text{s} a device sends at once, and the most characters one may delete. */
 export const MAX_TEXT = 256
@@ -81,6 +89,8 @@ export type DeviceMsg =
   | { t: 'btn'; id: string; ev: 'tap' | 'down' | 'up' | 'double' | 'long' }
   /** Typing on the device's keyboard (a `keyboard` tray control): delete `del` characters before the caret, then type `s` ('\n' is Enter). */
   | { t: 'text'; s: string; del?: number }
+  /** The device was flicked upward (the layout asked for `toss`): how fast it went up, m/s, at most MAX_TOSS. */
+  | { t: 'toss'; v: number }
   | { t: 'value'; id: string; v: number | boolean | string; add?: boolean }
   | { t: 'mode'; m: ModeId }
   | { t: 'recenter' }

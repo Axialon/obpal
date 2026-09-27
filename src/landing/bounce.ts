@@ -1,14 +1,18 @@
 /**
- * The hero's bounce field as physics: glowing orbs that bounce on a floor and on raised letters. Pure (no three.js),
- * unit-tested in node. Units are the letters' em: the floor is the x-z plane, y is up. A letter is a footprint
- * (outline polygons with holes, from its glyph) raised to a height; an orb has a position, a velocity and a radius.
+ * The hero's bounce field as physics: glass marbles that roll and bounce on a floor and on raised letters. Pure (no
+ * three.js), unit-tested in node. Units are the letters' em: the floor is the x-z plane, y is up. A letter is a
+ * footprint (outline polygons with holes, from its glyph) raised to a height; a marble has a position, a velocity and
+ * a radius, and some weight: it never bounces by itself.
  *
- * - Steered, an orb glides after its target on a damped spring and keeps hopping at a set height.
+ * - Steered, it rolls after its target on a damped spring; in the air it mostly keeps its momentum.
+ * - Tossed (a phone flicked upward, a click), it leaves the surface at that speed. A toss that comes while it's still
+ *   in the air waits a moment for it to touch down, the way a tray can only throw a ball that's on it.
  * - Given a route, it hops from spot to spot back to back: each hop leaves with exactly the sideways speed that
  *   lands it on the next spot, and it stops dead there (no sliding on past it).
- * - Left alone, each bounce is lower than the last and loses most of its sideways speed to the surface, until it
+ * - Left alone, each bounce is lower than the last and the surface's grip takes some of its sideways speed, until it
  *   rests; then nothing moves and nothing needs drawing.
- * - It lands on a letter where it comes down over one, and bumps off a letter's side where it runs into one.
+ * - It lands on a letter where it comes down over one, bumps off a letter's side where it runs into one, and two
+ *   marbles knock into each other.
  */
 
 export interface Footprint {
@@ -39,8 +43,8 @@ export interface Orb {
   flying: boolean
   /** Where the precise hop in the air is headed. */
   aim?: { x: number; z: number } | null
-  /** Keeps hopping at `hop` height while true; left alone, it settles. */
-  active: boolean
+  /** A toss waiting for it to touch down: the speed it leaves at, and how much longer it waits (s). */
+  toss: { vy: number; ttl: number } | null
   /** At rest on a surface: no motion at all. */
   resting: boolean
 }
@@ -55,23 +59,78 @@ export interface StepOptions {
   zeta?: number
   /** Extra sideways acceleration (a tilted phone, like a marble on a tray). */
   push?: [number, number]
+  /** How much of the steering still acts while it's in the air (0: none, it flies on its momentum; 1: all). */
+  air?: number
 }
 
 /** Gravity, em/s². */
 export const G = 18
-/** How much of its speed a bounce keeps when nobody keeps it going, and the speed below which it rests. */
-const SETTLE = 0.6
+/** How much of its speed a bounce keeps (glass on a hard surface), and the speed below which it rests. */
+const SETTLE = 0.55
 const REST_VY = 0.9
-/** Side bumps keep this much of the speed into the letter. */
+/** Side bumps keep this much of the speed into the letter; two marbles, this much of the speed between them. */
 const BUMP = 0.55
-/** Rolling slows by this factor per second once it's resting on its target or has none. */
-const FRICTION = 3.2
-/** A settling bounce keeps this much of its sideways speed (the surface's grip). */
-const GRIP = 0.35
+const CLINK = 0.9
+/** Rolling slows by this factor per second when nothing steers it. */
+const FRICTION = 1.8
+/** A real bounce keeps this much of its sideways speed (the surface's grip). */
+const GRIP = 0.6
 const MAX_SPEED = 14
+/** How long a toss waits for a marble in the air to come down (s). */
+const TOSS_WAIT = 0.25
+/** Running into a side slower than this (em/s) is leaning on it, not a bump. */
+const LEAN = 0.3
 
 export function newOrb(x: number, z: number, r: number, surface = 0): Orb {
-  return { x, y: surface + r, z, vx: 0, vy: 0, vz: 0, r, target: null, route: [], flying: false, active: false, resting: true }
+  return { x, y: surface + r, z, vx: 0, vy: 0, vz: 0, r, target: null, route: [], flying: false, toss: null, resting: true }
+}
+
+/**
+ * Toss it up at `vy` (em/s): now if it's on a surface, else as soon as it touches down (within TOSS_WAIT). The player
+ * takes over from any choreography. Returns whether it left now.
+ */
+export function toss(o: Orb, vy: number, fps: readonly Footprint[]): boolean {
+  o.route = []
+  o.flying = false
+  o.aim = null
+  o.resting = false
+  if (o.y - o.r - surfaceAt(fps, o.x, o.z).h < 0.02 && o.vy <= 0.5) {
+    o.vy = Math.max(o.vy, vy)
+    o.toss = null
+    return true
+  }
+  o.toss = { vy, ttl: TOSS_WAIT }
+  return false
+}
+
+/** A precise hop to a spot: it leaves as soon as it's on a surface and lands exactly there. */
+export function hopTo(o: Orb, spot: { x: number; z: number }) {
+  o.route = [spot]
+  o.toss = null
+  o.resting = false
+}
+
+/**
+ * Two marbles that meet knock into each other (they weigh the same): pushed apart, and the speed between them bounces
+ * back, most of it (glass on glass). Returns how hard they met (em/s), 0 if they didn't.
+ */
+export function collide(a: Orb, b: Orb): number {
+  const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z
+  const d = Math.hypot(dx, dy, dz), min = a.r + b.r
+  if (d >= min || d < 1e-9) return 0
+  const nx = dx / d, ny = dy / d, nz = dz / d
+  const apart = (min - d) / 2
+  a.x -= nx * apart; a.y -= ny * apart; a.z -= nz * apart
+  b.x += nx * apart; b.y += ny * apart; b.z += nz * apart
+  const vn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny + (b.vz - a.vz) * nz
+  for (const o of [a, b]) o.resting = false
+  if (vn >= 0) return 0
+  const j = (-(1 + CLINK) * vn) / 2
+  a.vx -= j * nx; a.vy -= j * ny; a.vz -= j * nz
+  b.vx += j * nx; b.vy += j * ny; b.vz += j * nz
+  // Knocked off course: any route is off.
+  for (const o of [a, b]) if (o.flying) { o.flying = false; o.aim = null; o.route = [] }
+  return -vn
 }
 
 /** Even-odd: is (x, z) inside the letter (not in a hole)? */
@@ -130,19 +189,22 @@ export function landingSpot(rings: Float64Array[], box: [number, number, number,
 }
 
 export interface StepResult {
-  /** It came down on something this step: a letter's id, or -1 for the floor. */
+  /** It came down on something this step (a real landing, not rolling along it): a letter's id, or -1 for the floor. */
   landed: number | null
   /** It ran into a letter's side this step (that letter's id). */
   bumped: number | null
+  /** How hard the hardest of those was: its speed into the surface, em/s (0 if none). */
+  impact: number
   /** Anything moved. */
   moving: boolean
 }
 
 /** Advance one orb by dt seconds among the letters. */
 export function step(o: Orb, fps: readonly Footprint[], dt: number, opts: StepOptions): StepResult {
-  const res: StepResult = { landed: null, bumped: null, moving: false }
-  if (o.resting && !o.active && !o.target && !o.route.length && !opts.push) return res
+  const res: StepResult = { landed: null, bumped: null, impact: 0, moving: false }
+  if (o.resting && !o.target && !o.route.length && !o.toss && !opts.push) return res
   dt = Math.min(dt, 1 / 30)
+  if (o.toss && (o.toss.ttl -= dt) <= 0) o.toss = null
   // Small substeps keep a fast orb from passing through a letter's side.
   const n = Math.max(1, Math.ceil((Math.hypot(o.vx, o.vz) * dt) / (o.r * 0.5)))
   const h = dt / n
@@ -150,22 +212,25 @@ export function step(o: Orb, fps: readonly Footprint[], dt: number, opts: StepOp
     const r = sub(o, fps, h, opts)
     if (r.landed !== null) res.landed = r.landed
     if (r.bumped !== null) res.bumped = r.bumped
+    res.impact = Math.max(res.impact, r.impact)
   }
   res.moving = !o.resting
   return res
 }
 
 function sub(o: Orb, fps: readonly Footprint[], h: number, opts: StepOptions): StepResult {
-  const res: StepResult = { landed: null, bumped: null, moving: false }
+  const res: StepResult = { landed: null, bumped: null, impact: 0, moving: false }
   const base = surfaceAt(fps, o.x, o.z)
-  const grounded = o.y - o.r <= base.h + 1e-4 && o.vy <= 0
+  const grounded = o.y - o.r <= base.h + 1e-3 && o.vy <= 0
 
-  // Sideways: steered (a spring that doesn't overshoot), carried through a precise hop, pushed by a tilt, or rolling to a stop.
+  // Sideways: steered (a spring that doesn't overshoot; in the air, only as much as `air`), carried through a precise
+  // hop, pushed by a tilt, or rolling to a stop.
   if (!o.flying) {
     const w = opts.omega ?? 7, zeta = opts.zeta ?? 0.9
     if (o.target) {
-      o.vx += (w * w * (o.target.x - o.x) - 2 * zeta * w * o.vx) * h
-      o.vz += (w * w * (o.target.z - o.z) - 2 * zeta * w * o.vz) * h
+      const k = grounded ? 1 : opts.air ?? 1
+      o.vx += k * (w * w * (o.target.x - o.x) - 2 * zeta * w * o.vx) * h
+      o.vz += k * (w * w * (o.target.z - o.z) - 2 * zeta * w * o.vz) * h
     } else if (grounded) {
       const k = Math.exp(-FRICTION * h)
       o.vx *= k; o.vz *= k
@@ -189,8 +254,10 @@ function sub(o: Orb, fps: readonly Footprint[], h: number, opts: StepOptions): S
   if (o.z < z0 + o.r) { o.z = z0 + o.r; o.vz = Math.abs(o.vz) * BUMP }
   if (o.z > z1 - o.r) { o.z = z1 - o.r; o.vz = -Math.abs(o.vz) * BUMP }
 
-  // Letters' sides: an orb lower than a letter's top that touches its outline is pushed back out and bounces off.
+  // Letters' sides: an orb lower than a letter's top that touches its outline is pushed back out and bounces off. (A
+  // precise hop on its way up is clear of them: it left from beside one and is over it a moment later.)
   for (const fp of fps) {
+    if (o.flying && o.vy > 0) break
     if (o.y - o.r >= fp.height - 0.01 || wasBottom >= fp.height - 0.01) continue
     const b = fp.box
     if (o.x < b[0] - o.r || o.x > b[2] + o.r || o.z < b[1] - o.r || o.z > b[3] + o.r) continue
@@ -206,14 +273,16 @@ function sub(o: Orb, fps: readonly Footprint[], h: number, opts: StepOptions): S
     if (vn < 0) { o.vx -= (1 + BUMP) * vn * nx; o.vz -= (1 + BUMP) * vn * nz }
     // Knocked off course: the route is off.
     if (o.flying) { o.flying = false; o.aim = null; o.route = [] }
-    res.bumped = fp.id
+    if (vn < -LEAN) { res.bumped = fp.id; res.impact = Math.max(res.impact, -vn) }
   }
 
   // Coming down on the surface under it: bounce (or settle).
   const under = surfaceAt(fps, o.x, o.z)
   if (o.y - o.r <= under.h && o.vy < 0) {
+    const vin = -o.vy
     o.y = under.h + o.r
-    res.landed = under.id
+    // Rolling along a surface touches it every step; only coming down on it is a landing.
+    if (vin > REST_VY * 0.5 || o.flying) { res.landed = under.id; res.impact = Math.max(res.impact, vin) }
     // Arriving from a precise hop: it's there, exactly (not wherever the step's end happened to be). Stop dead.
     if (o.flying) {
       if (o.aim) { o.x = o.aim.x; o.z = o.aim.z; o.y = surfaceAt(fps, o.x, o.z).h + o.r }
@@ -222,21 +291,24 @@ function sub(o: Orb, fps: readonly Footprint[], h: number, opts: StepOptions): S
       o.aim = null
     }
     const next = o.route.shift()
-    if (next || o.active) {
+    if (next) {
+      // A precise hop: the sideways speed that lands it on the spot as it comes back down (to the spot's surface).
       o.vy = Math.sqrt(2 * G * opts.hop)
       o.resting = false
-      if (next) {
-        // A precise hop: the sideways speed that lands it on the spot as it comes back down (to the spot's surface).
-        const t = flightTime(o.vy, o.y - o.r, surfaceAt(fps, next.x, next.z).h)
-        o.vx = (next.x - o.x) / t
-        o.vz = (next.z - o.z) / t
-        o.flying = true
-        o.aim = next
-      }
+      const t = flightTime(o.vy, o.y - o.r, surfaceAt(fps, next.x, next.z).h)
+      o.vx = (next.x - o.x) / t
+      o.vz = (next.z - o.z) / t
+      o.flying = true
+      o.aim = next
+    } else if (o.toss) {
+      // The toss that was waiting for it.
+      o.vy = Math.max(o.toss.vy, vin * SETTLE)
+      o.toss = null
+      o.resting = false
     } else {
-      // A real bounce (not just resting contact) loses most of its sideways speed to the surface's grip.
-      if (-o.vy > REST_VY) { o.vx *= GRIP; o.vz *= GRIP }
-      o.vy = -o.vy * SETTLE
+      // A real bounce (not just resting contact) loses some of its sideways speed to the surface's grip.
+      if (vin > REST_VY) { o.vx *= GRIP; o.vz *= GRIP }
+      o.vy = vin * SETTLE
       if (o.vy < REST_VY) {
         o.vy = 0
         const pushed = !!opts.push && Math.hypot(opts.push[0], opts.push[1]) > 1e-3

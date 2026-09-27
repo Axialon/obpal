@@ -1,42 +1,61 @@
 /**
  * The home page's hero is a bounce field (./field.ts, ./bounce.ts): the headline's letters stand as 3D blocks, seen
- * from overhead, and a glowing orb bounces on them. The mouse, a tap, or the phone's own tilt (a marble on a tray)
- * steers the lime orb; on a computer, phones that scan the code each get an orb in their own colour, steered by
- * their own sensors like the viewer's Wii-style pointer. With nobody steering, the orb drops in, hops along the
- * headline a word at a time and comes to rest on its full stop. Every letter an orb lands on lights up; light them
- * all and the headline celebrates.
+ * from overhead, and glass marbles roll and bounce on them. A marble has weight and never bounces by itself. The mouse
+ * rolls the lime one and a click hops it onto the spot; on a phone a tap hops it, and once motion is on, tilting rolls
+ * it like a marble on a tray and flicking the phone upward (screen level) tosses it. On a computer, phones that scan
+ * the code each get a marble in their own colour: it rolls where the phone points, and jumps when the phone is
+ * flicked upward or A is pressed. With nobody playing, the marble drops in, hops along the headline a word at a time
+ * and comes to rest on its full stop. Every letter a marble lands on lights up; light them all and the headline
+ * celebrates.
+ *
+ * Playing with a phone is the experience: the marbles sound like glass (./glass.ts), and the phone in hand feels
+ * every knock its marble takes.
  *
  * three.js loads only once the hero is on screen. Until then, and where WebGL isn't available, the headline is the
  * page's own text. Nothing draws while nothing moves.
  */
 import { addActor, wake } from './ticker'
-import { onTilt, recentre, startTilt, tiltOn } from './tilt'
+import { onTilt, onToss, recentre, startTilt, tiltOn } from './tilt'
+import { hopTo } from './bounce'
+import { createGlass } from './glass'
 import type { Participant, Remote } from '@obpal/host'
 import type { ScreenPointer } from '../viewer/pointer'
-import type { Field } from './field'
-import { tourStops } from './letters'
+import type { Field, Hit } from './field'
 
 const LIME = '#c6ff34'
-/** A hand that stops moving keeps its orb bouncing this long; then the orb settles where it is. */
+/** A hand that stops moving keeps steering its marble this long; then the marble rolls to a stop. */
 const HOLD_MS = 2600
-/** A phone's orb settles after this long without moving. */
+/** A phone's marble stops following it after this long without moving. */
 const PHONE_REST_MS = 6000
-/** A tilt of this many degrees pushes the orb this hard (em/s² per degree): a marble on a tray. */
+/** A tilt of this many degrees pushes the marble this hard (em/s² per degree): a marble on a tray. */
 const TILT_PUSH = 0.55
-/** The opening: the orb falls in from this high (em) and hops a word at a time. */
+/** A toss: the phone's up-speed (m/s) to the marble's (em/s), and the least and most a toss gives. */
+const TOSS_GAIN = 6.5
+const TOSS_MIN = 3
+const TOSS_MAX = 9.2
+/** A press of A tosses it this hard (em/s). */
+const A_TOSS = 5.2
+/** The opening: the marble falls in from this high (em) and hops a word at a time. */
 const DROP = 2.4
-/** A letter's top and the orb's radius (field.ts TOP and ORB_R, repeated so the page's first script needn't load three.js). */
+/** A letter's top and the marble's radius (field.ts TOP and ORB_R, repeated so the page's first script needn't load three.js). */
 const TOP = 0.182
 const R = 0.2
+/** A phone feels at most one knock this often (ms). */
+const BUZZ_GAP = 70
 
 export interface Hero {
-  /** Phones join through this remote (a computer's pairing card), each with its own orb. */
+  /** Phones join through this remote (a computer's pairing card), each with its own marble. */
   attach(remote: Remote, pointer: typeof ScreenPointer): void
-  /** Start following the phone's tilt (on a phone; iOS asks first, from a tap). */
+  /** Start following the phone's tilt and tosses (on a phone; iOS asks first, from a tap), with sound. */
   tilt(): Promise<boolean>
   readonly tilting: boolean
-  /** Where each orb is on screen, and how lit (for tests). */
-  tips(): { id: string; x: number; y: number; life: number }[]
+  /** Sound on or off (on needs a click or a tap, or one earlier on the page). Resolves whether it's on. */
+  sound(on: boolean): Promise<boolean>
+  readonly soundOn: boolean
+  /** Called when playing with a phone starts (sound and feel come with it) or stops. */
+  onExperience: ((on: boolean) => void) | null
+  /** Where each marble is on screen, how lit, how high it is (em, above the floor) and what it's on (for tests). */
+  tips(): { id: string; x: number; y: number; life: number; h: number; on: number }[]
   /** Where the full stop's landing spot is on screen (for tests), once the field is up. */
   dot(): { x: number; y: number } | null
 }
@@ -48,10 +67,15 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   let visible = true
   let W = 1, H = 1
   const local = { x: 0, y: 0, at: -1e9, any: false }
+  /** Where a click hopped the marble: it stays there until the mouse moves on (screen px of the click, and the spot). */
+  let anchor: { sx: number; sy: number; x: number; z: number } | null = null
   let tiltPush: [number, number] | null = null
   let tiltAt = -1e9
+  let tossAt = -1e9
   /** The opening is playing (the marble's route runs it; this is whether it's still going). */
   let tour = false
+  const glass = createGlass()
+  let experience = false
 
   /** The headline as the page wraps it: its lines of text, and the box its letters fill (hero px). */
   function measure() {
@@ -93,45 +117,77 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   }
 
   const me = () => field!.orb('me', LIME)
-
-  // ---- your own hand: the mouse, a tap, the phone's tilt ----
-
-  const steer = (x: number, y: number) => {
-    local.x = x; local.y = y; local.at = performance.now(); local.any = true
-    if (tour && field) { const o = me().orb; o.route = []; o.flying = false }
+  /** The player takes over from the opening. */
+  function takeOver() {
+    if (tour && field) { const o = me().orb; o.route = []; o.flying = false; o.aim = null }
     tour = false
+    local.any = true
     opts.onInput?.()
-    wake()
   }
-  const at = (e: PointerEvent) => { const r = hero.getBoundingClientRect(); steer(e.clientX - r.left, e.clientY - r.top) }
+
+  // ---- your own hand: the mouse, a tap, the phone's tilt and tosses ----
+
+  const heroAt = (e: PointerEvent) => { const r = hero.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top } }
   /** Pressing a button or a link is that, not playing. */
   const onControl = (e: Event) => !!(e.target as Element | null)?.closest?.('a, button')
-  // A mouse steers as it moves. A finger only when it taps: touching to scroll leaves the orb be.
+  // The mouse rolls the marble after it; a click (or a tap) hops it onto the spot. Touching to scroll leaves it be.
   let press: { x: number; y: number; t: number } | null = null
-  hero.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse') at(e) }, { passive: true })
-  hero.addEventListener('pointerdown', (e) => { if (onControl(e)) return; if (e.pointerType === 'mouse') at(e); else press = { x: e.clientX, y: e.clientY, t: e.timeStamp } }, { passive: true })
+  hero.addEventListener('pointermove', (e) => {
+    if (e.pointerType !== 'mouse') return
+    const p = heroAt(e)
+    local.x = p.x; local.y = p.y; local.at = performance.now()
+    if (anchor && Math.hypot(p.x - anchor.sx, p.y - anchor.sy) > 10) anchor = null
+    takeOver()
+    wake()
+  }, { passive: true })
+  const hop = (e: PointerEvent) => {
+    if (!field) return
+    const p = heroAt(e)
+    takeOver()
+    // Onto the letter clicked (or right by), at its landing spot; it stays there until the mouse moves on.
+    const spot = field.spotAt(p.x, p.y)
+    hopTo(me().orb, spot)
+    anchor = { sx: p.x, sy: p.y, ...spot }
+    // A tap has no hover to follow afterwards: the marble stays where it lands.
+    if (e.pointerType !== 'mouse') { local.at = -1e9; anchor = null }
+    wake()
+  }
+  hero.addEventListener('pointerdown', (e) => {
+    if (onControl(e)) return
+    if (e.pointerType === 'mouse') { if (e.button === 0) hop(e) } else press = { x: e.clientX, y: e.clientY, t: e.timeStamp }
+  }, { passive: true })
   hero.addEventListener('pointerup', (e) => {
-    if (e.pointerType !== 'mouse' && !onControl(e) && press && Math.hypot(e.clientX - press.x, e.clientY - press.y) < 10 && e.timeStamp - press.t < 350) at(e)
+    if (e.pointerType !== 'mouse' && !onControl(e) && press && Math.hypot(e.clientX - press.x, e.clientY - press.y) < 10 && e.timeStamp - press.t < 350) hop(e)
     press = null
   }, { passive: true })
   hero.addEventListener('pointercancel', () => { press = null }, { passive: true })
 
-  // The phone's tilt (once it's on) rolls the lime orb like a marble on a tray, once the opening has finished.
+  // The phone's tilt (once it's on) rolls the lime marble like a marble on a tray, once the opening has finished;
+  // flicking the phone upward tosses it.
   onTilt((t) => {
     if (!visible || tour) return
     tiltPush = [t.x * TILT_PUSH, t.y * TILT_PUSH]
     if (t.wake) { tiltAt = performance.now(); local.any = true; opts.onInput?.(); wake() }
   })
+  onToss((v) => {
+    if (!visible || !field) return
+    takeOver()
+    tossAt = performance.now()
+    field.toss(me(), tossSpeed(v))
+    wake()
+  })
+  const tossSpeed = (v: number) => Math.max(TOSS_MIN, Math.min(TOSS_MAX, v * TOSS_GAIN))
 
-  // ---- phones on a computer: one orb each, from its Wii-style pointer ----
+  // ---- phones on a computer: one marble each, rolling where it points ----
 
   let remote: Remote | null = null
   let Pointer: typeof ScreenPointer | null = null
   const pointers = new Map<string, ScreenPointer>()
-  const phones = new Map<string, { at: number; gone: boolean }>()
+  const phones = new Map<string, { at: number; gone: boolean; buzzAt: number }>()
   function join(p: Participant) {
-    phones.set(p.id, { at: performance.now(), gone: false })
+    phones.set(p.id, { at: performance.now(), gone: false, buzzAt: 0 })
     if (!pointers.has(p.id)) pointers.set(p.id, new Pointer!())
+    setExperience()
     wake()
   }
   function readPhones(now: number) {
@@ -143,9 +199,44 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       const st = pointers.get(p.id)!.step(f.aim, f.pad1, W, H)
       if (Math.abs(st.dx) + Math.abs(st.dy) > 0.25) ph.at = now
       const o = field.orb(p.id, p.color)
-      o.orb.target = field.floorAt(Math.max(0, Math.min(W, st.x)), Math.max(0, Math.min(H, st.y)))
-      o.orb.active = now - ph.at < PHONE_REST_MS
-      if (o.orb.active) o.orb.resting = false
+      o.live = now - ph.at < PHONE_REST_MS
+      o.orb.target = o.live ? field.pointAt(Math.max(0, Math.min(W, st.x)), Math.max(0, Math.min(H, st.y))) : null
+      if (o.live) o.orb.resting = false
+    }
+  }
+  function phoneToss(who: Participant, vy: number) {
+    if (!field || !visible) return
+    const ph = phones.get(who.id)
+    if (ph) ph.at = performance.now()
+    field.toss(field.orb(who.id, who.color), vy)
+    wake()
+  }
+
+  // ---- the experience: sound, and the knocks felt in the hand ----
+
+  function setExperience() {
+    const on = (remote?.participants.length ?? 0) > 0 || tiltOn()
+    if (on === experience) return
+    experience = on
+    // Sound comes with it where the page may already make it (someone clicked here before) and wasn't switched off.
+    const active = (navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation?.hasBeenActive
+    if (on && active && !glass.muted) void glass.set(true).then(() => heroApi.onExperience?.(true))
+    else heroApi.onExperience?.(on)
+  }
+
+  function onHit(h: Hit) {
+    if (!field) return
+    const p = field.project(h.x, h.y, h.z)
+    glass.hit(h.kind, h.strength, (p.x / Math.max(1, W)) * 2 - 1)
+    const ms = Math.round((h.kind === 'marble' ? 10 : 8) + 22 * h.strength)
+    for (const id of [h.orb, h.other]) {
+      if (!id) continue
+      if (id === 'me') { if (tiltOn() && coarse) navigator.vibrate?.(ms); continue }
+      const ph = phones.get(id)
+      const now = performance.now()
+      if (!ph || ph.gone || now - ph.buzzAt < BUZZ_GAP) continue
+      ph.buzzAt = now
+      remote?.rumble(Math.max(0.35, h.strength), 0, ms, id)
     }
   }
 
@@ -153,18 +244,29 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
 
   function opening() {
     if (!field || still || local.any) return
-    // One letter from the middle of each word, then the full stop.
-    const stops = tourStops(field.letters())
+    const stops = field.tour()
     if (!stops.length) return
     const o = me()
     const first = stops[0]
     // Dropped in over the first word with the rest of the route to hop; on the full stop, left to settle.
-    Object.assign(o.orb, { x: first.x, z: first.z, y: DROP, vx: 0, vy: 0, vz: 0, target: null, route: stops.slice(1), flying: false, active: false, resting: false })
+    Object.assign(o.orb, { x: first.x, z: first.z, y: DROP, vx: 0, vy: 0, vz: 0, target: null, route: stops.slice(1), flying: false, toss: null, resting: false })
     tour = true
     wake()
   }
 
   // ---- the loop ----
+
+  // A device that can't keep up draws less finely: judged on the frames while something moves.
+  const frames: number[] = []
+  let quality = 2
+  function pace(dt: number) {
+    if (!field || quality === 0) return
+    frames.push(dt)
+    if (frames.length < 90) return
+    const slow = frames.sort((a, b) => a - b)[45] > 1 / 40
+    frames.length = 0
+    if (slow) field.quality(--quality)
+  }
 
   addActor((now, dt) => {
     if (!visible || !field) return false
@@ -174,19 +276,15 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     const mine = now - local.at < HOLD_MS
     const tilting = !!tiltPush && now - tiltAt < HOLD_MS
     if (tour && !o.orb.route.length && !o.orb.flying && o.orb.resting) { tour = false; recentre() }
-    if (mine) {
-      o.orb.target = f.floorAt(local.x, local.y)
-      o.orb.active = true
-      o.orb.resting = false
-    } else if (!tour) {
-      o.orb.target = null
-      o.orb.active = tilting
-    }
+    if (!tour) o.orb.target = !mine ? null : anchor ? { x: anchor.x, z: anchor.z } : f.pointAt(local.x, local.y)
+    if (mine) o.orb.resting = false
+    o.live = mine || tilting || now - tossAt < HOLD_MS
     o.push = tilting ? tiltPush : null
     if (tilting) o.orb.resting = false
     for (const [id, ph] of phones) if (ph.gone) { f.removeOrb(id); phones.delete(id) }
     const busy = f.step(dt)
     f.render()
+    if (busy) pace(dt)
     return busy || mine || tilting || tour
   })
 
@@ -209,6 +307,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
         new Promise((r) => setTimeout(r, 2500)),
       ])
       field = createField(stage, { coarse })
+      field.onHit = onHit
       document.documentElement.classList.add('field3d')
       layout()
       // At rest on the full stop, unless the opening is about to bring it there.
@@ -228,21 +327,40 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     }
   }
 
-  return {
+  const heroApi: Hero = {
+    onExperience: null,
     attach(r, P) {
       remote = r
       Pointer = P
       r.on('join', join)
-      r.on('leave', (p) => { const ph = phones.get(p.id); if (ph) ph.gone = true; pointers.delete(p.id); wake() })
+      r.on('leave', (p) => { const ph = phones.get(p.id); if (ph) ph.gone = true; pointers.delete(p.id); setExperience(); wake() })
       r.on('recenter', (p) => pointers.get(p.id)?.recenter())
       r.on('input', () => wake())
+      r.on('toss', (e, who) => phoneToss(who, tossSpeed(e.v)))
+      // A on the phone tosses too (phones that can't feel a flick, or a person who'd rather press).
+      r.on('button', (e, who) => { if (e.id === 'wii-a' && e.ev === 'down') phoneToss(who, A_TOSS) })
     },
-    tilt: startTilt,
+    async tilt() {
+      // From the same tap: motion (iOS asks), and sound.
+      const sound = glass.muted ? Promise.resolve(false) : glass.set(true)
+      const ok = await startTilt()
+      await sound
+      setExperience()
+      return ok
+    },
     get tilting() { return tiltOn() },
+    sound: (on) => glass.set(on),
+    get soundOn() { return glass.on },
     tips: () => {
       if (!field) return []
       const f = field
-      return f.orbs().map((o) => { const p = f.project(o.orb.x, o.orb.y, o.orb.z); return { id: o.id, x: p.x, y: p.y, life: o.life } })
+      return f.orbs().map((o) => {
+        const p = f.project(o.orb.x, o.orb.y, o.orb.z)
+        const under = f.under(o.orb.x, o.orb.z)
+        // What it's on: a letter, the floor (-1), or nothing yet (in the air, -2).
+        const on = Math.abs(o.orb.y - o.orb.r - (under >= 0 ? TOP : 0)) < 0.01 && Math.abs(o.orb.vy) < 0.5 ? under : -2
+        return { id: o.id, x: p.x, y: p.y, life: o.life, h: o.orb.y - o.orb.r, on }
+      })
     },
     dot: () => {
       if (!field) return null
@@ -251,4 +369,5 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       return d ? field.project(d.spot[0], TOP + R, d.spot[1]) : null
     },
   }
+  return heroApi
 }
