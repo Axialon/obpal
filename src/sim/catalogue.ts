@@ -58,16 +58,6 @@ const SCENES: SimCard[] = [
 
 /** Proposed devices: what each would show about the catalogue. */
 export const PROPOSED: SimCard[] = [
-  { id: 'boat', name: 'Boat', kind: 'Vehicle', glyph: 'wheel', href: null, blurb: 'Tilt to steer the rudder; it drifts and leaves a wake.', controllers: [Controller.wheel, Controller.gamepad, Controller.trackpad] },
-  { id: 'spotlights', name: 'Stage spotlights', kind: 'Show', glyph: 'sun', href: null, blurb: 'Point your phone and the beam follows: a light show together.', controllers: [Controller.wii, Controller.trackpad] },
-  { id: 'vacuum', name: 'Robot vacuum', kind: 'Home', glyph: 'point', href: null, blurb: 'Point where to clean; ⌂ sends it to its dock.', controllers: [Controller.wii, Controller.trackpad] },
-  { id: 'tank', name: 'Tank', kind: 'Vehicle', glyph: 'gyro', href: null, blurb: 'Turn the phone to aim the turret (gyro Aim), the sticks drive.', controllers: [Controller.gamepad, Controller.trackpad] },
-  { id: 'excavator', name: 'Excavator', kind: 'Machine', glyph: 'gamepad', href: null, blurb: 'Two sticks, four joints: dig and dump, or move the bucket by hand.', controllers: [Controller.gamepad, Controller.hand] },
-  { id: 'forklift', name: 'Forklift', kind: 'Machine', glyph: 'gamepad', href: null, blurb: 'Drive with one stick, lift and tilt the forks with the other.', controllers: [Controller.gamepad, Controller.trackpad] },
-  { id: 'painter', name: 'Light painter', kind: 'Toy', glyph: 'cursor', href: null, blurb: 'Draw on the screen by pointing, Left held; type, and it writes.', controllers: [Controller.mouse, Controller.keyboard] },
-  { id: 'gimbal', name: 'Camera gimbal', kind: 'Camera', glyph: 'gyro', href: null, blurb: 'The camera turns exactly as your phone does (1:1).', controllers: [Controller.trackpad, Controller.hand] },
-  { id: 'plane', name: 'RC plane', kind: 'Flyer', glyph: 'plane', href: null, blurb: 'Tilt like a yoke with the Flight profile.', controllers: [Controller.gamepad, Controller.trackpad] },
-  { id: 'slotcars', name: 'Slot cars', kind: 'Game', glyph: 'wheel', href: null, blurb: 'Only a trigger each, eight players on one track.', controllers: [Controller.wheel, Controller.gamepad] },
 ]
 
 /** Every sim to try, in the catalogue's order: the devices, the arms, then the arena and the Viewer. */

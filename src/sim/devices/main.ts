@@ -45,6 +45,8 @@ const units = Array.from({ length: spec.units }, (_, n) => ({ id: `${spec.id}${n
 const unitOf = (node: string | undefined) => units.findIndex((u) => u.id === node)
 let view: DeviceView | null = null
 let sim: SimScene | null = null
+let following = true
+let followedUnit = 0
 
 addEventListener('bb-theme', (e) => {
   const t = themeById((e as CustomEvent<{ theme: string }>).detail.theme)
@@ -208,13 +210,20 @@ void entry.view().then((m) => {
   const resetView = document.createElement('button')
   resetView.className = 'btn'
   resetView.textContent = 'Reset view'
-  resetView.onclick = () => stage.frame(view!.framing)
+  resetView.onclick = () => { following = true; stage.frame(view!.framing) }
   $('home-all').parentElement!.appendChild(resetView)
+  if (view.overview) {
+    const overview = document.createElement('button')
+    overview.className = 'btn'
+    overview.textContent = 'Overview'
+    overview.onclick = () => { following = false; stage.frame(view!.overview!) }
+    resetView.after(overview)
+  }
   if (view.inspect) {
     const inspect = document.createElement('button')
     inspect.className = 'btn'
     inspect.textContent = 'Inspect model'
-    inspect.onclick = () => stage.frame(view!.inspect!())
+    inspect.onclick = () => { following = false; stage.frame(view!.inspect!()) }
     resetView.after(inspect)
   }
 })
@@ -283,6 +292,11 @@ void startSimScene({
       if (e.text && (e.kind === 'score' || e.kind === 'fall')) s.log(`${who ? s.nameOf(who) : units[e.unit]?.name}: ${e.text}`, who ? s.colorOf(who) : undefined)
     }
     view?.update(units.map((u) => { const who = s.claims.holder(u.id); return who ? s.colorOf(who) : null }), t, dt)
+    if (following && view?.follow) {
+      const active = perUnit.findIndex((i) => i && !i.quiet && (i.touching || i.held.size || i.presses.length || i.pose?.touching || i.pad && [...i.pad.axes, ...i.pad.triggers].some((v) => Math.abs(v) > 0.04)))
+      if (active >= 0) followedUnit = active
+      stage.follow(view.follow(followedUnit))
+    }
     drawCursors(inputs)
     refreshReadouts(now)
   }

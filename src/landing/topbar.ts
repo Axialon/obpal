@@ -1,3 +1,4 @@
+import { setMarkup } from '../ui/markup'
 /**
  * The site's top bar (home, catalogue): the family's app switcher by the logo, and on a narrow screen a menu for the
  * links that don't fit. Both are the family's glass popovers.
@@ -8,7 +9,7 @@ export function mountTopBar() {
   const sw = document.getElementById('t-switch')
   const menu = document.getElementById('switcher')
   if (sw && menu) {
-    if (!sw.innerHTML.trim()) sw.innerHTML = family.icons.chevron
+    if (!sw.hasChildNodes()) setMarkup(sw, family.icons.chevron)
     family.mountSwitcher(sw, menu, 'obpal')
   }
   const more = document.getElementById('t-menu')

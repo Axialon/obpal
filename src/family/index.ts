@@ -1,3 +1,4 @@
+import type { Content } from '../ui/markup'
 /**
  * Typed access to the shared Blackboxes family design system (vendored from the BlackBoxes repo, shared/family/;
  * refresh with `pnpm run sync:family`). family.js is a classic script that defines window.BlackboxesFamily.
@@ -30,10 +31,10 @@ export interface FamilyApi {
   applyAccent(id?: string): string
   /** The accent in effect as a hex colour. */
   accentColor(): string
-  mark(productId: string, opts?: { accent?: string; title?: boolean }): string
+  mark(productId: string, opts?: { accent?: string; title?: boolean }): Content
   /** opts.href(product): a site's own link for a product (a local preview); opts.itemClass: a class for each item. */
-  productMenu(current: string, opts?: SwitcherOptions): string
-  themeMenu(): string
+  productMenu(current: string, opts?: SwitcherOptions): Content
+  themeMenu(): Content
   popover(button: HTMLElement, menu: HTMLElement, onOpen?: (menu: HTMLElement) => void): Popover
   mountSwitcher(button: HTMLElement, menu: HTMLElement, current: string, opts?: SwitcherOptions): Popover
   mountThemes(button: HTMLElement, menu: HTMLElement): Popover

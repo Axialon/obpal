@@ -15,6 +15,7 @@ import { chromium, devices } from 'playwright'
 import { cspCheck } from './csp-watch.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
 import { startWorker } from './local-worker.mjs'
+import { deviceExercises, exerciseDevice } from './lib/catalogue-devices.mjs'
 
 const HEADED = process.argv.includes('--headed')
 const ONLY = (process.argv.find((a) => a.startsWith('--only='))?.slice(7) ?? '').split(',').filter(Boolean)
@@ -157,9 +158,19 @@ try {
     await check('catalogue: every sim has a card, and their previews come alive', async () => {
       await page.goto(`${ORIGIN}/sim/`)
       const cards = await until('cards', () => page.evaluate(() => window.__sims?.cards().length), 10000)
+      if (cards < 24) throw new Error(`only ${cards} cards`)
       await until('a live preview', () => page.evaluate(() => document.querySelectorAll('.dcard-stage.live').length), 15000)
       const live = await page.evaluate(() => document.querySelectorAll('.dcard-stage.live').length)
       return `${cards} cards, ${live} previews live`
+    })
+    await check('catalogue: every new device has a live preview on the shared renderer', async () => {
+      for (const id of ['boat', ...deviceExercises.map(e => e.id)]) {
+        const card = page.locator(`.dcard[data-id="${id}"]`)
+        await card.scrollIntoViewIfNeeded()
+        await until(`${id} preview`, () => card.locator('.dcard-stage.live').count(), 15000)
+        if (await card.locator('.dcard-go').getAttribute('href') !== `/sim/device/?d=${id}`) throw new Error(`${id} link`)
+      }
+      await page.locator('.sims-chip[data-face=""]').scrollIntoViewIfNeeded()
     })
     await check('catalogue: a controller filters the cards, and the address keeps it', async () => {
       await page.locator('.sims-chip[data-face="face.keyboard"]').click()
@@ -471,6 +482,25 @@ try {
     await p.close()
     await s.close()
   }
+  if (wanted('boat')) {
+    const { s, p, face } = await device('boat')
+    const state = () => at(s, () => window.__device.logic.units[0])
+    await check('boat: the wheel powers the launch through the harbour', async () => {
+      if (face !== 'face.wheel') throw new Error(`opened on ${face}`)
+      const before = await state()
+      await p.hold('.gp-trig[data-trig="1"]', 1000)
+      if ((await state()).z >= before.z - 0.25) throw new Error('the launch did not move forward')
+    })
+    await check('boat: H sounds the horn and Guide returns to the dock', async () => {
+      await p.page.keyboard.press('KeyH')
+      await until('horn', async () => (await state()).horn > 0)
+      await p.hold('.gp-guide', 100)
+      await until('docked', async () => Math.abs((await state()).z - 1) < 0.02)
+    })
+    await clean('boat', s, p)
+    await p.close(); await s.close()
+  }
+  for (const e of deviceExercises) if (wanted(e.id)) await exerciseDevice(e, { device, check, at, until, turn, clean })
   await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {
   console.error(e)

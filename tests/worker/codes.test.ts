@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { solveWork, workDone } from '../../packages/core/src/work'
-import { CODE_TTL_MS, CodeBook, HANDLES, LIMITS, networks, readLookup, type Claim, type Take } from '../../worker/codes'
+import { CODE_TTL_MS, CodeBook as HashedCodeBook, HANDLES, LIMITS, networks, readLookup, type Claim, type Take } from '../../worker/codes'
+
+import { addressKey, addressNetworks } from '../../worker/address'
+const hashKey = await addressKey('test address secret')
+const net = (ip: string) => addressNetworks(hashKey, ip)
+class CodeBook extends HashedCodeBook {
+  claim(room: string, ip: string | ReturnType<typeof net>, work?: Parameters<HashedCodeBook['claim']>[2]) { return super.claim(room, typeof ip === 'string' ? net(ip) : ip, work) }
+  take(handle: string, ip: string | ReturnType<typeof net>, work?: Parameters<HashedCodeBook['take']>[2]) { return super.take(handle, typeof ip === 'string' ? net(ip) : ip, work) }
+}
 
 const room = (n: number) => `room${String(n).padStart(18, '0')}`
 function book(start = 1_000_000) {
@@ -212,7 +220,7 @@ describe('new codes', () => {
 
   it('past the soft cap a new code brings a proof of work, and a solved one gets it', async () => {
     const { b } = book()
-    b.load(Array.from({ length: LIMITS.liveSoft }, (_, i) => [String(10000 + i), { room: room(100000 + i), exp: 9e12, ip: v6(i >> 5) }] as [string, { room: string; exp: number; ip: string }]))
+    b.load(Array.from({ length: LIMITS.liveSoft }, (_, i) => [String(10000 + i), { room: room(100000 + i), exp: 9e12, net: net(v6(i >> 5)) }] as [string, { room: string; exp: number; net: ReturnType<typeof net> }]))
     const asked = b.claim(room(1), '192.0.2.10')
     expect(asked).toMatchObject({ error: 'work' })
     expect(code(b.claim(room(1), '192.0.2.10', await solve(asked)))).toBeTruthy()
@@ -222,7 +230,7 @@ describe('new codes', () => {
     const { clock } = book()
     const del: string[] = []
     const restored = new CodeBook(() => clock.t, undefined, undefined, { put: () => {}, del: (h) => del.push(h) })
-    restored.load([['12345', { room: room(1), exp: clock.t + 1000, ip: '1.2.3.4' }], ['56789', { room: room(2), exp: clock.t - 1, ip: '1.2.3.4' }], ['1234', { room: room(3), exp: clock.t + 1000, ip: '1.2.3.4' }]])
+    restored.load([['12345', { room: room(1), exp: clock.t + 1000, net: net('1.2.3.4') }], ['56789', { room: room(2), exp: clock.t - 1, net: net('1.2.3.4') }], ['1234', { room: room(3), exp: clock.t + 1000, net: net('1.2.3.4') }]])
     expect([...restored.codes.keys()]).toEqual(['12345'])
     expect(del.sort()).toEqual(['1234', '56789'])
   })

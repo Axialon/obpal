@@ -1,4 +1,5 @@
-/** Stroke icon set shared by the phone controller and the viewer. Names double as the protocol's standard tray icon vocabulary. */
+/** Stroke icon set shared by the phone controller and the viewer. Names double as the protocol's standard tray icon vocabulary. */import { type Content, html, setMarkup } from './markup'
+
 const s = (d: string) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`
 
 export const ICONS: Record<string, string> = {
@@ -95,17 +96,17 @@ export function calmMarks(root: ParentNode, orbits = 1) {
 
 /** Fill each `[data-mark]` slot with the inline logo mark (crisp at any size); a phone lets it settle after two orbits. */
 export function mountMarks(root: ParentNode = document) {
-  for (const slot of root.querySelectorAll<HTMLElement>('[data-mark]')) slot.innerHTML = logoMark()
+  for (const slot of root.querySelectorAll<HTMLElement>('[data-mark]')) setMarkup(slot, logoMark())
   if (matchMedia('(pointer: coarse)').matches) calmMarks(root, 2)
 }
 
-export function logoMark(): string {
+export function logoMark(): Content {
   const id = `obm${++markSeq}`
   const A = 'var(--accent, #C6FF34)'
   const ring = 'M95.6 45.63 A47 15 -14 0 1 4.4 68.37'
   const orbit = 'M95.6 45.63 A47 15 -14 0 1 4.4 68.37 A47 15 -14 0 1 95.6 45.63'
-  const sat = (glow: boolean) => `<g><animateMotion dur="7.5s" repeatCount="indefinite" calcMode="linear"><mpath href="#${id}-orbit"/></animateMotion>${glow ? `<circle r="6.5" style="fill:${A}" opacity=".45" filter="url(#${id}-soft)"/>` : ''}<circle r="3.7" style="fill:${A}"/><circle r="1.4" fill="#fff"/></g>`
-  return `<svg class="mark" viewBox="0 0 100 100" aria-hidden="true" focusable="false" shape-rendering="geometricPrecision">
+  const sat = (glow: boolean) => html`<g><animateMotion dur="7.5s" repeatCount="indefinite" calcMode="linear"><mpath href="#${id}-orbit"/></animateMotion>${glow ? html`<circle r="6.5" style="fill:${A}" opacity=".45" filter="url(#${id}-soft)"/>` : ''}<circle r="3.7" style="fill:${A}"/><circle r="1.4" fill="#fff"/></g>`
+  return html`<svg class="mark" viewBox="0 0 100 100" aria-hidden="true" focusable="false" shape-rendering="geometricPrecision">
   <defs>
     <linearGradient id="${id}-top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4b4b4b"/><stop offset=".35" stop-color="#262626"/><stop offset=".75" stop-color="#131313"/><stop offset="1" stop-color="#050505"/></linearGradient>
     <linearGradient id="${id}-left" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1b1b1b"/><stop offset=".45" stop-color="#0a0a0a"/><stop offset="1" stop-color="#000"/></linearGradient>
@@ -144,5 +145,5 @@ export function settleMotion(root: ParentNode = document) {
 }
 
 /** Lockup: the mark with the ob.Pal wordmark (quiet "ob", accent full stop, bold "Pal"). */
-export const LOGO_WORD = '<span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span>'
-export const logo = () => `${logoMark()}${LOGO_WORD}`
+export const LOGO_WORD = `<span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span>`
+export const logo = () => html`${logoMark()}${LOGO_WORD}`

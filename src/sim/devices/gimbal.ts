@@ -1,0 +1,64 @@
+/** A three-axis camera follows the phone's quaternion exactly, relative to its last Home. */
+import { Controller, qConj, qMul, qAxisAngle, type Quat } from '@obpal/core'
+import { action, Machine } from './common'
+import { clamp, panTiltOf } from './input'
+import type { DeviceInput, DeviceSpec } from './types'
+export const GIMBAL_SPEC: DeviceSpec = {
+  id: 'gimbal',
+  name: 'Camera gimbal',
+  unit: 'Gimbal',
+  units: 1,
+  kind: 'Camera',
+  blurb: 'Hold a camera steady or roll it through a shot: its three axes follow your phone one for one.',
+  teaches: 'A quaternion keeps yaw, pitch and roll together',
+  controllers: [Controller.trackpad, Controller.hand],
+  how: {
+    'face.trackpad': 'Gyro on, 1:1: turn the camera with your phone · drag / twist also aim · tap records',
+    'face.hand': 'Hold the pad and turn the phone · Record starts a take',
+  },
+  tray: [{ id: 'record', label: 'Record', type: 'button', icon: 'frame' }],
+  buttons: { 'media:playpause': 'tray:record', 'key:KeyR': 'tray:record' },
+}
+export function unitQuaternion(q: Quat): Quat {
+  const length = Math.hypot(...q)
+  return length > 0 && Number.isFinite(length) ? (q.map((v) => v / length) as Quat) : [0, 0, 0, 1]
+}
+export class GimbalLogic extends Machine {
+  readonly spec = GIMBAL_SPEC
+  units = [{ q: [0, 0, 0, 1] as Quat, pan: 0, pitch: 0, roll: 0, recording: false, takes: 0 }]
+  private zero: Quat = [0, 0, 0, 1]
+  private last: Quat = [0, 0, 0, 1]
+  home() {
+    this.zero = [...this.last]
+    Object.assign(this.units[0], { q: [0, 0, 0, 1], pan: 0, pitch: 0, roll: 0 })
+  }
+  readout() {
+    const u = this.units[0]
+    return `${u.recording ? 'Recording' : 'Ready'} · ${Math.round(u.pan * 57.3)}°`
+  }
+  step(inputs: readonly (DeviceInput | null)[]) {
+    const i = inputs[0],
+      u = this.units[0]
+    if (!i) return
+    const q = i.hold ?? (i.pose?.tracked && i.pose.touching ? i.pose.q : null)
+    if (q) {
+      this.last = unitQuaternion(q)
+      if (i.recentred) this.zero = [0, 0, 0, 1]
+      u.q = unitQuaternion(qMul(qConj(this.zero), this.last))
+      ;[u.pan, u.pitch] = panTiltOf(u.q)
+      const [x, y, z, w] = u.q
+      u.roll = Math.atan2(2 * (x * y + w * z), 1 - 2 * (x * x + z * z))
+    } else if (i.drag.some((v) => v !== 0) || i.twist) {
+      u.pan -= i.drag[0] * 0.008
+      u.pitch = clamp(u.pitch - i.drag[1] * 0.008, -1.5, 1.5)
+      u.roll += (i.twist * Math.PI) / 180
+      u.q = qMul(qMul(qAxisAngle(0, 1, 0, u.pan), qAxisAngle(1, 0, 0, u.pitch)), qAxisAngle(0, 0, 1, u.roll))
+    }
+    if (i.recentred && !q) this.home()
+    if (action(i, 'record')) {
+      u.recording = !u.recording
+      if (u.recording) u.takes++
+      this.events.push({ unit: 0, kind: 'tick', text: u.recording ? 'Recording a take' : 'Take complete' })
+    }
+  }
+}

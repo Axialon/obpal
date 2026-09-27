@@ -9,7 +9,8 @@
  *  - The Back button or gesture: an opt-in, through CloseWatcher where there is one, else the history.
  * A one-line summary copies to paste back. Nothing here connects to a screen. The findings it checks are in
  * spec/RESEARCH-BUTTONS.md; the pure half (input ids, labels, the summary) is ./inputs.ts.
- */
+ */import { type Content, html, setMarkup, insertMarkup } from '../ui/markup'
+
 import { applyTheme, initialTheme } from '../ui/themes'
 import { ICONS, mountMarks } from '../ui/icons'
 import { mountTopBar } from '../landing/topbar'
@@ -23,13 +24,13 @@ mountMarks()
 mountTopBar()
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
-const s = (d: string) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`
-const GLYPH: Record<Source, string> = {
+const s = (d: Content) => html`<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`
+const GLYPH: Record<Source, Content> = {
   keys: ICONS.keyboard,
   volume: ICONS.sound,
-  media: s('<path d="M4.5 14.5v-2a7.5 7.5 0 0 1 15 0v2"/><rect x="3.5" y="13.5" width="4.2" height="6.5" rx="1.8"/><rect x="16.3" y="13.5" width="4.2" height="6.5" rx="1.8"/>'),
+  media: s(html`<path d="M4.5 14.5v-2a7.5 7.5 0 0 1 15 0v2"/><rect x="3.5" y="13.5" width="4.2" height="6.5" rx="1.8"/><rect x="16.3" y="13.5" width="4.2" height="6.5" rx="1.8"/>`),
   pad: ICONS.gamepad,
-  back: s('<path d="M9.5 7.5 5 12l4.5 4.5"/><path d="M5.5 12h8.5a4.5 4.5 0 0 1 0 9h-2"/>'),
+  back: s(html`<path d="M9.5 7.5 5 12l4.5 4.5"/><path d="M5.5 12h8.5a4.5 4.5 0 0 1 0 9h-2"/>`),
 }
 const SOURCES: [Source, string][] = [['keys', 'Keys'], ['volume', 'Volume'], ['media', 'Headset'], ['pad', 'Pad'], ['back', 'Back']]
 
@@ -79,12 +80,12 @@ showEnv()
 void uad?.getHighEntropyValues?.(['platformVersion', 'model']).then(showEnv, () => {})
 
 // ---- the page ----
-$('srcs').innerHTML = SOURCES.map(([src, name]) => `<div class="bt-src" data-src="${src}">${GLYPH[src]}<b>0</b><span>${name}</span></div>`).join('')
-$('hold').insertAdjacentHTML('afterbegin', ICONS.sound)
-$('headset').insertAdjacentHTML('afterbegin', GLYPH.media)
-$('back').insertAdjacentHTML('afterbegin', GLYPH.back)
-$('fs').innerHTML = ICONS.frame
-$('clear').innerHTML = ICONS.reset
+setMarkup($('srcs'), SOURCES.map(([src, name]) => html`<div class="bt-src" data-src="${src}">${GLYPH[src]}<b>0</b><span>${name}</span></div>`))
+insertMarkup($('hold'), 'afterbegin', ICONS.sound)
+insertMarkup($('headset'), 'afterbegin', GLYPH.media)
+insertMarkup($('back'), 'afterbegin', GLYPH.back)
+setMarkup($('fs'), ICONS.frame)
+setMarkup($('clear'), ICONS.reset)
 
 function renderSources() {
   const counts: Record<Source, number> = { keys: 0, volume: 0, media: 0, pad: 0, back: 0 }
@@ -97,14 +98,13 @@ function renderSources() {
 }
 
 const clock = (t: number) => new Date(t).toTimeString().slice(0, 8)
-const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
 function renderLog() {
-  $('log').innerHTML = rows.length
+  setMarkup($('log'), rows.length
     ? rows.map((r) => {
       const extra = [r.repeats ? `${r.repeats} repeats` : '', r.held !== undefined ? `held ${Math.round(r.held)} ms` : ''].filter(Boolean).join(' · ')
-      return `<li data-src="${r.source}"><i></i><b>${esc(r.label)}</b><span>${esc(r.detail)}${extra ? ` · ${extra}` : ''}</span><time>${clock(r.at)}</time></li>`
-    }).join('')
-    : '<li class="empty">Nothing yet</li>'
+      return html`<li data-src="${r.source}"><i></i><b>${r.label}</b><span>${r.detail}${extra ? ` · ${extra}` : ''}</span><time>${clock(r.at)}</time></li>`
+    })
+    : html`<li class="empty">Nothing yet</li>`)
 }
 
 const heroEl = $('hero')
@@ -289,11 +289,11 @@ function addPad(gp: Gamepad): PadView {
   el.className = 'bt-pad glass'
   const name = padName(gp.id)
   const rumbles = !!(gp.vibrationActuator || (gp as Gamepad & { hapticActuators?: unknown[] }).hapticActuators?.length)
-  el.innerHTML = `
-    <header><span>${GLYPH.pad}</span><div><b>${esc(name)}</b><small>${standard ? 'standard' : 'no mapping'} · ${gp.buttons.length} buttons · ${gp.axes.length} axes · #${gp.index}</small></div>
-      ${rumbles ? '<button class="bt-chip" type="button">Rumble</button>' : '<em>no rumble</em>'}</header>
-    <div class="bt-pbtns">${gp.buttons.map((_, i) => `<span class="bt-pb"><i></i>${esc(labelOf(padButton(i, standard)))}</span>`).join('')}</div>
-    <div class="bt-paxes">${gp.axes.map((_, i) => `<span class="bt-pa"><em>${standard && i < 4 ? ['LX', 'LY', 'RX', 'RY'][i] : `A${i}`}</em><span class="bt-bar"><i></i></span><b>0.00</b></span>`).join('')}</div>`
+  setMarkup(el, html`
+    <header><span>${GLYPH.pad}</span><div><b>${name}</b><small>${standard ? 'standard' : 'no mapping'} · ${gp.buttons.length} buttons · ${gp.axes.length} axes · #${gp.index}</small></div>
+      ${rumbles ? html`<button class="bt-chip" type="button">Rumble</button>` : html`<em>no rumble</em>`}</header>
+    <div class="bt-pbtns">${gp.buttons.map((_, i) => html`<span class="bt-pb"><i></i>${labelOf(padButton(i, standard))}</span>`)}</div>
+    <div class="bt-paxes">${gp.axes.map((_, i) => html`<span class="bt-pa"><em>${standard && i < 4 ? ['LX', 'LY', 'RX', 'RY'][i] : `A${i}`}</em><span class="bt-bar"><i></i></span><b>0.00</b></span>`)}</div>`)
   $('pads').append(el)
   const v: PadView = { el, name, standard, pressed: gp.buttons.map(() => false), dirs: gp.axes.map(() => 0), rumble: rumbles ? '' : 'no rumble' }
   el.querySelector<HTMLButtonElement>('.bt-chip')?.addEventListener('click', () => void rumble(gp.index, v))

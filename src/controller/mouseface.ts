@@ -5,7 +5,8 @@
  *
  * On the wire: btn mouse-left / mouse-right down and up; value{mouse-wheel: units} (120 a notch, + scrolls down) as
  * the wheel turns; btn mouse-middle tap; wii-b down and up for the hold; wii-minus / wii-plus taps to zoom.
- */
+ */import { type Content, html } from '../ui/markup'
+
 import type { DeviceMsg } from '@obpal/core'
 import { ICONS } from '../ui/icons'
 import { ScrollWheel } from './wheel'
@@ -25,8 +26,8 @@ export class MouseFace {
 
   constructor(private readonly deps: MouseFaceDeps) {}
 
-  html(): string {
-    return `
+  html(): Content {
+    return html`
       <div class="mouse-top">
         <button class="mouse-round" id="mouse-zoom-out" aria-label="Zoom out">${ICONS['zoom-out']}</button>
         <button class="mouse-round home" id="mouse-home" aria-label="Centre the pointer">${ICONS.center}</button>

@@ -49,6 +49,21 @@ async function check(name, fn) {
 }
 const shot = async (page, name, opts) => { if (SHOTS) await page.screenshot({ path: joinPath(SHOTS, `${name}.png`), ...opts }) }
 
+/** Observe the existing candidate envelope and the receiving WebRTC call on both real peers. */
+function watchCompletion() {
+  window.__iceEnd = { sent: 0, received: 0 }
+  const send = WebSocket.prototype.send
+  WebSocket.prototype.send = function (data) {
+    try { if (JSON.parse(data)?.d?.cand?.candidate === '') window.__iceEnd.sent++ } catch { /* ping */ }
+    return send.call(this, data)
+  }
+  const add = RTCPeerConnection.prototype.addIceCandidate
+  RTCPeerConnection.prototype.addIceCandidate = async function (candidate) {
+    await add.call(this, candidate)
+    if (candidate?.candidate === '') window.__iceEnd.received++
+  }
+}
+
 /** Both decoders on a screenshot of the QR code as the browser drew it. */
 async function readQr(png) {
   const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
@@ -73,6 +88,7 @@ try {
   const browser = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
   closers.push(browser)
   const screenCtx = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+  await screenCtx.addInitScript(watchCompletion)
   const screen = await screenCtx.newPage()
   const errors = []
   screen.on('pageerror', (e) => errors.push(e.message))
@@ -201,6 +217,7 @@ try {
     profiles.push(dir)
     const ctx = await chromium.launchPersistentContext(dir, { ...devices['Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS })
     closers.push(ctx)
+    await ctx.addInitScript(watchCompletion)
     const page = ctx.pages()[0] ?? (await ctx.newPage())
     await page.goto(url)
     return page
@@ -230,6 +247,13 @@ try {
     const next = await until('a fresh code', async () => { const c = await liveCode(); return c && c !== code ? c : null }, 5000)
     if (!(await chipState()).open) throw new Error('+ did not open the chip')
     return `typed "${typed}", field read "${shown}"; ${people} on the screen, the chip closed (${s.status}); + opens it with ${next}`
+  })
+
+  await check('both peers signal gathering completion and pass it to addIceCandidate', async () => {
+    await until('end of candidates in both directions', async () => {
+      const ends = await Promise.all([screen.evaluate(() => window.__iceEnd), phone.evaluate(() => window.__iceEnd)])
+      return ends.every((e) => e.sent > 0 && e.received > 0)
+    }, 30000)
   })
 
   await check('the phone kept the screen’s regular code: a reload rejoins the same scene without the short code', async () => {

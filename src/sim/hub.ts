@@ -77,6 +77,7 @@ const grid = $('sims')
 const made = SIMS.map(cardOf)
 grid.replaceChildren(...made.map((m) => m.el))
 $('soon').replaceChildren(...PROPOSED.map(soonOf))
+$('soon').closest<HTMLElement>('.sims-next')!.hidden = PROPOSED.length === 0
 mountPreviews(made.flatMap((m) => (m.slot ? [m.slot] : [])))
 
 // ---- the filter: by controller ----

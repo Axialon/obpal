@@ -1,8 +1,11 @@
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import * as THREE from 'three'
 import { formatValue, Tradeoff } from '../src/viewer/tradeoff'
 import { models } from '../src/vendor/blackboxes'
 import { boxemCore } from '../src/viewer/boxem-core'
+
+// The model tests need no rendered tags; browser suites cover their DOM.
+vi.mock('../src/ui/markup', () => ({ html: () => null, setMarkup: () => {} }))
 
 // Minimal DOM for the value tags (the test runs in node).
 const el = () => {

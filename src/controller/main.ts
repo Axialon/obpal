@@ -1,3 +1,4 @@
+import { controllerWorkerURL, type Content, insertMarkup, html, setMarkup } from '../ui/markup'
 import { family } from '../family'
 import '../styles/base.css'
 import '../styles/controller.css'
@@ -36,11 +37,10 @@ const store = {
   get: (k: string) => { try { return localStorage.getItem(k) } catch { return null } },
   set: (k: string, v: string) => { try { localStorage.setItem(k, v) } catch { /* private mode */ } },
 }
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 const safeImage = (u?: string) => (u && /^https:\/\//.test(u) ? u : undefined)
 
 applyTheme(initialTheme())
-document.body.insertAdjacentHTML('afterbegin', '<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>')
+insertMarkup(document.body, 'afterbegin', html`<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>`)
 document.addEventListener('gesturestart', (e) => e.preventDefault())
 document.addEventListener('touchmove', (e) => { if ((e.target as Element | null)?.closest?.('.pad, .dock')) e.preventDefault() }, { passive: false })
 
@@ -66,7 +66,7 @@ function takePairing(): PairingCode | null {
 // The controller keeps working with no internet after one visit: a service worker caches this page and its assets.
 // Registered once the link has had a head start, so it never competes with connecting.
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  setTimeout(() => navigator.serviceWorker.register('/p/sw.js', { scope: '/p/' }).catch(() => { /* optional */ }), 2500)
+  setTimeout(() => navigator.serviceWorker.register(controllerWorkerURL(), { scope: '/p/' }).catch(() => { /* optional */ }), 2500)
 }
 
 async function deviceName(): Promise<string> {
@@ -81,18 +81,18 @@ async function deviceName(): Promise<string> {
   return /Android/.test(ua) ? 'Android phone' : 'Browser'
 }
 
-function screenMessage(opts: { title: string; body: string; spinner?: boolean; art?: string; action?: { label: string; run: () => void } }) {
+function screenMessage(opts: { title: string; body: Content; spinner?: boolean; art?: string; action?: { label: string; run: () => void } }) {
   document.documentElement.classList.remove('gp-mode') // full-screen messages keep the background and hints alive
-  app.innerHTML = `
+  setMarkup(app, html`
     <main class="msg">
       <div class="logo">${logo()}</div>
       <div class="msg-card glass">
-        ${opts.spinner ? '<div class="spinner" aria-hidden="true"></div>' : opts.art ? `<div class="msg-art">${opts.art}</div>` : ''}
-        <h1>${esc(opts.title)}</h1>
+        ${opts.spinner ? html`<div class="spinner" aria-hidden="true"></div>` : opts.art ? html`<div class="msg-art">${opts.art}</div>` : ''}
+        <h1>${opts.title}</h1>
         <p>${opts.body}</p>
-        ${opts.action ? `<button class="btn primary" id="act">${esc(opts.action.label)}</button>` : ''}
+        ${opts.action ? html`<button class="btn primary" id="act">${opts.action.label}</button>` : ''}
       </div>
-    </main>`
+    </main>`)
   calmMarks(app, 2)
   if (opts.action) document.getElementById('act')!.onclick = opts.action.run
 }
@@ -120,7 +120,7 @@ function startPage() {
   screenMessage({ title: 'Scan the code on your screen', art: ICONS.phone, body: 'Or type the code shown beside it.' })
   const card = app.querySelector('.msg-card')!
   card.classList.add('start')
-  card.insertAdjacentHTML('beforeend', `
+  insertMarkup(card, 'beforeend', html`
     <form class="code-form" id="code-form" novalidate>
       <label class="sr" for="code-in">Code from your screen</label>
       <input class="code-in" id="code-in" type="text" inputmode="numeric" autocomplete="off" autocorrect="off" autocapitalize="characters"
@@ -128,7 +128,7 @@ function startPage() {
       <button class="btn primary big" id="code-go" type="submit" disabled>Connect</button>
       <p class="code-say" id="code-say" role="status"></p>
     </form>
-    <p class="start-foot">Nothing on the screen yet? Open <b>${esc(location.host)}/view</b> there.</p>`)
+    <p class="start-foot">Nothing on the screen yet? Open <b>${location.host}/view</b> there.</p>`)
   const form = document.getElementById('code-form') as HTMLFormElement
   const input = document.getElementById('code-in') as HTMLInputElement
   const go = document.getElementById('code-go') as HTMLButtonElement
@@ -264,7 +264,7 @@ async function boot(code: Join) {
     if (!b) return
     b.setAttribute('aria-pressed', String(lock.locked))
     b.setAttribute('aria-label', lock.locked ? 'Unlock screen rotation' : 'Lock screen rotation')
-    b.innerHTML = lock.locked ? ICONS.lock : ICONS.unlock
+    setMarkup(b, lock.locked ? ICONS.lock : ICONS.unlock)
   }
   // ---- 3D tracking (mode 6): WebXR follows the phone through space; each pose goes out in a POSE packet ----
   const tracker = new Tracker()
@@ -532,7 +532,7 @@ async function boot(code: Join) {
   else begin()
 
   function showGate() {
-    app.insertAdjacentHTML('beforeend', `
+    insertMarkup(app, 'beforeend', html`
       <div class="gate" id="gate">
         <div class="gate-card glass">
           <div class="gate-art" aria-hidden="true">${ICONS.gyro}</div>
@@ -815,7 +815,7 @@ async function boot(code: Join) {
 
   function showSurface() {
     if (surface && document.body.contains(surface)) return
-    app.innerHTML = `
+    setMarkup(app, html`
       <div class="surface${settings.left ? ' left' : ''}" id="surface">
         <header class="bar">
           <span class="host-ic">${logoMark()}</span>
@@ -863,7 +863,7 @@ async function boot(code: Join) {
       </div>
       ${keyboard.html()}
       <div class="toast glass" id="toast" role="status" aria-live="polite"></div>
-      <div class="rest" id="rest" aria-hidden="true"><span>Resting to keep your phone cool · touch to wake</span></div>`
+      <div class="rest" id="rest" aria-hidden="true"><span>Resting to keep your phone cool · touch to wake</span></div>`)
     surface = document.getElementById('surface')!
     linkBadge.mount(document.getElementById('link-badge')!)
     document.body.classList.add('live')
@@ -1073,14 +1073,14 @@ async function boot(code: Join) {
     if (hov && !part) hint('parts-phone', () => document.getElementById('pad-part'), 'Tap to select, then drag, pinch or twist it', { place: 'bottom', delay: 300 })
 
     // Visual gesture legend instead of instructions.
-    const g = (name: string, word: string) => `<span>${icon(name)}<b>${word}</b></span>`
-    document.getElementById('gestures')!.innerHTML = live
-      ? g('drag', 'value') + g('tilt', 'sweep') + g('tap', '2× reset')
+    const g = (name: string, word: string) => html`<span>${icon(name)}<b>${word}</b></span>`
+    setMarkup(document.getElementById('gestures')!, live
+      ? [g('drag', 'value'), g('tilt', 'sweep'), g('tap', '2? reset')]
       : part
-      ? g('drag', 'move') + g('pinch', 'scale') + g('twist', 'turn') + g('tap', '2× reset')
+      ? [g('drag', 'move'), g('pinch', 'scale'), g('twist', 'turn'), g('tap', '2? reset')]
       : mode === Mode.point
-      ? (gyroOn ? g('point', 'aim') : g('drag', 'move')) + g('tap', 'focus') + g('pan', 'pan') + g('pinch', 'zoom')
-      : g('drag', 'orbit') + g('pan', 'pan') + g('pinch', 'zoom') + g('twist', 'roll')
+      ? [gyroOn ? g('point', 'aim') : g('drag', 'move'), g('tap', 'focus'), g('pan', 'pan'), g('pinch', 'zoom')]
+      : [g('drag', 'orbit'), g('pan', 'pan'), g('pinch', 'zoom'), g('twist', 'roll')])
     gamepad.sync({ active: mode === Mode.gamepad, offered: hostModes().includes(Mode.gamepad) })
     placeTyping()
     // The controller may have changed: Back's arming follows its bindings, and the badges go on what's shown.
@@ -1130,8 +1130,8 @@ async function boot(code: Join) {
   function thumb(o: { image?: string; glyph?: string; color?: string; label: string }) {
     const img = safeImage(o.image)
     return img
-      ? `<img src="${esc(img)}" alt="" loading="lazy" decoding="async">`
-      : `<span style="color:${/^#[0-9a-f]{3,8}$/i.test(o.color ?? '') ? o.color : 'var(--accent)'}">${esc(o.glyph ?? o.label.slice(0, 1))}</span>`
+      ? html`<img src="${img}" alt="" loading="lazy" decoding="async">`
+      : html`<span style="color:${/^#[0-9a-f]{3,8}$/i.test(o.color ?? '') ? o.color : 'var(--accent)'}">${o.glyph ?? o.label.slice(0, 1)}</span>`
   }
 
   /** Who controls a node, as this device should read it: its holder, or whoever holds the node it is part of. */
@@ -1165,7 +1165,7 @@ async function boot(code: Join) {
   function renderTray() {
     const tray = document.getElementById('tray')
     if (!tray) return
-    tray.innerHTML = ''
+    tray.replaceChildren()
     // In a shared scene, what you hold (or the scene list, to claim something) comes first.
     if (scene && scene.nodes.length) {
       const c = sceneControl()
@@ -1175,7 +1175,7 @@ async function boot(code: Join) {
       b.className = 'tray-btn select glass scene-btn'
       b.setAttribute('aria-label', node ? `Holding ${node.name}. Open the scene list` : 'Open the scene list')
       b.setAttribute('aria-haspopup', 'dialog')
-      b.innerHTML = `<span class="sel-thumb"><span class="seat-dot"></span></span><span class="sel-v"></span>${ICONS.chevron}`
+      setMarkup(b, html`<span class="sel-thumb"><span class="seat-dot"></span></span><span class="sel-v"></span>${ICONS.chevron}`)
       b.querySelector('.sel-v')!.textContent = node?.name ?? `Scene · ${scene.people.length}`
       b.addEventListener('pointerdown', () => tick())
       b.onclick = () => openPicker({ ...c, label: `Scene · ${scene!.people.length} here` }, (v) => {
@@ -1190,16 +1190,16 @@ async function boot(code: Join) {
       b.setAttribute('aria-label', c.label)
       if (c.type === 'select') {
         const cur = c.options?.find((o) => o.value === values[c.id])
-        b.innerHTML = `<span class="sel-thumb">${cur ? thumb(cur) : icon(c.icon)}</span><span class="sel-v"></span>${ICONS.chevron}`
+        setMarkup(b, html`<span class="sel-thumb">${cur ? thumb(cur) : icon(c.icon)}</span><span class="sel-v"></span>${ICONS.chevron}`)
         b.querySelector('.sel-v')!.textContent = cur?.label ?? c.label
         b.setAttribute('aria-haspopup', 'dialog')
       } else if (c.tone === 'stop') {
-        b.innerHTML = '<span class="tray-label"></span>'
+        setMarkup(b, html`<span class="tray-label"></span>`)
         b.querySelector('.tray-label')!.textContent = c.label
       } else {
         // A keyboard control without an icon of its own gets the keyboard.
         const ic = icon(c.icon ?? (c.type === 'keyboard' ? 'keyboard' : undefined))
-        b.innerHTML = `${ic}<span class="tray-label"></span>`
+        setMarkup(b, html`${ic}<span class="tray-label"></span>`)
         b.querySelector('.tray-label')!.textContent = c.label
         if (!ic) b.classList.add('text')
         else b.title = c.label
@@ -1229,7 +1229,7 @@ async function boot(code: Join) {
   function openPicker(c: TrayControl, onPick?: (value: string) => void, current?: string) {
     const wrap = document.createElement('div')
     wrap.className = 'sheet-wrap'
-    wrap.innerHTML = `<div class="sheet picker glass" role="dialog"><div class="grip" aria-hidden="true"></div><div class="picker-head"><h2></h2><button class="icon-btn glass" id="pick-close" aria-label="Close">${ICONS.close}</button></div><div class="picker-list"></div></div>`
+    setMarkup(wrap, html`<div class="sheet picker glass" role="dialog"><div class="grip" aria-hidden="true"></div><div class="picker-head"><h2></h2><button class="icon-btn glass" id="pick-close" aria-label="Close">${ICONS.close}</button></div><div class="picker-list"></div></div>`)
     wrap.querySelector('h2')!.textContent = c.label
     wrap.querySelector('.sheet')!.setAttribute('aria-label', c.label)
     const list = wrap.querySelector('.picker-list')!
@@ -1250,7 +1250,7 @@ async function boot(code: Join) {
       const cell = document.createElement('button')
       cell.className = 'pick'
       cell.setAttribute('aria-selected', String((current ?? values[c.id]) === o.value))
-      cell.innerHTML = `<span class="pick-art">${thumb(o)}</span><span class="pick-name"></span>`
+      setMarkup(cell, html`<span class="pick-art">${thumb(o)}</span><span class="pick-name"></span>`)
       cell.querySelector('.pick-name')!.textContent = o.label
       cell.title = o.detail ?? o.label
       cell.onclick = () => {
@@ -1267,7 +1267,7 @@ async function boot(code: Join) {
         add.className = 'pick-add'
         add.setAttribute('role', 'button')
         add.setAttribute('aria-label', `Add ${o.label}`)
-        add.innerHTML = ICONS.plus
+        setMarkup(add, ICONS.plus)
         add.onclick = (e) => {
           e.stopPropagation()
           tick()
@@ -1317,23 +1317,23 @@ async function boot(code: Join) {
   function openSettings() {
     const sheet = document.createElement('div')
     sheet.className = 'sheet-wrap'
-    sheet.innerHTML = `
+    setMarkup(sheet, html`
       <div class="sheet settings glass" role="dialog" aria-label="Settings">
         <div class="sheet-head"><div class="grip" aria-hidden="true"></div><button class="icon-btn glass sheet-x" id="set-close" aria-label="Close">${ICONS.close}</button></div>
         <label class="bb-field"><span>Sensitivity</span><output id="gv"></output><input class="bb-range" type="range" id="gain" min="0.5" max="3" step="0.1"></label>
         <label class="bb-field"><span>Steadiness</span><output id="sv"></output><input class="bb-range" type="range" id="smooth" min="0" max="1" step="0.05"></label>
         <p class="sheet-k">Surface</p>
-        <div class="theme-row" role="radiogroup" aria-label="Surface">${THEMES.map((t) => `<button class="theme-opt" role="radio" data-theme="${t.id}" aria-checked="${document.documentElement.dataset.theme === t.id}">${swatch(t)}<span>${t.name}</span></button>`).join('')}</div>
-        <p class="sheet-k">Colour${seatColor ? '<small> · yours in this scene</small>' : ''}</p>
-        <div class="accent-row" role="radiogroup" aria-label="Colour">${family.ACCENTS.map((a) => `<button class="bb-accent${a.id === 'product' ? ' product' : ''}" role="radio" data-accent="${a.id}" aria-checked="${family.getAccent() === a.id}" aria-label="${a.id === 'product' ? 'ob.Pal lime (default)' : a.name}" style="--sw:${a.color ?? '#c6ff34'}">${family.icons.check}</button>`).join('')}</div>
+        <div class="theme-row" role="radiogroup" aria-label="Surface">${THEMES.map((t) => html`<button class="theme-opt" role="radio" data-theme="${t.id}" aria-checked="${document.documentElement.dataset.theme === t.id}">${swatch(t)}<span>${t.name}</span></button>`)}</div>
+        <p class="sheet-k">Colour${seatColor ? html`<small> · yours in this scene</small>` : ''}</p>
+        <div class="accent-row" role="radiogroup" aria-label="Colour">${family.ACCENTS.map((a) => html`<button class="bb-accent${a.id === 'product' ? ' product' : ''}" role="radio" data-accent="${a.id}" aria-checked="${family.getAccent() === a.id}" aria-label="${a.id === 'product' ? 'ob.Pal lime (default)' : a.name}" style="--sw:${a.color ?? '#c6ff34'}">${family.icons.check}</button>`)}</div>
         <label class="row"><input type="checkbox" id="left"> Left-handed</label>
         <label class="row"><input type="checkbox" id="lockgyro"> Lock rotation while the gyro is on</label>
-        <div class="row track3d" role="radiogroup" aria-label="3D follows"><span>3D follows</span>${(['motion', 'xr', 'glow'] as const).map((w) => `<button class="way-opt" role="radio" data-way="${w}" aria-checked="${settings.track3d === w}"><span>${{ motion: 'The phone’s motion', xr: 'Its camera (Android)', glow: 'A glow for the screen’s camera' }[w]}</span></button>`).join('')}</div>
+        <div class="row track3d" role="radiogroup" aria-label="3D follows"><span>3D follows</span>${(['motion', 'xr', 'glow'] as const).map((w) => html`<button class="way-opt" role="radio" data-way="${w}" aria-checked="${settings.track3d === w}"><span>${{ motion: 'The phone’s motion', xr: 'Its camera (Android)', glow: 'A glow for the screen’s camera' }[w]}</span></button>`)}</div>
         <button class="set-row glass" id="buttons-open">${BUTTONS_GLYPH}<span>Buttons<small>Headset, remote, clicker, pad</small></span><span class="set-srcs">${sourceStack(inputs)}</span>${ICONS.right}</button>
         <a class="support-link" href="/sponsor/" target="_blank" rel="noopener">${ICONS.heart}<span>Support ob.Pal</span></a>
         <button class="btn" id="forget" hidden>${ICONS.close}<span>Forget remembered screens</span></button>
         <div class="actions"><button class="btn" id="disc">Disconnect</button><button class="btn primary" id="done">Done</button></div>
-      </div>`
+      </div>`)
     document.body.appendChild(sheet)
     // Screens this phone can reach with a direct code; forgetting them means pairing online again.
     const forget = sheet.querySelector<HTMLButtonElement>('#forget')!
@@ -1411,7 +1411,7 @@ async function boot(code: Join) {
       screenMessage({
         title: 'Disconnected',
         art: ICONS.phone,
-        body: hostName ? `You left <b>${esc(hostName)}</b>. Reconnect, or scan another code.` : 'Reconnect, or scan another code.',
+        body: hostName ? html`You left <b>${hostName}</b>. Reconnect, or scan another code.` : 'Reconnect, or scan another code.',
         action: { label: 'Reconnect', run: () => location.reload() },
       })
     }

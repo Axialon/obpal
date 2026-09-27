@@ -97,7 +97,7 @@ export class Seats {
       s.padButtons = pad?.buttons ?? 0
       const quiet = now - s.lastInput > WATCHDOG_MS
       const events = { held: new Set(s.held), presses: s.presses, values: s.values, wheel: s.wheel, text: s.text, del: s.del, recentred: s.recentred }
-      out.set(p.id, quiet ? { ...restInput(face, mode), ...events, held: new Set() } : {
+      out.set(p.id, quiet ? { ...restInput(face, mode), ...events, quiet: true, held: new Set() } : {
         face, mode, pad, padPressed,
         touching: f.touching, drag: f.pad1, pan: f.pad2, pinch: f.zoom, twist: f.twist, tilt: f.tilt,
         hold: f.clutch && mode === Mode.hold ? f.qRel : null,

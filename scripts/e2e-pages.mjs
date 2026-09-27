@@ -40,6 +40,10 @@ try {
       const ctx = await browser.newContext(path === '/p/' ? { ...devices['Pixel 7'] } : { viewport: { width: 1280, height: 800 } })
       try {
         const page = await ctx.newPage()
+        const hostileName = '<img src=x onerror="window.templateInjection=true"> & "phone"'
+        if (path === '/donate/') await page.route('**/api/donations/live', (route) => route.fulfill({ json: {
+          status: 'ok', totalUsd: 10, backerCount: 1, recent: [{ donorName: hostileName, amountUsd: 10 }],
+        } }))
         const errors = []
         const elsewhere = []
         page.on('pageerror', (e) => errors.push(e.message))
@@ -58,8 +62,13 @@ try {
           return { loaded: [...new Set(loaded)], meta, fonts }
         })
         if (errors.length) throw new Error(`page errors: ${errors.slice(0, 2).join(' | ')}`)
+        if (path === '/donate/') {
+          const recent = page.locator('#recent')
+          if (!(await recent.textContent()).includes(hostileName) || await recent.locator('img').count()) throw new Error('network text was parsed as markup')
+        }
         if (cspViolations.length > seen) throw new Error(`violations: ${JSON.stringify(cspViolations.slice(seen, seen + 2))}`)
         if (!/script-src 'self'/.test(found.meta) || !/object-src 'none'/.test(found.meta)) throw new Error(`no page policy: "${found.meta.slice(0, 80)}"`)
+        if (!/require-trusted-types-for 'script'(;|$)/.test(found.meta) || !/trusted-types obpal-templates(;|$)/.test(found.meta)) throw new Error('Trusted Types must be enforced with only the site template policy')
         if (!/frame-ancestors 'self'/.test(headers['content-security-policy'] ?? '')) throw new Error(`no frame-ancestors header: ${headers['content-security-policy']}`)
         if (elsewhere.length) throw new Error(`requests elsewhere: ${elsewhere.slice(0, 3).join(', ')}`)
         if (found.fonts.some((f) => !f.startsWith(`${worker.origin}/fonts/`))) throw new Error(`fonts from elsewhere: ${found.fonts.join(', ')}`)

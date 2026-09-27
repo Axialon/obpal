@@ -10,8 +10,8 @@ import { HOME, layoutOf, restInput } from '../src/sim/devices/types'
 const D2R = Math.PI / 180
 
 describe('the device registry', () => {
-  it('has the first batch, each with a unique id, the controllers that suit it and how each drives it', () => {
-    expect(DEVICES.map((d) => d.spec.id)).toEqual(['rover', 'drone', 'maze', 'ptz', 'lamp', 'claw'])
+  it('has sixteen devices, each with a unique id, the controllers that suit it and how each drives it', () => {
+    expect(DEVICES.map((d) => d.spec.id)).toEqual(['rover', 'drone', 'maze', 'ptz', 'lamp', 'claw', 'boat', 'spotlights', 'vacuum', 'tank', 'excavator', 'forklift', 'painter', 'gimbal', 'plane', 'slotcars'])
     for (const { spec } of DEVICES) {
       expect(spec.controllers.length).toBeGreaterThan(1)
       for (const c of spec.controllers) {
@@ -63,13 +63,15 @@ describe('the device registry', () => {
 })
 
 describe('the sim catalogue', () => {
-  it('lists every device, the arms, the arena and the Viewer, and proposes more', () => {
+  it('lists 24 playable cards with previews, including every completed proposal', () => {
     const ids = SIMS.map((s) => s.id)
     for (const d of DEVICES) expect(ids).toContain(d.spec.id)
     expect(ids).toEqual(expect.arrayContaining(['arena', 'viewer']))
     expect(new Set(ids).size).toBe(ids.length)
     for (const s of SIMS) expect(s.href).toBeTruthy()
-    for (const s of PROPOSED) expect(s.href).toBeNull()
+    expect(ids).toHaveLength(24)
+    expect(PROPOSED).toEqual([])
+    for (const s of SIMS) expect(typeof s.preview).toBe('function')
   })
 
   it('has a card for each kind of arm the arm sim has, trying it in that kind, with its own preview', () => {

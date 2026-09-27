@@ -11,7 +11,8 @@
  *  - badges on bound controls.
  * The person's own changes are kept per profile and controller in `obpal.buttons.<profile id>`, and the smart defaults
  * per kind and controller beside them, in `obpal.buttons.smart`.
- */
+ */import { type Content, html, setMarkup } from '../ui/markup'
+
 import {
   badgeOf, CONTROLLERS, describeBindings, DEVICE_KINDS, hostButtons, INPUT_OPTIONS, inferKind, inputsFor, isInputId, isProfileId,
   isTarget, KEY_TARGETS, offerOf, optionOf, PROFILES, resolveButtons, smartButtons, sourceOf, tapsOnly, targetLabel,
@@ -36,7 +37,6 @@ const MINE = (profile: string) => `obpal.buttons.${profile}`
 const SMART = 'obpal.buttons-smart'
 const BADGES = 'obpal.buttons-badges'
 const BACK = 'obpal.buttons-back'
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
 /** Maps of strings, two deep (controller -> input -> target), from what was stored; anything else is left out. */
 function nested(o: unknown): Nested {
@@ -57,17 +57,17 @@ function readSmart(): SmartStore {
   return out
 }
 
-const s = (d: string) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`
+const s = (d: Content) => html`<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`
 /** A glyph per source: keys, volume, a headset, a pad, Back. */
-export const SOURCE_GLYPH: Record<InputSource, string> = {
+export const SOURCE_GLYPH: Record<InputSource, Content> = {
   keys: ICONS.keyboard,
   volume: ICONS.sound,
-  media: s('<path d="M4.5 14.5v-2a7.5 7.5 0 0 1 15 0v2"/><rect x="3.5" y="13.5" width="4.2" height="6.5" rx="1.8"/><rect x="16.3" y="13.5" width="4.2" height="6.5" rx="1.8"/>'),
+  media: s(html`<path d="M4.5 14.5v-2a7.5 7.5 0 0 1 15 0v2"/><rect x="3.5" y="13.5" width="4.2" height="6.5" rx="1.8"/><rect x="16.3" y="13.5" width="4.2" height="6.5" rx="1.8"/>`),
   pad: ICONS.gamepad,
-  back: s('<path d="M9.5 7.5 5 12l4.5 4.5"/><path d="M5.5 12h8.5a4.5 4.5 0 0 1 0 9h-2"/>'),
+  back: s(html`<path d="M9.5 7.5 5 12l4.5 4.5"/><path d="M5.5 12h8.5a4.5 4.5 0 0 1 0 9h-2"/>`),
 }
 /** Buttons, in Settings: a remote. */
-export const BUTTONS_GLYPH = s('<rect x="7.2" y="2.8" width="9.6" height="18.4" rx="3.2"/><circle cx="12" cy="8.2" r="2.1"/><path d="M10.2 13.4h3.6M10.2 16.6h3.6"/>')
+export const BUTTONS_GLYPH = s(html`<rect x="7.2" y="2.8" width="9.6" height="18.4" rx="3.2"/><circle cx="12" cy="8.2" r="2.1"/><path d="M10.2 13.4h3.6M10.2 16.6h3.6"/>`)
 const SOURCE_NAME: Record<InputSource, string> = { keys: 'Keys', volume: 'Volume', media: 'Headset', pad: 'Pad', back: 'Back' }
 const KIND_NAME: Record<DeviceKind, string> = { clicker: 'Clicker', selfie: 'Selfie remote', pad: 'Pad', headset: 'Headset', keyboard: 'Keyboard' }
 /** The inputs a notice shows for each kind, in order: its main buttons. */
@@ -239,12 +239,12 @@ export class Buttons {
 
   // ---- notices: found a device, or an unbound input ----
 
-  private notice(html: string, ms: number): HTMLElement {
+  private notice(content: Content, ms: number): HTMLElement {
     this.dismiss()
     const n = document.createElement('div')
     n.className = 'bt-notice glass'
     n.setAttribute('role', 'status')
-    n.innerHTML = `${html}<button class="bt-n-x" aria-label="Dismiss">${ICONS.close}</button>`
+    setMarkup(n, html`${content}<button class="bt-n-x" aria-label="Dismiss">${ICONS.close}</button>`)
     n.querySelector<HTMLButtonElement>('.bt-n-x')!.onclick = () => this.dismiss()
     document.body.appendChild(n)
     this.noticeTimer = setTimeout(() => this.dismiss(), ms)
@@ -264,9 +264,9 @@ export class Buttons {
     const controller = this.deps.controller()
     const pad = kind === 'pad' ? this.deps.inputs.padList()[0]?.name : undefined
     const does = describeBindings(controller, KIND_SHOWS[kind], bindings, this.deps.layout().tray, kind === 'clicker' ? 2 : 3)
-    const n = this.notice(`
+    const n = this.notice(html`
       <span class="bt-n-ic" data-src="${sourceOf(id)}">${SOURCE_GLYPH[sourceOf(id)]}</span>
-      <span class="bt-n-txt"><b>${esc(pad ?? KIND_NAME[kind])} found</b><span>${esc(does || 'Ready')}</span></span>
+      <span class="bt-n-txt"><b>${pad ?? KIND_NAME[kind]} found</b><span>${does || 'Ready'}</span></span>
       <button class="bt-n-go">Change</button>`, 6500)
     n.querySelector<HTMLButtonElement>('.bt-n-go')!.onclick = () => { this.deps.feel(); this.dismiss(); this.open(id) }
   }
@@ -275,10 +275,10 @@ export class Buttons {
   private offer(id: string) {
     const controller = this.deps.controller()
     const quick = QUICK[controller].filter((t) => isTarget(controller, t)).slice(0, 4)
-    const n = this.notice(`
+    const n = this.notice(html`
       <span class="bt-n-ic" data-src="${sourceOf(id)}">${SOURCE_GLYPH[sourceOf(id)]}</span>
-      <span class="bt-n-txt"><b>${esc(badgeOf(id))}</b><span>Use it for</span></span>
-      <span class="bt-n-picks">${quick.map((t) => `<button class="bt-n-pick" data-target="${esc(t)}">${esc(targetLabel(controller, t))}</button>`).join('')}<button class="bt-n-go">More</button></span>`, 9000)
+      <span class="bt-n-txt"><b>${badgeOf(id)}</b><span>Use it for</span></span>
+      <span class="bt-n-picks">${quick.map((t) => html`<button class="bt-n-pick" data-target="${t}">${targetLabel(controller, t)}</button>`)}<button class="bt-n-go">More</button></span>`, 9000)
     n.querySelectorAll<HTMLButtonElement>('[data-target]').forEach((b) => {
       b.onclick = () => {
         this.deps.feel()
@@ -318,7 +318,7 @@ export class Buttons {
    * render: a badge that would read the same is left alone, so nothing flickers as the screen's state streams in.
    */
   paint() {
-    const want = new Map<HTMLElement, string>()
+    const want = new Map<HTMLElement, HTMLElement>()
     if (this.badgesOn()) {
       const controller = this.deps.controller()
       const at = BADGE_AT[controller]
@@ -333,25 +333,24 @@ export class Buttons {
         const ids = inputsFor(bindings, t).filter((id) => seen.has(id))
         if (!ids.length) continue
         const labels = [...new Map(ids.map((id) => [badgeOf(id), id])).entries()]
-        // As the browser writes the markup back, so it compares like with like with what's on screen.
-        scratch.innerHTML = labels.slice(0, 2).map(([label, id]) => `<i data-src="${sourceOf(id)}"${this.used.has(id) ? ' class="used"' : ''}>${esc(label)}</i>`).join('')
-          + (labels.length > 2 ? `<i class="more">+${labels.length - 2}</i>` : '')
-        want.set(el, scratch.innerHTML)
+        const badges = document.createElement('span')
+        setMarkup(badges, [labels.slice(0, 2).map(([label, id]) => html`<i data-src="${sourceOf(id)}" class="${this.used.has(id) ? 'used' : ''}">${label}</i>`),
+          labels.length > 2 ? html`<i class="more">+${labels.length - 2}</i>` : ''])
+        want.set(el, badges)
       }
     }
-    document.querySelectorAll<HTMLElement>('.hw-badges').forEach((b) => { if (want.get(b.parentElement!) !== b.innerHTML) b.remove() })
-    for (const [el, html] of want) {
+    document.querySelectorAll<HTMLElement>('.hw-badges').forEach((b) => { if (!want.get(b.parentElement!)?.isEqualNode(b)) b.remove() })
+    for (const [el, badges] of want) {
       if (el.querySelector(':scope > .hw-badges')) continue
       const box = document.createElement('span')
       box.className = 'hw-badges'
       box.setAttribute('aria-hidden', 'true')
-      box.innerHTML = html
+      box.append(...badges.childNodes)
       el.appendChild(box)
     }
   }
 }
 
-const scratch = document.createElement('span')
 
 /** Where each control of a controller is on screen, for its badge. The gamepad has none: it's dense enough. */
 const BADGE_AT: Partial<Record<ControllerId, Record<string, string>>> = {
@@ -380,7 +379,7 @@ class ButtonsSheet {
   constructor(private readonly b: Buttons, private readonly deps: ButtonsDeps, private readonly onClose: () => void) {
     const wrap = document.createElement('div')
     wrap.className = 'sheet-wrap'
-    wrap.innerHTML = `
+    setMarkup(wrap, html`
       <div class="sheet btns glass" role="dialog" aria-label="Buttons">
         <div class="sheet-head"><div class="grip" aria-hidden="true"></div><button class="icon-btn glass sheet-x" data-act="close" aria-label="Close">${ICONS.close}</button></div>
         <div class="bt-title"><h2>Buttons</h2><span class="bt-ctl"></span></div>
@@ -392,7 +391,7 @@ class ButtonsSheet {
         <label class="row"><input type="checkbox" data-act="badges"> Show them on the controls</label>
         <a class="support-link" href="/buttons/" target="_blank" rel="noopener">${ICONS.open}<span>Test your buttons</span></a>
         <div class="actions"><button class="btn" data-act="reset">Reset</button><button class="btn primary" data-act="done">Done</button></div>
-      </div>`
+      </div>`)
     this.wrap = wrap
     document.body.appendChild(wrap)
     const close = () => this.close()
@@ -481,7 +480,7 @@ class ButtonsSheet {
 
   private say(text: string, undo = false) {
     const el = this.wrap.querySelector<HTMLElement>('.bt-line')!
-    el.innerHTML = esc(text) + (undo && this.undo ? ` <button class="bt-undo">Undo</button>` : '')
+    setMarkup(el, [text, undo && this.undo ? html` <button class="bt-undo">Undo</button>` : ''])
     const u = el.querySelector<HTMLButtonElement>('.bt-undo')
     if (u) u.onclick = () => {
       this.deps.feel()
@@ -511,10 +510,10 @@ class ButtonsSheet {
     const chip = (t: string) => {
       const ids = inputsFor(bindings, t)
       const labels = [...new Map(ids.map((id) => [badgeOf(id), id])).entries()]
-      const bs = labels.slice(0, 3).map(([label, id]) => `<i data-src="${sourceOf(id)}">${esc(label)}</i>`).join('') + (labels.length > 3 ? `<i class="more">+${labels.length - 3}</i>` : '')
+      const bs = [labels.slice(0, 3).map(([label, id]) => html`<i data-src="${sourceOf(id)}">${label}</i>`), labels.length > 3 ? html`<i class="more">+${labels.length - 3}</i>` : '']
       const on = this.target === t
       const waiting = !!this.pending && bindings[this.pending] === t
-      return `<button class="bt-c${on ? ' on' : ''}${waiting ? ' found' : ''}" data-target="${esc(t)}" aria-pressed="${on}"><b>${esc(targetLabel(c, t, layout.tray))}</b><span class="bt-bs">${bs}</span></button>`
+      return html`<button class="bt-c${on ? ' on' : ''}${waiting ? ' found' : ''}" data-target="${t}" aria-pressed="${on}"><b>${targetLabel(c, t, layout.tray)}</b><span class="bt-bs">${bs}</span></button>`
     }
     const groups: [string, string[]][] = [
       [CONTROLLERS[c]?.name ?? 'Controls', [...(CONTROLLERS[c]?.controls ?? [])]],
@@ -522,8 +521,8 @@ class ButtonsSheet {
       ['On the phone', [...(this.deps.canSwitch() ? ['app:next', 'app:prev'] : []), ...(offer.typing ? ['app:keyboard'] : [])]],
     ]
     const grids = this.wrap.querySelector('.bt-grids')!
-    grids.innerHTML = groups.filter(([, ts]) => ts.length).map(([name, ts], i) =>
-      `${i ? `<p class="sheet-k">${esc(name)}</p>` : ''}<div class="bt-grid${i ? ' more' : ''}" role="group" aria-label="${esc(name)}">${ts.map(chip).join('')}</div>`).join('')
+    setMarkup(grids, groups.filter(([, ts]) => ts.length).map(([name, ts], i) =>
+      html`${i ? html`<p class="sheet-k">${name}</p>` : ''}<div class="bt-grid${i ? ' more' : ''}" role="group" aria-label="${name}">${ts.map(chip)}</div>`))
     grids.querySelectorAll<HTMLButtonElement>('.bt-c').forEach((el) => {
       el.onclick = () => {
         this.deps.feel()
@@ -541,14 +540,14 @@ class ButtonsSheet {
   private renderAssign(bindings: Record<string, string>) {
     const box = this.wrap.querySelector<HTMLElement>('.bt-assign')!
     box.hidden = !this.target
-    if (!this.target) { box.innerHTML = ''; return }
+    if (!this.target) { box.replaceChildren(); return }
     const t = this.target
     const seen = this.deps.inputs.seen
-    box.innerHTML = INPUT_OPTIONS.map(({ source, ids }) => `
+    setMarkup(box, INPUT_OPTIONS.map(({ source, ids }) => html`
       <div class="bt-og" data-src="${source}">
         <span class="bt-og-ic" title="${SOURCE_NAME[source]}">${SOURCE_GLYPH[source]}</span>
-        <div class="bt-og-list">${ids.map((id) => `<button class="bt-o${seen.has(id) ? ' seen' : ''}" data-input="${esc(id)}" aria-pressed="${bindings[id] === t}">${esc(optionOf(id))}</button>`).join('')}</div>
-      </div>`).join('')
+        <div class="bt-og-list">${ids.map((id) => html`<button class="bt-o${seen.has(id) ? ' seen' : ''}" data-input="${id}" aria-pressed="${bindings[id] === t}">${optionOf(id)}</button>`)}</div>
+      </div>`))
     box.querySelectorAll<HTMLButtonElement>('.bt-o').forEach((o) => {
       o.onclick = () => {
         this.deps.feel()
@@ -578,12 +577,12 @@ class ButtonsSheet {
       { src: 'back', line: backLine, lit: this.b.backOn && inputs.backAvailable && !ios, sw: inputs.backAvailable && !ios ? 'back' : undefined, on: this.b.backOn, off: ios || !inputs.backAvailable },
     ]
     const box = this.wrap.querySelector('.bt-srcs')!
-    box.innerHTML = rows.map((r) => `
+    setMarkup(box, rows.map((r) => html`
       <div class="bt-src${r.lit ? ' lit' : ''}${r.off ? ' off' : ''}${r.src === 'media' && inputs.headset === 'paused' ? ' paused' : ''}" data-src="${r.src}">
         <span class="bt-src-ic">${SOURCE_GLYPH[r.src]}</span>
-        <span class="bt-src-t"><b>${SOURCE_NAME[r.src]}</b><small>${esc(r.line)}</small></span>
-        ${r.sw ? `<input type="checkbox" data-sw="${r.sw}" aria-label="${r.sw === 'headset' ? 'Headset buttons' : 'Use Back as a button'}"${r.on ? ' checked' : ''}${r.off ? ' disabled' : ''}>` : ''}
-      </div>`).join('')
+        <span class="bt-src-t"><b>${SOURCE_NAME[r.src]}</b><small>${r.line}</small></span>
+        ${r.sw ? html`<input type="checkbox" data-sw="${r.sw}" aria-label="${r.sw === 'headset' ? 'Headset buttons' : 'Use Back as a button'}" checked="${!!r.on}" disabled="${!!r.off}">` : ''}
+      </div>`))
     box.querySelector<HTMLInputElement>('[data-sw="headset"]')?.addEventListener('change', async (e) => {
       const el = e.currentTarget as HTMLInputElement
       this.deps.feel()
@@ -604,10 +603,10 @@ class ButtonsSheet {
 }
 
 /** For the Settings row: the glyphs of the sources that have worked on this phone. */
-export function sourceStack(inputs: PhysicalInputs): string {
+export function sourceStack(inputs: PhysicalInputs): Content {
   const srcs = new Set([...inputs.seen].map((id) => sourceOf(id)))
   if (inputs.headset === 'on') srcs.add('media')
   if (inputs.padList().length) srcs.add('pad')
-  return (['keys', 'media', 'pad', 'back'] as InputSource[]).filter((x) => srcs.has(x)).map((x) => `<i data-src="${x}">${SOURCE_GLYPH[x]}</i>`).join('')
+  return (['keys', 'media', 'pad', 'back'] as InputSource[]).filter((x) => srcs.has(x)).map((x) => html`<i data-src="${x}">${SOURCE_GLYPH[x]}</i>`)
 }
 

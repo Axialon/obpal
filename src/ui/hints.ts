@@ -1,3 +1,4 @@
+import { setMarkup, html } from './markup'
 import { ICONS } from './icons'
 
 type Place = 'top' | 'bottom' | 'left' | 'right'
@@ -32,7 +33,7 @@ export function hint(id: string, anchor: () => Element | null, text: string, opt
     const el = document.createElement('div')
     el.className = `hint hint-${place}`
     el.setAttribute('role', 'status')
-    el.innerHTML = `<span class="hint-text"></span><button class="hint-x" aria-label="Dismiss hint">${ICONS.close}</button>`
+    setMarkup(el, html`<span class="hint-text"></span><button class="hint-x" aria-label="Dismiss hint">${ICONS.close}</button>`)
     el.querySelector('.hint-text')!.textContent = text
     el.querySelector('button')!.onclick = (e) => { e.stopPropagation(); dismissHint(id) }
     document.body.appendChild(el)

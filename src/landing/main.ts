@@ -1,4 +1,4 @@
-// The home page: a hero you bounce light across (./hero.ts), the use cases as live scenes (./scenes.ts), and the ways in.
+import { setMarkup, html, insertMarkup } from '../ui/markup'
 import { applyTheme, initialTheme } from '../ui/themes'
 import { calmMarks, mountMarks } from '../ui/icons'
 import { mountTopBar } from './topbar'
@@ -71,7 +71,7 @@ if (desk) {
         remote.on('join', live)
         remote.on('leave', live)
       })
-      .catch(() => { slot.innerHTML = '<p class="pair-wait">No code right now. <a href="/view/">Open the viewer</a> to try it.</p>' })
+      .catch(() => { setMarkup(slot, html`<p class="pair-wait">No code right now. <a href="/view/">Open the viewer</a> to try it.</p>`) })
   })
   hint.addEventListener('click', () => hint.classList.add('gone'))
 } else {
@@ -316,7 +316,7 @@ function modeSwitch(live: Live, key: string): (text: string) => void {
     b.dataset.mode = m.id
     const does = touch ? m.touch : m.tip
     b.title = `${m.name}: ${does[0].toLowerCase()}${does.slice(1)}`
-    b.innerHTML = m.icon
+    setMarkup(b, m.icon)
     b.addEventListener('click', () => pick(m))
     return b
   })
@@ -449,7 +449,7 @@ function playByTouch(host: HTMLElement, on: Touching) {
 // (a card with a switch says what to do in its mode, under it). Both ways it may say it are there, one shown, so the
 // tilt coming on changes nothing else.
 if (matchMedia('(pointer: coarse)').matches) {
-  for (const l of lives) if (!l.scene.modes) captionOf(l.host).querySelector('.scene-k')!.insertAdjacentHTML('afterend', '<span class="play-cue" aria-hidden="true"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.6" /><circle cx="12" cy="12" r="7" opacity=".45" /></svg><span class="play-cue-t"><span>Hold to play</span><span>Tilt or hold to play</span></span></span>')
+  for (const l of lives) if (!l.scene.modes) insertMarkup(captionOf(l.host).querySelector('.scene-k')!, 'afterend', html`<span class="play-cue" aria-hidden="true"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.6" /><circle cx="12" cy="12" r="7" opacity=".45" /></svg><span class="play-cue-t"><span>Hold to play</span><span>Tilt or hold to play</span></span></span>`)
 } else {
   // A light follows the mouse across the cards, and their rims catch it.
   let raf = 0

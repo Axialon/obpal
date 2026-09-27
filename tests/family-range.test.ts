@@ -38,7 +38,7 @@ function family() {
     addEventListener: (type: string, fn: Listener) => { listeners[type] = fn },
   }
   const window = { document, location: { hostname: 'localhost', protocol: 'http:' }, HTMLInputElement: RangeInput, addEventListener: noop, dispatchEvent: noop }
-  new Function('window', source)(window)
+  new Function('window', source.replace(/^import .*$/gm, ''))(window)
   return { api: (window as unknown as { BlackboxesFamily: FamilyApi }).BlackboxesFamily, listeners }
 }
 

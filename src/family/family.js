@@ -1,3 +1,4 @@
+import { html, setMarkup } from '../ui/markup'
 /*
  * Blackboxes family: shared behaviour for ecosystem.blackboxes.net, the nine engines and ob.Pal.
  * A dependency-free classic script (works inlined or imported). Exposes window.BlackboxesFamily.
@@ -145,35 +146,15 @@
     var a = opts.accent || p.accent;
     var id = 'bbm' + (++markSeq);
     var orbit = p.id === 'obpal';
-    var title = opts.title === false ? '' : '<title>' + esc(p.name) + '</title>';
+    var title = opts.title === false ? '' : html`<title>${p.name}</title>`;
     var ring = orbit
-      ? '<ellipse cx="50" cy="57" rx="47" ry="15" transform="rotate(-14 50 57)" fill="none" stroke="' + a + '" stroke-width="3" opacity=".32"/>'
+      ? html`<ellipse cx="50" cy="57" rx="47" ry="15" transform="rotate(-14 50 57)" fill="none" stroke="${a}" stroke-width="3" opacity=".32"/>`
       : '';
     var front = orbit
-      ? '<path d="M95.6 45.63 A47 15 -14 0 1 4.4 68.37" fill="none" stroke="' + a + '" stroke-width="3.8" stroke-linecap="round"/>' +
-        '<circle cx="82.1" cy="60.8" r="4.8" fill="' + a + '"/><circle cx="82.1" cy="60.8" r="1.8" fill="#fff"/>'
+      ? html`<path d="M95.6 45.63 A47 15 -14 0 1 4.4 68.37" fill="none" stroke="${a}" stroke-width="3.8" stroke-linecap="round"/><circle cx="82.1" cy="60.8" r="4.8" fill="${a}"/><circle cx="82.1" cy="60.8" r="1.8" fill="#fff"/>`
       : '';
     // Engines fill the frame: the cube is scaled up a little when there's no ring around it.
-    var g = orbit ? '<g>' : '<g transform="translate(50 50) scale(1.16) translate(-50 -49.8)">';
-    return '<svg class="bb-mark" viewBox="0 0 100 100" role="img" aria-label="' + esc(p.name) + '" shape-rendering="geometricPrecision">' + title +
-      '<defs>' +
-      '<linearGradient id="' + id + 't" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#565656"/><stop offset=".35" stop-color="#2a2a2a"/><stop offset=".75" stop-color="#141414"/><stop offset="1" stop-color="#050505"/></linearGradient>' +
-      '<linearGradient id="' + id + 'l" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1d1d1d"/><stop offset=".45" stop-color="#0a0a0a"/><stop offset="1" stop-color="#000"/></linearGradient>' +
-      '<linearGradient id="' + id + 'r" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#313131"/><stop offset=".5" stop-color="#141414"/><stop offset="1" stop-color="#050505"/></linearGradient>' +
-      '<linearGradient id="' + id + 's" x1="0" y1="0" x2="0" y2="1"><stop offset=".42" stop-color="' + a + '" stop-opacity="0"/><stop offset="1" stop-color="' + a + '" stop-opacity=".5"/></linearGradient>' +
-      '</defs>' + ring + g +
-      '<polygon points="50,19 78,34.4 78,65.2 50,80.6 22,65.2 22,34.4" fill="#000"/>' +
-      '<polygon points="50,19 78,34.4 50,49.8 22,34.4" fill="url(#' + id + 't)"/>' +
-      '<polygon points="22,34.4 50,49.8 50,80.6 22,65.2" fill="url(#' + id + 'l)"/>' +
-      '<polygon points="50,49.8 78,34.4 78,65.2 50,80.6" fill="url(#' + id + 'r)"/>' +
-      '<polygon points="22,34.4 50,49.8 50,80.6 22,65.2" fill="url(#' + id + 's)" opacity=".7"/>' +
-      '<polygon points="50,49.8 78,34.4 78,65.2 50,80.6" fill="url(#' + id + 's)"/>' +
-      '<polygon points="50,19 78,34.4 78,65.2 50,80.6 22,65.2 22,34.4" fill="none" stroke="rgba(255,255,255,.4)" stroke-width="1.3" stroke-linejoin="round"/>' +
-      '<path d="M50,49.8 L50,80.6" fill="none" stroke="rgba(255,255,255,.3)" stroke-width="1.3"/>' +
-      '<path d="M22,34.4 L50,49.8 L78,34.4" fill="none" stroke="' + a + '" stroke-width="2.4" stroke-linejoin="round"/>' +
-      '<line x1="50" y1="19" x2="78" y2="34.4" stroke="rgba(255,255,255,.72)" stroke-width="1.3"/>' +
-      '<line x1="50" y1="19" x2="78" y2="34.4" stroke="' + a + '" stroke-width="1.4" opacity=".55"/>' +
-      '</g>' + front + '</svg>';
+    return html`<svg class="bb-mark" viewBox="0 0 100 100" role="img" aria-label="${p.name}" shape-rendering="geometricPrecision">${title}<defs><linearGradient id="${id}t" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#565656"/><stop offset=".35" stop-color="#2a2a2a"/><stop offset=".75" stop-color="#141414"/><stop offset="1" stop-color="#050505"/></linearGradient><linearGradient id="${id}l" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1d1d1d"/><stop offset=".45" stop-color="#0a0a0a"/><stop offset="1" stop-color="#000"/></linearGradient><linearGradient id="${id}r" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#313131"/><stop offset=".5" stop-color="#141414"/><stop offset="1" stop-color="#050505"/></linearGradient><linearGradient id="${id}s" x1="0" y1="0" x2="0" y2="1"><stop offset=".42" stop-color="${a}" stop-opacity="0"/><stop offset="1" stop-color="${a}" stop-opacity=".5"/></linearGradient></defs>${ring}<g transform="${orbit ? '' : 'translate(50 50) scale(1.16) translate(-50 -49.8)'}"><polygon points="50,19 78,34.4 78,65.2 50,80.6 22,65.2 22,34.4" fill="#000"/><polygon points="50,19 78,34.4 50,49.8 22,34.4" fill="url(#${id}t)"/><polygon points="22,34.4 50,49.8 50,80.6 22,65.2" fill="url(#${id}l)"/><polygon points="50,49.8 78,34.4 78,65.2 50,80.6" fill="url(#${id}r)"/><polygon points="22,34.4 50,49.8 50,80.6 22,65.2" fill="url(#${id}s)" opacity=".7"/><polygon points="50,49.8 78,34.4 78,65.2 50,80.6" fill="url(#${id}s)"/><polygon points="50,19 78,34.4 78,65.2 50,80.6 22,65.2 22,34.4" fill="none" stroke="rgba(255,255,255,.4)" stroke-width="1.3" stroke-linejoin="round"/><path d="M50,49.8 L50,80.6" fill="none" stroke="rgba(255,255,255,.3)" stroke-width="1.3"/><path d="M22,34.4 L50,49.8 L78,34.4" fill="none" stroke="${a}" stroke-width="2.4" stroke-linejoin="round"/><line x1="50" y1="19" x2="78" y2="34.4" stroke="rgba(255,255,255,.72)" stroke-width="1.3"/><line x1="50" y1="19" x2="78" y2="34.4" stroke="${a}" stroke-width="1.4" opacity=".55"/></g>${front}</svg>`;
   }
 
   // ---- menus ------------------------------------------------------------------------------------------------
@@ -193,24 +174,20 @@
     var href = function (p) { var h = typeof opts.href === 'function' ? opts.href(p) : ''; return h || 'https://' + p.host + '/'; };
     var cls = 'bb-menu-item' + (opts.itemClass ? ' ' + opts.itemClass : '');
     return PRODUCTS.map(function (p, i) {
-      var sep = i === 1 ? '<div class="bb-label bb-menu-group">Engines</div>' : i === PRODUCTS.length - 1 ? '<div class="bb-label bb-menu-group">Tools</div>' : '';
-      return sep + '<a class="' + cls + '" role="menuitem" href="' + esc(href(p)) + '" style="--bb-item-rgb:' + rgbOf(p.accent) + '"' + (p.id === current ? ' aria-current="page"' : '') + '>' +
-        mark(p.id, { title: false }) + '<span><b style="color:' + p.accent + '">' + esc(p.name) + '</b><small>' + esc(p.category) + '</small></span></a>';
-    }).join('');
+      var sep = i === 1 ? html`<div class="bb-label bb-menu-group">Engines</div>` : i === PRODUCTS.length - 1 ? html`<div class="bb-label bb-menu-group">Tools</div>` : '';
+      return html`${sep}<a class="${cls}" role="menuitem" href="${href(p)}" style="--bb-item-rgb:${rgbOf(p.accent)}" aria-current="${p.id === current ? 'page' : 'false'}">${mark(p.id, { title: false })}<span><b style="color:${p.accent}">${p.name}</b><small>${p.category}</small></span></a>`;
+    });
   }
   function themeMenu() {
     var cur = getTheme(), acc = getAccent(), own = product().accent;
-    return '<div class="bb-label bb-menu-group">Surface</div>' +
-      '<div class="bb-themes" role="radiogroup" aria-label="Surface">' + THEMES.map(function (t) {
-        return '<button type="button" class="bb-theme" role="radio" data-bb-theme-id="' + t.id + '" aria-checked="' + (t.id === cur) + '"><i style="background:linear-gradient(135deg,' + t.surface + ',' + t.page + ')"></i>' + esc(t.name) + '</button>';
-      }).join('') + '</div>' +
-      '<div class="bb-label bb-menu-group">Accent</div>' +
-      '<div class="bb-accents" role="radiogroup" aria-label="Accent">' + ACCENTS.filter(function (a) {
+    return html`<div class="bb-label bb-menu-group">Surface</div><div class="bb-themes" role="radiogroup" aria-label="Surface">${THEMES.map(function (t) {
+        return html`<button type="button" class="bb-theme" role="radio" data-bb-theme-id="${t.id}" aria-checked="${(t.id === cur)}"><i style="background:linear-gradient(135deg,${t.surface},${t.page})"></i>${t.name}</button>`;
+      })}</div><div class="bb-label bb-menu-group">Accent</div><div class="bb-accents" role="radiogroup" aria-label="Accent">${ACCENTS.filter(function (a) {
         return !a.color || a.color.toLowerCase() !== own.toLowerCase() || a.id === acc; // the product colour is already first
       }).map(function (a) {
         var label = a.id === 'product' ? product().name + ' colour (default)' : a.name;
-        return '<button type="button" class="bb-accent' + (a.id === 'product' ? ' product' : '') + '" role="radio" data-bb-accent-id="' + a.id + '" aria-checked="' + (a.id === acc) + '" aria-label="' + esc(label) + '" data-tip="' + esc(label) + '" style="--sw:' + (a.color || own) + '">' + ICON.check + '</button>';
-      }).join('') + '</div>';
+        return html`<button type="button" class="bb-accent${(a.id === 'product' ? ' product' : '')}" role="radio" data-bb-accent-id="${a.id}" aria-checked="${(a.id === acc)}" aria-label="${label}" data-tip="${label}" style="--sw:${(a.color || own)}">${ICON.check}</button>`;
+      })}</div>`;
   }
 
   var openMenus = [];
@@ -292,31 +269,31 @@
 
   function mountSwitcher(button, menu, current, opts) {
     menu.setAttribute('role', 'menu');
-    return popover(button, menu, function (m) { if (!m.childElementCount) m.innerHTML = productMenu(current, opts); });
+    return popover(button, menu, function (m) { if (!m.childElementCount) setMarkup(m, productMenu(current, opts)); });
   }
   function mountThemes(button, menu) {
-    var api = popover(button, menu, function (m) { m.innerHTML = themeMenu(); });
+    var api = popover(button, menu, function (m) { setMarkup(m, themeMenu()); });
     menu.addEventListener('click', function (e) {
       var t = e.target.closest ? e.target.closest('[data-bb-theme-id]') : null;
       var a = e.target.closest ? e.target.closest('[data-bb-accent-id]') : null;
       if (t) setTheme(t.getAttribute('data-bb-theme-id'));
       else if (a) setAccent(a.getAttribute('data-bb-accent-id'));
       else return;
-      menu.innerHTML = themeMenu();
+      setMarkup(menu, themeMenu());
     });
     return api;
   }
   /** Secondary tools (.bb-t2 inside toolsRoot) are mirrored as tiles in the More menu on narrow screens. */
   function mountMore(button, menu, toolsRoot) {
     return popover(button, menu, function (m) {
-      m.innerHTML = '';
+      m.replaceChildren();
       toolsRoot.querySelectorAll('.bb-t2').forEach(function (src) {
         if (src.classList.contains('bb-sep')) return;
         var item = doc.createElement('button');
         item.type = 'button';
         item.className = 'bb-menu-item';
         item.setAttribute('role', 'menuitem');
-        item.innerHTML = src.innerHTML + '<span>' + esc(src.getAttribute('aria-label') || src.getAttribute('data-tip') || '') + '</span>';
+        setMarkup(item, html`${[...src.childNodes].map((n) => n.cloneNode(true))}<span>${src.getAttribute('aria-label') || src.getAttribute('data-tip') || ''}</span>`);
         item.addEventListener('click', function () { src.click(); });
         m.appendChild(item);
       });
@@ -459,7 +436,7 @@
       var el = doc.createElement('div');
       el.className = 'bb-hint';
       el.setAttribute('role', 'status');
-      el.innerHTML = '<span></span><button type="button" aria-label="Dismiss">&times;</button>';
+      setMarkup(el, html`<span></span><button type="button" aria-label="Dismiss">&times;</button>`);
       el.firstChild.textContent = text;
       el.lastChild.addEventListener('click', function () { dismissHint(id); });
       doc.body.appendChild(el);

@@ -635,7 +635,7 @@ export class Remote {
       peer.room = room
       peer.session = sdpSession(d.offer.sdp)
       peer.cands.push(...early)
-      pc.onicecandidate = (e) => { if (e.candidate) this.sigOf(peer).send({ t: 'sig', to: peer.sig, d: { cand: e.candidate.toJSON() } }) }
+      pc.onicecandidate = (e) => { this.sigOf(peer).send({ t: 'sig', to: peer.sig, d: { cand: e.candidate?.toJSON() ?? { candidate: '' } } }) }
       await pc.setRemoteDescription(d.offer)
       for (const c of peer.cands.splice(0)) await pc.addIceCandidate(c).catch(() => {})
       const answer = await pc.createAnswer()
@@ -1132,16 +1132,47 @@ export class Remote {
     const compact = opts.variant === 'compact'
     const card = document.createElement('div')
     card.className = compact ? 'obpal-card obpal-compact' : 'obpal-card'
-    const phone = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.8" width="10" height="18.4" rx="2.8"/><path d="M10.5 18h3"/></svg>'
-    const open = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4.5h5.5V10M19.5 4.5 11 13M18 14v4a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 5 18V8a1.5 1.5 0 0 1 1.5-1.5h4"/></svg>'
-    card.innerHTML = `
-      <div class="obpal-qr" role="img" aria-label="QR code to pair your phone"></div>
-      <div class="obpal-body">
-        <div class="obpal-title">${compact ? `<span class="obpal-ic">${phone}</span>` : ''}<span class="obpal-title-text"></span></div>
-        ${compact ? '' : '<ol class="obpal-steps"><li>Open your phone’s camera</li><li>Point it at this code</li><li>Tap <b>Start</b> on your phone</li></ol>'}
-        <div class="obpal-status" aria-live="polite"></div>
-        ${opts.testLink === false ? '' : `<a class="obpal-link" target="_blank" rel="noopener" title="Open the controller on this device">${compact ? `${open}<span>This device</span>` : 'Open the controller on this device'}</a>`}
-      </div>`
+    const node = (parent: Element, tag: string, cls: string, text = '') => {
+      const el = document.createElement(tag)
+      el.className = cls
+      el.textContent = text
+      parent.appendChild(el)
+      return el
+    }
+    const glyph = (parent: Element, phone: boolean) => {
+      const ns = 'http://www.w3.org/2000/svg'
+      const svg = document.createElementNS(ns, 'svg')
+      svg.setAttribute('viewBox', '0 0 24 24')
+      svg.setAttribute('aria-hidden', 'true')
+      const path = document.createElementNS(ns, 'path')
+      path.setAttribute('d', phone ? 'M9.8 2.8h4.4A2.8 2.8 0 0 1 17 5.6v12.8a2.8 2.8 0 0 1-2.8 2.8H9.8A2.8 2.8 0 0 1 7 18.4V5.6a2.8 2.8 0 0 1 2.8-2.8ZM10.5 18h3' : 'M14 4.5h5.5V10M19.5 4.5 11 13M18 14v4a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 5 18V8a1.5 1.5 0 0 1 1.5-1.5h4')
+      svg.append(path)
+      parent.append(svg)
+    }
+    const qr = node(card, 'div', 'obpal-qr')
+    qr.setAttribute('role', 'img')
+    qr.setAttribute('aria-label', 'QR code to pair your phone')
+    const body = node(card, 'div', 'obpal-body')
+    const title = node(body, 'div', 'obpal-title')
+    if (compact) glyph(node(title, 'span', 'obpal-ic'), true)
+    node(title, 'span', 'obpal-title-text')
+    if (!compact) {
+      const steps = node(body, 'ol', 'obpal-steps')
+      node(steps, 'li', '', 'Open your phone’s camera')
+      node(steps, 'li', '', 'Point it at this code')
+      const tap = node(steps, 'li', '', 'Tap ')
+      node(tap, 'b', '', 'Start')
+      tap.append(' on your phone')
+    }
+    node(body, 'div', 'obpal-status').setAttribute('aria-live', 'polite')
+    if (opts.testLink !== false) {
+      const link = node(body, 'a', 'obpal-link')
+      link.setAttribute('target', '_blank')
+      link.setAttribute('rel', 'noopener')
+      link.setAttribute('title', 'Open the controller on this device')
+      if (compact) { glyph(link, false); node(link, 'span', '', 'This device') }
+      else link.textContent = 'Open the controller on this device'
+    }
     card.querySelector('.obpal-title-text')!.textContent = opts.title ?? (compact ? 'Scan to control' : 'Use your phone as a remote')
     el.appendChild(card)
     const entry = { el: card, status: card.querySelector<HTMLElement>('.obpal-status')!, qr: card.querySelector<HTMLElement>('.obpal-qr')!, link: card.querySelector<HTMLAnchorElement>('.obpal-link'), compact }
@@ -1154,7 +1185,7 @@ export class Remote {
   private renderQr(c: { qr: HTMLElement; link: HTMLAnchorElement | null }) {
     const url = this.pairingUrl
     if (c.link) c.link.href = url
-    void import('uqr').then(({ renderSVG }) => { if (url === this.pairingUrl) c.qr.innerHTML = renderSVG(url, { border: 2, ecc: 'M' }) })
+    void import('./qr').then(({ plainQrElement }) => { if (url === this.pairingUrl) c.qr.replaceChildren(plainQrElement(url)) })
   }
 
   private renderCards() {

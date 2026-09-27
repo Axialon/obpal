@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build, defineConfig, type Plugin } from 'vite'
+import { markupBuild } from './scripts/markup-build.mjs'
 import { cloudflare } from '@cloudflare/vite-plugin'
 import { checkProfile, CONTROLLER_ID, CONTROLLER_IDS, CONTROLLERS, MOTION_UTILITIES, PROFILE_IDS, PROFILE_LIMITS, PROFILES, ROUTES, utilityKey } from './packages/core/src/catalogue'
 import { APP_ACTIONS, BUTTON_TARGET, DEFAULT_BUTTONS, INPUT_ID, INPUT_OPTIONS, KEY_TARGETS, SMART_BUTTONS } from './packages/core/src/buttons'
@@ -40,6 +41,8 @@ function contentSecurityPolicy(page: string): string {
   const d: Record<string, string[]> = {
     'default-src': ["'self'"],
     'script-src': ["'self'"],
+    'require-trusted-types-for': ["'script'"],
+    'trusted-types': ['obpal-templates'],
     'style-src': ["'self'", "'unsafe-inline'"],
     'img-src': ["'self'", 'data:', 'blob:'],
     'font-src': ["'self'"],
@@ -261,7 +264,7 @@ function linkVersion(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [cloudflare(), controllerServiceWorker(), embedScript(), catalogueFiles(), linkVersion(), pagePolicy()],
+  plugins: [markupBuild(root), cloudflare(), controllerServiceWorker(), embedScript(), catalogueFiles(), linkVersion(), pagePolicy()],
   server: { port: 5175, strictPort: true },
   environments: {
     client: {

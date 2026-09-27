@@ -32,6 +32,7 @@ export interface Stage {
   theme: Theme
   /** Look at the device from its framing (again after a resize or the screen's own orbiting). */
   frame(f: Framing): void
+  follow(at: THREE.Vector3): void
   setTheme(t: Theme): void
   /** Where a pointer at (x, y) CSS px meets the horizontal plane at height y0, or null (it points above the horizon). */
   pick(x: number, y: number, y0?: number): THREE.Vector3 | null
@@ -109,9 +110,15 @@ export function createStage(canvas: HTMLCanvasElement, theme: Theme): Stage {
 
   const stage: Stage = {
     renderer, view, scene, camera, controls, ground, theme, lights: { hemi, key },
+    follow(at) {
+      const delta = at.clone().sub(controls.target)
+      camera.position.add(delta)
+      controls.target.copy(at)
+      framing = { ...framing, target: at.toArray() as V3, wide: new THREE.Vector3(...framing.wide).add(delta).toArray() as V3, tall: new THREE.Vector3(...framing.tall).add(delta).toArray() as V3 }
+    },
     frame(f) {
       framing = f
-      const radius = f.radius * 1.2
+      const radius = Math.max(5, f.radius * 1.2)
       Object.assign(key.shadow.camera, { left: -radius, right: radius, top: radius, bottom: -radius })
       key.shadow.camera.updateProjectionMatrix()
       const tall = innerWidth < innerHeight
@@ -128,7 +135,7 @@ export function createStage(canvas: HTMLCanvasElement, theme: Theme): Stage {
       camera.far = Math.max(80, controls.maxDistance * 3)
       camera.updateProjectionMatrix()
       const distance = from.distanceTo(target)
-      scene.fog = new THREE.Fog(stage.theme.scene[1], distance + f.radius, distance + f.radius * 6)
+      scene.fog = new THREE.Fog(stage.theme.scene[1], Math.max(24, distance + f.radius), Math.max(60, distance + f.radius * 6))
       controls.update()
     },
     setTheme(t) {

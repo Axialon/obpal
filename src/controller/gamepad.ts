@@ -1,3 +1,4 @@
+import { type Content, html, insertMarkup, setMarkup } from '../ui/markup'
 import '../styles/gamepad.css'
 import {
   addStick as mixAdd, emptyPad, emptyPointer, encodePad, encodePointer, flyVector, isProfileId, mixStick, MOTION_UTILITIES, offeredMotion,
@@ -175,15 +176,15 @@ const UTILITY_META: Record<MotionUtility, { label: string; title: string }> = {
   'motion.point': { label: 'Point', title: 'Wii-style pointer: the cursor is where the phone points' },
 }
 
-function layerHtml(): string {
+function layerHtml(): Content {
   const B = PadButton
-  const trig = (i: 0 | 1) => `<button class="gp-trig" data-trig="${i}" aria-label="${i ? 'Right' : 'Left'} trigger"><i class="gp-fill"></i><b>${i ? 'RT' : 'LT'}</b></button>`
-  const bump = (b: number, side: string) => `<button class="gp-bump" data-b="${b}" aria-label="${side} bumper"><b>${side[0]}B</b></button>`
-  const round = (cls: string, b: number, label: string, ic: string) => `<button class="${cls}" data-b="${b}" aria-label="${label}">${ic}</button>`
-  const face = (k: string, b: number) => `<button class="gp-f" data-k="${k}" data-b="${b}" aria-label="${k.toUpperCase()}">${k.toUpperCase()}</button>`
-  const arm = (dir: string, b: number) => `<i data-dir="${dir}" data-bit="${b}">${ICONS.chevron}</i>`
-  const stick = (i: 0 | 1) => `<div class="gp-stick" data-stick="${i}" role="group" aria-label="${i ? 'Right' : 'Left'} stick, tap to click"><i class="gp-base"><i class="gp-knob"></i></i></div>`
-  return `
+  const trig = (i: 0 | 1) => html`<button class="gp-trig" data-trig="${i}" aria-label="${i ? 'Right' : 'Left'} trigger"><i class="gp-fill"></i><b>${i ? 'RT' : 'LT'}</b></button>`
+  const bump = (b: number, side: string) => html`<button class="gp-bump" data-b="${b}" aria-label="${side} bumper"><b>${side[0]}B</b></button>`
+  const round = (cls: string, b: number, label: string, ic: Content) => html`<button class="${cls}" data-b="${b}" aria-label="${label}">${ic}</button>`
+  const face = (k: string, b: number) => html`<button class="gp-f" data-k="${k}" data-b="${b}" aria-label="${k.toUpperCase()}">${k.toUpperCase()}</button>`
+  const arm = (dir: string, b: number) => html`<i data-dir="${dir}" data-bit="${b}">${ICONS.chevron}</i>`
+  const stick = (i: 0 | 1) => html`<div class="gp-stick" data-stick="${i}" role="group" aria-label="${i ? 'Right' : 'Left'} stick, tap to click"><i class="gp-base"><i class="gp-knob"></i></i></div>`
+  return html`
     <div class="gp" hidden role="application" aria-label="Gamepad">
       <div class="gp-sh l">${trig(0)}${bump(B.LB, 'Left')}</div>
       <div class="gp-top">
@@ -443,7 +444,7 @@ export class GamepadMode {
     this.releaseAll()
     this.resets = []
     this.remeasures = []
-    surface.insertAdjacentHTML('beforeend', layerHtml())
+    insertMarkup(surface, 'beforeend', layerHtml())
     const el = surface.querySelector<HTMLElement>('.gp')!
     this.el = el
     el.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false })
@@ -747,7 +748,7 @@ export class GamepadMode {
   private renderChips() {
     const row = this.el?.querySelector<HTMLElement>('.gp-chips')
     if (!row) return
-    row.innerHTML = this.offered.map((u) => `<button class="gp-chip" data-chip="${u}" aria-pressed="false" aria-haspopup="dialog" title="${UTILITY_META[u].title}"><i class="gp-chip-ic"></i><span>${UTILITY_META[u].label}</span></button>`).join('')
+    setMarkup(row, this.offered.map((u) => html`<button class="gp-chip" data-chip="${u}" aria-pressed="false" aria-haspopup="dialog" title="${UTILITY_META[u].title}"><i class="gp-chip-ic"></i><span>${UTILITY_META[u].label}</span></button>`))
     row.querySelectorAll<HTMLElement>('[data-chip]').forEach((c) => this.bindChip(c, c.dataset.chip as MotionUtility))
     this.paintChips()
   }
@@ -784,11 +785,11 @@ export class GamepadMode {
       c.setAttribute('aria-pressed', String(this.on.has(u)))
       c.dataset.route = route(u)
       const ic = u === Utility.aim && route(u) !== 'mouse' ? 'gyro' : u === Utility.steer && route(u).startsWith('stick.') && route(u) !== 'stick.fly' && route(u) !== 'stick.wheel' ? 'tilt' : ROUTE_META[route(u)].icon
-      c.querySelector('.gp-chip-ic')!.innerHTML = ICONS[ic]
+      setMarkup(c.querySelector('.gp-chip-ic')!, ICONS[ic])
     })
     const prof = el.querySelector<HTMLElement>('[data-act="profile"]')
     if (prof) {
-      prof.innerHTML = `${ICONS[PROFILE_ICON[this.profileId]]}<span>${this.profile.name}</span>`
+      setMarkup(prof, html`${ICONS[PROFILE_ICON[this.profileId]]}<span>${this.profile.name}</span>`)
       prof.setAttribute('aria-label', `Profile: ${this.profile.name}`)
     }
     const centre = el.querySelector<HTMLElement>('[data-act="centre"]')
@@ -797,11 +798,11 @@ export class GamepadMode {
 
   // ---- sheets: utility options, profile picker --------------------------------------------
 
-  private openSheet(label: string, body: string): HTMLElement {
+  private openSheet(label: string, body: Content): HTMLElement {
     this.closeSheet()
     const wrap = document.createElement('div')
     wrap.className = 'sheet-wrap gp-sheet-wrap'
-    wrap.innerHTML = `<div class="sheet gp-sheet glass" role="dialog" aria-label="${label}"><div class="grip" aria-hidden="true"></div>${body}</div>`
+    setMarkup(wrap, html`<div class="sheet gp-sheet glass" role="dialog" aria-label="${label}"><div class="grip" aria-hidden="true"></div>${body}</div>`)
     wrap.querySelector<HTMLButtonElement>('[data-act="done"]')?.addEventListener('click', () => this.closeSheet())
     document.body.appendChild(wrap)
     this.sheet = wrap
@@ -827,13 +828,13 @@ export class GamepadMode {
     const s = this.profile[key]
     const routes = ROUTES[u]
     const seg = routes.length > 1
-      ? `<div class="routes" role="radiogroup" aria-label="Route">${routes.map((r) => `<button role="radio" data-route="${r}" aria-checked="${r === s.route}">${ICONS[ROUTE_META[r].icon]}<span>${ROUTE_META[r].label}</span></button>`).join('')}</div>`
+      ? html`<div class="routes" role="radiogroup" aria-label="Route">${routes.map((r) => html`<button role="radio" data-route="${r}" aria-checked="${r === s.route}">${ICONS[ROUTE_META[r].icon]}<span>${ROUTE_META[r].label}</span></button>`)}</div>`
       : ''
     const jump = u !== Utility.point
-      ? `<label class="bb-field"><span>Deadzone jump</span><output id="gp-dz"></output><input class="bb-range" type="range" id="gp-dead" min="0" max="0.4" step="0.02"></label>`
+      ? html`<label class="bb-field"><span>Deadzone jump</span><output id="gp-dz"></output><input class="bb-range" type="range" id="gp-dead" min="0" max="0.4" step="0.02"></label>`
       : ''
-    const edge = u === Utility.point ? `<label class="row"><input type="checkbox" id="gp-edge"> Edge turn</label>` : ''
-    const wrap = this.openSheet(`${UTILITY_META[u].label} options`, `
+    const edge = u === Utility.point ? html`<label class="row"><input type="checkbox" id="gp-edge"> Edge turn</label>` : ''
+    const wrap = this.openSheet(`${UTILITY_META[u].label} options`, html`
       <div class="sheet-title"><i class="gp-chip-ic">${ICONS[ROUTE_META[s.route].icon]}</i><h2>${UTILITY_META[u].label}</h2><span class="sheet-sub">${this.profile.name}</span></div>
       ${seg}
       <label class="bb-field"><span>Sensitivity</span><output id="gp-gv"></output><input class="bb-range" type="range" id="gp-gain" min="0.25" max="3" step="0.05"></label>
@@ -855,7 +856,7 @@ export class GamepadMode {
       $('gp-gv')!.textContent = `${Number(gain.value).toFixed(2).replace(/0$/, '')}×`
       if (dead) $('gp-dz')!.textContent = Number(dead.value).toFixed(2)
       wrap.querySelectorAll<HTMLElement>('[data-route]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.route === cur.route)))
-      wrap.querySelector('.sheet-title .gp-chip-ic')!.innerHTML = ICONS[ROUTE_META[cur.route].icon]
+      setMarkup(wrap.querySelector('.sheet-title .gp-chip-ic')!, ICONS[ROUTE_META[cur.route].icon])
       const fam = (window as Window & { BlackboxesFamily?: FamilyApi }).BlackboxesFamily
       fam?.syncRanges(wrap) // accent fill of the ranges
     }
@@ -873,10 +874,10 @@ export class GamepadMode {
     const suggested = isProfileId(this.host.profile) ? this.host.profile : null
     const cells = PROFILE_IDS.map((id) => {
       const p = PROFILES[id]
-      return `<button class="pick" data-profile="${id}" aria-selected="${id === this.profileId}" title="${p.for}">
-        <span class="pick-art">${ICONS[PROFILE_ICON[id]]}</span><span class="pick-name">${p.name}</span>${id === suggested ? '<span class="pick-tag">suggested</span>' : ''}</button>`
-    }).join('')
-    const wrap = this.openSheet('Profile', `
+      return html`<button class="pick" data-profile="${id}" aria-selected="${id === this.profileId}" title="${p.for}">
+        <span class="pick-art">${ICONS[PROFILE_ICON[id]]}</span><span class="pick-name">${p.name}</span>${id === suggested ? html`<span class="pick-tag">suggested</span>` : ''}</button>`
+    })
+    const wrap = this.openSheet('Profile', html`
       <div class="sheet-title"><i class="gp-chip-ic">${ICONS[PROFILE_ICON[this.profileId]]}</i><h2>Profile</h2><span class="sheet-sub">${this.host.name || ''}</span></div>
       <div class="pick-grid profiles">${cells}</div>
       <p class="pick-for" id="gp-for">${PROFILES[this.profileId].for}</p>`)
@@ -886,7 +887,7 @@ export class GamepadMode {
         this.chooseProfile(b.dataset.profile as ProfileId)
         wrap.querySelectorAll<HTMLElement>('[data-profile]').forEach((c) => c.setAttribute('aria-selected', String(c === b)))
         wrap.querySelector('#gp-for')!.textContent = this.profile.for
-        wrap.querySelector('.sheet-title .gp-chip-ic')!.innerHTML = ICONS[PROFILE_ICON[this.profileId]]
+        setMarkup(wrap.querySelector('.sheet-title .gp-chip-ic')!, ICONS[PROFILE_ICON[this.profileId]])
         setTimeout(() => this.closeSheet(), 260)
       }
     })

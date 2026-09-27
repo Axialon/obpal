@@ -192,8 +192,10 @@ export function createView(stage: Stage, logic: DroneLogic): DeviceView {
   const flash = rings.map(() => 0)
   const passed = logic.drones.map((d) => d.rings)
   return {
+    framing: (() => { const d = logic.drones[0]; return { target: [d.x, d.y + 0.12, d.z], wide: [d.x + 0.8, d.y + 0.9, d.z + 1], tall: [d.x + 0.8, d.y + 1, d.z + 1.3], radius: 0.58, min: 0.4, max: 38 } })(),
+    follow(n) { const d = logic.drones[n]; return new THREE.Vector3(d.x, d.y + 0.12, d.z) },
     inspect() { const d = logic.drones[0]; return { target: [d.x, d.y + 0.12, d.z], wide: [d.x + 0.8, d.y + 0.9, d.z + 1], tall: [d.x + 0.8, d.y + 1, d.z + 1.3], radius: 0.52, min: 0.4, max: 38 } },
-    framing: { target: [0, 1.7, 0], wide: [0, 10.5, 18], tall: [0, 13, 17], radius: 7.5, min: 2, max: 38 },
+    overview: { target: [0, 1.7, 0], wide: [0, 10.5, 18], tall: [0, 13, 17], radius: 7.5, min: 2, max: 38 },
     pickY: 0,
     update(colors, t, dt) {
       logic.drones.forEach((d, n) => {

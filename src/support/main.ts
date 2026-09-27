@@ -1,3 +1,4 @@
+import { type Content, setMarkup, joinMarkup, html } from '../ui/markup'
 import '../family'
 import '../styles/base.css'
 import '../styles/site.css'
@@ -12,9 +13,8 @@ mountTopBar()
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 const page = document.body.dataset.page === 'donate' ? 'donate' : 'sponsor'
 const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: n % 1 ? 2 : 0 })
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
-document.querySelectorAll<HTMLElement>('.logo').forEach((el) => { el.innerHTML = logo() })
+document.querySelectorAll<HTMLElement>('.logo').forEach((el) => { setMarkup(el, logo()) })
 
 interface Config { checkoutReady: boolean; sponsorshipReady: boolean; sponsorPortalUrl: string | null; sponsorsUrl: string | null; sponsorsPending: boolean }
 let config: Config | null = null
@@ -24,7 +24,7 @@ let amount = page === 'donate' ? 25 : 10
 const AMOUNTS = [5, 10, 25, 50, 100]
 function renderAmounts() {
   const box = $('amounts')
-  box.innerHTML = AMOUNTS.map((a) => `<button class="amt" data-a="${a}" aria-pressed="${a === amount}">${usd(a)}</button>`).join('')
+  setMarkup(box, AMOUNTS.map((a) => html`<button class="amt" data-a="${a}" aria-pressed="${a === amount}">${usd(a)}</button>`))
   box.querySelectorAll<HTMLButtonElement>('.amt').forEach((b) => {
     b.onclick = () => { amount = Number(b.dataset.a); $<HTMLInputElement>('custom').value = ''; renderAmounts(); renderAction() }
   })
@@ -52,11 +52,11 @@ async function loadConfig() {
   } catch {
     config = { checkoutReady: false, sponsorshipReady: false, sponsorPortalUrl: null, sponsorsUrl: null, sponsorsPending: false }
   }
-  const links: string[] = []
-  if (config.sponsorPortalUrl) links.push(`<a href="${esc(config.sponsorPortalUrl)}" rel="noopener">Manage a sponsorship</a>`)
-  if (config.sponsorsUrl) links.push(`<a href="${esc(config.sponsorsUrl)}" rel="noopener">GitHub Sponsors</a>`)
-  else if (config.sponsorsPending) links.push('<span>GitHub Sponsors coming soon</span>')
-  $('links').innerHTML = links.join('<i aria-hidden="true">·</i>')
+  const links: Content[] = []
+  if (config.sponsorPortalUrl) links.push(html`<a href="${config.sponsorPortalUrl}" rel="noopener">Manage a sponsorship</a>`)
+  if (config.sponsorsUrl) links.push(html`<a href="${config.sponsorsUrl}" rel="noopener">GitHub Sponsors</a>`)
+  else if (config.sponsorsPending) links.push(html`<span>GitHub Sponsors coming soon</span>`)
+  setMarkup($('links'), joinMarkup(links, html`<i aria-hidden="true">·</i>`))
   renderAction()
 }
 
@@ -67,13 +67,13 @@ async function loadLedger() {
     if (d.status !== 'ok' || d.totalUsd == null) throw new Error('unavailable')
     $('raised').textContent = usd(d.totalUsd)
     $('backers').textContent = `${d.backerCount ?? 0} supporter${d.backerCount === 1 ? '' : 's'}`
-    $('recent').innerHTML = d.recent.length
-      ? d.recent.slice(0, 6).map((x) => `<li><span>${esc(x.donorName || 'Anonymous')}</span><b>${usd(Number(x.amountUsd))}</b></li>`).join('')
-      : '<li class="empty">Be the first supporter.</li>'
+    setMarkup($('recent'), d.recent.length
+      ? d.recent.slice(0, 6).map((x) => html`<li><span>${x.donorName || 'Anonymous'}</span><b>${usd(Number(x.amountUsd))}</b></li>`)
+      : html`<li class="empty">Be the first supporter.</li>`)
   } catch {
     $('raised').textContent = '—'
     $('raised-label').textContent = 'Ledger unavailable'
-    $('recent').innerHTML = ''
+    $('recent').replaceChildren()
   }
 }
 

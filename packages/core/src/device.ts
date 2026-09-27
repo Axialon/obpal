@@ -304,9 +304,11 @@ export class DeviceLink {
     const pc = await this.newPeer({ iceServers: servers })
     if (!pc || build !== this.builds) return null
     pc.onicecandidate = (e) => {
-      if (!e.candidate || this.pc !== pc) return
-      if (this.offered) this.sig?.send({ t: 'sig', d: { cand: e.candidate.toJSON() } })
-      else this.localCands.push(e.candidate.toJSON())
+      if (this.pc !== pc) return
+      // An empty candidate ends gathering, using the same candidate object older peers already accept.
+      const cand = e.candidate?.toJSON() ?? { candidate: '' }
+      if (this.offered) this.sig?.send({ t: 'sig', d: { cand } })
+      else this.localCands.push(cand)
     }
     pc.onconnectionstatechange = () => {
       if (this.pc !== pc) return

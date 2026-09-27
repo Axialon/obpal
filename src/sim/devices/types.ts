@@ -62,6 +62,8 @@ export interface Pointing {
  * frame; presses are what went down since then, in order.
  */
 export interface DeviceInput {
+  /** The watchdog has stopped continuous input; explicit tray actions can still arrive. */
+  quiet?: boolean
   /** The catalogue controller in use (CATALOGUE §9.1): what the phone says, else what its mode stands for. */
   face: string
   mode: ModeId

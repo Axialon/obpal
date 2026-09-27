@@ -1,6 +1,9 @@
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import * as THREE from 'three'
 import type { Parts as PartsT, Part } from '../src/viewer/nodes'
+
+// These tests exercise ownership, not rendering; browser suites exercise the real template helper.
+vi.mock('../src/ui/markup', () => ({ html: () => null, setMarkup: () => {} }))
 
 // Parts builds its detail card with the DOM; a few stand-ins are enough for selection logic.
 beforeAll(() => {

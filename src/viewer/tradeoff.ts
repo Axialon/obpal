@@ -7,7 +7,8 @@
  * Maths comes from the vendored Blackboxes runtime: model-core.js solves; spatial-drag.js maps a value to a
  * radius on a log curve anchored at the canonical default. This module is the three.js wiring for ob.Pal:
  * mouse drags and phone drags both arrive as screen deltas (nudge), and the phone's tilt as a rate (drive).
- */
+ */import { setMarkup, html } from '../ui/markup'
+
 import * as THREE from 'three'
 import { models, spatial, type Constraints, type VisualMapping } from '../vendor/blackboxes'
 import { PILLARS } from './pillars'
@@ -95,7 +96,7 @@ export class Tradeoff {
       const f0 = spatial.visualFraction(this.mapping(key, field), Number(this.state[field]))
       const tag = document.createElement('div')
       tag.className = 'to-tag'
-      tag.innerHTML = '<i></i><b></b><span></span>'
+      setMarkup(tag, html`<i></i><b></b><span></span>`)
       const color = pillarColor(node)
       tag.style.setProperty('--c', color)
       tag.querySelector('b')!.textContent = (SHORT[key] ?? key).toUpperCase()

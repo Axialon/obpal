@@ -33,10 +33,16 @@ for (const line of md.split('\n')) {
 
 // What to tick and pick where there's nothing to paste (the owner's choices, 2026-09-27; UPLOAD.md's decisions).
 const choices = {
-  'Store listing tab': ['Category: Tools', 'Language: English', 'Official URL: leave empty', 'Mature content: No'],
-  'Privacy practices tab': ['Remote code: No, then paste its text', 'Data usage: tick none of the data types', 'Tick all three certifications'],
-  'Distribution tab': ['Visibility: Public', 'Regions: all regions', 'No in-app purchases'],
+  'Store listing tab': ['Category: Tools', 'Language: English', 'Official URL: leave empty', 'Mature content: No', 'Upload the icon, the five screenshots and the two promo tiles (below), then Save draft'],
+  'Privacy practices tab': ['Remote code: No, then paste its text', 'Data usage: tick none of the data types', 'Tick all three certifications', 'Then Save draft'],
+  'Distribution tab': ['Visibility: Public', 'Regions: all regions', 'No in-app purchases', 'Then Save draft'],
 }
+/** The dashboard's "Unable to publish" list, in its words, and the tab below that fixes each. */
+const blockers = [
+  ['Store listing tab', 'The detailed description, a category, the language, the icon image, and at least one screenshot'],
+  ['Privacy practices tab', 'The single purpose; a justification for activeTab, the host permission, nativeMessaging, notifications, offscreen, scripting and storage; the remote code answer; and the data usage certification'],
+]
+const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 const art = ['icon-128.png', ...[1, 2, 3, 4, 5].map((n) => `screenshot-${n}.png`), 'tile-440x280.png', 'marquee-1400x560.png']
 const files = [
   { name: `Package, an update to the listed item (Package → Upload new package)`, path: join(root, 'extension', 'release', `obpal-link-${version}-store.zip`) },
@@ -46,6 +52,7 @@ const files = [
 
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const copyable = (label, text, meta = '') => `<div class="field"><div class="head"><b>${esc(label)}</b>${meta}<button type="button" data-copy="${esc(text)}">Copy</button></div><pre>${esc(text)}</pre></div>`
+const fileRow = (f) => `<div class="file"><span>${esc(f.name)}<code>${esc(f.path)}</code></span><button type="button" data-copy="${esc(f.path)}">Copy path</button></div>`
 const count = (f) => (/summary/i.test(f.name) ? ` <span class="n">${f.text.length} of 132</span>` : /description/i.test(f.name) ? ` <span class="n">${f.text.length} of 16,000</span>` : '')
 
 const html = `<!doctype html>
@@ -72,11 +79,14 @@ button.done { background: transparent; color: var(--lime); box-shadow: inset 0 0
 <h1>ob.Pal Link ${esc(version)} on the Chrome Web Store</h1>
 <p class="lead">Copy each field into the <a href="https://chrome.google.com/webstore/devconsole" style="color:var(--lime)">Developer Dashboard</a>, in this order. For a file, press Copy path, click the dashboard's upload button, paste into the dialog's File name box and press Enter.</p>
 <p class="lead">Once, on the Account page: verify the contact email, set the publisher name, and answer the trader question: <b>non-trader</b>.</p>
-<h2>Files</h2>
-${files.map((f) => `<div class="file"><span>${esc(f.name)}<code>${esc(f.path)}</code></span><button type="button" data-copy="${esc(f.path)}">Copy path</button></div>`).join('\n')}
-${tabs.filter((t) => t.fields.length || choices[t.title]).filter((t) => t.title !== 'Package').map((t) => `<h2>${esc(t.title)}</h2>
+<h2>What the dashboard says is missing</h2>
+<ul class="ticks">${blockers.map(([tab, what]) => `<li><a href="#${slug(tab)}" style="color:var(--lime)">${esc(tab)}</a>: ${esc(what)}.</li>`).join('')}<li>Save draft on each tab before moving to the next; the list only clears for saved fields.</li></ul>
+<h2>Package</h2>
+${files.slice(0, 2).map(fileRow).join('\n')}
+${tabs.filter((t) => t.fields.length || choices[t.title]).filter((t) => t.title !== 'Package').map((t) => `<h2 id="${slug(t.title)}">${esc(t.title)}</h2>
 ${choices[t.title] ? `<ul class="ticks">${choices[t.title].map((c) => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}
-${t.fields.map((f) => copyable(f.name, f.text, count(f))).join('\n')}`).join('\n')}
+${t.fields.map((f) => copyable(f.name, f.text, count(f))).join('\n')}
+${t.title === 'Store listing tab' ? files.slice(2).map(fileRow).join('\n') : ''}`).join('\n')}
 <h2>Then</h2>
 <ul class="ticks"><li>Submit for review. Choose to publish by hand after approval if the site should link to the listing the same day.</li><li>Send Claude the listing's address.</li></ul>
 </main>

@@ -17,7 +17,7 @@ class FakePC {
   signalingState = 'stable'
   connectionState = 'new'
   closed = false
-  onicecandidate = null
+  onicecandidate: ((e: { candidate: null }) => void) | null = null
   onconnectionstatechange = null
   constructor(readonly config: RTCConfiguration) { FakePC.all.push(this) }
   createDataChannel() { return new FakeChannel() }
@@ -31,6 +31,7 @@ class FakePC {
     if (this.closed) throw new Error('InvalidStateError: closed')
     this.localDescription = { ...d, toJSON: () => d }
     this.signalingState = 'have-local-offer'
+    this.onicecandidate?.({ candidate: null })
   }
   async getStats() { return new Map() }
   close() { this.closed = true; this.connectionState = 'closed' }
@@ -86,6 +87,9 @@ async function run(at: { welcome: number; ice: number; cert: number }) {
   }
   await wait(900)
   const offers = ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === 'sig' && m.d.offer).map((m) => m.d.offer.sdp as string)
+  const messages = ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === 'sig')
+  expect(messages[0].d).toHaveProperty('offer')
+  expect(messages.slice(1).map((m) => m.d)).toContainEqual({ cand: { candidate: '' } })
   link.close()
   return offers
 }

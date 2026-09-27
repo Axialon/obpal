@@ -1,6 +1,6 @@
 /**
  * ob.Pal Link end to end: the built extension (extension/dist) in Chromium, a phone emulated in a second browser
- * that opens the pairing link, and a local test page that records what a game or 3D viewer would receive.
+ * that opens the pairing link, and an intercepted test page that records what a game or 3D viewer would receive.
  * The phone runs this checkout's controller build (dist/client) through a local stand-in for the service
  * (extension/e2e/local.mjs), and the extension's calls to the service by name resolve to the same stand-in, which
  * proxies signaling to this checkout's own worker, fresh for the run (OBPAL_E2E_UPSTREAM=https://obpal.blackboxes.net
@@ -42,7 +42,7 @@
  * Branded Chrome can't load unpacked extensions from the command line, so this needs Chromium.
  *
  * Automation can't click the toolbar icon, which is what grants activeTab. The test copy of the extension
- * therefore also gets host access to the local test page (http://127.0.0.1/*), and "This tab" is switched on
+ * therefore also gets host access to the local test page (https://127.0.0.1/*), and "This tab" is switched on
  * with the same message the popup sends. Optional permissions can't be granted by automation either, so the
  * test copy has nativeMessaging and notifications as required permissions.
  *
@@ -52,15 +52,15 @@
  * work, and its own tray can't pick PC), Allow lets it in and is remembered, and forgetting the phone takes it away.
  * Both sides keep the pairing key as a non-extractable CryptoKey.
  */
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { cp, mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, extname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { chromium, devices } from 'playwright'
+import { nativePort } from '../e2e/native-port.mjs'
 import { startLocal, UPSTREAM } from '../e2e/local.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -106,25 +106,22 @@ const ext = await mkdtemp(join(tmpdir(), 'obpal-link-ext-'))
 await cp(join(root, 'dist'), ext, { recursive: true })
 const manifestPath = join(ext, 'manifest.json')
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
-manifest.host_permissions = [...manifest.host_permissions, 'http://127.0.0.1/*']
+manifest.host_permissions = [...manifest.host_permissions, 'https://127.0.0.1/*']
 manifest.permissions = [...manifest.permissions, 'nativeMessaging', 'notifications']
 manifest.optional_permissions = (manifest.optional_permissions ?? []).filter((p) => p !== 'nativeMessaging' && p !== 'notifications')
 // No key: the copy gets an ID of its own, which an installed ob.Pal Desktop refuses (its allowed_origins name only
-// the fixed ID). Nothing here needs the fixed ID: the stub is registered for the ID the copy gets, and the service
+// the fixed ID). Nothing here needs the fixed ID: the stub connects to the test worker's Port API, and the service
 // and the test pages don't look at it. --desktop keeps the key, to reach the installed helper.
 if (!DESKTOP) delete manifest.key
 await writeFile(manifestPath, JSON.stringify(manifest, null, 2))
 
-// ---- the native helper: the stub, registered under a test-only host name -------------------------------------
-// Chromium finds native hosts through HKCU\Software\Chromium\NativeMessagingHosts (Chrome: Software\Google\Chrome).
-// The test copy of the extension is pointed at the stub's name, so an installed ob.Pal Desktop is left alone.
+// ---- the inert native helper, connected through the test worker's Port API (no registry writes) ----
 const STUB_HOST = 'net.blackboxes.obpal.e2e'
 const REAL_HOST = 'net.blackboxes.obpal'
-const STUB_KEYS = ['HKCU\\Software\\Chromium\\NativeMessagingHosts', 'HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts'].map((k) => `${k}\\${STUB_HOST}`)
 const stubDir = await mkdtemp(join(tmpdir(), 'obpal-link-stub-'))
 const stubLogPath = join(stubDir, 'stub.log')
 const stubCtlPath = join(stubDir, 'stub.ctl.json')
-const registered = []
+const stubPorts = []
 if (!DESKTOP) {
   for (const f of await readdir(ext, { recursive: true })) {
     const p = join(ext, f)
@@ -177,22 +174,6 @@ const stubLog = () => (existsSync(stubLogPath) ? readFileSync(stubLogPath, 'utf8
 /** What the stub reports as focused on the PC (a text or password field, and which window is in front). */
 const stubFocus = (focus) => writeFile(stubCtlPath, JSON.stringify(focus))
 
-async function registerStub(extensionId) {
-  const bat = join(stubDir, 'native-stub.bat')
-  await writeFile(bat, `@echo off\r\n"${process.execPath}" "${join(root, 'e2e', 'native-stub.mjs')}" %*\r\n`)
-  const stubManifest = join(stubDir, `${STUB_HOST}.json`)
-  await writeFile(stubManifest, JSON.stringify({ name: STUB_HOST, description: 'ob.Pal Link e2e stub host', path: bat, type: 'stdio', allowed_origins: [`chrome-extension://${extensionId}/`] }, null, 2))
-  for (const key of STUB_KEYS) {
-    const r = spawnSync('reg', ['add', key, '/ve', '/t', 'REG_SZ', '/d', stubManifest, '/f'], { encoding: 'utf8' })
-    if (r.status !== 0) throw new Error(`reg add ${key}: ${r.stderr || r.stdout}`)
-    registered.push(key)
-  }
-}
-
-function unregisterStub() {
-  for (const key of registered.splice(0)) spawnSync('reg', ['delete', key, '/f'], { encoding: 'utf8' })
-}
-
 /** The harness window (desktop/src/bin/harness.rs): a plain Win32 edit control that reports what it receives. */
 function startHarness() {
   if (!existsSync(HARNESS)) throw new Error(`no harness at ${HARNESS} (cargo build --release in desktop/, or OBPAL_E2E_HARNESS)`)
@@ -231,15 +212,10 @@ function startHarness() {
 const page0 = await readFile(join(root, 'e2e', 'harness.html'))
 // /framed: the game page inside a full-size iframe from another origin (localhost vs 127.0.0.1), the way itch.io
 // and most game portals host games. Without "All sites" the extension can't reach into it.
-const framed = (port) => `<!doctype html><title>Framed game</title><style>html,body{margin:0;height:100%}iframe{border:0;width:100%;height:100%;display:block}</style><iframe src="http://localhost:${port}/" allow="gamepad"></iframe>`
-const server = createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-  res.end(req.url?.startsWith('/framed') ? framed(server.address().port) : page0)
-})
-await new Promise((r) => server.listen(0, '127.0.0.1', r))
-const base = `http://127.0.0.1:${server.address().port}`
-const gameOrigin = `http://localhost:${server.address().port}`
 const local = await startLocal()
+const base = `${local.origin}/__game`
+const gameOrigin = local.origin.replace('127.0.0.1', 'localhost')
+const framed = `<!doctype html><title>Framed game</title><style>html,body{margin:0;height:100%}iframe{border:0;width:100%;height:100%;display:block}</style><iframe src="${gameOrigin}/__game/" allow="gamepad"></iframe>`
 const onPhone = (url) => url.replace(SERVICE, local.origin)
 
 const profile = await mkdtemp(join(tmpdir(), 'obpal-link-profile-'))
@@ -250,13 +226,17 @@ const phoneProfile = await mkdtemp(join(tmpdir(), 'obpal-link-phone-'))
  * (local.serviceArgs), which hands the rooms to this run's own worker, where the phone's go too. A launch with its
  * own host rules (the offline one) keeps just those.
  */
-const launchDesk = (extra = []) => chromium.launchPersistentContext(profile, {
-  executablePath,
-  headless: !HEADED,
-  args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`, ...RTC_ARGS, ...(extra.some((a) => a.startsWith('--host-resolver-rules')) ? [] : local.serviceArgs), ...extra],
-  viewport: { width: 1280, height: 800 },
-  deviceScaleFactor: 2,
-})
+const launchDesk = async (extra = []) => {
+  const ctx = await chromium.launchPersistentContext(profile, {
+    executablePath,
+    headless: !HEADED,
+    args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`, ...RTC_ARGS, ...(extra.some((a) => a.startsWith('--host-resolver-rules')) ? [] : local.serviceArgs), ...extra],
+    viewport: { width: 1280, height: 800 },
+    deviceScaleFactor: 2,
+  })
+  await ctx.route('**/__game/**', (route) => route.fulfill({ contentType: 'text/html', body: new URL(route.request().url()).pathname.endsWith('/framed') ? framed : page0 }))
+  return ctx
+}
 /** The phone: a persistent context too, so its service worker cache and its remembered screens survive. */
 const phoneCtx = await chromium.launchPersistentContext(phoneProfile, {
   ...devices['Pixel 7 landscape'], executablePath, headless: !HEADED, args: [...RTC_ARGS, '--ignore-certificate-errors'],
@@ -266,6 +246,7 @@ let desk = await launchDesk()
 async function openPopup(ctx) {
   const worker = ctx.serviceWorkers()[0] ?? (await ctx.waitForEvent('serviceworker'))
   const id = new URL(worker.url()).host
+  if (!DESKTOP) stubPorts.push(await nativePort(worker, STUB_HOST, join(root, 'e2e', 'native-stub.mjs')))
   copyIds.add(id)
   const popup = await ctx.newPage()
   await popup.goto(`chrome-extension://${id}/popup.html`)
@@ -297,7 +278,6 @@ try {
   if (DESKTOP) console.log('  --desktop: this run reaches the installed ob.Pal Desktop and injects real input (into its harness window)')
   let { id, popup } = await openPopup(desk)
   console.log(`  extension ${id} · ${manifest.name} ${manifest.version} · phone via ${local.origin}`)
-  if (!DESKTOP) await registerStub(id)
 
   let page = desk.pages()[0] ?? (await desk.newPage())
   await page.goto(`${base}/`)
@@ -927,9 +907,8 @@ try {
   exitCode = 1
 } finally {
   await Promise.allSettled([desk.close(), phoneCtx.close(), stranger?.close()])
-  server.close()
   await local.close()
-  unregisterStub()
+  for (const close of stubPorts) close()
   await Promise.allSettled([rm(ext, { recursive: true, force: true }), rm(profile, { recursive: true, force: true }), rm(phoneProfile, { recursive: true, force: true }), rm(stubDir, { recursive: true, force: true })])
 }
 

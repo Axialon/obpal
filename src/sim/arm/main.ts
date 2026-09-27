@@ -1333,6 +1333,7 @@ function renderReadouts() {
 }
 
 /** Centre the stage in the space beside the panel (wide screens) or above it (narrow). */
+let overview = false
 function resize() {
   const w = view.width
   const h = view.height
@@ -1341,11 +1342,12 @@ function resize() {
   if (w > 860) camera.setViewOffset(w, h, -panel.right / 2, 0, w, h)
   else camera.setViewOffset(w, h, 0, (h - panel.top) / 2, w, h)
   const free = w > 860 ? Math.min(w - panel.right, h - 90) : Math.min(w, panel.top - 64)
-  const radius = KIND.cell.fence * 0.95
+  const height = arms.length ? new THREE.Box3().setFromObject(arms[0].model.root).getSize(new THREE.Vector3()).y : 0
+  const radius = Math.max(KIND.cell.fence * (overview ? 0.95 : 0.48), height * 0.6)
   const distance = radius / (Math.tan(camera.fov * Math.PI / 360) * Math.max(0.2, free / h))
-  const target = new THREE.Vector3(0, KIND.cell.look, 0)
+  const target = new THREE.Vector3(0, overview ? KIND.cell.look : Math.max(KIND.cell.look, height * 0.45), 0)
   const direction = new THREE.Vector3(...KIND.cell.camera).sub(target)
-  camera.position.copy(target).addScaledVector(direction.normalize(), Math.max(distance, new THREE.Vector3(...KIND.cell.camera).distanceTo(target)))
+  camera.position.copy(target).addScaledVector(direction.normalize(), distance)
   controls.target.copy(target)
   controls.maxDistance = Math.max(14, distance * 1.6)
   controls.update()
@@ -1354,8 +1356,13 @@ function resize() {
 const resetView = document.createElement('button')
 resetView.className = 'add-arm'
 resetView.textContent = 'Reset view'
-resetView.onclick = resize
+resetView.onclick = () => { overview = false; resize() }
 $('add-arm').after(resetView)
+const overviewView = document.createElement('button')
+overviewView.className = 'add-arm'
+overviewView.textContent = 'Overview'
+overviewView.onclick = () => { overview = true; resize() }
+resetView.after(overviewView)
 const inspectArm = document.createElement('button')
 inspectArm.className = 'add-arm'
 inspectArm.textContent = 'Inspect arm'
@@ -1363,7 +1370,7 @@ inspectArm.onclick = () => {
   if (!arms.length) return
   const bounds = new THREE.Box3().setFromObject(arms[0].model.root)
   const target = bounds.getCenter(new THREE.Vector3())
-  const span = bounds.getSize(new THREE.Vector3()).length() * 0.8
+  const span = bounds.getSize(new THREE.Vector3()).length() * 0.45
   const distance = span / (Math.tan(camera.fov * Math.PI / 360) * Math.min(1, camera.aspect))
   camera.position.copy(target).addScaledVector(new THREE.Vector3(0.7, 0.4, 1).normalize(), distance)
   controls.target.copy(target)

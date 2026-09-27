@@ -12,6 +12,10 @@ import type { Framing, Stage } from './stage'
 
 export interface DeviceView {
   framing: Framing
+  /** The whole playground, one tap from the closer play view. */
+  overview?: Framing
+  /** Follow the unit being driven without changing the visitor's orbit or zoom. */
+  follow?(unit: number): THREE.Vector3
   /** A close look at one unit, without changing what any phone controls. */
   inspect?(): Framing
   /** The height of the floor a pointing phone drives on (DeviceInput.spot), for a device that has one. */

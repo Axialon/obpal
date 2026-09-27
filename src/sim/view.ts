@@ -72,7 +72,7 @@ export function jitterOf(k: number): [number, number] {
 }
 
 export interface SimGfx {
-  /** Primary scene submission, excluding the still-picture compositing quads. */
+  /** Scene submissions including camera insets, excluding still-picture compositing quads. */
   triangles: number
   calls: number
   renderMs: number
@@ -96,6 +96,8 @@ export interface SimView {
   readonly height: number
   /** Draw a frame, `dt` seconds after the one before. */
   draw(scene: Scene, camera: Camera, dt: number): void
+  /** Draw a camera inset and include its scene submission in the frame's budget. */
+  drawInset(scene: Scene, camera: Camera): void
   /** Something a frame shows changed that the still check can't see (a texture): the next frame is drawn anew. */
   invalidate(): void
   gfx(): SimGfx
@@ -111,6 +113,7 @@ const QUAD_FRAG = 'uniform sampler2D tMap; varying vec2 vUv; void main() { gl_Fr
 export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h: number): void; params?: WebGLRendererParameters }): SimView {
   const renderer = new WebGLRenderer({ canvas, antialias: true, ...opts.params })
   let triangles = 0, calls = 0, renderMs = 0
+  let insetTriangles = 0, insetCalls = 0, insetMs = 0
   const renderScene = (scene: Scene, camera: Camera) => {
     const start = performance.now()
     renderer.render(scene, camera)
@@ -253,7 +256,15 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
     get width() { return W },
     get height() { return H },
     invalidate() { force = true },
+    drawInset(scene, camera) {
+      const start = performance.now()
+      renderer.render(scene, camera)
+      insetMs += performance.now() - start
+      insetTriangles += renderer.info.render.triangles
+      insetCalls += renderer.info.render.calls
+    },
     draw(scene, camera, dt) {
+      insetTriangles = insetCalls = insetMs = 0
       signature(scene, camera, sig)
       const moving = force || changed(sig, prev, EPS_FRAME) || changed(sig, ref, EPS_TOTAL)
       ;[prev, sig] = [sig, prev]
@@ -298,7 +309,7 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
       still++
     },
     gfx: () => ({
-      triangles, calls, renderMs,
+      triangles: triangles + insetTriangles, calls: calls + insetCalls, renderMs: renderMs + insetMs,
       css: [W, H], buffer: [accum?.width ?? 0, accum?.height ?? 0], pr: step.pr, dpr: devicePixelRatio || 1, level: pinned ?? governor.level,
       steps, pinned: pinned !== null, samples, gpuMs: gpuLast?.ms ?? null, still,
     }),

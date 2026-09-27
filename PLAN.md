@@ -401,10 +401,32 @@ TVs, headsets, AR glasses and watches, as hosts and as controllers: [spec/RESEAR
 Public sims (2026-09-26): [/sim/](https://obpal.blackboxes.net/sim/) hosts the robot arm (phase D's envelope, simulated) and the faction arena (phase B's slots), so the public can try both before the bridges ship.
 
 **The sim catalogue (owner, 2026-09-27: "need more kinds of arms and devices and gadgets in the sim catalogue to try out with our growing control catalogue"). BUILT:**
-- /sim/ is the catalogue: a card per sim with a live preview (one WebGL renderer shared by every card on screen, 30 fps at most, a still under reduced motion), the controllers that suit it, and Try it; a bar filters by controller (`?face=wii`), and proposed devices sit below. /catalogue/'s controller cards link to it.
-- The first six device sims, one registry (`src/sim/devices/`, CATALOGUE §7): a rover, a drone, a marble maze, a PTZ camera, smart lamps and a claw machine. Each declares its `layout.controllers` and `buttons`, and every controller in the catalogue has at least one sim to try it in.
+- /sim/ is the catalogue: a card per sim with a live preview (one WebGL renderer shared by every card on screen, 30 fps at most, a still under reduced motion), the controllers that suit it, and Try it; a bar filters by controller (`?face=wii`), and /catalogue/'s controller cards link to it.
+- Sixteen device sims share one registry (`src/sim/devices/`, CATALOGUE §7): rover, drone, marble maze, PTZ camera, smart lamps, claw machine, boat, stage spotlights, robot vacuum, tank, excavator, forklift, light painter, camera gimbal, RC plane and slot cars. Each declares its `layout.controllers` and `buttons`, and every controller in the catalogue has at least one sim to try it in.
 - Tests: the devices' input mapping and physics limits (vitest), and `e2e:catalogue` (an emulated phone drives each device through the controller that suits it, the Buttons layer, the tray and Home).
-- Next: the arm kinds join as cards when their registry lands; then the proposed devices (a boat, spotlights, a robot vacuum, a tank, an excavator, a forklift, a light painter, a gimbal, an RC plane, slot cars).
+- 24 live cards include all six arm kinds, the sixteen devices, arena and Viewer. Instruments wait for the music room.
+- Play views make the models prominent at desktop, portrait-phone and landscape-phone sizes. Overview reveals the larger playground; Reset view restores play framing. Vehicles follow the controlled unit, arms retain their workbench, and the furnished lamp room has warm fill light.
+- Models and scenery use the shared procedural kit and batched rigid bodies. The graphics counters include camera insets; budget and screenshot evidence are captured across all three sizes. Phone tests cover each new controller mapping, its keyboard action and Home; logic tests cover limits, activity and loss of input.
+
+**The sims programme (owner, 2026-09-28: "conduct a comprehensive push for the full sims catalogue expansion and dev utilizing codex under your direction and management towards the vision for the project"; the music studio "as part of the sims experience").** The coordinator plans, briefs and reviews; Codex (gpt-6-astra, AGENTS.md) builds each wave in its own worktree; the owner approves the look before any rollout. At most three build jobs run at once.
+- **Wave 1: running.**
+  - Every sim's models and scenes upgraded (merged 2026-09-27). The default views are reframed, and the ten proposed devices are being built.
+  - A 3D style study: spec/STYLE-3D.md, a shared motion system, and the drone, SO-101 and rover as prototypes. Round 2 sculpts them in Blender, for the owner's review.
+- **Wave 2: the music studio (roadmap step 6, now).** Many people play in one room, each phone an instrument.
+  - Research first, in spec/MUSIC.md: the latency budget, instrument UX and synthesis.
+  - `face.drums` for pads and strike gestures (the phone as a drumstick), and `face.keys` for tone keys with a scale lock and tilt bend, as catalogue controllers (CATALOGUE §8–9).
+  - A studio sim: a drum kit, hand drums, electronic pads, keys, mallets and a gyro "air" instrument, with synthesised sound and measured latency.
+- **Wave 3: the style rollout.** Once the owner approves the prototypes, every sim is restyled in the approved language (Blender-authored where it pays): the arms, the devices, the ten new ones and the studio.
+- **Wave 4: the full catalogue.** More sims chosen to cover every controller and category:
+  - robotics: a robot dog, a sorting cell and a conveyor line;
+  - vehicles: a kart track, a helicopter and a submarine;
+  - home: a smart room with blinds, a fan and a TV;
+  - camera: a slider and a jib;
+  - games: pinball, air hockey, table football and a marble run;
+  - space: a planetary rover and a telescope mount;
+  - a physics lab: a pendulum and a trebuchet.
+
+  The catalogue page gets categories, search and filters, and every sim takes several players.
 
 Scheduled 2026-09-27: phase B lands with step 5b (the controller hub, below), and phase C after step 8b's research.
 
@@ -565,7 +587,7 @@ Scheduled 2026-09-27: phase B lands with step 5b (the controller hub, below), an
 5. Shared view: scenes and robot cameras visible to every phone. Owner, 2026-09-27: "the scene can be shared across connected easily for viewing whats happening and able to use the connected device for control as now".
 5b. **The controller catalogue in the phone, and the controller hub** (owner, 2026-09-27; added here, see below): pick any controller the screen takes, with its profiles, and use several at once, a Bluetooth pad through the phone included.
 5b.1b. **Buttons: a phone's physical inputs mapped to the controller** (owner, 2026-09-27: "i noticed headphone buttons utilized but no way to map physical phone buttons to the controller experience"; later: "map what can be mapped and available as options or smart use based on received input"). BUILT 2026-09-27, ahead of the picker it sits beside (below).
-6. Music room sim, after the shared view. Owner, 2026-09-27: "a sim for music room with the gyro action for playing them, mainly different kinds of drums and tone generating with contacts etc to showcase responsiveness with multiple people in the same scene". Research first (latency budget, instrument UX, audio synthesis) to do both "tastefully and keeping high quality of experience". Its drum pads and tone keys arrive as catalogue controllers in 5b's picker (CATALOGUE §9.1).
+6. Music room sim: **started 2026-09-28 as wave 2 of the sims programme (below), owner: "we need it as part of the sims experience"**. Owner, 2026-09-27: "a sim for music room with the gyro action for playing them, mainly different kinds of drums and tone generating with contacts etc to showcase responsiveness with multiple people in the same scene". Research first (latency budget, instrument UX, audio synthesis) to do both "tastefully and keeping high quality of experience". Its drum pads and tone keys arrive as catalogue controllers in 5b's picker (CATALOGUE §9.1).
 7. Arms.
 8. Bluetooth research.
 8b. **Research: TVs, headsets, AR glasses and watches, with controller profiles** (owner, 2026-09-27; added here, see below). The quick scan is [spec/RESEARCH-DEVICES.md](spec/RESEARCH-DEVICES.md).

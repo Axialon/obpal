@@ -220,8 +220,22 @@ A device is a row in one registry (`src/sim/devices/registry.ts`): data (`Device
 | PTZ camera (2) | `face.wii`, `face.trackpad`, `face.gamepad` | It looks where the phone points (⌂ centres it), − + zoom, A takes a picture; drag and pinch, or 1:1 like a gimbal; the right stick and triggers | Absolute pointing, relative drags and 1:1; three ways to zoom |
 | Smart lamps (4) | `face.trackpad`, `face.mouse`, `face.keyboard` | Drag across for the colour, up for the brightness, twist like a dial, tap to switch; point at a lamp and Left takes it, the wheel dims; type "teal", "warm 40%", "#ff8800", "off" | The trackpad as dials, the wheel as a value, `text` as input |
 | Claw machine (2) | `face.wii`, `face.gamepad`, `face.trackpad`, `face.hand` | Point over a prize (aiming straight is the middle of your pit), A drops the claw; the stick and A; a drag and a tap; the 3D hand | Pointing to place, one button to act |
+| Boat (2) | `face.wheel`, `face.gamepad`, `face.trackpad` | Tilt steers the rudder, triggers power / reverse; left stick or drag; H sounds the horn | Momentum, gentle waves, a wake, buoy course and dock |
+| Stage spotlights (4) | `face.wii`, `face.trackpad` | Point to aim; drag or 1:1 also aims; A / C changes colour, G changes gobo | Moving heads, truss, beams in haze and patterned pools |
+| Robot vacuum | `face.wii`, `face.trackpad` | Point and hold B to drive there, or drag / tilt; A / C cleans; Home routes to the charging dock | Furniture collision, finite dust and docking |
+| Tank (2) | `face.gamepad`, `face.trackpad` | Left stick drives, gyro Aim / right stick turns the turret; drag drives and two-finger pan aims; A / Space fires | Tracks, soft ballistic projectiles and resettable targets |
+| Excavator | `face.gamepad`, `face.hand` | Left stick swings / reaches, right curls / raises (pull raises), triggers travel; 3D hand places the bucket; A / Space curls or dumps | Four hydraulic joints, finite sand, a pile and truck |
+| Forklift | `face.gamepad`, `face.trackpad` | Left stick drives, right lifts / tilts; drag drives, two-finger pan lifts and twist tilts; A / Space picks up or releases | Pallets, storage racks, load limits and tipping |
+| Light painter | `face.hand`, `face.mouse`, `face.trackpad` | Hold and move the phone to paint; point and Left, or drag; C changes colour, Backspace clears | Bounded long-exposure trails in a dark studio |
+| Camera gimbal | `face.trackpad`, `face.hand` | Gyro 1:1 follows all three axes; held 3D orientation, drag / twist fallback; R records a take | Three nested axes and a live camera inset of a subject |
+| RC plane | `face.gamepad`, `face.trackpad` | Flight tilt / right stick banks and pitches, RT powers; trackpad tilt / drag and A / Space toggles engine | Gentle lift and glide, runway, hangar and sequential rings |
+| Slot cars (4) | `face.wheel`, `face.gamepad` | RT is throttle, steering is ignored; A / Space reslots a car | Lanes, lap counts and corner-speed derailments |
 
-Every device suggests `buttons` for a headset press and a keyboard key (the rover honks on H or one headset press), and has Home: the tray's, or a pad's Guide. The watchdog stops a unit whose holder's input goes quiet for 300 ms. Proposed next: a boat, stage spotlights, a robot vacuum (⌂ docks it), a tank (gyro Aim turns the turret), an excavator, a forklift, a light painter, a camera gimbal, an RC plane and slot cars. Instruments wait for the music room (PLAN §10, step 6).
+Every device suggests `buttons` for a headset press and a keyboard key (the rover honks on H or one headset press), and has Home: the tray's, or a pad's Guide. The watchdog clears manual drive when the holder's input goes quiet for 300 ms; boats coast and planes glide without power, and a vacuum already sent Home completes its dock route. Instruments wait for the music room (PLAN §10, step 6).
+
+The catalogue has 24 cards: these sixteen devices, six arm kinds, the arena and the Viewer. Device and arm cameras open close enough to play, with Overview one tap away and Reset view restoring the play camera. Vehicle cameras follow the controlled unit; orbit and zoom remain available. The furnished lamp room uses warm fill lighting. Previews share one renderer, with a still under reduced motion.
+
+The excavator uses the excavator control pattern (left swing / stick, right bucket / boom), as illustrated by [Caterpillar's joystick controls guide](https://www.cat.com/en_US/articles/for-owners/excavator-joystick-controls.html/). Its simplified sand transfer is a play task rather than a training simulator. Gimbal Record counts takes; it does not export video. All new models, textures, gobos and scenery are procedural work from the shared kit.
 
 ## 8. Adding to the catalogue
 

@@ -1,7 +1,8 @@
 /**
  * Giving back (the donate page only): the open-source work ob.Pal is built on, how much we rely on each, and a way to
  * give the same again to them, split by that share. Each gift goes straight to the project's own page.
- */
+ */import { setMarkup, html } from '../ui/markup'
+
 import data from './open-source.json'
 import { split } from './share'
 
@@ -10,7 +11,6 @@ const upstream = data.upstream as Upstream[]
 const total = upstream.reduce((s, u) => s + u.share, 0)
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 const usd = (n: number) => `$${n < 100 ? n.toFixed(2).replace(/\.00$/, '') : Math.round(n).toLocaleString('en-US')}`
 
 /** GitHub Sponsors takes whole dollars (from $1); Open Collective takes cents. */
@@ -32,16 +32,16 @@ if (root) {
   const input = $<HTMLInputElement>('gb-amount')
   const render = () => {
     const parts = split(amount, upstream.map((u) => u.share))
-    $('gb-list').innerHTML = upstream.map((u, i) => `
+    setMarkup($('gb-list'), upstream.map((u, i) => html`
       <li>
         <span class="gb-bar" style="--w:${((u.share / total) * 100).toFixed(1)}%"></span>
         <div class="gb-row">
-          <span class="gb-name"><a href="${esc(u.url)}" rel="noopener">${esc(u.name)}</a><small>${esc(u.what)} · ${esc(u.by)} · ${esc(u.license)}</small></span>
+          <span class="gb-name"><a href="${u.url}" rel="noopener">${u.name}</a><small>${u.what} · ${u.by} · ${u.license}</small></span>
           <span class="gb-share">${Math.round((u.share / total) * 100)}%</span>
-          <a class="gb-give" href="${esc(giveUrl(u, parts[i]))}" target="_blank" rel="noopener">Give ${usd(payable(u, parts[i]))}</a>
+          <a class="gb-give" href="${giveUrl(u, parts[i])}" target="_blank" rel="noopener">Give ${usd(payable(u, parts[i]))}</a>
         </div>
-      </li>`).join('')
-    $('gb-thanks').innerHTML = (data.thanks as { name: string; by: string; what: string }[]).map((t) => `<li><b>${esc(t.name)}</b> <span>${esc(t.by)}: ${esc(t.what)}</span></li>`).join('')
+      </li>`))
+    setMarkup($('gb-thanks'), (data.thanks as { name: string; by: string; what: string }[]).map((t) => html`<li><b>${t.name}</b> <span>${t.by}: ${t.what}</span></li>`))
   }
   const setAmount = (n: number) => {
     if (!(n >= 1 && n <= 10000)) return

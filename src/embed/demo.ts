@@ -4,7 +4,8 @@
  * Scan the code and you take a free shape: drag moves it, two fingers push it back or pull it near, a pinch sizes it,
  * a twist turns it, the gyro turns it 1:1, Point moves it where you aim and 3D moves it with your hand. The first
  * person holding nothing turns the view.
- */
+ */import { setMarkup, html } from '../ui/markup'
+
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
@@ -58,7 +59,7 @@ const shapes: Shape[] = [
   halo.visible = false
   scene.add(halo)
   const label = document.createElement('span')
-  label.innerHTML = '<i></i><b></b><small></small>'
+  setMarkup(label, html`<i></i><b></b><small></small>`)
   label.querySelector('b')!.textContent = s.name
   labels.appendChild(label)
   const home = tall ? new THREE.Vector3(s.x * 0.5, 0.85, s.x ? 0.5 : -0.9) : new THREE.Vector3(s.x, 0.85, 0)
@@ -115,7 +116,7 @@ function people(pal: ObpalRemote) {
   const list = document.getElementById('people')!
   list.replaceChildren(...pal.participants.map((p) => {
     const li = document.createElement('li')
-    li.innerHTML = '<span class="person"></span><span></span><small></small>'
+    setMarkup(li, html`<span class="person"></span><span></span><small></small>`)
     const dot = li.querySelector<HTMLElement>('.person')!
     dot.style.setProperty('--c', p.color)
     dot.textContent = p.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase()

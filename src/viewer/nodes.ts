@@ -1,3 +1,4 @@
+import { setMarkup, html } from '../ui/markup'
 import * as THREE from 'three'
 import { PILLARS, type Pillar } from './pillars'
 import { formatValue, type Tradeoff } from './tradeoff'
@@ -92,7 +93,7 @@ export class Parts {
     this.card = document.createElement('div')
     this.card.className = 'node-card glass'
     this.card.setAttribute('role', 'status')
-    this.card.innerHTML = '<div class="nc-head"><span class="nc-dot"></span><strong class="nc-title"></strong><button class="nc-x" aria-label="Release part">×</button></div><div class="nc-rows"></div><div class="nc-range bb-meter" hidden><i></i></div><div class="nc-foot"></div>'
+    setMarkup(this.card, html`<div class="nc-head"><span class="nc-dot"></span><strong class="nc-title"></strong><button class="nc-x" aria-label="Release part">×</button></div><div class="nc-rows"></div><div class="nc-range bb-meter" hidden><i></i></div><div class="nc-foot"></div>`)
     this.card.querySelector<HTMLButtonElement>('.nc-x')!.onclick = () => this.select(null, this.cardHand)
     document.body.appendChild(this.card)
   }
@@ -525,11 +526,11 @@ export class Parts {
     this.card.dataset.kind = part.kind
     this.card.querySelector('.nc-title')!.textContent = part.title
     const rows = this.card.querySelector('.nc-rows')!
-    rows.innerHTML = ''
+    rows.replaceChildren()
     for (const [k, v] of part.rows) {
       const r = document.createElement('div')
       r.className = 'nc-row'
-      r.innerHTML = '<span></span><b></b>'
+      setMarkup(r, html`<span></span><b></b>`)
       r.querySelector('span')!.textContent = k
       r.querySelector('b')!.textContent = v
       rows.appendChild(r)

@@ -29,7 +29,7 @@ export async function startWorker({ port = 5179 } = {}) {
   const origin = `http://127.0.0.1:${port}`
   if (await answers(origin)) throw new Error(`something already answers on port ${port}; stop it, or pick another port`)
   const state = await mkdtemp(join(tmpdir(), 'obpal-worker-'))
-  const child = spawn('npx', ['wrangler', 'dev', '--port', String(port), '--ip', '127.0.0.1', '--persist-to', state, '--show-interactive-dev-session=false'], {
+  const child = spawn('npx', ['wrangler', 'dev', '--port', String(port), '--ip', '127.0.0.1', '--persist-to', state, '--var', 'TURN_SECRET:local-e2e-address-key', '--show-interactive-dev-session=false'], {
     cwd: root, shell: true, stdio: 'ignore', windowsHide: true,
   })
   // On exit only synchronous work runs: kill the tree and drop the state folder this run made.

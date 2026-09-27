@@ -115,8 +115,9 @@ export function createView(stage: Stage, logic: MazeLogic): DeviceView {
   const setTheme = (t: Theme) => { for (const m of models) m.base.color.set(t.light ? '#cfd6e0' : '#2a3140') }
   setTheme(stage.theme)
   return {
+    framing: (() => { const [x, z] = BOARD_AT[0]; return { target: [x, LIFT, z], wide: [x, 2.5, z + 2], tall: [x, 3, z + 1.6], radius: 0.92, min: 0.6, max: 12 } })(),
     inspect() { const [x, z] = BOARD_AT[0]; return { target: [x, LIFT, z], wide: [x, 2.5, z + 2], tall: [x, 3, z + 1.6], radius: 0.92, min: 0.6, max: 12 } },
-    framing: { target: [0, 0.1, 0.1], wide: [0, 5.1, 4.25], tall: [0, 6.5, 3.8], radius: 2.15, min: 0.8, max: 12 },
+    overview: { target: [0, 0.1, 0.1], wide: [0, 5.1, 4.25], tall: [0, 6.5, 3.8], radius: 2.15, min: 0.8, max: 12 },
     update(colors, t) { logic.boards.forEach((b, n) => placeBoard(models[n], b, colors[n], t)) },
     setTheme,
   }

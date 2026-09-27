@@ -7,6 +7,7 @@
  * them all. Pressure from everyone together never switches pairing off: past a budget, a lookup or a new code has to
  * bring a proof of work (../packages/core/src/work.ts), which slows the flood and lets people through.
  */
+import type { NetworkKeys } from './address'
 import { hmacSha256, workDone } from '../packages/core/src/work'
 
 export const CODE_TTL_MS = 10 * 60_000
@@ -39,7 +40,7 @@ export const LIMITS = {
   work: { base: 16, max: 22, ttl: 120_000 },
 } satisfies Record<string, unknown>
 
-export interface CodeEntry { room: string; exp: number; ip: string }
+export interface CodeEntry { room: string; exp: number; net: NetworkKeys }
 export type Work = { c: string; x: string }
 
 /** A token bucket per key, kept in memory (a restart forgets, which only ever lets someone through sooner). */
@@ -174,7 +175,7 @@ export class CodeBook {
   }
 
   private count(e: CodeEntry, by: 1 | -1) {
-    const n = networks(e.ip)
+    const n = e.net
     for (const k of [`a:${n.addr}`, n.mid && `m:${n.mid}`, `w:${n.wide}`]) {
       if (!k) continue
       const v = (this.live.get(k) ?? 0) + by
@@ -249,9 +250,8 @@ export class CodeBook {
   // ---- codes ---------------------------------------------------------------------------------------------------
 
   /** A fresh handle for a room, replacing the room's previous one (which stays if this is refused). */
-  claim(room: string, ip: string, work?: Work): Claim {
+  claim(room: string, net: NetworkKeys, work?: Work): Claim {
     this.sweep()
-    const net = networks(ip)
     const wait = Math.max(this.b.room.wait(room), this.b.claimAddr.wait(net.addr), this.b.claimWide.wait(net.wide))
     if (wait) return { error: 'slow-down', retry: wait }
     // Every attempt past the rate check spends a token, whatever comes of it.
@@ -260,7 +260,7 @@ export class CodeBook {
     this.b.claimWide.take(net.wide)
     const old = this.byRoom.get(room)
     const oldE = old ? this.codes.get(old) : undefined
-    const oldNet = oldE ? networks(oldE.ip) : null
+    const oldNet = oldE?.net
     // Live codes this network holds (its own code for this room is about to be replaced, so it doesn't count).
     const held = (key: string, same: boolean) => (this.live.get(key) ?? 0) - (same ? 1 : 0)
     const L = LIMITS.live
@@ -280,7 +280,7 @@ export class CodeBook {
     }
     if (!handle) return { error: 'busy', retry: 60 }
     if (old) this.remove(old)
-    const entry = { room, exp: this.now() + CODE_TTL_MS, ip }
+    const entry = { room, exp: this.now() + CODE_TTL_MS, net }
     this.add(handle, entry)
     return { code: handle, exp: entry.exp }
   }
@@ -290,9 +290,8 @@ export class CodeBook {
    * the device a ticket to show the host. Not found, expired and spent all answer the same, and so does every
    * lookup while a limit holds: nothing tells a live handle from a dead one.
    */
-  take(handle: string, ip: string, work?: Work): Take {
+  take(handle: string, net: NetworkKeys, work?: Work): Take {
     this.sweep()
-    const net = networks(ip)
     const b = this.b
     const wait = Math.max(
       b.missAddr.wait(net.addr), net.mid ? b.missMid.wait(net.mid) : 0, b.missWide.wait(net.wide),
@@ -318,7 +317,7 @@ export class CodeBook {
     b.hitAddr.take(net.addr)
     b.hitWide.take(net.wide)
     this.remove(handle)
-    return { room: e.room, ticket: this.ticket(), next: this.claim(e.room, e.ip) }
+    return { room: e.room, ticket: this.ticket(), next: this.claim(e.room, e.net) }
   }
 
   /** The room's host went away or no longer shows a code: forget its handle (only that one, if given). */

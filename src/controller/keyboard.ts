@@ -9,7 +9,8 @@
  * for when it is down) sends btn{key-<KeyboardEvent.code>, tap}; the arrows and Backspace repeat while held. For a
  * password field the field is a password input, so the keyboard neither learns nor suggests; the dock draws dots of
  * its own (the input's would show one for the sentinel) and forgets the field as soon as it closes.
- */
+ */import { type Content, html, setMarkup } from '../ui/markup'
+
 import type { DeviceMsg } from '@obpal/core'
 import { ICONS } from '../ui/icons'
 import { SENTINEL, textMessages, TypingDiff } from './typing'
@@ -87,9 +88,9 @@ export class KeyboardDock {
     return !!this.field && !this.open
   }
 
-  html(): string {
-    const keys = KEYS.map((k) => `<button class="kbd-key${k.code === 'Enter' ? ' enter' : ''}" data-code="${k.code}" aria-label="${k.name}">${k.icon ? ICONS[k.icon] : `<span>${k.word}</span>`}</button>`).join('')
-    return `
+  html(): Content {
+    const keys = KEYS.map((k) => html`<button class="kbd-key${k.code === 'Enter' ? ' enter' : ''}" data-code="${k.code}" aria-label="${k.name}">${k.icon ? ICONS[k.icon] : html`<span>${k.word}</span>`}</button>`)
+    return html`
       <div class="kbd glass" id="kbd" role="group" aria-label="Keyboard" hidden>
         <div class="kbd-in" id="kbd-in">
           <span class="kbd-ic" aria-hidden="true"></span>
@@ -330,7 +331,7 @@ export class KeyboardDock {
       root.querySelector('#kbd-in')!.classList.toggle('empty', typed === 0)
       root.querySelector('.kbd-dots')!.textContent = secret ? '•'.repeat(Math.min(typed, MAX_DOTS)) : ''
       if (redraw) {
-        root.querySelector('.kbd-ic')!.innerHTML = secret ? ICONS.lock : ICONS.keyboard
+        setMarkup(root.querySelector('.kbd-ic')!, secret ? ICONS.lock : ICONS.keyboard)
         root.querySelector('.kbd-ph')!.textContent = secret ? 'Password' : 'Type'
       }
     }
@@ -343,7 +344,7 @@ export class KeyboardDock {
       if (redraw) {
         p.classList.toggle('secret', this.field === 'secret')
         p.setAttribute('aria-label', this.field === 'secret' ? 'Type a password on the screen' : 'Type on the screen')
-        p.querySelector('.tp-ic')!.innerHTML = this.field === 'secret' ? ICONS.lock : ICONS.keyboard
+        setMarkup(p.querySelector('.tp-ic')!, this.field === 'secret' ? ICONS.lock : ICONS.keyboard)
       }
     }
   }

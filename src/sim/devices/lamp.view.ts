@@ -189,18 +189,21 @@ export function createView(stage: Stage, logic: LampLogic): DeviceView {
     return el
   })
   const setTheme = (t: Theme) => {
-    // Dusk on either surface: the stage's own light low, so the lamps light the room (a little brighter on the light one).
-    stage.lights.hemi.intensity = t.light ? 0.45 : 0.32
-    stage.lights.key.intensity = t.light ? 0.35 : 0.25
-    stage.scene.environmentIntensity = t.light ? 0.32 : 0.25
-    room.wallMat.color.set(t.light ? '#8e94a6' : '#2d3140')
-    room.floorMat.color.set(t.light ? '#6f5a4b' : '#3a2f2a')
+    // Warm ambient fill keeps the furnishing visible while the bulbs supply the colour.
+    stage.renderer.toneMappingExposure = 1.1
+    stage.lights.key.color.set('#ffe0b0')
+    stage.lights.hemi.intensity = t.light ? 1.1 : 0.85
+    stage.lights.key.intensity = t.light ? 1.2 : 0.95
+    stage.scene.environmentIntensity = t.light ? 0.6 : 0.5
+    room.wallMat.color.set(t.light ? '#c6b7a8' : '#8d7765')
+    room.floorMat.color.set(t.light ? '#a17e5d' : '#78583e')
   }
   setTheme(stage.theme)
   const v = new THREE.Vector3()
   return {
+    framing: { target: [0, 1.05, -1.1], wide: [2.5, 3.0, 4.7], tall: [0.7, 3.3, 5.6], radius: 2.25, min: 0.6, max: 24 },
     inspect() { return { target: [1.8, 0.95, -1.6], wide: [2.6, 1.4, -0.6], tall: [2.5, 1.6, -0.4], radius: 0.5, min: 0.4, max: 20 } },
-    framing: { target: [0, 0.8, -0.3], wide: [3.8, 4.8, 8.2], tall: [1, 6, 10], radius: 4.5, min: 1.5, max: 20 },
+    overview: { target: [0, 0.8, -0.3], wide: [3.8, 4.8, 8.2], tall: [1, 6, 10], radius: 4.5, min: 1.5, max: 20 },
     anchor: (n) => models[n].at.clone(),
     update(colors) {
       logic.lamps.forEach((l, n) => {

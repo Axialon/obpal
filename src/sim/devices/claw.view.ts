@@ -181,8 +181,9 @@ export function createView(stage: Stage, logic: ClawLogic): DeviceView {
   const setTheme = (t: Theme) => { for (const m of models) m.base.color.set(t.light ? '#dfe3ea' : '#232838') }
   setTheme(stage.theme)
   return {
+    framing: (() => { const [x, z] = CABINETS[0]; return { target: [x, 1.1, z], wide: [x + 1.1, 2.1, z + 2.3], tall: [x + 0.8, 2.2, z + 2.5], radius: 1.25, min: 0.5, max: 12 } })(),
     inspect() { const [x, z] = CABINETS[0]; return { target: [x, 1.1, z], wide: [x + 1.1, 2.1, z + 2.3], tall: [x + 0.8, 2.2, z + 2.5], radius: 0.87, min: 0.5, max: 12 } },
-    framing: { target: [0, 0.95, 0], wide: [0.6, 2.8, 5.6], tall: [0, 3.1, 6.5], radius: 1.85, min: 0.8, max: 12 },
+    overview: { target: [0, 0.95, 0], wide: [0.6, 2.8, 5.6], tall: [0, 3.1, 6.5], radius: 1.85, min: 0.8, max: 12 },
     pickY: CLAW.floor + 0.05,
     pointFrom: (n) => new THREE.Vector3((CABINETS[n] ?? [0, 0])[0], CLAW.floor + 0.05, (CABINETS[n] ?? [0, 0])[1]),
     update(colors, t) { logic.claws.forEach((c, n) => placeClaw(models[n], c, logic.prizes[n], colors[n], t)) },

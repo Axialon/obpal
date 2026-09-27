@@ -47,7 +47,7 @@ class FakePC {
   iceGatheringState = 'complete'
   channels: Record<string, FakeChannel> = {}
   config: RTCConfiguration
-  onicecandidate: unknown = null
+  onicecandidate: ((e: { candidate: null }) => void) | null = null
   onconnectionstatechange: (() => void) | null = null
   constructor(config: RTCConfiguration = {}) { this.config = config; FakePC.all.push(this) }
   createDataChannel(label: string) { return (this.channels[label] = new FakeChannel()) }
@@ -65,7 +65,8 @@ class FakePC {
     this.remoteDescription = d
     this.signalingState = d.type === 'offer' ? 'have-remote-offer' : 'stable'
   }
-  async addIceCandidate() {}
+  added: RTCIceCandidateInit[] = []
+  async addIceCandidate(c: RTCIceCandidateInit) { this.added.push(c) }
   async getStats() { return new Map() }
   close() { this.connectionState = 'closed' }
 }
@@ -135,6 +136,17 @@ async function pair(ws: FakeWS, o: { from: string; fp: Uint8Array; session: stri
 }
 
 describe('the invite moves on once a phone pairs', () => {
+  it('the host sends completion on its answering socket and receives an empty candidate', async () => {
+    const { r, ws } = await screen()
+    const p = await invite(r)
+    const { pc } = await pair(ws, { from: 'a1', fp: FP_A, session: '1', ...p })
+    pc.onicecandidate?.({ candidate: null })
+    expect(ws.messages()).toContainEqual({ t: 'sig', to: 'a1', d: { cand: { candidate: '' } } })
+    ws.receive({ t: 'sig', from: 'a1', d: { cand: { candidate: '' } } })
+    await until('host applies completion', () => pc.added.some((c) => c.candidate === ''))
+    r.destroy()
+  })
+
   it('the old link pairs nobody new, and the phone that paired comes back through its room: a reload, an ICE restart', async () => {
     const { r, ws } = await screen()
     const first = r.pairingUrl

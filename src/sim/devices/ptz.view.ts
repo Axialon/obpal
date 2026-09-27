@@ -198,8 +198,9 @@ export function insetRects(count: number, W = innerWidth, H = innerHeight) {
     return Array.from({ length: count }, (_, i) => ({ x: W - 12 - w, y: 70 + i * (h + 8), w, h }))
   }
   if (W <= 860) {
-    const w = Math.floor((W - 24 - (count - 1) * 8) / count)
-    return Array.from({ length: count }, (_, i) => ({ x: 12 + i * (w + 8), y: 70, w, h: Math.round((w * 9) / 16) }))
+    // Keep the camera's head visible in the middle of the portrait play view.
+    const w = Math.min(140, Math.floor(W * 0.29)), h = Math.round(w * 9 / 16)
+    return Array.from({ length: count }, (_, i) => ({ x: W - 12 - w, y: 70 + i * (h + 8), w, h }))
   }
   const fits = (((H - 88 - 76 - (count - 1) * 14) / count) * 16) / 9
   const w = Math.round(Math.max(160, Math.min(420, Math.max(240, W * 0.24), fits)))
@@ -238,8 +239,9 @@ export function createView(stage: Stage, logic: PtzLogic): DeviceView {
   const size = new THREE.Vector2()
   const clear = new THREE.Color()
   return {
+    framing: (() => { const [x, , z] = logic.cams[0].at; return { target: [x, 0.75, z], wide: [x + 1.5, 1.7, z + 2.4], tall: [x + 1.5, 1.7, z + 2.4], radius: 0.85, min: 0.3, max: 24 } })(),
     inspect() { const [x, y, z] = logic.cams[0].at; return { target: [x, y, z], wide: [x + 0.65, y + 0.4, z - 0.8], tall: [x + 0.8, y + 0.5, z - 1], radius: 0.35, min: 0.3, max: 24 } },
-    framing: { target: [0, 0.7, -0.3], wide: [0, 7.5, 12], tall: [0, 9, 12], radius: 5.2, min: 1, max: 24 },
+    overview: { target: [0, 0.7, -0.3], wide: [0, 7.5, 12], tall: [0, 9, 12], radius: 5.2, min: 1, max: 24 },
     update(colors, t) {
       set.sculpture.rotation.y = t * 0.25
       train.place(logic.time)
@@ -275,7 +277,7 @@ export function createView(stage: Stage, logic: PtzLogic): DeviceView {
         r.clear()
         models[n].eye.aspect = rect.w / rect.h
         models[n].eye.updateProjectionMatrix()
-        r.render(stage.scene, models[n].eye)
+        stage.view.drawInset(stage.scene, models[n].eye)
       })
       r.setScissorTest(false)
       r.setViewport(0, 0, size.x, size.y)

@@ -1,3 +1,4 @@
+import { setMarkup, insertMarkup, html } from '../ui/markup'
 import { family } from '../family'
 import '../styles/base.css'
 import '../styles/viewer.css'
@@ -195,10 +196,10 @@ function gradientTexture(w: number, h: number, paint: (ctx: CanvasRenderingConte
 
 // ---- chrome: logo and icons -------------------------------------------------
 
-$('logo').innerHTML = logo()
+setMarkup($('logo'), logo())
 settleMotion()
 initTips()
-document.querySelectorAll<HTMLElement>('[data-icon]').forEach((el) => el.insertAdjacentHTML('afterbegin', ICONS[el.dataset.icon!] ?? ''))
+document.querySelectorAll<HTMLElement>('[data-icon]').forEach((el) => insertMarkup(el, 'afterbegin', ICONS[el.dataset.icon!] ?? ''))
 
 // ---- view state -----------------------------------------------------------
 
@@ -268,7 +269,7 @@ function buildLightingUI() {
   for (const c of LIGHT_CONTROLS) {
     const l = document.createElement('label')
     l.className = 'bb-field'
-    l.innerHTML = `<span>${c.label}</span><output></output><input class="bb-range" type="range" min="${c.min}" max="${c.max}" step="${c.step}" data-key="${c.key}">`
+    setMarkup(l, html`<span>${c.label}</span><output></output><input class="bb-range" type="range" min="${c.min}" max="${c.max}" step="${c.step}" data-key="${c.key}">`)
     l.querySelector('input')!.oninput = (e) => {
       lighting = { preset: 'custom', values: { ...lighting.values, [c.key]: Number((e.target as HTMLInputElement).value) } }
       applyLighting()
@@ -300,14 +301,14 @@ let pop = 1
 const categoryName = (id: string) => CATEGORIES.find((c) => c.id === id)?.name ?? ''
 
 function art(color: string, iconName?: string, image?: string, glyph?: string) {
-  if (image) return `<img src="${image}" alt="" loading="lazy" decoding="async">`
+  if (image) return html`<img src="${image}" alt="" loading="lazy" decoding="async">`
   if (iconName) return ICONS[iconName] ?? ''
-  return `<span${color ? ` style="color:${color}"` : ''}>${glyph ?? ''}</span>`
+  return html`<span style="color:${color}">${glyph ?? ''}</span>`
 }
 
 function renderRail() {
   const rail = $('rail')
-  rail.innerHTML = ''
+  rail.replaceChildren()
   for (const cat of CATEGORIES) {
     const a = CAT_ART[cat.id]
     const b = document.createElement('button')
@@ -317,7 +318,7 @@ function renderRail() {
     b.dataset.tip = cat.name
     b.dataset.tipSide = 'right'
     b.dataset.cat = cat.id
-    b.innerHTML = art('', a.icon, a.image)
+    setMarkup(b, art('', a.icon, a.image))
     b.onclick = () => {
       dismissHint('catalog')
       if ($('catalog').dataset.state === 'rail' || activeCat !== cat.id) { activeCat = cat.id; setCatalog(true); renderTiles(true) }
@@ -331,7 +332,7 @@ function renderRail() {
   t.setAttribute('aria-label', 'Collapse catalogue')
   t.dataset.tip = 'Collapse'
   t.dataset.tipSide = 'right'
-  t.innerHTML = ICONS.left
+  setMarkup(t, ICONS.left)
   t.onclick = () => setCatalog($('catalog').dataset.state === 'rail')
   rail.appendChild(t)
 }
@@ -342,13 +343,13 @@ function renderTiles(animate = false) {
   $('cat-name').textContent = cat.name
   $('cat-count').textContent = String(items.length)
   const tiles = $('tiles')
-  tiles.innerHTML = ''
+  tiles.replaceChildren()
   for (const item of items) {
     const b = document.createElement('button')
     b.className = 'tile'
     b.dataset.id = item.id
     b.dataset.tip = item.subtitle
-    b.innerHTML = `<span class="tile-art">${art('', undefined, item.icon, item.glyph)}</span><span class="tile-name"></span>`
+    setMarkup(b, html`<span class="tile-art">${art('', undefined, item.icon, item.glyph)}</span><span class="tile-name"></span>`)
     b.querySelector('.tile-name')!.textContent = item.name
     b.onclick = (e) => { dismissHint('catalog'); void selectItem(item, e.shiftKey); if (innerWidth <= 860) setCatalog(false) }
     // Add alongside what's already in the scene (shift-click does the same).
@@ -357,7 +358,7 @@ function renderTiles(animate = false) {
     add.setAttribute('role', 'button')
     add.setAttribute('aria-label', `Add ${item.name} to the scene`)
     add.dataset.tip = 'Add to scene'
-    add.innerHTML = ICONS.plus
+    setMarkup(add, ICONS.plus)
     add.onclick = (e) => { e.stopPropagation(); dismissHint('catalog'); dismissHint('add'); void selectItem(item, true) }
     b.appendChild(add)
     tiles.appendChild(b)
@@ -403,7 +404,7 @@ function renderScene(animate = true) {
       const chip = document.createElement('div')
       chip.className = 'sc-chip'
       chip.setAttribute('aria-selected', String(sel === e.obj))
-      chip.innerHTML = `<button class="sc-pick"><span class="sc-dot"></span><span class="sc-name"></span></button><button class="sc-x">${ICONS.close}</button>`
+      setMarkup(chip, html`<button class="sc-pick"><span class="sc-dot"></span><span class="sc-name"></span></button><button class="sc-x">${ICONS.close}</button>`)
       chip.querySelector('.sc-name')!.textContent = e.name
       chip.querySelector('.sc-x')!.setAttribute('aria-label', `Remove ${e.name}`) // file names are user data: never through innerHTML
       ;(chip.querySelector('.sc-pick') as HTMLButtonElement).onclick = () => { parts.select(sel === e.obj ? null : parts.objectPart(e.obj)); renderScene(false) }
@@ -412,7 +413,7 @@ function renderScene(animate = true) {
     }))
     const tools = document.createElement('div')
     tools.className = 'sc-tools'
-    tools.innerHTML = `<button class="sc-tool" data-act="arrange" aria-label="Arrange in a row" data-tip="Arrange">${ICONS.arrange}</button><button class="sc-tool" data-act="clear" aria-label="Keep only the selected object" data-tip="Keep only this">${ICONS.solo}</button>`
+    setMarkup(tools, html`<button class="sc-tool" data-act="arrange" aria-label="Arrange in a row" data-tip="Arrange">${ICONS.arrange}</button><button class="sc-tool" data-act="clear" aria-label="Keep only the selected object" data-tip="Keep only this">${ICONS.solo}</button>`)
     ;(tools.querySelector('[data-act=arrange]') as HTMLButtonElement).onclick = () => { arrange(); frameModel() }
     ;(tools.querySelector('[data-act=clear]') as HTMLButtonElement).onclick = () => keepOnly(sceneObjects.find((e) => e.obj === sel) ?? sceneObjects[sceneObjects.length - 1])
     strip.appendChild(tools)
@@ -744,7 +745,7 @@ function setTheme(t: Theme, sync = true) {
   applyTheme(t) // sets the ob.Pal product first, so the accent below is ours rather than the family default
   parts.setAccent(family.accentColor())
   applySceneTheme(t)
-  if (!$('themes').hidden) $('themes').innerHTML = family.themeMenu()
+  if (!$('themes').hidden) setMarkup($('themes'), family.themeMenu())
   if (sync) remote?.setValues({ theme: t.id })
 }
 /** Accent changed (here, on the phone or in the menu): recolour the stage and part highlights. */
@@ -753,12 +754,12 @@ function setAccent(id: string, sync = true) {
   parts.setAccent(family.accentColor())
   remote?.setHostPerson({ color: family.accentColor() })
   applySceneTheme(theme)
-  if (!$('themes').hidden) $('themes').innerHTML = family.themeMenu()
+  if (!$('themes').hidden) setMarkup($('themes'), family.themeMenu())
   if (sync) remote?.setValues({ accent: family.getAccent() })
 }
 function toggleThemes(open = $('themes').hidden) {
   const pop = $('themes')
-  if (open) pop.innerHTML = family.themeMenu()
+  if (open) setMarkup(pop, family.themeMenu())
   pop.hidden = !open
   $('t-theme').setAttribute('aria-pressed', String(open))
 }
@@ -777,19 +778,19 @@ $('t-theme').onclick = (e) => { e.stopPropagation(); if (!$('lighting').hidden) 
 $('t-light').onclick = (e) => { e.stopPropagation(); toggleLighting() }
 
 // ---- ecosystem switcher: every Blackboxes site, one tap away ----
-$('t-switch').innerHTML = family.icons.chevron
+setMarkup($('t-switch'), family.icons.chevron)
 family.mountSwitcher($('t-switch'), $('switcher'), 'obpal')
 
 // ---- overflow: secondary tools fold into a glass tile menu on narrower screens ----
 function buildMore() {
   const menu = $('more')
-  menu.innerHTML = ''
+  menu.replaceChildren()
   document.querySelectorAll<HTMLElement>('#tools .tool.t2').forEach((src) => {
     const b = document.createElement('button')
     b.className = 'more-tile'
     b.setAttribute('role', 'menuitem')
     b.dataset.for = src.id
-    b.innerHTML = `${src.innerHTML}<span></span>`
+    setMarkup(b, html`${[...src.childNodes].map((n) => n.cloneNode(true))}<span></span>`)
     b.querySelector('span')!.textContent = (src.getAttribute('aria-label') ?? '').replace(/ ob\.Pal$/, '')
     b.onclick = (e) => {
       e.stopPropagation()
@@ -1113,14 +1114,14 @@ function renderPeople() {
   rows.replaceChildren(...list.map((p) => {
     const li = document.createElement('li')
     const held = seats.get(p.id)?.hand.selected
-    li.innerHTML = '<span class="person"></span><span class="pp-text"><b></b><small></small></span><button class="chip-x" data-icon="close"></button>'
+    setMarkup(li, html`<span class="person"></span><span class="pp-text"><b></b><small></small></span><button class="chip-x" data-icon="close"></button>`)
     const dot = li.querySelector<HTMLElement>('.person')!
     dot.style.setProperty('--c', p.color)
     dot.textContent = initials(p.name)
     li.querySelector('b')!.textContent = p.name
     li.querySelector('small')!.textContent = [p.lead ? 'Drives the view' : '', held ? `Holding ${held.title}` : ''].filter(Boolean).join(' · ') || 'Free'
     const x = li.querySelector<HTMLButtonElement>('button')!
-    x.innerHTML = ICONS.close
+    setMarkup(x, ICONS.close)
     x.setAttribute('aria-label', `Remove ${p.name}`)
     x.onclick = () => { remote?.disconnect(p.id); note(`Removed ${p.name}`) }
     return li

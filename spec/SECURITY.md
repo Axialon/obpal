@@ -4,7 +4,7 @@ How ob.Pal keeps the link between a phone and a screen private, authentic and qu
 doesn't do yet, and how to run all of it yourself. To report a vulnerability, see [SECURITY.md](../SECURITY.md). The
 wire formats are in [PROTOCOL.md](PROTOCOL.md).
 
-This is the state on 27 September 2026, with the ob.Pal Link 1.6.0 items of §8. File references point into this
+This is the state on 28 September 2026, with the ob.Pal Link 1.6.0 items of §8. File references point into this
 repository as it was then.
 
 ## 1. The connection path
@@ -151,7 +151,7 @@ Status values:
 | Full ICE, with direct paths before relays (candidate priorities) | meets (browser) | no `iceTransportPolicy` is ever set |
 | ICE restart (8445 §9) when a path goes | meets | phone at `device.ts:545-614`; screen at `remote.ts:608-615` and `:658-694`; `welcome{restart}` at `remote.ts:762`. Hosts that don't take restarts get a new connection (PROTOCOL §1) |
 | Trickle ICE both ways (8838) | meets | `device.ts:306-310`, `remote.ts:638` |
-| End-of-candidates indication (8838 §13) | gap (low) | a null candidate isn't sent, so ICE concludes by its own timers |
+| End-of-candidates indication (8838 §13) | meets | The host and controller send `{ candidate: '' }` through the existing candidate envelope when gathering completes; receivers queue it until the remote description and pass it to `addIceCandidate`. Peers that omit completion still work. `tests/offer.test.ts`, `tests/restart.test.ts` and `tests/invite.test.ts`; e2e:code verifies both directions |
 | Gathering starts early: the offer is built while the socket connects | meets | `device.ts:172-182`, `:292-332` |
 | An unsent offer is built again when TURN servers arrive, and an attempt that makes no progress starts again | meets | `device.ts:332-373` |
 | mDNS host candidates (draft-ietf-mmusic-mdns-ice-candidates) | meets (browser) | the LAN code carries them (`pairing.ts:178-219`) |
@@ -197,7 +197,7 @@ Status values:
 | WebSocket over TLS | meets | `wss:` from an `https:` service only; `http:` is allowed only on localhost (`remote.ts:161-171`, `signal.ts:7-9`) |
 | HSTS (RFC 6797) | meets | `public/_headers:10`: a year, on this host only |
 | CSP Level 3 | meets | Each page's own policy comes first in its head (`vite.config.ts:23-68`): scripts and fonts from this origin only; connections to this service only (the arm sim may also reach the robot socket the person names, and the viewer the files the person opens); no inline script, no eval, no plugins, no frames. `frame-ancestors`, `object-src` and `base-uri` are in the headers (`public/_headers:13`). Each of the site's e2e suites fails on any violation (`scripts/csp-watch.mjs`), and `scripts/e2e-pages.mjs` checks every page. e2e:extension, which tests Link under Link's own policy, doesn't watch for violations |
-| Trusted Types | partial | The pairing chip, its QR code and `<obpal-remote>` build no markup, and run under an enforcing policy in e2e:embed (`scripts/e2e-embed.mjs:238`). The site's own pages still fill their templates with `innerHTML`, so they don't set `require-trusted-types-for` |
+| Trusted Types | meets | Every site's page policy enforces `require-trusted-types-for 'script'` and allows only `obpal-templates` (`vite.config.ts`). `src/ui/markup.ts` accepts only source-catalogued static templates and the controller's fixed worker URL; dynamic values become DOM text or attributes. `scripts/markup-build.mjs` adapts the sims at build time. The chip, QR and pairing card build DOM. Guard tests: `tests/markup.test.ts`; enforcement and hostile network text: e2e:pages; interaction checks: e2e:phone, embed, home, shared, sims and catalogue |
 | Permissions-Policy | meets | `public/_headers:11` |
 | security.txt (RFC 9116) | meets | `public/.well-known/security.txt` |
 | `nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options`, COOP `same-origin` | meets | `public/_headers:8-14` |
@@ -237,7 +237,7 @@ Status values:
 |---|---|---|
 | Data minimisation (Art. 5(1)(c)) | meets | no accounts, no analytics, no request logs of our own |
 | Retention | meets | short codes last 10 minutes; rate-limit counters stay in memory for minutes; Cloudflare's edge logs follow its own policy |
-| Addresses in the limits | partial | Limits key on an address or its network, in memory. But a live short code keeps its screen's raw address in storage for up to 10 minutes (`worker/codes.ts:42`), where a keyed hash would do |
+| Addresses in the limits | meets | Code records, room socket attachments and in-memory limits use HMAC-SHA256 keys for the same IPv4 address and /24, or IPv6 /64, /56 and /48. `worker/address.ts` derives a separate key from an existing relay or payment secret with HKDF-SHA256, label `obpal-address-limits-v1`. Old raw records and attachments are rewritten before requests run (`worker/index.ts`). `tests/worker/address.test.ts` and `tests/worker/codes.test.ts` prove prefix boundaries, restored live counts and replacement codes |
 | Processors named and accurate (Art. 13) | meets | `/privacy/` names Cloudflare (hosting, signaling, relays, email) and Stripe (payments), and no longer a font service |
 | Privacy by default (Art. 25) | meets | fragment secrets, mDNS candidates, pairing records kept on the devices |
 | Security of processing (Art. 32) | meets | DTLS end to end; relays and the room service never see content |
@@ -257,12 +257,12 @@ Status values:
 
 | Status | Count |
 |---|---|
-| meets | 70 (11 of them provided by the browser) |
-| partial | 9 |
-| gap | 1 |
+| meets | 73 (11 of them provided by the browser) |
+| partial | 7 |
+| gap | 0 |
 | n.a. | 3 |
 
-Without the rows the browser provides, ob.Pal itself meets 59. Four of those (the pairing keys at rest, and Link's
+Without the rows the browser provides, ob.Pal itself meets 62. Four of those (the pairing keys at rest, and Link's
 three rows) came with the Link 1.6.0 items of §8.
 
 ## 4. The shortest, fastest path
@@ -347,6 +347,8 @@ as Worker secrets, and every key that matters is made on the devices.
 4. Point your screens at it. Screens built with `@obpal/host` take `service: 'https://your.host'` (`RemoteOptions`).
    Your deployment serves the phone controller, from the same origin as its room service.
 
+Address hashing reuses `TURN_KEY_API_TOKEN`, `TURN_SECRET`, `STRIPE_WEBHOOK_SECRET` or `STRIPE_SECRET_KEY` (the first present, in that order), with a separate HKDF label. Keep at least one configured for the room service, even for a STUN-only self-host. There is no new secret binding. Rotating the selected secret also changes network keys; existing short codes expire within ten minutes, but connected hosts retain their previous keys until reconnect. Limit grouping across that rotation boundary resets.
+
 **A relay.** Pick one of these:
 
 - *Cloudflare Realtime TURN.* Make a TURN key (Realtime → TURN in the dashboard), then set both secrets:
@@ -420,9 +422,9 @@ The same steps are in `extension/README.md` ("Running your own service").
 | An invite Link has moved on from (its secret and room), for the phone that paired through it | Link's link document, in memory | until that phone pairs through a newer invite or is forgotten, or the browser closes (8 at most) |
 | Pairing keys (non-extractable), both devices' DTLS fingerprints, a device's name | each device's IndexedDB, and Link's | until forgotten; certificates renew yearly |
 | Whether each phone may control this PC (the answer, and the phone's name) | Link's `chrome.storage.local` | until changed, or the phone is forgotten |
-| A short code's handle, its room, the screen's address | the service's Codes object | 10 minutes at most |
-| Room membership (socket ids, and the screen's address for its codes) | the room's Durable Object, with its sockets | while the sockets are open |
-| Rate-limit counters (by address or network) | the service, in memory | minutes |
+| A short code's handle, its room, keyed hashes of the screen's networks | the service's Codes object | 10 minutes at most |
+| Room membership (socket ids, and keyed network hashes for the screen's codes) | the room's Durable Object, with its sockets | while the sockets are open |
+| Rate-limit counters (by keyed address or network hash) | the service, in memory | minutes |
 | Request logs | none of ours (invocation logs are off); Cloudflare's edge keeps its own, under its policy | |
 | What the link carries (input, typing) | nowhere: it goes end to end between the two devices | |
 | Relay metadata (addresses, ports, timing) | Cloudflare TURN, under its policy | |
@@ -491,13 +493,12 @@ The items the review set for the next Link release, and how Link 1.6.0 does each
 - *Tests:* `tests/lan.test.ts`; e2e: the phone's record and Link's are `p.key instanceof CryptoKey &&
   !p.key.extractable`, and the direct LAN code still connects with them.
 
+**Site and connection follow-ups.** Done: Trusted Types on all site pages, keyed network hashes in limits and stored records, and end-of-candidates in both directions. These close the three corresponding matrix rows; the remaining items are below.
+
 ## 9. Open items
 
-- **End-of-candidates isn't signaled** (RFC 8838 §13). ICE finishes by its own timers. Low impact.
-- **Trusted Types on the site's own pages** need their templates rebuilt without `innerHTML`; the chip shows how.
 - **Script-side crypto isn't constant time.** The Elligator 2 map runs in script, and so does X25519 on browsers
   whose WebCrypto lacks it.
-- **A live short code keeps its screen's raw address** for up to 10 minutes; a keyed hash of the network would do.
 - **CPace's encoding is ob.Pal's own.** Moving to the draft's encoding would let its test vectors apply. That's a
   protocol change: a new label and version.
 - **The edge's minimum TLS version** is a Cloudflare zone setting. The owner checks that it's 1.2 or above.

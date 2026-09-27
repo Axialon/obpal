@@ -242,8 +242,10 @@ export function createView(stage: Stage, logic: RoverLogic): DeviceView {
   }
   setTheme(stage.theme)
   return {
+    framing: (() => { const r = logic.rovers[0]; return { target: [r.x, 0.17, r.z], wide: [r.x + 0.8, 0.85, r.z + 1], tall: [r.x + 0.8, 1, r.z + 1.3], radius: 0.58, min: 0.4, max: 38 } })(),
+    follow(n) { const r = logic.rovers[n]; return new THREE.Vector3(r.x, 0.17, r.z) },
     inspect() { const r = logic.rovers[0]; return { target: [r.x, 0.17, r.z], wide: [r.x + 0.8, 0.85, r.z + 1], tall: [r.x + 0.8, 1, r.z + 1.3], radius: 0.5, min: 0.4, max: 38 } },
-    framing: { target: [0, 0, 0], wide: [0, 13.5, 15], tall: [0, 18, 10], radius: 9.5, min: 2, max: 38 },
+    overview: { target: [0, 0, 0], wide: [0, 13.5, 15], tall: [0, 18, 10], radius: 9.5, min: 2, max: 38 },
     pickY: 0,
     update(colors) {
       logic.rovers.forEach((r, n) => placeRover(models[n], r, colors[n]))

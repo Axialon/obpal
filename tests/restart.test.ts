@@ -41,7 +41,7 @@ class FakePC {
   config: RTCConfiguration
   restarts = 0
   added: RTCIceCandidateInit[] = []
-  onicecandidate: unknown = null
+  onicecandidate: ((e: { candidate: null }) => void) | null = null
   onconnectionstatechange: (() => void) | null = null
   private ufrag = 'u0'
   constructor(config: RTCConfiguration = {}) { this.config = config; FakePC.all.push(this) }
@@ -128,6 +128,15 @@ async function connected(restart: boolean) {
 }
 
 describe('the phone keeps its link when the path under it goes', () => {
+  it('sends gathering completion and passes the peer?s empty candidate to WebRTC', async () => {
+    const { link, ws, pc } = await connected(true)
+    pc.onicecandidate?.({ candidate: null })
+    expect(ws.sent.map((s) => JSON.parse(s))).toContainEqual({ t: 'sig', d: { cand: { candidate: '' } } })
+    ws.receive({ t: 'sig', from: 'h1', d: { cand: { candidate: '' } } })
+    await until('end of candidates applied', () => pc.added.some((c) => c.candidate === ''))
+    link.close()
+  })
+
   it('restarts ICE on the same connection when its path goes quiet, and carries on once the answer applies', async () => {
     const { link, ws, pc, statuses } = await connected(true)
     pc.state('disconnected')
@@ -240,12 +249,14 @@ describe('the screen renegotiates a phone’s connection', () => {
     const done = s.payload('p2', { offer, restart: true })
     // Candidates that come while the offer applies wait for it.
     void s.payload('p2', { cand: { candidate: 'candidate:1 1 udp 1 10.0.0.9 5000 typ host', usernameFragment: 'u1' } })
+    void s.payload('p2', { cand: { candidate: '' } })
     await done
     expect(s.pc.remoteDescription).toEqual(offer)
     expect(s.pc.config.iceServers).toEqual([{ urls: 'turn:fresh', username: 'u', credential: 'c' }])
     expect(s.sent).toEqual([{ t: 'sig', to: 'p2', d: { answer: expect.objectContaining({ type: 'answer' }) } }])
     expect(s.peer.sig).toBe('p2')
-    expect(s.pc.added).toHaveLength(1)
+    expect(s.pc.added).toHaveLength(2)
+    expect(s.pc.added[1]).toEqual({ candidate: '' })
     expect([...(s.r as unknown as { peers: Map<string, unknown> }).peers.keys()]).toEqual(['p1'])
   })
 

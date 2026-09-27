@@ -12,7 +12,8 @@
  * - Nothing leaves the device: files are never uploaded, and a reference that is not in the folder fails offline.
  *
  * Viewer hooks (main.ts): init() at boot, renderPanel() after the Local tiles render, release() when an object leaves the scene.
- */
+ */import { type Content, html, setMarkup } from '../ui/markup'
+
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import type { MTLLoader } from 'three/addons/loaders/MTLLoader.js'
@@ -510,18 +511,18 @@ function release(obj: THREE.Object3D) {
 // ---- the Local panel -------------------------------------------------------------------------------
 
 /** The supported formats as a small wrapping row of labels. */
-const FORMATS = `<span class="lf-sub lf-formats">${Object.values(MODEL_FORMATS).map((f) => `<i>${f}</i>`).join('')}</span>`
-const FOLDER_ADD = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.2a1.7 1.7 0 0 1 1.7-1.7H9l1.9 2h7.9a1.7 1.7 0 0 1 1.7 1.7v8.1a1.7 1.7 0 0 1-1.7 1.7H5.2a1.7 1.7 0 0 1-1.7-1.7Z"/><path d="M12 11.3v5M9.5 13.8h5"/></svg>'
+const FORMATS = html`<span class="lf-sub lf-formats">${Object.values(MODEL_FORMATS).map((f) => html`<i>${f}</i>`)}</span>`
+const FOLDER_ADD = html`<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.2a1.7 1.7 0 0 1 1.7-1.7H9l1.9 2h7.9a1.7 1.7 0 0 1 1.7 1.7v8.1a1.7 1.7 0 0 1-1.7 1.7H5.2a1.7 1.7 0 0 1-1.7-1.7Z"/><path d="M12 11.3v5M9.5 13.8h5"/></svg>`
 
-function el(tag: string, cls: string, html = '') {
+function el(tag: string, cls: string, content: Content = '') {
   const e = document.createElement(tag)
   e.className = cls
-  e.innerHTML = html
+  setMarkup(e, content)
   return e
 }
 
-function button(cls: string, html: string, label: string, tip: string | null, run: () => void) {
-  const b = el('button', cls, html) as HTMLButtonElement
+function button(cls: string, content: Content, label: string, tip: string | null, run: () => void) {
+  const b = el('button', cls, content) as HTMLButtonElement
   b.type = 'button'
   b.setAttribute('aria-label', label)
   if (tip) b.dataset.tip = tip
@@ -534,7 +535,7 @@ function head(): HTMLElement {
   if (source) {
     const session = source.kind === 'files'
     const bar = el('div', 'lf-bar')
-    const where = button('lf-where', `${ICONS.folder}<span></span>`, `Change folder: ${source.name}`, session ? 'Pick another folder · this session only' : 'Change folder', connect)
+    const where = button('lf-where', html`${ICONS.folder}<span></span>`, `Change folder: ${source.name}`, session ? 'Pick another folder · this session only' : 'Change folder', connect)
     where.querySelector('span')!.textContent = source.name
     const again = button(busy ? 'lf-btn busy' : 'lf-btn', ICONS.rotate, 'Refresh', session ? 'Pick the folder again' : 'Refresh', () => void refresh())
     bar.append(where, again, button('lf-btn', ICONS.close, 'Disconnect', 'Disconnect', disconnect))
@@ -544,16 +545,16 @@ function head(): HTMLElement {
   if (busy) {
     card.classList.add('busy')
     card.setAttribute('role', 'status')
-    card.innerHTML = '<span class="lf-art"><i class="lf-ring"></i></span><span class="lf-title"></span><span class="lf-sub"></span>'
+    setMarkup(card, html`<span class="lf-art"><i class="lf-ring"></i></span><span class="lf-title"></span><span class="lf-sub"></span>`)
     card.querySelector('.lf-title')!.textContent = busy.name
     progress = card.querySelector('.lf-sub')
     if (busy.seen) progress!.textContent = `${count(busy.seen)} scanned`
   } else if (waiting && handle) {
-    const go = button('lf-go', `<span class="lf-art">${ICONS.folder}</span><span class="lf-title">Reconnect</span><span class="lf-name"></span>`, `Reconnect ${handle.name}`, null, () => void reconnect())
+    const go = button('lf-go', html`<span class="lf-art">${ICONS.folder}</span><span class="lf-title">Reconnect</span><span class="lf-name"></span>`, `Reconnect ${handle.name}`, null, () => void reconnect())
     go.querySelector('.lf-name')!.textContent = handle.name
     card.append(go, button('lf-x', ICONS.close, 'Forget this folder', 'Forget', disconnect))
   } else {
-    card.append(button('lf-go', `<span class="lf-art">${FOLDER_ADD}</span><span class="lf-title">Connect a folder</span>${FORMATS}`, 'Connect a folder', null, connect))
+    card.append(button('lf-go', html`<span class="lf-art">${FOLDER_ADD}</span><span class="lf-title">Connect a folder</span>${FORMATS}`, 'Connect a folder', null, connect))
   }
   return card
 }
@@ -591,7 +592,7 @@ function renderPanel(tiles: HTMLElement) {
     b.appendChild(sub)
   })
   tiles.prepend(head())
-  if (source && !tiles.querySelector('.tile')) tiles.append(el('div', 'lf-empty', `<span class="lf-art">${ICONS.cube}</span><span>No 3D files here</span>${FORMATS}`))
+  if (source && !tiles.querySelector('.tile')) tiles.append(el('div', 'lf-empty', html`<span class="lf-art">${ICONS.cube}</span><span>No 3D files here</span>${FORMATS}`))
   const foot = source && skipped ? footnote(skipped) : null
   if (foot) tiles.append(foot)
 }

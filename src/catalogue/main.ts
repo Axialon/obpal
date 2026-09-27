@@ -1,7 +1,8 @@
 /**
  * The control catalogue page (/catalogue/): the utilities, profiles, control systems and bridges, from the same data
  * the phone and hosts use, and a builder for a new controller profile, checked with checkProfile() as the build is.
- */
+ */import { type Content, setMarkup, html } from '../ui/markup'
+
 import { applyTheme, initialTheme } from '../ui/themes'
 import { calmMarks, mountMarks } from '../ui/icons'
 import { mountTopBar } from '../landing/topbar'
@@ -17,43 +18,42 @@ calmMarks(document, 2)
 mountTopBar()
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 const NAMES: Record<MotionUtility, string> = { 'motion.aim': 'Aim', 'motion.steer': 'Steer', 'motion.point': 'Point' }
 
 /** Community profiles (catalogue/profiles/*.json), checked when built. */
 const community = Object.values(import.meta.glob<ProfileSpec>('../../catalogue/profiles/*.json', { eager: true, import: 'default' }))
 
 function rows(id: string, list: CatalogueRow[]) {
-  $(id).innerHTML = list.map((r) => `
+  setMarkup($(id), list.map((r) => html`
     <article class="cat-card">
-      <header><b>${esc(r.name)}</b><span class="st ${r.status === 'Planned' ? 'plan' : ''}">${r.status}</span></header>
-      <code>${esc(r.id)}</code>
-      <p>${esc(r.what)}</p>
-      ${r.link ? `<a href="${r.link}">Try it →</a>` : ''}
-    </article>`).join('')
+      <header><b>${r.name}</b><span class="st ${r.status === 'Planned' ? 'plan' : ''}">${r.status}</span></header>
+      <code>${r.id}</code>
+      <p>${r.what}</p>
+      ${r.link ? html`<a href="${r.link}">Try it →</a>` : ''}
+    </article>`))
 }
 // Controllers: what a person picks on the phone, each built from utilities (CATALOGUE §9.1), and the sims that take it.
-$('controllers').innerHTML = CONTROLLER_IDS.map((id) => CONTROLLERS[id]).map((c) => `
+setMarkup($('controllers'), CONTROLLER_IDS.map((id) => CONTROLLERS[id]).map((c) => html`
     <article class="cat-card">
-      <header><b>${esc(c.name)}</b><span class="st">${c.category}</span></header>
-      <code>${esc(c.id)}</code>
-      <p>${esc(c.for)}</p>
-      ${c.utilities.length ? `<div class="routes">${c.utilities.map((u) => `<span>${esc(u)}</span>`).join('')}</div>` : ''}
-      <a href="/sim/?face=${esc(c.id.slice(5))}">Try it in a sim →</a>
-    </article>`).join('')
+      <header><b>${c.name}</b><span class="st">${c.category}</span></header>
+      <code>${c.id}</code>
+      <p>${c.for}</p>
+      ${c.utilities.length ? html`<div class="routes">${c.utilities.map((u) => html`<span>${u}</span>`)}</div>` : ''}
+      <a href="/sim/?face=${c.id.slice(5)}">Try it in a sim →</a>
+    </article>`))
 rows('utilities', UTILITY_ROWS)
 rows('systems', SYSTEM_ROWS)
 rows('bridges', BRIDGE_ROWS)
 
-const routeLine = (p: ProfileSpec) => MOTION_UTILITIES.map((u) => `<span><i>${NAMES[u]}</i>${p[utilityKey(u)].route}</span>`).join('')
-$('profiles').innerHTML = [...PROFILE_IDS.map((id) => ({ p: PROFILES[id] as ProfileSpec, from: 'Built in' })), ...community.map((p) => ({ p, from: 'Community' }))]
-  .map(({ p, from }) => `
+const routeLine = (p: ProfileSpec) => MOTION_UTILITIES.map((u) => html`<span><i>${NAMES[u]}</i>${p[utilityKey(u)].route}</span>`)
+setMarkup($('profiles'), [...PROFILE_IDS.map((id) => ({ p: PROFILES[id] as ProfileSpec, from: 'Built in' })), ...community.map((p) => ({ p, from: 'Community' }))]
+  .map(({ p, from }) => html`
     <article class="cat-card">
-      <header><b>${esc(p.name)}</b><span class="st ${from === 'Community' ? 'com' : ''}">${from}</span></header>
-      <code>${esc(p.id)}</code>
-      <p>${esc(p.for)}</p>
+      <header><b>${p.name}</b><span class="st ${from === 'Community' ? 'com' : ''}">${from}</span></header>
+      <code>${p.id}</code>
+      <p>${p.for}</p>
       <div class="routes">${routeLine(p)}</div>
-    </article>`).join('')
+    </article>`))
 
 // ---- the builder ----
 
@@ -62,42 +62,38 @@ const base = $<HTMLSelectElement>('base')
 for (const id of PROFILE_IDS) base.add(new Option(PROFILES[id].name, id))
 for (const p of community) base.add(new Option(`${p.name} (community)`, `c:${p.id}`))
 
-$('on').innerHTML = MOTION_UTILITIES.map((u) => `<label class="chk"><input type="checkbox" value="${u}"> ${NAMES[u]}</label>`).join('')
-$('utils').innerHTML = MOTION_UTILITIES.map((u) => {
+setMarkup($('on'), MOTION_UTILITIES.map((u) => html`<label class="chk"><input type="checkbox" value="${u}"> ${NAMES[u]}</label>`))
+setMarkup($('utils'), MOTION_UTILITIES.map((u) => {
   const key = utilityKey(u)
   const range = (name: 'gain' | 'curve' | 'deadzone', step: number) => {
     const [lo, hi] = PROFILE_LIMITS[name]
-    return `<label class="rng"><span>${{ gain: 'Sensitivity', curve: 'Curve', deadzone: 'Deadzone jump' }[name]}</span><input class="bb-range" type="range" name="${name}" min="${lo}" max="${hi}" step="${step}"><output></output></label>`
+    return html`<label class="rng"><span>${{ gain: 'Sensitivity', curve: 'Curve', deadzone: 'Deadzone jump' }[name]}</span><input class="bb-range" type="range" name="${name}" min="${lo}" max="${hi}" step="${step}"><output></output></label>`
   }
-  return `
+  return html`
     <fieldset class="bld-u" data-key="${key}">
       <legend>${NAMES[u]} <code>${u}</code></legend>
-      <label class="fld"><span>Goes to</span><select name="route">${ROUTES[u].map((r) => `<option>${r}</option>`).join('')}</select></label>
+      <label class="fld"><span>Goes to</span><select name="route">${ROUTES[u].map((r) => html`<option>${r}</option>`)}</select></label>
       ${range('gain', 0.05)}${range('curve', 0.05)}${range('deadzone', 0.01)}
       <label class="chk"><input type="checkbox" name="invertY"> Invert up and down</label>
-      ${u === 'motion.point' ? '<label class="chk"><input type="checkbox" name="edgeTurn"> Turn at the screen’s edge</label>' : '<input type="checkbox" name="edgeTurn" hidden>'}
+      ${u === 'motion.point' ? html`<label class="chk"><input type="checkbox" name="edgeTurn"> Turn at the screen’s edge</label>` : html`<input type="checkbox" name="edgeTurn" hidden>`}
     </fieldset>`
-}).join('')
+}))
 
 // ---- the builder's buttons: what a phone's keys, headset, pad or Back press, where it differs from the controller's own ----
 
 const SOURCE_NAME: Record<InputSource, string> = { media: 'Headset', keys: 'Keys', pad: 'Pad', back: 'Back', volume: 'A keyboard’s volume keys' }
 const bctl = $<HTMLSelectElement>('bctl')
 for (const id of CONTROLLER_IDS) bctl.add(new Option(CONTROLLERS[id].name, id))
-const inputSelect = () => `<select class="bin" aria-label="Press">${INPUT_OPTIONS.map((g) => `<optgroup label="${esc(SOURCE_NAME[g.source])}">${g.ids.map((id) => `<option value="${esc(id)}">${esc(optionOf(id))}</option>`).join('')}</optgroup>`).join('')}</select>`
+const inputSelect = () => html`<select class="bin" aria-label="Press">${INPUT_OPTIONS.map((g) => html`<optgroup label="${SOURCE_NAME[g.source]}">${g.ids.map((id) => html`<option value="${id}">${optionOf(id)}</option>`)}</optgroup>`)}</select>`
 /** What an input can press on the chosen controller: its controls, a key on the screen, the phone's own, a tray button, or nothing. */
-function targetOptions(c: ControllerId): string {
-  const opt = (t: string) => `<option value="${esc(t)}">${esc(targetLabel(c, t))}</option>`
-  return `<optgroup label="${esc(CONTROLLERS[c].name)}">${CONTROLLERS[c].controls.map(opt).join('')}</optgroup>`
-    + (c === Controller.keyboard ? '' : `<optgroup label="Keys on the screen">${KEY_TARGETS.map((t) => `<option value="${esc(t)}">Key ${esc(targetLabel(c, t))}</option>`).join('')}</optgroup>`)
-    + `<optgroup label="On the phone">${APP_ACTIONS.map((a) => opt(`app:${a}`)).join('')}</optgroup>`
-    + `<optgroup label="Other"><option value="tray:">A tray button…</option><option value="none">Nothing (takes it away)</option></optgroup>`
+function targetOptions(c: ControllerId): Content {
+  const opt = (t: string) => html`<option value="${t}">${targetLabel(c, t)}</option>`
+  return html`${html`<optgroup label="${CONTROLLERS[c].name}">${CONTROLLERS[c].controls.map(opt)}</optgroup>`}${(c === Controller.keyboard ? '' : html`<optgroup label="Keys on the screen">${KEY_TARGETS.map((t) => html`<option value="${t}">Key ${targetLabel(c, t)}</option>`)}</optgroup>`)}${html`<optgroup label="On the phone">${APP_ACTIONS.map((a) => opt(`app:${a}`))}</optgroup>`}${html`<optgroup label="Other"><option value="tray:">A tray button…</option><option value="none">Nothing (takes it away)</option></optgroup>`}`
 }
 function addRow(input?: string, target?: string) {
   const row = document.createElement('div')
   row.className = 'brow'
-  row.innerHTML = `${inputSelect()}<span aria-hidden="true">→</span><select class="bto" aria-label="Does">${targetOptions(bctl.value as ControllerId)}</select>`
-    + `<input class="btray" placeholder="tray id" spellcheck="false" aria-label="Tray button id" hidden><button class="bdel" type="button" aria-label="Remove">×</button>`
+  setMarkup(row, html`${html`${inputSelect()}<span aria-hidden="true">→</span><select class="bto" aria-label="Does">${targetOptions(bctl.value as ControllerId)}</select>`}${html`<input class="btray" placeholder="tray id" spellcheck="false" aria-label="Tray button id" hidden><button class="bdel" type="button" aria-label="Remove">×</button>`}`)
   const bin = row.querySelector<HTMLSelectElement>('.bin')!
   const bto = row.querySelector<HTMLSelectElement>('.bto')!
   const tray = row.querySelector<HTMLInputElement>('.btray')!
@@ -120,7 +116,7 @@ function readButtons(): Record<string, string> {
 bctl.addEventListener('change', () => {
   // The same bindings, offered what this controller can press (one it can't shows as the checker's error).
   const kept = readButtons()
-  $('brows').innerHTML = ''
+  $('brows').replaceChildren()
   for (const [input, t] of Object.entries(kept)) addRow(input, t)
   update()
 })
@@ -138,7 +134,7 @@ function load(p: ProfileSpec) {
   }
   if (!$<HTMLInputElement>('pfor').value) $<HTMLInputElement>('pfor').placeholder = p.for
   bctl.value = p.controller && isControllerId(p.controller) ? p.controller : Controller.gamepad
-  $('brows').innerHTML = ''
+  $('brows').replaceChildren()
   for (const [input, t] of Object.entries(p.buttons ?? {})) addRow(input, t)
   update()
 }
@@ -174,7 +170,7 @@ function update() {
   const { profile, errors } = checkProfile(draft)
   json = JSON.stringify(profile ?? draft, null, 2)
   $('json').textContent = json
-  $('errs').innerHTML = errors.map((e) => `<li>${esc(e)}</li>`).join('')
+  setMarkup($('errs'), errors.map((e) => html`<li>${e}</li>`))
   const ok = !!profile
   const propose = $<HTMLAnchorElement>('propose')
   propose.classList.toggle('off', !ok)

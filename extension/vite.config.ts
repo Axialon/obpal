@@ -10,6 +10,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build, defineConfig, type Plugin } from 'vite'
+import { markupBuild } from '../scripts/markup-build.mjs'
 import { ICON_SIZES, renderIcons } from './scripts/icons.mjs'
 
 const root = fileURLToPath(new URL('.', import.meta.url))
@@ -150,7 +151,7 @@ export default defineConfig({
   base: '/',
   publicDir: false,
   define,
-  plugins: [extension()],
+  plugins: [markupBuild(resolve(root, '..')),extension()],
   worker: { format: 'es' },
   build: {
     outDir,

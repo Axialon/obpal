@@ -1,5 +1,6 @@
+import { addressKey, addressNetworks, type NetworkKeys } from './address'
 import { DurableObject } from 'cloudflare:workers'
-import { Buckets, CodeBook, networks, readLookup, type Claim, type CodeEntry, type Work } from './codes'
+import { Buckets, CodeBook, readLookup, type Claim, type CodeEntry, type Work } from './codes'
 import { iceAnswer, relayOf, stunServers, type IceEnv } from './ice'
 import { allow, type RateLimit } from './limits'
 import { handlePayment, PAYMENT_ROUTES, type PaymentsEnv } from './payments'
@@ -20,7 +21,16 @@ const CORS = { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' }
 const NO_STORE = { 'Cache-Control': 'no-store' }
 
 /** The limits' key for a request: its address, an IPv6 /64 as one. */
-const clientKey = (req: Request) => networks(req.headers.get('CF-Connecting-IP')).addr
+const addressKeys = new WeakMap<Env, Promise<Uint8Array<ArrayBuffer>>>()
+const networkKeys = async (env: Env, ip: string | null) => {
+  let key = addressKeys.get(env)
+  if (!key) {
+    key = addressKey(env.TURN_KEY_API_TOKEN || env.TURN_SECRET || env.STRIPE_WEBHOOK_SECRET || env.STRIPE_SECRET_KEY || '')
+    addressKeys.set(env, key)
+  }
+  return addressNetworks(await key, ip)
+}
+const clientKey = async (req: Request, env: Env) => (await networkKeys(env, req.headers.get('CF-Connecting-IP'))).addr
 
 export default {
   async fetch(req, env): Promise<Response> {
@@ -28,7 +38,7 @@ export default {
     const room = ROOM.exec(url.pathname)
     if (room) {
       if (req.headers.get('Upgrade') !== 'websocket') return new Response('Expected a WebSocket upgrade', { status: 426 })
-      if (!(await allow(env.RL_SOCKET, clientKey(req)))) return new Response('Too many connections, try again in a minute', { status: 429, headers: { 'Retry-After': '60' } })
+      if (!(await allow(env.RL_SOCKET, await clientKey(req, env)))) return new Response('Too many connections, try again in a minute', { status: 429, headers: { 'Retry-After': '60' } })
       return env.ROOMS.get(env.ROOMS.idFromName(room[1])).fetch(req)
     }
     if (url.pathname === '/api/health') return Response.json({ ok: true, service: 'obpal', proto: 1 }, { headers: CORS })
@@ -47,7 +57,7 @@ async function iceServers(req: Request, url: URL, env: Env): Promise<Response> {
   const room = url.searchParams.get('room') ?? ''
   const stunOnly = () => Response.json({ iceServers: stunServers(env), turn: false }, { headers: CORS })
   if (!relayOf(env) || !/^[A-Za-z0-9_-]{22}$/.test(room)) return stunOnly()
-  const [live, ok] = await Promise.all([env.ROOMS.get(env.ROOMS.idFromName(room)).hasHost(), allow(env.RL_ICE, clientKey(req))])
+  const [live, ok] = await Promise.all([env.ROOMS.get(env.ROOMS.idFromName(room)).hasHost(), allow(env.RL_ICE, await clientKey(req, env))])
   if (!live || !ok) return stunOnly()
   return Response.json(await iceAnswer(env), { headers: CORS })
 }
@@ -70,14 +80,15 @@ async function lookupCode(req: Request, env: Env): Promise<Response> {
   if ('status' in read) return json({ error: read.error }, read.status, read.status === 405 ? { Allow: 'POST' } : {})
   const ip = req.headers.get('CF-Connecting-IP') ?? ''
   if (++shedKeys > 50_000) { shed.sweep(); shedKeys = 0 }
-  const net = networks(ip).addr
+  const keys = await networkKeys(env, ip)
+  const net = keys.addr
   const wait = shed.wait(net)
   if (wait) return json({ error: 'slow-down', retry: wait }, 429, { 'Retry-After': String(wait) })
   shed.take(net)
   const codes = env.CODES.get(env.CODES.idFromName('codes'))
   const busy = () => json({ error: 'busy', retry: 5 }, 503, { 'Retry-After': '5' })
   let r: Awaited<ReturnType<Codes['take']>>
-  try { r = await codes.take(read.handle, ip, read.work) } catch { return busy() }
+  try { r = await codes.take(read.handle, keys, read.work) } catch { return busy() }
   if ('error' in r) {
     if (r.error === 'no-code') return json({ error: 'no-code' }, 404)
     if (r.error === 'work') return json({ error: 'work', challenge: r.challenge, bits: r.bits }, 429)
@@ -92,9 +103,9 @@ async function lookupCode(req: Request, env: Env): Promise<Response> {
 interface Tag {
   id: string
   role: 'host' | 'device'
-  /** The room's name (its id in /r/<room>) and the address the socket came from: a host's short codes need both. */
+  /** The room's name (its id in /r/<room>) and keyed network hashes for the socket: a host's short codes need both. */
   room?: string
-  ip?: string
+  net?: NetworkKeys
   /** The short-code handle this host holds. */
   code?: string
   /** This socket's claims: a token bucket (count left, and when it was last full). */
@@ -112,6 +123,15 @@ export class Room extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'))
+    void ctx.blockConcurrencyWhile(async () => {
+      for (const ws of ctx.getWebSockets()) {
+        const tag = ws.deserializeAttachment() as Tag & { ip?: string }
+        if (tag && 'ip' in tag) {
+          const { ip, ...rest } = tag
+          ws.serializeAttachment({ ...rest, net: await networkKeys(env, ip ?? null) } satisfies Tag)
+        }
+      }
+    })
   }
 
   async hasHost(): Promise<boolean> {
@@ -127,7 +147,7 @@ export class Room extends DurableObject<Env> {
     const id = crypto.randomUUID().slice(0, 8)
     this.ctx.acceptWebSocket(server, [role, `id:${id}`])
     const room = ROOM.exec(new URL(req.url).pathname)?.[1]
-    server.serializeAttachment({ id, role, ...(role === 'host' ? { room, ip: req.headers.get('CF-Connecting-IP') ?? '' } : {}) } satisfies Tag)
+    server.serializeAttachment({ id, role, ...(role === 'host' ? { room, net: await networkKeys(this.env, req.headers.get('CF-Connecting-IP')) } : {}) } satisfies Tag)
 
     const hostPresent = this.ctx.getWebSockets('host').length > 0
     server.send(JSON.stringify({ t: 'welcome', id, role, host: hostPresent }))
@@ -173,7 +193,7 @@ export class Room extends DurableObject<Env> {
       }
       b.n--
       let r: Claim
-      try { r = await codes.claim(me.room, me.ip ?? '', work) } catch { r = { error: 'busy', retry: 15 } }
+      try { r = await codes.claim(me.room, me.net ?? await networkKeys(this.env, null), work) } catch { r = { error: 'busy', retry: 15 } }
       ws.serializeAttachment({ ...me, cl: b, ...('code' in r ? { code: r.code } : {}) } satisfies Tag)
       safeSend(ws, { t: 'code', ...r })
     }
@@ -231,18 +251,25 @@ export class Codes extends DurableObject<Env> {
       del: (h) => void ctx.storage.delete(`h:${h}`),
     })
     void ctx.blockConcurrencyWhile(async () => {
-      const all = await ctx.storage.list<CodeEntry>({ prefix: 'h:' })
+      const all = await ctx.storage.list<CodeEntry & { ip?: string }>({ prefix: 'h:' })
+      for (const [h, e] of all) {
+        if ('ip' in e) {
+          const clean: CodeEntry = { room: e.room, exp: e.exp, net: await networkKeys(env, e.ip ?? null) }
+          await ctx.storage.put(h, clean)
+          all.set(h, clean)
+        }
+      }
       this.book.load([...all].map(([k, v]) => [k.slice(2), v] as [string, CodeEntry]))
     })
   }
 
-  async claim(room: string, ip: string, work?: Work) {
-    const r = this.book.claim(room, ip, work)
+  async claim(room: string, net: NetworkKeys, work?: Work) {
+    const r = this.book.claim(room, net, work)
     await this.sweepLater()
     return r
   }
 
-  async take(handle: string, ip: string, work?: Work) { return this.book.take(handle, ip, work) }
+  async take(handle: string, net: NetworkKeys, work?: Work) { return this.book.take(handle, net, work) }
 
   async drop(room: string, handle?: string) { this.book.drop(room, handle) }
 
