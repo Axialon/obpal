@@ -116,11 +116,25 @@ describe('the short-code exchange', () => {
     expect(dm!.mine).not.toBe(hm!.theirs)
   })
   it('is fresh every time, and refuses shares that would fix the key', async () => {
-    const a = await CodePake.start('device', { secret: '93705', handle: '4821', room })
-    const b = await CodePake.start('device', { secret: '93705', handle: '4821', room })
-    expect(b64url(a.share)).not.toBe(b64url(b.share))
-    expect(await a.confirm(new Uint8Array(32), fp(1), fp(2))).toBeNull()
-    expect(await a.confirm(Uint8Array.of(1, ...new Uint8Array(31)), fp(1), fp(2))).toBeNull() // u = 1 has order 4
-    expect(await a.confirm(new Uint8Array(31), fp(1), fp(2))).toBeNull()
+    for (const ladderOnly of [false, true]) {
+      const a = await CodePake.start('device', { secret: '93705', handle: '4821', room }, { ladderOnly })
+      const b = await CodePake.start('device', { secret: '93705', handle: '4821', room }, { ladderOnly })
+      expect(b64url(a.share)).not.toBe(b64url(b.share))
+      expect(await a.confirm(new Uint8Array(32), fp(1), fp(2))).toBeNull()
+      expect(await a.confirm(Uint8Array.of(1, ...new Uint8Array(31)), fp(1), fp(2))).toBeNull() // u = 1 has order 4
+      expect(await a.confirm(new Uint8Array(31), fp(1), fp(2))).toBeNull()
+    }
+  })
+
+  it('the platform’s X25519 (WebCrypto) and the ladder agree: a side on each reaches the same confirmations', async () => {
+    for (const [dev, host] of [[false, true], [true, false], [true, true]]) {
+      const d = await CodePake.start('device', { secret: '93705', handle: '4821', room }, { ladderOnly: dev })
+      const h = await CodePake.start('host', { secret: '93705', handle: '4821', room }, { ladderOnly: host })
+      const dm = await d.confirm(h.share, fp(1), fp(2))
+      const hm = await h.confirm(d.share, fp(1), fp(2))
+      expect(dm && hm).toBeTruthy()
+      expect(dm!.mine).toBe(hm!.theirs)
+      expect(hm!.mine).toBe(dm!.theirs)
+    }
   })
 })

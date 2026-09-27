@@ -400,6 +400,12 @@ TVs, headsets, AR glasses and watches, as hosts and as controllers: [spec/RESEAR
 
 Public sims (2026-09-26): [/sim/](https://obpal.blackboxes.net/sim/) hosts the robot arm (phase D's envelope, simulated) and the faction arena (phase B's slots), so the public can try both before the bridges ship.
 
+**The sim catalogue (owner, 2026-09-27: "need more kinds of arms and devices and gadgets in the sim catalogue to try out with our growing control catalogue"). BUILT:**
+- /sim/ is the catalogue: a card per sim with a live preview (one WebGL renderer shared by every card on screen, 30 fps at most, a still under reduced motion), the controllers that suit it, and Try it; a bar filters by controller (`?face=wii`), and proposed devices sit below. /catalogue/'s controller cards link to it.
+- The first six device sims, one registry (`src/sim/devices/`, CATALOGUE §7): a rover, a drone, a marble maze, a PTZ camera, smart lamps and a claw machine. Each declares its `layout.controllers` and `buttons`, and every controller in the catalogue has at least one sim to try it in.
+- Tests: the devices' input mapping and physics limits (vitest), and `e2e:catalogue` (an emulated phone drives each device through the controller that suits it, the Buttons layer, the tray and Home).
+- Next: the arm kinds join as cards when their registry lands; then the proposed devices (a boat, spotlights, a robot vacuum, a tank, an excavator, a forklift, a light painter, a gimbal, an RC plane, slot cars).
+
 Scheduled 2026-09-27: phase B lands with step 5b (the controller hub, below), and phase C after step 8b's research.
 
 **Robot arms: status (2026-09-26).**
@@ -440,7 +446,7 @@ Scheduled 2026-09-27: phase B lands with step 5b (the controller hub, below), an
 
 - **Next:**
   1. Try it on real hardware: an SO-101, an Arduino arm, and a ROS 2 arm.
-  2. Per-model geometry, so the twin has the SO-101's proportions (the kinematics already take an `ArmGeometry`).
+  2. Per-model geometry, so the twin has the SO-101's proportions. **Done 2026-09-27:** six kinds of arm in the sim (`?kind=`, src/sim/arm/kind/), each with its own joints, IK, floor and parts for the blocks: the five-axis arm, the SO-101, a six-axis industrial arm (spherical wrist), a SCARA, a delta and a four-axis desk arm; `ARM_KINDS` (src/sim/arm/kinds.ts) lists them for the sims catalogue, with a moving preview.
   3. A serial bridge in ob.Pal Desktop, for browsers without Web Serial and for a PC that bridges an arm without a page open.
   4. Arm-to-arm collision checks in the cell.
   5. A camera view of a remote arm, for physical spaces.

@@ -1,6 +1,6 @@
 /**
  * The phone controller's rotation lock and hardware buttons, end to end: the Viewer from this checkout's build (local
- * stand-in, signaling proxied to production) and an emulated phone with a faked device orientation.
+ * stand-in, signaling through this checkout's own worker) and an emulated phone with a faked device orientation.
  *   - Turning the gyro on locks rotation; turning the phone to landscape then keeps the portrait controls (the virtual
  *     lock: this run forces it, as on an iPhone), and unlocking brings the landscape layout back.
  *   - Volume up and Enter switch the gyro in Rotate; in Point, volume up is A and volume down holds B.
@@ -17,6 +17,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join as joinPath } from 'node:path'
 import { chromium, devices } from 'playwright'
+import { cspCheck } from './csp-watch.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
 
 const HEADED = process.argv.includes('--headed')
@@ -286,6 +287,7 @@ try {
     if (left.title !== 'Disconnected' || !left.back) throw new Error(`after disconnecting: ${JSON.stringify(left)}`)
     return `Done at ${fit.bottom.toFixed(0)} of ${fit.vh}px; swipe, Back and × close it; Disconnect asks, then says so`
   })
+  await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {
   console.error(e)
   exitCode = 1

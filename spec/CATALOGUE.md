@@ -79,8 +79,8 @@ A profile is a named set of utility settings. The **host** owns what each output
 | Profile | For | Settings |
 |---|---|---|
 | `default` | Most gamepad games | Aim → `stick.right`. Steer → `stick.wheel`. Point → `pointer`. |
-| `flight` | Flight and space games (e.g. CVC Collider) | Steer → `stick.fly` (tilt the phone like a yoke). Aim → `stick.right` as fine correction on top. Deadzone 0.2. |
-| `driving` | Racing | Steer → `stick.wheel`, with the triggers as throttle and brake. |
+| `flight` | Flight and space games (e.g. CVC Collider) | Steer on, → `stick.fly` (tilt the phone like a yoke). Aim → `stick.right` as fine correction on top. Deadzone 0.2. |
+| `driving` | Racing | Steer on, → `stick.wheel`, with the triggers as throttle and brake. |
 | `shooter` | First-person shooters | Aim → `mouse` when the page has pointer lock, otherwise `stick.right`. |
 | `pointer` | Menus, point-and-click, Wii-style games | Point on. A clicks at the cursor and holding B drags. |
 
@@ -88,7 +88,7 @@ A profile is a named set of utility settings. The **host** owns what each output
 - A host may suggest a profile for the current site or program: layout `profile: string`. The browser extension takes it from a per-site data table (`extension/src/shared/sites.ts`: tesana.com and play.tesana.ai suggest `flight`).
 - The phone applies the suggestion unless the user has chosen a profile for that host.
 - The phone remembers choices per host, and per suggestion the host makes (a suggestion stands for a site or program, so a choice made on one site never overrides another site's suggestion). Picking the suggested profile again forgets the choice.
-- A profile's `on` utilities switch on when it applies (`pointer` turns Point on); the others keep their state.
+- A profile's `on` utilities switch on when it applies (`flight` and `driving` turn Steer on, `pointer` turns Point on); the others keep their state. On a phone whose motion sensors haven't started yet (they start late, or wait for Start), they switch on with the first sample. Steer's level is the way the phone is held when it comes on, and it's taken again once the phone settles after the screen turns (portrait to landscape, say); Centre takes it any time.
 - Options a user changes on a chip (route, sensitivity, deadzone jump, invert Y, edge turn) are remembered per profile.
 
 **Controller and buttons** (optional in any profile; `checkProfile()` and /profile.schema.json check both):
@@ -171,7 +171,7 @@ A control system is a kind of host. It decides what its nodes are, which utiliti
 | `system.scene3d` | ob.Pal Viewer | Each object, its movable parts, and the view (the lead's) | Point, Hold, Steer and Tilt, the trackpad, the gamepad | Shared scenes shipped |
 | `system.gamepad-slots` | ob.Pal Link in a browser game | Player 1–4 gamepad slots | `pad` and the Motion utilities | Public sim at [/sim/arena/](https://obpal.blackboxes.net/sim/arena/). In ob.Pal Link: planned. Each participant claims a slot, so a local-multiplayer game gets one pad per phone. |
 | `system.desktop` | ob.Pal Desktop | The allowed program in front (keyboard, mouse) | The Keys and mouse routes | Shipped, one participant |
-| `system.robot-arm` | A bridge beside the arm's control software | Each arm whole (the tool follows the phone), its joints and its gripper; several arms per scene | Hold (gyro on) → the tool follows the phone. Drag, tilt, the sticks → tool or joint velocity. The triggers, a tap or Grip → the gripper. | [/sim/arm/](https://obpal.blackboxes.net/sim/arm/): one to four arms with the whole safety envelope. Each drives a real arm when the screen connects one: Feetech bus servos (SO-100, SO-101) or the ob.Pal serial sketch over Web Serial, or ROS 2 through rosbridge. Not yet tried on hardware. |
+| `system.robot-arm` | A bridge beside the arm's control software | Each arm whole (the tool follows the phone), its joints and its gripper; several arms per scene | Hold (gyro on) → the tool follows the phone. Drag, tilt, the sticks → tool or joint velocity. The triggers, a tap or Grip → the gripper. | [/sim/arm/](https://obpal.blackboxes.net/sim/arm/): one to four arms with the whole safety envelope, of six kinds (`?kind=`: the five-axis arm, SO-101, a six-axis industrial arm, a SCARA, a delta, a desk arm). The five-axis arm and the SO-101 each drive a real arm when the screen connects one: Feetech bus servos (SO-100, SO-101) or the ob.Pal serial sketch over Web Serial, or ROS 2 through rosbridge. Not yet tried on hardware. |
 
 **`system.robot-arm`.** The host is a small bridge next to the arm's own control software. It is a web page using `@obpal/host` or ob.Pal Desktop, and it speaks the arm's interface:
 - ROS 2 (through rosbridge, or `ros2_control` topics);
@@ -207,6 +207,21 @@ Nodes map to the arm: one participant can steer the tool while another works the
   - **Arduino:** `hardware/arduino/obpal-arm` is a reference sketch for hobby servos. It speaks the ob.Pal serial protocol (`J`, `?`, `S`, `T` lines at 115200 baud) and keeps its own limits, speed caps and a 0.5 s hold.
 
 `Claims` in `@obpal/host` gives any control system the same one-per-node rules.
+
+**The sim catalogue** ([/sim/](https://obpal.blackboxes.net/sim/)) is where people try the catalogue's controllers on things to drive. Each sim is a card with a live preview, the controllers that suit it (the best one lit) and Try it; a bar filters by controller, and `/sim/?face=wii` opens filtered (the /catalogue/ page's controller cards link there). Besides the arms, the arena and the Viewer, it has **device sims** (`/sim/device/?d=<id>`, `src/sim/devices/`): small control systems of their own, each a few units in a shared scene, one per phone. A phone that joins is given a free unit at once; its scene list picks another, and where a device can be pointed at (the lamps), pointing at a unit and pressing A or Left takes it (§5).
+
+A device is a row in one registry (`src/sim/devices/registry.ts`): data (`DeviceSpec`: its controllers best first, how each drives it, its tray and its suggested `buttons`), pure logic stepped once a frame from each unit's holder's input (`DeviceLogic`, unit-tested in node), and a three.js view with its card's preview. Its layout is `layout.controllers` (so the first opens on the phone, and older phones get the modes), its tray plus Home, and `layout.buttons`. The Wii remote and the air mouse share the phone's Point tab and the host picks one (`layout.point`), so a device offers one of the two.
+
+| Device | Controllers, best first | How the phone drives it | What it shows |
+|---|---|---|---|
+| Rover (4) | `face.wheel`, `face.gamepad`, `face.trackpad`, `face.wii` | Tilt steers and the triggers are pedals (Driving); the left stick; the trackpad's tilt or a floating stick under the thumb; point at a spot and hold B to drive there | The steering wheel, triggers as pedals, `stick.wheel` |
+| Drone (4) | `face.gamepad`, `face.hand`, `face.trackpad` | Mode 2 twin sticks, with the Flight profile suggested (it switches Steer on, so tilting the phone tilts the right stick); follows the 3D hand; tilt and drags. A takes off and lands, Home flies back to the pad | Twin sticks, `stick.fly`, `motion.track` as a position |
+| Marble maze (4 boards) | `face.trackpad`, `face.gamepad` | Tilt tips the board; 1:1 turns it as the phone turns, Level makes the way it's held flat; the left stick | `motion.tilt`, `motion.hold`, the level |
+| PTZ camera (2) | `face.wii`, `face.trackpad`, `face.gamepad` | It looks where the phone points (⌂ centres it), − + zoom, A takes a picture; drag and pinch, or 1:1 like a gimbal; the right stick and triggers | Absolute pointing, relative drags and 1:1; three ways to zoom |
+| Smart lamps (4) | `face.trackpad`, `face.mouse`, `face.keyboard` | Drag across for the colour, up for the brightness, twist like a dial, tap to switch; point at a lamp and Left takes it, the wheel dims; type "teal", "warm 40%", "#ff8800", "off" | The trackpad as dials, the wheel as a value, `text` as input |
+| Claw machine (2) | `face.wii`, `face.gamepad`, `face.trackpad`, `face.hand` | Point over a prize (aiming straight is the middle of your pit), A drops the claw; the stick and A; a drag and a tap; the 3D hand | Pointing to place, one button to act |
+
+Every device suggests `buttons` for a headset press and a keyboard key (the rover honks on H or one headset press), and has Home: the tray's, or a pad's Guide. The watchdog stops a unit whose holder's input goes quiet for 300 ms. Proposed next: a boat, stage spotlights, a robot vacuum (⌂ docks it), a tank (gyro Aim turns the turret), an excavator, a forklift, a light painter, a camera gimbal, an RC plane and slot cars. Instruments wait for the music room (PLAN §10, step 6).
 
 ## 8. Adding to the catalogue
 

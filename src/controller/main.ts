@@ -17,6 +17,7 @@ import { WiiPointer } from './pointing'
 import { MouseFace } from './mouseface'
 import { ScrollWheel } from './wheel'
 import { KeyboardDock } from './keyboard'
+import { LinkBadge } from './linkbadge'
 import { sheetExits } from './sheet'
 import { calmMarks, icon, ICONS, logo, logoMark } from '../ui/icons'
 import { dismissHint, hint, repositionHints, setHintFrame } from '../ui/hints'
@@ -514,17 +515,13 @@ async function boot(code: Join) {
     profile: () => { if (surface && mode === Mode.gamepad) sendMode() },
   })
 
+  // The top bar's connection badge: encrypted, how the screen was verified, the path and the round trip (./linkbadge.ts).
+  const linkBadge = new LinkBadge()
   screenMessage({ title: 'Connecting', body: code.v === 2 ? 'Reaching your screen over Wi-Fi…' : 'Finding your screen…', spinner: true })
   link.on('status', onStatus)
   link.on('message', onHost)
   link.on('pair', () => toast('Remembered · works without internet next time'))
-  link.on('stats', ({ path, rttMs }) => {
-    const sig = document.getElementById('sig')
-    if (!sig) return
-    sig.dataset.q = path === 'relay' ? 'relay' : 'direct'
-    sig.title = `${path === 'relay' ? 'Relayed' : 'Direct'} connection${rttMs != null ? `, ${rttMs} ms` : ''}`
-    sig.querySelector('b')!.textContent = rttMs != null ? `${rttMs}` : ''
-  })
+  link.on('stats', (s) => linkBadge.update(s))
   void link.start()
 
   const permission = motionSupported() ? await requestMotionPermission() : 'denied'
@@ -634,6 +631,7 @@ async function boot(code: Join) {
   function onStatus(s: LinkStatus) {
     // Left on purpose: the link closing says nothing more (the Disconnected screen stays).
     if (hungUp) return
+    if (s !== 'connected') linkBadge.down()
     if (s === 'connected') {
       banner(null)
       if (started) showSurface()
@@ -804,7 +802,7 @@ async function boot(code: Join) {
         <header class="bar">
           <span class="host-ic">${logoMark()}</span>
           <span class="host-name"></span>
-          <span class="sig" id="sig" data-q="direct" title="Connection"><i></i><i></i><i></i><b></b></span>
+          <span id="link-badge"></span>
           <button class="icon-btn glass lock-btn" id="lock" aria-label="Lock screen rotation" aria-pressed="false">${ICONS.unlock}</button>
           <button class="icon-btn glass" id="gear" aria-label="Settings">${ICONS.settings}</button>
         </header>
@@ -849,6 +847,7 @@ async function boot(code: Join) {
       <div class="toast glass" id="toast" role="status" aria-live="polite"></div>
       <div class="rest" id="rest" aria-hidden="true"><span>Resting to keep your phone cool · touch to wake</span></div>`
     surface = document.getElementById('surface')!
+    linkBadge.mount(document.getElementById('link-badge')!)
     document.body.classList.add('live')
     calmMarks(surface)
     gamepad.mount(surface)

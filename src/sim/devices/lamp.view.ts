@@ -1,0 +1,219 @@
+/**
+ * The lamps' look (three.js): a room at dusk (a sofa, a rug, a side table and a coffee table) with an arc floor lamp, a
+ * desk lamp, a pendant and a light bar, each lighting the room in its colour, with a soft halo round its bulb, a ring in
+ * its holder's colour, and what's being typed to it floating beside it.
+ */
+import * as THREE from 'three'
+import { LampLogic, rgbOf, type Lamp } from './lamp'
+import type { Stage } from './stage'
+import type { Theme } from '../../ui/themes'
+import { box, mats, previewScene, wear, type DeviceView, type Preview } from './view'
+
+let haloTex: THREE.Texture | null = null
+function halo(size: number) {
+  if (!haloTex) {
+    const c = document.createElement('canvas')
+    c.width = c.height = 128
+    const g = c.getContext('2d')!
+    const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64)
+    grad.addColorStop(0, 'rgba(255,255,255,1)')
+    grad.addColorStop(0.25, 'rgba(255,255,255,0.45)')
+    grad.addColorStop(1, 'rgba(255,255,255,0)')
+    g.fillStyle = grad
+    g.fillRect(0, 0, 128, 128)
+    haloTex = new THREE.CanvasTexture(c)
+  }
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: haloTex, color: '#ffffff', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }))
+  s.scale.setScalar(size)
+  return s
+}
+
+interface LampModel { bulb: THREE.Mesh; bulbMat: THREE.MeshStandardMaterial; light: THREE.PointLight; glow: THREE.Sprite; ring: THREE.MeshStandardMaterial; at: THREE.Vector3; power: number }
+
+/** A bulb with its light and halo, where a lamp's light comes from; `world` is where the lamp stands (its ring). */
+function bulbAt(parent: THREE.Object3D, p: THREE.Vector3, r: number, power: number, world: THREE.Vector3): LampModel {
+  const bulbMat = new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#ffffff', emissiveIntensity: 2 })
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 14), bulbMat)
+  bulb.position.copy(p)
+  const light = new THREE.PointLight('#ffffff', power, 7, 1.6)
+  light.position.copy(p)
+  const glow = halo(r * 14)
+  glow.position.copy(p)
+  const ring = mats.glow()
+  parent.add(bulb, light, glow)
+  return { bulb, bulbMat, light, glow, ring, at: world.clone().setY(p.y), power }
+}
+
+function buildRoom() {
+  const g = new THREE.Group()
+  const floorMat = new THREE.MeshStandardMaterial({ color: '#3a2f2a', roughness: 0.8 })
+  const floor = box(6.4, 0.05, 4.6, floorMat, 0.02)
+  floor.position.set(0, -0.025, -0.1)
+  const wallMat = new THREE.MeshStandardMaterial({ color: '#2d3140', roughness: 0.95 })
+  const back = new THREE.Mesh(new THREE.BoxGeometry(6.4, 2.7, 0.08), wallMat)
+  back.position.set(0, 1.35, -2.4)
+  const side = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.7, 4.6), wallMat)
+  side.position.set(-3.2, 1.35, -0.1)
+  const rug = box(2.8, 0.02, 1.7, new THREE.MeshStandardMaterial({ color: '#8b86a8', roughness: 1 }), 0.01)
+  rug.position.set(0.2, 0.01, -0.3)
+  const fabric = new THREE.MeshStandardMaterial({ color: '#56607a', roughness: 0.9 })
+  const seat = box(2.1, 0.42, 0.85, fabric, 0.1)
+  seat.position.set(0.2, 0.21, -1.75)
+  const backrest = box(2.1, 0.55, 0.22, fabric, 0.08)
+  backrest.position.set(0.2, 0.62, -2.13)
+  const armL = box(0.22, 0.58, 0.85, fabric, 0.08)
+  armL.position.set(-0.86, 0.29, -1.75)
+  const armR = armL.clone()
+  armR.position.x = 1.26
+  const cushionMat = new THREE.MeshStandardMaterial({ color: '#b3a4ff', roughness: 0.9 })
+  const cushion = box(0.42, 0.36, 0.14, cushionMat, 0.07)
+  cushion.position.set(-0.45, 0.6, -1.95)
+  cushion.rotation.z = 0.15
+  const wood = new THREE.MeshStandardMaterial({ color: '#6b4f3a', roughness: 0.6 })
+  const coffee = box(1.1, 0.06, 0.6, wood, 0.03)
+  coffee.position.set(0.25, 0.36, -0.35)
+  for (const [x, z] of [[-0.25, -0.58], [0.75, -0.58], [-0.25, -0.12], [0.75, -0.12]]) {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.34, 8), mats.dark())
+    leg.position.set(x, 0.17, z)
+    g.add(leg)
+  }
+  const side1 = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.04, 40), wood)
+  side1.position.set(1.95, 0.58, -1.65)
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.05, 0.56, 12), mats.dark())
+  stem.position.set(1.95, 0.28, -1.65)
+  const plant = new THREE.Mesh(new THREE.SphereGeometry(0.32, 20, 14), new THREE.MeshStandardMaterial({ color: '#3f6b4a', roughness: 0.9 }))
+  plant.position.set(-2.55, 0.62, -1.9)
+  const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.16, 0.42, 20), new THREE.MeshStandardMaterial({ color: '#d8cfc4', roughness: 0.7 }))
+  pot.position.set(-2.55, 0.21, -1.9)
+  g.add(floor, back, side, rug, seat, backrest, armL, armR, cushion, coffee, side1, stem, plant, pot)
+  return { group: g, floorMat, wallMat }
+}
+
+/** The four lamps, in LAMP_SPEC's order: floor lamp, desk lamp, pendant, light bar. */
+function buildLamps(parent: THREE.Object3D): LampModel[] {
+  const metal = mats.metal()
+  const dark = mats.dark()
+  const shade = new THREE.MeshStandardMaterial({ color: '#f1ede6', roughness: 0.5, side: THREE.DoubleSide })
+  // The arc floor lamp: a heavy base, an arc over the sofa's end, a dome.
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.05, 32), dark)
+  base.position.set(-2.1, 0.025, -1.3)
+  const arc = new THREE.QuadraticBezierCurve3(new THREE.Vector3(-2.1, 0.05, -1.3), new THREE.Vector3(-2.2, 2.6, -1.3), new THREE.Vector3(-1.05, 1.9, -1.3))
+  const pole = new THREE.Mesh(new THREE.TubeGeometry(arc, 40, 0.018, 8), metal)
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(0.24, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), shade)
+  dome.position.set(-1.05, 1.88, -1.3)
+  parent.add(base, pole, dome)
+  const floorLamp = bulbAt(parent, new THREE.Vector3(-1.05, 1.8, -1.3), 0.05, 7, new THREE.Vector3(-2.1, 0, -1.3))
+  // The desk lamp on the side table: a foot, two arms, a cone.
+  const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.1, 0.03, 24), dark)
+  foot.position.set(1.95, 0.615, -1.65)
+  const arm1 = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.4, 8), metal)
+  arm1.position.set(1.9, 0.8, -1.62)
+  arm1.rotation.z = 0.35
+  const arm2 = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.34, 8), metal)
+  arm2.position.set(1.76, 1.02, -1.55)
+  arm2.rotation.z = -0.9
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.18, 24, 1, true), shade)
+  cone.position.set(1.6, 1.02, -1.5)
+  cone.rotation.z = 0.5
+  parent.add(foot, arm1, arm2, cone)
+  const desk = bulbAt(parent, new THREE.Vector3(1.6, 0.98, -1.5), 0.035, 3.5, new THREE.Vector3(1.95, 0, -1.65))
+  // The pendant over the coffee table, on a cord from the ceiling.
+  const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 1.1, 6), dark)
+  cord.position.set(0.25, 2.2, -0.35)
+  const bell = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.26, 0.26, 32, 1, true), new THREE.MeshStandardMaterial({ color: '#c9d1dc', metalness: 0.7, roughness: 0.3, side: THREE.DoubleSide }))
+  bell.position.set(0.25, 1.55, -0.35)
+  parent.add(cord, bell)
+  const pendant = bulbAt(parent, new THREE.Vector3(0.25, 1.46, -0.35), 0.05, 6, new THREE.Vector3(0.25, 0, -0.35))
+  // The light bar on the wall over the sofa.
+  const bar = box(1.2, 0.05, 0.05, dark, 0.02)
+  bar.position.set(1.05, 1.72, -2.33)
+  parent.add(bar)
+  const strip = bulbAt(parent, new THREE.Vector3(1.05, 1.7, -2.28), 0.03, 5, new THREE.Vector3(1.05, 0, -2.0))
+  strip.bulb.scale.set(19, 0.7, 0.7)
+  strip.glow.scale.set(1.8, 0.45, 1)
+  return [floorLamp, desk, pendant, strip]
+}
+
+function placeLamp(m: LampModel, l: Lamp, color: string | null) {
+  const [r, g, b] = rgbOf(l)
+  const lit = Math.max(r, g, b)
+  m.light.color.setRGB(r / (lit || 1), g / (lit || 1), b / (lit || 1))
+  m.light.intensity = m.power * lit
+  m.bulbMat.emissive.setRGB(r / (lit || 1), g / (lit || 1), b / (lit || 1))
+  m.bulbMat.emissiveIntensity = 0.2 + lit * 2.6
+  ;(m.glow.material as THREE.SpriteMaterial).color.setRGB(r, g, b)
+  ;(m.glow.material as THREE.SpriteMaterial).opacity = 0.2 + lit * 0.6
+  wear(m.ring, color, 0.3, 2)
+}
+
+export function createView(stage: Stage, logic: LampLogic): DeviceView {
+  const room = buildRoom()
+  stage.scene.add(room.group)
+  const models = buildLamps(stage.scene)
+  for (const m of models) {
+    const band = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.008, 8, 48), m.ring)
+    band.rotation.x = Math.PI / 2
+    band.position.set(m.at.x, 0.012, m.at.z)
+    stage.scene.add(band)
+  }
+  // What's being typed to a lamp, beside it.
+  const labels = models.map(() => {
+    const el = document.createElement('div')
+    el.className = 'lamp-typing'
+    el.hidden = true
+    document.body.appendChild(el)
+    return el
+  })
+  const setTheme = (t: Theme) => {
+    // Dusk on either surface: the stage's own light low, so the lamps light the room (a little brighter on the light one).
+    stage.lights.hemi.intensity = t.light ? 0.45 : 0.32
+    stage.lights.key.intensity = t.light ? 0.35 : 0.25
+    stage.scene.environmentIntensity = t.light ? 0.32 : 0.25
+    room.wallMat.color.set(t.light ? '#8e94a6' : '#2d3140')
+    room.floorMat.color.set(t.light ? '#6f5a4b' : '#3a2f2a')
+  }
+  setTheme(stage.theme)
+  const v = new THREE.Vector3()
+  return {
+    framing: { target: [0.1, 0.9, -1], wide: [1.6, 2.9, 4.6], tall: [0.8, 3.4, 5.6], radius: 2.3, min: 2, max: 10 },
+    anchor: (n) => models[n].at.clone(),
+    update(colors) {
+      logic.lamps.forEach((l, n) => {
+        placeLamp(models[n], l, colors[n])
+        const el = labels[n]
+        el.hidden = !l.typing
+        if (!l.typing) return
+        el.textContent = l.typing
+        const s = stage.toScreen(v.copy(models[n].at))
+        if (s) el.style.transform = `translate(${s.x}px, ${s.y - 40}px) translate(-50%, -100%)`
+        el.style.setProperty('--c', colors[n] ?? '#ffffff')
+      })
+    },
+    setTheme,
+  }
+}
+
+/** The card: the room with its lamps changing colour, slowly, one after another. */
+export function preview(): Preview {
+  const scene = previewScene()
+  const hemi = scene.children.find((o) => (o as THREE.HemisphereLight).isHemisphereLight) as THREE.HemisphereLight
+  hemi.intensity = 0.35
+  const room = buildRoom()
+  scene.add(room.group)
+  const models = buildLamps(scene)
+  const logic = new LampLogic()
+  const camera = new THREE.PerspectiveCamera(40, 16 / 10, 0.05, 30)
+  camera.position.set(1.7, 2.3, 3.6)
+  camera.lookAt(0, 0.9, -1.2)
+  return {
+    scene, camera,
+    step(t) {
+      logic.lamps.forEach((l, n) => {
+        l.h = (t * 24 + n * 90) % 360
+        l.s = 0.7
+        l.v = 0.55 + 0.35 * Math.sin(t * 0.8 + n)
+        placeLamp(models[n], l, null)
+      })
+    },
+  }
+}

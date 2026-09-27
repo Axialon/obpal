@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Monitor",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"import(require('url').pathToFileURL(require('path').join(process.env.CLAUDE_PROJECT_DIR,'.claude/hooks/guard.mjs')).href).then((m)=>m.main())\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

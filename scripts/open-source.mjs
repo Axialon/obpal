@@ -20,6 +20,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ALLOW, isLocalOnly, PRIVATE_RULES, readDenyWords } from './lib/scan.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const PUBLIC_REPO = 'Axialon/obpal'
@@ -28,7 +29,9 @@ const publish = process.argv.includes('--publish')
 const git = (args, cwd = root) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 << 20 })
 
 // ---- 1. export ----------------------------------------------------------------------------------------------------
-const files = git(['ls-files', '-z']).split('\0').filter(Boolean)
+// Tracked files only, and never the local-only ones even if one got tracked (.claude/settings.local.json, .claude/local/,
+// local-* skills and agents, CLAUDE.local.md: see scripts/lib/scan.mjs).
+const files = git(['ls-files', '-z']).split('\0').filter((f) => f && !isLocalOnly(f))
 const out = mkdtempSync(join(tmpdir(), 'obpal-open-source-'))
 for (const f of files) {
   mkdirSync(dirname(join(out, f)), { recursive: true })
@@ -48,20 +51,16 @@ for (const [f, fix] of Object.entries(SANITIZE)) {
 }
 
 // ---- 3. scan ------------------------------------------------------------------------------------------------------
-const denyFile = join(root, '.open-source-deny')
-const deny = existsSync(denyFile) ? readFileSync(denyFile, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#')) : []
+const deny = readDenyWords(root)
+// Local paths and personal addresses (shared with the lane merge's scan, scripts/lib/scan.mjs), then keys.
 const PATTERNS = [
-  [/[A-Za-z]:[\\/]Users[\\/]/, 'a local Windows path'],
-  [/\/(home|Users)\/[a-z][\w.-]+\//, 'a local home path'],
+  ...PRIVATE_RULES.map((r) => [r.re, r.what]),
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----/, 'a private key'],
   [/\b(sk|rk)_live_[A-Za-z0-9]{20,}/, 'a live Stripe key'],
   [/\bwhsec_[A-Za-z0-9]{20,}/, 'a Stripe webhook secret'],
   [/\bgh[pousr]_[A-Za-z0-9]{30,}/, 'a GitHub token'],
   [/"database_id":\s*"[0-9a-f-]{36}"/, 'a D1 database id'],
-  [/\b[\w.+-]+@(gmail|outlook|hotmail|yahoo|icloud)\.com\b/i, 'a personal email address'],
 ]
-/** Known-fake values in tests and docs (e.g. a made-up macOS path the local-folder resolver is tested with). */
-const ALLOW = ['/Users/art/']
 const TEXT = /\.(ts|tsx|js|mjs|cjs|json|jsonc|md|html|css|svg|txt|yml|yaml|toml|webmanifest|gitignore)$|^[^.]+$/
 const problems = []
 function scan(dir) {

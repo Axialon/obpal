@@ -14,7 +14,8 @@ Status: draft, implemented by `packages/core` and `packages/host`. Keywords foll
   - `st`: id 1, `ordered:false, maxRetransmits:0`, binary STATE.
 - The device creates the offer. ICE servers come from `GET /api/ice?room=<roomId>`: `{iceServers, turn, expires?}`, STUN plus short-lived TURN credentials when the room has a live host, and when those lapse (`expires`, epoch ms). The device SHOULD request them while its socket connects and build the offer meanwhile (gathering host candidates), so the offer and its candidates leave the moment the host is known to be present; it MUST NOT wait more than a few hundred milliseconds for TURN credentials, since on a LAN the host candidates carry the connection. An offer built before they came and not yet sent SHOULD be built again with them, and an attempt that makes no progress SHOULD start again. An offer counts as sent only once a socket took it; a device whose socket went before then sends it on its next `welcome`.
 - A host SHOULD fetch the ICE servers again before `expires`: a relay drops an allocation whose credentials have lapsed.
-- A host keeps a bound device whose socket was lost (`leave` with `clean: false`) while its peer connection lives, since the link doesn't run through the room service; it drops it when that connection fails too.
+- A host keeps a bound device whose socket was lost (`leave` with `clean: false`) while its peer connection lives, since the link doesn't run through the room service; it drops it when that connection fails too. A device likewise keeps its link while the host's socket comes back or is lost.
+- **ICE restart** (RFC 8445 §9). A host whose `welcome` says `restart: true` takes a later offer on the same connection. A device whose path goes (its network changed, no `pong` for 3.5 s, or ICE says `disconnected` or `failed`) SHOULD restart ICE rather than build a new connection: it sends `{t:"sig", d:{offer, restart: true}}` (over its socket as it is now, a new one if the old was lost), and the host applies it to the connection with the same DTLS fingerprint and the same SDP session (the `o=` line's session id), with fresh ICE servers, and answers. The DTLS session, both channels and the binding stay, so input goes on the moment ICE has a path. A host with no such connection answers `{gone: true}`, and a restart that hasn't brought a path back in 6 s gives way to a new connection. Hosts that don't say `restart` (ob.Pal Link 1.5 and earlier) get a new connection instead, as before.
 - Reachability: a socket that has not opened within **1.5 s** counts as unreachable. Both sides then switch to the direct path of §2a when they can, and keep retrying the room in the background.
 
 ## 2. Pairing and authentication
@@ -130,7 +131,7 @@ Unknown message types and fields MUST be ignored.
 - `bye`
 
 **Host → device:**
-- `welcome{proto, name, layout, pair?, invite?}`: `pair{id, key}` is a pairing grant (§2a) from a host that remembers this device; `invite` is the QR link's pairing code, for a device that joined by short code (§2b)
+- `welcome{proto, name, layout, pair?, invite?, restart?}`: `pair{id, key}` is a pairing grant (§2a) from a host that remembers this device; `invite` is the QR link's pairing code, for a device that joined by short code (§2b); `restart: true` when the host takes ICE restarts on this connection (§1; not on a direct LAN code's)
 - `pake{y, mac}`: the host's share and confirmation in the short-code exchange (§2b)
 - `layout{layout}`
 - `state{values}`

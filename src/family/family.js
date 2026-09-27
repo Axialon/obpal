@@ -6,6 +6,7 @@
  *   product  identity accent; never changed by the theme
  *   mark     the obsidian cube lit in the product's colour (ob.Pal keeps its orbit)
  *   menus    product switcher, theme picker and the "More" overflow for secondary tools
+ *   ranges   each .bb-range slider's accent fill, kept in step with its value
  *   tips     hover tooltips for [data-tip]; hints: coach marks that stay dismissed for the session
  */
 (function (global) {
@@ -323,20 +324,90 @@
   }
 
   // ---- range fill ---------------------------------------------------------------------------------------------
+  // A .bb-range's track is filled with the accent up to its knob (--fill), kept in step with its value however it
+  // changes: a person dragging it, code setting value, valueAsNumber or stepUp/stepDown, new min/max/step/value
+  // attributes, a form reset, or the slider arriving in the page with its value already set.
 
+  /** The filled share (0 to 1) of a slider at `value` between `min` and `max`: clamped, and empty for an empty range. */
+  function rangeShare(value, min, max) {
+    if (!(max > min) || value !== value) return 0;
+    return value <= min ? 0 : value >= max ? 1 : (value - min) / (max - min);
+  }
+  /** A range input's bound: its attribute as a number, else the HTML default (min 0, max 100). */
+  function bound(attr, fallback) {
+    var n = parseFloat(attr);
+    return isFinite(n) ? n : fallback;
+  }
   /** Keep a .bb-range's accent fill in step with its value. */
   function rangeFill(el) {
-    var min = parseFloat(el.min || '0'), max = parseFloat(el.max || '100'), v = parseFloat(el.value);
-    var p = max > min ? ((v - min) / (max - min)) * 100 : 0;
-    el.style.setProperty('--fill', Math.max(0, Math.min(100, p)).toFixed(2) + '%');
+    el.style.setProperty('--fill', (rangeShare(parseFloat(el.value), bound(el.min, 0), bound(el.max, 100)) * 100).toFixed(2) + '%');
+    watchRange(el);
   }
   function syncRanges(root) {
     (root || doc).querySelectorAll('.bb-range').forEach(rangeFill);
   }
+
+  // Values set in code: the slider gets its own value and valueAsNumber (wrapping the input's) and step methods.
+  var inputProto = global.HTMLInputElement && global.HTMLInputElement.prototype;
+  var valueDesc = inputProto && Object.getOwnPropertyDescriptor(inputProto, 'value');
+  var numberDesc = inputProto && Object.getOwnPropertyDescriptor(inputProto, 'valueAsNumber');
+  function watchRange(el) {
+    if (el._bbRange || !valueDesc || el.type !== 'range') return;
+    el._bbRange = true;
+    var refill = function (desc) {
+      return { configurable: true, enumerable: true, get: desc.get, set: function (v) { desc.set.call(this, v); rangeFill(this); } };
+    };
+    Object.defineProperty(el, 'value', refill(valueDesc));
+    if (numberDesc) Object.defineProperty(el, 'valueAsNumber', refill(numberDesc));
+    ['stepUp', 'stepDown'].forEach(function (m) {
+      var step = inputProto[m];
+      if (step) el[m] = function () { step.apply(this, arguments); rangeFill(this); };
+    });
+    if (el.classList.contains('vertical')) checkVertical();
+  }
+
+  /** Browsers whose form controls can't stand up (before Chrome 124, Safari 17.4, Firefox 120) turn vertical sliders. */
+  var vertical = null;
+  function checkVertical() {
+    var root = doc.documentElement;
+    if (vertical !== null || !root) return;
+    var probe = doc.createElement('input');
+    probe.type = 'range';
+    probe.style.cssText = 'position:absolute;visibility:hidden;writing-mode:vertical-lr';
+    root.appendChild(probe);
+    vertical = probe.offsetHeight > probe.offsetWidth;
+    root.removeChild(probe);
+    if (!vertical) root.setAttribute('data-bb-vranges', 'rotate');
+  }
+
   doc.addEventListener('input', function (e) {
     var t = e.target;
     if (t && t.classList && t.classList.contains('bb-range')) rangeFill(t);
   }, true);
+  // A reset puts a form's values back without an input event; refill once it has.
+  doc.addEventListener('reset', function (e) {
+    var form = e.target;
+    setTimeout(function () { if (form.querySelectorAll) syncRanges(form); }, 0);
+  }, true);
+  // Sliders fill as they arrive (their value may already be set), and refill when their attributes change.
+  if (global.MutationObserver && doc.documentElement) {
+    new global.MutationObserver(function (records) {
+      for (var i = 0; i < records.length; i++) {
+        var r = records[i];
+        if (r.type === 'attributes') {
+          if (r.target.classList.contains('bb-range')) rangeFill(r.target);
+          continue;
+        }
+        for (var j = 0; j < r.addedNodes.length; j++) {
+          var n = r.addedNodes[j];
+          if (n.nodeType !== 1) continue;
+          if (n.classList.contains('bb-range')) rangeFill(n);
+          else if (n.firstElementChild) syncRanges(n);
+        }
+      }
+    }).observe(doc.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['min', 'max', 'step', 'value'] });
+    syncRanges(doc);
+  }
 
   // ---- tooltips ---------------------------------------------------------------------------------------------
 
@@ -421,7 +492,7 @@
     getAccent: getAccent, setAccent: setAccent, applyAccent: applyAccent, accentColor: accentColor,
     mark: mark, productMenu: productMenu, themeMenu: themeMenu,
     popover: popover, mountSwitcher: mountSwitcher, mountThemes: mountThemes, mountMore: mountMore,
-    initTips: initTips, hint: hint, dismissHint: dismissHint, icons: ICON, rangeFill: rangeFill, syncRanges: syncRanges
+    initTips: initTips, hint: hint, dismissHint: dismissHint, icons: ICON, rangeShare: rangeShare, rangeFill: rangeFill, syncRanges: syncRanges
   };
   // Apply the stored theme as early as possible to avoid a flash of the default surface.
   if (doc && doc.documentElement) { applyTheme(); applyAccent(); }

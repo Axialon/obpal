@@ -1,6 +1,6 @@
 /**
  * The blocks on the floor and the arms among them, as geometry. Pure, unit-tested in node. Every part of an arm is a
- * box (the shapes ./model.ts builds, boxed), and so is every block, and nothing passes through anything else:
+ * box (the shapes its model builds, boxed), and so is every block, and nothing passes through anything else:
  *   - A part that runs into a block from the side pushes it along the floor, gripping it a little as it goes, and the
  *     block stops when the push does (quasi-static pushing: the floor's friction). Pushed off its middle, a block
  *     turns as well, the way a box pushed at one end turns on a table (the ellipsoid limit surface of its footprint's
@@ -10,10 +10,16 @@
  *   - A block between the fingers as they close is kept between them, pushed to their middle and turned square to
  *     them; once it can't turn or move any further, the fingers stop on its faces and hold it.
  *   - A real arm is never stopped or moved by blocks that aren't really there: it pushes them out of its way.
+ * Any kind of arm (./kin.ts): its parts, its floor and its joints come from its Kin. The five-axis arm's parts are
+ * here (armParts), boxed from its model.
  * World metres, y up. A block stands upright: turned only about the vertical (yaw, as three.js turns it).
  */
+import { col, cross, dot, len, mulTV, mulV, nest, place, rotY, rotZ, sub, type Frame } from './frames'
 import { byFingers, FINGER_W, fingerAt, openingFor, type GripBox, type V3 } from './grasp'
-import { ARM, FLOOR_CLEAR, lowest, stepAboveFloor, type ArmPose } from './kinematics'
+import { ARM, FLOOR_CLEAR, type ArmPose } from './kinematics'
+import { subsets, type Kin, type Pose } from './kin'
+
+export type { Frame }
 
 /** An oriented box: its middle, its axes (unit vectors) and its half-sizes along them. */
 export type Box = GripBox
@@ -22,10 +28,13 @@ export type Box = GripBox
 export interface Blk { x: number; y: number; z: number; yaw: number; half: V3 }
 /** Where an arm stands: the middle of its base, and how it's turned about the vertical (the model's root). */
 export interface Stand { x: number; z: number; turn: number }
-/** An arm's base, which never moves: a column standing on the floor there (./model.ts). */
-export interface Base { x: number; z: number }
-/** A joint a block can stop: the arm's five, and the gripper. */
-export type Key = 'yaw' | 'shoulder' | 'elbow' | 'wrist' | 'roll' | 'grip'
+/**
+ * An arm's base, which never moves: a column standing on the floor there, cylinders one on another (radius, bottom and
+ * top), the five-axis arm's (./model.ts) unless it says.
+ */
+export interface Base { x: number; z: number; column?: readonly (readonly [number, number, number])[] }
+/** A joint a block can stop: one of the arm's (by its key), or 'grip', the gripper. */
+export type Key = string
 
 const D2R = Math.PI / 180
 /** Overlap this small is touching (m); a push takes a block this much further. */
@@ -40,36 +49,18 @@ const ROUNDS = 10
 const MAX_TURN = 0.2
 /** A part's grip on a block it pushes (friction coefficient): it drags the block along with it this much. */
 const GRIP = 0.4
-/** A base's column: two cylinders, radius, bottom and top (m). */
-const COLUMN: readonly [number, number, number][] = [[0.27, 0, 0.1], [0.19, 0.1, 0.26]]
+/** The five-axis arm's base (./model.ts): two cylinders, radius, bottom and top (m). */
+export const COLUMN: readonly (readonly [number, number, number])[] = [[0.27, 0, 0.1], [0.19, 0.1, 0.26]]
 
-// ---- vectors and frames ----
-
-const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-const cross = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-const len = (a: V3) => Math.hypot(a[0], a[1], a[2])
-
-/** A frame in the world: x ↦ R·x + t (R row-major). */
-export interface Frame { R: number[]; t: V3 }
-const rotY = (a: number) => { const c = Math.cos(a), s = Math.sin(a); return [c, 0, s, 0, 1, 0, -s, 0, c] }
-const rotZ = (a: number) => { const c = Math.cos(a), s = Math.sin(a); return [c, -s, 0, s, c, 0, 0, 0, 1] }
-const mulR = (A: number[], B: number[]) => [0, 1, 2].flatMap((i) => [0, 1, 2].map((j) => A[i * 3] * B[j] + A[i * 3 + 1] * B[3 + j] + A[i * 3 + 2] * B[6 + j]))
-const mulV = (R: number[], v: V3): V3 => [R[0] * v[0] + R[1] * v[1] + R[2] * v[2], R[3] * v[0] + R[4] * v[1] + R[5] * v[2], R[6] * v[0] + R[7] * v[1] + R[8] * v[2]]
-const mulTV = (R: number[], v: V3): V3 => [R[0] * v[0] + R[3] * v[1] + R[6] * v[2], R[1] * v[0] + R[4] * v[1] + R[7] * v[2], R[2] * v[0] + R[5] * v[1] + R[8] * v[2]]
-const col = (R: number[], i: number): V3 => [R[i], R[3 + i], R[6 + i]]
-const place = (f: Frame, v: V3): V3 => { const r = mulV(f.R, v); return [r[0] + f.t[0], r[1] + f.t[1], r[2] + f.t[2]] }
-const then = (f: Frame, R: number[], t: V3): Frame => ({ R: mulR(f.R, R), t: place(f, t) })
-
-/** An arm's joints' frames in the world, nested as ./model.ts nests them. */
+/** The five-axis arm's joints' frames in the world, nested as ./model.ts nests them. */
 export function armFrames(s: Stand, p: ArmPose) {
   const root: Frame = { R: rotY(s.turn), t: [s.x, 0, s.z] }
-  const yaw = then(root, rotY(p.yaw * D2R), [0, 0.1, 0])
-  const shoulder = then(yaw, rotZ(p.shoulder * D2R), [0, ARM.H0 - 0.1, 0])
-  const elbow = then(shoulder, rotZ(p.elbow * D2R), [0, ARM.L1, 0])
-  const wrist = then(elbow, rotZ(p.wrist * D2R), [0, ARM.L2, 0])
-  const roll = then(wrist, rotY(p.roll * D2R), [0, 0.12, 0])
-  const grasp = then(roll, [1, 0, 0, 0, 1, 0, 0, 0, 1], [0, ARM.LT - 0.12, 0])
+  const yaw = nest(root, rotY(p.yaw * D2R), [0, 0.1, 0])
+  const shoulder = nest(yaw, rotZ(p.shoulder * D2R), [0, ARM.H0 - 0.1, 0])
+  const elbow = nest(shoulder, rotZ(p.elbow * D2R), [0, ARM.L1, 0])
+  const wrist = nest(elbow, rotZ(p.wrist * D2R), [0, ARM.L2, 0])
+  const roll = nest(wrist, rotY(p.roll * D2R), [0, 0.12, 0])
+  const grasp = nest(roll, [1, 0, 0, 0, 1, 0, 0, 0, 1], [0, ARM.LT - 0.12, 0])
   return { shoulder, elbow, wrist, roll, grasp }
 }
 
@@ -102,7 +93,7 @@ export const boxOf = (f: Frame, b: Box): Box => ({ c: place(f, b.c), axes: [mulV
 /** A box in the world, in a frame's own terms. */
 export const boxInto = (f: Frame, b: Box): Box => ({ c: mulTV(f.R, sub(b.c, f.t)), axes: [mulTV(f.R, b.axes[0]), mulTV(f.R, b.axes[1]), mulTV(f.R, b.axes[2])], half: b.half })
 
-/** An arm's parts in the world, at a pose and an opening, with the block it holds (in its grasp frame). */
+/** The five-axis arm's parts in the world, at a pose and an opening, with the block it holds (in its grasp frame). */
 export function armParts(s: Stand, p: ArmPose, open: number, held?: Box | null): Box[] {
   const f = armFrames(s, p)
   const out = SHAPES.map(([j, c, h]) => boxIn(f[j], c, h))
@@ -261,7 +252,7 @@ function nearestOn(b: Blk, x: number, z: number): [number, number] {
 /** Keep a block out of an arm's base. Returns whether it had to move. */
 function outOfBase(b: Blk, base: Base, tol = TOL): boolean {
   let moved = false
-  for (const [r, y0, y1] of COLUMN) {
+  for (const [r, y0, y1] of base.column ?? COLUMN) {
     if (b.y + b.half[1] <= y0 + 1e-9 || b.y - b.half[1] >= y1 - 1e-9) continue
     const [px, pz] = nearestOn(b, base.x, base.z)
     const dx = px - base.x, dz = pz - base.z, d = Math.hypot(dx, dz)
@@ -281,7 +272,7 @@ function outOfBase(b: Blk, base: Base, tol = TOL): boolean {
 /** Where a block and a base's column overlap (for checks): how far in, or 0. */
 function inBase(b: Blk, base: Base): number {
   let most = 0
-  for (const [r, y0, y1] of COLUMN) {
+  for (const [r, y0, y1] of base.column ?? COLUMN) {
     if (b.y + b.half[1] <= y0 + 1e-9 || b.y - b.half[1] >= y1 - 1e-9) continue
     const [px, pz] = nearestOn(b, base.x, base.z)
     most = Math.max(most, r - Math.hypot(px - base.x, pz - base.z))
@@ -413,19 +404,14 @@ export function squeeze(b: Blk, g: Frame, from: number, to: number): { b: Blk; o
 
 // ---- an arm's step among the blocks ----
 
-const KEYS = ['yaw', 'shoulder', 'elbow', 'wrist', 'roll'] as const
-type ArmKey = (typeof KEYS)[number]
-/** Every set of the arm's joints, fewest first. */
-const SETS: ArmKey[][] = Array.from({ length: 31 }, (_, n) => KEYS.filter((_, i) => ((n + 1) >> i) & 1)).sort((a, b) => a.length - b.length)
-
 export interface Among { blocks: Blk[]; still: Box[]; bases: Base[] }
 /**
  * How the arm moves: `real`, a real arm (nothing virtual may stop it); `following`, headed for a pose (the floor lets it
- * ride along, ./kinematics.ts); `minShoulder`, how far back its shoulder goes (degrees).
+ * ride along, ./kinematics.ts).
  */
-export interface How { real: boolean; following: boolean; minShoulder: number }
+export interface How { real: boolean; following: boolean }
 export interface Stepped {
-  pose: ArmPose
+  pose: Pose
   open: number
   /** The joints a block stopped. */
   stopped: Key[]
@@ -435,7 +421,7 @@ export interface Stepped {
 }
 
 const copy = (bl: Blk[]) => bl.map((b) => ({ ...b }))
-const mix = (from: ArmPose, to: ArmPose, keys: readonly ArmKey[], f: number): ArmPose => {
+const mix = (from: Pose, to: Pose, keys: readonly string[], f: number): Pose => {
   const p = { ...to }
   for (const k of keys) p[k] = from[k] + (to[k] - from[k]) * f
   return p
@@ -450,11 +436,12 @@ const mix = (from: ArmPose, to: ArmPose, keys: readonly ArmKey[], f: number): Ar
  * floor as the frame does. A real arm is never stopped: what it runs into is pushed out of its way, however far that
  * takes.
  */
-export function stepAmong(s: Stand, from: { pose: ArmPose; open: number }, to: { pose: ArmPose; open: number }, held: Box | null, world: Among, how: How): Stepped {
+export function stepAmong(kin: Kin, s: Stand, from: { pose: Pose; open: number }, to: { pose: Pose; open: number }, held: Box | null, world: Among, how: How): Stepped {
   const real = how.real
+  const KEYS = kin.keys
   let blocks = copy(world.blocks)
   let h = held
-  const partsAt = (p: ArmPose, o: number) => armParts(s, p, o, h)
+  const partsAt = (p: Pose, o: number) => kin.parts(s, p, o, h)
   // How far any part moves, and whether any comes near a block: most frames, none does.
   const A = partsAt(from.pose, from.open), Z = partsAt(to.pose, to.open)
   let move = 0
@@ -471,7 +458,7 @@ export function stepAmong(s: Stand, from: { pose: ArmPose; open: number }, to: {
    * The blocks settled around the arm at `p`, `o` (a copy), or null if that can't be. Where a block stops the arm, it
    * stops touching it more closely than touching counts (`tol`), so that it's clear by that much when it starts again.
    */
-  const tryAt = (p: ArmPose, o: number, tol = TOL): Blk[] | null => {
+  const tryAt = (p: Pose, o: number, tol = TOL): Blk[] | null => {
     const t = copy(blocks)
     const r = settle(t.filter((_, i) => i !== took?.i), partsAt(p, o), world.still, world.bases, real, tol, partsAt(q, u))
     if (r === 'ok') return t
@@ -480,11 +467,11 @@ export function stepAmong(s: Stand, from: { pose: ArmPose; open: number }, to: {
     return t
   }
   /** Stop the fewest joints that keep the arm out of the blocks (and above the floor), as near `want` as they get. */
-  const holdBack = (want: ArmPose) => {
-    const floor = Math.min(FLOOR_CLEAR, lowest(q, h)) - 1e-9
-    const ok = (p: ArmPose) => (lowest(p, h) < floor ? null : tryAt(p, u, TOL / 4))
-    const moved = (set: ArmKey[]) => set.reduce((sum, k) => sum + Math.abs(want[k] - q[k]), 0)
-    const sets = [...SETS].sort((a, b) => a.length - b.length || moved(b) - moved(a))
+  const holdBack = (want: Pose) => {
+    const floor = Math.min(FLOOR_CLEAR, kin.lowest(q, h)) - 1e-9
+    const ok = (p: Pose) => (kin.lowest(p, h) < floor ? null : tryAt(p, u, TOL / 4))
+    const moved = (set: string[]) => set.reduce((sum, k) => sum + Math.abs(want[k] - q[k]), 0)
+    const sets = [...subsets(KEYS)].sort((a, b) => a.length - b.length || moved(b) - moved(a))
     for (const set of sets) {
       let bl = ok(mix(q, want, set, 0))
       if (!bl) continue
@@ -507,7 +494,7 @@ export function stepAmong(s: Stand, from: { pose: ArmPose; open: number }, to: {
     // The arm moves, its fingers as they were.
     let want = { ...q }
     for (const key of KEYS) if (!stopped.has(key)) want[key] = from.pose[key] + (to.pose[key] - from.pose[key]) * f
-    if (!real) want = stepAboveFloor(q, want, how.following, how.minShoulder, h).pose
+    if (!real) want = kin.stepAboveFloor(q, want, how.following, h).pose
     const got = tryAt(want, u)
     if (got) { q = want; blocks = got } else {
       const b = holdBack(want)
@@ -520,7 +507,7 @@ export function stepAmong(s: Stand, from: { pose: ArmPose; open: number }, to: {
     const o = from.open + (to.open - from.open) * f
     if (o === u) continue
     if (o < u && !real) {
-      const g = armFrames(s, q).grasp
+      const g = kin.grasp(s, q)
       const between = free().map((b) => ({ b, i: blocks.indexOf(b) })).map(({ b, i }) => ({ i, sq: squeeze(b, g, u, o), d: len(sub([b.x, b.y, b.z], g.t)) }))
         .filter((x) => x.sq).sort((p, r) => p.d - r.d)[0]
       if (between?.sq) {

@@ -32,6 +32,8 @@
   --glass-shadow: 0 20px 50px rgb(0 0 0 / 0.32), inset 0 1px 0 rgb(255 255 255 / 0.1);
   --glass-light: linear-gradient(150deg, rgb(var(--accent-rgb) / 0.95), rgb(var(--accent-rgb) / 0.78));
   --blur: blur(28px) saturate(150%);
+  /* Heavy frosted glass, for sheets and docks over busy controls: what's behind reads as colour and shape, never text. */
+  --blur-heavy: blur(40px) saturate(180%);
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --font: var(--bb-font-ui);
   --font-display: var(--bb-font-display);
@@ -104,7 +106,7 @@ a { color: var(--accent-text); }
 .switch-btn[aria-expanded='true'] { color: var(--accent-text); background: rgb(var(--accent-rgb) / 0.12); }
 .switch-btn .bb-ic { width: 18px; height: 18px; transition: transform 0.2s var(--ease); }
 .switch-btn[aria-expanded='true'] .bb-ic { transform: rotate(180deg); }
-.switcher { width: 300px; max-height: min(640px, calc(100vh - 100px)); overflow: auto; }
+.switcher { width: 300px; max-height: min(640px, calc(100vh - 100px)); overflow: auto; --bb-scroll-inset: 14px; }
 
 /* The inline logo mark (icons.ts mountMarks) takes the place the logo image had. */
 .mark-slot { display: inline-grid; flex: none; }

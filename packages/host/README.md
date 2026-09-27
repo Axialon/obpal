@@ -144,19 +144,22 @@ const chip = new PairingChip({
   scheme: 'auto',            // 'auto' (from the page) | 'light' | 'dark'
   code: true,                // show the short code beside the QR
   testLink: false,           // a link that opens the controller on this device
+  avoid: '#settings, .sheet', // the page's own panels the card must never cover (below)
   onToggle: (open) => {},    // it opened or closed
 })
 
 chip.el          // the chip's element (its own shadow root, so page CSS can't break it)
 chip.expanded    // whether it is open
-chip.expand()    // open it: QR, short code, status
+chip.expand()    // open it: QR, short code, status (once the page's panels are out of its way)
 chip.collapse()  // close it
-chip.toggle()
+chip.toggle()    // as a click on the chip
 chip.refresh()   // read the page's look again (after a theme change it couldn't see)
 chip.destroy()   // remove it, and stop asking for a short code
 ```
 
-`'inline'` leaves placement to the page: the chip sits where `parent` puts it. The four corners fix it to the viewport. `--obpal-offset` (or `--obpal-offset-x` and `--obpal-offset-y`) moves it from its corner, from the page's own CSS; ob.Pal's sims lift it above their bottom panel on phones that way.
+`'inline'` leaves placement to the page: the chip sits where `parent` puts it. The four corners fix it to the viewport. `--obpal-offset` (or `--obpal-offset-x` and `--obpal-offset-y`) moves it from its corner, from the page's own CSS; ob.Pal's sims lift it above their bottom panel on phones that way. `--obpal-qr` sets the QR code's size in the card (default `168px`), for a short screen.
+
+**Sharing the corner with the page's panels.** The card opens above the chip, over whatever is there. `avoid` names the page's own panels and sheets (a settings panel, a menu, a sheet): while one of them is shown where the card opens, the card folds to the chip, a mouse resting on the chip doesn't open it, and once they're out of the way it opens again if it was open. A click on the chip still opens it (a page that closes its panel on that click gives the card its place back). The chip only ever takes the pointer where it draws, so the page stays clickable where the card would open. Keep the panels themselves clear of the chip: end them above it (`--obpal-offset` plus 44px and a gap), or move the chip with `--obpal-offset*`.
 
 `variant: 'panel'` is for a page that gives pairing a place of its own (ob.Pal's home page does, in its hero): the QR code as wide as `parent`, the short code and the status under it, no chip and no frame of its own, and it stays open.
 

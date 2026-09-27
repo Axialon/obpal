@@ -56,6 +56,37 @@ export function ladder(dpr: number, coarse: boolean, css?: { w: number; h: numbe
 }
 
 /**
+ * The ladder for a picture with no glass in it (the sims, ../sim/view.ts), finest first: twice the screen's own pixels
+ * each way (where that fits BUDGET, and not on a phone), the screen's own, then fewer. Above the screen's own, only
+ * twice them: the browser averages each 2 x 2 into one pixel evenly, where 1.5 or 1.6 times would weigh some of the
+ * drawn pixels more than others (edges that step). Each step has glass 0: the governor weighs them by pixels alone.
+ */
+export function pixelLadder(dpr: number, coarse: boolean, css?: { w: number; h: number }): Step[] {
+  const native = Math.min(Math.max(dpr || 1, 1), coarse ? 2 : 3)
+  const steps: Step[] = []
+  const add = (pr: number) => {
+    pr = Math.round(pr * 100) / 100
+    if (!steps.some((s) => s.pr === pr)) steps.push({ pr, glass: 0 })
+  }
+  if (!coarse && (!css || css.w * css.h * (2 * native) ** 2 <= BUDGET)) add(2 * native)
+  add(native)
+  add(Math.max(1, native * 0.75))
+  add(1)
+  return steps
+}
+
+/**
+ * A step of a pixel ladder by name (or number): super (the finest), native (the screen's own pixels), low (the
+ * fewest). -1 if there's no such step.
+ */
+export function pickPixels(steps: readonly Step[], name: string, dpr: number, coarse: boolean): number {
+  if (/^\d+$/.test(name)) return Math.min(steps.length - 1, Number(name))
+  const native = Math.min(Math.max(dpr || 1, 1), coarse ? 2 : 3)
+  const at = { super: 0, native: steps.findIndex((s) => s.pr === Math.round(native * 100) / 100), low: steps.length - 1 }[name]
+  return at ?? -1
+}
+
+/**
  * The picture of the scene behind the marbles' glass, in its pixels per CSS pixel at a step: half the pixels the step
  * draws, at most half the screen's own (the glass shows it shrunk three times or more), less for lighter glass, none
  * for plain. It follows the drawing buffer down, and never above it (nor its budget).

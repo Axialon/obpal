@@ -6,20 +6,22 @@
 import * as THREE from 'three'
 import { FINGER_IN, FINGER_TRAVEL, FINGER_W } from './grasp'
 import { ARM } from './kinematics'
+import { plateLabel } from './shapes3d'
 
 const D2R = Math.PI / 180
 
 export interface JointSpec {
-  key: 'base' | 'shoulder' | 'elbow' | 'wrist' | 'roll' | 'gripper'
+  /** Its name in node ids (`a1.shoulder`), unique in its arm; the gripper is always 'gripper'. */
+  key: string
   name: string
-  /** Degrees (the gripper: 0 closed … 1 open). */
+  /** Degrees, or metres for a joint that slides (the gripper: 0 closed … 1 open). */
   min: number
   max: number
   home: number
   /** Speed and acceleration caps, units per second (per second). */
   vmax: number
   amax: number
-  unit: '°' | ''
+  unit: '°' | 'm' | ''
 }
 
 export const JOINTS: JointSpec[] = [
@@ -49,24 +51,6 @@ const accent = (c: string) => new THREE.MeshStandardMaterial({ color: '#0b0f14',
 
 function ringAt(radius: number, tube = 0.012) {
   return new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 12, 96), accent('#5b6472'))
-}
-
-/** A number plate on the base, so people can tell the arms apart. */
-function plateLabel(n: number) {
-  const c = document.createElement('canvas')
-  c.width = c.height = 128
-  const g = c.getContext('2d')!
-  g.fillStyle = '#e6ebf2'
-  g.font = '800 88px "Plus Jakarta Sans", Inter, system-ui, sans-serif'
-  g.textAlign = 'center'
-  g.textBaseline = 'middle'
-  g.fillText(String(n), 64, 70)
-  const tex = new THREE.CanvasTexture(c)
-  tex.colorSpace = THREE.SRGBColorSpace
-  tex.anisotropy = 4
-  const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }))
-  m.scale.setScalar(0.16)
-  return m
 }
 
 export function buildArm(n: number, mats: ArmMaterials): ArmModel {

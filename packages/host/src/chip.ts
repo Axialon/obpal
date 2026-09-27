@@ -12,7 +12,8 @@
 import { formatCode, spokenCode } from '@obpal/core'
 import { luminance, parseColor, toHex, type Rgb } from './color'
 import { markElement } from './mark'
-import type { HostStatus, Remote } from './remote'
+import type { DeviceLinkInfo, HostStatus, Remote } from './remote'
+import { svgElement, type SvgNode } from './svg'
 
 export type ChipCorner = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left' | 'inline'
 
@@ -45,6 +46,12 @@ export interface PairingChipOptions {
   code?: boolean
   /** A link that opens the controller on this device (to try it without a phone). Default false. */
   testLink?: boolean
+  /**
+   * The page's own panels and sheets that the card must never cover, as a selector. While one is shown where the card
+   * opens, the card folds to the chip (and a mouse resting on the chip doesn't open it); once they're out of the way it
+   * opens again if it was open. A click on the chip still opens it. Keep the chip itself clear of them (--obpal-offset*).
+   */
+  avoid?: string
   /** It opened (true) or closed (false). */
   onToggle?: (open: boolean) => void
 }
@@ -80,6 +87,29 @@ function adoptStyle(root: ShadowRoot) {
   root.appendChild(s)
 }
 
+/** The connection's icons (stroke, 24 × 24), as elements. */
+const icon = (...kids: SvgNode[]) => svgElement(['svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true', focusable: 'false', class: 'i' }, kids])
+const LOCK: SvgNode[] = [['rect', { x: 5.5, y: 10.5, width: 13, height: 9.5, rx: 2.6 }], ['path', { d: 'M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5' }]]
+const SHIELD: SvgNode[] = [['path', { d: 'M12 3.5 5.5 6v5.2c0 4 2.7 7.4 6.5 8.8 3.8-1.4 6.5-4.8 6.5-8.8V6L12 3.5Z' }], ['path', { d: 'm9 12 2.2 2.2L15.5 10' }]]
+const PATH: SvgNode[] = [['circle', { cx: 6, cy: 17.5, r: 2.2 }], ['circle', { cx: 18, cy: 6.5, r: 2.2 }], ['path', { d: 'M8 16.2c3-1 2.3-4.4 5-5.6 1.4-.6 2.6-1.2 3.2-2.4' }]]
+/** How often the connections' facts are read again while anyone is connected (Remote.links: their own statistics). */
+const LINK_POLL_MS = 2000
+
+const VERIFIED: Record<DeviceLinkInfo['verified'], [short: string, long: string]> = {
+  qr: ['QR', 'Verified by the QR code'], code: ['Code', 'Verified by the code typed'], lan: ['Paired', 'Verified by a remembered pairing'],
+}
+
+/** The path a connection takes, in a few words, as its selected ICE pair says. */
+function pathWords(l: DeviceLinkInfo['link']): string {
+  switch (l.path) {
+    case 'lan': return 'Direct, on the same network'
+    case 'nat': return 'Direct, over the internet'
+    case 'direct': return 'Direct, peer to peer'
+    case 'relay': return `Relayed through TURN${l.relayProtocol ? ` over ${l.relayProtocol.toUpperCase()}` : ''}, which can’t read it`
+    default: return 'Finding the path'
+  }
+}
+
 const STATUS: Record<HostStatus, string> = {
   starting: 'Starting…', ready: 'Waiting for a phone', connecting: 'Phone found, connecting…', connected: 'Connected', offline: 'Offline, retrying…',
 }
@@ -93,6 +123,7 @@ export class PairingChip {
   private $: {
     wrap: HTMLElement; pill: HTMLButtonElement; label: HTMLElement; badge: HTMLElement; mark: HTMLElement; card: HTMLElement; qr: HTMLElement
     codeBox: HTMLElement; code: HTMLElement; site: HTMLElement; status: HTMLElement; live: HTMLElement; here: HTMLAnchorElement | null
+    conn: HTMLElement; connMs: HTMLElement; facts: HTMLButtonElement; details: HTMLElement
   }
   private isOpen = false
   /** Opened by a click or a key: stays open. Opened by hovering: closes when the pointer leaves. */
@@ -109,6 +140,17 @@ export class PairingChip {
   private media: MediaQueryList | null = null
   private refreshQueued = false
   private listeners: [string, (...a: never[]) => void][] = []
+  /** The connected devices' links as last read (Remote.links), and the timer that reads them again. */
+  private links: DeviceLinkInfo[] = []
+  private linkTimer = 0
+  /** A page panel (avoid) is where the card opens: it stays folded. */
+  private blocked = false
+  /** Folded for the page while open: it opens again once the page is clear. */
+  private unfold = false
+  /** The card as a press on the chip found it (and when): the click that follows goes from there. */
+  private pressed: { was: 'closed' | 'peek' | 'pinned'; at: number } | null = null
+  private room: { mo: MutationObserver; ro: ResizeObserver | null; seen: WeakSet<Element> } | null = null
+  private roomQueued = false
 
   constructor(opts: PairingChipOptions) {
     this.opts = opts
@@ -124,14 +166,20 @@ export class PairingChip {
       qr: h('div', { class: 'qr', role: 'img', 'aria-label': 'QR code: scan it with your phone’s camera to control this page' }),
       code: h('span', { class: 'code' }), site: h('b', { class: 'site' }), status: h('span', { class: 'stext' }), live: h('span', { class: 'sr', role: 'status' }),
       here: opts.testLink ? h('a', { class: 'here', target: '_blank', rel: 'noopener' }, 'Use this device') : null,
+      connMs: h('span', { class: 'ms' }),
+      details: h('div', { class: 'details', id: `${id}-link`, hidden: '' }),
     }
-    const pill = h('button', { class: 'pill', type: 'button', 'aria-expanded': 'false', 'aria-controls': id }, $.mark, $.label, $.badge, h('span', { class: 'dot', ...hidden }))
+    // The connection, once a phone is in: a lock and the round trip on the chip, a line of facts on the card, and each
+    // device's details a tap away. Only what the connections' own statistics say.
+    const conn = h('span', { class: 'conn', ...hidden }, icon(...LOCK), $.connMs)
+    const facts = h('button', { class: 'facts', type: 'button', 'aria-expanded': 'false', 'aria-controls': `${id}-link`, hidden: '' })
+    const pill = h('button', { class: 'pill', type: 'button', 'aria-expanded': 'false', 'aria-controls': id }, $.mark, $.label, $.badge, conn, h('span', { class: 'dot', ...hidden }))
     const codeBox = h('div', { class: 'code-box', 'data-wait': '' }, h('span', { class: 'k' }, 'Or type'), $.code, h('span', { class: 'k at' }, 'at ', $.site))
-    const side = h('div', { class: 'side' }, codeBox, h('p', { class: 'status' }, h('span', { class: 'sdot', ...hidden }), $.status), ...($.here ? [$.here] : []))
+    const side = h('div', { class: 'side' }, codeBox, h('p', { class: 'status' }, h('span', { class: 'sdot', ...hidden }), $.status), facts, $.details, ...($.here ? [$.here] : []))
     const card = h('div', { class: 'card', id, role: 'group', 'aria-label': 'Pair a phone' }, $.qr, side)
     const wrap = h('div', { class: 'wrap', 'data-corner': opts.corner ?? 'bottom-right', 'data-variant': opts.variant ?? 'chip', 'data-s': 'starting' }, pill, card, $.live)
     this.root.appendChild(wrap)
-    this.$ = { ...$, wrap, pill, card, codeBox }
+    this.$ = { ...$, wrap, pill, card, codeBox, conn, facts }
     this.wire()
     ;(opts.parent ?? document.body).appendChild(this.el)
     this.refresh()
@@ -139,12 +187,15 @@ export class PairingChip {
     this.render()
     if (opts.open || opts.variant === 'panel') this.setOpen(true, true)
     else this.syncCode()
+    this.watchRoom()
   }
 
   get expanded() { return this.isOpen }
-  expand() { this.setOpen(true, true) }
-  collapse() { this.setOpen(false) }
-  toggle() { this.setOpen(!this.isOpen, true) }
+  /** Open the card; while a page panel is where it opens (avoid), as soon as that's gone. */
+  expand() { if (this.blocked) this.unfold = true; else this.setOpen(true, true) }
+  collapse() { this.unfold = false; this.setOpen(false) }
+  /** As a click on the chip. */
+  toggle() { this.unfold = false; this.setOpen(!this.isOpen, true) }
 
   /**
    * Read the page's look again: its accent (--obpal-accent, else --accent, --primary, --color-primary or --brand),
@@ -180,9 +231,15 @@ export class PairingChip {
     this.listeners = []
     this.observer?.disconnect()
     this.media?.removeEventListener('change', this.queueRefresh)
+    this.room?.mo.disconnect()
+    this.room?.ro?.disconnect()
+    this.room = null
+    removeEventListener('resize', this.queueRoom)
     clearTimeout(this.hoverTimer)
     clearTimeout(this.leaveTimer)
     clearTimeout(this.codeTimer)
+    clearTimeout(this.linkTimer)
+    this.linkTimer = 0
     this.releaseCode?.()
     this.releaseCode = null
     this.el.remove()
@@ -192,14 +249,22 @@ export class PairingChip {
 
   private wire() {
     const { wrap, pill } = this.$
+    const now = () => (!this.isOpen ? 'closed' : this.pinned ? 'pinned' : 'peek')
+    pill.addEventListener('pointerdown', () => { this.pressed = { was: now(), at: performance.now() } })
     pill.addEventListener('click', () => {
+      // It goes from the card as the press found it: a page may close its own panel on the press, and so give the card
+      // its room back (and open it) before the click arrives. (A key, or a press long gone, goes from the card as it is.)
+      const p = this.pressed
+      const was = p && performance.now() - p.at < 1500 ? p.was : now()
+      this.pressed = null
+      this.unfold = false
       // A click on a card the pointer only peeked at keeps it open; otherwise it opens or closes.
-      if (this.isOpen && !this.pinned) { this.pinned = true; return }
-      this.setOpen(!this.isOpen, true)
+      if (was === 'peek' && this.isOpen) { this.pinned = true; return }
+      this.setOpen(was !== 'pinned', true)
     })
-    // With a mouse, resting on the chip peeks at the card; leaving closes a peek.
+    // With a mouse, resting on the chip peeks at the card (not while the page has a panel there); leaving closes a peek.
     pill.addEventListener('pointerenter', (e) => {
-      if (e.pointerType !== 'mouse' || this.isOpen) return
+      if (e.pointerType !== 'mouse' || this.isOpen || this.blocked) return
       clearTimeout(this.hoverTimer)
       this.hoverTimer = window.setTimeout(() => this.setOpen(true, false), 220)
     })
@@ -208,6 +273,11 @@ export class PairingChip {
       clearTimeout(this.hoverTimer)
       if (e.pointerType !== 'mouse' || !this.isOpen || this.pinned || wrap.matches(':focus-within')) return
       this.leaveTimer = window.setTimeout(() => this.setOpen(false), 380)
+    })
+    this.$.facts.addEventListener('click', () => {
+      const show = this.$.details.hidden
+      this.$.details.hidden = !show
+      this.$.facts.setAttribute('aria-expanded', String(show))
     })
     wrap.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape' || !this.isOpen) return
@@ -220,9 +290,9 @@ export class PairingChip {
       this.listeners.push([ev, fn])
     }
     on('status', () => { this.render(); this.syncCode() })
-    // A phone is in: the card has done its job.
-    on('connect', () => this.setOpen(false))
-    on('join', () => { this.setOpen(false); this.render() })
+    // A phone is in: the card has done its job (and doesn't come back when a page panel closes).
+    on('connect', () => { this.unfold = false; this.setOpen(false) })
+    on('join', () => { this.unfold = false; this.setOpen(false); this.render() })
     on('leave', () => this.render())
     on('disconnect', () => { this.render(); this.syncCode() })
     on('code', () => this.renderCode())
@@ -271,11 +341,84 @@ export class PairingChip {
     this.$.status.textContent = text
     // Said once per change, open or not (the card's own line is hidden while it's closed).
     if (this.$.live.textContent !== text && s !== 'starting') this.$.live.textContent = text
-    const label = this.opts.label ?? 'Scan to control'
-    this.$.pill.setAttribute('aria-label', n ? `${n > 1 ? `${n} connected` : `Connected${r.deviceName ? ` to ${r.deviceName}` : ''}`}. Pair another phone` : label)
+    this.labelPill()
+    this.watchLinks(n > 0)
     // Only ever an https (or local http) link: the Remote checks its service, and so does this.
     if (this.$.here && /^https:\/\/|^http:\/\/(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(r.pairingUrl)) this.$.here.href = r.pairingUrl
     this.drawQr()
+  }
+
+  /** The chip's name for screen readers: who is connected and how (the connection's facts), or its call to pair. */
+  private labelPill() {
+    const r = this.remote
+    const n = r.participants.length
+    const who = n > 1 ? `${n} connected` : `Connected${r.deviceName ? ` to ${r.deviceName}` : ''}`
+    const how = this.links.length ? `: ${this.factSentence()}` : ''
+    this.$.pill.setAttribute('aria-label', n ? `${who}${how}. Pair another phone` : this.opts.label ?? 'Scan to control')
+  }
+
+  /** The facts as words to hear: "encrypted end to end, verified by the QR code, direct, 12 ms round trip". */
+  private factSentence(): string {
+    const ls = this.links
+    const via = new Set(ls.map((l) => l.verified))
+    const [, , path, rtt] = this.factWords()
+    const lower = (w: string) => w.charAt(0).toLowerCase() + w.slice(1)
+    return ['encrypted end to end', via.size === 1 ? lower(VERIFIED[ls[0].verified][1]) : 'each verified', lower(path), ...(rtt ? [`${rtt} round trip`] : [])].join(', ')
+  }
+
+  /** Read the connections' facts while anyone is connected (every LINK_POLL_MS), and stop when nobody is. */
+  private watchLinks(on: boolean) {
+    if (on && !this.linkTimer) void this.readLinks()
+    if (!on && (this.linkTimer || this.links.length)) {
+      clearTimeout(this.linkTimer)
+      this.linkTimer = 0
+      this.links = []
+      this.renderLinks()
+    }
+  }
+
+  private async readLinks() {
+    this.linkTimer = window.setTimeout(() => void this.readLinks(), LINK_POLL_MS)
+    const links = await this.remote.links().catch(() => [] as DeviceLinkInfo[])
+    if (!this.linkTimer || !this.el.isConnected) return
+    this.links = links.filter((l) => l.link.secure)
+    this.renderLinks()
+    this.labelPill()
+  }
+
+  /** Everyone's facts: encrypted, how they were verified, the path (relayed if any is) and the round trip (the slowest). */
+  private factWords(): string[] {
+    const ls = this.links
+    if (!ls.length) return []
+    const via = new Set(ls.map((l) => l.verified))
+    const relayed = ls.some((l) => l.link.path === 'relay')
+    const rtt = Math.max(-1, ...ls.map((l) => l.link.rttMs ?? -1))
+    return ['Encrypted', via.size === 1 ? `Verified · ${VERIFIED[ls[0].verified][0]}` : 'Verified', relayed ? 'Relayed' : 'Direct', ...(rtt >= 0 ? [`${rtt} ms`] : [])]
+  }
+
+  private renderLinks() {
+    const ls = this.links
+    const { wrap, facts, details, connMs } = this.$
+    wrap.toggleAttribute('data-linked', ls.length > 0)
+    wrap.toggleAttribute('data-relayed', ls.some((l) => l.link.path === 'relay'))
+    facts.hidden = !ls.length
+    if (!ls.length) { details.hidden = true; facts.setAttribute('aria-expanded', 'false') }
+    const words = this.factWords()
+    const rtt = words.find((w) => w.endsWith(' ms')) ?? ''
+    connMs.textContent = rtt
+    const fact = (ic: SvgNode[], text: string) => h('span', { class: 'fact' }, icon(...ic), text)
+    facts.replaceChildren(...(words.length ? [fact(LOCK, words[0]), fact(SHIELD, words[1]), fact(PATH, rtt ? `${words[2]} · ${rtt}` : words[2])] : []))
+    if (words.length) facts.setAttribute('aria-label', `${this.factSentence()}. Connection details`)
+    else facts.removeAttribute('aria-label')
+    details.replaceChildren(
+      ...ls.map((l) => h('div', { class: 'dev' },
+        h('b', {}, l.name),
+        h('span', {}, 'Encrypted end to end'), ...(l.link.dtls || l.link.cipher ? [h('small', {}, [l.link.dtls, l.link.cipher].filter(Boolean).join(' · '))] : []),
+        h('span', {}, VERIFIED[l.verified][1]),
+        h('span', {}, pathWords(l.link)),
+        ...(l.link.rttMs != null ? [h('span', {}, `Round trip ${l.link.rttMs} ms`)] : []))),
+      ...(ls.length ? [h('p', { class: 'k' }, 'The room service only passes the handshake along.')] : []),
+    )
   }
 
   private renderCode() {
@@ -328,11 +471,63 @@ export class PairingChip {
 
   /** Themes change by classes, attributes or styles on the root and body, by stylesheets coming and going, or by the system's colour scheme. */
   private watchLooks() {
-    this.observer = new MutationObserver(this.queueRefresh)
+    // The same changes can show or hide a page panel (a class on the body, say): the room is checked too.
+    this.observer = new MutationObserver(() => { this.queueRefresh(); this.queueRoom() })
     for (const n of [document.documentElement, document.body]) this.observer.observe(n, { attributes: true, attributeFilter: ['class', 'style', 'data-theme', 'data-bb-theme', 'data-bb-accent', 'data-bb-product'] })
     this.observer.observe(document.head, { childList: true })
     this.media = matchMedia('(prefers-color-scheme: dark)')
     this.media.addEventListener('change', this.queueRefresh)
+  }
+
+  // ---- the page's panels (avoid) ------------------------------------------------------------------------------
+
+  /** The panels' own attributes and sizes, elements coming and going, and the window's size tell when to look again. */
+  private watchRoom() {
+    if (!this.opts.avoid || this.opts.variant === 'panel' || this.opts.corner === 'inline') return
+    const mo = new MutationObserver(this.queueRoom)
+    mo.observe(document.body, { childList: true })
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(this.queueRoom) : null
+    ro?.observe(this.$.card)
+    this.room = { mo, ro, seen: new WeakSet() }
+    addEventListener('resize', this.queueRoom)
+    this.checkRoom()
+  }
+
+  private queueRoom = () => {
+    if (!this.room || this.roomQueued) return
+    this.roomQueued = true
+    requestAnimationFrame(() => { this.roomQueued = false; this.checkRoom() })
+  }
+
+  /** Is a page panel shown where the card opens? Fold as one arrives, and open again once they've all gone. */
+  private checkRoom() {
+    const room = this.room
+    if (!room || !this.el.isConnected) return
+    let els: Element[]
+    try { els = [...document.querySelectorAll(this.opts.avoid!)] } catch { return }
+    for (const el of els) {
+      if (room.seen.has(el)) continue
+      room.seen.add(el)
+      room.mo.observe(el, { attributes: true })
+      room.ro?.observe(el)
+    }
+    // The card keeps its place while closed (it's only hidden), so this is where it opens.
+    const card = this.$.card.getBoundingClientRect()
+    // Shown is laid out and not hidden (a panel fading in counts from its first frame).
+    const blocked = els.some((el) => {
+      if (el.contains(this.el) || !el.getClientRects().length || getComputedStyle(el).visibility === 'hidden') return false
+      const r = el.getBoundingClientRect()
+      return Math.min(r.right, card.right) - Math.max(r.left, card.left) > 1 && Math.min(r.bottom, card.bottom) - Math.max(r.top, card.top) > 1
+    })
+    if (blocked === this.blocked) return
+    this.blocked = blocked
+    if (blocked) {
+      this.unfold = this.isOpen
+      this.setOpen(false)
+    } else if (this.unfold) {
+      this.unfold = false
+      this.setOpen(true, true)
+    }
   }
 }
 
@@ -381,7 +576,7 @@ const STYLE = `
 .wrap {
   --ox: var(--obpal-offset-x, var(--obpal-offset, 16px)); --oy: var(--obpal-offset-y, var(--obpal-offset, 16px)); --ease: cubic-bezier(.2, .8, .2, 1); --base: 18 20 26;
   position: fixed; z-index: 2147483000; display: flex; gap: 10px; box-sizing: border-box;
-  max-width: calc(100vw - 2 * var(--ox)); color: var(--ink);
+  max-width: calc(100vw - 2 * var(--ox)); color: var(--ink); pointer-events: none;
   font-size: 14px; line-height: 1.35; font-weight: 500; font-style: normal; letter-spacing: normal; text-align: left;
   text-transform: none; text-indent: 0; text-shadow: none; white-space: normal; word-spacing: normal; direction: ltr;
   -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent;
@@ -399,6 +594,8 @@ const STYLE = `
 
 .pill, .card { background: var(--glass); border: 1px solid var(--line); box-shadow: var(--shadow);
   -webkit-backdrop-filter: blur(22px) saturate(160%); backdrop-filter: blur(22px) saturate(160%); }
+/* Only the chip and the open card take the pointer (a closing card lets go at once): the page gets it everywhere else. */
+.pill, .wrap[data-open] .card { pointer-events: auto; }
 
 .pill { position: relative; display: inline-flex; align-items: center; gap: 9px; height: 44px; margin: 0; padding: 0 16px 0 6px;
   border-radius: var(--pill-r, 999px); color: inherit; font: inherit; font-weight: 650; cursor: pointer; touch-action: manipulation;
@@ -439,7 +636,7 @@ const STYLE = `
   box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; transition: none; }
 .wrap[data-variant=panel] .qr { width: 100%; height: auto; aspect-ratio: 1; border-radius: 16px; }
 .wrap[data-variant=panel] .side { gap: 8px; }
-.qr { width: 168px; height: 168px; flex: none; border-radius: 10px; background: #fff;
+.qr { width: var(--obpal-qr, 168px); height: var(--obpal-qr, 168px); flex: none; border-radius: 10px; background: #fff;
   box-shadow: 0 0 0 1.5px rgb(var(--a-rgb) / .55), 0 10px 30px rgb(var(--a-rgb) / .2); }
 .qr svg { display: block; width: 100%; height: 100%; }
 .side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
@@ -456,7 +653,29 @@ const STYLE = `
 .here { align-self: flex-start; font-size: 12px; font-weight: 600; color: var(--muted); text-decoration: none; border-bottom: 1px solid rgb(var(--hl) / .25); }
 .here:hover { color: var(--ink); }
 .here:focus-visible { outline: 2px solid var(--a); outline-offset: 2px; border-radius: 3px; }
+/* The connection (renderLinks): a lock and the round trip on the chip, facts on the card, each device's details a tap away. */
+.wrap[data-scheme=dark] { --ok: #6ee7b7; --warn: #fcd34d; }
+.wrap[data-scheme=light] { --ok: #0b8a60; --warn: #b45309; }
+.i { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.conn { display: none; align-items: center; gap: 4px; font-size: 12px; font-weight: 650; color: var(--muted); font-variant-numeric: tabular-nums; }
+.wrap[data-linked] .conn { display: inline-flex; }
+.conn .i, .fact .i { color: var(--ok); }
+.wrap[data-relayed] :is(.conn .i, .fact:last-child .i) { color: var(--warn); }
+.ms:empty { display: none; }
+.facts { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.facts[hidden] { display: none; }
+.facts:focus-visible { outline: 2px solid var(--a); outline-offset: 3px; border-radius: 12px; }
+.fact { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px 0 7px; border-radius: 999px; font-size: 12px; font-weight: 650;
+  font-variant-numeric: tabular-nums; white-space: nowrap; background: rgb(var(--hl) / .07); border: 1px solid var(--line); }
+.facts:hover .fact { border-color: rgb(var(--a-rgb) / .45); }
+.details { display: flex; flex-direction: column; gap: 6px; max-width: 260px; font-size: 12px; line-height: 1.4; }
+.details[hidden] { display: none; }
+.dev { display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; border-radius: min(12px, var(--r, 18px)); background: rgb(var(--hl) / .05); border: 1px solid var(--line); }
+.dev b { font-size: 12.5px; font-weight: 700; }
+.dev small { color: var(--muted); overflow-wrap: anywhere; }
 @media (max-width: 480px) {
+  .facts { justify-content: center; }
+  .details { max-width: none; text-align: left; }
   .card { flex-direction: column; align-items: stretch; text-align: center; gap: 12px; padding: 14px; }
   .qr { align-self: center; }
   .side, .code-box { align-items: center; }

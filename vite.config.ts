@@ -11,8 +11,61 @@ import { BRIDGE_ROWS, EMBED, REPO, SYSTEM_ROWS, UTILITY_ROWS } from './src/catal
 
 const root = fileURLToPath(new URL('.', import.meta.url))
 
-/** Files the phone needs to open the controller with no internet, besides the page's own build assets. */
-const CONTROLLER_STATIC = ['/manifest.webmanifest', '/favicon.svg', '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/apple-touch-icon.png']
+/**
+ * Files the phone needs to open the controller with no internet, besides the page's own build assets: the icons, and
+ * the latin faces of its fonts (scripts/fonts.mjs; other subsets are cached as they're used).
+ */
+const CONTROLLER_STATIC = [
+  '/manifest.webmanifest', '/favicon.svg', '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/apple-touch-icon.png',
+  '/fonts/inter-latin.woff2', '/fonts/plus-jakarta-sans-latin.woff2', '/fonts/jetbrains-mono-latin.woff2',
+]
+
+/**
+ * Each page's Content Security Policy, as a <meta> the build puts first in its head; the headers (public/_headers)
+ * add what a meta can't say (frame-ancestors). Scripts only from this origin, connections only to it (the room service
+ * and its sockets, named for browsers whose 'self' leaves sockets out), fonts from here, no plugins, no frames, forms
+ * only to here. Styles may be inline: the pages set style attributes. A page that needs more says so in CSP_EXTRA.
+ * OBPAL_PUBLIC_ORIGIN names the service's origin for a build of your own.
+ */
+const PUBLIC_ORIGIN = process.env.OBPAL_PUBLIC_ORIGIN ?? 'https://obpal.blackboxes.net'
+const CSP_EXTRA: Record<string, Record<string, string[]>> = {
+  // The controller shows the thumbnails a screen's layout names, from any https host.
+  '/p/index.html': { 'img-src': ['https:'] },
+  // The viewer reads models and their textures from files the person opens.
+  '/view/index.html': { 'connect-src': ['blob:', 'data:'] },
+  // The arm sim drives a real arm through a rosbridge wherever the person points it.
+  '/sim/arm/index.html': { 'connect-src': ['ws:', 'wss:'] },
+}
+function contentSecurityPolicy(page: string): string {
+  const d: Record<string, string[]> = {
+    'default-src': ["'self'"],
+    'script-src': ["'self'"],
+    'style-src': ["'self'", "'unsafe-inline'"],
+    'img-src': ["'self'", 'data:', 'blob:'],
+    'font-src': ["'self'"],
+    'connect-src': ["'self'", PUBLIC_ORIGIN.replace(/^http/, 'ws')],
+    'media-src': ["'self'", 'blob:', 'data:'],
+    'worker-src': ["'self'"],
+    'manifest-src': ["'self'"],
+    'frame-src': ["'none'"],
+    'object-src': ["'none'"],
+    'base-uri': ["'self'"],
+    'form-action': ["'self'"],
+  }
+  for (const [k, v] of Object.entries(CSP_EXTRA[page] ?? {})) d[k] = [...(d[k] ?? []), ...v]
+  return Object.entries(d).map(([k, v]) => `${k} ${v.join(' ')}`).join('; ')
+}
+
+function pagePolicy(): Plugin {
+  return {
+    name: 'obpal-csp',
+    apply: 'build',
+    transformIndexHtml: {
+      order: 'post',
+      handler: (html, ctx) => ({ html, tags: [{ tag: 'meta', attrs: { 'http-equiv': 'Content-Security-Policy', content: contentSecurityPolicy(ctx.path) }, injectTo: 'head-prepend' }] }),
+    },
+  }
+}
 
 /**
  * Builds the controller's service worker (src/sw/sw.ts) into <client outDir>/p/sw.js after the client bundle is
@@ -208,7 +261,7 @@ function linkVersion(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [cloudflare(), controllerServiceWorker(), embedScript(), catalogueFiles(), linkVersion()],
+  plugins: [cloudflare(), controllerServiceWorker(), embedScript(), catalogueFiles(), linkVersion(), pagePolicy()],
   server: { port: 5175, strictPort: true },
   environments: {
     client: {
@@ -216,7 +269,7 @@ export default defineConfig({
         // Controller floor from PLAN.md: Safari 15, Chromium 95, Firefox 115.
         target: ['safari15', 'chrome95', 'firefox115', 'edge95'],
         rollupOptions: {
-          input: { index: 'index.html', controller: 'p/index.html', viewer: 'view/index.html', sponsor: 'sponsor/index.html', donate: 'donate/index.html', link: 'link/index.html', privacy: 'privacy/index.html', sims: 'sim/index.html', simArm: 'sim/arm/index.html', simArena: 'sim/arena/index.html', catalogue: 'catalogue/index.html', embed: 'embed/index.html', buttons: 'buttons/index.html' },
+          input: { index: 'index.html', controller: 'p/index.html', viewer: 'view/index.html', sponsor: 'sponsor/index.html', donate: 'donate/index.html', link: 'link/index.html', privacy: 'privacy/index.html', sims: 'sim/index.html', simArm: 'sim/arm/index.html', simArena: 'sim/arena/index.html', simDevice: 'sim/device/index.html', catalogue: 'catalogue/index.html', embed: 'embed/index.html', buttons: 'buttons/index.html' },
         },
       },
     },

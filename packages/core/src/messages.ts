@@ -133,8 +133,10 @@ export type HostMsg =
    * pair: present when the host remembers this device (it can reconnect over the LAN without the room service).
    * invite: for a device that joined by short code, the online pairing code (as in the QR link's fragment), so it can
    * reconnect and reload like a phone that scanned.
+   * restart: the host takes ICE restarts, a later offer on this connection (PROTOCOL §1), so a device whose path went
+   * can find a new one without building the connection again.
    */
-  | { t: 'welcome'; proto: number; name: string; layout: Layout; pair?: PairGrant; invite?: string }
+  | { t: 'welcome'; proto: number; name: string; layout: Layout; pair?: PairGrant; invite?: string; restart?: boolean }
   /** The short-code exchange (PROTOCOL §2b): the host's share and its confirmation. */
   | { t: 'pake'; y: string; mac: string }
   | { t: 'layout'; layout: Layout }
@@ -171,6 +173,9 @@ export type SignalIn =
   }
 
 export type SignalPayload =
-  | { offer: RTCSessionDescriptionInit }
+  /** restart: an ICE restart's offer, on a connection the host already has (PROTOCOL §1). */
+  | { offer: RTCSessionDescriptionInit; restart?: boolean }
   | { answer: RTCSessionDescriptionInit }
   | { cand: RTCIceCandidateInit }
+  /** To a device whose restart offer names a connection the host no longer has: build a new one. */
+  | { gone: true }

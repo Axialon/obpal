@@ -1,10 +1,11 @@
 /**
  * ?debug=audio,gfx on the home page: a small readout in the corner, to read on a real device what the tests can't
- * hear or see there. audio: the audio context's state, the output's level (what reaches the speakers, from a meter at
- * the very end of the chain) and the hits played (of each kind: a wall is the edge of the screen) and skipped. gfx:
- * the canvas and its drawing buffer, the quality step
- * the governor chose, multisampling, and the GPU's time per frame where the browser can measure it.
- * Loaded only when asked for.
+ * hear or see there. audio: the audio context's state (and an iPhone's audio session: `playback` is heard with the
+ * silent switch on), the output's level (what reaches the speakers, from a meter at the very end of the chain), the
+ * hits played (of each kind: a wall is the edge of the screen) and skipped, and the last few knocks: how fast each came
+ * in (em/s) and whether it was heard (how loud) or why not (too soft, too soon after the last, sound blocked or off, too
+ * many ringing). gfx: the canvas and its drawing buffer, the quality step the governor chose, multisampling, and the
+ * GPU's time per frame where the browser can measure it. Loaded only when asked for.
  */
 import type { GlassStats } from './glass'
 import type { Hero } from './hero'
@@ -23,11 +24,16 @@ export function mountDebug(kinds: Set<string>, src: { audio: () => GlassStats; g
     const lines: string[] = []
     if (kinds.has('audio')) {
       const a = src.audio()
-      lines.push(`audio  ${a.state}  (context: ${a.context ?? 'not made yet'})`)
+      lines.push(`audio  ${a.state}  (context: ${a.context ?? 'not made yet'}${a.session ? `, session: ${a.session}` : ''})`)
       lines.push(`level  ${dbs(a.levelDb)}   peak ${dbs(a.peakDb)}`)
       const kinds = Object.entries(a.kinds).filter(([, v]) => v > 0).map(([k, v]) => `${k} ${v}`).join(', ')
       lines.push(`hits   ${a.played} played${kinds ? ` (${kinds})` : ''}, ${a.skipped} skipped`)
       if (a.rate) lines.push(`       ${a.rate} Hz, ${a.latencyMs} ms latency`)
+      // Newest first: what, how fast, and what became of it.
+      a.log.slice(-5).reverse().forEach((k, i) => {
+        const what = k.verdict === 'heard' ? `heard, ${k.db} dB` : k.verdict
+        lines.push(`${i ? '      ' : 'knock '} ${k.kind.padEnd(6)} ${k.speed.toFixed(2)} em/s  ${what}`)
+      })
     }
     if (kinds.has('gfx')) {
       const g = src.gfx()

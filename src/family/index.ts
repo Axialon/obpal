@@ -42,7 +42,12 @@ export interface FamilyApi {
   hint(id: string, anchor: () => Element | null, text: string, opts?: { place?: 'above' | 'below'; delay?: number }): void
   dismissHint(id: string, silent?: boolean): void
   icons: { chevron: string; check: string }
-  /** Refresh the accent fill of one .bb-range, or of every .bb-range under root. */
+  /** The filled share (0 to 1) of a slider at `value` between `min` and `max`: clamped; an empty range is empty. */
+  rangeShare(value: number, min: number, max: number): number
+  /**
+   * Refresh the accent fill of one .bb-range, or of every .bb-range under root. Rarely needed: a slider refills
+   * itself when it arrives, is dragged, or has its value or bounds set in code.
+   */
   rangeFill(el: HTMLInputElement): void
   syncRanges(root?: ParentNode): void
 }

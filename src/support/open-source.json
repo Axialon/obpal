@@ -20,6 +20,8 @@
     { "name": "Plus Jakarta Sans", "by": "Tokotype", "what": "Headings, bundled in ob.Pal Link, and the home page's 3D letters", "fonts": ["Plus Jakarta Sans"] },
     { "name": "opentype.js", "by": "Frederik De Bleser and contributors", "what": "Reads the display typeface's outlines for the home page's 3D letters", "packages": ["opentype.js"] },
     { "name": "Clipper", "by": "Angus Johnson, and Timo's JavaScript port", "what": "Merges the 3D letters' outlines into shapes three.js can fill", "packages": ["clipper-lib"] },
-    { "name": "QR Code generator", "by": "Project Nayuki", "what": "What uqr is built on", "packages": [] }
+    { "name": "QR Code generator", "by": "Project Nayuki", "what": "What uqr is built on", "packages": [] },
+    { "name": "jsQR", "by": "Cosmo Wolfe", "what": "Reads our branded QR codes back in the tests, so every code we draw scans", "packages": ["jsqr"] },
+    { "name": "ZXing", "by": "The ZXing authors", "what": "A second reader in the same QR tests", "packages": ["@zxing/library"] }
   ]
 }

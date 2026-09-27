@@ -62,7 +62,12 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   const nodeName = (id: string) => { const n = nodes.find((x) => x.id === id); return n ? o.label?.(n) ?? n.name : id }
   remote.setHostPerson({ name: 'Screen', color: family.accentColor() })
   // The pairing chip: open while nobody is here, closed by itself as a phone comes in; the people chip's + opens it.
-  const chip = new PairingChip({ remote, open: true, testLink: true, onToggle: (open) => $('chip-invite').setAttribute('aria-pressed', String(open)) })
+  // Its card never covers the panel (the e-stop), the people list, the stop banner, the menus or a camera's picture
+  // (the device sims): it folds while one is in the way.
+  const chip = new PairingChip({
+    remote, open: true, testLink: true, avoid: '.sim-panel, #people, .stopped-banner, #switcher, #themes, .ptz-inset',
+    onToggle: (open) => $('chip-invite').setAttribute('aria-pressed', String(open)),
+  })
   Object.assign(window, { __obpal: remote, __sim: { claims, approved, chip } })
 
   const autoAllow = $('auto-allow') as HTMLInputElement | null

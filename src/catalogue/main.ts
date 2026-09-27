@@ -32,13 +32,14 @@ function rows(id: string, list: CatalogueRow[]) {
       ${r.link ? `<a href="${r.link}">Try it →</a>` : ''}
     </article>`).join('')
 }
-// Controllers: what a person picks on the phone, each built from utilities (CATALOGUE §9.1).
+// Controllers: what a person picks on the phone, each built from utilities (CATALOGUE §9.1), and the sims that take it.
 $('controllers').innerHTML = CONTROLLER_IDS.map((id) => CONTROLLERS[id]).map((c) => `
     <article class="cat-card">
       <header><b>${esc(c.name)}</b><span class="st">${c.category}</span></header>
       <code>${esc(c.id)}</code>
       <p>${esc(c.for)}</p>
       ${c.utilities.length ? `<div class="routes">${c.utilities.map((u) => `<span>${esc(u)}</span>`).join('')}</div>` : ''}
+      <a href="/sim/?face=${esc(c.id.slice(5))}">Try it in a sim →</a>
     </article>`).join('')
 rows('utilities', UTILITY_ROWS)
 rows('systems', SYSTEM_ROWS)
@@ -66,7 +67,7 @@ $('utils').innerHTML = MOTION_UTILITIES.map((u) => {
   const key = utilityKey(u)
   const range = (name: 'gain' | 'curve' | 'deadzone', step: number) => {
     const [lo, hi] = PROFILE_LIMITS[name]
-    return `<label class="rng"><span>${{ gain: 'Sensitivity', curve: 'Curve', deadzone: 'Deadzone jump' }[name]}</span><input type="range" name="${name}" min="${lo}" max="${hi}" step="${step}"><output></output></label>`
+    return `<label class="rng"><span>${{ gain: 'Sensitivity', curve: 'Curve', deadzone: 'Deadzone jump' }[name]}</span><input class="bb-range" type="range" name="${name}" min="${lo}" max="${hi}" step="${step}"><output></output></label>`
   }
   return `
     <fieldset class="bld-u" data-key="${key}">

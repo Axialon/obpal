@@ -1,0 +1,73 @@
+/* Device sims (/sim/device/): the stage's backdrop in the visitor's surface, the panel's controllers and units, and a
+   cursor per pointing phone. The rest is the sims' own (sim.css). */
+body.sim.dev { background: radial-gradient(120% 95% at 50% 36%, var(--stage-a, #262626), var(--stage-b, #121212) 58%, var(--stage-c, #050505)); }
+
+.sim-right { grid-column: 3; justify-self: end; display: flex; align-items: center; gap: 8px; }
+.dev-tool { width: 40px; height: 40px; display: grid; place-items: center; padding: 0; border-radius: 14px; color: var(--muted); cursor: pointer; transition: color 0.2s, background 0.2s; }
+.dev-tool:hover, .dev-tool[aria-expanded='true'] { color: var(--ink); }
+.dev-tool .ic { width: 19px; height: 19px; }
+.themes-menu { width: 280px; }
+
+/* The controllers that suit the device: its best first, lit; a dot for each phone using one now. */
+.dev-faces { display: flex; flex-wrap: wrap; gap: 6px; }
+.dev-face { position: relative; display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 12px 0 9px; border: 1px solid var(--line); border-radius: 999px; background: rgb(var(--hl-rgb) / 0.04); color: var(--secondary, var(--muted)); font: 650 12.5px var(--font); cursor: pointer; transition: background 0.2s var(--ease), border-color 0.2s, color 0.2s; }
+.dev-face .ic { width: 17px; height: 17px; }
+.dev-face:hover { color: var(--ink); border-color: rgb(var(--hl-rgb) / 0.22); }
+.dev-face.first { border-color: rgb(var(--accent-rgb) / 0.55); color: var(--ink); }
+.dev-face.first .ic { color: var(--accent-text); }
+.dev-face[aria-pressed='true'] { background: var(--glass-light); border-color: rgb(255 255 255 / 0.3); color: var(--accent-ink); }
+.dev-face[aria-pressed='true'] .ic { color: var(--accent-ink); }
+.dev-face .dots { position: absolute; top: -3px; right: -2px; display: flex; font-style: normal; }
+.dev-face .dots b { width: 11px; height: 11px; border-radius: 50%; box-shadow: 0 0 0 2px rgb(var(--surface-rgb) / 0.95); }
+.dev-face .dots b + b { margin-left: -4px; }
+.dev-how { min-height: 1.5em; margin: -4px 2px 2px; color: var(--secondary, var(--muted)); font-size: 13px; line-height: 1.45; }
+
+/* Units: who holds each, with which controller, and a live readout. */
+.dev-units { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.dev-units li { display: grid; grid-template-columns: 12px 1fr auto; align-items: center; gap: 10px; padding: 9px 12px 9px 10px; border-radius: 14px; background: rgb(var(--hl-rgb) / 0.04); border: 1px solid transparent; transition: border-color 0.3s, background 0.3s; }
+.dev-units li.held { border-color: rgb(var(--hl-rgb) / 0.12); background: rgb(var(--hl-rgb) / 0.07); }
+.dev-units .dot { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 2px rgb(var(--hl-rgb) / 0.3); }
+.dev-units li.held .dot { box-shadow: 0 0 12px currentColor; }
+.dev-units .nn { display: grid; min-width: 0; line-height: 1.25; }
+.dev-units .nn b { font-size: 13.5px; }
+.dev-units .nn small { display: flex; align-items: center; gap: 5px; overflow: hidden; color: var(--muted); font-size: 11.5px; white-space: nowrap; text-overflow: ellipsis; }
+.dev-units .nn small .ic { width: 13px; height: 13px; flex: none; color: var(--secondary, var(--muted)); }
+.dev-units .nv { font: 600 12.5px var(--font-data, var(--font)); font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
+.safety .btn { display: inline-flex; align-items: center; gap: 8px; }
+.safety .btn .ic { width: 17px; height: 17px; }
+
+/* A pointing phone's cursor on the screen, in its colour; hollow while it points off the screen's edge. */
+.dev-cursors { position: fixed; inset: 0; z-index: 4; pointer-events: none; overflow: hidden; }
+.dev-cursor { --c: #fff; position: absolute; left: -14px; top: -14px; width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--c); box-shadow: 0 0 18px color-mix(in srgb, var(--c) 55%, transparent), inset 0 0 0 2px rgb(0 0 0 / 0.25); will-change: transform; transition: width 0.15s var(--ease), height 0.15s var(--ease), left 0.15s var(--ease), top 0.15s var(--ease); }
+.dev-cursor::after { content: ''; position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: var(--c); }
+.dev-cursor.press { left: -18px; top: -18px; width: 36px; height: 36px; }
+.dev-cursor.off { opacity: 0.45; border-style: dashed; }
+
+/* A camera's picture (the PTZ camera): framed in its holder's colour, the zoom in its corner, a flash for a picture, and
+   corners lit while the train is in the middle of it. The picture itself is drawn into the stage's canvas beneath. */
+.ptz-insets { position: fixed; inset: 0; z-index: 2; pointer-events: none; }
+.ptz-inset { --c: rgb(255 255 255 / 0.35); position: absolute; left: 0; top: 0; border-radius: 16px; box-shadow: 0 0 0 2px var(--c), 0 18px 44px rgb(0 0 0 / 0.35); overflow: hidden; }
+.ptz-inset b, .ptz-inset i { position: absolute; top: 8px; padding: 3px 9px; border-radius: 999px; background: rgb(0 0 0 / 0.5); color: #fff; font: 700 11.5px var(--font); font-style: normal; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.ptz-inset b { left: 30px; }
+.ptz-inset i { right: 8px; font-family: var(--font-data, var(--font)); font-variant-numeric: tabular-nums; }
+.ptz-rec { position: absolute; left: 10px; top: 13px; width: 10px; height: 10px; border-radius: 50%; background: rgb(255 255 255 / 0.35); }
+.ptz-inset.held .ptz-rec { background: #ff3b52; box-shadow: 0 0 10px #ff3b52; animation: ptz-rec 1.6s steps(2) infinite; }
+.ptz-inset::before, .ptz-inset::after { content: ''; position: absolute; inset: 22% 30%; border: 2px solid transparent; border-radius: 6px; transition: border-color 0.2s; }
+.ptz-inset.lock::before { border-color: #c6ff34; clip-path: polygon(0 0, 22% 0, 22% 3px, 3px 3px, 3px 22%, 0 22%, 0 78%, 3px 78%, 3px calc(100% - 3px), 22% calc(100% - 3px), 22% 100%, 78% 100%, 78% calc(100% - 3px), calc(100% - 3px) calc(100% - 3px), calc(100% - 3px) 78%, 100% 78%, 100% 22%, calc(100% - 3px) 22%, calc(100% - 3px) 3px, 78% 3px, 78% 0, 100% 0, 100% 100%, 0 100%); }
+.ptz-flash { position: absolute; inset: 0; background: #fff; opacity: 0; transition: opacity 0.5s var(--ease); }
+.ptz-inset.flash .ptz-flash { opacity: 0.85; transition: none; }
+@keyframes ptz-rec { 50% { opacity: 0.35; } }
+
+/* The lamps: what someone is typing to a lamp, floating beside it as they type. */
+.lamp-typing { --c: #fff; position: fixed; left: 0; top: 0; z-index: 3; max-width: 260px; padding: 8px 14px; border-radius: 16px 16px 16px 4px; background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: 0 0 0 2px var(--c), 0 14px 32px rgb(0 0 0 / 0.35); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); color: var(--ink); font: 650 15px var(--font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.lamp-typing::after { content: ''; display: inline-block; width: 2px; height: 1em; margin-left: 2px; vertical-align: -2px; background: var(--c); animation: lamp-caret 1s steps(2) infinite; }
+@keyframes lamp-caret { 50% { opacity: 0; } }
+
+/* The page's notes on one line where they fit (the shared note is otherwise as wide as half the screen). */
+body.dev .note { width: max-content; max-width: calc(100vw - 32px); text-align: center; }
+
+@media (max-width: 860px) {
+  .dev-panel .sim-lede, .dev-panel .log-wrap { display: none; }
+  .dev-panel { gap: 10px; }
+}
+@media (prefers-reduced-motion: reduce) { .dev-cursor { transition: none; } }

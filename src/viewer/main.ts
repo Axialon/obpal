@@ -989,7 +989,11 @@ async function startRemote() {
   remote.setHostPerson({ name: 'Screen', color: family.accentColor() })
   Object.assign(window, { __obpal: remote, __viewer: { holder, camera, controls, view, seats, parts } })
   // Open while nobody is here; it closes by itself as a phone comes in, and the + in the people chip opens it again.
-  pairChip = new PairingChip({ remote, open: true, testLink: true, onToggle: (open) => $('chip-invite').setAttribute('aria-pressed', String(open)) })
+  // It folds while a panel is where it opens, and on narrow screens the caption makes way for it.
+  pairChip = new PairingChip({
+    remote, open: true, testLink: true, avoid: '#lighting, #themes, #more, #switcher, #people, #catalog',
+    onToggle: (open) => { $('chip-invite').setAttribute('aria-pressed', String(open)); $('caption').classList.toggle('pair-open', open) },
+  })
   remote.on('connect', () => {
     $('chip').hidden = false
     remote!.setValues({ model: current?.id ?? '', spin: view.spin, grid: view.grid, glow: view.glow, theme: theme.id, accent: family.getAccent(), light: lighting.preset })

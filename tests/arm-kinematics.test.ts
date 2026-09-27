@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { forward, inverse, type ArmPose } from '../src/sim/arm/kinematics'
+import { forward, inverse, type ArmPose, type ToolTarget } from '../src/sim/arm/kinematics'
+import { reachDown as reachDownOf, solveNear as solveNearOf, within } from '../src/sim/arm/kin'
+import { arm5 } from '../src/sim/arm/kind/arm5'
 
 const HOME: ArmPose = { yaw: 0, shoulder: 18, elbow: 72, wrist: 62, roll: 0 }
+/** Point and 3D as the five-axis arm does them (../src/sim/arm/kin.ts), from its home. */
+const reachDown = (yaw: number, reach: number, height: number, roll = 0) => { const r = reachDownOf(arm5.kin, yaw, reach, height, roll, null, HOME); return r && { pose: r.pose as ArmPose, exact: r.exact } }
+const solveNear = (t: ToolTarget) => { const r = solveNearOf(arm5.kin, t, 60, null, HOME); return r && { pose: r.pose as ArmPose, exact: r.exact } }
+const withinLimits = (p: ArmPose) => within(arm5.kin, p)
 
 describe('robot arm kinematics (the whole-arm node follows a tool target)', () => {
   it('puts the tool where forward kinematics says the home pose has it', () => {
@@ -29,8 +35,6 @@ describe('robot arm kinematics (the whole-arm node follows a tool target)', () =
   })
 })
 
-import { reachDown } from '../src/sim/arm/reach'
-
 describe('point and go: the gripper above a spot on the floor', () => {
   it('points straight down over a spot in reach', () => {
     const r = reachDown(30, 0.6, 0.2)!
@@ -51,8 +55,6 @@ describe('point and go: the gripper above a spot on the floor', () => {
     expect(forward(beyond.pose).reach).toBeLessThan(1.25)
   })
 })
-
-import { solveNear, withinLimits } from '../src/sim/arm/reach'
 
 describe('following a hand: position first', () => {
   it('tips the gripper when its angle can’t be kept, so the gripper still gets there', () => {

@@ -8,9 +8,9 @@
     <title>Robot arms · ob.Pal</title>
     <link rel="icon" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&family=JetBrains+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+    <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/plus-jakarta-sans-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/src/styles/fonts.css" />
     <link rel="stylesheet" href="/src/family/family.css" />
     <script type="module" src="/src/sim/arm/main.ts"></script>
   </head>
@@ -36,6 +36,7 @@
       <p class="eyebrow">system.robot-arm</p>
       <h1>Robot arms</h1>
       <p class="sim-lede">Scan to join, then take a whole arm or one joint. <b>Point</b>: aim at a spot and hold B; A picks up. <b>3D</b>: hold the pad and move your phone, and the gripper follows your hand.</p>
+      <label class="arm-prof arm-kind"><span>Kind of arm</span><select id="arm-kind"></select></label>
       <div class="arms" id="arms"></div>
       <button class="add-arm" id="add-arm" data-icon="plus">Add arm</button>
       <button class="add-arm glow-cam" id="glow-cam" data-icon="view" aria-pressed="false">Follow glowing phones with this camera</button>

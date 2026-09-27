@@ -9,7 +9,7 @@ import { toUi, uiRect } from './uiframe'
 import { sheetExits } from './sheet'
 import { hapticsKind, tick } from './haptics'
 import { GyroSmoother, playerSpaceRates, TiltStick } from './gyro'
-import type { Motion } from './motion'
+import { screenAngle, type Motion } from './motion'
 import { WiiPointer } from './pointing'
 import { ICONS } from '../ui/icons'
 import type { FamilyApi } from '../family'
@@ -370,6 +370,30 @@ export interface HostInfo { name: string; profile?: string; utilities?: string[]
  * by the active profile (CATALOGUE §2–3). Streams PAD packets (packages/core/src/pad.ts) in place of STATE while it is
  * active, and POINTER packets beside them while a pointing utility is on.
  */
+/**
+ * The screen turned (portrait to landscape, say): the level Steer holds and the centre Point aims from were taken in the
+ * old screen frame, so they're taken again once the phone has settled in the new one. step() says when.
+ */
+export class TurnWatch {
+  private angle = -1
+  private due = 0
+  constructor(private readonly settleMs = 400) {}
+
+  /** The screen's angle (degrees) at `now` (ms): true when it's time to take the level again. */
+  step(angle: number, now: number): boolean {
+    if (angle !== this.angle) {
+      if (this.angle >= 0) this.due = now + this.settleMs
+      this.angle = angle
+    }
+    if (!this.due || now < this.due) return false
+    this.due = 0
+    return true
+  }
+
+  /** Forget the angle (the gamepad left): the next one is where it starts. */
+  reset() { this.angle = -1; this.due = 0 }
+}
+
 export class GamepadMode {
   private el: HTMLElement | null = null
   private active = false
@@ -387,6 +411,9 @@ export class GamepadMode {
   private resets: (() => void)[] = []
   private remeasures: (() => void)[] = []
   private readonly on = new Set<MotionUtility>()
+  /** Utilities a profile switched on before the phone had motion to drive them: they come on with its first sample. */
+  private readonly pending = new Set<MotionUtility>()
+  private readonly turns = new TurnWatch()
   private offered: MotionUtility[] = [...MOTION_UTILITIES]
   private host: HostInfo = { name: '' }
   private profileId: ProfileId = 'default'
@@ -453,6 +480,7 @@ export class GamepadMode {
     this.host = h
     this.offered = offeredMotion(h.utilities)
     for (const u of [...this.on]) if (!this.offered.includes(u)) this.on.delete(u)
+    for (const u of [...this.pending]) if (!this.offered.includes(u)) this.pending.delete(u)
     const suggested = isProfileId(h.profile) ? h.profile : null
     this.applyProfile(activeProfile(store.get(profileKey(h.name, suggested)), suggested))
     this.renderChips()
@@ -508,6 +536,7 @@ export class GamepadMode {
   private setActive(on: boolean) {
     if (on === this.active) return
     this.active = on
+    this.turns.reset()
     const el = this.el
     if (el) { el.hidden = !on; el.parentElement?.classList.toggle('gp-on', on) }
     document.documentElement.classList.toggle('gp-mode', on)
@@ -541,6 +570,7 @@ export class GamepadMode {
 
   private toggle(u: MotionUtility, on = !this.on.has(u)) {
     const { motion } = this.deps
+    this.pending.delete(u)
     if (on && !this.on.has(u)) {
       if ((u === Utility.aim && !motion.hasGyro) || !motion.q) return this.deps.toast('Motion is off on this phone')
       this.on.add(u)
@@ -562,6 +592,9 @@ export class GamepadMode {
 
   private sampleMotion(dtMs: number) {
     const { motion, settings } = this.deps
+    // Motion came: what the profile switched on starts now (its level is the pose right now).
+    if (this.pending.size && motion.q) this.switchPending()
+    if (this.turns.step(screenAngle(), performance.now())) this.recentre()
     this.smoother.smoothBelow = 4 + 8 * settings.smooth
     this.wii.setSteadiness(settings.smooth)
     this.inputs = { rates: null, tilt: null }
@@ -658,14 +691,29 @@ export class GamepadMode {
   /** The profile in effect (CATALOGUE §3), which the phone names in mode{p}. */
   get profileInUse(): ProfileId { return this.profileId }
 
-  /** Make a profile current. Its `on` utilities switch on (when the phone can drive them); the rest stay as they were. */
+  /**
+   * Make a profile current. Its `on` utilities the host offers switch on (CATALOGUE §3): at once where the phone can drive
+   * them, else with its first motion sample (a phone whose sensors start late, or wait for Start). The rest stay as they
+   * were.
+   */
   private applyProfile(id: ProfileId) {
     const changed = id !== this.profileId
     this.profileId = id
     this.profile = resolveProfile(id, this.overrides(id))
-    if (changed) for (const u of this.profile.on) if (this.offered.includes(u) && this.deps.motion.q) this.toggle(u, true)
+    if (changed) {
+      this.pending.clear()
+      for (const u of this.profile.on) if (this.offered.includes(u) && !this.on.has(u)) this.pending.add(u)
+      if (this.deps.motion.q) this.switchPending()
+    }
     this.paintChips()
     if (changed) this.deps.profile?.(id)
+  }
+
+  /** Switch on what the profile asked for (Aim only with a gyro to drive it). */
+  private switchPending() {
+    const want = [...this.pending]
+    this.pending.clear()
+    for (const u of want) if (u !== Utility.aim || this.deps.motion.hasGyro) this.toggle(u, true)
   }
 
   /** The user picked a profile: remembered for this host and suggestion; picking the suggestion itself forgets the choice. */

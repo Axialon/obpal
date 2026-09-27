@@ -25,6 +25,8 @@ html.site {
   --bb-accent-strong: #4d7c0f;
   --bb-accent-text: var(--bb-accent);
   --bb-accent-soft: color-mix(in srgb, var(--bb-accent) 55%, var(--bb-ink));
+  --bb-hl-rgb: 235 228 255;
+  --bb-range-deepen: 0%;
   --hl-rgb: 255 255 255;
   /* The haze and the depth around the lime, and the white-hot core of a light. */
   --haze-rgb: 179 164 255;

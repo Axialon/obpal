@@ -1,6 +1,6 @@
 /**
  * The home page end to end, from this checkout's build on the local stand-in (extension/e2e/local.mjs, signaling
- * proxied to production):
+ * through this checkout's own worker, fresh for the run):
  *   - On phone widths the page never scrolls sideways (nothing reaches past the screen's edge).
  *   - On a computer, the hero makes a real code once someone is there; a phone that opens it joins the page.
  *   - The phone's own marble follows it (here by its trackpad, as a phone without motion sensors steers).
@@ -17,12 +17,16 @@
  *   - A knock against the edge of the screen is heard; leaning on it is quiet.
  *   - On a phone, tilted up from below the buttons, the marble rolls up onto them, across and off.
  *   - A marble in a letter's counter rests there without a tremor, and leaves when pointed away.
+ *   - The Move card switches between Move and Grab: in Grab a click (or on a phone a tap) closes the gripper on the
+ *     block and a drag carries it, the arm never freezing; arrow keys change it and the visit keeps it.
+ *   - The Play card's ball stays in play, alone or with the mouse pushing it into the corners.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch.
  */
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, devices } from 'playwright'
+import { cspCheck } from './csp-watch.mjs'
 import sharp from 'sharp'
 import { startLocal } from '../extension/e2e/local.mjs'
 
@@ -272,6 +276,146 @@ try {
     await ctx.close()
     if (selected) throw new Error(`a long press selected "${selected.slice(0, 40)}"`)
     return `arm ${before.x.toFixed(0)},${before.y.toFixed(0)} → ${during.x.toFixed(0)},${during.y.toFixed(0)} with the page still; flick scrolled ${y2 - y1}px`
+  })
+
+  /** The Move card's arm, as drawn: where its hand is, and the block (viewBox units). */
+  const armState = (page) => page.evaluate(() => {
+    const svg = document.querySelector('[data-scene="arm"] svg')
+    const f = [...svg.querySelectorAll('line')].find((e) => e.getAttribute('stroke-width') === '10')
+    const b = [...svg.querySelectorAll('rect')].find((e) => e.getAttribute('fill') === '#c6ff34')
+    return { x: +f.getAttribute('x2'), y: +f.getAttribute('y2'), bx: +b.getAttribute('x') + 10, by: +b.getAttribute('y') + 10 }
+  })
+  const modeOf = (page) => page.evaluate(() => document.querySelector('[data-scene="arm"] .scene-modes [aria-checked="true"]')?.dataset.mode)
+
+  await check('the Move card switches between Move and Grab: in Grab a click closes the gripper on the block and a drag carries it, the arm never freezing; arrows and the visit keep the choice', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, ignoreHTTPSErrors: true })
+    const page = await ctx.newPage()
+    await page.goto(`${local.origin}/`)
+    await page.evaluate(() => document.querySelector('[data-scene="arm"]').scrollIntoView({ block: 'center' }))
+    await sleep(900)
+    const art = await page.locator('[data-scene="arm"]').boundingBox()
+    const at = (x, y) => [art.x + (x / 400) * art.width, art.y + (y / 260) * art.height]
+    const radios = await page.locator('[data-scene="arm"] .scene-modes [role="radio"]').count()
+    if (radios !== 2) throw new Error(`the switch has ${radios} choices`)
+    if ((await modeOf(page)) !== 'move') throw new Error(`it opened in ${await modeOf(page)}`)
+    // Move: pressing and dragging from the block moves the arm, and leaves the block be.
+    await page.mouse.move(...at(200, 120))
+    await sleep(900)
+    const bx = (await armState(page)).bx
+    const to = bx > 200 ? -1 : 1
+    await page.mouse.move(...at(bx, 232))
+    await sleep(900)
+    await page.mouse.down()
+    for (let i = 1; i <= 10; i++) { await page.mouse.move(...at(bx + to * i * 20, 232 - i * 6)); await sleep(40) }
+    await sleep(700)
+    const moved = await armState(page)
+    await page.mouse.up()
+    if (Math.abs(moved.x - (bx + to * 200)) > 30) throw new Error(`in Move the arm stayed at ${moved.x.toFixed(0)} under a drag`)
+    if (Math.hypot(moved.bx - moved.x, moved.by - moved.y - 10) < 20) throw new Error('in Move a press picked the block up')
+    // Grab: a click over the block closes the gripper on it; dragging with the button down carries it across.
+    await page.locator('[data-scene="arm"] .scene-modes [data-mode="grab"]').click()
+    if ((await modeOf(page)) !== 'grab') throw new Error('the switch did not change to Grab')
+    const gx = (await armState(page)).bx
+    const way = gx > 200 ? -1 : 1
+    await page.mouse.move(...at(gx, 232))
+    await sleep(1500)
+    await page.mouse.down()
+    await sleep(500)
+    for (let i = 1; i <= 12; i++) { await page.mouse.move(...at(gx + way * i * 16, 232 - i * 6)); await sleep(40) }
+    await sleep(800)
+    const carried = await armState(page)
+    if (Math.abs(carried.x - (gx + way * 192)) > 30 || Math.hypot(carried.bx - carried.x, carried.by - carried.y - 10) > 4) throw new Error(`the block didn't come along: ${JSON.stringify(carried)}`)
+    // Held still with the button down, past the 3 s a still pointer keeps a scene: it stays with the pointer.
+    await sleep(3600)
+    const still = await armState(page)
+    await page.mouse.up()
+    if (Math.hypot(still.x - carried.x, still.y - carried.y) > 3) throw new Error(`the arm wandered off a held button: ${JSON.stringify(still)}`)
+    // The keyboard moves between the choices, and the choice lasts the visit.
+    await page.locator('[data-scene="arm"] .scene-modes [aria-checked="true"]').focus()
+    await page.keyboard.press('ArrowLeft')
+    const focused = await page.evaluate(() => document.activeElement?.dataset?.mode)
+    if ((await modeOf(page)) !== 'move' || focused !== 'move') throw new Error(`an arrow key left it at ${await modeOf(page)} (focus on ${focused})`)
+    await page.keyboard.press('ArrowRight')
+    await page.reload()
+    await sleep(600)
+    const kept = await modeOf(page)
+    await ctx.close()
+    if (kept !== 'grab') throw new Error(`after a reload it was ${kept}`)
+    return `Move drag: arm ${bx.toFixed(0)} → ${moved.x.toFixed(0)}, the block left be; Grab: carried ${gx.toFixed(0)} → ${carried.bx.toFixed(0)}, held still ${Math.hypot(still.x - carried.x, still.y - carried.y).toFixed(1)} off; arrows and reload kept it`
+  })
+
+  await check('on a phone, in Grab, a tap closes the gripper and a held finger drags the block along', async () => {
+    const ctx = await browser.newContext({ ...devices['Pixel 7'], ignoreHTTPSErrors: true })
+    const page = await ctx.newPage()
+    await page.goto(`${local.origin}/`)
+    await page.evaluate(() => document.querySelector('[data-scene="arm"]').scrollIntoView({ block: 'center' }))
+    await sleep(900)
+    const cdp = await ctx.newCDPSession(page)
+    const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 1 }] })
+    const grab = await page.locator('[data-scene="arm"] .scene-modes [data-mode="grab"]').boundingBox()
+    await touch('touchStart', grab.x + grab.width / 2, grab.y + grab.height / 2)
+    await touch('touchEnd')
+    await sleep(200)
+    if ((await modeOf(page)) !== 'grab') throw new Error('a tap on the switch did not pick Grab')
+    const art = await page.locator('[data-scene="arm"]').boundingBox()
+    const at = (x, y) => [art.x + (x / 400) * art.width, art.y + (y / 260) * art.height]
+    // A tap on the block: the arm reaches for it and the gripper closes on it.
+    const bx = (await armState(page)).bx
+    const way = bx > 200 ? -1 : 1
+    await touch('touchStart', ...at(bx, 232))
+    await touch('touchEnd')
+    await sleep(1200)
+    // Hold, then drag across.
+    await touch('touchStart', ...at(bx, 232))
+    await sleep(260)
+    for (let i = 1; i <= 10; i++) { await touch('touchMove', ...at(bx + way * i * 20, 232 - i * 6)); await sleep(40) }
+    await sleep(700)
+    const carried = await armState(page)
+    await touch('touchEnd')
+    await ctx.close()
+    if (Math.abs(carried.bx - bx) < 100 || Math.hypot(carried.bx - carried.x, carried.by - carried.y - 10) > 4) throw new Error(`the block didn't come along: ${JSON.stringify({ bx, ...carried })}`)
+    return `the block carried ${bx.toFixed(0)} → ${carried.bx.toFixed(0)}`
+  })
+
+  await check('the Play card keeps its ball in play: never still for 2 s, alone or with the mouse pushing it into the corners', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, ignoreHTTPSErrors: true })
+    const page = await ctx.newPage()
+    await page.goto(`${local.origin}/`)
+    await page.evaluate(() => document.querySelector('[data-scene="play"]').scrollIntoView({ block: 'center' }))
+    await sleep(900)
+    const art = await page.locator('[data-scene="play"]').boundingBox()
+    const toPage = (x, y) => [art.x + (x / 400) * art.width, art.y + (y / 260) * art.height]
+    const ball = () => page.evaluate(() => { const c = [...document.querySelectorAll('[data-scene="play"] svg circle')].find((e) => e.getAttribute('fill') === '#f4ffd6'); return { x: +c.getAttribute('cx'), y: +c.getAttribute('cy') } })
+    /** Watch the ball for `ms`: the longest it stayed within 18 units of one spot (s). */
+    const watch = async (ms, each) => {
+      const seen = []
+      let worst = 0
+      const t0 = Date.now()
+      for (let t = 0; t < ms; t = Date.now() - t0) {
+        await each(seen.at(-1))
+        const b = await ball()
+        seen.push({ t, ...b })
+        let k = seen.length - 1
+        while (k > 0 && Math.hypot(seen[k - 1].x - b.x, seen[k - 1].y - b.y) < 18) k--
+        worst = Math.max(worst, (t - seen[k].t) / 1000)
+        await sleep(100)
+      }
+      return worst
+    }
+    const corners = [[70, 34], [330, 34], [70, 226], [330, 226]]
+    const pushed = await watch(12000, async (b) => {
+      if (!b) { await page.mouse.move(...toPage(200, 130)); return }
+      const [cx, cy] = corners.reduce((m, c) => (Math.hypot(c[0] - b.x, c[1] - b.y) < Math.hypot(m[0] - b.x, m[1] - b.y) ? c : m))
+      const d = Math.hypot(cx - b.x, cy - b.y) || 1
+      await page.mouse.move(...toPage(b.x - ((cx - b.x) / d) * 10, b.y - ((cy - b.y) / d) * 10))
+    })
+    // Alone (the mouse off the card; reading down the page keeps a scene in view playing).
+    await page.mouse.move(5, 5)
+    let n = 0
+    const alone = await watch(10000, async () => { if (++n % 20 === 0) await page.mouse.wheel(0, 1) })
+    await ctx.close()
+    if (pushed >= 2 || alone >= 2) throw new Error(`the ball stayed put ${pushed.toFixed(1)} s pushed into corners, ${alone.toFixed(1)} s alone`)
+    return `longest in one spot: ${pushed.toFixed(1)} s pushed into corners, ${alone.toFixed(1)} s alone`
   })
 
   await check("pressed into each edge of what's on screen, the marble's outline meets it (within a pixel), on phones and computers", async () => {
@@ -628,6 +772,7 @@ try {
   })
 
   await check('no page errors on the computer', async () => { if (screenErrors.length) throw new Error(screenErrors.join(' | ')) })
+  await check('no Content Security Policy violations on any page', cspCheck)
 } finally {
   for (const b of browsers.reverse()) await b.close().catch(() => {})
   if (profile) await rm(profile, { recursive: true, force: true }).catch(() => {})

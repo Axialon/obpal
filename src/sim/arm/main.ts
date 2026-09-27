@@ -1,6 +1,8 @@
 /**
- * Robot arms (CATALOGUE §7, system.robot-arm): one to four arms in a shared scene, driven by phones. Each arm offers a
- * whole-arm node and a node per joint, by the control profile the screen picks. Whoever holds the whole arm moves it
+ * Robot arms (CATALOGUE §7, system.robot-arm): one to four arms in a shared scene, driven by phones, all of one kind
+ * (?kind=, ./kinds.ts: the five-axis arm, the SO-101, a six-axis industrial arm, a SCARA, a delta, a desk arm; each
+ * moves by its own kinematics, ./kind/). Each arm offers a whole-arm node and a node per joint, by the control
+ * profile the screen picks. Whoever holds the whole arm moves it
  * with the phone. Point (Wii-style): aim at a spot on the floor and hold B, and the arm goes there; A picks up or
  * drops like a claw; + and − set the height. 3D (Android): hold the pad and move the phone, and the gripper moves as
  * the hand does, through space. 1:1: with the gyro on and a thumb on the pad, turning swings the arm,
@@ -23,15 +25,19 @@ import { applyTheme, initialTheme } from '../../ui/themes'
 import { mountMarks } from '../../ui/icons'
 import { mountTopBar } from '../../landing/topbar'
 import { startSimScene, type SimScene } from '../scene'
+import { simView } from '../view'
 import {
   calibrateHome, defaultCalibration, FeetechDriver, fromRaw, hasSerial, RosDriver, ROS_DEFAULTS, SerialTextDriver, toRaw,
   type ArmDriver, type Calibration, type DriverKind,
 } from './drivers'
-import { armParts, eject, restOf, settle as settleBlocks, stepAmong, type Blk, type Stand } from './blocks'
+import { eject, restOf, settle as settleBlocks, stepAmong, type Base, type Blk, type Stand } from './blocks'
 import { holding, type GripBox, type V3 } from './grasp'
-import { forward, inverse, stepAboveFloor, toolFloor, type ArmPose, type ToolTarget } from './kinematics'
-import { buildArm, JOINTS, type ArmModel, type JointSpec } from './model'
-import { reachDown, solveNear } from './reach'
+import { reachDown, solveNear, within, type Pose } from './kin'
+import type { ToolTarget } from './kinematics'
+import { kindFrom } from './kind'
+import { ARM_KINDS } from './kinds'
+import { placement, turnBetween } from './layout'
+import type { ArmModel, JointSpec } from './model'
 import { GlowFollower, handMove, handTurn, headingOf } from '@obpal/host'
 import { ScreenPointer } from '../../viewer/pointer'
 
@@ -43,18 +49,27 @@ const D2R = Math.PI / 180
 const R2D = 180 / Math.PI
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
+// ---- which kind of arm: every arm in the cell is one (?kind=, ./kinds.ts) ----
+
+const KIND = kindFrom(new URLSearchParams(location.search).get('kind'))
+const KIN = KIND.kin
+const INFO = ARM_KINDS.find((k) => k.id === KIND.id)!
+/** The gripper's joint, after the pose's. */
+const GRIP = KIN.keys.length
+
 // ---- the stage: a work cell, arms around a shared floor ----
 
-const renderer = new THREE.WebGLRenderer({ canvas: $('stage') as HTMLCanvasElement, antialias: true })
-renderer.setPixelRatio(Math.min(2, Math.max(1.5, devicePixelRatio)))
+// Drawn the way every sim is (../view.ts): clean edges at rest, smooth in motion.
+const view = simView($('stage') as HTMLCanvasElement, { onResize: resize })
+const renderer = view.renderer
 renderer.toneMapping = THREE.ACESFilmicToneMapping
 const scene = new THREE.Scene()
 scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture
 scene.background = new THREE.Color(document.documentElement.dataset.theme === 'light' ? '#e9edf3' : '#07090d')
 const camera = new THREE.PerspectiveCamera(42, 1, 0.05, 60)
-camera.position.set(2.2, 2.1, 3.1)
+camera.position.set(...KIND.cell.camera)
 const controls = new OrbitControls(camera, renderer.domElement)
-controls.target.set(0, 0.35, 0)
+controls.target.set(0, KIND.cell.look, 0)
 controls.enableDamping = true
 controls.minDistance = 1.2
 controls.maxDistance = 7
@@ -67,11 +82,11 @@ const mats = {
 const floor = new THREE.Mesh(new THREE.CircleGeometry(4.2, 128), new THREE.MeshStandardMaterial({ color: '#0e1118', metalness: 0.2, roughness: 0.9 }))
 floor.rotation.x = -Math.PI / 2
 scene.add(floor)
-const grid = new THREE.PolarGridHelper(2, 8, 8, 128, '#27303d', '#1b222d')
+const grid = new THREE.PolarGridHelper(KIND.cell.fence - 0.05, 8, 8, 128, '#27303d', '#1b222d')
 grid.position.y = 0.001
 scene.add(grid)
-// The cell's fence: everything inside is within some arm's reach.
-const fence = new THREE.Mesh(new THREE.TorusGeometry(2.05, 0.008, 8, 192), new THREE.MeshBasicMaterial({ color: '#f59e0b', transparent: true, opacity: 0.55 }))
+// The cell's fence: the arms work inside it.
+const fence = new THREE.Mesh(new THREE.TorusGeometry(KIND.cell.fence, 0.008, 8, 192), new THREE.MeshBasicMaterial({ color: '#f59e0b', transparent: true, opacity: 0.55 }))
 fence.rotation.x = Math.PI / 2
 fence.position.y = 0.004
 scene.add(fence)
@@ -147,6 +162,7 @@ interface Claw {
   pick: boolean
   yaw: number
   reach: number
+  roll: number
   since: number
   /** Where the gripper is headed, and how far it's been sent so far (the sim's own arm goes straight up or down). */
   goal: number
@@ -154,9 +170,6 @@ interface Claw {
   at: number
 }
 
-/** Arms stand around the middle, facing it: left, right, back, front. */
-const SLOTS: [number, number][] = [[-1, 0], [1, 0], [0, -1], [0, 1]]
-const CELL = 0.78
 const MAX_ARMS = 4
 const arms: Arm[] = []
 /** The panel: who held what when it was last drawn (to flash changes), and which arms have their settings open. */
@@ -183,16 +196,16 @@ function addArm(): Arm | null {
   const used = new Set(arms.map((a) => a.n))
   const n = [1, 2, 3, 4].find((k) => !used.has(k))
   if (!n) return null
-  const model = buildArm(n, mats)
-  const [x, z] = SLOTS[n - 1]
-  model.root.position.set(x * CELL, 0, z * CELL)
-  // Reach (local −x) toward the middle.
-  model.root.rotation.y = Math.atan2(z, x) + Math.PI
+  const model = KIND.build(n, mats)
+  // Around the middle, facing it: the sector its base can't turn to faces out, behind it (./layout.ts).
+  const at = placement(n, KIND.cell.stand)
+  model.root.position.set(at.x, 0, at.z)
+  model.root.rotation.y = at.turn
   scene.add(model.root)
   const id = `a${n}`
-  const joints: Joint[] = JOINTS.map((spec) => ({ spec, node: `${id}.${spec.key}`, angle: spec.home, vel: 0, target: null, state: '', flash: 0 }))
+  const joints: Joint[] = KIN.joints.map((spec) => ({ spec, node: `${id}.${spec.key}`, angle: spec.home, vel: 0, target: null, state: '', flash: 0 }))
   joints.forEach((j, i) => model.apply[i](j.angle))
-  const arm: Arm = { n, id, name: `Arm ${n}`, model, joints, profile: 'both', drive: null, edge: false, state: '', homing: false, flash: 0, hw: null, hover: 0.2, claw: null, track: null, scale: 1.5, goal: null, blocked: false }
+  const arm: Arm = { n, id, name: `Arm ${n}`, model, joints, profile: 'both', drive: null, edge: false, state: '', homing: false, flash: 0, hw: null, hover: KIND.drive.hover[0], claw: null, track: null, scale: KIND.drive.scale, goal: null, blocked: false }
   arms.push(arm)
   arms.sort((a, b) => a.n - b.n)
   refreshNodes()
@@ -226,19 +239,22 @@ function refreshNodes() {
   renderPanel()
 }
 
-const poseOf = (a: Arm): ArmPose => ({ yaw: a.joints[0].angle, shoulder: a.joints[1].angle, elbow: a.joints[2].angle, wrist: a.joints[3].angle, roll: a.joints[4].angle })
-const POSE_KEYS = ['yaw', 'shoulder', 'elbow', 'wrist', 'roll'] as const
-const within = (p: ArmPose) => POSE_KEYS.every((k, i) => p[k] >= JOINTS[i].min && p[k] <= JOINTS[i].max)
-function setPose(a: Arm, p: ArmPose) { POSE_KEYS.forEach((k, i) => { a.joints[i].target = p[k] }) }
+/** An arm's joints but the gripper, as a pose (./kin.ts). */
+function poseOf(a: Arm): Pose {
+  const p: Pose = {}
+  KIN.keys.forEach((k, i) => { p[k] = a.joints[i].angle })
+  return p
+}
+function setPose(a: Arm, p: Pose) { KIN.keys.forEach((k, i) => { a.joints[i].target = p[k] }) }
 /** The whole arm stops where it is (the gripper keeps what it was told). */
 function settle(a: Arm) {
   a.drive = null
   a.claw = null
   a.track = null
-  if (!a.homing) for (let i = 0; i < 5; i++) a.joints[i].target = null
+  if (!a.homing) for (let i = 0; i < GRIP; i++) a.joints[i].target = null
 }
 function toggleGrip(a: Arm) {
-  const g = a.joints[5]
+  const g = a.joints[GRIP]
   // Closed on a block, it's shut, however wide the block keeps it.
   const shut = blocks.some((b) => b.by === a) || (g.target ?? g.angle) <= 0.5
   g.target = shut ? 1 : 0
@@ -265,7 +281,7 @@ interface Block {
 const blocks: Block[] = ['#38bdf8', '#fb7185', '#fcd34d', '#a78bfa', '#34d399', '#f472b6'].map((c, i) => {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(BLOCK, BLOCK, BLOCK), new THREE.MeshStandardMaterial({ color: c, metalness: 0.1, roughness: 0.35, emissive: c, emissiveIntensity: 0.12 }))
   const a = (i / 6) * Math.PI * 2 + 0.5
-  const r = i % 2 ? 0.34 : 0.22
+  const r = KIND.cell.blocks[i % 2]
   mesh.position.set(Math.cos(a) * r, BLOCK / 2, Math.sin(a) * r)
   scene.add(mesh)
   return { mesh, by: null, vy: 0, grip: 0 }
@@ -303,8 +319,14 @@ function setBlk(b: Block, t: Blk) {
 }
 /** Where an arm stands, its parts (and what it holds) as boxes, and every arm's base, for ./blocks.ts. */
 const standOf = (a: Arm): Stand => ({ x: a.model.root.position.x, z: a.model.root.position.z, turn: a.model.root.rotation.y })
-const partsOf = (a: Arm) => armParts(standOf(a), poseOf(a), a.joints[5].angle, heldBox(a))
-const bases = () => arms.map((a) => ({ x: a.model.root.position.x, z: a.model.root.position.z }))
+const partsOf = (a: Arm) => KIN.parts(standOf(a), poseOf(a), a.joints[GRIP].angle, heldBox(a))
+/** Every arm's base as posts standing on the floor, in the world. */
+function bases(): Base[] {
+  return arms.flatMap((a) => {
+    const s = standOf(a), c = Math.cos(s.turn), n = Math.sin(s.turn)
+    return KIN.posts.map((p) => ({ x: s.x + c * p.x + n * p.z, z: s.z - n * p.x + c * p.z, column: [[p.r, p.y0, p.y1] as const] }))
+  })
+}
 
 function updateBlocks(dt: number) {
   const free = blocks.filter((b) => !b.by)
@@ -355,7 +377,7 @@ function heldBox(a: Arm): GripBox | null {
 function holdStep(a: Arm) {
   const b = blocks.find((o) => o.by === a)
   if (!b) return
-  const g = a.joints[5]
+  const g = a.joints[GRIP]
   const h = holding(b.grip, g.angle)
   if (h.release || a.hw) { drop(b); return }
   if (h.open === g.angle) return
@@ -363,7 +385,7 @@ function holdStep(a: Arm) {
   g.vel = 0
   // On the block, the gripper is as closed as it goes: done.
   if (g.target !== null && g.target < h.open) g.target = null
-  a.model.apply[5](g.angle)
+  a.model.apply[GRIP](g.angle)
 }
 
 /**
@@ -371,23 +393,23 @@ function holdStep(a: Arm) {
  * what can't give way (under a part coming down on it, or pinned) stops the joints that would take it in, and a block
  * the fingers close on, turned square, is held. A real arm is stopped by none of it: it pushes them out of its way.
  */
-function blockStep(a: Arm, was: ArmPose, gripWas: number, following: boolean) {
+function blockStep(a: Arm, was: Pose, gripWas: number, following: boolean) {
   const free = blocks.filter((b) => !b.by)
-  const g = a.joints[5]
-  const r = stepAmong(standOf(a), { pose: was, open: gripWas }, { pose: poseOf(a), open: g.angle }, heldBox(a),
+  const g = a.joints[GRIP]
+  const r = stepAmong(KIN, standOf(a), { pose: was, open: gripWas }, { pose: poseOf(a), open: g.angle }, heldBox(a),
     { blocks: free.map(blkOf), still: arms.filter((o) => o !== a).flatMap(partsOf), bases: bases() },
-    { real: !!a.hw, following, minShoulder: JOINTS[1].min })
+    { real: !!a.hw, following })
   free.forEach((b, i) => { if (i !== r.took?.i) setBlk(b, r.blocks[i]) })
   a.blocked = r.stopped.some((k) => k !== 'grip')
   if (a.hw) return
-  POSE_KEYS.forEach((k, i) => {
+  KIN.keys.forEach((k, i) => {
     if (a.joints[i].angle === r.pose[k]) return
     a.joints[i].angle = r.pose[k]
     a.model.apply[i](r.pose[k])
   })
-  if (g.angle !== r.open) { g.angle = r.open; a.model.apply[5](g.angle) }
+  if (g.angle !== r.open) { g.angle = r.open; a.model.apply[GRIP](g.angle) }
   for (const k of r.stopped) {
-    const j = a.joints[k === 'grip' ? 5 : POSE_KEYS.indexOf(k)]
+    const j = a.joints[k === 'grip' ? GRIP : KIN.keys.indexOf(k)]
     j.vel = 0
     j.state ||= 'block'
   }
@@ -475,7 +497,7 @@ void startSimScene({
     if (!f || stopped) return
     if (!f.joint && id === 'wii-a') { startClaw(f.arm); return }
     if (!f.joint && (id === 'wii-plus' || id === 'wii-minus')) {
-      f.arm.hover = clamp(Math.round((f.arm.hover + (id === 'wii-plus' ? 0.05 : -0.05)) * 100) / 100, 0.08, 0.8)
+      f.arm.hover = clamp(Math.round((f.arm.hover + (id === 'wii-plus' ? 0.05 : -0.05)) * 100) / 100, KIND.drive.hover[1], KIND.drive.hover[2])
       s.remote.feedback({ haptic: 'tick', toast: `Hovering ${Math.round(f.arm.hover * 100)} cm up` }, who.id)
       return
     }
@@ -491,6 +513,12 @@ void startSimScene({
   s.remote.on('leave', (p) => { dropAim(p.id); renderPanel() })
   refreshNodes()
 })
+
+// The kind of arm: another kind is another cell, so the page again with it (./kinds.ts).
+const kindPick = $('arm-kind') as HTMLSelectElement
+for (const k of ARM_KINDS) kindPick.add(new Option(k.name, k.id, false, k.id === KIND.id))
+kindPick.title = INFO.blurb
+kindPick.onchange = () => { const u = new URL(location.href); u.searchParams.set('kind', kindPick.value); location.assign(u) }
 
 $('estop').onclick = () => estop('host')
 $('resume').onclick = resume
@@ -523,7 +551,8 @@ function commanded(j: Joint, who: string, f: Frame, pad: PadState | null, dt: nu
     const b = dialBase.get(who)
     if (!b || b.grab !== f.grab) dialBase.set(who, { grab: f.grab, angle: j.angle })
     const base = dialBase.get(who)!.angle
-    const scale = j.spec.unit === '°' ? 1 : 1 / 120
+    // A degree of the phone's turn: a degree, 1/6 cm of a joint that slides, 1/120 of the gripper's opening.
+    const scale = j.spec.unit === '°' ? 1 : j.spec.unit === 'm' ? 1 / 600 : 1 / 120
     j.target = clamp(base + twistOf(f.qRel) * scale, j.spec.min, j.spec.max)
     return 0
   }
@@ -559,7 +588,7 @@ function driveWhole(a: Arm, who: string, now: number, dt: number): string {
   if (now - (lastInput.get(who) ?? 0) > 200) { settle(a); return 'watchdog' }
   if (!pad && f.mode === Mode.point) return drivePoint(a, who, now)
   if (!pad && f.mode === Mode.track) return driveTrack(a, who, f)
-  const grip = a.joints[5]
+  const grip = a.joints[GRIP]
   const inc = zeroTarget()
   let active = false
   let following = false
@@ -593,25 +622,25 @@ function driveWhole(a: Arm, who: string, now: number, dt: number): string {
   a.homing = false
   // Begin a drive from where the tool is and where the phone points: letting go and pressing again ratchets.
   if (!a.drive || a.drive.grab !== f.grab || a.drive.following !== following) {
-    a.drive = { grab: f.grab, following, q0: following ? new THREE.Quaternion(f.qRel[0], f.qRel[1], f.qRel[2], f.qRel[3]) : null, ref: forward(poseOf(a)), acc: zeroTarget() }
+    a.drive = { grab: f.grab, following, q0: following ? new THREE.Quaternion(f.qRel[0], f.qRel[1], f.qRel[2], f.qRel[3]) : null, ref: KIN.forward(poseOf(a)), acc: zeroTarget() }
   }
   const d = a.drive
   for (const k of ['yaw', 'reach', 'height', 'pitch', 'roll'] as const) d.acc[k] += inc[k]
   const ph = d.q0 ? phoneTurn(d.q0, f.qRel) : { yaw: 0, pitch: 0, roll: 0 }
-  const pitch = clamp(d.ref.pitch + d.acc.pitch, 20, 200)
-  const roll = clamp(d.ref.roll + d.acc.roll - ph.roll, JOINTS[4].min, JOINTS[4].max)
+  const pitch = clamp(d.ref.pitch + d.acc.pitch, ...KIN.pitchRange)
+  const roll = clamp(d.ref.roll + d.acc.roll - ph.roll, ...KIN.rollRange)
   const goal: ToolTarget = {
-    yaw: clamp(d.ref.yaw + d.acc.yaw + ph.yaw, JOINTS[0].min, JOINTS[0].max),
-    reach: clamp(d.ref.reach + d.acc.reach, 0.25, 1.2),
+    yaw: clamp(d.ref.yaw + d.acc.yaw + ph.yaw, ...KIN.yawRange),
+    reach: clamp(d.ref.reach + d.acc.reach, ...KIND.drive.reach),
     // No lower than the gripper can go at its angle: pushed down, it stops on the floor.
-    height: clamp(d.ref.height + d.acc.height + ph.pitch * D2R * LIFT, Math.max(0.06, toolFloor(pitch, roll, heldBox(a))), 1.45),
+    height: clamp(d.ref.height + d.acc.height + ph.pitch * D2R * LIFT, Math.max(KIND.drive.height[0], KIN.toolFloor(pitch, roll, heldBox(a))), KIND.drive.height[1]),
     pitch,
     roll,
   }
   // No winding up past the clamps: pushing further out and back again answers at once.
   d.acc = { yaw: goal.yaw - d.ref.yaw - ph.yaw, reach: goal.reach - d.ref.reach, height: goal.height - d.ref.height - ph.pitch * D2R * LIFT, pitch: goal.pitch - d.ref.pitch, roll: goal.roll - d.ref.roll + ph.roll }
-  const { pose, reached } = inverse(goal, heldBox(a))
-  const ok = reached && within(pose)
+  const { pose, reached } = KIN.inverse(goal, heldBox(a), poseOf(a))
+  const ok = reached && within(KIN, pose)
   // Past the arm's reach or a joint's limit, the arm holds the last pose it could reach.
   if (ok) setPose(a, pose)
   if (!ok && !a.edge) s.remote.feedback({ haptic: 'bump' }, who)
@@ -678,7 +707,8 @@ function readInputs(now: number) {
     raycaster.setFromCamera(ndc, camera)
     const hit = st.off ? null : raycaster.ray.intersectPlane(floorPlane, aim.hit ?? new THREE.Vector3())
     // Keep it inside the cell's fence.
-    if (hit && Math.hypot(hit.x, hit.z) > 2) { const k = 2 / Math.hypot(hit.x, hit.z); hit.x *= k; hit.z *= k }
+    const edge = KIND.cell.fence - 0.05
+    if (hit && Math.hypot(hit.x, hit.z) > edge) { const k = edge / Math.hypot(hit.x, hit.z); hit.x *= k; hit.z *= k }
     // Aim assist, as on the Wii: near a block on the floor, the dot settles onto it.
     if (hit) {
       let best: Block | null = null
@@ -739,7 +769,9 @@ function drivePoint(a: Arm, who: string, now: number): string {
   if (!aim?.b || !aim.hit) { settle(a); return 'deadman' }
   a.homing = false
   const local = a.model.root.worldToLocal(tv.copy(aim.hit))
-  const r = reachDown(Math.atan2(local.z, -local.x) * R2D, Math.hypot(local.x, local.z), a.hover, a.joints[4].angle, heldBox(a))
+  // Behind the arm, it holds at a limit rather than swinging round (./layout.ts); `exact` says it faces the spot.
+  const pose = poseOf(a)
+  const r = reachDown(KIN, Math.atan2(local.z, -local.x) * R2D, Math.hypot(local.x, local.z), a.hover, KIN.forward(pose).roll, heldBox(a), pose)
   if (r) setPose(a, r.pose)
   const ok = !!r?.exact
   if (!ok && !a.edge) sim?.remote.feedback({ haptic: 'bump' }, who)
@@ -766,8 +798,9 @@ function toolWorld(a: Arm, t: ToolTarget) {
  */
 function driveTrack(a: Arm, who: string, f: Frame): string {
   const pose = f.pose
-  // The deadman as the phone saw it with this pose (a glow's pose comes from the camera, so from STATE).
-  const held = pose ? pose.touching || f.touching : false
+  // The deadman as the phone saw it with this pose (a glow's pose comes from the camera, so from STATE). Only the
+  // pose's: a STATE that lags the thumb lifting doesn't keep the arm following the poses after it.
+  const held = pose ? pose.touching : false
   if (!pose || !pose.tracked || !held) {
     if (pose && !pose.tracked && held && a.track) sim?.remote.feedback({ toast: 'Lost track: more light, slower moves' }, who)
     settle(a)
@@ -776,7 +809,7 @@ function driveTrack(a: Arm, who: string, f: Frame): string {
   a.homing = false
   a.claw = null
   if (!a.track || a.track.gen !== pose.gen) {
-    const t = forward(poseOf(a))
+    const t = KIN.forward(poseOf(a))
     a.track = { gen: pose.gen, p0: [...pose.p], q0: [...pose.q], heading: headingOf(pose.q), tool: toolWorld(a, t), pitch: t.pitch, roll: t.roll }
   }
   const k = a.track
@@ -789,20 +822,24 @@ function driveTrack(a: Arm, who: string, f: Frame): string {
   camRight.crossVectors(camFwd, UP).normalize()
   const w = tv.copy(k.tool).addScaledVector(camRight, m.right * a.scale).addScaledVector(UP, m.up * a.scale).addScaledVector(camFwd, m.forward * a.scale)
   const local = a.model.root.worldToLocal(w)
+  // Behind the arm, it holds at a limit rather than swinging round (./layout.ts).
+  const want = Math.atan2(local.z, -local.x) * R2D
+  const current = poseOf(a)
   const goal: ToolTarget = {
-    yaw: Math.atan2(local.z, -local.x) * R2D,
-    reach: Math.max(0.2, Math.hypot(local.x, local.z)),
+    yaw: KIN.heading(want, current),
+    reach: Math.max(KIND.drive.reach[0], Math.hypot(local.x, local.z)),
     height: Math.max(CLAW_LOW, local.y),
-    pitch: clamp(k.pitch - turn.tip, 20, 200),
-    roll: clamp(k.roll + turn.twist, JOINTS[4].min, JOINTS[4].max),
+    pitch: clamp(k.pitch - turn.tip, ...KIN.pitchRange),
+    roll: clamp(k.roll + turn.twist, ...KIN.rollRange),
   }
   a.goal = goal
   // Where the gripper goes comes first: tip it if that's what it takes to get there.
-  const r = solveNear(goal, 60, heldBox(a))
+  const r = solveNear(KIN, goal, 60, heldBox(a), current)
   if (r) setPose(a, r.pose)
-  if (!r && !a.edge) sim?.remote.feedback({ haptic: 'bump' }, who)
-  a.edge = !r
-  return r ? '' : 'edge'
+  const ok = !!r && turnBetween(goal.yaw, want) < 1e-6
+  if (!ok && !a.edge) sim?.remote.feedback({ haptic: 'bump' }, who)
+  a.edge = !ok
+  return ok ? '' : 'edge'
 }
 
 /** The gripper this close above the floor grasps a block lying there. */
@@ -813,7 +850,7 @@ const CLAW_SPEED = 0.3
 
 /** Send the gripper to a height over the claw's spot. */
 function clawAt(a: Arm, c: Claw, height: number) {
-  const r = reachDown(c.yaw, c.reach, height, a.joints[4].angle, heldBox(a))
+  const r = reachDown(KIN, c.yaw, c.reach, height, c.roll, heldBox(a), poseOf(a))
   if (r) setPose(a, r.pose)
 }
 
@@ -824,7 +861,7 @@ function clawAt(a: Arm, c: Claw, height: number) {
  */
 function clawTo(a: Arm, c: Claw, height: number) {
   c.goal = height
-  c.h = a.hw ? height : forward(poseOf(a)).height
+  c.h = a.hw ? height : KIN.forward(poseOf(a)).height
   c.at = performance.now()
   if (a.hw) clawAt(a, c, height)
 }
@@ -832,12 +869,12 @@ function clawTo(a: Arm, c: Claw, height: number) {
 /** A (Point): pick up what's under the gripper, or put down what it holds. */
 function startClaw(a: Arm) {
   if (a.claw || stopped || (a.hw && !a.hw.live)) return
-  const t = forward(poseOf(a))
+  const t = KIN.forward(poseOf(a))
   a.homing = false
   // Holding a block, it puts it down; else it picks one up, opening on the way down.
   const pick = !blocks.some((b) => b.by === a)
-  if (pick) a.joints[5].target = 1
-  a.claw = { phase: 'down', pick, yaw: t.yaw, reach: t.reach, since: performance.now(), goal: CLAW_LOW, h: t.height, at: performance.now() }
+  if (pick) a.joints[GRIP].target = 1
+  a.claw = { phase: 'down', pick, yaw: t.yaw, reach: t.reach, roll: t.roll, since: performance.now(), goal: CLAW_LOW, h: t.height, at: performance.now() }
   clawTo(a, a.claw, CLAW_LOW)
 }
 
@@ -849,8 +886,8 @@ function clawStep(a: Arm, now: number): string {
     clawAt(a, c, c.h)
   }
   c.at = now
-  const still = c.h === c.goal && a.joints.slice(0, 5).every((j) => j.target === null && Math.abs(j.vel) < 2)
-  const g = a.joints[5]
+  const still = c.h === c.goal && a.joints.slice(0, GRIP).every((j) => j.target === null && Math.abs(j.vel) < 2)
+  const g = a.joints[GRIP]
   if (now - c.since > 8000) { a.claw = null; return '' }
   // Down (or down on a block that stops it): close or open.
   if (c.phase === 'down' && (still || a.blocked)) { c.phase = 'grip'; g.target = c.pick ? 0 : 1 } else if (c.phase === 'grip' && g.target === null) {
@@ -876,8 +913,8 @@ function stepArm(a: Arm, now: number, dt: number) {
   const cap = hw?.live ? hw.cap : 1
   // Where the arm and the gripper were, and whether it's headed for a pose, for the floor and the grip (below).
   const was = poseOf(a)
-  const gripWas = a.joints[5].angle
-  const following = !stopped && a.joints.slice(1, 5).some((j) => j.target !== null)
+  const gripWas = a.joints[GRIP].angle
+  const following = !stopped && a.joints.slice(0, GRIP).some((j) => j.target !== null)
   a.joints.forEach((j, i) => {
     const who = s?.claims.holder(j.node)
     let v = 0
@@ -900,7 +937,7 @@ function stepArm(a: Arm, now: number, dt: number) {
     // Following a target (the whole arm, 1:1, home, the gripper): a proportional approach under the same caps.
     if (j.target !== null && !stopped) {
       const e = j.target - j.angle
-      v = Math.abs(e) < (j.spec.unit === '°' ? 0.05 : 0.002) ? 0 : e * 6
+      v = Math.abs(e) < (j.spec.unit === '°' ? 0.05 : j.spec.unit === 'm' ? 0.0005 : 0.002) ? 0 : e * 6
       if (!v) j.target = null
     }
     const vmax = j.spec.vmax * cap
@@ -916,9 +953,9 @@ function stepArm(a: Arm, now: number, dt: number) {
   // The floor: no step takes any part of the arm below it. Headed for a pose, the arm rides along it while its joints
   // catch up; turned by hand, a joint stops there as at a limit.
   if (!mirror) {
-    const { pose, floored } = stepAboveFloor(was, poseOf(a), following, JOINTS[1].min, heldBox(a))
+    const { pose, floored } = KIN.stepAboveFloor(was, poseOf(a), following, heldBox(a))
     for (const k of floored) {
-      const i = POSE_KEYS.indexOf(k)
+      const i = KIN.keys.indexOf(k)
       const j = a.joints[i]
       j.angle = pose[k]
       j.vel = 0
@@ -952,7 +989,7 @@ function loop(now: number) {
   for (const a of arms) stepArm(a, now, dt)
   updateBlocks(dt)
   controls.update()
-  renderer.render(scene, camera)
+  view.draw(scene, camera, dt)
   if (Math.floor(now / 100) !== Math.floor((now - dt * 1000) / 100)) renderReadouts()
   requestAnimationFrame(loop)
 }
@@ -968,13 +1005,14 @@ function liveStep(a: Arm, now: number) {
   if (!r || now - r.at > 1200) { if (now - hw.since > 2000) estop('host', `${a.name} stopped reporting where it is`); return }
   const got = fromRaw(hw.cal, r.raw.map((v) => v ?? NaN))
   let off = 0
-  for (let i = 0; i < 5; i++) if (Number.isFinite(got[i])) off = Math.max(off, Math.abs(got[i] - a.joints[i].angle))
+  for (let i = 0; i < GRIP; i++) if (Number.isFinite(got[i])) off = Math.max(off, Math.abs(got[i] - a.joints[i].angle))
   if (off <= 12) { hw.lagSince = 0; return }
   hw.lagSince ||= now
   if (now - hw.lagSince > 600) estop('host', `${a.name} isn’t keeping up (${Math.round(off)}° off): check for something in its way`)
 }
 
-const calKey = (kind: DriverKind, a: Arm) => `obpal-arm-cal:${kind}:${a.n}`
+/** Where an arm's calibration is kept: per kind of arm (the five-axis arm's as it always was), driver and arm. */
+const calKey = (kind: DriverKind, a: Arm) => `obpal-arm-cal:${KIND.id === 'arm5' ? '' : `${KIND.id}:`}${kind}:${a.n}`
 function loadCal(kind: DriverKind, a: Arm): Calibration {
   const base = defaultCalibration(kind)
   try {
@@ -1018,8 +1056,8 @@ async function goLive(a: Arm, cap: number) {
   const r = hw.driver.read()
   if (!r || r.raw.some((v) => v === null)) { sim?.note(`${a.name} hasn’t reported every joint yet`); return }
   const angles = fromRaw(hw.cal, r.raw as number[])
-  const out = JOINTS.findIndex((s, i) => !(angles[i] >= s.min - 3 && angles[i] <= s.max + 3))
-  if (out >= 0) { sim?.note(`${a.name}’s ${JOINTS[out].name.toLowerCase()} reads outside its limits: calibrate it first`); return }
+  const out = KIN.joints.findIndex((s, i) => !(angles[i] >= s.min - 3 && angles[i] <= s.max + 3))
+  if (out >= 0) { sim?.note(`${a.name}’s ${KIN.joints[out].name.toLowerCase()} reads outside its limits: calibrate it first`); return }
   // Start from where the arm is, so going live never jumps.
   a.joints.forEach((j, i) => { j.angle = clamp(angles[i], j.spec.min, j.spec.max); j.vel = 0; j.target = null })
   await hw.driver.torque(true)
@@ -1061,7 +1099,7 @@ function renderHardware() {
   $('hw-cal').hidden = !cal
   $('hw-live-note').hidden = !hw?.live
   if (cal) {
-    $('hw-dirs').replaceChildren(...JOINTS.slice(0, 5).map((s, i) => {
+    $('hw-dirs').replaceChildren(...KIN.joints.slice(0, GRIP).map((s, i) => {
       const l = document.createElement('label')
       l.innerHTML = '<input type="checkbox" /> <span></span>'
       l.querySelector('span')!.textContent = s.name
@@ -1111,7 +1149,7 @@ $('cal-home').onclick = () => {
   const a = dialogArm
   const r = a?.hw?.driver.read()
   if (!a?.hw || !r || r.raw.some((v) => v === null)) { $('hw-err').textContent = 'The arm hasn’t reported every joint yet'; return }
-  a.hw.cal = calibrateHome(a.hw.cal, r.raw as number[], JOINTS.map((s) => s.home))
+  a.hw.cal = calibrateHome(a.hw.cal, r.raw as number[], KIN.joints.map((s) => s.home))
   saveCal(a)
   $('hw-err').textContent = ''
   sim?.log(`The screen set ${a.name}’s home from the real arm`)
@@ -1192,6 +1230,8 @@ function armCard(a: Arm, held: Record<string, string>): HTMLElement {
   for (const k of SCALES) scale.add(new Option(`${k}×`, String(k), false, k === a.scale))
   scale.onchange = () => { a.scale = Number(scale.value) || 1.5; a.track = null }
   const hwBtn = sec.querySelector<HTMLButtonElement>('.arm-hw')!
+  // Only an arm with a real one's joints can be its twin (./drivers.ts).
+  hwBtn.hidden = !KIND.hardware
   hwBtn.textContent = hw ? 'Hardware' : 'Connect a real arm'
   hwBtn.onclick = () => openHardware(a)
   const liveBtn = sec.querySelector<HTMLButtonElement>('.arm-live')!
@@ -1208,7 +1248,7 @@ function armCard(a: Arm, held: Record<string, string>): HTMLElement {
   if (a.profile !== 'joints') {
     const li = document.createElement('li')
     li.dataset.node = a.id
-    li.innerHTML = '<i class="dot"></i><span class="nn"><b>Whole arm</b><small></small></span><span class="nv"></span><span class="bar"><span></span></span>'
+    li.innerHTML = '<i class="dot"></i><span class="nn"><b>Whole arm</b><small></small></span><span class="nv"></span><span class="bar bb-meter"></span>'
     li.querySelector('small')!.textContent = holderText(armWho)
     if (armWho) { li.classList.add('held'); li.querySelector<HTMLElement>('.dot')!.style.background = sim!.colorOf(armWho) }
     if (armWho) li.appendChild(xButton(() => takeBack(a.id)))
@@ -1219,7 +1259,7 @@ function armCard(a: Arm, held: Record<string, string>): HTMLElement {
       const li = document.createElement('li')
       li.dataset.node = j.node
       const who = held[j.node] ?? armWho
-      li.innerHTML = '<i class="dot"></i><b></b><span class="nv"></span><span class="bar"><span></span></span>'
+      li.innerHTML = '<i class="dot"></i><b></b><span class="nv"></span><span class="bar bb-meter"></span>'
       li.querySelector('b')!.textContent = j.spec.name
       li.title = holderText(who, held[j.node] ? undefined : armWho ? 'the whole arm' : undefined)
       if (who) { li.classList.add('held'); li.querySelector<HTMLElement>('.dot')!.style.background = sim!.colorOf(who) }
@@ -1244,16 +1284,17 @@ function renderReadouts() {
   for (const a of arms) {
     const row = document.querySelector<HTMLElement>(`#arms li[data-node="${a.id}"]`)
     if (row) {
-      const t = forward(poseOf(a))
+      const t = KIN.forward(poseOf(a))
+      const [near, far] = KIND.drive.reach
       row.querySelector('.nv')!.textContent = `${Math.round(t.reach * 100)} cm · ${Math.round(t.height * 100)} up`
-      row.querySelector<HTMLElement>('.bar span')!.style.width = `${clamp((t.reach - 0.25) / 0.95, 0, 1) * 100}%`
+      row.querySelector<HTMLElement>('.bar')!.style.setProperty('--fill', `${clamp((t.reach - near) / (far - near), 0, 1) * 100}%`)
       row.dataset.state = a.state || (a.hw && !a.hw.live ? 'mirror' : stopped ? 'stopped' : '')
     }
     for (const j of a.joints) {
       const li = document.querySelector<HTMLElement>(`#arms li[data-node="${j.node}"]`)
       if (!li) continue
-      li.querySelector('.nv')!.textContent = j.spec.unit === '°' ? `${Math.round(j.angle)}°` : `${Math.round(j.angle * 100)}%`
-      li.querySelector<HTMLElement>('.bar span')!.style.width = `${((j.angle - j.spec.min) / (j.spec.max - j.spec.min)) * 100}%`
+      li.querySelector('.nv')!.textContent = j.spec.unit === '°' ? `${Math.round(j.angle)}°` : j.spec.unit === 'm' ? `${Math.round(j.angle * 100)} cm` : `${Math.round(j.angle * 100)}%`
+      li.querySelector<HTMLElement>('.bar')!.style.setProperty('--fill', `${((j.angle - j.spec.min) / (j.spec.max - j.spec.min)) * 100}%`)
       li.dataset.state = j.state
     }
   }
@@ -1261,16 +1302,14 @@ function renderReadouts() {
 
 /** Centre the stage in the space beside the panel (wide screens) or above it (narrow). */
 function resize() {
-  const w = innerWidth
-  const h = innerHeight
-  renderer.setSize(w, h, false)
+  const w = view.width
+  const h = view.height
   camera.aspect = w / h
   const panel = document.querySelector('.sim-panel')!.getBoundingClientRect()
   if (w > 860) camera.setViewOffset(w, h, -panel.right / 2, 0, w, h)
   else camera.setViewOffset(w, h, 0, (h - panel.top) / 2, w, h)
   camera.updateProjectionMatrix()
 }
-addEventListener('resize', resize)
 resize()
 renderPanel()
 requestAnimationFrame(loop)
@@ -1279,7 +1318,7 @@ Object.assign(window, {
   __arm: {
     arms: () => arms.map((a) => ({
       id: a.id, profile: a.profile, state: a.state, edge: a.edge, live: !!a.hw?.live, twin: !!a.hw, hover: a.hover, claw: a.claw?.phase ?? null, goal: a.goal, anchor: a.track ? { p0: a.track.p0, tool: a.track.tool.y } : null,
-      tool: forward(poseOf(a)), joints: a.joints.map((j) => ({ node: j.node, angle: j.angle, target: j.target, state: j.state })),
+      tool: KIN.forward(poseOf(a)), joints: a.joints.map((j) => ({ node: j.node, angle: j.angle, target: j.target, vel: j.vel, state: j.state })),
     })),
     blocks: () => blocks.map((b) => b.by?.id ?? null),
     /** A block: where it is, how it's turned, how low it reaches, who holds it and the opening they hold it at. */
@@ -1288,7 +1327,20 @@ Object.assign(window, {
       return { x: p.x, y: p.y, z: p.z, yaw: yawOf(b.mesh.getWorldQuaternion(new THREE.Quaternion())), bottom: p.y - halfHeight(b), by: b.by?.id ?? null, grip: b.by ? b.grip : null }
     },
     /** Send an arm to a pose (degrees; the gripper 0 closed … 1 open), as Home does (tests and screenshots). */
-    goTo: (id: string, pose: ArmPose, open?: number) => { const a = armOf(id); if (!a) return; a.homing = false; setPose(a, pose); if (open !== undefined) a.joints[5].target = open },
+    goTo: (id: string, pose: Pose, open?: number) => { const a = armOf(id); if (!a) return; a.homing = false; setPose(a, pose); if (open !== undefined) a.joints[GRIP].target = open },
+    /** The kind of arm, and its pose's joints. */
+    kind: () => ({ id: KIND.id, keys: KIN.keys }),
+    /** Where an arm stands, and which way it's turned. */
+    stand: (id: string) => { const a = armOf(id); return a ? standOf(a) : null },
+    /** The pose that puts an arm's gripper `height` over (x, z) on the floor, as Point would (null: it can't, exactly). */
+    solve: (id: string, x: number, z: number, height: number) => {
+      const a = armOf(id)
+      if (!a) return null
+      const local = a.model.root.worldToLocal(new THREE.Vector3(x, 0, z))
+      const pose = poseOf(a)
+      const r = reachDown(KIN, Math.atan2(local.z, -local.x) * R2D, Math.hypot(local.x, local.z), height, KIN.forward(pose).roll, heldBox(a), pose)
+      return r?.exact ? r.pose : null
+    },
     /** Put a block down on the floor at (x, z), turned `yaw` degrees (tests and screenshots). */
     placeBlock: (i: number, x: number, z: number, yaw = 0) => { const b = blocks[i]; if (b.by) drop(b); b.mesh.position.set(x, BLOCK / 2, z); b.mesh.quaternion.setFromAxisAngle(UP, yaw * D2R); b.vy = 0 },
     /** Look from `at` toward `to` (metres; tests and screenshots). The camera keeps its limits. */

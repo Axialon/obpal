@@ -102,6 +102,11 @@ describe('profiles (CATALOGUE §3)', () => {
     expect(PROFILES.shooter.aim.route).toBe('mouse')
     expect(PROFILES.shooter.point.edgeTurn).toBe(true)
     expect(PROFILES.pointer.on).toEqual(['motion.point'])
+    // Flight and Driving switch Steer on: tilting flies or steers at once; the others switch nothing on.
+    expect(PROFILES.flight.on).toEqual(['motion.steer'])
+    expect(PROFILES.driving.on).toEqual(['motion.steer'])
+    expect(PROFILES.default.on).toEqual([])
+    expect(PROFILES.shooter.on).toEqual([])
     expect(isProfileId('flight')).toBe(true)
     expect(isProfileId('racing')).toBe(false)
   })

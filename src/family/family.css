@@ -168,6 +168,16 @@
 :root { --bb-accent-text: var(--bb-accent); --bb-accent-soft: color-mix(in srgb, var(--bb-accent) 55%, var(--bb-ink)); }
 [data-bb-theme='light'] { --bb-accent-text: var(--bb-accent-strong); --bb-accent-soft: var(--bb-accent-strong); }
 
+/* The surface's own highlight channel, for see-through fills (glass tracks, scrollbars): the surface's tinted white
+ * on dark surfaces, slate ink on the light one. --bb-range-deepen: how far a slider's fill leans to the strong accent
+ * shade, so a pale accent still reads on the light surface. */
+:root { --bb-hl-rgb: 255 255 255; --bb-range-deepen: 0%; }
+[data-bb-theme='navy'] { --bb-hl-rgb: 214 230 255; }
+[data-bb-theme='violet'] { --bb-hl-rgb: 231 222 255; }
+[data-bb-theme='wine'] { --bb-hl-rgb: 255 240 248; }
+[data-bb-theme='onyx'] { --bb-hl-rgb: 241 246 249; }
+[data-bb-theme='light'] { --bb-hl-rgb: 15 23 42; --bb-range-deepen: 38%; }
+
 /* ---- derived surfaces ------------------------------------------------------------------------------------ */
 
 :root {
@@ -245,36 +255,147 @@
 }
 .bb-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bb-accent); box-shadow: 0 0 10px rgb(var(--bb-accent-rgb) / 0.7); }
 
-/* ---- range: Apple-style slider. A hairline track filled with the accent up to a white knob; no tray. ----------
- * family.js keeps --fill in step with the value (call BlackboxesFamily.syncRanges() after setting values in code). */
+/* ---- range: Apple-style slider -----------------------------------------------------------------------------
+ * A thin glass track (the surface shows through it) filled with the accent up to a round white knob; no tray.
+ * A native <input type="range" class="bb-range">, so keys and screen readers work; add .vertical to stand it up
+ * (the minimum at the bottom). family.js keeps --fill, the filled share, in step with the value, whether a person or
+ * code sets it. .bb-meter is the read-only kind: the same track and fill, and a knob if it holds an <i>. */
+
+:root {
+  --bb-range-line: 4px;
+  --bb-range-knob: 20px;
+  /* The control's size across the track: what a pointer can grab. The track stays thin within it. */
+  --bb-range-hit: 28px;
+  /* A vertical slider's length, unless it's sized otherwise. */
+  --bb-range-length: 160px;
+  /* The track where it isn't filled: glass, the surface showing through. */
+  --bb-range-glass: rgb(var(--bb-hl-rgb) / 0.16);
+  --bb-range-knob-bg: #fff;
+  --bb-range-knob-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.08), 0 0.5px 1px rgb(0 0 0 / 0.12), 0 2px 6px rgb(0 0 0 / 0.22);
+  --bb-range-knob-lift: 0 0 0 0.5px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.14), 0 5px 14px rgb(0 0 0 / 0.3);
+}
+/* Fingers get a bigger knob and a 44px touch target; the track stays as thin. */
+@media (pointer: coarse) { :root { --bb-range-knob: 26px; --bb-range-hit: 44px; } }
+
+/* The fill and the focus ring are worked out on each control, so a subtree's own accent reaches it. */
+.bb-range, .bb-meter {
+  --bb-range-tint: var(--bb-accent);
+  --bb-range-ring: rgb(var(--bb-accent-rgb) / 0.5);
+}
+@supports (color: color-mix(in srgb, red, blue)) {
+  .bb-range, .bb-meter {
+    --bb-range-tint: color-mix(in srgb, var(--bb-accent), var(--bb-accent-strong) var(--bb-range-deepen));
+    --bb-range-ring: color-mix(in srgb, var(--bb-accent-text) 60%, transparent);
+  }
+}
 
 .bb-range {
   --fill: 50%;
   -webkit-appearance: none; appearance: none; display: block;
-  width: 100%; height: 26px; margin: 0; padding: 0; background: transparent; cursor: pointer; touch-action: pan-y;
+  width: 100%; height: var(--bb-range-hit); margin: 0; padding: 0; background: transparent; cursor: pointer;
+  touch-action: pan-y; -webkit-tap-highlight-color: transparent;
 }
 .bb-range::-webkit-slider-runnable-track {
-  height: 4px; border: 0; border-radius: 999px;
-  background: linear-gradient(to right, var(--bb-accent) 0 var(--fill), var(--bb-line-strong) var(--fill) 100%);
+  height: var(--bb-range-line); border: 0; border-radius: 999px;
+  background: linear-gradient(to right, var(--bb-range-tint) 0 var(--fill), var(--bb-range-glass) var(--fill));
+  box-shadow: inset 0 0.5px 0 var(--bb-hi);
 }
 .bb-range::-webkit-slider-thumb {
-  -webkit-appearance: none; appearance: none; width: 22px; height: 22px; margin-top: -9px; border: 0; border-radius: 50%;
-  background: #fff; box-shadow: 0 2px 6px rgb(0 0 0 / 0.24), 0 0 0 0.5px rgb(0 0 0 / 0.1);
+  -webkit-appearance: none; appearance: none; width: var(--bb-range-knob); height: var(--bb-range-knob);
+  margin-top: calc((var(--bb-range-line) - var(--bb-range-knob)) / 2); border: 0; border-radius: 50%;
+  background: var(--bb-range-knob-bg); box-shadow: var(--bb-range-knob-shadow);
   transition: transform var(--bb-dur-1) var(--bb-ease), box-shadow var(--bb-dur-2) var(--bb-ease);
 }
-.bb-range:active::-webkit-slider-thumb { transform: scale(1.12); }
+.bb-range::-moz-range-track {
+  height: var(--bb-range-line); border: 0; border-radius: 999px; background: var(--bb-range-glass); box-shadow: inset 0 0.5px 0 var(--bb-hi);
+}
+.bb-range::-moz-range-progress { height: var(--bb-range-line); border-radius: 999px; background: var(--bb-range-tint); }
+.bb-range::-moz-range-thumb {
+  width: var(--bb-range-knob); height: var(--bb-range-knob); border: 0; border-radius: 50%;
+  background: var(--bb-range-knob-bg); box-shadow: var(--bb-range-knob-shadow);
+  transition: transform var(--bb-dur-1) var(--bb-ease), box-shadow var(--bb-dur-2) var(--bb-ease);
+}
+.bb-range:not(.vertical):dir(rtl)::-webkit-slider-runnable-track {
+  background: linear-gradient(to left, var(--bb-range-tint) 0 var(--fill), var(--bb-range-glass) var(--fill));
+}
+
+/* Hovered: the glass brightens and the knob lifts. Held: the knob grows. Focused from the keyboard: a ring. */
+@media (hover: hover) {
+  .bb-range:hover { --bb-range-glass: rgb(var(--bb-hl-rgb) / 0.24); }
+  .bb-range:hover::-webkit-slider-thumb { box-shadow: var(--bb-range-knob-lift); }
+  .bb-range:hover::-moz-range-thumb { box-shadow: var(--bb-range-knob-lift); }
+}
+.bb-range:active::-webkit-slider-thumb { transform: scale(1.1); box-shadow: var(--bb-range-knob-lift); }
+.bb-range:active::-moz-range-thumb { transform: scale(1.1); box-shadow: var(--bb-range-knob-lift); }
 .bb-range:focus-visible { outline: none; box-shadow: none; }
-.bb-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 2px 6px rgb(0 0 0 / 0.24), 0 0 0 4px rgb(var(--bb-accent-rgb) / 0.4); }
-.bb-range::-moz-range-track { height: 4px; border: 0; border-radius: 999px; background: var(--bb-line-strong); }
-.bb-range::-moz-range-progress { height: 4px; border-radius: 999px; background: var(--bb-accent); }
-.bb-range::-moz-range-thumb { width: 22px; height: 22px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 2px 6px rgb(0 0 0 / 0.24), 0 0 0 0.5px rgb(0 0 0 / 0.1); }
-.bb-range:disabled { opacity: 0.45; cursor: default; }
+.bb-range:focus-visible::-webkit-slider-thumb { box-shadow: var(--bb-range-knob-shadow), 0 0 0 4px var(--bb-range-ring); }
+.bb-range:focus-visible::-moz-range-thumb { box-shadow: var(--bb-range-knob-shadow), 0 0 0 4px var(--bb-range-ring); }
+.bb-range:disabled { --bb-range-tint: rgb(var(--bb-hl-rgb) / 0.32); opacity: 0.55; cursor: not-allowed; }
+.bb-range:disabled::-webkit-slider-thumb { transform: none; box-shadow: var(--bb-range-knob-shadow); }
+.bb-range:disabled::-moz-range-thumb { transform: none; box-shadow: var(--bb-range-knob-shadow); }
+
+/* Vertical: the writing mode stands it up (Chrome 124, Safari 17.4, Firefox 120); direction puts the minimum at
+ * the bottom. Where form controls can't be vertical, family.js sets data-bb-vranges="rotate" and it's turned. */
+.bb-range.vertical {
+  writing-mode: vertical-lr; direction: rtl; width: var(--bb-range-hit); height: var(--bb-range-length); touch-action: pan-x;
+}
+.bb-range.vertical::-webkit-slider-runnable-track {
+  width: var(--bb-range-line); height: 100%;
+  background: linear-gradient(to top, var(--bb-range-tint) 0 var(--fill), var(--bb-range-glass) var(--fill));
+}
+.bb-range.vertical::-webkit-slider-thumb { margin: 0 0 0 calc((var(--bb-range-line) - var(--bb-range-knob)) / 2); }
+.bb-range.vertical::-moz-range-track { width: var(--bb-range-line); height: 100%; }
+.bb-range.vertical::-moz-range-progress { width: var(--bb-range-line); }
+[data-bb-vranges='rotate'] .bb-range.vertical {
+  writing-mode: horizontal-tb; direction: ltr; width: var(--bb-range-length); height: var(--bb-range-hit);
+  margin: calc((var(--bb-range-length) - var(--bb-range-hit)) / 2) calc((var(--bb-range-hit) - var(--bb-range-length)) / 2);
+  transform: rotate(-90deg);
+}
+[data-bb-vranges='rotate'] .bb-range.vertical::-webkit-slider-runnable-track {
+  width: auto; height: var(--bb-range-line);
+  background: linear-gradient(to right, var(--bb-range-tint) 0 var(--fill), var(--bb-range-glass) var(--fill));
+}
+[data-bb-vranges='rotate'] .bb-range.vertical::-webkit-slider-thumb { margin: calc((var(--bb-range-line) - var(--bb-range-knob)) / 2) 0 0; }
+[data-bb-vranges='rotate'] .bb-range.vertical::-moz-range-track { width: auto; height: var(--bb-range-line); }
+[data-bb-vranges='rotate'] .bb-range.vertical::-moz-range-progress { width: auto; height: var(--bb-range-line); }
+
+.bb-meter {
+  --fill: 0%;
+  position: relative; display: block; height: var(--bb-range-line); border-radius: 999px;
+  background: linear-gradient(to right, var(--bb-range-tint) 0 var(--fill), var(--bb-range-glass) var(--fill));
+  box-shadow: inset 0 0.5px 0 var(--bb-hi);
+}
+.bb-meter > i {
+  position: absolute; top: 50%; left: var(--fill); width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%;
+  background: var(--bb-range-knob-bg); box-shadow: var(--bb-range-knob-shadow);
+}
 
 /* A labelled slider row: name left, value right (tabular), the slider beneath. */
 .bb-field { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 2px 10px; }
 .bb-field > span { font: 600 13px/1.3 var(--bb-font-ui); color: var(--bb-ink-2); }
 .bb-field > output { font: 600 12px/1.3 var(--bb-font-data); color: var(--bb-ink-3); font-variant-numeric: tabular-nums; }
 .bb-field > .bb-range { grid-column: 1 / -1; }
+
+/* ---- scrollbars: thin, on a clear track, in the surface's own ink; the accent while dragged -------------------
+ * For mouse and trackpad only: phones keep their own overlay scrollbars. Chromium and Safari draw these. Chromium
+ * drops ::-webkit-scrollbar styling wherever scrollbar-width or scrollbar-color is set, and its thin standard
+ * scrollbar keeps its arrow buttons, so the standard properties are for Firefox alone. A rounded box that scrolls
+ * sets --bb-scroll-inset to keep the thumb's ends clear of its corners. */
+
+@media (hover: hover) and (pointer: fine) {
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-track:vertical { margin: var(--bb-scroll-inset, 0px) 0; }
+  ::-webkit-scrollbar-track:horizontal { margin: 0 var(--bb-scroll-inset, 0px); }
+  ::-webkit-scrollbar-button { display: none; }
+  ::-webkit-scrollbar-thumb { min-height: 36px; border: 3px solid transparent; border-radius: 999px; background: rgb(var(--bb-hl-rgb) / 0.16) padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background-color: rgb(var(--bb-hl-rgb) / 0.3); }
+  ::-webkit-scrollbar-thumb:active { background-color: rgb(var(--bb-accent-rgb) / 0.65); }
+}
+@supports not selector(::-webkit-scrollbar) {
+  :root { scrollbar-color: rgb(var(--bb-hl-rgb) / 0.3) transparent; }
+  * { scrollbar-width: thin; }
+}
 
 /* ---- top bar --------------------------------------------------------------------------------------------- */
 
@@ -308,7 +429,7 @@
 
 /* ---- menus (product switcher, More, themes) -------------------------------------------------------------- */
 
-.bb-menu { scrollbar-width: thin; scrollbar-color: var(--bb-line-strong) transparent; position: absolute; z-index: var(--bb-z-menu); min-width: 260px; padding: 8px; border-radius: var(--bb-r-xl); animation: bb-rise var(--bb-dur-3) var(--bb-ease-out); }
+.bb-menu { position: absolute; z-index: var(--bb-z-menu); min-width: 260px; padding: 8px; border-radius: var(--bb-r-xl); animation: bb-rise var(--bb-dur-3) var(--bb-ease-out); }
 .bb-menu[hidden] { display: none; }
 .bb-menu-item {
   display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 10px; border-radius: var(--bb-r-md);
@@ -375,5 +496,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .bb-hint, .bb-menu { animation: none; }
+  .bb-range::-webkit-slider-thumb { transition: none; }
+  .bb-range::-moz-range-thumb { transition: none; }
   .bb-btn, .bb-tool, .bb-tip, .bb-switch .bb-ic { transition: none; }
 }

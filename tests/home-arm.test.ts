@@ -100,6 +100,18 @@ describe('the home page robot arm never goes below the table', () => {
     expect(pose(right).wrist.y).toBeCloseTo(LOW, 1)
   })
 
+  it('turns its base through its front half only (0 to π), never round its back, as the sim\'s arms keep theirs out of the work', () => {
+    const within = (a: Arm) => { expect(a.turn).toBeGreaterThanOrEqual(0); expect(a.turn).toBeLessThanOrEqual(Math.PI) }
+    let a = story(0).arm
+    for (let t = 0; t < STORY_S * 2; t += 1 / 60) { a = follow(a, story(t).arm, 1 / 60); within(a) }
+    for (const start of [story(0).arm, story(STORY_S / 2).arm]) {
+      for (let x = -60; x <= 460; x += 40) {
+        let b = start
+        for (let i = 0; i < 90; i++) { b = follow(b, aim({ x, y: 150 }, b.turn), 1 / 60); within(b) }
+      }
+    }
+  })
+
   it('keeps facing its way right over the base, rather than turning to and fro', () => {
     const facingRight = aim({ x: SHOULDER.x - 3, y: 120 }, 0.2)
     const facingLeft = aim({ x: SHOULDER.x + 3, y: 120 }, Math.PI - 0.2)

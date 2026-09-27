@@ -1,10 +1,13 @@
 /**
- * A local stand-in for obpal.blackboxes.net, for the extension's end-to-end test and the connection bench:
- * an HTTPS server (a throwaway self-signed cert made in ./tls on first run, never committed; the browsers run with
- * --ignore-certificate-errors) that serves the
- * site build (dist/client: the controller page, its assets, the service worker) and proxies the room service
- * (/r/* WebSockets and /api/*) to production. So the phone runs this checkout's controller code while the
- * extension pairs through the real signaling service.
+ * A local stand-in for obpal.blackboxes.net, for the end-to-end tests and the benches: an HTTPS server (a throwaway
+ * self-signed cert made in ./tls on first run, never committed; the browsers run with --ignore-certificate-errors)
+ * that serves the site build (dist/client: the controller page, its assets, the service worker) and proxies the
+ * room service (/r/* WebSockets and /api/*) to this checkout's own worker, a fresh one per run
+ * (scripts/local-worker.mjs), so both ends under test are the code here.
+ *
+ * Production is used only when asked for: OBPAL_E2E_UPSTREAM=https://obpal.blackboxes.net, or an explicit
+ * `upstream` (the benches that measure it). Its per-address limits are shared by every run on this machine, so
+ * tests that lean on it fail under each other's load.
  *
  * setOffline(true) makes the service unreachable (proxied requests refused, sockets closed) without touching the
  * static files, so the phone can be taken "off the internet" while the page itself still loads from the cache.
@@ -18,10 +21,13 @@ import { connect as netConnect } from 'node:net'
 import { connect as tlsConnect } from 'node:tls'
 import { extname, join, normalize, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { startWorker } from '../../scripts/local-worker.mjs'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 export const UPSTREAM = 'obpal.blackboxes.net'
 export const LOCAL_PORT = 5176
+/** The local worker's port when OBPAL_E2E_WORKER_PORT names none. */
+export const LOCAL_WORKER_PORT = 5189
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png',
@@ -46,11 +52,15 @@ async function ensureCert() {
 }
 
 /**
- * `port`: OBPAL_E2E_PORT, else 5176, so a run can sit beside another. `upstream` (or OBPAL_E2E_UPSTREAM): the room service
- * to proxy to instead of production, http or https, such as this checkout's own worker under `wrangler dev`
- * (scripts/local-worker.mjs).
+ * `port`: OBPAL_E2E_PORT, else 5176, so a run can sit beside another. `upstream` (or OBPAL_E2E_UPSTREAM): the room
+ * service to proxy to, http or https. Without either, a fresh local worker is started here on OBPAL_E2E_WORKER_PORT
+ * (else 5189) and stopped by close() (or when the process exits).
+ * The result's `serviceArgs` are the Chromium flags that send a browser's requests for the service's own host (the
+ * extension calls it by name) to this stand-in instead of production; none when production is the upstream.
  */
-export async function startLocal({ dist = resolve(here, '../../dist/client'), port = Number(process.env.OBPAL_E2E_PORT) || LOCAL_PORT, upstream = process.env.OBPAL_E2E_UPSTREAM || `https://${UPSTREAM}` } = {}) {
+export async function startLocal({ dist = resolve(here, '../../dist/client'), port = Number(process.env.OBPAL_E2E_PORT) || LOCAL_PORT, upstream = process.env.OBPAL_E2E_UPSTREAM || '' } = {}) {
+  const worker = upstream ? null : await startWorker({ port: Number(process.env.OBPAL_E2E_WORKER_PORT) || LOCAL_WORKER_PORT })
+  if (worker) upstream = worker.origin
   const target = new URL(upstream)
   const secure = target.protocol === 'https:'
   const targetPort = Number(target.port) || (secure ? 443 : 80)
@@ -113,14 +123,25 @@ export async function startLocal({ dist = resolve(here, '../../dist/client'), po
     socket.on('error', drop)
     socket.on('close', () => sockets.delete(socket))
   })
-  await new Promise((r, j) => { server.once('error', j); server.listen(port, '127.0.0.1', r) })
+  try {
+    await new Promise((r, j) => { server.once('error', j); server.listen(port, '127.0.0.1', r) })
+  } catch (e) {
+    await worker?.close()
+    throw e
+  }
   return {
     origin: `https://127.0.0.1:${port}`,
+    /** Where the room service is: this run's own worker, or what was asked for. */
+    upstream: target.origin,
+    serviceArgs: target.origin === `https://${UPSTREAM}` ? [] : [`--host-resolver-rules=MAP ${UPSTREAM} 127.0.0.1:${port}`, '--ignore-certificate-errors'],
     /** Refuse the room service (and drop live sockets) or bring it back. */
     setOffline(v) {
       offline = v
       if (v) for (const s of sockets) s.destroy()
     },
-    close: () => new Promise((r) => { for (const s of sockets) s.destroy(); server.close(() => r()) }),
+    close: async () => {
+      await new Promise((r) => { for (const s of sockets) s.destroy(); server.close(() => r()) })
+      await worker?.close()
+    },
   }
 }

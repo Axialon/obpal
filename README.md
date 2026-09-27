@@ -56,8 +56,13 @@ requestAnimationFrame(frame)
 pnpm install
 pnpm dev          # http://localhost:5175 (Vite + Worker + Durable Object)
 pnpm test         # protocol math, codec and pairing tests
+pnpm run check    # typecheck + tests
+pnpm run e2e:all  # every end-to-end suite against a local worker, one table (-- phone shared for some)
 pnpm run deploy   # test, build, deploy to obpal.blackboxes.net
+pnpm run check:live  # after a deploy: pages, pairing code, API rules, TURN, security headers (-- --origin for yours)
 ```
+
+Working with Claude Code agents: `.claude/README.md` lists the lane agent, the skills, the guard hook and the merge tool.
 
 Phones need HTTPS to get motion sensors. To test on a real phone, deploy, or run a Cloudflare Tunnel to the dev server.
 

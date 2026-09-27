@@ -25,22 +25,33 @@ const listeners = new Set<Listener>()
 const tossers = new Set<(v: number) => void>()
 const tosses = new TossDetector()
 let motionAt = 0
-const s = { on: false, b0: NaN, g0: NaN, lb: 0, lg: 0, wb: 0, wg: 0 }
+const s = { on: false, ...tiltState() }
 const soft = (v: number) => Math.sign(v) * Math.max(0, Math.abs(v) - DEAD)
+
+/** Where a reading is measured from (NaN: the next reading), and the last one heard and woken by. */
+export function tiltState() { return { b0: NaN, g0: NaN, lb: 0, lg: 0, wb: 0, wg: 0 } }
+
+/**
+ * One reading of the phone's orientation (degrees), with the screen turned `angle`: the tilt, or null if it's a
+ * jitter of the last one (or the first, which sets level). Pure, for tests: `st` carries it from one to the next.
+ */
+export function readTilt(st: ReturnType<typeof tiltState>, beta: number, gamma: number, angle: number): Tilt | null {
+  if (Number.isNaN(st.b0)) { st.b0 = st.lb = st.wb = beta; st.g0 = st.lg = st.wg = gamma; return null }
+  if (Math.abs(beta - st.lb) + Math.abs(gamma - st.lg) < JITTER) return null
+  st.lb = beta; st.lg = gamma
+  let dx = gamma - st.g0, dy = beta - st.b0
+  if (angle === 90) [dx, dy] = [dy, -dx]
+  else if (angle === 270) [dx, dy] = [-dy, dx]
+  else if (angle === 180) [dx, dy] = [-dx, -dy]
+  const wake = Math.abs(beta - st.wb) + Math.abs(gamma - st.wg) >= WAKE
+  if (wake) { st.wb = beta; st.wg = gamma }
+  return { x: soft(dx), y: soft(dy), wake }
+}
 
 function onOrient(e: DeviceOrientationEvent) {
   if (e.beta == null || e.gamma == null || document.hidden) return
-  if (Number.isNaN(s.b0)) { s.b0 = s.lb = s.wb = e.beta; s.g0 = s.lg = s.wg = e.gamma; return }
-  if (Math.abs(e.beta - s.lb) + Math.abs(e.gamma - s.lg) < JITTER) return
-  s.lb = e.beta; s.lg = e.gamma
-  let dx = e.gamma - s.g0, dy = e.beta - s.b0
-  const a = screen.orientation?.angle ?? 0
-  if (a === 90) [dx, dy] = [dy, -dx]
-  else if (a === 270) [dx, dy] = [-dy, dx]
-  else if (a === 180) [dx, dy] = [-dx, -dy]
-  const wake = Math.abs(e.beta - s.wb) + Math.abs(e.gamma - s.wg) >= WAKE
-  if (wake) { s.wb = e.beta; s.wg = e.gamma }
-  for (const fn of listeners) fn({ x: soft(dx), y: soft(dy), wake })
+  const t = readTilt(s, e.beta, e.gamma, screen.orientation?.angle ?? 0)
+  if (t) for (const fn of listeners) fn(t)
 }
 
 function onMotion(e: DeviceMotionEvent) {

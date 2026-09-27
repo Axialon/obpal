@@ -15,6 +15,7 @@
  */
 import { join } from 'node:path'
 import { chromium, devices } from 'playwright'
+import { cspCheck } from './csp-watch.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
 import { startWorker } from './local-worker.mjs'
 
@@ -395,6 +396,7 @@ try {
     if (!ready || s.chip || s.frame || !s.note || !moving || errors.length) throw new Error(JSON.stringify({ ready, ...s, moving, errors }))
     return `“${s.note}”`
   })
+  await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {
   console.error(e)
   exitCode = 1

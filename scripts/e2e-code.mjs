@@ -15,6 +15,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join as joinPath } from 'node:path'
 import { chromium, devices } from 'playwright'
+import { cspCheck } from './csp-watch.mjs'
 import sharp from 'sharp'
 import jsQR from 'jsqr'
 import zx from '@zxing/library'
@@ -157,6 +158,43 @@ try {
     return `transition ${m.card}, dot ${m.dot}`
   })
 
+  await check('the lighting panel and the chip never overlap: the card folds while it is open and comes back after, the panel ends above the chip, and a click on the chip opens the card in its place', async () => {
+    const rects = () => screen.evaluate(() => {
+      const r = (el) => { const b = el.getBoundingClientRect(); return { x: b.x, y: b.y, r: b.right, b: b.bottom } }
+      const root = document.querySelector('.obpal-chip').shadowRoot
+      return { panel: r(document.getElementById('lighting')), pill: r(root.querySelector('.pill')), card: r(root.querySelector('.card')) }
+    })
+    const meets = (a, b) => Math.min(a.r, b.r) > Math.max(a.x, b.x) && Math.min(a.b, b.b) > Math.max(a.y, b.y)
+    if (!(await chipState()).open) throw new Error('the card should be open to start with')
+    await screen.mouse.move(640, 300)
+    await screen.keyboard.press('l')
+    await until('the card folded', async () => !(await chipState()).open, 3000)
+    const g = await rects()
+    if (meets(g.panel, g.pill)) throw new Error(`the panel (to ${g.panel.b}) reaches the chip (from ${g.pill.y})`)
+    // Reset, the panel's last control, is where a click finds it; so is the stage where the card would open.
+    const reset = await screen.evaluate(() => { const b = document.getElementById('lt-reset'); b.scrollIntoView({ block: 'nearest' }); const r = b.getBoundingClientRect(); return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.id })
+    if (reset !== 'lt-reset') throw new Error(`a click on Reset reaches ${reset}`)
+    const through = await screen.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.id || document.elementFromPoint(x, y)?.className, { x: g.card.x + 20, y: (g.card.y + g.card.b) / 2 })
+    if (through !== 'scene') throw new Error(`where the card would open, a click reaches ${through}`)
+    // A mouse resting on the chip doesn't open the card over the panel.
+    const pill = screen.locator('.obpal-chip .pill')
+    await pill.hover()
+    await sleep(600)
+    if ((await chipState()).open) throw new Error('hovering opened the card over the panel')
+    await shot(screen, 'chip-viewer-lighting')
+    await screen.keyboard.press('Escape')
+    await until('the card back', async () => (await chipState()).open, 3000)
+    // With the panel open again, a click on the chip closes the panel (as any click outside it) and opens the card.
+    await screen.mouse.move(640, 300)
+    await screen.keyboard.press('l')
+    await until('folded again', async () => !(await chipState()).open, 3000)
+    await pill.click()
+    await sleep(500)
+    const after = { open: (await chipState()).open, panel: await screen.evaluate(() => !document.getElementById('lighting').hidden) }
+    if (!after.open || after.panel) throw new Error(`after the click: ${JSON.stringify(after)}`)
+    return `panel to ${Math.round(g.panel.b)}px, chip from ${Math.round(g.pill.y)}px; Reset and the stage clickable; hover kept it folded; Escape brought it back; a click opened it`
+  })
+
   // ---- a phone types the code ----
   const phoneAt = async (url) => {
     const dir = await mkdtemp(joinPath(tmpdir(), 'obpal-code-'))
@@ -256,6 +294,7 @@ try {
     await shot(p, 'chip-viewer-phone-closed')
     await small.close()
   }
+  await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {
   console.error(e)
   exitCode = 1

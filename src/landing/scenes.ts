@@ -5,6 +5,7 @@
  * looked at), so a phone stays cool.
  */
 import { aim, BLOCK, FINGER, follow, HOLD, JOINT_R, LINK_W, PADS, PLATE, pose, RIM, story, TABLE, type Arm } from './arm'
+import { BALL_R, FIELD, PUCK_R, rally, stepRally } from './rally'
 
 const NS = 'http://www.w3.org/2000/svg'
 type Attrs = Record<string, string | number>
@@ -35,6 +36,8 @@ const ROSE = '#fb7185'
 const AMBER = '#fcd34d'
 
 export interface Point { x: number; y: number }
+/** A way to play a scene, for the switch on its card: its name and tooltip, an icon, and whether a press presses. */
+export interface SceneMode { id: string; name: string; tip: string; icon: string; presses: boolean }
 export interface Scene {
   svg: SVGSVGElement
   /**
@@ -44,7 +47,17 @@ export interface Scene {
   step(dt: number, p: Point | null, t: number): boolean
   /** A tap or click at `p`. */
   press?(p: Point): void
+  /**
+   * The ways to play it that its card switches between, the first by default. The pointer plays the scene in every
+   * one; a tap or click presses only in those that say so. None: every tap or click presses.
+   */
+  modes?: readonly SceneMode[]
 }
+
+/** The icons a scene's switch shows (the site's stroke icons, ../ui/icons.ts): move, and the gripper. */
+const icon = (d: string) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`
+const MOVE_ICON = icon('<path d="M12 3.5v17M3.5 12h17"/><path d="M9.3 6.2 12 3.5l2.7 2.7M9.3 17.8l2.7 2.7 2.7-2.7M6.2 9.3 3.5 12l2.7 2.7M17.8 9.3l2.7 2.7-2.7 2.7"/>')
+const GRIP_ICON = icon('<path d="M12 21v-5.5"/><path d="M6.5 15.5h11"/><path d="M6.5 15.5V9.2l2.6-4.7"/><path d="M17.5 15.5V9.2l-2.6-4.7"/>')
 
 let seq = 0
 /** A scene's frame: the stage light, and the gradients its parts share. */
@@ -250,6 +263,12 @@ export function armScene(): Scene {
   const hand: Point[] = []
   return {
     svg,
+    // Move: the pointer (or a finger) moves the arm, and a click doesn't grip. Grab: a click or tap closes or opens
+    // the gripper, and the arm keeps following while the button is down, to carry the block.
+    modes: [
+      { id: 'move', name: 'Move', tip: 'Move: the arm follows your pointer', icon: MOVE_ICON, presses: false },
+      { id: 'grab', name: 'Grab', tip: 'Grab: click or tap to close or open the gripper', icon: GRIP_ICON, presses: true },
+    ],
     press() { wantGrip = wantGrip ? 0 : 1 },
     step(dt, p, t) {
       let to: Arm, tg: number
@@ -290,68 +309,34 @@ export function armScene(): Scene {
 
 export function playScene(): Scene {
   const { svg, u } = frame('Four players, each on their own phone, in a rally')
-  const L = 70, R = 330, T = 34, B = 226
-  el('rect', { x: L, y: T, width: R - L, height: B - T, rx: 22, fill: DEEP, 'fill-opacity': 0.5, stroke: HAZE, 'stroke-opacity': 0.26, 'stroke-width': 1.4 }, svg)
+  const { L, R, T, B, round } = FIELD
+  el('rect', { x: L, y: T, width: R - L, height: B - T, rx: round, fill: DEEP, 'fill-opacity': 0.5, stroke: HAZE, 'stroke-opacity': 0.26, 'stroke-width': 1.4 }, svg)
   el('circle', { cx: W / 2, cy: H / 2, r: 30, fill: 'none', stroke: HAZE, 'stroke-opacity': 0.16, 'stroke-width': 1.2 }, svg)
   el('ellipse', { cx: W / 2, cy: H / 2, rx: 120, ry: 80, fill: u('haze'), opacity: 0.25 }, svg)
   const colors = [LIME, SKY, ROSE, AMBER]
-  // Each player guards a side: bottom (you), top, left, right. Playing, yours goes anywhere on the field.
-  const home = [{ x: W / 2, y: B - 22 }, { x: W / 2, y: T + 22 }, { x: L + 22, y: H / 2 }, { x: R - 22, y: H / 2 }]
-  const pucks = colors.map((c, i) => ({ ...home[i], vx: 0, vy: 0, rot: 0, c: el('circle', { r: 12, fill: c, stroke: DEEP, 'stroke-width': 1.5 }, svg), i }))
+  // Each player guards a side (./rally.ts): bottom (you), top, left, right. Playing, yours goes anywhere on the field.
+  const r = rally()
+  const pucks = colors.map((c) => el('circle', { r: PUCK_R, fill: c, stroke: DEEP, 'stroke-width': 1.5 }, svg))
   const phones = colors.map((c, i) => {
     const { g, screen } = phone(svg, u, 0.5)
     el('circle', { r: 6, fill: c, opacity: 0.9 }, screen)
     const at = [[W / 2 + 150, H - 28], [W / 2 - 150, 30], [30, H / 2 + 72], [W - 30, H / 2 - 72]][i]
-    return { g, x: at[0], y: at[1] }
+    return { g, x: at[0], y: at[1], rot: 0 }
   })
   const glow = el('circle', { r: 16, fill: u('glow') }, svg)
-  const ball = el('circle', { r: 6.5, fill: CORE }, svg)
-  let x = W / 2, y = H / 2, vx = 120, vy = 85
+  const ball = el('circle', { r: BALL_R, fill: CORE }, svg)
   return {
     svg,
     step(dt, p) {
-      x += vx * dt; y += vy * dt
-      if (x < L + 8) { x = L + 8; vx = Math.abs(vx) } else if (x > R - 8) { x = R - 8; vx = -Math.abs(vx) }
-      if (y < T + 8) { y = T + 8; vy = Math.abs(vy) } else if (y > B - 8) { y = B - 8; vy = -Math.abs(vy) }
-      for (const pk of pucks) {
-        // Guard your side: follow the ball along it, lean in when it's close. Your own puck, played, goes where you
-        // point, anywhere on the field.
-        let gx: number, gy: number
-        if (pk.i === 0 && p) { gx = clamp(p.x, L + 14, R - 14); gy = clamp(p.y, T + 14, B - 14) }
-        else if (pk.i < 2) { gx = clamp(x, L + 30, R - 30); gy = home[pk.i].y + (Math.abs(y - home[pk.i].y) < 70 ? (y - home[pk.i].y) * 0.4 : 0) }
-        else { gy = clamp(y, T + 30, B - 30); gx = home[pk.i].x + (Math.abs(x - home[pk.i].x) < 70 ? (x - home[pk.i].x) * 0.4 : 0) }
-        const ox = pk.x, oy = pk.y
-        pk.x = ease(pk.x, gx, dt, pk.i === 0 && p ? 14 : 5)
-        pk.y = ease(pk.y, gy, dt, pk.i === 0 && p ? 14 : 5)
-        // Pucks don't pass through each other: yours, going anywhere, nudges the others aside.
-        for (const o of pucks) {
-          if (o === pk) continue
-          const dx = pk.x - o.x, dy = pk.y - o.y, d = Math.hypot(dx, dy)
-          if (d >= 24 || d < 1e-6) continue
-          const push = (24 - d) / 2
-          pk.x = clamp(pk.x + (dx / d) * push, L + 14, R - 14); pk.y = clamp(pk.y + (dy / d) * push, T + 14, B - 14)
-          o.x = clamp(o.x - (dx / d) * push, L + 14, R - 14); o.y = clamp(o.y - (dy / d) * push, T + 14, B - 14)
-        }
-        pk.vx = (pk.x - ox) / Math.max(dt, 1e-3); pk.vy = (pk.y - oy) / Math.max(dt, 1e-3)
-        const dx = x - pk.x, dy = y - pk.y, d = Math.hypot(dx, dy)
-        if (d < 18.5 && d > 0) {
-          // Bounce off the puck, taking some of its speed.
-          const nx = dx / d, ny = dy / d
-          const dot = vx * nx + vy * ny
-          if (dot < 0) { vx -= 2 * dot * nx; vy -= 2 * dot * ny }
-          vx += pk.vx * 0.25; vy += pk.vy * 0.25
-          x = pk.x + nx * 18.6; y = pk.y + ny * 18.6
-        }
-        set(pk.c, { cx: pk.x, cy: pk.y })
-        const ph = phones[pk.i]
+      stepRally(r, dt, p)
+      r.pucks.forEach((pk, i) => {
+        set(pucks[i], { cx: pk.x, cy: pk.y })
         // Each phone leans with its puck, smoothly: a player's hand, not every bump.
-        pk.rot = ease(pk.rot, clamp(pk.vx * 0.05, -24, 24), dt, 4)
-        set(ph.g, { transform: `translate(${ph.x} ${ph.y}) rotate(${pk.rot})` })
-      }
-      // Keep the rally lively but never wild.
-      const sp = Math.hypot(vx, vy) || 1, want = clamp(sp, 130, 230)
-      vx *= want / sp; vy *= want / sp
-      set(ball, { cx: x, cy: y }); set(glow, { cx: x, cy: y })
+        const ph = phones[i]
+        ph.rot = ease(ph.rot, clamp(pk.vx * 0.05, -24, 24), dt, 4)
+        set(ph.g, { transform: `translate(${ph.x} ${ph.y}) rotate(${ph.rot})` })
+      })
+      set(ball, { cx: r.x, cy: r.y }); set(glow, { cx: r.x, cy: r.y })
       return true
     },
   }

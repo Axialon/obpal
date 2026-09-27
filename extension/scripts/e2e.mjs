@@ -2,7 +2,9 @@
  * ob.Pal Link end to end: the built extension (extension/dist) in Chromium, a phone emulated in a second browser
  * that opens the pairing link, and a local test page that records what a game or 3D viewer would receive.
  * The phone runs this checkout's controller build (dist/client) through a local stand-in for the service
- * (extension/e2e/local.mjs) that proxies signaling to production, so both ends under test are the code here.
+ * (extension/e2e/local.mjs), and the extension's calls to the service by name resolve to the same stand-in, which
+ * proxies signaling to this checkout's own worker, fresh for the run (OBPAL_E2E_UPSTREAM=https://obpal.blackboxes.net
+ * for production instead). So both ends under test, and the service between them, are the code here.
  * Checks the four targets:
  *   Controller: the Gamepad API shows "ob.Pal Controller", A held on the phone = button 0 pressed.
  *   Keys:       A = Space, D-pad up = ArrowUp (keydown, then keyup).
@@ -23,7 +25,7 @@
  * still names the real one. Afterwards, ob.Pal Desktop's own log (read only) must show no session from this
  * run's browser, or the run fails.
  *
- * Online (production signaling):
+ * Online (the signaling service up):
  *   Controller: the Gamepad API shows "ob.Pal Controller", A held on the phone = button 0 pressed.
  *   Motion:     Aim clears an 0.18 look deadzone with a small turn; Steer on the flight profile flies the right stick.
  *   Point:      the Wii cursor follows where the phone points and A clicks the button under it.
@@ -235,11 +237,16 @@ const onPhone = (url) => url.replace(SERVICE, local.origin)
 
 const profile = await mkdtemp(join(tmpdir(), 'obpal-link-profile-'))
 const phoneProfile = await mkdtemp(join(tmpdir(), 'obpal-link-phone-'))
-/** The extension's browser; the same profile keeps its certificate and remembered phones across relaunches. */
+/**
+ * The extension's browser; the same profile keeps its certificate and remembered phones across relaunches. The
+ * extension calls the service by name, so unless production is the upstream, its host resolves to the stand-in
+ * (local.serviceArgs), which hands the rooms to this run's own worker, where the phone's go too. A launch with its
+ * own host rules (the offline one) keeps just those.
+ */
 const launchDesk = (extra = []) => chromium.launchPersistentContext(profile, {
   executablePath,
   headless: !HEADED,
-  args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`, ...RTC_ARGS, ...extra],
+  args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`, ...RTC_ARGS, ...(extra.some((a) => a.startsWith('--host-resolver-rules')) ? [] : local.serviceArgs), ...extra],
   viewport: { width: 1280, height: 800 },
   deviceScaleFactor: 2,
 })

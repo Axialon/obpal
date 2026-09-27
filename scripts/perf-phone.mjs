@@ -1,6 +1,6 @@
 /**
- * How hard an idle, connected phone works: the Viewer from this checkout's build (local stand-in, signaling proxied
- * to production) and an emulated phone joined to it. After it settles, measure 10 s of doing nothing:
+ * How hard an idle, connected phone works: the Viewer from this checkout's build (local stand-in, signaling through
+ * this checkout's own worker) and an emulated phone joined to it. After it settles, measure 10 s of doing nothing:
  *   - main-thread task and script time (CPU), style recalcs and layouts;
  *   - animation frames the page paints (each one recomposites the glass over whatever moves behind it);
  *   - how often the page's input loop runs (pump), and whether the motion sensors are on.

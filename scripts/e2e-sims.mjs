@@ -2,7 +2,8 @@
  * The public sims end to end (CATALOGUE §7), served from this checkout's build by the local stand-in
  * (extension/e2e/local.mjs), with emulated phones joining by invite:
  *   Robot arm: approval before a first claim, a joint moved by dragging on the phone's pad (the deadman), stopping when
- *   the finger lifts, an e-stop from a phone that only the screen resumes.
+ *   the finger lifts, an e-stop from a phone that only the screen resumes. Each kind of arm (?kind=) opens with its own
+ *   joints, and its arm 1 picks up a block and lifts it.
  *   Arena: two phones claim slots and roll their pucks.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch. OBPAL_SHOTS=<dir> saves screens.
  */
@@ -10,6 +11,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join as joinPath } from 'node:path'
 import { chromium, devices } from 'playwright'
+import { cspCheck } from './csp-watch.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
 
 const HEADED = process.argv.includes('--headed')
@@ -318,6 +320,46 @@ try {
     return banner
   })
   if (arm.errors.length) console.log(`  page errors: ${arm.errors.join(' | ')}`)
+  await check('robot arm kinds: each opens with its own joints, and its arm 1 picks up a block and lifts it', async () => {
+    const b = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
+    closers.push(b)
+    const context = await b.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true })
+    const done = []
+    for (const kind of ['arm5', 'so101', 'six', 'scara', 'delta', 'desk']) {
+      const page = await context.newPage()
+      const errors = []
+      page.on('pageerror', (e) => errors.push(e.message))
+      await page.goto(`${local.origin}/sim/arm/?kind=${kind}`)
+      await until(`${kind}: the sim`, () => page.evaluate(() => !!window.__arm?.kind), 15000)
+      const { id, keys } = await page.evaluate(() => window.__arm.kind())
+      const joints = await page.evaluate(() => window.__arm.arms()[0].joints.map((j) => j.node))
+      if (id !== kind || joints.length !== keys.length + 1) throw new Error(`${kind}: opened ${id} with ${joints.join(', ')}`)
+      // A block in front of arm 1, halfway to the middle; the gripper over it, straight down, closed, up.
+      const at = await page.evaluate(() => { const s = window.__arm.stand('a1'); return { x: s.x * 0.5, z: s.z * 0.5 } })
+      await page.evaluate(({ x, z }) => window.__arm.placeBlock(0, x, z, 25), at)
+      const go = async (h, open, ms) => {
+        const pose = await page.evaluate(({ x, z, h }) => window.__arm.solve('a1', x, z, h), { ...at, h })
+        if (!pose) throw new Error(`${kind}: can't reach ${h.toFixed(3)} m over (${at.x.toFixed(2)}, ${at.z.toFixed(2)})`)
+        await page.evaluate(({ pose, open }) => window.__arm.goTo('a1', pose, open), { pose, open })
+        await sleep(ms)
+      }
+      await go(0.22, 1, 2500)
+      for (let h = 0.2; h >= 0.035; h -= 0.015) await go(h, 1, 150)
+      await go(0.035, 1, 600)
+      await go(0.035, 0, 1500)
+      const by = await page.evaluate(() => window.__arm.blocks()[0])
+      if (by !== 'a1') throw new Error(`${kind}: the gripper closed without taking the block (${JSON.stringify(await page.evaluate(() => window.__arm.block(0)))})`)
+      for (let h = 0.05; h <= 0.25; h += 0.03) await go(h, 0, 120)
+      await sleep(1200)
+      const y = await page.evaluate(() => window.__arm.block(0).y)
+      if (y < 0.15) throw new Error(`${kind}: the block only rose to ${y.toFixed(3)} m`)
+      if (errors.length) throw new Error(`${kind}: ${errors.join(' | ')}`)
+      if (SHOTS) await page.screenshot({ path: joinPath(SHOTS, `sim-arm-${kind}.png`) })
+      done.push(`${kind} ${Math.round(y * 100)} cm`)
+      await page.close()
+    }
+    return done.join(', ')
+  })
 
   // ---- arena ----
   const arena = await screenAt('/sim/arena/')
@@ -341,6 +383,40 @@ try {
     return `P2 was told "${refused}"; P1 rolled ${moved.toFixed(2)} m`
   })
   if (arena.errors.length) console.log(`  page errors: ${arena.errors.join(' | ')}`)
+
+  // ---- the pairing chip beside the panel, on phones ----
+  await check('on phones the pairing card fits between the top bar and the panel, a short phone too, and folds while the people list is open', async () => {
+    const b = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
+    closers.push(b)
+    const out = []
+    for (const [w, h] of [[412, 915], [390, 844], [360, 640]]) {
+      const ctx = await b.newContext({ viewport: { width: w, height: h }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, ignoreHTTPSErrors: true })
+      const page = await ctx.newPage()
+      await page.goto(`${local.origin}/sim/arm/`)
+      await until('the chip', () => page.evaluate(() => !!document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.qr svg')), 20000)
+      const open = () => page.evaluate(() => document.querySelector('.obpal-chip').shadowRoot.querySelector('.pill').getAttribute('aria-expanded') === 'true')
+      await until('the card open', open, 5000)
+      await sleep(400)
+      const g = await page.evaluate(() => {
+        const r = (el) => el.getBoundingClientRect()
+        const root = document.querySelector('.obpal-chip').shadowRoot
+        return { card: r(root.querySelector('.card')), pill: r(root.querySelector('.pill')), panel: r(document.querySelector('.sim-panel')), bar: r(document.querySelector('.sim-top')).bottom }
+      })
+      const at = `${w}×${h}`
+      if (g.card.top < g.bar) throw new Error(`${at}: the card reaches ${Math.round(g.card.top)}px, under the top bar (to ${Math.round(g.bar)}px)`)
+      if (g.card.bottom > g.pill.top || g.pill.bottom > g.panel.top) throw new Error(`${at}: card to ${Math.round(g.card.bottom)}, chip ${Math.round(g.pill.top)}–${Math.round(g.pill.bottom)}, panel from ${Math.round(g.panel.top)}`)
+      await page.evaluate(() => { document.getElementById('people').hidden = false })
+      await until(`${at}: the card folded for the people list`, async () => !(await open()), 3000)
+      await page.evaluate(() => { document.getElementById('people').hidden = true })
+      await until(`${at}: the card back`, open, 3000)
+      if (SHOTS) await page.screenshot({ path: joinPath(SHOTS, `sim-arm-chip-${w}x${h}.png`) })
+      out.push(`${at}: card ${Math.round(g.card.top)}–${Math.round(g.card.bottom)}, panel from ${Math.round(g.panel.top)}`)
+      await ctx.close()
+    }
+    return out.join('; ')
+  })
+
+  await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {
   console.error(e)
   exitCode = 1

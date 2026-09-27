@@ -2,7 +2,8 @@
  * Connection bench for ob.Pal Link: how fast a phone gets control, and how quickly its input lands on the page.
  * Same setup as e2e.mjs (the built extension in one Chromium, an emulated phone in another, both on this
  * machine), with the phone running this checkout's controller build through the local stand-in service
- * (extension/e2e/local.mjs: static files here, signaling proxied to production).
+ * (extension/e2e/local.mjs: static files here, signaling proxied to production). It measures production on purpose,
+ * as the extension meets it, so it asks the stand-in for production explicitly.
  *
  *   QR ready        popup opened -> pairing link available (cold: the link document had to be created)
  *   connected       phone opens the link -> the host has verified the phone (popup shows Connected)
@@ -42,7 +43,7 @@ async function until(what, fn, timeout = 15000, every = 20) {
 const q = (xs, p) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.min(s.length - 1, Math.floor(p * s.length))] : NaN }
 const fmt = (xs) => `median ${q(xs, 0.5).toFixed(0)} ms, p90 ${q(xs, 0.9).toFixed(0)} ms, min ${Math.min(...xs).toFixed(0)}, max ${Math.max(...xs).toFixed(0)} (n=${xs.length})`
 
-const local = await startLocal()
+const local = await startLocal({ upstream: `https://${UPSTREAM}` })
 const ext = await mkdtemp(join(tmpdir(), 'obpal-link-bench-ext-'))
 await cp(join(root, 'dist'), ext, { recursive: true })
 const manifestPath = join(ext, 'manifest.json')

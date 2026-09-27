@@ -56,12 +56,28 @@ body.live .aurora i { animation-play-state: paused; }
 .host-ic { width: 34px; height: 34px; display: grid; place-items: center; flex: none; }
 .host-ic .mark { width: 34px; height: 34px; filter: drop-shadow(0 4px 10px rgb(var(--accent-rgb) / 0.25)); }
 .host-name { flex: 1; min-width: 0; font-size: 15px; font-weight: 700; letter-spacing: -0.015em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sig { display: inline-flex; align-items: flex-end; gap: 2px; height: 16px; padding: 0 2px; }
-.sig i { width: 4px; border-radius: 2px; background: var(--ok); box-shadow: 0 0 8px rgba(110, 231, 183, 0.45); }
-.sig i:nth-child(1) { height: 6px; } .sig i:nth-child(2) { height: 10px; } .sig i:nth-child(3) { height: 14px; }
-.sig[data-q='relay'] i { background: var(--warn); box-shadow: 0 0 8px rgba(252, 211, 77, 0.45); }
-.sig[data-q='relay'] i:nth-child(3) { opacity: 0.35; }
-.sig b { margin-left: 5px; font-size: 11px; font-weight: 650; color: var(--muted); font-variant-numeric: tabular-nums; align-self: center; }
+/* The connection badge (./linkbadge.ts): a lock, the path's colour (mint direct, amber relayed) and the round trip. */
+.link-badge, .link-sheet { --lb-ok: var(--ok); --lb-warn: var(--warn); }
+[data-bb-theme='light'] :is(.link-badge, .link-sheet) { --lb-ok: #0b8a60; --lb-warn: #b45309; }
+.link-badge { display: inline-flex; align-items: center; gap: 6px; flex: none; height: 32px; padding: 0 11px 0 9px; border-radius: 999px; color: var(--secondary);
+  font: 650 12px/1 var(--font-data, var(--font)); font-variant-numeric: tabular-nums; touch-action: manipulation; transition: transform 0.12s var(--ease), opacity 0.2s var(--ease); }
+.link-badge:active { transform: scale(0.95); }
+.link-badge .ic { width: 15px; height: 15px; stroke-width: 2; color: var(--lb-ok); }
+.link-badge i { width: 6px; height: 6px; border-radius: 50%; background: var(--lb-ok); box-shadow: 0 0 8px rgb(110 231 183 / 0.55); }
+.link-badge[data-path='relay'] i { background: var(--lb-warn); box-shadow: 0 0 8px rgb(252 211 77 / 0.55); }
+.link-badge .lb-ms:empty { display: none; }
+.link-badge[data-state='down'] { opacity: 0.55; }
+.link-badge[data-state='down'] .ic { color: var(--muted); }
+.link-badge[data-state='down'] i { background: var(--muted); box-shadow: none; }
+.link-sheet h2 { margin: -6px 2px -4px; font-family: var(--font-display); font-size: 20px; font-weight: 750; letter-spacing: -0.025em; }
+.link-rows { display: grid; gap: 14px; }
+.link-row { display: grid; grid-template-columns: 40px 1fr; align-items: center; gap: 12px; }
+.link-row .lr-ic { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 13px; color: var(--lb-ok); background: rgb(var(--hl-rgb) / 0.06); border: 1px solid var(--glass-edge); }
+.link-row[data-tone='warn'] .lr-ic { color: var(--lb-warn); }
+.link-row[data-tone='off'] .lr-ic { color: var(--muted); }
+.link-row b { display: block; font-size: 14.5px; font-weight: 700; letter-spacing: -0.01em; }
+.link-row small { display: block; margin-top: 2px; color: var(--muted); font-size: 12.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.link-foot { margin: 0 2px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .icon-btn { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 14px; color: var(--secondary); touch-action: manipulation; transition: transform 0.12s var(--ease), background 0.15s; }
 .icon-btn:active { transform: scale(0.94); }
 .banner { padding: 9px 14px; border-radius: 14px; color: #f6dfae; font-size: 13px; font-weight: 650; border-color: rgba(252, 211, 77, 0.35) !important; animation: rise 0.3s var(--ease); }
@@ -159,17 +175,27 @@ body.live .aurora i { animation-play-state: paused; }
 .toast { position: fixed; left: 50%; bottom: max(calc(112px + env(safe-area-inset-bottom)), var(--kbd-lift, 0px)); transform: translate(-50%, 10px); opacity: 0; padding: 10px 16px; border-radius: 16px; font-weight: 650; font-size: 14px; pointer-events: none; transition: opacity 0.2s var(--ease), transform 0.25s var(--ease); max-width: 86vw; text-align: center; z-index: 40; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
-/* ---- sheets (settings, picker) ---- */
+/* ---- sheets (settings, buttons, picker, the gamepad's) ---- */
 /* A sheet fits the screen that's actually visible (dvh: never under the browser's own bars), leaves a strip above it
-   to tap away, and scrolls inside; swiping it down, Back and Esc close it too (./sheet.ts). */
-.sheet-wrap { position: fixed; inset: 0; z-index: 30; background: rgb(var(--base-rgb) / 0.5); display: grid; place-items: end center; padding: max(56px, calc(env(safe-area-inset-top) + 40px)) 10px calc(10px + env(safe-area-inset-bottom)); animation: fade 0.2s var(--ease); }
+   to tap away, and scrolls inside; swiping it down, Back and Esc close it too (./sheet.ts).
+   It's heavy frosted glass: the controls behind read as colour and shape, never as text. The scrim that dims and
+   softens the rest fades on a layer of its own (::before), and the sheet slides rather than fades: anything fading
+   around or on the sheet would let the controls behind show through sharp while it opens and closes. */
+.sheet-wrap { position: fixed; inset: 0; z-index: 30; display: grid; place-items: end center; padding: max(56px, calc(env(safe-area-inset-top) + 40px)) 10px calc(10px + env(safe-area-inset-bottom)); }
+.sheet-wrap::before { content: ''; position: absolute; inset: 0; z-index: -1; background: rgb(var(--base-rgb) / 0.42);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); animation: fade 0.2s var(--ease); }
 @supports (height: 100dvh) { .sheet-wrap { bottom: auto; height: 100dvh; } }
-.sheet-wrap.out { animation: fade-out 0.2s var(--ease) forwards; }
+.sheet-wrap.out::before { animation: fade-out 0.2s var(--ease) forwards; }
+.sheet-wrap.out .sheet { animation: sheet-down 0.2s var(--ease) forwards; }
 .sheet { width: min(480px, 100%); max-height: 100%; padding: 10px 20px 20px; border-radius: 30px; display: grid; gap: 16px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; -webkit-overflow-scrolling: touch;
-  background: linear-gradient(160deg, rgb(var(--surface-rgb) / 0.72), var(--sheet)) !important; animation: rise 0.3s var(--ease); transition: transform 0.28s var(--ease); }
+  background: linear-gradient(180deg, rgb(var(--surface-rgb) / 0.62), rgb(var(--base-rgb) / 0.68)) !important;
+  -webkit-backdrop-filter: var(--blur-heavy) !important; backdrop-filter: var(--blur-heavy) !important;
+  animation: sheet-up 0.32s var(--ease); transition: transform 0.28s var(--ease); }
 .sheet::-webkit-scrollbar { display: none; }
+/* The head and the answer buttons stay put while the rest scrolls under them and fades into their denser glass (a
+   blur of their own can't see through the sheet's), in the sheet's own colour at that edge. */
 .sheet-head { position: sticky; top: -10px; z-index: 2; display: grid; grid-template-columns: 40px 1fr 40px; align-items: center; margin: -10px -20px -6px; padding: 10px 12px 6px;
-  background: linear-gradient(180deg, rgb(var(--surface-rgb)) 72%, rgb(var(--surface-rgb) / 0)); border-radius: 30px 30px 0 0; }
+  background: linear-gradient(180deg, rgb(var(--surface-rgb) / 0.94) 62%, rgb(var(--surface-rgb) / 0)); border-radius: 30px 30px 0 0; }
 .sheet-head .grip { grid-column: 2; }
 .sheet-x { grid-column: 3; width: 40px; height: 40px; border-radius: 50%; }
 .sheet-x .ic { width: 18px; height: 18px; }
@@ -177,11 +203,13 @@ body.live .aurora i { animation-play-state: paused; }
 .sheet-k small { font-size: inherit; font-weight: 650; letter-spacing: 0.04em; text-transform: none; }
 /* The sheet's answer buttons stay in view however far it scrolls. */
 .sheet .actions { position: sticky; bottom: -20px; z-index: 2; display: flex; justify-content: flex-end; gap: 10px; margin: 0 -20px -20px; padding: 14px 20px 20px;
-  background: linear-gradient(0deg, rgb(var(--surface-rgb)) 74%, rgb(var(--surface-rgb) / 0)); }
+  background: linear-gradient(0deg, rgb(var(--base-rgb) / 0.94) 66%, rgb(var(--base-rgb) / 0)); }
 #disc.armed { background: rgb(239 68 68 / 0.92); border-color: transparent; color: #fff; }
 @keyframes fade { from { opacity: 0; } }
 @keyframes fade-out { to { opacity: 0; } }
 @keyframes rise { from { transform: translateY(28px); opacity: 0.4; } }
+@keyframes sheet-up { from { transform: translateY(calc(100% + 24px)); } }
+@keyframes sheet-down { to { transform: translateY(calc(100% + 24px)); } }
 .grip { width: 40px; height: 5px; border-radius: 5px; background: rgb(var(--hl-rgb) / 0.25); margin: 0 auto; }
 .sheet label { display: grid; grid-template-columns: 1fr auto; gap: 8px; font-size: 14px; font-weight: 650; }
 .sheet label input[type='range'] { grid-column: 1 / -1; }
@@ -412,8 +440,11 @@ body.resting .rest { display: grid; }
 /* --kb: how far the phone's keyboard reaches up (visualViewport); the dock rides on it. */
 .kbd { position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 22; max-width: 720px; margin: 0 auto;
   display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'field hide' 'keys keys'; gap: 8px; padding: 8px; border-radius: 24px;
-  background: linear-gradient(160deg, rgb(var(--surface-rgb) / 0.9), rgb(var(--surface-rgb) / 0.76));
-  transform: translate3d(0, calc(-1 * var(--kb, 0px)), 0); transition: transform 0.2s var(--ease); animation: rise 0.28s var(--ease); }
+  background: linear-gradient(160deg, rgb(var(--surface-rgb) / 0.66), rgb(var(--base-rgb) / 0.6));
+  -webkit-backdrop-filter: var(--blur-heavy); backdrop-filter: var(--blur-heavy);
+  transform: translate3d(0, calc(-1 * var(--kb, 0px)), 0); transition: transform 0.2s var(--ease); animation: dock-up 0.28s var(--ease); }
+/* It slides up rather than fades in, so the glass is frosted from its first frame (see the sheets). */
+@keyframes dock-up { from { transform: translate3d(0, calc(100% + 16px), 0); } }
 /* On the phone's keyboard: attached to it, edge to edge, like the keyboard's own bar. */
 .kbd.up { left: 0; right: 0; bottom: 0; max-width: none; border-radius: 22px 22px 0 0; border-bottom: 0; padding-bottom: 10px; }
 /* What the dock covers steps out of the way instead of showing through it, cut in half. */

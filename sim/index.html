@@ -4,22 +4,22 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#0a0718" />
-    <meta name="description" content="Public sims for ob.Pal's control catalogue: robot arms several phones drive, whole or joint by joint, a four-player arena, and a shared 3D scene. Open one on a screen and scan it with your phones." />
+    <meta name="description" content="The sim catalogue: rovers, drones, cameras, lamps, a marble maze, a claw machine, robot arms and more, each driven by your phone with the controllers that suit it. Open one on a screen and scan its code." />
     <title>Sims · ob.Pal</title>
     <link rel="icon" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&family=JetBrains+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+    <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/plus-jakarta-sans-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/src/styles/fonts.css" />
     <link rel="stylesheet" href="/src/family/family.css" />
     <link rel="stylesheet" href="/src/styles/base.css" />
     <link rel="stylesheet" href="/src/styles/site.css" />
     <link rel="stylesheet" href="/src/styles/landing.css" />
-    <link rel="stylesheet" href="/src/styles/pages.css" />
-    <script type="module" src="/src/landing/site.ts"></script>
+    <link rel="stylesheet" href="/src/styles/sims.css" />
+    <script type="module" src="/src/sim/hub.ts"></script>
   </head>
   <body>
-        <header class="top">
+    <header class="top">
       <div class="top-in">
         <a class="logo" href="/" aria-label="ob.Pal"><span class="mark-slot" data-mark></span><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span></a>
         <button class="switch-btn" id="t-switch" type="button" aria-label="Blackboxes apps" title="Blackboxes apps"></button>
@@ -44,46 +44,31 @@
       <a class="bb-menu-item" href="/#build">Build with it</a>
       <a class="bb-menu-item" href="/donate/">Donate</a>
     </nav>
-    <main class="land">
-      <section class="hero">
-        <p class="eyebrow">Sims · try the control catalogue</p>
-        <h1>Take control, together.</h1>
-        <p class="lede">Open a sim on a screen, then scan its code with your phone. Up to eight phones share one scene. Each holds its own part, and nobody can take what someone else is holding.</p>
+    <main class="land sims-land">
+      <section class="hero sims-hero">
+        <p class="eyebrow">Sims · the control catalogue</p>
+        <h1>Pick a device. Your phone drives&nbsp;it.</h1>
+        <p class="lede">Open one on a screen and scan its code: a unit is yours. Up to eight phones in one scene.</p>
       </section>
 
-      <section class="modes-grid sims" aria-label="Sims">
-        <a class="sim-card" href="/sim/arm/">
-          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16M7 20v-3h6v3M10 17l-2-6 7-4 2 3"/><circle cx="8" cy="11" r="1.6"/><circle cx="15" cy="7" r="1.6"/><path d="M17 10l2.5-.5M17 10l1.6 2"/></svg>
-          <h2>Robot arms</h2>
-          <p>Up to four arms. Point your phone like a Wii remote to send an arm, or move it through space and the gripper follows your hand. Pick up the blocks together, or connect a real arm.</p>
-          <span class="tag">system.robot-arm</span>
-        </a>
-        <a class="sim-card" href="/sim/arena/">
-          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.4"/><circle cx="9" cy="10" r="1.8"/><circle cx="15" cy="14.5" r="1.8"/><path d="M10.6 11.2 13.4 13.4"/></svg>
-          <h2>Faction arena</h2>
-          <p>Up to four players on one screen, a phone each. Claim a slot, tilt to roll, tap to dash, knock the others off the ring. The per-phone gamepad slots browser games get next.</p>
-          <span class="tag">system.gamepad-slots</span>
-        </a>
-        <a class="sim-card" href="/view/">
-          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 19.8 7.6v8.8L12 20.8 4.2 16.4V7.6L12 3.2Z"/><path d="M4.2 7.6 12 12l7.8-4.4M12 12v8.8"/></svg>
-          <h2>Shared 3D scene</h2>
-          <p>The Viewer with several phones: each takes a part of a model by pointing at it or from its scene list, in its own colour.</p>
-          <span class="tag">system.scene3d</span>
-        </a>
-        <article class="sim-card soon">
-          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M7.2 7.2h9.6a4.2 4.2 0 0 1 4.1 3.4l.9 4.6a2.5 2.5 0 0 1-4.3 2.2l-2.1-2.3H8.6l-2.1 2.3a2.5 2.5 0 0 1-4.3-2.2l.9-4.6a4.2 4.2 0 0 1 4.1-3.4Z"/></svg>
-          <h2>Controller bridges</h2>
-          <p>Next: a gamepad, a Joy-Con, a Wii Remote or VR controllers, connected to your phone or PC, join these sims as players of their own.</p>
-          <span class="tag">bridge.* · coming</span>
-        </article>
+      <div class="sims-bar" role="group" aria-label="Show the sims a controller suits">
+        <div class="sims-filter" id="filter"></div>
+      </div>
+
+      <section class="sims-grid" id="sims" aria-label="Sims"></section>
+      <p class="sims-none" id="none" hidden>Nothing here takes that controller yet.</p>
+
+      <section class="sims-next" aria-labelledby="h-next">
+        <h2 id="h-next">Next in the catalogue</h2>
+        <div class="sims-soon" id="soon"></div>
       </section>
 
-      <section class="note-card">
+      <section class="note-card sims-how">
         <h2>How to play</h2>
-        <p>Open a sim on a computer or TV. Scan its code with your phone's camera; nothing to install. Everyone else scans the same code, or the invite from the <b>+</b> at the top. Pick what you'll control from your phone's scene list.</p>
+        <p>Open a sim on a computer or TV and scan its code with your phone's camera, or type the code at <b>obpal.blackboxes.net</b>. Nothing to install. Your phone opens the controller that suits it best; pick another from its tabs.</p>
       </section>
 
-      <footer class="foot">Part of <a href="/">ob.Pal</a> and the <a href="https://ecosystem.blackboxes.net">Blackboxes</a> ecosystem. <a href="https://github.com/Axialon/obpal/blob/main/spec/CATALOGUE.md">Control catalogue</a> · <a href="/privacy/">Privacy</a></footer>
+      <footer class="foot">Part of <a href="/">ob.Pal</a> and the <a href="https://ecosystem.blackboxes.net">Blackboxes</a> ecosystem. <a href="/catalogue/">Control catalogue</a> · <a href="https://github.com/Axialon/obpal/blob/main/spec/CATALOGUE.md">Spec</a> · <a href="/privacy/">Privacy</a></footer>
     </main>
   </body>
 </html>

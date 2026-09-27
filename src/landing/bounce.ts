@@ -61,6 +61,9 @@ export interface Orb {
   resting: boolean
   /** Held up by a counter's rim (as of the last step): it rolls there as on any surface. */
   held?: boolean
+  /** In a letter's counter (on its rim, or down in its pit), and how long a clear tilt has been pulling it out (s). */
+  cup?: boolean
+  strain?: number
 }
 
 /**
@@ -121,6 +124,17 @@ const LEAN = 0.3
  */
 const MEANT = 1
 const TOWARD = 0.42
+/**
+ * A step's edge, and how hard a tilt must push into it to help the marble up: this much per em of the step's height
+ * (a button 0.1 em high takes 4.4 em/s², a phone tipped about 9°; a gentler tilt bumps it against the edge).
+ */
+const LIFT_PER_EM = 44
+/**
+ * In a counter, a tilt pulls the marble out only past this (em/s², a phone tipped about 5°) and held this long (s): a
+ * hand's tremble and stray readings don't, and a marble that stops there sleeps.
+ */
+const BREAK = 2.2
+const BREAK_TIME = 0.25
 
 export function newOrb(x: number, z: number, r: number, surface = 0): Orb {
   return { x, y: surface + r, z, vx: 0, vy: 0, vz: 0, r, target: null, route: [], flying: false, toss: null, resting: true }
@@ -263,7 +277,15 @@ export interface StepResult {
 /** Advance one orb by dt seconds among the letters. */
 export function step(o: Orb, fps: readonly Footprint[], dt: number, opts: StepOptions): StepResult {
   const res: StepResult = { landed: null, bumped: null, impact: 0, wall: null, wallImpact: 0, moving: false }
-  if (o.resting && !o.target && !o.route.length && !o.toss && !opts.push) return res
+  // In a counter, a tilt has to mean it: a hand's tremble, a slight lean or a stray reading doesn't shift it (static
+  // friction); only a clear tilt, held a moment, does.
+  let push = opts.push
+  if (o.cup && push) {
+    o.strain = Math.hypot(push[0], push[1]) > BREAK ? (o.strain ?? 0) + Math.min(dt, 1 / 30) : 0
+    if (o.strain < BREAK_TIME) push = undefined
+  } else o.strain = 0
+  if (o.resting && !o.target && !o.route.length && !o.toss && !push) return res
+  if (push !== opts.push) opts = { ...opts, push }
   dt = Math.min(dt, 1 / 30)
   if (o.toss && (o.toss.ttl -= dt) <= 0) o.toss = null
   // Small substeps keep a fast orb from passing through a letter's side.
@@ -298,7 +320,8 @@ function sub(o: Orb, fps: readonly Footprint[], h: number, opts: StepOptions): S
       o.vx += k * (w * w * (o.target.x - o.x) - 2 * zeta * w * o.vx) * h
       o.vz += k * (w * w * (o.target.z - o.z) - 2 * zeta * w * o.vz) * h
     } else if (grounded) {
-      const k = Math.exp(-(wasHeld ? RIM_FRICTION : FRICTION) * h)
+      // (Settling on a counter's rim, it grips: nothing's tilting it on.)
+      const k = Math.exp(-(wasHeld && !opts.push ? RIM_FRICTION : FRICTION) * h)
       o.vx *= k; o.vz *= k
     }
   }
@@ -332,6 +355,7 @@ function sub(o: Orb, fps: readonly Footprint[], h: number, opts: StepOptions): S
   // clear of all of them together: a few passes, each from where the last left it, so none of them shoves it back
   // into another.
   o.held = false
+  o.cup = false
   for (let pass = 0; pass < 3; pass++) {
     let moved = false
     for (const fp of fps) {
@@ -423,7 +447,7 @@ function edge(o: Orb, fp: Footprint, res: StepResult, tilt?: [number, number]) {
   const dist = Math.hypot(e.d, up)
   if (dist >= o.r) return
   // Tilted into the edge: the tilt's part toward the step (e.n points from the edge out to the marble).
-  const tilted = !!tilt && -(tilt[0] * e.nx + tilt[1] * e.nz) > Math.max(MEANT, TOWARD * Math.hypot(tilt[0], tilt[1]))
+  const tilted = !!tilt && -(tilt[0] * e.nx + tilt[1] * e.nz) > Math.max(MEANT, LIFT_PER_EM * fp.height, TOWARD * Math.hypot(tilt[0], tilt[1]))
   if (tilted || (o.target && inside(fp, o.target.x, o.target.z))) {
     o.y = fp.height + Math.sqrt(o.r * o.r - e.d * e.d)
     if (o.vy < 0) o.vy = 0
@@ -505,6 +529,7 @@ function counter(o: Orb, fp: Footprint, hole: Float64Array, wasBottom: number, w
     if (vn > 0) { o.vx -= (1 + BUMP) * vn * inX; o.vz -= (1 + BUMP) * vn * inZ }
     return
   }
+  o.cup = true
   // How high the rim holds it here (nowhere, if the rim is out of its reach: it's over the middle of a pit).
   const rim = bd < o.r ? top + Math.sqrt(o.r * o.r - bd * bd) : -Infinity
   if (rim > o.r + 1e-6 && (wasHeld || wasBottom + o.r >= rim - 0.02)) {

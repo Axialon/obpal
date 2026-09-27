@@ -198,24 +198,62 @@ async function generator(secret: string, handle: string, room: string): Promise<
 const allZero = (b: Uint8Array) => b.every((x) => x === 0)
 
 /**
+ * One side's X25519 key for one exchange. The platform's where it has X25519 in WebCrypto (Chrome 133, Safari 17,
+ * Firefox 130 and later): native and constant time, and its private half out of script's reach. Elsewhere a random
+ * scalar for the ladder above, which gives the same results (RFC 7748's vectors check both).
+ */
+type Ephemeral = { platform: CryptoKey } | { scalar: Uint8Array }
+
+let platformX25519: Promise<boolean> | null = null
+/** Whether WebCrypto here does X25519 (asked once). */
+const hasPlatformX25519 = () =>
+  (platformX25519 ??= crypto.subtle.generateKey({ name: 'X25519' }, false, ['deriveBits']).then(() => true, () => false))
+
+async function ephemeral(ladderOnly = false): Promise<Ephemeral> {
+  if (!ladderOnly && (await hasPlatformX25519())) {
+    const pair = (await crypto.subtle.generateKey({ name: 'X25519' }, false, ['deriveBits'])) as CryptoKeyPair
+    return { platform: pair.privateKey }
+  }
+  return { scalar: crypto.getRandomValues(new Uint8Array(32)) }
+}
+
+/** X25519 of this side's key and `u`, or null for an all-zero result (a low-order `u`, which would fix the key). */
+async function dh(key: Ephemeral, u: Uint8Array): Promise<Uint8Array | null> {
+  if ('scalar' in key) {
+    const k = x25519(key.scalar, u)
+    return allZero(k) ? null : k
+  }
+  try {
+    const pub = await crypto.subtle.importKey('raw', u as BufferSource, { name: 'X25519' }, false, [])
+    const k = new Uint8Array(await crypto.subtle.deriveBits({ name: 'X25519', public: pub }, key.platform, 256))
+    return allZero(k) ? null : k
+  } catch {
+    return null // WebCrypto refuses an all-zero result by throwing (RFC 7748 §6.1)
+  }
+}
+
+/**
  * One side of the short-code exchange. Each side sends `share`; with the other's share, `confirm` gives the
  * confirmation to send (`mine`) and the one to expect (`theirs`). They match only if both used the same secret,
  * handle and room and see the same two DTLS fingerprints.
  */
 export class CodePake {
-  private constructor(readonly role: 'device' | 'host', private scalar: Uint8Array, readonly share: Uint8Array, private handle: string, private room: string) {}
+  private constructor(readonly role: 'device' | 'host', private key: Ephemeral, readonly share: Uint8Array, private handle: string, private room: string) {}
 
-  static async start(role: 'device' | 'host', p: { secret: string; handle: string; room: string }): Promise<CodePake> {
+  /** `ladderOnly`: use the ladder even where the platform has X25519 (tests check the two agree). */
+  static async start(role: 'device' | 'host', p: { secret: string; handle: string; room: string }, o: { ladderOnly?: boolean } = {}): Promise<CodePake> {
     const g = await generator(p.secret, p.handle, p.room)
-    const scalar = crypto.getRandomValues(new Uint8Array(32))
-    return new CodePake(role, scalar, x25519(scalar, g), p.handle, p.room)
+    const key = await ephemeral(o.ladderOnly)
+    const share = await dh(key, g)
+    if (!share) throw new Error('The code’s generator is a low-order point') // odds 2^-252: a hash that lands on one
+    return new CodePake(role, key, share, p.handle, p.room)
   }
 
   /** Null when the other share is unusable (wrong size, or a low-order point that would fix the key). */
   async confirm(other: Uint8Array, fpDevice: Uint8Array, fpHost: Uint8Array): Promise<{ mine: string; theirs: string } | null> {
     if (other.length !== 32 || allZero(other)) return null
-    const k = x25519(this.scalar, other)
-    if (allZero(k)) return null
+    const k = await dh(this.key, other)
+    if (!k) return null
     const [shareDevice, shareHost] = this.role === 'device' ? [this.share, other] : [other, this.share]
     const base = await crypto.subtle.importKey('raw', k as BufferSource, 'HKDF', false, ['deriveKey'])
     const isk = await crypto.subtle.deriveKey(

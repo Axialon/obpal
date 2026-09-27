@@ -13,10 +13,11 @@
   // per-request invocation logs, which would keep every request's address and URL for days.
   "observability": { "enabled": true, "logs": { "invocation_logs": false } },
   // Brakes on abuse (worker/limits.ts), per address and minute, counted per Cloudflare location: room sockets opened,
-  // and ICE lookups (TURN credentials). Well above what people need; a service without them runs unlimited.
+  // and ICE lookups (TURN credentials). Well above what people need, many phones behind one carrier's address
+  // included; a service without them runs unlimited.
   "ratelimits": [
-    { "name": "RL_SOCKET", "namespace_id": "31701", "simple": { "limit": 300, "period": 60 } },
-    { "name": "RL_ICE", "namespace_id": "31702", "simple": { "limit": 120, "period": 60 } }
+    { "name": "RL_SOCKET", "namespace_id": "31701", "simple": { "limit": 600, "period": 60 } },
+    { "name": "RL_ICE", "namespace_id": "31702", "simple": { "limit": 300, "period": 60 } }
   ],
   // Shared Blackboxes contribution ledger (same D1 database as Box'em, Orbit'em and the other engines).
   "d1_databases": [{ "binding": "DB", "database_name": "blackboxes-contributions", "database_id": "<your-d1-database-id>" }],

@@ -55,6 +55,13 @@ const BUZZ_GAP = 70
 /** The page's buttons in the hero that marbles roll onto, and how far a marble's weight presses one (px). */
 const PADS = '.cta .btn, [data-hint], [data-sound]'
 const PRESS_PX = 1.5
+/**
+ * A knocked button rocks like a spring: how fast (6 swings a second), how soon it settles (in a fifth of a second), and
+ * at most how far (degrees).
+ */
+const ROCK_W = 2 * Math.PI * 6
+const ROCK_ZETA = 0.3
+const ROCK_MAX = 4
 
 /** The step ?quality= holds the field at, if any. */
 function pinnedStep(steps: readonly Step[]): number | null {
@@ -295,14 +302,16 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
 
   // ---- the page's buttons: steps the marbles roll up onto and off (./field.ts), which answer them ----
 
-  // Each button in the hero is a low step in the marbles' world, where it is on the page (measured every frame, so a
-  // button that moves takes its marble with it). The marbles draw above it and its dots stay under it. It answers a
+  // Each button in the hero is a raised block in the marbles' world, where it is on the page (measured every frame, so
+  // a button that moves takes its marble with it). The marbles draw above it and its dots stay under it. It answers a
   // marble with a light where the marble is (brighter the nearer, in its colour), a small press under its weight, a
-  // little dip when one lands, and a glass tap. It never does its own thing for a marble: only a click or a tap does.
+  // dip and a rock (toward where it was struck) when one lands on it or knocks its side, and a glass tap. It never does
+  // its own thing for a marble: only a click or a tap does.
   const padEls = [...hero.querySelectorAll<HTMLElement>(PADS)]
-  const padState = new Map(padEls.map((el) => [el, { press: 0, pressV: 0, glow: 0, flash: 0, radius: NaN, shown: '' }]))
+  const padState = new Map(padEls.map((el) => [el, { press: 0, pressV: 0, glow: 0, flash: 0, radius: NaN, shown: '', rx: { x: 0, v: 0 }, ry: { x: 0, v: 0 } }]))
   /** Each button's box (hero px), in the order the field counts them; empty while one isn't there to stand on. */
   let padRects: PadRect[] = []
+  let padDepth = -1
   function measurePads(): PadRect[] {
     const hr = hero.getBoundingClientRect()
     padRects = padEls.map((el) => {
@@ -318,9 +327,18 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   }
   function padHit(h: Hit) {
     const st = h.pad === undefined ? undefined : padState.get(padEls[h.pad])
-    if (!st) return
+    const b = h.pad === undefined ? undefined : padRects[h.pad]
+    if (!st || !b || !field) return
     st.pressV += 2 + 7 * h.strength
     st.flash = Math.max(st.flash, 0.55 + 0.45 * h.strength)
+    if (still) return
+    // It rocks: the side struck goes down (away from the eye), by half a degree for a gentle knock up to 3° for the
+    // hardest (a kick of the spring's speed: degrees a second).
+    const p = field.project(h.x, h.y, h.z)
+    const dx = Math.max(-1, Math.min(1, (p.x - (b.x + b.w / 2)) / (b.w / 2))), dy = Math.max(-1, Math.min(1, (p.y - (b.y + b.h / 2)) / (b.h / 2)))
+    const k = ROCK_W * (0.6 + 2.4 * h.strength)
+    st.ry.v += k * dx
+    st.rx.v -= k * dy
   }
   /** Each button's light and press, from the marbles on it and near it. Returns whether any is still settling. */
   function answerPads(dt: number): boolean {
@@ -349,22 +367,35 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       const goal = near ? near.k : 0
       st.glow += (goal - st.glow) * (1 - Math.exp(-dt * 10))
       st.flash *= Math.exp(-dt * 5)
-      // Under a marble's weight it gives a little; a landing dips it, and it springs back.
+      // Under a marble's weight it gives a little; a landing dips it, and it springs back. A knock rocks it, a few
+      // swings in a fifth of a second.
       const rest = weight ? 0.4 : 0
       st.pressV += (-(st.press - rest) * 380 - st.pressV * 26) * dt
       st.press = Math.max(-0.4, Math.min(1.4, st.press + st.pressV * dt))
+      for (const w of [st.rx, st.ry]) {
+        for (let left = dt; left > 1e-6; left -= 1 / 240) {
+          const h = Math.min(left, 1 / 240)
+          w.v += (-ROCK_W * ROCK_W * w.x - 2 * ROCK_ZETA * ROCK_W * w.v) * h
+          w.x = Math.max(-ROCK_MAX, Math.min(ROCK_MAX, w.x + w.v * h))
+        }
+      }
       const lit = Math.min(1, Math.max(st.glow, st.flash))
       const c = near?.o.color
-      const shown = `${near ? `${near.x.toFixed(0)},${near.y.toFixed(0)}` : ''}|${lit.toFixed(2)}|${st.press.toFixed(2)}|${c ? c.getHexString() : ''}`
+      const rock = Math.hypot(st.rx.x, st.ry.x)
+      const shown = `${near ? `${near.x.toFixed(0)},${near.y.toFixed(0)}` : ''}|${lit.toFixed(2)}|${st.press.toFixed(2)}|${c ? c.getHexString() : ''}|${st.rx.x.toFixed(2)},${st.ry.x.toFixed(2)}`
       if (shown !== st.shown) {
         st.shown = shown
         const s = el.style
         if (near) { s.setProperty('--orb-x', `${near.x.toFixed(0)}px`); s.setProperty('--orb-y', `${near.y.toFixed(0)}px`) }
         if (c) s.setProperty('--orb-rgb', `${Math.round(c.r * 255)} ${Math.round(c.g * 255)} ${Math.round(c.b * 255)}`)
         s.setProperty('--orb-glow', lit.toFixed(2))
+        // Pressed, the block sinks and its side shows that much less.
+        const sink = Math.max(0, st.press * PRESS_PX)
         s.translate = Math.abs(st.press) < 0.005 ? '' : `0 ${(st.press * PRESS_PX).toFixed(2)}px`
+        s.setProperty('--sink', `${sink.toFixed(2)}px`)
+        s.rotate = rock < 0.02 ? '' : `${(st.rx.x / rock).toFixed(3)} ${(st.ry.x / rock).toFixed(3)} 0 ${rock.toFixed(2)}deg`
       }
-      if (Math.abs(st.press - rest) > 0.005 || Math.abs(st.pressV) > 0.02 || st.flash > 0.01 || Math.abs(st.glow - goal) > 0.01) busy = true
+      if (Math.abs(st.press - rest) > 0.005 || Math.abs(st.pressV) > 0.02 || st.flash > 0.01 || Math.abs(st.glow - goal) > 0.01 || rock > 0.02 || Math.abs(st.rx.v) + Math.abs(st.ry.v) > 0.5) busy = true
     })
     return busy
   }
@@ -382,8 +413,9 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     if (!field) return
     if (h.kind === 'button') padHit(h)
     const p = field.project(h.x, h.y, h.z)
-    glass.hit(h.kind, h.strength, (p.x / Math.max(1, W)) * 2 - 1)
-    // Long enough to feel: many phones' motors don't answer pulses much under 20 ms.
+    glass.hit(h.kind, h.speed, (p.x / Math.max(1, W)) * 2 - 1, [h.orb, h.other])
+    // Long enough to feel: many phones' motors don't answer pulses much under 20 ms. (The knocks are felt where the
+    // visitor asks for less motion too: they aren't motion on the screen.)
     const ms = Math.round((h.kind === 'marble' ? 24 : 18) + 42 * h.strength)
     for (const id of [h.orb, h.other]) {
       if (!id) continue
@@ -462,6 +494,9 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     if (tilting) o.orb.resting = false
     for (const [id, ph] of phones) if (ph.gone) { f.removeOrb(id); phones.delete(id) }
     f.pads(measurePads())
+    // The buttons are drawn as blocks as deep as their step looks from here.
+    const depth = Math.round(f.padDepth() * 2) / 2
+    if (depth !== padDepth) { padDepth = depth; hero.style.setProperty('--pad-depth', `${depth}px`) }
     const busy = f.step(dt)
     const padsBusy = answerPads(dt)
     f.render()
@@ -487,8 +522,9 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
         Promise.all([document.fonts?.ready, document.fonts?.load(`${f.fontStyle} ${f.fontWeight} ${f.fontSize} ${f.fontFamily}`).catch(() => undefined)]),
         new Promise((r) => setTimeout(r, 2500)),
       ])
-      field = createField(stage, { coarse })
+      field = createField(stage, { coarse, still })
       field.onHit = onHit
+      field.onQuiet = (q) => glass.note(q.kind, q.speed, q.why)
       setQuality()
       document.documentElement.classList.add('field3d')
       layout()

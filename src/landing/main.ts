@@ -6,7 +6,7 @@ import { mountHero } from './hero'
 import { onPresence, startPairing } from './pair'
 import { addActor, wake } from './ticker'
 import { onTilt } from './tilt'
-import { armScene, desktopScene, H, playScene, pointScene, togetherScene, turnScene, W, type Point, type Scene } from './scenes'
+import { armScene, desktopScene, H, playScene, pointScene, togetherScene, turnScene, W, type Point, type Scene, type SceneMode } from './scenes'
 
 applyTheme(initialTheme())
 // The logo is the page's one ambient motion; a phone lets it settle after two orbits.
@@ -116,8 +116,16 @@ const ACTIVE_MS = 16000
 /** A pointer that stops moving stays in charge this long. */
 const HOLD_MS = 3000
 
-interface Live { scene: Scene; host: HTMLElement; visible: boolean; pointer: Point | null; pointerAt: number; tilt: Point | null; tiltAt: number; until: number; t: number }
+interface Live {
+  scene: Scene; host: HTMLElement; visible: boolean; pointer: Point | null; pointerAt: number; tilt: Point | null; tiltAt: number; until: number; t: number
+  /** A mouse button is down on it (the pointer stays in charge however long it's held still). */
+  down: boolean
+  /** How it's played, for a scene with a switch on its card. */
+  mode: SceneMode | null
+}
 const lives: Live[] = []
+/** Whether a tap or click presses the scene, as its card's switch has it. */
+const presses = (l: Live) => !l.mode || l.mode.presses
 
 for (const host of document.querySelectorAll<HTMLElement>('[data-scene]')) {
   const make = MAKERS[host.dataset.scene ?? '']
@@ -126,19 +134,81 @@ for (const host of document.querySelectorAll<HTMLElement>('[data-scene]')) {
   host.appendChild(scene.svg)
   // A first frame, so a scene is never blank, even when nothing plays.
   for (let i = 0; i < 30; i++) scene.step(1 / 60, null, i / 60)
-  const live: Live = { scene, host, visible: false, pointer: null, pointerAt: 0, tilt: null, tiltAt: -1e9, until: 0, t: 0.5 }
+  const live: Live = { scene, host, visible: false, pointer: null, pointerAt: 0, tilt: null, tiltAt: -1e9, until: 0, t: 0.5, down: false, mode: null }
   lives.push(live)
+  if (scene.modes) modeSwitch(live, host.dataset.scene!)
   const toView = (x: number, y: number): Point => {
     const r = scene.svg.getBoundingClientRect()
     return { x: ((x - r.left) / r.width) * W, y: ((y - r.top) / r.height) * H }
   }
   const follow = (x: number, y: number) => { live.pointer = toView(x, y); live.pointerAt = performance.now(); live.until = live.pointerAt + ACTIVE_MS; wake() }
-  // A mouse (or pen) plays by hovering and clicks by pressing; pressing never starts a text selection.
+  // A mouse (or pen) plays by hovering and clicks by pressing; pressing never starts a text selection or a drag, and
+  // while the button is down the scene keeps following, even past the card's edge.
   host.addEventListener('pointermove', (e) => { if (e.pointerType !== 'touch') follow(e.clientX, e.clientY) })
-  host.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') return; e.preventDefault(); follow(e.clientX, e.clientY); scene.press?.(live.pointer!) })
-  host.addEventListener('pointerleave', (e) => { if (e.pointerType !== 'touch') { live.pointer = null; wake() } })
-  playByTouch(host, follow, () => { if (live.pointer) scene.press?.(live.pointer) })
+  host.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch' || e.button !== 0) return
+    e.preventDefault()
+    try { host.setPointerCapture(e.pointerId) } catch { /* the pointer is gone already */ }
+    live.down = true
+    follow(e.clientX, e.clientY)
+    if (presses(live)) scene.press?.(live.pointer!)
+  })
+  const up = (e: PointerEvent) => { if (e.pointerType !== 'touch' && live.down) { live.down = false; live.pointerAt = performance.now() } }
+  host.addEventListener('pointerup', up)
+  host.addEventListener('pointercancel', up)
+  host.addEventListener('pointerleave', (e) => { if (e.pointerType !== 'touch' && !live.down) { live.pointer = null; wake() } })
+  host.addEventListener('dragstart', (e) => e.preventDefault())
+  playByTouch(host, follow, () => { if (live.pointer && presses(live)) scene.press?.(live.pointer) })
   host.addEventListener('contextmenu', (e) => e.preventDefault())
+}
+
+/**
+ * The switch on a scene's card between its ways to play (Move and Grab, for the arm): an icon each, a tooltip, arrow
+ * keys between them. The choice lasts the visit.
+ */
+function modeSwitch(live: Live, key: string) {
+  const modes = live.scene.modes!
+  const store = `obpal.scene.${key}`
+  let saved: string | null = null
+  try { saved = sessionStorage.getItem(store) } catch { /* storage blocked: the first mode */ }
+  const bar = document.createElement('div')
+  bar.className = 'scene-modes'
+  bar.setAttribute('role', 'radiogroup')
+  bar.setAttribute('aria-label', 'How to play it')
+  const buttons = modes.map((m) => {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.setAttribute('role', 'radio')
+    b.setAttribute('aria-label', m.name)
+    b.dataset.mode = m.id
+    b.title = m.tip
+    b.innerHTML = m.icon
+    b.addEventListener('click', () => pick(m))
+    return b
+  })
+  const pick = (m: SceneMode, focus = false) => {
+    live.mode = m
+    live.host.dataset.mode = m.id
+    buttons.forEach((b, i) => {
+      const on = modes[i] === m
+      b.setAttribute('aria-checked', String(on))
+      b.tabIndex = on ? 0 : -1
+      if (on && focus) b.focus()
+    })
+    try { sessionStorage.setItem(store, m.id) } catch { /* not kept */ }
+  }
+  bar.addEventListener('keydown', (e) => {
+    const at = modes.indexOf(live.mode!)
+    const to = { ArrowRight: at + 1, ArrowDown: at + 1, ArrowLeft: at - 1, ArrowUp: at - 1, Home: 0, End: modes.length - 1 }[e.key]
+    if (to === undefined) return
+    e.preventDefault()
+    pick(modes[(to + modes.length) % modes.length], true)
+  })
+  // The switch is a control of its own: pressing it neither moves nor presses the scene.
+  for (const type of ['pointerdown', 'touchstart', 'touchmove', 'touchend'] as const) bar.addEventListener(type, (e) => e.stopPropagation(), { passive: true })
+  bar.append(...buttons)
+  live.host.appendChild(bar)
+  pick(modes.find((m) => m.id === saved) ?? modes[0])
 }
 
 /**
@@ -250,7 +320,7 @@ addActor((now, dt) => {
   let busy = false
   for (const l of lives) {
     if (!l.visible || now > l.until) continue
-    const pointing = !!l.pointer && now - l.pointerAt < HOLD_MS
+    const pointing = !!l.pointer && (l.down || now - l.pointerAt < HOLD_MS)
     const tilted = !pointing && !!l.tilt && now - l.tiltAt < HOLD_MS
     if (!pointing && !tilted && still) continue
     l.t += dt

@@ -18,7 +18,7 @@ export const ARM: ArmGeometry = {
   LT: 0.23,
 }
 
-export interface ArmPose { yaw: number; shoulder: number; elbow: number; wrist: number; roll: number }
+export type ArmPose = { yaw: number; shoulder: number; elbow: number; wrist: number; roll: number }
 
 /** Where the tool is, in the arm's cylinder: heading, horizontal reach from the base axis, height, tool pitch and roll. */
 export interface ToolTarget { yaw: number; reach: number; height: number; pitch: number; roll: number }
@@ -130,14 +130,14 @@ export function forward(p: ArmPose, g: ArmGeometry = ARM): ToolTarget {
 
 /**
  * The pose that puts the tool at `t` (elbow up). A target lower than the gripper can go at its angle, holding `held` if
- * anything, is raised to just above the floor (toolFloor), so no part of the arm, nor what it holds, goes through it. A
- * target out of reach is pulled back to the edge of the workspace, so following a phone never jumps; `reached` says
- * whether it had to.
+ * anything, is raised to just above the floor (toolFloor, or `floor` for an arm with a gripper of its own), so no part
+ * of the arm, nor what it holds, goes through it. A target out of reach is pulled back to the edge of the workspace, so
+ * following a phone never jumps; `reached` says whether it had to.
  */
-export function inverse(t: ToolTarget, held?: GripBox | null, g: ArmGeometry = ARM): { pose: ArmPose; reached: boolean } {
+export function inverse(t: ToolTarget, held?: GripBox | null, g: ArmGeometry = ARM, floor = toolFloor(t.pitch, t.roll, held, g)): { pose: ArmPose; reached: boolean } {
   const phi = t.pitch * D2R
   let du = t.reach - g.LT * Math.sin(phi)
-  let dv = Math.max(t.height, toolFloor(t.pitch, t.roll, held, g)) - g.LT * Math.cos(phi) - g.H0
+  let dv = Math.max(t.height, floor) - g.LT * Math.cos(phi) - g.H0
   let d = Math.hypot(du, dv)
   const min = Math.abs(g.L1 - g.L2) + 0.02 * (g.L1 + g.L2)
   const max = (g.L1 + g.L2) * 0.999

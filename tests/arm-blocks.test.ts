@@ -2,11 +2,16 @@ import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
 import { armFrames, armParts, blockBox, FINGERS, gap, restOf, settle, stepAmong, type Base, type Blk, type Box, type Stand } from '../src/sim/arm/blocks'
 import { fingerAt, FINGER_IN, FINGER_TRAVEL, FINGER_W, holding, reachAlong } from '../src/sim/arm/grasp'
-import { ARM, FLOOR_CLEAR, forward, lowest, stepAboveFloor, type ArmPose } from '../src/sim/arm/kinematics'
+import { ARM, FLOOR_CLEAR, forward, lowest, stepAboveFloor, type ArmPose, type ToolTarget } from '../src/sim/arm/kinematics'
 import { JOINTS } from '../src/sim/arm/model'
-import { reachDown, solveNear } from '../src/sim/arm/reach'
+import { reachDown as reachDownOf, solveNear as solveNearOf } from '../src/sim/arm/kin'
+import { arm5 } from '../src/sim/arm/kind/arm5'
 
 const D = Math.PI / 180
+/** Point and 3D as the five-axis arm does them (../src/sim/arm/kin.ts), from its home. */
+const HOME_POSE = { yaw: 0, shoulder: JOINTS[1].home, elbow: JOINTS[2].home, wrist: JOINTS[3].home, roll: 0 }
+const reachDown = (yaw: number, reach: number, height: number) => { const r = reachDownOf(arm5.kin, yaw, reach, height, 0, null, HOME_POSE); return r && { pose: r.pose as ArmPose, exact: r.exact } }
+const solveNear = (t: ToolTarget) => { const r = solveNearOf(arm5.kin, t, 60, null, HOME_POSE); return r && { pose: r.pose as ArmPose, exact: r.exact } }
 /** An arm at the middle, facing −x: at yaw 0 it reaches that way; turned positive, it swings toward +z. */
 const HERE: Stand = { x: 0, z: 0, turn: 0 }
 const KEYS = ['yaw', 'shoulder', 'elbow', 'wrist', 'roll'] as const
@@ -17,7 +22,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 /** Overlap this small is touching, in these checks (m). */
 const TOUCH = 0.0005
 /** A sim arm headed for a pose. */
-const SIM = { real: false, following: true, minShoulder: JOINTS[1].min }
+const SIM = { real: false, following: true }
 
 /** A seeded random number generator (mulberry32), so a failing sweep can be replayed. */
 function rng(seed: number) {
@@ -59,9 +64,9 @@ function frame(a: Arm, target: ArmPose, open: number, dt: number, world: { still
   const f = stepAboveFloor(was, pose, true, JOINTS[1].min, a.held)
   pose = f.pose
   for (const k of f.floored) a.vel[KEYS.indexOf(k)] = 0
-  const r = stepAmong(HERE, { pose: was, open: gripWas }, { pose, open: o }, a.held, { blocks: a.blocks, still: world.still ?? [], bases: world.bases ?? [] }, { real, following: true, minShoulder: JOINTS[1].min })
-  if (real) { a.pose = pose; a.open = o } else { a.pose = r.pose; a.open = r.open }
-  for (const k of r.stopped) a.vel[k === 'grip' ? 5 : KEYS.indexOf(k)] = 0
+  const r = stepAmong(arm5.kin, HERE, { pose: was, open: gripWas }, { pose, open: o }, a.held, { blocks: a.blocks, still: world.still ?? [], bases: world.bases ?? [] }, { real, following: true })
+  if (real) { a.pose = pose; a.open = o } else { a.pose = r.pose as ArmPose; a.open = r.open }
+  for (const k of r.stopped) a.vel[k === 'grip' ? 5 : KEYS.indexOf(k as (typeof KEYS)[number])] = 0
   if (r.stopped.length) a.stopped++
   a.blocks = r.blocks
   if (r.took) {
@@ -166,13 +171,13 @@ describe('the robot arm among the blocks: nothing passes through anything', () =
     const [x, z] = spot(0, 0.7)
     const from = reachDown(-15, 0.7, 0.045)!.pose, to = reachDown(15, 0.7, 0.045)!.pose
     // The fingers move about 0.36 m in this one step.
-    const r = stepAmong(HERE, { pose: from, open: 0 }, { pose: to, open: 0 }, null, { blocks: [cube(x, z)], still: [], bases: [] }, SIM)
+    const r = stepAmong(arm5.kin, HERE, { pose: from, open: 0 }, { pose: to, open: 0 }, null, { blocks: [cube(x, z)], still: [], bases: [] }, SIM)
     expect(r.stopped).toEqual([])
-    for (const p of armParts(HERE, r.pose, 0)) expect(gap(p, blockBox(r.blocks[0]))).toBeGreaterThan(-TOUCH)
+    for (const p of armParts(HERE, r.pose as ArmPose, 0)) expect(gap(p, blockBox(r.blocks[0]))).toBeGreaterThan(-TOUCH)
     // The same swing in 60 short steps.
     let blocks = [cube(x, z)]
     const at = (f: number) => Object.fromEntries(KEYS.map((k) => [k, from[k] + (to[k] - from[k]) * f])) as unknown as ArmPose
-    for (let i = 0; i < 60; i++) blocks = stepAmong(HERE, { pose: at(i / 60), open: 0 }, { pose: at((i + 1) / 60), open: 0 }, null, { blocks, still: [], bases: [] }, SIM).blocks
+    for (let i = 0; i < 60; i++) blocks = stepAmong(arm5.kin, HERE, { pose: at(i / 60), open: 0 }, { pose: at((i + 1) / 60), open: 0 }, null, { blocks, still: [], bases: [] }, SIM).blocks
     // Pushed the way the fingers swing, most of the way it goes in short steps (it slides and turns on its own way
     // along the fingers' ends, so not to the millimetre).
     const [one, many] = [r.blocks[0], blocks[0]]

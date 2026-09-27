@@ -65,18 +65,21 @@ export const isProfileId = (x: unknown): x is ProfileId => typeof x === 'string'
 const u = (route: Route, over: Partial<UtilitySettings> = {}): UtilitySettings =>
   ({ route, gain: 1, curve: 1, deadzone: 0.2, invertY: false, edgeTurn: false, ...over })
 
-/** The built-in profiles (CATALOGUE §3). */
+/**
+ * The built-in profiles (CATALOGUE §3). Flight and Driving switch Steer on as they apply, so tilting the phone flies or
+ * steers at once; Pointer switches Point on.
+ */
 export const PROFILES: Record<ProfileId, Profile> = {
   default: {
     id: 'default', name: 'Default', for: 'Most gamepad games', on: [],
     aim: u('stick.right'), steer: u('stick.wheel'), point: u('pointer'),
   },
   flight: {
-    id: 'flight', name: 'Flight', for: 'Flight and space games: tilt the phone like a yoke', on: [],
+    id: 'flight', name: 'Flight', for: 'Flight and space games: tilt the phone like a yoke', on: ['motion.steer'],
     aim: u('stick.right'), steer: u('stick.fly'), point: u('pointer'),
   },
   driving: {
-    id: 'driving', name: 'Driving', for: 'Racing: tilt to steer, triggers for throttle and brake', on: [],
+    id: 'driving', name: 'Driving', for: 'Racing: tilt to steer, triggers for throttle and brake', on: ['motion.steer'],
     aim: u('stick.right'), steer: u('stick.wheel'), point: u('pointer'),
   },
   shooter: {

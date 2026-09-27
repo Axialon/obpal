@@ -4,7 +4,7 @@ import {
   b64url, bindMac, equalBytes, fromB64url, lanContext, lanIceCredentials, lanOfferSdp, mungeIce, parsePairing, roomIdFor, sdpFingerprint,
   type LanPairing, type Pairing,
 } from './pairing'
-import { fetchIce, linkPath, roomSocketUrl, SignalClient, type IceSet } from './signal'
+import { fetchIce, ICE_REFRESH_BEFORE_MS, linkInfo, roomSocketUrl, SignalClient, type IceSet, type LinkInfo } from './signal'
 import { PROTO } from './state'
 import { putPair, type StoredPair } from './store'
 
@@ -14,10 +14,25 @@ export type LinkStatus =
   /** Joining by short code failed: the code was wrong, or already had its one attempt (PROTOCOL §2b). */
   | 'code-wrong'
 
+/**
+ * How this device knew the screen was the right one: `qr`, its fingerprint pinned by the QR code and the code's secret
+ * proven (PROTOCOL §2); `code`, the typed code's exchange (§2b); `lan`, a remembered pairing's key and fingerprints (§2a).
+ */
+export type VerifiedBy = 'qr' | 'code' | 'lan'
+
+export interface LinkStats {
+  path: 'direct' | 'relay' | 'unknown'
+  /** The control channel's round trip (ping to pong), ms. */
+  rttMs: number | null
+  /** What the connection's own statistics say: its path in detail, ICE's round trip, DTLS. */
+  link?: LinkInfo
+  verified?: VerifiedBy
+}
+
 export interface DeviceLinkEvents {
   status: (s: LinkStatus) => void
   message: (m: HostMsg) => void
-  stats: (s: { path: 'direct' | 'relay' | 'unknown'; rttMs: number | null }) => void
+  stats: (s: LinkStats) => void
   /** The host remembers this device now (an online pairing handed over a pairing key). */
   pair: (p: StoredPair) => void
   /**
@@ -65,8 +80,16 @@ const ICE_SEND_WAIT_MS = 400
  */
 const ATTEMPT_MS = 6000
 const ATTEMPT_MAX_MS = 20_000
+/** A path that went quiet gets a new one this soon (an ICE restart), where the host takes restarts. */
+const RESTART_GRACE_MS = 500
+/** An ICE restart that hasn't brought a path back in this long gives way to building the connection again. */
+const RESTART_MS = 6000
+/** No pong in this long (pings go every 2 s) counts as a path gone quiet. */
+const PONG_LOST_MS = 3500
 
 const mark = (name: string) => { try { performance.mark(name) } catch { /* no marks here */ } }
+/** The Network Information API where there is one (Chromium: `navigator.connection` says `change` on a new network). */
+const netInfo = () => (typeof navigator === 'undefined' ? undefined : (navigator as Navigator & { connection?: EventTarget }).connection)
 
 /**
  * Device (controller) side of an ob-pal link. Online it joins the room, opens the WebRTC DataChannels, verifies
@@ -101,6 +124,8 @@ export class DeviceLink {
   private lanTimer: ReturnType<typeof setTimeout> | null = null
   private statsTimer: ReturnType<typeof setInterval> | null = null
   private rttMs: number | null = null
+  /** When the last pong came (performance.now()): a path that stops answering is looked for again (poll). */
+  private pongAt = 0
   private handlers: { [K in keyof DeviceLinkEvents]: DeviceLinkEvents[K][] } = { status: [], message: [], stats: [], pair: [], invite: [] }
   /** By short code: the host's fingerprint as its answer gave it, and this side of the exchange. */
   private hostFp: Uint8Array | null = null
@@ -109,8 +134,18 @@ export class DeviceLink {
   private codeProven = false
   /** The offer (its description) an answer has been taken for: one answer per offer, the first. */
   private answeredOffer: string | null = null
+  /** The host takes ICE restarts (welcome{restart}): a path that goes is found again without a new connection. */
+  private canRestart = false
+  /** An ICE restart is under way (restartDue: its deadline), or one waits for the socket to come back. */
+  private restarting = false
+  private restartDue: ReturnType<typeof setTimeout> | null = null
+  private restartWanted = false
+  /** How this device knew the screen was the right one (the way it joined; a short code's invite doesn't change it). */
+  readonly verifiedBy: VerifiedBy
 
-  constructor(private opts: DeviceLinkOptions) {}
+  constructor(private opts: DeviceLinkOptions) {
+    this.verifiedBy = 'lan' in opts ? 'lan' : 'code' in opts ? 'code' : 'qr'
+  }
 
   on<K extends keyof DeviceLinkEvents>(ev: K, fn: DeviceLinkEvents[K]) { this.handlers[ev].push(fn) }
   private emit<K extends keyof DeviceLinkEvents>(ev: K, ...args: Parameters<DeviceLinkEvents[K]>) {
@@ -144,6 +179,8 @@ export class DeviceLink {
     // The offer (and its candidates) take shape while the socket connects, so they leave the moment the host is known to be there.
     this.peerReady = this.buildPeer()
     document.addEventListener('visibilitychange', this.onVisible)
+    globalThis.addEventListener?.('online', this.onNetwork)
+    netInfo()?.addEventListener?.('change', this.onNetwork)
   }
 
   private onVisible = () => {
@@ -152,13 +189,28 @@ export class DeviceLink {
     if (this.hostPresent && s !== 'connected' && s !== 'connecting') this.restart(0)
   }
 
+  /** The phone's network changed (it's online again, or on another kind of connection): look for a new path now. */
+  private onNetwork = () => {
+    if (this.status === 'connected' && this.canRestart) this.scheduleIceRestart(RESTART_GRACE_MS)
+  }
+
+  /** The link is up (bound, its connection alive or finding a new path), whatever the room service does. */
+  private linkUp() {
+    const s = this.pc?.connectionState
+    return (this.status === 'connected' || this.restarting) && !!s && s !== 'closed' && s !== 'failed'
+  }
+
   private onSignal(m: SignalIn) {
     if (m.t === 'welcome') {
       this.hostPresent = m.host
+      // The socket came back while the link held: an ICE restart waiting for it goes now, and nothing else changes.
+      if (this.linkUp()) { if (m.host && this.restartWanted) void this.restartIce(); return }
       if (m.host) void this.sendOffer()
       else this.setStatus('waiting-host')
     } else if (m.t === 'peer' && m.role === 'host') {
       this.hostPresent = m.ev === 'join'
+      // The host's socket came back, or was lost (not closed): the link doesn't run through it.
+      if (this.linkUp() && (m.ev === 'join' || m.clean === false)) return
       // A host arriving later takes the prepared offer if nobody had it yet, else a fresh one.
       if (m.ev === 'join') void (this.offered ? this.startPeer() : this.sendOffer())
       else { this.teardown(); this.setStatus('waiting-host') }
@@ -170,6 +222,11 @@ export class DeviceLink {
   private async onPayload(d: SignalPayload) {
     const pc = this.pc
     if (!pc || 'lan' in this.opts) return
+    if ('gone' in d) {
+      // The host no longer has the connection an ICE restart was for: a new one, at once.
+      if (this.restarting) { this.restarting = false; this.restart(0, true) }
+      return
+    }
     if ('answer' in d) {
       // Only while an offer of ours waits (the first, or a later one on this connection, such as an ICE restart), and
       // one answer per offer, the first: any other is ignored, whatever it says.
@@ -196,6 +253,8 @@ export class DeviceLink {
       if (this.pc !== pc) return
       this.hostFp = fp
       for (const c of this.pendingCands.splice(0)) await pc.addIceCandidate(c).catch(() => {})
+      // An ICE restart's answer, while the connection held: the new path takes over as soon as ICE has it.
+      if (this.restarting && pc.connectionState === 'connected') this.restartDone(pc)
     } else if ('cand' in d) {
       if (pc.remoteDescription) await pc.addIceCandidate(d.cand).catch(() => {})
       else this.pendingCands.push(d.cand)
@@ -224,7 +283,7 @@ export class DeviceLink {
     // ICE servers were requested at start and are normally here first. Never wait long for TURN credentials
     // though: on the LAN the host candidates carry the connection, and an offer not yet sent is built again
     // when they come (takeIce).
-    if (this.iceReady) await Promise.race([this.iceReady, new Promise((r) => setTimeout(r, ICE_WAIT_MS))])
+    if (this.iceReady) await Promise.race([this.iceReady.catch(() => {}), new Promise((r) => setTimeout(r, ICE_WAIT_MS))])
     // The certificate first (the first one is generated now): the ICE servers may come meanwhile.
     await this.opts.cert
     if (build !== this.builds) return null
@@ -240,11 +299,11 @@ export class DeviceLink {
     }
     pc.onconnectionstatechange = () => {
       if (this.pc !== pc) return
-      if (pc.connectionState === 'connected') this.clearAttempt()
-      else if (pc.connectionState === 'failed') this.restart(300)
-      else if (pc.connectionState === 'disconnected') this.restart(3000)
+      if (pc.connectionState === 'connected') { this.clearAttempt(); if (this.restarting && pc.signalingState === 'stable') this.restartDone(pc) }
+      else if (pc.connectionState === 'failed') this.pathLost(true)
+      else if (pc.connectionState === 'disconnected') this.pathLost(false)
     }
-    this.ctl!.onclose = () => { if (this.pc === pc && this.status === 'connected') this.restart(500) }
+    this.ctl!.onclose = () => { if (this.pc === pc && (this.status === 'connected' || this.restarting)) { this.restarting = false; this.restart(500) } }
     try {
       await pc.setLocalDescription(await pc.createOffer())
     } catch {
@@ -263,7 +322,7 @@ export class DeviceLink {
     this.iceSet = set
     this.ice = set.servers
     mark('obpal:ice')
-    if (!this.offered && this.peerReady && this.builtWith && this.builtWith !== set.servers) this.peerReady = this.buildPeer()
+    if (!this.offered && this.peerReady && this.builtWith && JSON.stringify(this.builtWith) !== JSON.stringify(set.servers)) this.peerReady = this.buildPeer()
   }
 
   /**
@@ -274,7 +333,7 @@ export class DeviceLink {
     if (this.offered) return
     this.setStatus('connecting')
     // Without its ICE servers the offer would carry no relay: give them a moment more (they're usually here first).
-    if (!this.iceSet && this.iceReady) await Promise.race([this.iceReady, new Promise((r) => setTimeout(r, ICE_SEND_WAIT_MS))])
+    if (!this.iceSet && this.iceReady) await Promise.race([this.iceReady.catch(() => {}), new Promise((r) => setTimeout(r, ICE_SEND_WAIT_MS))])
     let ready = (this.peerReady ??= this.buildPeer())
     let pc = await ready
     // Built again meanwhile (the ICE servers came): take the newer one.
@@ -382,7 +441,10 @@ export class DeviceLink {
     if (m.t === 'welcome') {
       mark('obpal:welcome')
       if (this.lanTimer) { clearTimeout(this.lanTimer); this.lanTimer = null }
+      this.canRestart = m.restart === true && !this.direct
+      this.pongAt = performance.now()
       this.setStatus('connected')
+      void this.poll()
       const { pair, name } = m
       // By short code, the invite comes first: it is the pairing a grant is remembered with.
       void ('code' in this.opts ? this.takeInvite(m.invite) : Promise.resolve()).then(() => {
@@ -397,7 +459,7 @@ export class DeviceLink {
       this.emit('message', m)
       return
     }
-    if (m.t === 'pong') this.rttMs = Math.round(performance.now() - m.t0)
+    if (m.t === 'pong') { this.rttMs = Math.round(performance.now() - m.t0); this.pongAt = performance.now() }
     if (m.t === 'lock') {
       this.teardown()
       // Removed or turned away: leave the room too, so this device neither rejoins nor holds one of its places.
@@ -450,21 +512,103 @@ export class DeviceLink {
     } catch { /* malformed grant: ignore */ }
   }
 
-  private restart(delay: number) {
+  /** Build the connection again after `delay`, unless it has come back by then (`gone`: the host says it hasn't). */
+  private restart(delay: number, gone = false) {
     if (this.direct) return
     if (this.restartTimer) clearTimeout(this.restartTimer)
     this.restartTimer = setTimeout(() => {
       this.restartTimer = null
       const s = this.pc?.connectionState
-      if (s === 'connected' && this.status === 'connected') return
+      if (!gone && s === 'connected' && this.status === 'connected') return
       if (this.hostPresent) { this.setStatus('reconnecting'); void this.startPeer() }
     }, delay)
   }
 
+  /**
+   * The path went quiet (disconnected) or died (failed). A bound link whose host takes restarts looks for a new path
+   * (an ICE restart); anything else is built again.
+   */
+  private pathLost(failed: boolean) {
+    if (this.canRestart && (this.status === 'connected' || this.restarting)) {
+      if (!this.restarting) this.scheduleIceRestart(failed ? 0 : RESTART_GRACE_MS)
+      return
+    }
+    this.restart(failed ? 300 : 3000)
+  }
+
+  private scheduleIceRestart(delay: number) {
+    if (this.restartTimer) clearTimeout(this.restartTimer)
+    this.restartTimer = setTimeout(() => { this.restartTimer = null; void this.restartIce() }, delay)
+  }
+
+  /**
+   * A new path for the live connection, without building it again (RFC 8445 §9): new ICE credentials and candidates go
+   * to the host through the room service, while the DTLS session, the channels and the binding stay, so input carries
+   * on the moment a path is back. With the socket down, it goes on the socket's next welcome. A restart that hasn't
+   * brought a path back in RESTART_MS gives way to a new connection.
+   */
+  private async restartIce() {
+    const pc = this.pc
+    if (!pc || this.direct || !this.canRestart || this.restarting || pc.connectionState === 'closed') return
+    if (pc.connectionState !== 'connected') this.setStatus('reconnecting')
+    if (!this.sig?.open) { this.restartWanted = true; return }
+    this.restartWanted = false
+    this.restarting = true
+    try {
+      await this.freshIce()
+      pc.setConfiguration({ ...pc.getConfiguration(), iceServers: this.ice })
+      pc.restartIce()
+      await pc.setLocalDescription(await pc.createOffer({ iceRestart: true }))
+    } catch {
+      this.restarting = false
+      if (this.pc === pc) this.restart(0)
+      return
+    }
+    if (this.pc !== pc || !this.sig?.open) { this.restarting = false; if (this.pc === pc) this.restartWanted = true; return }
+    this.sig.send({ t: 'sig', d: { offer: pc.localDescription!.toJSON(), restart: true } })
+    mark('obpal:restart')
+    if (this.restartDue) clearTimeout(this.restartDue)
+    this.restartDue = setTimeout(() => this.restartDone(pc), RESTART_MS)
+  }
+
+  /**
+   * An ICE restart ends: at its deadline, or once the host's answer applied with the connection up. Up, the link goes
+   * on (a pending offer the host never answered is rolled back: the old path held); down, it is built again.
+   */
+  private restartDone(pc: RTCPeerConnection) {
+    if (this.restartDue) { clearTimeout(this.restartDue); this.restartDue = null }
+    if (!this.restarting) return
+    this.restarting = false
+    if (this.pc !== pc) return
+    if (pc.connectionState === 'connected') {
+      if (pc.signalingState === 'have-local-offer') pc.setLocalDescription({ type: 'rollback' }).catch(() => {})
+      this.pongAt = performance.now()
+      if (this.status === 'reconnecting') this.setStatus('connected')
+      return
+    }
+    this.restart(0)
+  }
+
+  /** ICE servers whose TURN credentials won't lapse in the next few minutes, fetched again if they would. */
+  private async freshIce() {
+    if (!('service' in this.opts) || !this.roomId) return
+    const expires = this.iceSet?.expires
+    if (this.iceSet?.turn && expires && expires - Date.now() > ICE_REFRESH_BEFORE_MS) return
+    const set = await fetchIce(this.opts.service, this.roomId)
+    this.iceSet = set
+    this.ice = set.servers
+  }
+
   private async poll() {
+    // An offer that should be out and isn't (the host is there, the socket open, nothing under way): it goes now.
+    if (!this.direct && !this.offered && !this.restarting && this.hostPresent && this.sig?.open && this.status !== 'connected') void this.sendOffer()
     if (this.status !== 'connected' || !this.pc) return
+    // No pong since the ping before last: the path has gone quiet, and ICE would take a while longer to say so.
+    if (this.canRestart && !this.restarting && this.pongAt && performance.now() - this.pongAt > PONG_LOST_MS) this.scheduleIceRestart(0)
     this.sendCtl({ t: 'ping', t0: performance.now() })
-    this.emit('stats', { path: await linkPath(this.pc), rttMs: this.rttMs })
+    const link = await linkInfo(this.pc)
+    const path = link.path === 'relay' ? 'relay' : link.path === 'unknown' ? 'unknown' : 'direct'
+    this.emit('stats', { path, rttMs: this.rttMs, link, verified: this.verifiedBy })
   }
 
   private teardown() {
@@ -486,6 +630,12 @@ export class DeviceLink {
     this.offered = false
     this.builtWith = null
     this.clearAttempt()
+    // Restarts belong to a connection: the next one says again whether its host takes them.
+    this.canRestart = false
+    this.pongAt = 0
+    this.restarting = false
+    this.restartWanted = false
+    if (this.restartDue) { clearTimeout(this.restartDue); this.restartDue = null }
     if (this.lanTimer) { clearTimeout(this.lanTimer); this.lanTimer = null }
     const pc = this.pc
     this.pc = null
@@ -513,6 +663,8 @@ export class DeviceLink {
     if (this.statsTimer) clearInterval(this.statsTimer)
     if (this.restartTimer) clearTimeout(this.restartTimer)
     document.removeEventListener('visibilitychange', this.onVisible)
+    globalThis.removeEventListener?.('online', this.onNetwork)
+    netInfo()?.removeEventListener?.('change', this.onNetwork)
     this.teardown()
     this.sig?.close()
     this.setStatus('closed')

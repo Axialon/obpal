@@ -1,6 +1,6 @@
 /**
  * Shared scenes end to end (CATALOGUE §5): the Viewer from this checkout's build, served by the local stand-in for
- * obpal.blackboxes.net (extension/e2e/local.mjs, signaling proxied to production), and two emulated phones that join
+ * obpal.blackboxes.net (extension/e2e/local.mjs, signaling through this checkout's own worker), and two emulated phones that join
  * through its one invite link.
  *   - Both join, each with its own colour; the first is the lead.
  *   - Each claims a node from its scene list; a node someone else holds is refused, with a toast naming who has it.
@@ -13,6 +13,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, devices } from 'playwright'
+import { cspCheck } from './csp-watch.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
 
 const HEADED = process.argv.includes('--headed')
@@ -217,6 +218,7 @@ try {
     if ((await scene()).people.length) throw new Error('the removed phone rejoined')
     return 'no rejoin'
   })
+  await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {
   console.error(e)
   exitCode = 1

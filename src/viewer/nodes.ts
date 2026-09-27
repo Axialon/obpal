@@ -92,7 +92,7 @@ export class Parts {
     this.card = document.createElement('div')
     this.card.className = 'node-card glass'
     this.card.setAttribute('role', 'status')
-    this.card.innerHTML = '<div class="nc-head"><span class="nc-dot"></span><strong class="nc-title"></strong><button class="nc-x" aria-label="Release part">×</button></div><div class="nc-rows"></div><div class="nc-range" hidden><i></i></div><div class="nc-foot"></div>'
+    this.card.innerHTML = '<div class="nc-head"><span class="nc-dot"></span><strong class="nc-title"></strong><button class="nc-x" aria-label="Release part">×</button></div><div class="nc-rows"></div><div class="nc-range bb-meter" hidden><i></i></div><div class="nc-foot"></div>'
     this.card.querySelector<HTMLButtonElement>('.nc-x')!.onclick = () => this.select(null, this.cardHand)
     document.body.appendChild(this.card)
   }
@@ -536,11 +536,12 @@ export class Parts {
     }
     const range = this.card.querySelector<HTMLElement>('.nc-range')!
     range.hidden = !part.range && !live
-    if (live) range.querySelector('i')!.style.left = `${live.fraction * 100}%`
+    // The meter fills up to its knob (the family's .bb-meter).
+    if (live) range.style.setProperty('--fill', `${live.fraction * 100}%`)
     else if (part.range) {
       const { def, min, max } = part.range.pillar
       const t = max > min * 50 && min > 0 ? Math.log(def / min) / Math.log(max / min) : (def - min) / (max - min || 1)
-      range.querySelector('i')!.style.left = `${Math.max(0, Math.min(1, t)) * 100}%`
+      range.style.setProperty('--fill', `${Math.max(0, Math.min(1, t)) * 100}%`)
     }
     this.card.querySelector('.nc-foot')!.textContent = part.related?.join(' · ') ?? ''
   }

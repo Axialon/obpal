@@ -1,10 +1,10 @@
 import {
   b64url, bindMac, candidatesOf, certFingerprint, controllerOf, CONTROLLERS, DEFAULT_SERVICE, encodeLanPairing, encodePairing, equalBytes,
-  fetchIce, forgetPair, iceRefreshIn, fromB64url, isControllerId, lanAnswerSdp, lanContext, lanIceCredentials, listPairs, loadCertificate, MAX_NODE_ID, MAX_TEXT, MAX_TOSS, Mode, newSecret, PAD_HEADER,
-  packetType, POINTER_HEADER, POSE_HEADER, PROTO, putPair, randomBytes, readLocalIce, readMode, roomIdFor, roomSocketUrl, sdpFingerprint, SignalClient,
+  fetchIce, forgetPair, iceRefreshIn, fromB64url, isControllerId, lanAnswerSdp, lanContext, lanIceCredentials, linkInfo, listPairs, loadCertificate, MAX_NODE_ID, MAX_TEXT, MAX_TOSS, Mode, newSecret, PAD_HEADER,
+  packetType, POINTER_HEADER, POSE_HEADER, PROTO, putPair, randomBytes, REACH_TIMEOUT_MS, readLocalIce, readMode, roomIdFor, roomSocketUrl, sdpFingerprint, sdpSession, SignalClient,
   withControllers,
   type Caps, type DeviceMsg, type HostMsg, type Layout, type ModeId, type PadState, type PairGrant, type PointerState, type SceneNode,
-  type ScenePerson, type SignalIn, type SignalPayload, type StoredPair,
+  type ScenePerson, type SignalIn, type SignalPayload, type StoredPair, type LinkInfo, type VerifiedBy,
 } from '@obpal/core'
 import { CODE_SECRET_DIGITS, CodePake, isCodeHandle, randomDigits, solveWork } from '@obpal/core'
 import { Stream, type Frame } from './stream'
@@ -55,6 +55,9 @@ export interface Participant {
   controller?: string; profile?: string
 }
 
+/** A connected device's link (Remote.links): who, how it proved itself, and what its connection says of itself. */
+export interface DeviceLinkInfo { id: string; name: string; verified: VerifiedBy; link: LinkInfo }
+
 /** A remembered phone, as shown to people (no key material). */
 export interface PairSummary { id: string; name: string; at: number }
 
@@ -95,6 +98,14 @@ interface RemoteEvents {
 
 interface Peer {
   id: string
+  /** The signaling socket it talks through: its first, or a new one after its phone's socket was lost and came back. */
+  sig: string
+  /** Its offer's SDP session (sdpSession): a later offer in the same session renegotiates this connection. */
+  session: string | null
+  /** An ICE restart's offer is being applied: its candidates wait until it has. */
+  renegotiating: boolean
+  /** How it proved itself when it bound: the QR code's secret, the typed code's exchange, or a remembered pairing. */
+  via?: VerifiedBy
   pc: RTCPeerConnection
   ctl: RTCDataChannel
   st: RTCDataChannel
@@ -162,6 +173,12 @@ export class Remote {
   private ice: RTCIceServer[] = []
   /** The next ICE server lookup (refreshIce). */
   private iceTimer: ReturnType<typeof setTimeout> | null = null
+  /** The first lookup is done (iceFirst settles then): answers carry the service's ICE servers, TURN included. */
+  private iceLoaded = false
+  private iceFirst: Promise<void>
+  private iceFirstDone: () => void = () => {}
+  /** Candidates for offers still waiting for the first ICE servers, by signaling id. */
+  private early = new Map<string, RTCIceCandidateInit[]>()
   private destroyed = false
   private sig!: SignalClient
   private peers = new Map<string, Peer>()
@@ -207,6 +224,7 @@ export class Remote {
   private constructor(private opts: RemoteOptions) {
     this.service = serviceOrigin(opts.service ?? (isObpalOrigin() ? location.origin : DEFAULT_SERVICE))
     this.layout = withControllers(opts.layout ?? DEFAULT_LAYOUT)
+    this.iceFirst = new Promise((r) => { this.iceFirstDone = r })
   }
 
   static async create(opts: RemoteOptions): Promise<Remote> {
@@ -263,6 +281,8 @@ export class Remote {
       const set = await fetchIce(this.service, room)
       if (room !== this.roomId || this.destroyed) return
       this.ice = set.servers
+      this.iceLoaded = true
+      this.iceFirstDone()
       this.refreshIce(room, iceRefreshIn(set))
     }, delay)
   }
@@ -401,11 +421,12 @@ export class Remote {
    * through the room service (and a phone that changes networks loses its socket first): it goes only if the
    * connection fails too (scheduleLost). A service that doesn't say which counts as clean.
    */
-  private peerLeft(id: string, clean: boolean) {
-    const p = this.peers.get(id)
+  private peerLeft(sig: string, clean: boolean) {
+    this.early.delete(sig)
+    const p = this.bySig(sig)
     if (!p) return
     const s = p.pc.connectionState
-    if (clean || !p.bound || s === 'closed' || s === 'failed') return this.dropPeer(id)
+    if (clean || !p.bound || s === 'closed' || s === 'failed') return this.dropPeer(p.id)
     if (s !== 'connected') this.scheduleLost(p)
   }
 
@@ -415,7 +436,8 @@ export class Remote {
     const st = pc.createDataChannel('st', { negotiated: true, id: 1, ordered: false, maxRetransmits: 0 })
     st.binaryType = 'arraybuffer'
     const peer: Peer = {
-      id, pc, ctl, st, fp, bound: false, name: 'Phone', cands: [], color: this.host.color, since: 0, caps: null, lost: null, nodesSent: -1, says: false,
+      id, sig: id, session: null, renegotiating: false,
+      pc, ctl, st, fp, bound: false, name: 'Phone', cands: [], color: this.host.color, since: 0, caps: null, lost: null, nodesSent: -1, says: false,
       stream: new Stream({
         mode: (m) => {
           // The packets can bring a new mode before the mode message naming the controller: until it comes, the
@@ -453,24 +475,85 @@ export class Remote {
 
   private async onPayload(id: string, d: SignalPayload) {
     if ('offer' in d) {
-      this.dropPeer(id)
+      // The same connection again (its phone changed networks): renegotiate it, and keep everything else. A restart
+      // for a connection this host no longer has can't be taken up: the phone builds a new one at once.
+      const again = this.sameConnection(d.offer?.sdp)
+      if (again) return this.renegotiate(again, id, d.offer)
+      if (d.restart) { this.sig.send({ t: 'sig', to: id, d: { gone: true } }); return }
+      const old = this.bySig(id)
+      if (old) this.dropPeer(old.id)
       // An offer that doesn't commit to exactly one fingerprint (the one DTLS will check) could never bind: no answer.
       if (!sdpFingerprint(d.offer?.sdp)) return
       if (this.status !== 'connected') this.setStatus('connecting')
+      // An offer in this host's first moments may come before its ICE servers: a moment for them, so the answer
+      // carries a relay where one is needed (its candidates wait meanwhile). A newer offer from the same socket wins.
+      const early: RTCIceCandidateInit[] = []
+      if (!this.iceLoaded) {
+        this.early.set(id, early)
+        await Promise.race([this.iceFirst, new Promise((r) => setTimeout(r, REACH_TIMEOUT_MS))])
+        if (this.early.get(id) !== early) return
+        this.early.delete(id)
+      }
       const pc = new RTCPeerConnection({ iceServers: this.ice, certificates: [this.cert] })
       const peer = this.addPeer(id, pc, sdpFingerprint(d.offer.sdp))
-      pc.onicecandidate = (e) => { if (e.candidate) this.sig.send({ t: 'sig', to: id, d: { cand: e.candidate.toJSON() } }) }
+      peer.session = sdpSession(d.offer.sdp)
+      peer.cands.push(...early)
+      pc.onicecandidate = (e) => { if (e.candidate) this.sig.send({ t: 'sig', to: peer.sig, d: { cand: e.candidate.toJSON() } }) }
       await pc.setRemoteDescription(d.offer)
       for (const c of peer.cands.splice(0)) await pc.addIceCandidate(c).catch(() => {})
       const answer = await pc.createAnswer()
       await pc.setLocalDescription(answer)
       this.sig.send({ t: 'sig', to: id, d: { answer: pc.localDescription!.toJSON() } })
     } else if ('cand' in d) {
-      const peer = this.peers.get(id)
-      if (!peer) return
-      if (peer.pc.remoteDescription) await peer.pc.addIceCandidate(d.cand).catch(() => {})
+      const peer = this.bySig(id)
+      if (!peer) { this.early.get(id)?.push(d.cand); return }
+      if (peer.pc.remoteDescription && !peer.renegotiating) await peer.pc.addIceCandidate(d.cand).catch(() => {})
       else peer.cands.push(d.cand)
     }
+  }
+
+  /** The peer that talks through signaling socket `sig`. */
+  private bySig(sig: string): Peer | undefined {
+    for (const p of this.peers.values()) if (p.sig === sig) return p
+    return undefined
+  }
+
+  /**
+   * The bound peer an offer renegotiates, if it does: the same DTLS fingerprint and the same SDP session (a connection
+   * keeps its session through all its offers; a new one starts another), on a connection that isn't closed. Anyone
+   * else's offer, or a phone's new connection, is a new peer.
+   */
+  private sameConnection(sdp: string | undefined): Peer | null {
+    const fp = sdpFingerprint(sdp)
+    const session = sdpSession(sdp)
+    if (!fp || !session) return null
+    for (const p of this.peers.values()) {
+      if (p.bound && !p.lan && p.fp && p.session === session && equalBytes(p.fp, fp) && p.pc.connectionState !== 'closed') return p
+    }
+    return null
+  }
+
+  /**
+   * A bound phone renegotiates its connection: an ICE restart (RFC 8445 §9), after its network changed or its path went
+   * quiet. The new ICE credentials and candidates go in with fresh ICE servers (a relay then has live credentials),
+   * and the DTLS session, the channels and the binding stay: the phone was proven once, and DTLS still holds both
+   * fingerprints. A phone whose socket was lost and came back talks through its new one from now on.
+   */
+  private async renegotiate(peer: Peer, sig: string, offer: RTCSessionDescriptionInit) {
+    peer.sig = sig
+    if (peer.lost) { clearTimeout(peer.lost); peer.lost = null }
+    peer.renegotiating = true
+    try {
+      peer.pc.setConfiguration({ ...peer.pc.getConfiguration(), iceServers: this.ice })
+      await peer.pc.setRemoteDescription(offer)
+      await peer.pc.setLocalDescription(await peer.pc.createAnswer())
+      this.sig.send({ t: 'sig', to: sig, d: { answer: peer.pc.localDescription!.toJSON() } })
+    } catch {
+      // Not one this connection can take: the phone builds a new one when its restart doesn't come up.
+    } finally {
+      peer.renegotiating = false
+    }
+    for (const c of peer.cands.splice(0)) await peer.pc.addIceCandidate(c).catch(() => {})
   }
 
   private async onCtl(peer: Peer, data: unknown) {
@@ -498,6 +581,7 @@ export class Remote {
         return
       }
       peer.bound = true
+      peer.via = peer.lan ? 'lan' : 'code' in m ? 'code' : 'qr'
       peer.name = String(m.name || 'Phone').slice(0, 40)
       peer.caps = m.caps ?? null
       peer.since = Date.now()
@@ -529,7 +613,8 @@ export class Remote {
       }
       // A device that came by short code gets the QR link's code, to reconnect and reload with like a scanned one.
       const invite = 'code' in m ? encodePairing({ secret: this.secret, fp: this.fp }) : undefined
-      this.send(peer, { t: 'welcome', proto: PROTO, name: this.opts.appName, layout: this.layout, ...(pair ? { pair } : {}), ...(invite ? { invite } : {}) })
+      // Through the room service, the phone may renegotiate this connection when its path goes (restart).
+      this.send(peer, { t: 'welcome', proto: PROTO, name: this.opts.appName, layout: this.layout, ...(pair ? { pair } : {}), ...(invite ? { invite } : {}), ...(peer.lan ? {} : { restart: true }) })
       // A shared scene's settings so far, and this participant's colour (a device wears it as its accent).
       if (this.shared) this.send(peer, { t: 'state', values: { ...this.values, color: peer.color } })
       const first = this.status !== 'connected'
@@ -726,6 +811,14 @@ export class Remote {
   /** Everyone controlling the scene, oldest (the lead) first. */
   get participants(): Participant[] { return this.bound().map((p) => this.participant(p)) }
 
+  /**
+   * Each connected device's link, oldest first, from the connection's own statistics: its path, ICE's round trip and
+   * DTLS (linkInfo), and how the device proved itself when it bound. For a connection badge that claims only this.
+   */
+  async links(): Promise<DeviceLinkInfo[]> {
+    return Promise.all(this.bound().map(async (p) => ({ id: p.id, name: p.name, verified: p.via ?? 'qr', link: await linkInfo(p.pc) })))
+  }
+
   private freeColor(peer: Peer): string {
     const used = new Set([this.host.color.toLowerCase(), ...this.bound().filter((p) => p !== peer).map((p) => p.color)])
     return PARTICIPANT_COLORS.find((c) => !used.has(c)) ?? PARTICIPANT_COLORS[used.size % PARTICIPANT_COLORS.length]
@@ -842,12 +935,16 @@ export class Remote {
     if (peer.ctl.readyState === 'open') peer.ctl.send(JSON.stringify(m))
   }
 
+  /**
+   * A bound peer's connection went quiet or failed: it goes unless it comes back in time. A phone through the room
+   * service gets longer, since it may be finding a new path (an ICE restart) after changing networks.
+   */
   private scheduleLost(peer: Peer) {
     if (peer.lost) return
     peer.lost = setTimeout(() => {
       peer.lost = null
       if (peer.pc.connectionState !== 'connected') this.dropPeer(peer.id)
-    }, 4000)
+    }, peer.lan ? 4000 : 10_000)
   }
 
   private dropPeer(id: string) {

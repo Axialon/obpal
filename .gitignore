@@ -6,6 +6,11 @@ dist/
 .DS_Store
 .claude/worktrees/
 .claude/settings.local.json
+# Local-only Claude Code files (.claude/README.md): never committed, never in the open-source export.
+.claude/local/
+.claude/skills/local-*/
+.claude/agents/local-*.md
+CLAUDE.local.md
 extension/release/
 .open-source-deny
 *.pem

@@ -11,8 +11,9 @@
  *   signal cut    the phone's TCP connections (its signaling socket among them) are cut the way a lost network cuts
  *                 them, with no close frame, while its peer connection lives on: the longest gap in its input on the
  *                 screen, whether it flows again, and whether the screen kept the same participant
- *   ICE restart   restartIce() on the phone's live connection, as a phone does when its network changes: how long until
- *                 the new ICE session is up, and the longest gap in input meanwhile
+ *   ICE restart   the phone's browser says it's online again, as when its network changes: how long until a new ICE
+ *                 session is up (a phone and screen that restart ICE), the longest gap in input meanwhile, and whether
+ *                 the screen kept the same participant
  *   rebuild       the screen closes the phone's peer connection (a link that failed outright): time until input again
  * --relay: the same through a TURN relay only (both sides' peer connections forced to iceTransportPolicy 'relay'), with
  * the room service and its TURN credentials from production through the HTTPS stand-in (extension/e2e/local.mjs on
@@ -26,7 +27,7 @@ import { writeFile } from 'node:fs/promises'
 import { connect, createServer } from 'node:net'
 import { chromium, devices } from 'playwright'
 import { startWorker } from './local-worker.mjs'
-import { startLocal } from '../extension/e2e/local.mjs'
+import { startLocal, UPSTREAM } from '../extension/e2e/local.mjs'
 
 const PORT = Number(process.env.OBPAL_E2E_WORKER_PORT) || 5179
 const HEADED = process.argv.includes('--headed')
@@ -137,7 +138,8 @@ const out = { relay: RELAY, origin: AT || 'local', runs: [], failed: 0 }
 try {
   let origin = AT
   if (!AT && RELAY) {
-    const local = await startLocal()
+    // The relay needs production's TURN keys, which a local worker has none of: production, asked for by --relay.
+    const local = await startLocal({ upstream: `https://${UPSTREAM}` })
     closers.push(local)
     origin = local.origin
   } else if (!AT) {
@@ -208,17 +210,20 @@ try {
 
       if (!SKIP.has('restart')) {
         await until('input flowing', () => flowing(screen), 20000).catch(() => {})
-        const t = Date.now()
-        const ufrag = () => phone.evaluate(() => {
+        const before = await people()
+        // The host's ICE credentials in the live connection's remote description: new ones mean a new ICE session.
+        const session = () => phone.evaluate(() => {
           const pc = [...window.__rtc.pcs].reverse().find((p) => p.connectionState === 'connected')
-          return pc ? /a=ice-ufrag:(\S+)/.exec(pc.localDescription?.sdp ?? '')?.[1] ?? '' : ''
+          return pc && ['connected', 'completed'].includes(pc.iceConnectionState) ? /a=ice-ufrag:(\S+)/.exec(pc.remoteDescription?.sdp ?? '')?.[1] ?? '' : ''
         })
-        const u0 = await ufrag()
-        await phone.evaluate(() => [...window.__rtc.pcs].reverse().find((p) => p.connectionState === 'connected')?.restartIce())
-        const done = await until('a new ICE session', async () => { const u = await ufrag(); return u && u !== u0 ? Date.now() : 0 }, 8000).catch(() => 0)
+        const s0 = await session()
+        const t = Date.now()
+        // What a phone sees when its network changes: the browser says it's online (again).
+        await phone.evaluate(() => dispatchEvent(new Event('online')))
+        const done = await until('a new ICE session', async () => { const s = await session(); return s && s !== s0 ? Date.now() : 0 }, 8000).catch(() => 0)
         await sleep(800)
-        out.restart = { ms: done ? done - t : null, gap: await inputGap(screen, t) }
-        console.log(`  ICE restart: ${done ? `new ICE session up in ${done - t} ms` : 'not taken up'}; longest input gap ${out.restart.gap} ms`)
+        out.restart = { ms: done ? done - t : null, gap: await inputGap(screen, t), kept: (await people()) === before }
+        console.log(`  ICE restart on a network change: ${done ? `new ICE session up in ${done - t} ms` : 'not taken up'}; longest input gap ${out.restart.gap} ms; same participant: ${out.restart.kept}`)
       }
 
       if (!SKIP.has('rebuild')) {

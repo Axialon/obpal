@@ -78,6 +78,14 @@ export function sdpFingerprint(sdp: string | undefined | null): Uint8Array | nul
   return m ? Uint8Array.from(m[1].split(':').map((h) => parseInt(h, 16))) : null
 }
 
+/**
+ * The session an SDP blob belongs to: its o= line's session id, which stays the same through every offer one peer
+ * connection makes (RFC 8829 §5.2.2), so a later offer with it renegotiates that connection. Null without one.
+ */
+export function sdpSession(sdp: string | undefined | null): string | null {
+  return /^o=\S+ (\d{1,20}) \d+ IN /m.exec(sdp ?? '')?.[1] ?? null
+}
+
 /** Fingerprint as SDP writes it: upper-case hex pairs joined by colons. */
 export const fingerprintHex = (fp: Uint8Array) => Array.from(fp, (b) => b.toString(16).padStart(2, '0').toUpperCase()).join(':')
 

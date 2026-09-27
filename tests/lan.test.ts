@@ -132,9 +132,10 @@ describe('controller service worker routing', () => {
     expect(route(get('https://example.com/x.js'), origin, pre)).toBe('network')
   })
 
-  it('caches web fonts as they are seen and cleans old versions only', () => {
-    expect(route(get('https://fonts.googleapis.com/css2?family=Inter'), origin, pre)).toBe('fonts')
-    expect(route(get('https://fonts.gstatic.com/s/inter/v1/x.woff2'), origin, pre)).toBe('fonts')
+  it('caches this origin’s web fonts as they are seen, reaches no font service, and cleans old versions only', () => {
+    expect(route(get(`${origin}/fonts/inter-latin.woff2`), origin, pre)).toBe('fonts')
+    expect(route(get(`${origin}/fonts/OFL-Inter.txt`), origin, pre)).toBe('network')
+    expect(route(get('https://fonts.gstatic.com/s/inter/v1/x.woff2'), origin, pre)).toBe('network')
     expect(staleCaches(['obpal-p-old', cacheName('new'), 'obpal-fonts-v1', 'other'], cacheName('new'))).toEqual(['obpal-p-old'])
   })
 })

@@ -14,6 +14,7 @@ import { applyTheme, initialTheme } from '../ui/themes'
 import { mountMarks } from '../ui/icons'
 import { mountTopBar } from '../landing/topbar'
 import { startSimScene, type SimScene } from './scene'
+import { simView } from './view'
 
 applyTheme(initialTheme())
 mountMarks()
@@ -41,8 +42,9 @@ interface Slot {
   flash: number
 }
 
-const renderer = new THREE.WebGLRenderer({ canvas: $('stage') as HTMLCanvasElement, antialias: true })
-renderer.setPixelRatio(Math.min(2, Math.max(1.5, devicePixelRatio)))
+// Drawn the way every sim is (./view.ts): clean edges at rest, smooth in motion.
+const view = simView($('stage') as HTMLCanvasElement, { onResize: resize })
+const renderer = view.renderer
 renderer.toneMapping = THREE.ACESFilmicToneMapping
 const scene = new THREE.Scene()
 scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture
@@ -244,8 +246,9 @@ function loop(now: number) {
     const ins = s.group.getObjectByName('insignia')
     if (ins) ins.rotation.y = t * 0.9 + Number(s.id.slice(1))
   }
-  ;(edge.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.8 + 0.2 * Math.sin(t * 2)
-  renderer.render(scene, camera)
+  // The ring's edge breathes while anyone plays; with nobody here, it glows steady (and the still picture can settle).
+  ;(edge.material as THREE.MeshStandardMaterial).emissiveIntensity = active.length ? 0.8 + 0.2 * Math.sin(t * 2) : 0.9
+  view.draw(scene, camera, dt)
   requestAnimationFrame(loop)
 }
 
@@ -267,9 +270,8 @@ function renderScore() {
 }
 
 function resize() {
-  const w = innerWidth
-  const h = innerHeight
-  renderer.setSize(w, h, false)
+  const w = view.width
+  const h = view.height
   camera.aspect = w / h
   // Keep the whole ring in view on narrow screens, and centred beside (or above) the panel.
   camera.position.set(0, w < h ? 6.4 : 4.3, w < h ? 5 : 3.4)
@@ -279,7 +281,6 @@ function resize() {
   else camera.setViewOffset(w, h, 0, (h - panel.top) / 2, w, h)
   camera.updateProjectionMatrix()
 }
-addEventListener('resize', resize)
 resize()
 renderScore()
 requestAnimationFrame(loop)

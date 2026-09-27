@@ -42,19 +42,34 @@ const DEPTH = 0.3
 /** A marble has weight: it follows its steering on a soft spring, and in the air mostly keeps its momentum. */
 const STEER = { omega: 4.6, zeta: 0.78, air: 0.3 }
 /** Hits slower than this (em/s) are silent; this fast is the hardest there is. */
-const HIT_MIN = 0.7
+const HIT_MIN = 0.6
 const HIT_MAX = 7
 /**
  * A knock against the edge of the screen: slower than this (em/s) is rolling along it or leaning on it (silent), and a
- * marble is heard at most this often against the same edge (s).
+ * marble is heard at most this often against the same edge (s). A phone tipped 3° rolls a marble into an edge at
+ * about 0.5 em/s, 2.5° at 0.4, and a hand pressing it against one knocks at 0.1 or so.
  */
-const WALL_MIN = 0.8
+const WALL_MIN = 0.3
 const WALL_GAP = 0.25
+/** Knocks too soft to hear are noted for ?debug=audio from this fast (em/s), at most this often per marble (s). */
+const NOTE_FROM = 0.12
+const NOTE_GAP = 0.3
+/**
+ * A knock felt in 3D: a letter rocks (rad/s at the hardest: about 3°), a marble squashes and rings (per s: about 7% at
+ * the hardest), and a very hard one jolts the view (from this hard, up to this many px).
+ */
+const ROCK = 2.4
+const SQUASH = 5
+const JOLT_FROM = 0.7
+const JOLT_PX = 1.6
 /** The rounded edge a letter's top has (em). */
 const EDGE = 0.016
-/** Buttons are steps this high (em), and footprints up to CLIMB high can be rolled onto (./bounce.ts). */
-const PAD_H = 0.05
-const CLIMB = 0.1
+/**
+ * Buttons are steps this high (em: half a marble's radius, a block it bumps against and needs a good tilt, about 9°,
+ * or a point, to get up onto), and footprints up to CLIMB high can be rolled onto (./bounce.ts).
+ */
+const PAD_H = 0.1
+const CLIMB = 0.15
 /** A button's footprint id is this plus its index (letters count from 0). At most MAX_PADS keep the dots off them. */
 const PAD_ID = 1000
 const MAX_PADS = 6
@@ -65,8 +80,11 @@ const INK = new Color('#f1edff')
 const LIME = new Color('#c6ff34')
 
 export type HitKind = 'letter' | 'floor' | 'marble' | 'button' | 'wall'
-/** A marble hit something (the edge of the screen: a wall): what (a button: which), how hard (0…1), and where. */
-export interface Hit { orb: string; other?: string; kind: HitKind; pad?: number; strength: number; x: number; y: number; z: number }
+/**
+ * A marble hit something (the edge of the screen: a wall): what (a button: which), how hard (0…1, and its speed into
+ * it, em/s), and where.
+ */
+export interface Hit { orb: string; other?: string; kind: HitKind; pad?: number; strength: number; speed: number; x: number; y: number; z: number }
 
 /** A button in the hero, as the marbles' world sees it: its box on the canvas (CSS px) and its corners' radius. */
 export interface PadRect { x: number; y: number; w: number; h: number; r: number }
@@ -92,9 +110,17 @@ export interface FieldOrb {
   /** When it last made itself heard (s, the field's clock), so rolling along a letter doesn't rattle; and against each edge. */
   heardAt: number
   wallAt: number[]
+  /** When a knock too soft to hear was last noted for ?debug=audio. */
+  quietAt: number
   /** What it last rested or rolled on (a surface id: bounce.ts), so arriving on a button is noticed. */
   on: number
+  /** A knock rings through it: it squashes along `axis` (the way it was struck) and back, a few times, quickly. */
+  squash: Wobble
+  axis: Vector3
 }
+
+/** A decaying spring: its value and its speed (the letters' tilt, a marble's squash, the view's shake). */
+interface Wobble { x: number; v: number }
 
 interface Letter {
   ch: string
@@ -108,7 +134,22 @@ interface Letter {
   /** Its dip when landed on (a damped spring). */
   dip: number
   dipV: number
+  /** It rocks when struck, about its foot (radians, about x and z): springs, a fifth of a second. */
+  rx: Wobble
+  rz: Wobble
 }
+
+/** A spring's step: stiffness as a frequency (Hz) and damping ratio. */
+function spring(w: Wobble, dt: number, hz: number, zeta: number) {
+  const k = 2 * Math.PI * hz
+  // In small steps: it's stiff.
+  for (let left = dt; left > 1e-6; left -= 1 / 240) {
+    const h = Math.min(left, 1 / 240)
+    w.v += (-k * k * w.x - 2 * zeta * k * w.v) * h
+    w.x += w.v * h
+  }
+}
+const settled = (w: Wobble) => Math.abs(w.x) < 1e-4 && Math.abs(w.v) < 1e-3
 
 export interface Gfx {
   /** The canvas's size in CSS pixels, its drawing buffer's, and drawing-buffer pixels per CSS pixel. */
@@ -160,6 +201,8 @@ export interface Field {
   play(top: number, bottom: number): void
   /** A marble's outline as drawn, on the canvas (px): its leftmost, rightmost, topmost and bottommost points. */
   outline(id: string): { left: number; right: number; top: number; bottom: number } | null
+  /** How tall a button's step looks on screen (px) where the buttons are: the depth its block is drawn with. */
+  padDepth(): number
   /** Toss a marble up at `vy` (em/s): now if it's on something, else as soon as it touches down. */
   toss(o: FieldOrb, vy: number): void
   /** A marble, created on first use, in a colour. */
@@ -183,6 +226,8 @@ export interface Field {
   onLand: ((letter: number, orbId: string) => void) | null
   /** A marble hit something hard enough to hear. */
   onHit: ((h: Hit) => void) | null
+  /** A knock too soft (or too soon after the last) to sound, and why: for ?debug=audio. */
+  onQuiet: ((q: { orb: string; kind: HitKind; speed: number; why: string }) => void) | null
 }
 
 const radial = (stops: [number, string][], size = 256) => {
@@ -224,7 +269,7 @@ const GLOW_GLSL = `
     return g;
   }`
 
-export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }): Field {
+export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; still?: boolean }): Field {
   const renderer = new WebGLRenderer({ canvas, alpha: true, antialias: true, premultipliedAlpha: true })
   renderer.setClearColor(0x000000, 0)
   renderer.outputColorSpace = SRGBColorSpace
@@ -421,6 +466,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
       uTint: { value: tint }, uLife: { value: 0 }, uKey: { value: keyDir },
       uScene: { value: behind.texture }, uRefract: { value: 1 }, uView: { value: buf }, uSteps: { value: 12 },
       uCenter: { value: new Vector2() }, uRad: { value: 1 }, uC: { value: new Vector3() }, uR: { value: ORB_R }, uSpin: { value: new Matrix3() },
+      uAxis: { value: new Vector3(0, 1, 0) }, uSquash: { value: 0 },
     },
     vertexShader: `
       varying vec3 vWorld;
@@ -442,7 +488,14 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
       uniform vec3 uC;
       uniform float uR;
       uniform mat3 uSpin;
+      uniform vec3 uAxis;
+      uniform float uSquash;
       varying vec3 vWorld;
+      // Into the space where the marble, squashed along uAxis by a knock, is a sphere of radius uR again.
+      vec3 unsquash(vec3 v) {
+        float a = dot(v, uAxis);
+        return (v - a * uAxis) / (1.0 + 0.5 * uSquash) + uAxis * (a / (1.0 - uSquash));
+      }
       float vanes(vec3 q) {
         float l = length(q);
         float r = length(q.xz);
@@ -458,15 +511,18 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
       }
       void main() {
         // The sphere along this pixel's view ray: how near the ray passes its centre, and one pixel in the same units.
+        // (Worked out where the squashed marble is round again: the same, unsquashed.)
         vec3 rd0 = normalize(vWorld - cameraPosition);
-        vec3 oc = uC - cameraPosition;
-        float along = dot(oc, rd0);
-        float q = sqrt(max(dot(oc, oc) - along * along, 0.0));
+        vec3 O = unsquash(cameraPosition - uC);
+        vec3 D = unsquash(rd0);
+        float dd = dot(D, D);
+        float along = -dot(O, D) / dd;
+        float q = length(O + D * along);
         float px = max(length(vec2(dFdx(q), dFdy(q))), 1e-6);
         float cover = clamp((uR - q) / px + 0.5, 0.0, 1.0);
         float qi = min(q, uR);
-        vec3 hit = cameraPosition + rd0 * (along - sqrt(uR * uR - qi * qi));
-        vec3 n = normalize(hit - uC);
+        vec3 hit = cameraPosition + rd0 * (along - sqrt(uR * uR - qi * qi) / sqrt(dd));
+        vec3 n = normalize(unsquash(unsquash(hit - uC)));
         vec3 v = -rd0;
         float ndv = clamp(dot(n, v), 0.0, 1.0);
         float fres = 0.0;
@@ -487,7 +543,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
         for (int i = 1; i <= 12; i++) {
           if (i > uSteps) break;
           vec3 p = hit + rd * chord * (float(i) / (steps + 1.0));
-          dens += vanes(uSpin * ((p - uC) / uR));
+          dens += vanes(uSpin * (unsquash(p - uC) / uR));
         }
         dens = clamp(dens / (steps * 0.25), 0.0, 1.0);
         vec3 r = reflect(-v, n);
@@ -526,7 +582,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
     scene.add(marble, halo)
     const start = letters.length ? letters[letters.length - 1].fp.spot : [0, 0]
     const orb = newOrb(start[0], start[1], ORB_R, surfaceAt(footprints, start[0], start[1]).h)
-    const fo: FieldOrb = { id, orb, color: c, life: 0, live: false, push: null, marble, halo, shadow, caustic, pool, spin: new Quaternion(), omega: new Vector3(), heardAt: -1, wallAt: [-1, -1, -1, -1], on: -1 }
+    const fo: FieldOrb = { id, orb, color: c, life: 0, live: false, push: null, marble, halo, shadow, caustic, pool, spin: new Quaternion(), omega: new Vector3(), heardAt: -1, wallAt: [-1, -1, -1, -1], quietAt: -1, on: -1, squash: { x: 0, v: 0 }, axis: new Vector3(0, 1, 0) }
     orbMap.set(id, fo)
     return fo
   }
@@ -536,6 +592,40 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
     glow.uRipples.value[i].set(x, z, clock, strength)
     glow.uRippleColors.value[i].copy(color)
   }
+
+  // ---- knocks felt in 3D (none where the visitor asks for less motion: then it's the sound alone) ----
+  /** The view's jolt (canvas px), springing back. */
+  const shake = { x: { x: 0, v: 0 }, y: { x: 0, v: 0 } }
+  /** A letter struck: it rocks, the side toward (dx, dz) from its foot going down, as hard as `s` (0…1). */
+  function rock(l: Letter, dx: number, dz: number, s: number) {
+    const d = Math.hypot(dx, dz)
+    if (opts.still || s <= 0 || d < 1e-6) return
+    l.rx.v += (ROCK * s * dz) / d
+    l.rz.v -= (ROCK * s * dx) / d
+  }
+  /** A marble struck along (ax, ay, az): it squashes that way, and rings. */
+  function knock(o: FieldOrb, ax: number, ay: number, az: number, s: number) {
+    if (opts.still || s <= 0 || Math.hypot(ax, ay, az) < 1e-6) return
+    // A new knock the other way round wins over what's left of the last.
+    if (Math.abs(o.squash.x) < 0.02) o.axis.set(ax, ay, az).normalize()
+    o.squash.v += SQUASH * s
+  }
+  /** A very hard knock jolts the view, the way the marble was going (canvas px: dx right, dy down). */
+  function jolt(dx: number, dy: number, s: number) {
+    const d = Math.hypot(dx, dy)
+    if (opts.still || s < JOLT_FROM || d < 1e-6) return
+    const k = ((s - JOLT_FROM) / (1 - JOLT_FROM)) * JOLT_PX * 2 * Math.PI * 9
+    shake.x.v += (k * dx) / d
+    shake.y.v += (k * dy) / d
+  }
+  /** A knock too soft (or too soon) to sound: noted for ?debug=audio, now and then. */
+  function hush(o: FieldOrb, kind: HitKind, speed: number, why: string) {
+    if (speed < NOTE_FROM || clock - o.quietAt < NOTE_GAP) return
+    o.quietAt = clock
+    field.onQuiet?.({ orb: o.id, kind, speed, why })
+  }
+  /** Which way on screen a wall is (left, right, top, bottom). */
+  const WALL_WAY: [number, number][] = [[-1, 0], [1, 0], [0, -1], [0, 1]]
 
   // ---- letters ----
   function buildLetters(lines: string[]) {
@@ -550,14 +640,17 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
         depth: LETTER_H - BEVEL, bevelEnabled: true, bevelThickness: BEVEL, bevelSize: EDGE, bevelOffset: -EDGE, bevelSegments: 2,
         curveSegments: opts.coarse ? 9 : 14,
       })
-      // Glyph up is away from the viewer (-z); the letter stands up out of the floor (+y), its bevel just below it.
+      // Glyph up is away from the viewer (-z); the letter stands up out of the floor (+y), its bevel just below it. It
+      // stands on its own foot (the middle of its footprint), which it rocks about when struck.
+      const b = l.fp.box, cx = (b[0] + b[2]) / 2, cz = (b[1] + b[3]) / 2
       geo.rotateX(-Math.PI / 2)
-      geo.translate(l.x, BEVEL, l.zBase)
+      geo.translate(l.x - cx, BEVEL, l.zBase - cz)
       const cap = glowing(new MeshStandardMaterial(capBase), 0.7, 2.6)
       const mesh = new Mesh(geo, [cap, sideMat])
+      mesh.position.set(cx, 0, cz)
       letterGroup.add(mesh)
       footprints.push(l.fp)
-      letters.push({ ch: l.ch, word: l.word, fp: l.fp, mesh, cap, lit: 0, kept: 0, dip: 0, dipV: 0 })
+      letters.push({ ch: l.ch, word: l.word, fp: l.fp, mesh, cap, lit: 0, kept: 0, dip: 0, dipV: 0, rx: { x: 0, v: 0 }, rz: { x: 0, v: 0 } })
     }
   }
 
@@ -567,6 +660,8 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
   const tops = new Plane(new Vector3(0, 1, 0), -TOP)
   let lastLines = ''
   let lastBox = { x: 0, y: 0, w: 1, h: 1 }
+  /** How far the view is shifted to set the letters where the headline is (canvas px). */
+  const view = { x: 0, y: 0 }
 
   function fit(box: { x: number; y: number; w: number; h: number }) {
     const el = (ELEVATION * Math.PI) / 180
@@ -581,7 +676,9 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
     const dist = visW / (2 * tanV * camera.aspect)
     camera.position.set(cx, Math.sin(el) * dist, cz + Math.cos(el) * dist)
     camera.lookAt(cx, 0, cz)
-    camera.setViewOffset(W, H, W / 2 - (box.x + box.w / 2), H / 2 - (box.y + box.h / 2), W, H)
+    view.x = W / 2 - (box.x + box.w / 2)
+    view.y = H / 2 - (box.y + box.h / 2)
+    camera.setViewOffset(W, H, view.x, view.y, W, H)
     camera.updateProjectionMatrix()
     camera.updateMatrixWorld()
     // What the camera sees of the floor, for the dots; the marbles keep to the walls.
@@ -686,6 +783,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
     canvas,
     onLand: null,
     onHit: null,
+    onQuiet: null,
     layout(lines, w, h, box) {
       W = Math.max(1, w); H = Math.max(1, h)
       lastBox = box
@@ -752,6 +850,13 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
       buildWalls()
       // Marbles now past an edge come back inside it.
       for (const o of orbMap.values()) o.orb.resting = false
+    },
+    padDepth() {
+      // At the first button there is (else the middle of the canvas): its top's height above the floor, on screen.
+      const b = padRects.find((r) => r.w > 0) ?? { x: W / 2, y: H / 2, w: 0, h: 0 }
+      const p = rawFloorAt(b.x + b.w / 2, b.y + b.h, padTops)
+      const top = field.project(p.x, PAD_H, p.z), foot = field.project(p.x, 0, p.z)
+      return Math.max(0, foot.y - top.y)
     },
     outline(id) {
       const o = orbMap.get(id)
@@ -831,59 +936,77 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
           r.moving = q.moving
         }
         const b = o.orb
-        // A knock against the edge of the screen: a glass tap, as hard as it came in; rolling along it or leaning on
-        // it is quiet (too slow, and not again so soon against the same edge).
-        if (r.wall !== null && r.wallImpact > WALL_MIN && clock - o.wallAt[r.wall] > WALL_GAP) {
-          o.wallAt[r.wall] = clock
-          hits.push({ orb: o.id, kind: 'wall', strength: strength(r.wallImpact), x: b.x, y: b.y, z: b.z })
+        // A knock against the edge of the screen: a glass tap, as hard as it came in, a ring of light from where it
+        // struck, and a squash along the edge's way. Rolling along it or leaning on it is quiet: too slow, or too soon
+        // after the last knock on that edge.
+        if (r.wall !== null) {
+          const soon = clock - o.wallAt[r.wall] < WALL_GAP
+          if (r.wallImpact > WALL_MIN && !soon) {
+            o.wallAt[r.wall] = clock
+            const s = strength(r.wallImpact), n = walls[r.wall].n
+            hits.push({ orb: o.id, kind: 'wall', strength: s, speed: r.wallImpact, x: b.x, y: b.y, z: b.z })
+            ripple(b.x, b.z, 0.2 + 0.55 * s, o.color)
+            knock(o, n[0], 0, n[2], s)
+            jolt(WALL_WAY[r.wall][0], WALL_WAY[r.wall][1], s)
+          } else hush(o, 'wall', r.wallImpact, soon ? `again within ${WALL_GAP}s` : `under ${WALL_MIN} em/s`)
         }
         if (r.landed !== null) {
-          // Every bounce sends a ring of light out through the dots and the letters, stronger the harder it lands.
+          // Every bounce sends a ring of light out through the dots and the letters, stronger the harder it lands; the
+          // marble squashes a little as it lands, and a very hard landing jolts the view.
           const impact = Math.min(1, r.impact / 5)
           if (impact > 0.12) ripple(b.x, b.z, 0.25 + 0.75 * impact, o.color)
+          knock(o, 0, 1, 0, strength(r.impact))
+          jolt(0, 1, strength(r.impact))
         }
         if (r.landed !== null && r.landed >= 0 && r.landed < PAD_ID) {
           const l = letters[r.landed]
           l.dipV -= 0.9
           l.lit = 1
           l.kept = 0.42
+          // It rocks toward the side that took it.
+          rock(l, b.x - l.mesh.position.x, b.z - l.mesh.position.z, strength(r.impact))
           field.onLand?.(r.landed, o.id)
           if (celebrateAt < 0 && letters.every((x) => x.kept > 0)) celebrateAt = clock
         }
         if (r.bumped !== null && r.bumped < PAD_ID) {
-          // A knock on a letter's side: it flashes, but only a landing keeps it lit.
+          // A knock on a letter's side: it flashes, but only a landing keeps it lit; it rocks away from the marble.
           const l = letters[r.bumped]
           l.lit = Math.max(l.lit, 0.35 + 0.65 * strength(r.impact))
           l.dipV -= 0.25 * strength(r.impact)
+          rock(l, l.mesh.position.x - b.x, l.mesh.position.z - b.z, 0.8 * strength(r.impact))
+          knock(o, b.x - l.mesh.position.x, 0, b.z - l.mesh.position.z, strength(r.impact))
         }
         const struck = r.bumped ?? r.landed ?? -1
         const heard = hits.length
+        const kind: HitKind = struck >= PAD_ID ? 'button' : struck >= 0 ? 'letter' : 'floor'
         if (r.impact > HIT_MIN && clock - o.heardAt > 0.06) {
           o.heardAt = clock
-          const kind: HitKind = struck >= PAD_ID ? 'button' : struck >= 0 ? 'letter' : 'floor'
-          hits.push({ orb: o.id, kind, ...(kind === 'button' ? { pad: struck - PAD_ID } : {}), strength: strength(r.impact), x: b.x, y: b.y - b.r, z: b.z })
-        }
+          hits.push({ orb: o.id, kind, ...(kind === 'button' ? { pad: struck - PAD_ID } : {}), strength: strength(r.impact), speed: r.impact, x: b.x, y: b.y - b.r, z: b.z })
+        } else if (r.impact > 0) hush(o, kind, r.impact, r.impact > HIT_MIN ? 'again within 0.06s' : `under ${HIT_MIN} em/s`)
         // Arriving on a button without a landing to hear (rolled up onto it, or set down softly): it takes the
         // marble's weight with a soft tap.
         const s = surfaceAt(solid, b.x, b.z)
         if (b.y - b.r - s.h < 0.01) {
           if (s.id >= PAD_ID && o.on !== s.id && hits.length === heard) {
-            hits.push({ orb: o.id, kind: 'button', pad: s.id - PAD_ID, strength: 0.12 + 0.3 * strength(Math.hypot(b.vx, b.vz) * 2), x: b.x, y: b.y - b.r, z: b.z })
+            const speed = 0.4 + Math.hypot(b.vx, b.vz)
+            hits.push({ orb: o.id, kind: 'button', pad: s.id - PAD_ID, strength: 0.12 + 0.3 * strength(speed * 2), speed, x: b.x, y: b.y - b.r, z: b.z })
             o.heardAt = clock
           }
           o.on = s.id
         }
         busy = busy || r.moving
       }
-      // Marbles knock into each other (glass on glass).
+      // Marbles knock into each other (glass on glass): both ring, both squash along the line between them.
       for (let i = 0; i < all.length; i++) {
         for (let j = i + 1; j < all.length; j++) {
           const v = collide(all[i].orb, all[j].orb)
           if (v <= HIT_MIN * 0.6) continue
           const a = all[i].orb, c = all[j].orb
           const at = { x: (a.x + c.x) / 2, y: (a.y + c.y) / 2, z: (a.z + c.z) / 2 }
-          hits.push({ orb: all[i].id, other: all[j].id, kind: 'marble', strength: strength(v), ...at })
+          hits.push({ orb: all[i].id, other: all[j].id, kind: 'marble', strength: strength(v), speed: v, ...at })
           ripple(at.x, at.z, 0.2 + 0.5 * strength(v), all[i].color.clone().lerp(all[j].color, 0.5))
+          knock(all[i], c.x - a.x, c.y - a.y, c.z - a.z, strength(v))
+          knock(all[j], c.x - a.x, c.y - a.y, c.z - a.z, strength(v))
           all[i].heardAt = all[j].heardAt = clock
           busy = true
         }
@@ -899,7 +1022,14 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
         const goal = o.live || o.push ? 1 : 0.45
         o.life += (goal - o.life) * (1 - Math.exp(-dt * 3))
         busy = busy || Math.abs(goal - o.life) > 0.01
+        // A knock's squash rings out: a few quick swings, gone in a fifth of a second.
+        spring(o.squash, dt, 12, 0.18)
+        o.squash.x = Math.max(-0.1, Math.min(0.1, o.squash.x))
+        if (!settled(o.squash)) busy = true
       }
+      spring(shake.x, dt, 9, 0.35)
+      spring(shake.y, dt, 9, 0.35)
+      if (!settled(shake.x) || !settled(shake.y)) busy = true
       for (const h of hits) field.onHit?.(h)
       // Rings still spreading keep the page drawing.
       for (const r of glow.uRipples.value) if (r.w > 0 && clock - r.z < 2.2) busy = true
@@ -919,15 +1049,25 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
         l.dip += l.dipV * dt
         l.lit += (l.kept - l.lit) * (1 - Math.exp(-dt * 2.2))
         l.mesh.position.y = Math.max(-LETTER_H * 0.45, l.dip * 0.05)
+        // A knock rocks it about its foot, a few swings in a fifth of a second.
+        spring(l.rx, dt, 7, 0.32)
+        spring(l.rz, dt, 7, 0.32)
+        l.mesh.rotation.set(Math.max(-0.08, Math.min(0.08, l.rx.x)), 0, Math.max(-0.08, Math.min(0.08, l.rz.x)))
         l.cap.emissiveIntensity = l.lit * 0.7
         l.cap.color.copy(INK).lerp(LIME, l.lit * 0.3)
-        if (Math.abs(l.dip) > 1e-4 || Math.abs(l.dipV) > 1e-3 || Math.abs(l.lit - l.kept) > 0.004) busy = true
+        if (Math.abs(l.dip) > 1e-4 || Math.abs(l.dipV) > 1e-3 || Math.abs(l.lit - l.kept) > 0.004 || !settled(l.rx) || !settled(l.rz)) busy = true
       }
       return busy
     },
     render() {
       let i = 0
       const refract = quality.glass > 0
+      // A hard knock's jolt: the whole view, drawn a pixel or two over (the page itself stays put).
+      const jolted = !settled(shake.x) || !settled(shake.y)
+      if (jolted) {
+        camera.setViewOffset(W, H, view.x - shake.x.x, view.y - shake.y.x, W, H)
+        camera.updateProjectionMatrix()
+      }
       right.setFromMatrixColumn(camera.matrixWorld, 0)
       for (const o of orbMap.values()) {
         const b = o.orb
@@ -939,6 +1079,8 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
         u.uSteps.value = quality.glass === 2 ? 12 : 6
         u.uC.value.set(b.x, b.y, b.z)
         u.uR.value = ORB_R * scale
+        u.uSquash.value = o.squash.x
+        ;(u.uAxis.value as Vector3).copy(o.axis)
         ;(u.uSpin.value as Matrix3).setFromMatrix4(m4.makeRotationFromQuaternion(tmpQ.copy(o.spin).invert()))
         // Its centre and size on screen (drawing-buffer pixels, from the bottom), where its glass bends what's behind.
         pc.set(b.x, b.y, b.z).project(camera)
@@ -946,9 +1088,9 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
         ;(u.uCenter.value as Vector2).set(((pc.x + 1) / 2) * buf.x, ((pc.y + 1) / 2) * buf.y)
         const rad = Math.max(1, Math.hypot(((pe.x - pc.x) / 2) * buf.x, ((pe.y - pc.y) / 2) * buf.y))
         u.uRad.value = rad
-        // The mesh reaches a couple of pixels past the glass, for its shaded edge.
+        // The mesh reaches a couple of pixels past the glass, for its shaded edge (and past a squash's bulge).
         o.marble.position.set(b.x, b.y, b.z)
-        o.marble.scale.setScalar(scale * (1 + 2.5 / rad))
+        o.marble.scale.setScalar(scale * (1 + 2.5 / rad + Math.abs(o.squash.x)))
         o.halo.position.set(b.x, b.y, b.z)
         o.halo.scale.setScalar(ORB_R * 4.2 * scale)
         o.halo.material.opacity = 0.05 + 0.12 * o.life
@@ -993,6 +1135,10 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
       renderer.render(scene, camera)
       if (q) { gl.endQuery(timer!.TIME_ELAPSED_EXT); timing.push({ q, level: qualityLevel }) }
       if (!samples) samples = gl.getParameter(gl.SAMPLES) as number
+      if (jolted) {
+        camera.setViewOffset(W, H, view.x, view.y, W, H)
+        camera.updateProjectionMatrix()
+      }
     },
   }
 

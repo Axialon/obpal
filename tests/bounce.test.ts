@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { G, collide, counterOf, flightTime, hopTo, inside, landingSpot, nearest, newOrb, roundedRect, sidesAt, step, surfaceAt, toss, withinWalls, type Footprint, type Orb, type Wall } from '../src/landing/bounce'
 import { layoutLetters, TOP } from '../src/landing/letters'
+import { readTilt, tiltState } from '../src/landing/tilt'
 
 const ring = (...pts: number[]) => Float64Array.from(pts)
 /** An "o": a square 2 wide with a square hole 1 wide, standing `height` tall at (cx, cz). */
@@ -307,6 +308,48 @@ describe('a low step (a button)', () => {
   })
 })
 
+describe('a raised button (0.1 em, twice the first ones), tilted into', () => {
+  const R = 0.2
+  const pad: Footprint = { id: 1000, height: 0.1, box: [-1.5, 0, 1.5, 1], rings: [ring(-1.5, 0, 1.5, 0, 1.5, 1, -1.5, 1)], spot: [0, 0.5] }
+  /** A phone tipped this many degrees, as the hero turns it into a push (0.55 em/s² a degree past 1.2°). */
+  const tipped = (deg: number) => (deg - 1.2) * 0.55
+  /** Tilted toward the button (-z) from 1 em in front of it, for 4 s: where it went, and whether it bumped the edge. */
+  const tiltInto = (deg: number) => {
+    const b = newOrb(0, 2, R)
+    b.resting = false
+    let bumped = false, onIt = false
+    for (let t = 0; t < 4; t += 1 / 60) {
+      const r = step(b, [pad], 1 / 60, { hop: 0.8, bounds: BOUNDS, climb: 0.15, push: [0, -tipped(deg)] })
+      if (r.bumped === 1000) bumped = true
+      if (surfaceAt([pad], b.x, b.z).id === 1000 && b.y - R > 0.09) onIt = true
+    }
+    return { b, bumped, onIt }
+  }
+  it('a gentle tilt (5°) runs the marble into its edge, where it bumps and stays, on the floor', () => {
+    const { b, bumped, onIt } = tiltInto(5)
+    expect(bumped).toBe(true)
+    expect(onIt).toBe(false)
+    expect(b.y).toBeCloseTo(R, 2)
+    expect(b.z).toBeGreaterThan(1)
+    expect(b.z).toBeLessThan(1 + R)
+  })
+  it('more tilt, 8°, still doesn\'t take it up; 10° does: onto it, across, and off the far side', () => {
+    expect(tiltInto(8).onIt).toBe(false)
+    const { b, onIt } = tiltInto(10)
+    expect(onIt).toBe(true)
+    expect(b.z).toBeLessThan(0)
+    expect(b.y).toBeCloseTo(R, 2)
+  })
+  it('pointed at, it still goes up onto it, from a standstill beside it', () => {
+    const b = newOrb(0, 1.15, R)
+    b.target = { x: 0, z: 0.6 }
+    b.resting = false
+    for (let t = 0; t < 3; t += 1 / 60) step(b, [pad], 1 / 60, { hop: 0.8, bounds: BOUNDS, climb: 0.15, omega: 4.6, zeta: 0.78 })
+    expect(surfaceAt([pad], b.x, b.z).id).toBe(1000)
+    expect(b.y).toBeCloseTo(0.1 + R, 3)
+  })
+})
+
 describe("a button's outline", () => {
   it('runs round its rounded corners, inside its box, with the radius held to half its short side', () => {
     const pts = roundedRect(10, 20, 100, 40, 999, 5)
@@ -393,6 +436,73 @@ describe("a letter's counters (the holes in o, p, e)", () => {
         expect(counterOf(fp, o.x, o.z), `${ch} tilted ${push}`).toBeNull()
       }
     }
+  })
+  /**
+   * A real hand holding a phone, as the hero hears it: readings at 60 Hz with a tremble (±0.8°), a slight lean (1.5°,
+   * 0.8°) and now and then a stray reading (4.5° off, for one reading), through the page's own tilt filter
+   * (./tilt.ts: its jitter floor, dead zone and wake) and the hero's rules (0.55 em/s² a degree; a tilt stops pushing
+   * 2.6 s after it last really moved). Frames at 30 a second, with now and then a long one (0.1 s), each caught up in
+   * 60 Hz steps as the field does; the hero wakes the marble every frame it's tilted. Returns how far the marble
+   * strayed from where it was when `still` began (em) and, from then on, its largest move in a frame.
+   */
+  const hand = (o: Orb, fps: Footprint[], seconds: number, lean: [number, number] = [1.5, 0.8], seed = 1) => {
+    let rnd = seed
+    const rand = () => { rnd = (rnd * 16807) % 2147483647; return rnd / 2147483647 }
+    const st = tiltState()
+    let push: [number, number] = [0, 0], tiltAt = -1e9, at = 0, readAt = 0, frame = 0
+    const start = [o.x, o.y, o.z]
+    let strayed = 0, most = 0
+    while (at < seconds) {
+      const dt = ++frame % 17 === 0 ? 0.1 : 1 / 30
+      // The readings that came in during this frame.
+      for (; readAt < at + dt; readAt += 1 / 60) {
+        const spike = rand() < 1 / 40 ? (rand() < 0.5 ? -4.5 : 4.5) : 0
+        const t = readTilt(st, 40 + lean[1] + (rand() - 0.5) * 1.6 + spike, lean[0] + (rand() - 0.5) * 1.6, 0)
+        if (t) { push = [t.x * 0.55, t.y * 0.55]; if (t.wake) tiltAt = readAt }
+      }
+      at += dt
+      const tilting = at - tiltAt < 2.6
+      if (tilting) o.resting = false
+      const p = [o.x, o.y, o.z]
+      for (let left = Math.min(dt, 0.12); left > 1e-6; left -= 1 / 60) step(o, fps, Math.min(left, 1 / 60), opts(tilting ? { push } : {}))
+      most = Math.max(most, Math.hypot(o.x - p[0], o.y - p[1], o.z - p[2]))
+      strayed = Math.max(strayed, Math.hypot(o.x - start[0], o.y - start[1], o.z - start[2]))
+    }
+    return { strayed, most }
+  }
+  it('held in a real hand (a tremble, a lean, stray readings, uneven frames), a marble in any counter keeps dead still', () => {
+    for (const ch of SHAPES) {
+      const { fp, counters } = glyph(ch)
+      for (const [i, c] of counters.entries()) {
+        for (const lean of [[1.5, 0.8], [-2.5, 2]] as [number, number][]) {
+          const o = newOrb(c.x, c.z, R)
+          Object.assign(o, { y: TOP + R + 0.3, resting: false })
+          // Dropped in, and held a moment; then two seconds watched.
+          hand(o, [fp], 1.5, lean, 7 + i)
+          const { strayed, most } = hand(o, [fp], 2, lean, 101 + i)
+          // Under 0.1 px at 100 px an em (a phone's letters are about 50 px an em).
+          expect(strayed, `${ch}, leaning ${lean}: strayed ${strayed} em`).toBeLessThan(0.001)
+          expect(most, ch).toBeLessThan(0.001)
+          expect(counterOf(fp, o.x, o.z), ch).not.toBeNull()
+        }
+      }
+    }
+  })
+  it('a clear tilt (8°, held) takes it out of the counter; a stray reading or two of the same does not', () => {
+    const { fp, counters } = glyph('o')
+    const c = counters[0]
+    const o = newOrb(c.x, c.z, R)
+    Object.assign(o, { y: TOP + R + 0.3, resting: false })
+    hand(o, [fp], 1.5)
+    // Two stray readings, a frame apart, of an 8° tilt: nothing.
+    const at = [o.x, o.z]
+    const clear = (8 - 1.2) * 0.55
+    for (let f = 0; f < 2; f++) step(o, [fp], 1 / 30, opts({ push: [clear, 0] }))
+    for (let f = 0; f < 30; f++) step(o, [fp], 1 / 30, opts())
+    expect(Math.hypot(o.x - at[0], o.z - at[1])).toBeLessThan(1e-6)
+    // Held: out.
+    for (let f = 0; f < 90; f++) step(o, [fp], 1 / 30, opts({ push: [clear, 0] }))
+    expect(counterOf(fp, o.x, o.z)).toBeNull()
   })
   it('steered to somewhere outside, it leaves the same way; steered back into it, it goes in and stays calm', () => {
     const { fp, counters } = glyph('o')
