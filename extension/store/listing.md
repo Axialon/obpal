@@ -35,6 +35,7 @@ Your whole PC, with ob.Pal Desktop
 Add the free ob.Pal Desktop helper for Windows, and your phone becomes this computer's mouse and keyboard: in every window, or only in the programs you allow. Tap to click, hold to right-click, two fingers to scroll, pinch to zoom.
 • Type with your phone's own keyboard, autocorrect and predictions included. When a text field on the PC has the focus, the phone offers to type by itself. In a password field, nothing is suggested, learned or kept.
 • Ctrl + Alt + Backspace on the PC stops everything at once.
+• Before a new phone can control your PC, the PC asks you once. Change your answer any time in the options page.
 The helper is optional: the extension works on websites without it, and asks for permission to talk to it only when you choose PC.
 
 How it works
@@ -47,6 +48,7 @@ The popup and the options page wear ob.Pal's look: pick one of six surfaces and 
 Private by design
 • No accounts, no analytics, no ads and no remote code.
 • Your phone and your computer talk over an encrypted WebRTC connection. The ob.Pal service only introduces them to each other, and doesn't keep what they send.
+• Each QR code pairs once: a new one shows as soon as a phone pairs, so an old photo of it can't connect.
 • The extension acts only in the tab you switch on, or with ob.Pal Desktop in the programs you allow. It doesn't read page content, your browsing history or what you type on the computer.
 Privacy policy: https://obpal.blackboxes.net/privacy/
 
@@ -126,6 +128,12 @@ Optional permission `nativeMessaging`
 Optional and off by default: requested only when the user chooses the PC target in the popup, or turns on PC control in the options page. It lets the extension start and talk to exactly one native host, ob.Pal Desktop (net.blackboxes.obpal), a helper the user installs separately, which turns the phone's input and typing into mouse and keyboard input on the PC, in every window or only in programs the user allows. The extension sends it the phone's held keys and buttons, mouse motion, scrolling and typed text, and the user's changes to the allowed programs; the helper answers with its version and settings, the program in front, and whether a text field has the keyboard focus (never its contents). The helper has no network access.
 ```
 
+Optional permission `notifications`
+
+```text
+Optional and off by default: requested only when the user turns on "Notify me" under Phones in the options page, and removed when they turn it off. The first time a paired phone asks to control the PC through ob.Pal Desktop, the extension shows one system notification with Allow and Deny buttons, so the user can answer without opening the popup. It shows no other notifications.
+```
+
 **Are you using remote code?** No.
 
 ```text
@@ -145,7 +153,7 @@ Why none (and one judgement call, in UPLOAD.md):
   - To pair, the extension exchanges connection setup messages with the phone through the ob.Pal service (a Cloudflare Worker): a random room identifier, the WebRTC session descriptions and the network candidates, which hold the computer's IP addresses. The service passes them to the phone in memory and doesn't store them.
   - For networks that block direct connections, it fetches short-lived relay credentials, and the connection may then run through Cloudflare's TURN relay. It stays encrypted end to end.
   - Input goes between the user's own phone and computer over that encrypted connection: the phone's name, controller state, touches, motion and typed text one way; vibration, the phone's layout and short notices the other.
-- What stays on the computer: the chosen mode, the look of the popup and options page, and the session state (`chrome.storage`, with the look also cached in the pages' web storage for their first paint), the connection certificate and remembered phones (a pairing key, the phone's certificate fingerprint, its name, and when it paired; IndexedDB). The controlled page's address is read only in the browser: to show it in the popup, and to suggest a control profile for known sites from a built-in list (the phone gets the profile's name, never the address).
+- What stays on the computer: the chosen mode, the look of the popup and options page, and the session state (`chrome.storage`, with the look also cached in the pages' web storage for their first paint), the connection certificate and remembered phones (a pairing key, the phone's certificate fingerprint, its name, and when it paired; IndexedDB), and the user's Allow or Deny for each phone that asked to control the PC (the phone's pairing key or fingerprint, its name, the answer and when; `chrome.storage.local`). The controlled page's address is read only in the browser: to show it in the popup, and to suggest a control profile for known sites from a built-in list (the phone gets the profile's name, never the address).
 - ob.Pal Desktop, for the PC target, runs on the same computer and gets the phone's input and typing through native messaging. It checks only whether the focused control is a text or password field, never its contents, and keeps neither input nor typed text.
 
 **Privacy policy URL:** `https://obpal.blackboxes.net/privacy/`
@@ -166,7 +174,7 @@ Click the ob.Pal Link icon on any web page and scan the QR code with any phone's
 - 3D: pick 3D in the popup and Rotate on the phone. A drag on the phone's trackpad rotates a 3D viewer, for example https://obpal.blackboxes.net/view/
 - Keys: pick Keys. A on the phone presses Space, and the D-pad presses the arrow keys.
 
-The PC target needs the optional ob.Pal Desktop helper for Windows (https://obpal.blackboxes.net/link/, free, open source). Without it, choosing PC asks for the native messaging permission and then says that ob.Pal Desktop isn't installed; everything else works without it.
+The PC target needs the optional ob.Pal Desktop helper for Windows (https://obpal.blackboxes.net/link/, free, open source). Without it, choosing PC asks for the native messaging permission and then says that ob.Pal Desktop isn't installed; everything else works without it. With it, the popup first asks whether the paired phone may control this PC (Allow or Deny), once per phone.
 
 Source code: https://github.com/Axialon/obpal (the extension is in extension/). The package is built without minifying, so the code in it reads like the TypeScript in the repository.
 ```

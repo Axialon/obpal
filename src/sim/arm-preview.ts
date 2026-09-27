@@ -3,6 +3,7 @@
  * rings lit, framed for its size.
  */
 import * as THREE from 'three'
+import { floorMaterial } from './kit'
 import type { ArmKindInfo } from './arm/kinds'
 import { previewScene, type Preview } from './devices/view'
 
@@ -17,7 +18,7 @@ export async function armPreview(kind: ArmKindInfo): Promise<Preview> {
   scene.add(arm.object)
   const { height: h, reach: r } = arm.size
   // A table under the arm and both of its spots.
-  const table = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.72 + 0.25, r * 0.72 + 0.25, 0.04, 96), new THREE.MeshStandardMaterial({ color: '#241d4a', roughness: 0.9 }))
+  const table = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.72 + 0.25, r * 0.72 + 0.25, 0.04, 96), floorMaterial())
   table.position.set(-r * 0.45, -0.02, 0)
   scene.add(table)
   // From in front, a little to the right and above: the arm, its reach and its spots in the card, however tall it is.

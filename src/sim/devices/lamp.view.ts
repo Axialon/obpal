@@ -4,6 +4,7 @@
  * its holder's colour, and what's being typed to it floating beside it.
  */
 import * as THREE from 'three'
+import { batch, bolt, cable, cylinder, floorMaterial, maker, plastic } from '../kit'
 import { LampLogic, rgbOf, type Lamp } from './lamp'
 import type { Stage } from './stage'
 import type { Theme } from '../../ui/themes'
@@ -46,14 +47,14 @@ function bulbAt(parent: THREE.Object3D, p: THREE.Vector3, r: number, power: numb
 
 function buildRoom() {
   const g = new THREE.Group()
-  const floorMat = new THREE.MeshStandardMaterial({ color: '#3a2f2a', roughness: 0.8 })
-  const floor = box(6.4, 0.05, 4.6, floorMat, 0.02)
-  floor.position.set(0, -0.025, -0.1)
+  const floorMat = floorMaterial('#645448')
+  const floor = box(8.8, 0.05, 6.8, floorMat, 0.02)
+  floor.position.set(0, -0.025, 0.95)
   const wallMat = new THREE.MeshStandardMaterial({ color: '#2d3140', roughness: 0.95 })
-  const back = new THREE.Mesh(new THREE.BoxGeometry(6.4, 2.7, 0.08), wallMat)
+  const back = new THREE.Mesh(new THREE.BoxGeometry(8.8, 2.7, 0.08), wallMat)
   back.position.set(0, 1.35, -2.4)
-  const side = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.7, 4.6), wallMat)
-  side.position.set(-3.2, 1.35, -0.1)
+  const side = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.7, 6.8), wallMat)
+  side.position.set(-4.4, 1.35, 0.95)
   const rug = box(2.8, 0.02, 1.7, new THREE.MeshStandardMaterial({ color: '#8b86a8', roughness: 1 }), 0.01)
   rug.position.set(0.2, 0.01, -0.3)
   const fabric = new THREE.MeshStandardMaterial({ color: '#56607a', roughness: 0.9 })
@@ -86,6 +87,23 @@ function buildRoom() {
   const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.16, 0.42, 20), new THREE.MeshStandardMaterial({ color: '#d8cfc4', roughness: 0.7 }))
   pot.position.set(-2.55, 0.21, -1.9)
   g.add(floor, back, side, rug, seat, backrest, armL, armR, cushion, coffee, side1, stem, plant, pot)
+  // The reading end of the room: shelving, books, a chair and a framed print.
+  const extra = new THREE.Group()
+  const timber = plastic('#806544'), dark = mats.dark()
+  for (const y of [0.18, 0.7, 1.22, 1.74]) { const shelf = box(1.4, 0.055, 0.42, timber); shelf.position.set(3.3, y, -2.08); extra.add(shelf) }
+  for (const x of [2.62, 3.98]) { const support = box(0.05, 1.85, 0.4, dark); support.position.set(x, 0.94, -2.08); extra.add(support) }
+  for (let i = 0; i < 12; i++) {
+    const book = box(0.08, 0.26 + (i % 3) * 0.04, 0.21, plastic(['#a1aba4', '#ba8f60', '#596b74'][i % 3]), 0.004)
+    book.position.set(2.82 + (i % 6) * 0.12, 0.89 + Math.floor(i / 6) * 0.52, -2.02); extra.add(book)
+  }
+  const chair = box(0.8, 0.18, 0.8, fabric, 0.07); chair.position.set(2.75, 0.4, 0.7); extra.add(chair)
+  const chairBack = box(0.8, 0.68, 0.16, fabric, 0.065); chairBack.position.set(2.75, 0.72, 1.03); extra.add(chairBack)
+  for (const x of [2.43, 3.07]) for (const z of [0.4, 1]) { const leg = cylinder(0.028, 0.36, timber); leg.position.set(x, 0.18, z); extra.add(leg) }
+  const art = box(1.35, 0.85, 0.045, dark); art.position.set(-0.2, 1.72, -2.33); extra.add(art)
+  const paper = box(1.22, 0.72, 0.01, plastic('#b6b5a6')); paper.position.set(-0.2, 1.72, -2.3); extra.add(paper)
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(0.25, 32), plastic('#76806c')); disc.position.set(-0.34, 1.72, -2.29); extra.add(disc)
+  batch(extra); g.add(extra)
+  batch(g, [floor, back, side])
   return { group: g, floorMat, wallMat }
 }
 
@@ -123,6 +141,12 @@ function buildLamps(parent: THREE.Object3D): LampModel[] {
   const bell = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.26, 0.26, 32, 1, true), new THREE.MeshStandardMaterial({ color: '#c9d1dc', metalness: 0.7, roughness: 0.3, side: THREE.DoubleSide }))
   bell.position.set(0.25, 1.55, -0.35)
   parent.add(cord, bell)
+  const rose = cylinder(0.085, 0.045, dark); rose.position.set(0.25, 2.74, -0.35); parent.add(rose)
+  const socket = cylinder(0.034, 0.11, metal); socket.position.set(0.25, 1.59, -0.35); parent.add(socket)
+  for (const y of [0.72, 1]) { const pivot = cylinder(0.024, 0.032, dark); pivot.rotation.z = Math.PI / 2; pivot.position.set(1.9, y, -1.62); parent.add(pivot) }
+  parent.add(cable([[1.95, 0.6, -1.64], [1.87, 0.77, -1.6], [1.8, 1.03, -1.55], [1.64, 1.04, -1.5]], 0.005))
+  maker(parent, -2.1, 0.052, -1.3, 0.06)
+  const screw = bolt(0.012); screw.position.set(1.95, 0.634, -1.65); parent.add(screw)
   const pendant = bulbAt(parent, new THREE.Vector3(0.25, 1.46, -0.35), 0.05, 6, new THREE.Vector3(0.25, 0, -0.35))
   // The light bar on the wall over the sofa.
   const bar = box(1.2, 0.05, 0.05, dark, 0.02)
@@ -175,7 +199,8 @@ export function createView(stage: Stage, logic: LampLogic): DeviceView {
   setTheme(stage.theme)
   const v = new THREE.Vector3()
   return {
-    framing: { target: [0.1, 0.9, -1], wide: [1.6, 2.9, 4.6], tall: [0.8, 3.4, 5.6], radius: 2.3, min: 2, max: 10 },
+    inspect() { return { target: [1.8, 0.95, -1.6], wide: [2.6, 1.4, -0.6], tall: [2.5, 1.6, -0.4], radius: 0.5, min: 0.4, max: 20 } },
+    framing: { target: [0, 0.8, -0.3], wide: [3.8, 4.8, 8.2], tall: [1, 6, 10], radius: 4.5, min: 1.5, max: 20 },
     anchor: (n) => models[n].at.clone(),
     update(colors) {
       logic.lamps.forEach((l, n) => {

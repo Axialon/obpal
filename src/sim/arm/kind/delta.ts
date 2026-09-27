@@ -7,6 +7,7 @@
  * the arm short of it. Its tool's roll is how far the fingers are turned from closing along its own x. Procedural.
  */
 import * as THREE from 'three'
+import { rounded } from '../../kit'
 import type { Box, Stand } from '../blocks'
 import { add, cross, dot, ID, len, nest, place, rotY, scale, sub, unit, type Frame } from '../frames'
 import { FINGER_IN, FINGER_TRAVEL, FINGER_W, type GripBox, type V3 } from '../grasp'
@@ -246,14 +247,14 @@ function buildDelta(n: number, stuff: ReturnType<typeof stuffOf>): ArmModel {
   // The rods: unit cylinders, stretched and turned into place.
   const rodGeo = new THREE.CylinderGeometry(0.011, 0.011, 1, 12)
   const rods = Array.from({ length: 6 }, () => { const m = new THREE.Mesh(rodGeo, stuff.metal); root.add(m); return m })
-  const ringPlate = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.01, 12, 96), accent())
+  const ringPlate = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.01, 8, 48), accent())
   ringPlate.rotation.x = Math.PI / 2
   ringPlate.position.set(POST, 0.05, 0)
   root.add(ringPlate)
   const label = plateLabel(n)
   label.position.set(POST + 0.22, 0.12, 0)
   root.add(label)
-  const fingerGeo = new THREE.BoxGeometry(FINGER_W, 0.1, 0.055)
+  const fingerGeo = rounded(FINGER_W, 0.1, 0.055)
   const fingers = [new THREE.Mesh(fingerGeo, stuff.metal), new THREE.Mesh(fingerGeo, stuff.metal)]
   for (const m of fingers) { m.position.y = FINGER_Y; hand.add(m) }
   const pose: DeltaPose = { a1: HOME[0], a2: HOME[1], a3: HOME[2], roll: 0 }

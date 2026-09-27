@@ -6,6 +6,7 @@
  * along the line out from the arm's axis. Procedural, white and dark.
  */
 import * as THREE from 'three'
+import { rounded } from '../../kit'
 import type { Box, Stand } from '../blocks'
 import { ID, nest, rotY, type Frame } from '../frames'
 import { FINGER_IN, FINGER_TRAVEL, FINGER_W, type GripBox } from '../grasp'
@@ -172,14 +173,14 @@ function buildScara(n: number, stuff: ReturnType<typeof stuffOf>): ArmModel {
   grasp.position.y = GRASP_PAST_ROLL
   hand.add(grasp)
   const rings = dress(SCARA_LOOK, { root, upper, fore, quill, hand }, stuff, 5)
-  const plate = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.01, 12, 96), accent())
+  const plate = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.01, 8, 48), accent())
   plate.rotation.x = Math.PI / 2
   plate.position.y = 0.012
   root.add(plate)
   const label = plateLabel(n)
   label.position.set(0.3, 0.1, 0)
   root.add(label)
-  const fingerGeo = new THREE.BoxGeometry(FINGER_W, 0.1, 0.055)
+  const fingerGeo = rounded(FINGER_W, 0.1, 0.055)
   const fingers = [new THREE.Mesh(fingerGeo, stuff.metal), new THREE.Mesh(fingerGeo, stuff.metal)]
   for (const m of fingers) { m.position.y = FINGER_Y; hand.add(m) }
   const apply = [

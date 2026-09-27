@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Mode, PadButton, qIdentity } from '@obpal/core'
-import { DRONE, DroneLogic, RINGS, throughRing } from '../src/sim/devices/drone'
+import { DRONE, DroneLogic, PYLONS, RINGS, throughRing } from '../src/sim/devices/drone'
 import { restInput, type DeviceInput } from '../src/sim/devices/types'
 
 const pad = (axes: [number, number, number, number], triggers: [number, number] = [0, 0], buttons = 0) => ({ flags: 0, seq: 0, t: 0, buttons, axes, triggers })
@@ -14,6 +14,21 @@ const takeOff = (logic: DroneLogic) => {
 }
 
 describe('drone: each controller flies it', () => {
+  it('has a larger course whose rings clear the cage and whose pylons stop a drone', () => {
+    expect(DRONE.cage[0] * DRONE.cage[1] * DRONE.ceiling).toBeGreaterThan(4 * 4.2 * 3 * 3.2)
+    for (const r of RINGS) {
+      expect(Math.abs(r.x) + r.r).toBeLessThan(DRONE.cage[0])
+      expect(r.y + r.r).toBeLessThan(DRONE.ceiling)
+    }
+    const logic = new DroneLogic(1), d = logic.drones[0], p = PYLONS[0]
+    Object.assign(d, { x: p.x, z: p.z + 0.4, y: 1, phase: 'flying', vz: -1 })
+    logic.step([null], 1 / 60)
+    expect(Math.hypot(d.x - p.x, d.z - p.z)).toBeGreaterThanOrEqual(p.radius + DRONE.radius - 1e-6)
+    Object.assign(d, { x: p.x, z: p.z, y: p.height + DRONE.radius + 0.1, vy: 0, vz: 0 })
+    logic.step([null], 1 / 60)
+    expect(d.x).toBe(p.x)
+    expect(d.z).toBe(p.z)
+  })
   it('gamepad, Mode 2: A takes off to a hover and lands again; the left stick climbs, the right stick flies', () => {
     const logic = new DroneLogic(1)
     const d = logic.drones[0]

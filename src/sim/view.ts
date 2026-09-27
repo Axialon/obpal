@@ -14,9 +14,9 @@
  * ?quality=super|native|low (or a step's number) holds a step; ?debug=gfx shows how it draws.
  */
 import {
-  ConstantAlphaFactor, CustomBlending, FramebufferTexture, Mesh, NearestFilter, OneMinusConstantAlphaFactor, OrthographicCamera,
+  ACESFilmicToneMapping, SRGBColorSpace, ConstantAlphaFactor, CustomBlending, FramebufferTexture, Mesh, NearestFilter, OneMinusConstantAlphaFactor, OrthographicCamera,
   PlaneGeometry, Scene, ShaderMaterial, WebGLRenderer, WebGLRenderTarget, type Camera, type Color, type Material, type Object3D,
-  type WebGLRendererParameters,
+  type WebGLRendererParameters, type Light, type InstancedMesh,
 } from 'three'
 import { Governor, pickPixels, pixelLadder, type GpuSample, type Step } from '../landing/governor'
 
@@ -36,6 +36,10 @@ export function signature(scene: Object3D, camera: Camera, out: number[] = []): 
     out.push(...o.matrixWorld.elements)
     const m = (o as Mesh).material as Material | Material[] | undefined
     if (m) for (const x of Array.isArray(m) ? m : [m]) look(out, x)
+    const light = o as Light
+    if (light.isLight) out.push(light.intensity, light.color.r, light.color.g, light.color.b)
+    const instances = o as InstancedMesh
+    if (instances.isInstancedMesh) out.push(instances.instanceMatrix.version)
   })
   const bg = (scene as Scene).background as Color | null
   if (bg && bg.isColor) out.push(bg.r, bg.g, bg.b)
@@ -68,6 +72,10 @@ export function jitterOf(k: number): [number, number] {
 }
 
 export interface SimGfx {
+  /** Primary scene submission, excluding the still-picture compositing quads. */
+  triangles: number
+  calls: number
+  renderMs: number
   css: [number, number]
   buffer: [number, number]
   pr: number
@@ -102,6 +110,16 @@ const QUAD_FRAG = 'uniform sampler2D tMap; varying vec2 vUv; void main() { gl_Fr
  */
 export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h: number): void; params?: WebGLRendererParameters }): SimView {
   const renderer = new WebGLRenderer({ canvas, antialias: true, ...opts.params })
+  let triangles = 0, calls = 0, renderMs = 0
+  const renderScene = (scene: Scene, camera: Camera) => {
+    const start = performance.now()
+    renderer.render(scene, camera)
+    renderMs = performance.now() - start
+    triangles = renderer.info.render.triangles
+    calls = renderer.info.render.calls
+  }
+  renderer.outputColorSpace = SRGBColorSpace
+  renderer.toneMapping = ACESFilmicToneMapping
   const coarse = matchMedia('(pointer: coarse)').matches
   const gl = renderer.getContext() as WebGL2RenderingContext
   let W = canvas.clientWidth || innerWidth, H = canvas.clientHeight || innerHeight
@@ -208,7 +226,7 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
       aspect?: number; setViewOffset?: (...a: number[]) => void; clearViewOffset?: () => void; updateProjectionMatrix?: () => void
     }
     const bw = accum!.width, bh = accum!.height
-    if (!x && !y) { renderer.render(scene, camera); return }
+    if (!x && !y) { renderScene(scene, camera); return }
     const v = cam.view
     if (v?.enabled) {
       const ox = v.offsetX, oy = v.offsetY
@@ -216,7 +234,7 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
       v.offsetX += (x * v.width) / bw
       v.offsetY += (y * v.height) / bh
       cam.updateProjectionMatrix?.()
-      renderer.render(scene, camera)
+      renderScene(scene, camera)
       v.offsetX = ox
       v.offsetY = oy
       cam.updateProjectionMatrix?.()
@@ -224,10 +242,10 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
       // (A view offset sets a perspective camera's aspect to its own: put the camera's back after.)
       const aspect = cam.aspect
       cam.setViewOffset(bw, bh, x, y, bw, bh)
-      renderer.render(scene, camera)
+      renderScene(scene, camera)
       cam.clearViewOffset()
       if (aspect !== undefined) { cam.aspect = aspect; cam.updateProjectionMatrix?.() }
-    } else renderer.render(scene, camera)
+    } else renderScene(scene, camera)
   }
 
   const view: SimView = {
@@ -240,13 +258,16 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
       const moving = force || changed(sig, prev, EPS_FRAME) || changed(sig, ref, EPS_TOTAL)
       ;[prev, sig] = [sig, prev]
       if (moving || noStill) {
+        // One shadow update for the scene; jitter and PTZ inset passes reuse it.
+        renderer.shadowMap.autoUpdate = false
+        renderer.shadowMap.needsUpdate = true
         force = false
         still = 0
         ref = [...prev]
         pollTiming()
         const q = timer && timing.length < 4 ? gl.createQuery() : null
         if (q) gl.beginQuery(timer!.TIME_ELAPSED_EXT, q)
-        renderer.render(scene, camera)
+        renderScene(scene, camera)
         if (q) { gl.endQuery(timer!.TIME_ELAPSED_EXT); timing.push({ q, level: governor.level }) }
         if (!samples) samples = gl.getParameter(gl.SAMPLES) as number
         if (pinned === null) {
@@ -277,6 +298,7 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
       still++
     },
     gfx: () => ({
+      triangles, calls, renderMs,
       css: [W, H], buffer: [accum?.width ?? 0, accum?.height ?? 0], pr: step.pr, dpr: devicePixelRatio || 1, level: pinned ?? governor.level,
       steps, pinned: pinned !== null, samples, gpuMs: gpuLast?.ms ?? null, still,
     }),

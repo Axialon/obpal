@@ -6,7 +6,9 @@
 import * as THREE from 'three'
 import { FINGER_IN, FINGER_TRAVEL, FINGER_W } from './grasp'
 import { ARM } from './kinematics'
-import { plateLabel } from './shapes3d'
+import { machining, plateLabel } from './shapes3d'
+
+import { batch, rounded } from '../kit'
 
 const D2R = Math.PI / 180
 
@@ -50,7 +52,7 @@ export interface ArmMaterials { metal: THREE.Material; dark: THREE.Material }
 const accent = (c: string) => new THREE.MeshStandardMaterial({ color: '#0b0f14', emissive: c, emissiveIntensity: 0.25, metalness: 0.2, roughness: 0.4 })
 
 function ringAt(radius: number, tube = 0.012) {
-  return new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 12, 96), accent('#5b6472'))
+  return new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 8, 48), accent('#5b6472'))
 }
 
 export function buildArm(n: number, mats: ArmMaterials): ArmModel {
@@ -85,7 +87,7 @@ export function buildArm(n: number, mats: ArmMaterials): ArmModel {
   const shoulderRing = ringAt(0.1)
   shoulderRing.position.z = 0.105
   shoulder.add(shoulderRing)
-  shoulder.add(new THREE.Mesh(new THREE.BoxGeometry(0.1, ARM.L1, 0.11), metal).translateY(ARM.L1 / 2))
+  shoulder.add(new THREE.Mesh(rounded(0.1, ARM.L1, 0.11), metal).translateY(ARM.L1 / 2))
 
   const elbow = new THREE.Group()
   elbow.position.y = ARM.L1
@@ -94,7 +96,7 @@ export function buildArm(n: number, mats: ArmMaterials): ArmModel {
   const elbowRing = ringAt(0.082)
   elbowRing.position.z = 0.09
   elbow.add(elbowRing)
-  elbow.add(new THREE.Mesh(new THREE.BoxGeometry(0.08, ARM.L2, 0.09), metal).translateY(ARM.L2 / 2))
+  elbow.add(new THREE.Mesh(rounded(0.08, ARM.L2, 0.09), metal).translateY(ARM.L2 / 2))
 
   const wrist = new THREE.Group()
   wrist.position.y = ARM.L2
@@ -111,11 +113,11 @@ export function buildArm(n: number, mats: ArmMaterials): ArmModel {
   const rollRing = ringAt(0.052)
   rollRing.rotation.x = Math.PI / 2
   roll.add(rollRing)
-  const palm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.035, 0.07), dark)
+  const palm = new THREE.Mesh(rounded(0.14, 0.035, 0.07), dark)
   palm.position.y = 0.03
   roll.add(palm)
   // The fingers as ./grasp.ts has them: 0.1 long, their tips 0.035 past the point between them (the grasp, below).
-  const fingerGeo = new THREE.BoxGeometry(FINGER_W, 0.1, 0.055)
+  const fingerGeo = rounded(FINGER_W, 0.1, 0.055)
   const fingers = [new THREE.Mesh(fingerGeo, metal), new THREE.Mesh(fingerGeo, metal)]
   for (const f of fingers) { f.position.y = 0.095; roll.add(f) }
   const gripRing = ringAt(0.03, 0.008)
@@ -126,6 +128,16 @@ export function buildArm(n: number, mats: ArmMaterials): ArmModel {
   grasp.position.y = ARM.LT - 0.12
   roll.add(grasp)
 
+  const detail = (g: THREE.Object3D, w: number, h: number, d: number) => machining(g, { box: [w, h, d], at: [0, h / 2, 0], stuff: 'metal' })
+  detail(shoulder, 0.1, ARM.L1, 0.11)
+  detail(elbow, 0.08, ARM.L2, 0.09)
+  for (const [group, ring] of [[shoulder, shoulderRing], [elbow, elbowRing], [wrist, wristRing]] as const) {
+    const radius = (ring.geometry as THREE.TorusGeometry).parameters.radius
+    machining(group, { ring: [radius, 0.012], axis: 'z', at: [0, 0, ring.position.z], joint: 0 })
+  }
+  machining(root, { cyl: [0.24, 0.27, 0.1], axis: 'y', at: [0, 0.05, 0], stuff: 'dark' })
+  root.traverse(o => { if ((o as THREE.Mesh).isMesh) { o.castShadow = (o as THREE.Mesh).material === metal || (o as THREE.Mesh).material === dark; o.receiveShadow = true } })
+  batch(root, [plate, yawRing, shoulderRing, elbowRing, wristRing, rollRing, gripRing, ...fingers])
   const apply = [
     (v: number) => { yaw.rotation.y = v * D2R },
     (v: number) => { shoulder.rotation.z = v * D2R },
@@ -141,9 +153,9 @@ export function buildArm(n: number, mats: ArmMaterials): ArmModel {
       root.traverse((o) => {
         const m = o as THREE.Mesh
         if (!m.isMesh && !(o as THREE.Sprite).isSprite) return
-        if (m.isMesh) m.geometry.dispose()
+        if (m.isMesh && !m.geometry.userData.simShared) m.geometry.dispose()
         const mat = m.material as THREE.Material
-        if (mat !== metal && mat !== dark) { (mat as THREE.SpriteMaterial).map?.dispose(); mat.dispose() }
+        if (mat !== metal && mat !== dark && !mat.userData.simShared) { (mat as THREE.SpriteMaterial).map?.dispose(); mat.dispose() }
       })
     },
   }

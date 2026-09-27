@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Mode, PadButton } from '@obpal/core'
 import { DragStick } from '../src/sim/devices/input'
-import { driveTo, ROVER, RoverLogic, roverIntent, stepRover, type Rover } from '../src/sim/devices/rover'
+import { driveTo, GATES, RAMPS, ROVER, roverGround, RoverLogic, roverIntent, stepRover, type Rover } from '../src/sim/devices/rover'
 import { restInput, type DeviceInput } from '../src/sim/devices/types'
 
 const pad = (axes: [number, number, number, number], triggers: [number, number] = [0, 0], buttons = 0) => ({ flags: 0, seq: 0, t: 0, buttons, axes, triggers })
@@ -55,6 +55,24 @@ describe('rover: each controller drives it', () => {
 })
 
 describe('rover: physics within its limits', () => {
+  it('has four times the yard area and traversable ramps with ground-level ends', () => {
+    expect(ROVER.yard[0] * ROVER.yard[1]).toBeGreaterThanOrEqual(4 * 4.6 * 3)
+    for (const r of RAMPS) {
+      expect(roverGround(r.x, r.z)).toBe(r.height)
+      for (const side of [-1, 1]) expect(roverGround(r.x, r.z + side * r.halfLength)).toBeCloseTo(0, 12)
+      expect(roverGround(r.x + r.halfWidth + 0.01, r.z)).toBe(0)
+    }
+  })
+
+  it('stops against gate posts while leaving the opening driveable', () => {
+    const logic = new RoverLogic(1), r = logic.rovers[0], gate = GATES[0]
+    Object.assign(r, { x: gate.x - gate.width / 2, z: gate.z + 0.5, h: 0, v: 2 })
+    run(logic, () => at({ pad: pad([0, -1, 0, 0]) }), 0.5)
+    expect(r.z).toBeGreaterThan(gate.z + ROVER.radius)
+    Object.assign(r, { x: gate.x, z: gate.z + 0.5, h: 0, v: 2 })
+    run(logic, () => at({ pad: pad([0, -1, 0, 0]) }), 0.5)
+    expect(r.z).toBeLessThan(gate.z)
+  })
   it('never goes faster than its top speed, forward or back, and the wheels never turn past their stop', () => {
     const rv: Rover = { x: 0, z: 0, h: 0, v: 0, steer: 0, lights: false, honk: 0, braking: false, roll: 0, home: [0, 0, 0] }
     for (let i = 0; i < 600; i++) stepRover(rv, { steer: 1, throttle: 1, brake: false }, 1 / 60)
@@ -120,3 +138,4 @@ describe('rover: physics within its limits', () => {
     expect(logic.readout(0)).toMatch(/km\/h$/)
   })
 })
+

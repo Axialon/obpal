@@ -6,7 +6,7 @@
  */
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+import { environment, softKey } from '../kit'
 import type { Theme } from '../../ui/themes'
 import { simView, type SimView } from '../view'
 
@@ -58,7 +58,7 @@ function groundTexture(floor: string, grid: string) {
   // The grid only where there's floor, fading with it.
   g.globalCompositeOperation = 'source-atop'
   g.strokeStyle = grid
-  g.globalAlpha = 0.09
+  g.globalAlpha = 0.025
   g.lineWidth = 1
   for (let i = 0; i <= 1024; i += 1024 / 56) {
     g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 1024); g.stroke()
@@ -75,9 +75,12 @@ export function createStage(canvas: HTMLCanvasElement, theme: Theme): Stage {
   const renderer = view.renderer
   renderer.toneMapping = THREE.ACESFilmicToneMapping
   renderer.toneMappingExposure = 0.95
+  renderer.outputColorSpace = THREE.SRGBColorSpace
+  renderer.shadowMap.enabled = true
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap
   renderer.setClearColor(0x000000, 0)
   const scene = new THREE.Scene()
-  scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture
+  scene.environment = environment(renderer)
   scene.environmentIntensity = 0.8
   const camera = new THREE.PerspectiveCamera(40, 1, 0.05, 80)
   const controls = new OrbitControls(camera, renderer.domElement)
@@ -87,11 +90,10 @@ export function createStage(canvas: HTMLCanvasElement, theme: Theme): Stage {
 
   const hemi = new THREE.HemisphereLight('#ffffff', '#20242c', 1.1)
   scene.add(hemi)
-  const key = new THREE.DirectionalLight('#ffffff', 1.6)
-  key.position.set(-3, 6, 4)
-  scene.add(key)
+  const key = softKey(scene, 10)
 
   const ground = new THREE.Mesh(new THREE.CircleGeometry(14, 96), new THREE.MeshStandardMaterial({ transparent: true, roughness: 0.95, metalness: 0, depthWrite: false }))
+  ground.receiveShadow = true
   ground.rotation.x = -Math.PI / 2
   // Just under the devices' own floors (at 0), which it would otherwise draw over: it's transparent, so it comes last.
   ground.position.y = -0.03
@@ -109,17 +111,24 @@ export function createStage(canvas: HTMLCanvasElement, theme: Theme): Stage {
     renderer, view, scene, camera, controls, ground, theme, lights: { hemi, key },
     frame(f) {
       framing = f
+      const radius = f.radius * 1.2
+      Object.assign(key.shadow.camera, { left: -radius, right: radius, top: radius, bottom: -radius })
+      key.shadow.camera.updateProjectionMatrix()
       const tall = innerWidth < innerHeight
       const from = new THREE.Vector3(...(tall ? f.tall : f.wide))
       const target = new THREE.Vector3(...f.target)
       // Far enough that the device's width fits what the panel leaves free.
-      const need = f.radius / ((Math.tan((camera.fov * Math.PI) / 360) * free.w) / innerHeight)
+      const need = f.radius / (Math.tan((camera.fov * Math.PI) / 360) * Math.max(0.2, Math.min(free.w, free.h) / innerHeight))
       const dir = from.clone().sub(target)
       if (dir.length() < need) from.copy(target).addScaledVector(dir.normalize(), need)
       camera.position.copy(from)
       controls.target.copy(target)
       controls.minDistance = f.min ?? 1
       controls.maxDistance = Math.max(f.max ?? 30, need * 1.5)
+      camera.far = Math.max(80, controls.maxDistance * 3)
+      camera.updateProjectionMatrix()
+      const distance = from.distanceTo(target)
+      scene.fog = new THREE.Fog(stage.theme.scene[1], distance + f.radius, distance + f.radius * 6)
       controls.update()
     },
     setTheme(t) {
@@ -131,7 +140,7 @@ export function createStage(canvas: HTMLCanvasElement, theme: Theme): Stage {
       root.setProperty('--stage-c', c)
       const m = ground.material as THREE.MeshStandardMaterial
       m.map?.dispose()
-      m.map = groundTexture(t.light ? '#f6f8fb' : a, t.grid)
+      m.map = groundTexture(t.light ? '#f6f8fb' : '#111820', t.grid)
       m.needsUpdate = true
       hemi.color.set(t.light ? '#ffffff' : '#e8ecff')
       hemi.groundColor.set(t.light ? '#c9d1dc' : '#171a22')

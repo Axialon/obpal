@@ -3,6 +3,7 @@
  * glass orbs and cubes, the claw on its cable opening and closing, and the chute in the corner.
  */
 import * as THREE from 'three'
+import { batch, bolt, cylinder, maker, plastic, rounded } from '../kit'
 import { CABINETS, CLAW, ClawLogic, type Claw, type Prize } from './claw'
 import type { Stage } from './stage'
 import type { Theme } from '../../ui/themes'
@@ -18,7 +19,7 @@ interface ClawModel {
   fingers: THREE.Group[]
   sign: THREE.MeshStandardMaterial
   base: THREE.MeshStandardMaterial
-  prizes: THREE.Mesh[]
+  prizes: { mesh: THREE.InstancedMesh; index: number; last: string }[]
 }
 
 function buildCabinet(n: number, prizes: readonly Prize[]): ClawModel {
@@ -26,8 +27,23 @@ function buildCabinet(n: number, prizes: readonly Prize[]): ClawModel {
   const H = CLAW.half + 0.08
   const baseMat = new THREE.MeshStandardMaterial({ color: '#232838', roughness: 0.55, metalness: 0.2 })
   const base = box(H * 2, CLAW.floor, H * 2, baseMat, 0.03)
+  base.castShadow = true
   base.position.y = CLAW.floor / 2
   root.add(base)
+  const dark = mats.dark(), metalTrim = mats.metal()
+  const console = box(H * 1.65, 0.09, 0.2, dark); console.position.set(0, 0.58, H + 0.075); root.add(console)
+  const joystick = cylinder(0.013, 0.09, metalTrim); joystick.position.set(-0.22, 0.665, H + 0.075); root.add(joystick)
+  const grip = new THREE.Mesh(new THREE.SphereGeometry(0.03, 16, 10), dark); grip.position.set(-0.22, 0.72, H + 0.075); root.add(grip)
+  const button = cylinder(0.035, 0.022, plastic('#c6ff34')); button.position.set(0.2, 0.636, H + 0.075); root.add(button)
+  const hatch = box(0.34, 0.23, 0.018, dark); hatch.position.set(-0.22, 0.22, H + 0.005); root.add(hatch)
+  const lip = box(0.34, 0.026, 0.05, metalTrim); lip.position.set(-0.22, 0.12, H + 0.025); root.add(lip)
+  const coin = box(0.075, 0.13, 0.012, metalTrim); coin.position.set(0.29, 0.32, H + 0.006); root.add(coin)
+  const slot = box(0.009, 0.065, 0.006, dark); slot.position.set(0.29, 0.33, H + 0.014); root.add(slot)
+  for (const side of [-1, 1]) {
+    const screw = bolt(0.012); screw.rotation.x = Math.PI / 2; screw.position.set(side * H * 0.85, 0.4, H + 0.01); root.add(screw)
+    for (const z of [-1, 1]) { const foot = cylinder(0.055, 0.025, dark); foot.position.set(side * H * 0.86, 0.012, z * H * 0.86); root.add(foot) }
+  }
+  const mark = maker(root, 0.3, 0.16, H + 0.017, 0.065); mark.rotation.x = Math.PI / 2
   const sign = mats.glow()
   const trim = new THREE.Mesh(new THREE.BoxGeometry(H * 2 + 0.01, 0.02, H * 2 + 0.01), sign)
   trim.position.y = CLAW.floor
@@ -113,15 +129,25 @@ function buildCabinet(n: number, prizes: readonly Prize[]): ClawModel {
     fingers.push(f)
   }
   root.add(hub)
-  const prizeMeshes = prizes.map((p) => {
-    const m = new THREE.MeshPhysicalMaterial({ color: p.color, roughness: 0.12, metalness: 0.05, clearcoat: 1, emissive: p.color, emissiveIntensity: 0.08 })
-    const mesh = p.kind === 'orb' ? new THREE.Mesh(new THREE.SphereGeometry(p.r, 28, 18), m) : box(p.r * 1.7, p.r * 1.7, p.r * 1.7, m, p.r * 0.3)
-    root.add(mesh)
-    return mesh
+  // One instance buffer per shape and colour; every prize still moves independently.
+  const buckets = new Map<string, { mesh: THREE.InstancedMesh; used: number }>()
+  const prizeMeshes = prizes.map(p => {
+    const key = `${p.kind}:${p.color}`
+    let bucket = buckets.get(key)
+    if (!bucket) {
+      const count = prizes.filter(q => q.kind === p.kind && q.color === p.color).length
+      const geometry = p.kind === 'orb' ? new THREE.SphereGeometry(p.r, 20, 12) : rounded(p.r * 1.7, p.r * 1.7, p.r * 1.7, p.r * 0.3)
+      const mesh = new THREE.InstancedMesh(geometry, plastic(p.color), count)
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.frustumCulled = false
+      bucket = { mesh, used: 0 }; buckets.set(key, bucket); root.add(mesh)
+    }
+    return { mesh: bucket.mesh, index: bucket.used++, last: '' }
   })
+  batch(root, [bridge, cable, ...prizeMeshes.map(p => p.mesh)])
   return { root, trolley, bridge, cable, hub, fingers, sign, base: baseMat, prizes: prizeMeshes }
 }
 
+const prizeTransform = new THREE.Object3D()
 function placeClaw(m: ClawModel, c: Claw, prizes: readonly Prize[], color: string | null, t: number) {
   m.bridge.position.x = c.x
   m.trolley.position.set(c.x, CLAW.top + 0.04, c.z)
@@ -133,10 +159,14 @@ function placeClaw(m: ClawModel, c: Claw, prizes: readonly Prize[], color: strin
   for (const f of m.fingers) f.rotation.z = 0.55 - c.close * 0.75
   wear(m.sign, color, 0.5, 1.8 + (color ? 0.4 * Math.sin(t * 3) : 0))
   prizes.forEach((p, k) => {
-    const mesh = m.prizes[k]
-    mesh.visible = !p.won || p.y > CLAW.floor - 0.15
-    mesh.position.set(p.x, p.y, p.z)
-    if (p.kind === 'cube') mesh.rotation.y = k * 0.7
+    const { mesh, index } = m.prizes[k]
+    const state = `${p.x}:${p.y}:${p.z}:${p.won}`
+    if (m.prizes[k].last === state) return
+    m.prizes[k].last = state
+    prizeTransform.scale.setScalar(!p.won || p.y > CLAW.floor - 0.15 ? 1 : 0)
+    prizeTransform.position.set(p.x, p.y, p.z)
+    prizeTransform.rotation.y = p.kind === 'cube' ? k * 0.7 : 0
+    prizeTransform.updateMatrix(); mesh.setMatrixAt(index, prizeTransform.matrix); mesh.instanceMatrix.needsUpdate = true
   })
 }
 
@@ -151,7 +181,8 @@ export function createView(stage: Stage, logic: ClawLogic): DeviceView {
   const setTheme = (t: Theme) => { for (const m of models) m.base.color.set(t.light ? '#dfe3ea' : '#232838') }
   setTheme(stage.theme)
   return {
-    framing: { target: [0, 1, 0], wide: [0, 2.05, 3.95], tall: [0, 2.4, 5], radius: 1.35, min: 1.4, max: 8 },
+    inspect() { const [x, z] = CABINETS[0]; return { target: [x, 1.1, z], wide: [x + 1.1, 2.1, z + 2.3], tall: [x + 0.8, 2.2, z + 2.5], radius: 0.87, min: 0.5, max: 12 } },
+    framing: { target: [0, 0.95, 0], wide: [0.6, 2.8, 5.6], tall: [0, 3.1, 6.5], radius: 1.85, min: 0.8, max: 12 },
     pickY: CLAW.floor + 0.05,
     pointFrom: (n) => new THREE.Vector3((CABINETS[n] ?? [0, 0])[0], CLAW.floor + 0.05, (CABINETS[n] ?? [0, 0])[1]),
     update(colors, t) { logic.claws.forEach((c, n) => placeClaw(models[n], c, logic.prizes[n], colors[n], t)) },
@@ -167,7 +198,7 @@ export function preview(): Preview {
   m.base.color.set('#2b2358')
   scene.add(m.root)
   const camera = new THREE.PerspectiveCamera(34, 16 / 10, 0.05, 20)
-  camera.position.set(0.9, 1.75, 2.1)
+  camera.position.set(1.2, 2.1, 2.8)
   camera.lookAt(0, 1, 0)
   let next = 0
   return {

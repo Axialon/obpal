@@ -3,6 +3,22 @@ import { Mode, PadButton, qAxisAngle } from '@obpal/core'
 import { panTiltOf } from '../src/sim/devices/input'
 import { aimAt, offCentre, PTZ, PtzLogic, ptzControl, stepCam } from '../src/sim/devices/ptz'
 import { restInput, type DeviceInput } from '../src/sim/devices/types'
+import { insetRects } from '../src/sim/devices/ptz.view'
+
+it('keeps PTZ feeds inside the viewport and leaves the courtyard visible on a landscape phone', () => {
+  for (const [w, h] of [[1280, 800], [390, 844], [844, 390]]) {
+    const rects = insetRects(2, w, h)
+    for (const r of rects) {
+      expect(r.x).toBeGreaterThanOrEqual(0)
+      expect(r.x + r.w).toBeLessThan(w)
+      expect(r.y + r.h).toBeLessThan(h)
+    }
+    if (w === 844) for (const r of rects) {
+      expect(r.x).toBeGreaterThan(w * 0.75)
+      expect(r.y + r.h).toBeLessThan(h * 0.76 - 76)
+    }
+  }
+})
 
 const D2R = Math.PI / 180
 const pad = (axes: [number, number, number, number], triggers: [number, number] = [0, 0], buttons = 0) => ({ flags: 0, seq: 0, t: 0, buttons, axes, triggers })

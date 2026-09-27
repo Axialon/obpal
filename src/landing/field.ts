@@ -1,13 +1,14 @@
 /**
  * The hero's bounce field, drawn: the headline's letters as 3D blocks standing on the floor, seen from overhead at a
  * tilt, and glass marbles that roll and bounce on them (./world.ts and ./bounce.ts move them; this draws them where
- * they are between their last two steps, and answers what they strike). A marble is clear glass: what's
- * behind it shows through upside down and drawn in, the way a ball of glass bends it; a twist of colour inside turns
- * as it rolls; it's bright at its rim, catches the key light, and focuses a caustic on the surface below. It looks a
- * little bigger the higher it rises (it's nearer), while its shadow stays on the ground. Its glow spreads across a
- * floor of dots, which part around it as it passes and brighten in its light (a depth field), and passes through the
- * letters, which light up from within as it nears; every bounce sends a ring of light out through both. A letter a
- * marble lands on turns lime and stays so; light them all and the headline celebrates.
+ * they are between their last two steps, and answers what they strike). The page's raised things (its buttons and the
+ * like) are drawn by the page, under this canvas: here they only hide what stands behind them. A marble is clear
+ * glass: what's behind it shows through upside down and drawn in, the way a ball of glass bends it; a twist of colour
+ * inside turns as it rolls; it's bright at its rim, catches the key light, and focuses a caustic on the surface below.
+ * It looks a little bigger the higher it rises (it's nearer), while its shadow stays on the ground. Its glow spreads
+ * across a floor of dots, which part around it as it passes and brighten in its light (a depth field), and passes
+ * through the letters, which light up from within as it nears; every bounce sends a ring of light out through both. A
+ * letter a marble lands on turns lime and stays so; light them all and the headline celebrates.
  *
  * Edges stay clean at any size: the canvas's pixels are exactly the screen's (or, on a GPU with room, twice as many,
  * which the browser averages down), the letters are multisampled, the marble's outline and rim are worked out per
@@ -16,9 +17,9 @@
  * Loaded on demand (it brings three.js), and it draws only when asked to (the hero calls render() while anything moves).
  */
 import {
-  AdditiveBlending, BufferAttribute, BufferGeometry, CanvasTexture, CircleGeometry, Color, DirectionalLight, ExtrudeGeometry, Group,
+  AdditiveBlending, BufferAttribute, BufferGeometry, CanvasTexture, CircleGeometry, Color, DirectionalLight, DoubleSide, ExtrudeGeometry, Group,
   HemisphereLight, LinearFilter, LinearMipmapLinearFilter, Matrix3, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial,
-  PMREMGenerator, Points, Quaternion, Scene, ShaderMaterial, SphereGeometry, Sprite, SpriteMaterial, SRGBColorSpace, Vector2,
+  PMREMGenerator, Points, Quaternion, Scene, ShaderMaterial, Shape, SphereGeometry, Sprite, SpriteMaterial, SRGBColorSpace, Vector2,
   Vector3, Vector4, WebGLRenderer, WebGLRenderTarget, type Material, type Texture,
 } from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
@@ -179,8 +180,16 @@ export interface Field {
   play(top: number, bottom: number): void
   /** A marble's outline as drawn, on the canvas (px): its leftmost, rightmost, topmost and bottommost points. */
   outline(id: string): { left: number; right: number; top: number; bottom: number } | null
-  /** How tall a button's step looks on screen (px) where the buttons are: the depth its block is drawn with. */
-  padDepth(): number
+  /**
+   * Each raised thing's side as it's seen (canvas px, in the order they were given; null: not there): from the middle
+   * of its top's near edge down to the floor. Its block is drawn with it: as tall as its step looks from here, leaning
+   * the way perspective leans it.
+   */
+  padSides(): ({ dx: number; dy: number } | null)[]
+  /** How tall the raised things stand (em: ./world.ts PAD_H). */
+  readonly padHeight: number
+  /** The marbles' own clock (s): how far their fixed steps have taken them (./world.ts). */
+  clock(): number
   /** Toss a marble up at `vy` (em/s): now if it's on something, else as soon as it touches down. */
   toss(o: FieldOrb, vy: number): void
   /** A marble, created on first use, in a colour. */
@@ -318,6 +327,12 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
   const letterGroup = new Group()
   scene.add(letterGroup)
   let letters: Letter[] = []
+  // The raised things are drawn by the page (their tops, their sides), under the canvas. Here each is a block that draws
+  // nothing but hides what's behind it (a marble rolled up to its far side, the dots and the light on the floor there),
+  // so the page's block shows in front of it, as it stands in front of it.
+  const padGroup = new Group()
+  scene.add(padGroup)
+  const hides = new MeshBasicMaterial({ colorWrite: false, side: DoubleSide })
   /** The raised things' boxes (canvas px), which the dots keep off. */
   let padRects: PadRect[] = []
   let W = 1, H = 1
@@ -623,6 +638,22 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
     }
   }
 
+  // ---- the raised things, as blocks that hide what's behind them ----
+  function buildPadBlocks() {
+    for (const m of padGroup.children) (m as Mesh).geometry.dispose()
+    padGroup.clear()
+    for (const fp of world.pads) {
+      const ring = fp.rings[0]
+      const shape = new Shape()
+      shape.moveTo(ring[0], -ring[1])
+      for (let k = 2; k < ring.length; k += 2) shape.lineTo(ring[k], -ring[k + 1])
+      // Its footprint, from the floor up to its top (the shape's y is the floor's -z, as the letters' glyphs are).
+      const geo = new ExtrudeGeometry(shape, { depth: PAD_H, bevelEnabled: false, curveSegments: 1 })
+      geo.rotateX(-Math.PI / 2)
+      padGroup.add(new Mesh(geo, hides))
+    }
+  }
+
   // ---- the dots, where the camera sees the floor; and the raised things they keep off ----
 
   /** The dots cover what the camera sees of the floor (a little wider apart on a phone), sized for the buffer. */
@@ -686,6 +717,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
       size()
       if (world.layout(lines, W, H, box)) buildLetters()
       fitDots()
+      buildPadBlocks()
     },
     floorAt: (sx, sy) => world.floorAt(sx, sy),
     pointAt: (sx, sy) => world.pointAt(sx, sy),
@@ -702,14 +734,18 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
       if (!world.setPads(rects)) return
       padRects = rects.map((r) => ({ ...r }))
       padsForDots()
+      buildPadBlocks()
     },
     play: (top, bottom) => world.play(top, bottom),
-    padDepth() {
-      // At the first button there is (else the middle of the canvas): its top's height above the floor, on screen.
-      const b = padRects.find((r) => r.w > 0) ?? { x: W / 2, y: H / 2, w: 0, h: 0 }
-      const p = world.planeAt(b.x + b.w / 2, b.y + b.h, PAD_H)
-      const top = world.project(p.x, PAD_H, p.z), foot = world.project(p.x, 0, p.z)
-      return Math.max(0, foot.y - top.y)
+    padHeight: PAD_H,
+    clock: () => world.clock,
+    padSides() {
+      return padRects.map((b) => {
+        if (!(b.w > 0)) return null
+        const p = world.planeAt(b.x + b.w / 2, b.y + b.h, PAD_H)
+        const top = world.project(p.x, PAD_H, p.z), foot = world.project(p.x, 0, p.z)
+        return { dx: foot.x - top.x, dy: Math.max(0, foot.y - top.y) }
+      })
     },
     outline(id) {
       const o = orbMap.get(id)

@@ -4,6 +4,7 @@
  * points straight down.
  */
 import * as THREE from 'three'
+import { rounded } from '../kit'
 import { FINGER_IN, FINGER_TRAVEL, FINGER_W } from './grasp'
 import type { ArmModel } from './model'
 import { FINGER_Y, levelWrist, type SerialSpec } from './serial'
@@ -39,7 +40,7 @@ export function buildSerial(spec: SerialSpec, n: number, stuff: Stuffs, opts: { 
   const joints = opts.level ? 5 : 6
   const rings = dress(spec.look, { root, yaw, shoulder, elbow, wrist, roll }, stuff, joints)
   // The base's ring, the whole arm's: it wears the holder of the whole arm.
-  const plate = new THREE.Mesh(new THREE.TorusGeometry(opts.plateRing, 0.01, 12, 96), accent())
+  const plate = new THREE.Mesh(new THREE.TorusGeometry(opts.plateRing, 0.01, 8, 48), accent())
   plate.rotation.x = Math.PI / 2
   plate.position.y = 0.012
   root.add(plate)
@@ -47,7 +48,7 @@ export function buildSerial(spec: SerialSpec, n: number, stuff: Stuffs, opts: { 
   label.position.set(...opts.plate)
   root.add(label)
   // The gripper as ./grasp.ts has it: fingers 0.1 long, their middles FINGER_Y along the roll's group.
-  const fingerGeo = new THREE.BoxGeometry(FINGER_W, 0.1, 0.055)
+  const fingerGeo = rounded(FINGER_W, 0.1, 0.055)
   const fingers = [new THREE.Mesh(fingerGeo, stuff.metal), new THREE.Mesh(fingerGeo, stuff.metal)]
   for (const f of fingers) { f.position.y = FINGER_Y; roll.add(f) }
   const open = (v: number) => { const x = FINGER_IN + FINGER_W / 2 + FINGER_TRAVEL * v; fingers[0].position.x = -x; fingers[1].position.x = x }

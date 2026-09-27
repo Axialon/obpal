@@ -3,6 +3,7 @@
  * glowing ring) and the Viewer's shared scene (a model whose parts people hold, each in their colour).
  */
 import * as THREE from 'three'
+import { floorMaterial, plastic } from './kit'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import { previewScene, type Preview } from './devices/view'
 
@@ -12,7 +13,7 @@ const PEOPLE = ['#38bdf8', '#fb7185', '#fcd34d', '#6ee7b7']
 export function arenaPreview(): Preview {
   const scene = previewScene()
   const R = 1.2
-  const disc = new THREE.Mesh(new THREE.CylinderGeometry(R, R, 0.06, 96), new THREE.MeshStandardMaterial({ color: '#141026', metalness: 0.3, roughness: 0.55 }))
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(R, R, 0.06, 96), floorMaterial())
   disc.position.y = -0.03
   const edge = new THREE.Mesh(new THREE.TorusGeometry(R, 0.014, 10, 160), new THREE.MeshStandardMaterial({ color: '#0b0f14', emissive: '#c6ff34', emissiveIntensity: 1.2 }))
   edge.rotation.x = Math.PI / 2
@@ -47,7 +48,7 @@ export function viewerPreview(): Preview {
   const scene = previewScene()
   const model = new THREE.Group()
   scene.add(model)
-  const body = new THREE.MeshPhysicalMaterial({ color: '#e6e1ff', metalness: 0.3, roughness: 0.3, clearcoat: 0.7 })
+  const body = plastic()
   const base = new THREE.Mesh(new RoundedBoxGeometry(0.9, 0.34, 0.9, 4, 0.07), body)
   base.position.y = 0.17
   const lid = new THREE.Mesh(new RoundedBoxGeometry(0.9, 0.1, 0.9, 4, 0.04), body)

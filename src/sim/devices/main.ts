@@ -205,6 +205,18 @@ void entry.view().then((m) => {
   view = m.createView(stage, logic)
   stage.frame(view.framing)
   if (view.afterRender) stage.afterRender = () => view!.afterRender!()
+  const resetView = document.createElement('button')
+  resetView.className = 'btn'
+  resetView.textContent = 'Reset view'
+  resetView.onclick = () => stage.frame(view!.framing)
+  $('home-all').parentElement!.appendChild(resetView)
+  if (view.inspect) {
+    const inspect = document.createElement('button')
+    inspect.className = 'btn'
+    inspect.textContent = 'Inspect model'
+    inspect.onclick = () => stage.frame(view!.inspect!())
+    resetView.after(inspect)
+  }
 })
 
 void startSimScene({

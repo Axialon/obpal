@@ -40,8 +40,11 @@ export function mountPreviews(slots: readonly PreviewSlot[]): { stop(): void } {
       renderer = new T.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true })
       renderer.toneMapping = T.ACESFilmicToneMapping
       renderer.toneMappingExposure = 1
+      renderer.outputColorSpace = T.SRGBColorSpace
       renderer.setClearColor(0x000000, 0)
-      env = new T.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture
+      const pmrem = new T.PMREMGenerator(renderer), room = new RoomEnvironment()
+      env = pmrem.fromScene(room, 0.04).texture
+      room.dispose(); pmrem.dispose()
     } catch {
       failed = true
     }
@@ -129,6 +132,7 @@ export function mountPreviews(slots: readonly PreviewSlot[]): { stop(): void } {
       removeEventListener('resize', wake)
       if (raf) cancelAnimationFrame(raf)
       renderer?.dispose()
+      env?.dispose()
     },
   }
 }

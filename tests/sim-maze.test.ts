@@ -10,13 +10,18 @@ const board = (m = makeMaze()): Board => ({ tx: 0, tz: 0, mx: m.start[0], mz: m.
 const D2R = Math.PI / 180
 
 describe('marble maze: the maze', () => {
+  it('has more room while its passages remain wider than the marble', () => {
+    expect(MAZE.size ** 2).toBeGreaterThan(2)
+    expect(MAZE.size / MAZE.cells - MAZE.wall).toBeGreaterThan(MAZE.ball * 2)
+  })
+
   it('is the same for every board (seeded), with holes off the way from start to goal', () => {
     const a = makeMaze(7), b = makeMaze(7)
     expect(a).toEqual(b)
     expect(a.holes.length).toBeGreaterThan(0)
     for (const h of a.holes) expect(Math.hypot(h[0] - a.start[0], h[1] - a.start[1])).toBeGreaterThan(0.05)
-    // A perfect maze of 7 × 7 cells has 48 passages: 84 inner walls less 48, and the 4 sides.
-    expect(a.walls.length).toBe(84 - 48 + 4)
+    // A perfect maze has one fewer passage than cells.
+    expect(a.walls.length).toBe(2 * MAZE.cells * (MAZE.cells - 1) - (MAZE.cells ** 2 - 1) + 4)
   })
 })
 

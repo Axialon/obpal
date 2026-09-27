@@ -8,15 +8,20 @@ import { describe, it } from 'vitest'
 import { counterOf, inside, withinWalls } from '../../src/landing/bounce'
 import { TOP } from '../../src/landing/letters'
 import { gauss, rng } from './inputs'
-import { counters, distTo, gaps } from './metrics'
+import { beside, counters, distTo, gaps, summarize } from './metrics'
 import { run, type Scenario } from './run'
-import { buildWorld, ORB_R, type Harness } from './world'
+import { buildWorld, LAYOUTS, ORB_R, type Harness } from './world'
 
 const ON = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env.LANEQ === '1'
 const round = (v: unknown): unknown => typeof v === 'number' ? +v.toPrecision(4) : Array.isArray(v) ? v.map(round) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, round(x)])) : v
 const drop = (x: number, z: number) => (m: { orb: { x: number; y: number; z: number; resting: boolean } }) => { Object.assign(m.orb, { x, z, y: TOP + ORB_R + 0.3, resting: false }) }
 const at = (x: number, z: number) => (m: { orb: { x: number; y: number; z: number; resting: boolean } }, h: Harness) => { Object.assign(m.orb, { x, z, y: h.world.surface(x, z).h + ORB_R, resting: false }) }
 const report: Record<string, unknown> = {}
+/** The raised things: the first button (on a phone it sends the page to a computer), the second, the icons, the sound control, the hint. */
+const THINGS = [
+  ['send', (h: Harness) => h.pad(/send|open the viewer/i)], ['see', (h: Harness) => h.pad(/see what/i)], ['icon 1', (h: Harness) => h.icon(0)],
+  ['icon 2', (h: Harness) => h.icon(1)], ['icon 3', (h: Harness) => h.icon(2)], ['sound', (h: Harness) => h.pad(/sound/i)], ['hint', (h: Harness) => h.pad(/tilt|roll/i)],
+] as const
 const go = (sc: Scenario, extra: Record<string, unknown> = {}) => {
   const r = run(sc)
   const sounds = r.hits.filter((q) => q.speed > (q.kind === 'wall' ? 0.3 : 0.6))
@@ -114,17 +119,53 @@ describe.skipIf(!ON)('lane Q: the marble, measured', () => {
       const p = h.world.floorAt(sx, sy)
       rows.push({ ...go({ h, fps: 60, seconds: 7, seed: down * 3 + right, gyro: { noise: 0.7, tilt: (t) => [t < 0.3 ? 0 : down, t < 0.3 ? 0 : right] }, place: at(p.x, p.z), measureFrom: 4 }, { where: label }), end: undefined })
     }
-    // Below each raised thing, tipped gently toward it (too little to climb it), and clearly (enough).
-    for (const [what, pick] of [['send', (h: Harness) => h.pad(/send/i)], ['see', (h: Harness) => h.pad(/see what/i)], ['icon', (h: Harness) => h.icon(0)], ['sound', (h: Harness) => h.pad(/sound/i)]] as const) {
-      for (const deg of [2, 5, 8, 10]) {
+    // Beside each raised thing, tipped toward it: gently (too little to climb it), and clearly (enough).
+    for (const [what, pick] of THINGS) {
+      for (const deg of [5, 8, 11, 13, 15]) {
         const h = buildWorld('phone-390x844')
-        const pad = h.world.pads.find((p) => p.id === 1000 + pick(h))!
-        const below = h.world.floorAt(...(() => { const c = h.layout.pads[pick(h)]; return [c.x + c.w / 2, c.y + c.h + 26] as [number, number] })())
-        const s = go({ h, fps: 60, seconds: 7, seed: deg, gyro: { noise: 0.7, tilt: (t) => [t < 0.3 ? 0 : -deg, 0] }, place: at(below.x, below.z), measureFrom: 4 }, { where: `${what}, ${deg}°` })
-        rows.push({ ...s, onPad: inside(pad, (s.end as { x: number }).x, (s.end as { z: number }).z) || (s.end as { z: number }).z < pad.box[1], end: undefined })
+        const i = pick(h)
+        const pad = h.world.pads.find((p) => p.id === 1000 + i)!
+        const b = beside(h, i)
+        const r = run({ h, fps: 60, seconds: 7, seed: deg, gyro: { noise: 0.7, tilt: (t) => (t < 0.3 ? [0, 0] : [b.down * deg, b.right * deg]) }, place: at(b.x, b.z), measureFrom: 0 })
+        const up = r.samples.some((q) => q.y > pad.height + ORB_R - 0.01 && inside(pad, q.x, q.z))
+        // (Still or not: its last 3 s.)
+        rows.push({ where: `${what}, ${deg}°`, ...(round(summarize(h, r.samples.filter((q) => q.t >= 5000))) as object), onPad: up })
       }
     }
     report.cornersButtons = rows
+  })
+  it('climbs onto the raised things, and drops off them (phone and computer)', () => {
+    const rows: unknown[] = []
+    for (const layout of ['phone-390x844', 'desk-1280x800']) {
+      for (const [what, pick] of THINGS) {
+        let i: number
+        try { i = pick(buildWorld(layout)) } catch { continue }
+        if (!(LAYOUTS[layout].pads[i].w > 0)) continue
+        // The least tilt that takes it up, every time (three hands): half a degree at a time.
+        let climbs = NaN, took = NaN, onto = NaN, drop = NaN
+        for (let deg = 10; deg <= 18 && Number.isNaN(climbs); deg += 0.5) {
+          const runs = [1, 2, 3].map((seed) => {
+            const h = buildWorld(layout)
+            const pad = h.world.pads.find((p) => p.id === 1000 + i)!
+            const b = beside(h, i)
+            const r = run({ h, fps: 60, seconds: 6, seed: seed * 50 + deg * 2, gyro: { noise: 0.7, tilt: (t) => (t < 0.3 ? [0, 0] : [b.down * deg, b.right * deg]) }, place: at(b.x, b.z), measureFrom: 0 })
+            const up = r.samples.find((q) => q.y > pad.height + ORB_R - 0.01 && inside(pad, q.x, q.z))
+            // How long from the tilt to on top (s), how fast it arrived (em/s), and its first landing on the floor after.
+            const land = up ? r.hits.find((q) => q.kind === 'floor' && q.landed && q.frame > up.t) : undefined
+            return { up, took: up ? (up.t - 1300) / 1000 : NaN, onto: up ? Math.hypot(up.vx, up.vz) : NaN, drop: land ? land.speed : NaN }
+          })
+          if (runs.every((q) => q.up)) { climbs = deg; took = runs[0].took; onto = runs[0].onto; drop = runs[0].drop }
+        }
+        // Rolled off it gently (tipped 8° away): its first landing on the floor.
+        const h = buildWorld(layout)
+        const pad = h.world.pads.find((p) => p.id === 1000 + i)!
+        const b = beside(h, i)
+        const r = run({ h, fps: 60, seconds: 5, seed: 3, spikes: 0, gyro: { noise: 0.5, tilt: (t) => (t < 0.3 ? [0, 0] : [-b.down * 8, -b.right * 8]) }, place: at(pad.spot[0], pad.spot[1]), measureFrom: 0 })
+        const off = r.hits.filter((q) => q.kind === 'floor' && q.landed).map((q) => q.speed)
+        rows.push({ layout, what, climbs, took, onto, drop, rolledOff: off.slice(0, 3), teleports: r.summary.teleports })
+      }
+    }
+    report.climbs = round(rows)
   })
   it('ten minutes of random play (tilt and taps): teleports, depth, tunnelling', () => {
     const rows: unknown[] = []

@@ -43,9 +43,9 @@ export const DRONE = {
   /** How quickly it reaches the speed asked for. */
   tau: 0.35,
   hover: 1.1,
-  ceiling: 3.2,
+  ceiling: 5.4,
   /** The cage: half its width (x) and depth (z). */
-  cage: [4.2, 3] as const,
+  cage: [7.2, 5.4] as const,
   /** The 3D hand: metres the drone moves per metre of hand. */
   handScale: 3,
   maxTilt: 0.42,
@@ -85,7 +85,13 @@ export const RINGS: Ring[] = [
   { x: 1, y: 2.1, z: -1.8, face: -0.3, r: 0.55 },
   { x: 2.9, y: 1.3, z: 0.3, face: Math.PI / 2, r: 0.55 },
   { x: -0.4, y: 1.8, z: 0.4, face: 0, r: 0.6 },
+  { x: -5, y: 3.4, z: -2.8, face: 0.5, r: 0.8 },
+  { x: 0, y: 4.2, z: -3.5, face: -0.4, r: 0.8 },
+  { x: 5.1, y: 2.6, z: -2.4, face: Math.PI / 2, r: 0.8 },
 ]
+
+/** Training pylons; pilots can fly around them or over their tops. */
+export const PYLONS = [{ x: -4.8, z: 1, radius: 0.32, height: 2.1 }, { x: 4.8, z: 1, radius: 0.32, height: 2.8 }]
 
 /** What a pilot asks for: speeds −1…1 forward, right, up and turning right; or a place to be (the 3D hand). */
 export interface DroneIntent { fwd: number; right: number; climb: number; turn: number; goal: [number, number, number] | null; toggle: boolean }
@@ -282,6 +288,15 @@ export class DroneLogic implements DeviceLogic {
     const R = DRONE.radius
     this.drones.forEach((d, n) => {
       let hit = 0
+      for (const p of PYLONS) {
+        const dx = d.x - p.x, dz = d.z - p.z, distance = Math.hypot(dx, dz)
+        if (d.y >= p.height + R || distance >= p.radius + R) continue
+        if (d.y > p.height && d.vy < 0) { d.y = p.height + R; hit = Math.abs(d.vy); d.vy = 0; continue }
+        const nx = distance > 1e-6 ? dx / distance : 1, nz = distance > 1e-6 ? dz / distance : 0
+        d.x = p.x + nx * (p.radius + R); d.z = p.z + nz * (p.radius + R)
+        const into = d.vx * nx + d.vz * nz
+        if (into < 0) { hit = Math.max(hit, -into); d.vx -= nx * into * 1.3; d.vz -= nz * into * 1.3 }
+      }
       if (Math.abs(d.x) > X - R) { d.x = Math.sign(d.x) * (X - R); hit = Math.abs(d.vx); d.vx *= -0.3 }
       if (Math.abs(d.z) > Z - R) { d.z = Math.sign(d.z) * (Z - R); hit = Math.max(hit, Math.abs(d.vz)); d.vz *= -0.3 }
       if (d.y > DRONE.ceiling) { d.y = DRONE.ceiling; hit = Math.max(hit, Math.abs(d.vy)); d.vy = Math.min(0, d.vy) }

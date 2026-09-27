@@ -20,6 +20,7 @@
     "sync:family": "node scripts/sync-family.mjs",
     "pack:extension": "pnpm run build:extension && pnpm --filter @obpal/extension run pack",
     "store:extension": "pnpm run build:extension && node extension/scripts/store.mjs",
+    "store:kit": "node extension/scripts/store-kit.mjs",
     "store:art": "vite build && pnpm run build:extension && node extension/store/src/render.mjs",
     "e2e:all": "node scripts/e2e-all.mjs",
     "e2e:extension": "vite build && pnpm run build:extension && pnpm --filter @obpal/extension run e2e",

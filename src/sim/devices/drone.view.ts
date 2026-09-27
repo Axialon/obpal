@@ -3,12 +3,13 @@
  * its holder's colour on its lights, its rotors a blur when they spin, and a shadow that softens as it climbs.
  */
 import * as THREE from 'three'
-import { DRONE, DroneLogic, RINGS, stepDrone, type Drone, type DroneIntent } from './drone'
+import { DRONE, DroneLogic, PYLONS, RINGS, stepDrone, type Drone, type DroneIntent } from './drone'
+import { batch, bolt, cable, cylinder, floorMaterial, maker, plastic } from '../kit'
 import type { Stage } from './stage'
 import type { Theme } from '../../ui/themes'
 import { blobShadow, box, mats, plate, previewScene, wear, type DeviceView, type Preview } from './view'
 
-interface DroneModel { root: THREE.Group; body: THREE.Group; props: THREE.Group[]; blurs: THREE.Mesh[]; light: THREE.MeshStandardMaterial; shadow: THREE.Mesh }
+interface DroneModel { root: THREE.Group; body: THREE.Group; gimbal: THREE.Group; props: THREE.Group[]; blurs: THREE.Mesh[]; light: THREE.MeshStandardMaterial; shadow: THREE.Mesh }
 
 /** The model is drawn 0.26 m in radius, then scaled to the drone's size in the logic. */
 const SCALE = DRONE.radius / 0.26
@@ -22,6 +23,7 @@ function buildDrone(n: number): DroneModel {
   const dark = mats.dark()
   const light = mats.glow()
   const core = box(0.2, 0.07, 0.26, shell, 0.03)
+  core.castShadow = true
   core.position.y = 0.09
   const top = box(0.14, 0.03, 0.18, dark, 0.012)
   top.position.y = 0.135
@@ -32,6 +34,17 @@ function buildDrone(n: number): DroneModel {
   const cam = new THREE.Mesh(new THREE.SphereGeometry(0.03, 20, 14), dark)
   cam.position.set(0, 0.06, -0.14)
   body.add(core, top, strip, tail, cam)
+  const mount = box(0.1, 0.055, 0.07, dark); mount.position.set(0, 0.04, -0.12); body.add(mount)
+  const lens = cylinder(0.018, 0.025, plastic('#244c65')); lens.rotation.x = Math.PI / 2; lens.position.set(0, 0.05, -0.167); body.add(lens)
+  const gimbal = new THREE.Group()
+  gimbal.position.set(0, 0.05, -0.14)
+  for (const part of [mount, cam, lens]) { part.position.sub(gimbal.position); gimbal.add(part) }
+  body.add(gimbal)
+  for (const side of [-1, 1]) {
+    body.add(cable([[side * 0.085, 0.035, -0.1], [side * 0.11, 0.01, -0.15], [side * 0.11, 0.01, 0.16], [side * 0.085, 0.035, 0.1]], 0.008, mats.metal()))
+    const screw = bolt(0.006); screw.position.set(side * 0.07, 0.129, -0.075); body.add(screw)
+  }
+  maker(body, 0, 0.153, -0.04, 0.035)
   const props: THREE.Group[] = []
   const blurs: THREE.Mesh[] = []
   const bladeGeo = new THREE.BoxGeometry(0.2, 0.004, 0.022)
@@ -56,6 +69,10 @@ function buildDrone(n: number): DroneModel {
     const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.07, 6), dark)
     foot.position.set(x * 0.08, 0.035, z * 0.1)
     body.add(arm, motor, prop, blur, guard, foot)
+    const collar = cylinder(0.029, 0.008, dark); collar.position.set(x * 0.17, 0.113, z * 0.17); body.add(collar)
+    const cap = cylinder(0.012, 0.015); cap.position.y = 0.006; prop.add(cap)
+    batch(prop)
+    const lead = cable([[x * 0.05, 0.1, z * 0.04], [x * 0.11, 0.108, z * 0.11], [x * 0.16, 0.108, z * 0.16]], 0.003, plastic('#b5693b')); body.add(lead)
     props.push(prop)
     blurs.push(blur)
   }
@@ -64,15 +81,17 @@ function buildDrone(n: number): DroneModel {
   num.position.set(0, 0.152, 0.02)
   body.add(num)
   const shadow = blobShadow(0.3 * SCALE, 0.5)
-  return { root, body, props, blurs, light, shadow }
+  batch(body, [...props, ...blurs])
+  return { root, body, gimbal, props, blurs, light, shadow }
 }
 
 function placeDrone(m: DroneModel, d: Drone, color: string | null) {
   m.root.position.set(d.x, d.y, d.z)
   m.root.rotation.y = d.yaw
   m.body.rotation.set(d.pitch, 0, -d.roll, 'YXZ')
+  m.gimbal.quaternion.copy(m.body.quaternion).invert()
   m.props.forEach((p, i) => { p.rotation.y = d.spin * (i % 3 === 0 ? 1 : -1) })
-  for (const b of m.blurs) (b.material as THREE.MeshBasicMaterial).opacity = d.rotor * 0.28
+  for (const b of m.blurs) { b.visible = d.rotor > 0.02; (b.material as THREE.MeshBasicMaterial).opacity = d.rotor * 0.28 }
   for (const p of m.props) p.visible = d.rotor < 0.7
   wear(m.light, color, 0.5, 2.6)
   // The shadow stays on the floor, softer and wider the higher it flies.
@@ -99,7 +118,7 @@ function buildRing(r: typeof RINGS[number]) {
 /** The cage: a floor, a lit frame, and net on its sides (drawn faintly, so the drones show through). */
 function buildCage(hx: number, hz: number, h: number) {
   const g = new THREE.Group()
-  const floor = box(hx * 2 + 0.3, 0.04, hz * 2 + 0.3, new THREE.MeshStandardMaterial({ color: '#232833', roughness: 0.92 }), 0.02)
+  const floor = box(hx * 2 + 0.3, 0.04, hz * 2 + 0.3, floorMaterial(), 0.02)
   floor.position.y = -0.02
   g.add(floor)
   const edge = new THREE.MeshStandardMaterial({ color: '#0b0f14', emissive: '#c6ff34', emissiveIntensity: 0.9 })
@@ -130,6 +149,7 @@ function buildCage(hx: number, hz: number, h: number) {
   net(hx * 2, 0, -hz, 0)
   net(hz * 2, -hx, 0, Math.PI / 2)
   net(hz * 2, hx, 0, Math.PI / 2)
+  batch(g, [floor])
   return { group: g, floor: floor.material as THREE.MeshStandardMaterial, edge }
 }
 
@@ -152,6 +172,12 @@ export function createView(stage: Stage, logic: DroneLogic): DeviceView {
   const [hx, hz] = DRONE.cage
   const cage = buildCage(hx, hz, DRONE.ceiling)
   stage.scene.add(cage.group)
+  const obstacles = new THREE.Group()
+  for (const p of PYLONS) {
+    const body = cylinder(p.radius, p.height, mats.dark()); body.position.set(p.x, p.height / 2, p.z); obstacles.add(body)
+    for (let i = 0; i < 3; i++) { const band = cylinder(p.radius + 0.006, 0.07, plastic('#c6ff34')); band.position.set(p.x, p.height - 0.1 - i * 0.2, p.z); obstacles.add(band) }
+  }
+  batch(obstacles); stage.scene.add(obstacles)
   const rings = logic.rings.map((r) => { const m = buildRing(r); stage.scene.add(m.group); return m })
   const pads = logic.drones.map((d, n) => { const p = buildPad(n); p.group.position.set(d.home[0], 0, d.home[1]); stage.scene.add(p.group); return p })
   const models = logic.drones.map((_, n) => { const m = buildDrone(n); stage.scene.add(m.root, m.shadow); return m })
@@ -166,7 +192,8 @@ export function createView(stage: Stage, logic: DroneLogic): DeviceView {
   const flash = rings.map(() => 0)
   const passed = logic.drones.map((d) => d.rings)
   return {
-    framing: { target: [0, 1, 0.3], wide: [0, 5.4, 10.2], tall: [0, 8, 10], radius: 4.2, min: 3, max: 22 },
+    inspect() { const d = logic.drones[0]; return { target: [d.x, d.y + 0.12, d.z], wide: [d.x + 0.8, d.y + 0.9, d.z + 1], tall: [d.x + 0.8, d.y + 1, d.z + 1.3], radius: 0.52, min: 0.4, max: 38 } },
+    framing: { target: [0, 1.7, 0], wide: [0, 10.5, 18], tall: [0, 13, 17], radius: 7.5, min: 2, max: 38 },
     pickY: 0,
     update(colors, t, dt) {
       logic.drones.forEach((d, n) => {

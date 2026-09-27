@@ -67,7 +67,7 @@ export interface Cam {
 }
 
 /** The train's way round the set: an oval, its middle and radii. */
-export const TRACK = { x: 0, z: -0.6, rx: 1.9, rz: 1.05, y: 0.12 }
+export const TRACK = { x: 0, z: -0.6, rx: 3.2, rz: 2, y: 0.12 }
 /** Where the train is at time t (s): it takes about 17 s a lap. */
 export function trainAt(t: number): [number, number, number] {
   const a = t * 0.37

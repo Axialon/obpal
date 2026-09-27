@@ -10,6 +10,16 @@ const run = (logic: ClawLogic, inp: () => DeviceInput | null, seconds: number) =
 const pointAt = (x: number, z: number, presses: string[] = []) => ({ ...restInput('face.wii', Mode.point), point: { x: 0, y: 0, yaw: 0, pitch: 0, off: false }, spot: [x + CABINETS[0][0], z + CABINETS[0][1]] as [number, number], presses })
 
 describe('claw machine: each controller moves the claw', () => {
+  it('has a larger prize bed with more prizes, clear of the chute and walls', () => {
+    const logic = new ClawLogic(1)
+    expect(CLAW.half ** 2).toBeGreaterThan(2 * 0.42 ** 2)
+    expect(logic.prizes[0].length).toBeGreaterThan(30)
+    for (const p of logic.prizes[0]) {
+      expect(Math.abs(p.x) + p.r).toBeLessThan(CLAW.half)
+      expect(Math.abs(p.z) + p.r).toBeLessThan(CLAW.half)
+      expect(Math.abs(p.x - CLAW.chute.x) >= CLAW.chute.half + p.r || Math.abs(p.z - CLAW.chute.z) >= CLAW.chute.half + p.r).toBe(true)
+    }
+  })
   it('Wii remote: the claw rides to where the phone points in the pit, never past its walls', () => {
     const logic = new ClawLogic(1)
     const c = logic.claws[0]
@@ -49,6 +59,20 @@ describe('claw machine: each controller moves the claw', () => {
 })
 
 describe('claw machine: a go', () => {
+  it('keeps the prize pile settled and picks its upper layer without lifting the bed', () => {
+    const logic = new ClawLogic(1)
+    const upper = logic.prizes[0].at(-1)!
+    const heights = logic.prizes[0].map(p => p.y)
+    run(logic, () => null, 10)
+    expect(logic.prizes[0].map(p => p.y)).toEqual(heights)
+    expect(upper.y).toBeGreaterThan(CLAW.floor + upper.r * 2)
+    run(logic, () => pointAt(upper.x, upper.z), 3)
+    logic.step([pointAt(upper.x, upper.z, ['wii-a'])], 1 / 60)
+    for (let t = 0; t < 5 && !upper.held; t += 1 / 60) logic.step([null], 1 / 60)
+    expect(upper.held).toBe(true)
+    expect(logic.prizes[0][0].y).toBe(heights[0])
+  })
+
   it('dropped right over a prize: down, closes, lifts, carries it to the chute, and it’s won', () => {
     const logic = new ClawLogic(1)
     const c = logic.claws[0]

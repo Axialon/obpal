@@ -7,6 +7,7 @@
  * whichever is nearer), and the twist is for turning by hand. Procedural, in industrial orange.
  */
 import * as THREE from 'three'
+import { rounded } from '../../kit'
 import type { Box, Stand } from '../blocks'
 import { col, dot, ID, mulR, mulTV, nest, rotY, rotZ, type Frame } from '../frames'
 import { FINGER_IN, FINGER_TRAVEL, FINGER_W, type GripBox, type V3 } from '../grasp'
@@ -165,14 +166,14 @@ function buildSix(n: number, stuff: ReturnType<typeof stuffOf>): ArmModel {
   const roll = at(wrist, ROLL_AT)
   const grasp = at(roll, LT - ROLL_AT)
   const rings = dress(SIX_LOOK, { root, yaw, shoulder, elbow, twist, wrist, roll }, stuff, 7)
-  const plate = new THREE.Mesh(new THREE.TorusGeometry(0.29, 0.01, 12, 96), accent())
+  const plate = new THREE.Mesh(new THREE.TorusGeometry(0.29, 0.01, 8, 48), accent())
   plate.rotation.x = Math.PI / 2
   plate.position.y = 0.012
   root.add(plate)
   const label = plateLabel(n)
   label.position.set(0.38, 0.12, 0)
   root.add(label)
-  const fingerGeo = new THREE.BoxGeometry(FINGER_W, 0.1, 0.055)
+  const fingerGeo = rounded(FINGER_W, 0.1, 0.055)
   const fingers = [new THREE.Mesh(fingerGeo, stuff.metal), new THREE.Mesh(fingerGeo, stuff.metal)]
   for (const m of fingers) { m.position.y = FINGER_Y; roll.add(m) }
   const apply = [

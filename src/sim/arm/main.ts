@@ -18,7 +18,9 @@ import '../../styles/base.css'
 import '../../styles/sim.css'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+import { batch, box, environment, floorMaterial, metal, palette, plastic, softKey } from '../kit'
+import { fixtures, payloadSpeed, STOCK } from './workspace'
+import { instanceCopies } from '../kit/instances'
 import type { SceneNode } from '@obpal/core'
 import { Mode, PadButton, type Frame, type Layout, type PadState, type Quat } from '@obpal/host'
 import { applyTheme, initialTheme } from '../../ui/themes'
@@ -30,7 +32,7 @@ import {
   calibrateHome, defaultCalibration, FeetechDriver, fromRaw, hasSerial, RosDriver, ROS_DEFAULTS, SerialTextDriver, toRaw,
   type ArmDriver, type Calibration, type DriverKind,
 } from './drivers'
-import { eject, restOf, settle as settleBlocks, stepAmong, type Base, type Blk, type Stand } from './blocks'
+import { blockBox, eject, restOf, settle as settleBlocks, stepAmong, type Base, type Blk, type Stand } from './blocks'
 import { holding, type GripBox, type V3 } from './grasp'
 import { reachDown, solveNear, within, type Pose } from './kin'
 import type { ToolTarget } from './kinematics'
@@ -64,7 +66,12 @@ const view = simView($('stage') as HTMLCanvasElement, { onResize: resize })
 const renderer = view.renderer
 renderer.toneMapping = THREE.ACESFilmicToneMapping
 const scene = new THREE.Scene()
-scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture
+scene.environment = environment(renderer)
+renderer.shadowMap.enabled = true
+renderer.shadowMap.type = THREE.PCFSoftShadowMap
+scene.environmentIntensity = 0.65
+scene.add(new THREE.HemisphereLight(0xffffff, 0x313941, 0.65))
+softKey(scene, KIND.cell.fence * 1.35).intensity = 1.8
 scene.background = new THREE.Color(document.documentElement.dataset.theme === 'light' ? '#e9edf3' : '#07090d')
 const camera = new THREE.PerspectiveCamera(42, 1, 0.05, 60)
 camera.position.set(...KIND.cell.camera)
@@ -72,24 +79,40 @@ const controls = new OrbitControls(camera, renderer.domElement)
 controls.target.set(0, KIND.cell.look, 0)
 controls.enableDamping = true
 controls.minDistance = 1.2
-controls.maxDistance = 7
+controls.maxDistance = 14
+controls.enablePan = false
 controls.maxPolarAngle = Math.PI * 0.49
 
-const mats = {
-  metal: new THREE.MeshStandardMaterial({ color: '#c9d1dc', metalness: 0.85, roughness: 0.28 }),
-  dark: new THREE.MeshStandardMaterial({ color: '#1b2029', metalness: 0.6, roughness: 0.45 }),
-}
-const floor = new THREE.Mesh(new THREE.CircleGeometry(4.2, 128), new THREE.MeshStandardMaterial({ color: '#0e1118', metalness: 0.2, roughness: 0.9 }))
+const mats = { metal, dark: plastic(palette.carbon) }
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), floorMaterial('#090e12'))
 floor.rotation.x = -Math.PI / 2
+floor.position.y = -0.16
+floor.receiveShadow = true
 scene.add(floor)
-const grid = new THREE.PolarGridHelper(KIND.cell.fence - 0.05, 8, 8, 128, '#27303d', '#1b222d')
+const bench = box(KIND.cell.fence * 2.8, 0.14, KIND.cell.fence * 2.8, floorMaterial('#273036'), 0.05)
+bench.position.y = -0.074
+scene.add(bench)
+const grid = new THREE.PolarGridHelper(KIND.cell.fence * 1.3, 12, 6, 96, '#586166', '#454e54')
 grid.position.y = 0.001
 scene.add(grid)
 // The cell's fence: the arms work inside it.
-const fence = new THREE.Mesh(new THREE.TorusGeometry(KIND.cell.fence, 0.008, 8, 192), new THREE.MeshBasicMaterial({ color: '#f59e0b', transparent: true, opacity: 0.55 }))
+const fence = new THREE.Mesh(new THREE.TorusGeometry(KIND.cell.fence * 1.3, 0.005, 6, 128), plastic('#c6ff34'))
 fence.rotation.x = Math.PI / 2
 fence.position.y = 0.004
 scene.add(fence)
+const workholding = fixtures(KIND.cell.stand)
+const fixedBoxes = workholding.map(blockBox)
+const fixtureMeshes = new THREE.Group()
+for (const f of workholding) {
+  const m = f.finish === 'peg'
+    ? new THREE.Mesh(new THREE.CylinderGeometry(f.half[0], f.half[0], f.half[1] * 2, 16), metal)
+    : box(f.half[0] * 2, f.half[1] * 2, f.half[2] * 2, plastic(f.finish === 'shelf' ? '#818c91' : '#60746b'), 0.003)
+  m.position.set(f.x, f.y, f.z)
+  m.castShadow = m.receiveShadow = true
+  fixtureMeshes.add(m)
+}
+batch(fixtureMeshes)
+scene.add(fixtureMeshes)
 
 // ---- arms ----
 
@@ -172,6 +195,7 @@ interface Claw {
 
 const MAX_ARMS = 4
 const arms: Arm[] = []
+const armInstances = instanceCopies(scene)
 /** The panel: who held what when it was last drawn (to flash changes), and which arms have their settings open. */
 let heldBefore: Record<string, string> = {}
 const openTools = new Set<string>()
@@ -208,6 +232,7 @@ function addArm(): Arm | null {
   const arm: Arm = { n, id, name: `Arm ${n}`, model, joints, profile: 'both', drive: null, edge: false, state: '', homing: false, flash: 0, hw: null, hover: KIND.drive.hover[0], claw: null, track: null, scale: KIND.drive.scale, goal: null, blocked: false }
   arms.push(arm)
   arms.sort((a, b) => a.n - b.n)
+  armInstances.set(arms.map(a => a.model.root))
   refreshNodes()
   return arm
 }
@@ -216,8 +241,10 @@ async function removeArm(a: Arm) {
   if (a.hw?.live) { sim?.note(`${a.name} is live: take it off live first`); return }
   if (a.hw) await disconnect(a)
   for (const b of blocks) if (b.by === a) drop(b)
+  armInstances.clear()
   a.model.dispose()
   arms.splice(arms.indexOf(a), 1)
+  armInstances.set(arms.map(a => a.model.root))
   for (const n of [a.id, ...a.joints.map((j) => j.node)]) sim?.claims.unnest(n)
   sim?.log(`The screen removed ${a.name}`)
   refreshNodes()
@@ -269,22 +296,26 @@ function homeArm(a: Arm, by: string) {
 
 // ---- blocks on the shared floor: pushed along it, stopping what they can't give way to, held (./blocks.ts) ----
 
-const BLOCK = 0.06
-const BLOCK_HALF: V3 = [BLOCK / 2, BLOCK / 2, BLOCK / 2]
 interface Block {
   mesh: THREE.Mesh
+  half: V3
+  mass: number
   by: Arm | null
   vy: number
   /** The opening its holder's fingers stopped at on it. */
   grip: number
 }
-const blocks: Block[] = ['#38bdf8', '#fb7185', '#fcd34d', '#a78bfa', '#34d399', '#f472b6'].map((c, i) => {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(BLOCK, BLOCK, BLOCK), new THREE.MeshStandardMaterial({ color: c, metalness: 0.1, roughness: 0.35, emissive: c, emissiveIntensity: 0.12 }))
-  const a = (i / 6) * Math.PI * 2 + 0.5
-  const r = KIND.cell.blocks[i % 2]
-  mesh.position.set(Math.cos(a) * r, BLOCK / 2, Math.sin(a) * r)
+const blocks: Block[] = STOCK.map((stock, i) => {
+  const [x, y, z] = stock.half
+  const material = stock.shape === 'drum' ? metal : plastic(stock.color)
+  const mesh = stock.shape === 'drum' ? new THREE.Mesh(new THREE.CylinderGeometry(x, x, y * 2, 24), material) : box(x * 2, y * 2, z * 2, material, 0.004)
+  const a = ((i % 6) / 6) * Math.PI * 2 + (i < 6 ? 0.5 : 0.9)
+  const r = i < 6 ? KIND.cell.blocks[i % 2] : KIND.cell.stand * 0.58
+  mesh.position.set(Math.cos(a) * r, y, Math.sin(a) * r)
+  mesh.castShadow = mesh.receiveShadow = true
+  mesh.userData.pickable = true
   scene.add(mesh)
-  return { mesh, by: null, vy: 0, grip: 0 }
+  return { mesh, half: stock.half, mass: stock.mass, by: null, vy: 0, grip: 0 }
 })
 const bq = new THREE.Quaternion()
 const bm = new THREE.Matrix4()
@@ -298,7 +329,7 @@ function drop(b: Block) {
 /** How far a block reaches above (and below) its middle, as it's turned. */
 function halfHeight(b: Block) {
   const e = bm.makeRotationFromQuaternion(b.mesh.getWorldQuaternion(bq)).elements
-  return (BLOCK / 2) * (Math.abs(e[1]) + Math.abs(e[5]) + Math.abs(e[9]))
+  return b.half[0] * Math.abs(e[1]) + b.half[1] * Math.abs(e[5]) + b.half[2] * Math.abs(e[9])
 }
 const bx = new THREE.Vector3()
 const bz = new THREE.Vector3()
@@ -310,7 +341,7 @@ function yawOf(q: THREE.Quaternion) {
   return Math.abs(bx.y) <= Math.abs(bz.y) ? Math.atan2(-bx.z, bx.x) : Math.atan2(bz.x, bz.z)
 }
 /** A free block as ./blocks.ts has it. */
-const blkOf = (b: Block): Blk => ({ x: b.mesh.position.x, y: b.mesh.position.y, z: b.mesh.position.z, yaw: yawOf(b.mesh.quaternion), half: BLOCK_HALF })
+const blkOf = (b: Block): Blk => ({ x: b.mesh.position.x, y: b.mesh.position.y, z: b.mesh.position.z, yaw: yawOf(b.mesh.quaternion), half: b.half })
 /** Move a free block to where ./blocks.ts put it, turning it about the vertical as far as it turned it. */
 function setBlk(b: Block, t: Blk) {
   b.mesh.position.set(t.x, t.y, t.z)
@@ -334,13 +365,13 @@ function updateBlocks(dt: number) {
   free.forEach((b, i) => {
     // Down to the floor, or onto a block under it (one whose middle it's over: past an edge, it slides off), levelling
     // as it goes: it rests on its lowest corner or face, never in what's under it.
-    const rest = restOf(all[i], all.filter((_, j) => j !== i))
+    const rest = restOf(all[i], [...all.filter((_, j) => j !== i), ...workholding])
     const p = b.mesh.position
     p.x = rest.x
     p.z = rest.z
     level.setFromEuler(levelTurn.set(0, yawOf(b.mesh.quaternion), 0))
     if (b.mesh.quaternion.angleTo(level) > 1e-4) b.mesh.quaternion.slerp(level, Math.min(1, dt * 6))
-    const y = rest.y - BLOCK / 2 + halfHeight(b)
+    const y = rest.y - b.half[1] + halfHeight(b)
     if (p.y > y + 1e-4) {
       b.vy -= 9.8 * dt
       p.y = Math.max(y, p.y + b.vy * dt)
@@ -352,7 +383,7 @@ function updateBlocks(dt: number) {
   })
   // Nothing in anything: a block that fell against an arm, or that another arm's push left in one, is pushed out of it,
   // and out of the other blocks and the bases; one pinned among them goes where there's room.
-  const parts = arms.flatMap(partsOf)
+  const parts = [...arms.flatMap(partsOf), ...fixedBoxes]
   if (settleBlocks(all, [], parts, bases()) !== 'ok') eject(all, parts, bases())
   free.forEach((b, i) => setBlk(b, all[i]))
 }
@@ -367,7 +398,7 @@ function heldBox(a: Arm): GripBox | null {
   if (!b) return null
   const e = bm.makeRotationFromQuaternion(b.mesh.quaternion).elements
   const p = b.mesh.position
-  return { c: [p.x, p.y, p.z], axes: [[e[0], e[1], e[2]], [e[4], e[5], e[6]], [e[8], e[9], e[10]]], half: BLOCK_HALF }
+  return { c: [p.x, p.y, p.z], axes: [[e[0], e[1], e[2]], [e[4], e[5], e[6]], [e[8], e[9], e[10]]], half: b.half }
 }
 
 /**
@@ -397,7 +428,7 @@ function blockStep(a: Arm, was: Pose, gripWas: number, following: boolean) {
   const free = blocks.filter((b) => !b.by)
   const g = a.joints[GRIP]
   const r = stepAmong(KIN, standOf(a), { pose: was, open: gripWas }, { pose: poseOf(a), open: g.angle }, heldBox(a),
-    { blocks: free.map(blkOf), still: arms.filter((o) => o !== a).flatMap(partsOf), bases: bases() },
+    { blocks: free.map(blkOf), still: [...arms.filter((o) => o !== a).flatMap(partsOf), ...fixedBoxes], bases: bases() },
     { real: !!a.hw, following })
   free.forEach((b, i) => { if (i !== r.took?.i) setBlk(b, r.blocks[i]) })
   a.blocked = r.stopped.some((k) => k !== 'grip')
@@ -910,7 +941,7 @@ function stepArm(a: Arm, now: number, dt: number) {
   else a.state = driveWhole(a, armWho, now, dt)
   const got = mirror ? hw.driver.read() : null
   const angles = got ? fromRaw(hw!.cal, got.raw.map((v) => v ?? NaN)) : null
-  const cap = hw?.live ? hw.cap : 1
+  const cap = hw?.live ? hw.cap : hw ? 1 : payloadSpeed(blocks.find(b => b.by === a)?.mass ?? 0)
   // Where the arm and the gripper were, and whether it's headed for a pose, for the floor and the grip (below).
   const was = poseOf(a)
   const gripWas = a.joints[GRIP].angle
@@ -989,6 +1020,7 @@ function loop(now: number) {
   for (const a of arms) stepArm(a, now, dt)
   updateBlocks(dt)
   controls.update()
+  armInstances.update()
   view.draw(scene, camera, dt)
   if (Math.floor(now / 100) !== Math.floor((now - dt * 1000) / 100)) renderReadouts()
   requestAnimationFrame(loop)
@@ -1308,8 +1340,36 @@ function resize() {
   const panel = document.querySelector('.sim-panel')!.getBoundingClientRect()
   if (w > 860) camera.setViewOffset(w, h, -panel.right / 2, 0, w, h)
   else camera.setViewOffset(w, h, 0, (h - panel.top) / 2, w, h)
+  const free = w > 860 ? Math.min(w - panel.right, h - 90) : Math.min(w, panel.top - 64)
+  const radius = KIND.cell.fence * 0.95
+  const distance = radius / (Math.tan(camera.fov * Math.PI / 360) * Math.max(0.2, free / h))
+  const target = new THREE.Vector3(0, KIND.cell.look, 0)
+  const direction = new THREE.Vector3(...KIND.cell.camera).sub(target)
+  camera.position.copy(target).addScaledVector(direction.normalize(), Math.max(distance, new THREE.Vector3(...KIND.cell.camera).distanceTo(target)))
+  controls.target.copy(target)
+  controls.maxDistance = Math.max(14, distance * 1.6)
+  controls.update()
   camera.updateProjectionMatrix()
 }
+const resetView = document.createElement('button')
+resetView.className = 'add-arm'
+resetView.textContent = 'Reset view'
+resetView.onclick = resize
+$('add-arm').after(resetView)
+const inspectArm = document.createElement('button')
+inspectArm.className = 'add-arm'
+inspectArm.textContent = 'Inspect arm'
+inspectArm.onclick = () => {
+  if (!arms.length) return
+  const bounds = new THREE.Box3().setFromObject(arms[0].model.root)
+  const target = bounds.getCenter(new THREE.Vector3())
+  const span = bounds.getSize(new THREE.Vector3()).length() * 0.8
+  const distance = span / (Math.tan(camera.fov * Math.PI / 360) * Math.min(1, camera.aspect))
+  camera.position.copy(target).addScaledVector(new THREE.Vector3(0.7, 0.4, 1).normalize(), distance)
+  controls.target.copy(target)
+  controls.update()
+}
+resetView.after(inspectArm)
 resize()
 renderPanel()
 requestAnimationFrame(loop)
@@ -1342,7 +1402,7 @@ Object.assign(window, {
       return r?.exact ? r.pose : null
     },
     /** Put a block down on the floor at (x, z), turned `yaw` degrees (tests and screenshots). */
-    placeBlock: (i: number, x: number, z: number, yaw = 0) => { const b = blocks[i]; if (b.by) drop(b); b.mesh.position.set(x, BLOCK / 2, z); b.mesh.quaternion.setFromAxisAngle(UP, yaw * D2R); b.vy = 0 },
+    placeBlock: (i: number, x: number, z: number, yaw = 0) => { const b = blocks[i]; if (b.by) drop(b); b.mesh.position.set(x, b.half[1], z); b.mesh.quaternion.setFromAxisAngle(UP, yaw * D2R); b.vy = 0 },
     /** Look from `at` toward `to` (metres; tests and screenshots). The camera keeps its limits. */
     view: (at: [number, number, number], to: [number, number, number]) => { camera.position.set(...at); controls.target.set(...to); controls.update() },
     aims: () => [...aims.entries()].map(([id, a]) => ({ id, on: a.on, b: a.b, hit: a.hit ? { x: a.hit.x, z: a.hit.z } : null })),

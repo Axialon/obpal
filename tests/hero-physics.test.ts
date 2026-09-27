@@ -4,12 +4,13 @@
  * jump, never inside anything, always a way out, the raised things as steps, and every knock at its moment.
  */
 import { describe, expect, it } from 'vitest'
-import { counterOf, inside, withinWalls } from '../src/landing/bounce'
+import { counterOf, inside, roundedRect, withinWalls } from '../src/landing/bounce'
 import { TOP } from '../src/landing/letters'
+import { PAD_H } from '../src/landing/world'
 import { gauss, rng } from './harness/inputs'
-import { counters, distTo, gaps } from './harness/metrics'
+import { beside, counters, distTo, gaps } from './harness/metrics'
 import { run, type Scenario } from './harness/run'
-import { buildWorld, ORB_R, type Harness } from './harness/world'
+import { buildWorld, LAYOUTS, ORB_R, type Harness } from './harness/world'
 
 const PHONE = 'phone-390x844'
 const DESK = 'desk-1280x800'
@@ -179,50 +180,136 @@ describe('always a way out', { timeout: 180_000 }, () => {
       expect(tilt, `${sp.what}: by tilt`).toBe(true)
     }
   })
+  it('from every corner of what\'s on screen, on phones (upright and sideways) and computers: out by a 5° tilt toward the middle, and by pointing there', () => {
+    let corners = 0
+    for (const name of Object.keys(LAYOUTS)) {
+      const h0 = buildWorld(name)
+      const { W, play } = h0.layout
+      const bottom = Math.min(play.bottom, h0.layout.H)
+      for (const [cx, cy] of [[0, play.top], [W, play.top], [0, bottom], [W, bottom]]) {
+        // Set in the corner (its outline touching both edges, as drawn), where nothing else stands, and left to sleep.
+        const f = h0.world.floorAt(cx, cy)
+        const p = withinWalls(h0.world.walls, f.x, ORB_R, f.z, ORB_R)
+        if (h0.world.surface(p.x, p.z).id !== -1 || [...h0.world.footprints, ...h0.world.pads].some((fp) => distTo(fp, p.x, ORB_R, p.z) < ORB_R)) continue
+        corners++
+        const what = `${name}, corner ${cx},${cy}`
+        const down = cy > play.top ? -5 : 5, right = cx > 0 ? -5 : 5
+        const h = buildWorld(name)
+        const r = run({ h, fps: 60, seconds: 6, seed: 11, gyro: { noise: 0.6, tilt: (t) => (t < 1.5 ? [0, 0] : [down, right]) }, place: at(p.x, p.z), measureFrom: 0 })
+        const start = r.samples.find((q) => q.t >= 2400)!, end = r.samples.at(-1)!
+        expect(start.resting, `${what}: asleep there`).toBe(true)
+        expect(Math.hypot(end.sx - start.sx, end.sy - start.sy), `${what}: out by tilt`).toBeGreaterThan(40)
+        // Pointed at the middle, from the corner.
+        const hp = buildWorld(name)
+        const pointer = Array.from({ length: 3 * 60 }, (_, k) => ({ t: 2500 + k * (1000 / 60), x: W / 2, y: (play.top + bottom) / 2 }))
+        const rp = run({ h: hp, fps: 60, seconds: 5.5, seed: 12, pointer, place: at(p.x, p.z), measureFrom: 0 })
+        const a = rp.samples.find((q) => q.t >= 2400)!, b = rp.samples.at(-1)!
+        expect(Math.hypot(b.sx - a.sx, b.sy - a.sy), `${what}: out by pointing`).toBeGreaterThan(40)
+      }
+    }
+    expect(corners).toBeGreaterThan(16)
+  })
 })
 
-describe('the raised things (the buttons, the hint, the sound control, the three steps\' icons)', { timeout: 180_000 }, () => {
+describe("the raised things (the buttons, the hint, the sound control, the three steps' icons): blocks 0.3 em tall", { timeout: 180_000 }, () => {
   // (On a phone the first button sends the page to a computer; on a computer it opens the viewer.)
-  const things = [['the first button', (h: Harness) => h.pad(/send|open the viewer/i)], ['"See what it does"', (h: Harness) => h.pad(/see what/i)], ['a step\'s icon', (h: Harness) => h.icon(0)], ['the sound control', (h: Harness) => h.pad(/sound/i)]] as const
-  /** From just below one (on screen), tipped `deg` toward it for 5 s: whether it went up onto it (or on over it). */
-  const tip = (pick: (h: Harness) => number, deg: number) => {
+  const things = [
+    ['the first button', (h: Harness) => h.pad(/send|open the viewer/i)], ['"See what it does"', (h: Harness) => h.pad(/see what/i)],
+    ["a step's icon", (h: Harness) => h.icon(0)], ["the second step's icon", (h: Harness) => h.icon(1)], ["the third step's icon", (h: Harness) => h.icon(2)],
+    ['the sound control', (h: Harness) => h.pad(/sound/i)], ['the hint', (h: Harness) => h.pad(/tilt/i)],
+  ] as const
+  /** From open floor right beside one, tipped `deg` toward it for 5 s: whether it went up onto it, and the run. */
+  const tip = (pick: (h: Harness) => number, deg: number, seed = deg) => {
     const h = buildWorld(PHONE)
     const i = pick(h)
-    const b = h.layout.pads[i]
     const pad = h.world.pads.find((p) => p.id === 1000 + i)!
-    const below = h.world.floorAt(b.x + b.w / 2, b.y + b.h + 26)
-    const r = run({ h, fps: 60, seconds: 6, seed: deg, gyro: { noise: 0.7, tilt: tipped(-deg, 0) }, place: at(below.x, below.z), measureFrom: 4 })
-    const o = r.m.orb
-    return { up: inside(pad, o.x, o.z) || o.z < pad.box[1], r }
+    const b = beside(h, i)
+    const r = run({ h, fps: 60, seconds: 6, seed, gyro: { noise: 0.7, tilt: tipped(b.down * deg, b.right * deg) }, place: at(b.x, b.z), measureFrom: 0 })
+    const up = r.samples.find((q) => q.y > pad.height + ORB_R - 0.01 && inside(pad, q.x, q.z))
+    return { up: !!up, r }
   }
-  it('each blocks a gentle tilt (5°, 8°), still against its edge, and is climbed with a clear one (10°)', () => {
+  it('each is a block its own height (half as tall again as a marble\'s radius), whose top is where the page draws it', () => {
+    expect(PAD_H).toBeCloseTo(0.3, 9)
+    expect(PAD_H).toBeGreaterThan(ORB_R)
+    for (const name of Object.keys(LAYOUTS)) {
+      const h = buildWorld(name)
+      h.layout.pads.forEach((b, i) => {
+        if (!(b.w > 0)) return
+        const pad = h.world.pads.find((p) => p.id === 1000 + i)!
+        expect(pad.height).toBe(PAD_H)
+        // Its top's outline, seen from the camera at its height, is its box on screen (to a hundredth of a pixel).
+        const pts = roundedRect(b.x, b.y, b.w, b.h, b.r, 4)
+        for (let k = 0; k < pts.length; k += 2) {
+          const q = h.world.project(pad.rings[0][k], PAD_H, pad.rings[0][k + 1])
+          expect(Math.hypot(q.x - pts[k], q.y - pts[k + 1]), `${name}, raised thing ${i}`).toBeLessThan(0.01)
+        }
+      })
+    }
+  })
+  it('each blocks a gentle tilt (5°, 8°, 11°), against its side without a tremor, and is climbed with a clear one (15°): up its side and over its edge, never a jump', () => {
     for (const [what, pick] of things) {
-      for (const deg of [5, 8]) {
+      for (const deg of [5, 8, 11]) {
         const { up, r } = tip(pick, deg)
         expect(up, `${what} at ${deg}°`).toBe(false)
-        expect(r.summary.maxPx, `${what} at ${deg}°: still against it`).toBeLessThan(0.1)
+        // Held against it (a round one, the sound control on a phone, lets it roll slowly round its side).
+        const last = r.samples.filter((q) => q.t > 5000)
+        const steps = last.slice(1).map((q, k) => [q.sx - last[k].sx, q.sy - last[k].sy])
+        expect(Math.max(...steps.map(([x, y]) => Math.hypot(x, y))), `${what} at ${deg}°: no more than rolling slowly`).toBeLessThan(0.5)
+        // Not a tremor: never back the way it just came.
+        expect(steps.slice(1).every(([x, y], k) => x * steps[k][0] + y * steps[k][1] >= -1e-6), `${what} at ${deg}°: no tremor`).toBe(true)
       }
-      expect(tip(pick, 10).up, `${what} at 10°`).toBe(true)
+      for (const seed of [15, 16, 17]) {
+        const { up, r } = tip(pick, 15, seed)
+        expect(up, `${what} at 15°`).toBe(true)
+        expect(r.summary.teleports, `${what} at 15°`).toBe(0)
+        expect(r.summary.maxPen, `${what} at 15°`).toBeLessThan(0.01)
+      }
     }
   })
   it('each is climbed by pointing at it; resting on one is still; rolling over their edges never jumps', () => {
     for (const [what, pick] of things) {
       const h = buildWorld(DESK)
-      const i = pick(h)
+      let i: number
+      try { i = pick(h) } catch { continue }
       const b = h.layout.pads[i]
       if (!(b.w > 0)) continue
       const pad = h.world.pads.find((p) => p.id === 1000 + i)!
-      const below = h.world.floorAt(b.x + b.w / 2, b.y + b.h + 30)
+      const from = beside(h, i)
       const pointer = Array.from({ length: 5 * 60 }, (_, k) => ({ t: 1000 + k * (1000 / 60), x: b.x + b.w / 2, y: b.y + b.h / 2 }))
-      const r = run({ h, fps: 60, seconds: 7, seed: i, pointer, place: at(below.x, below.z), measureFrom: 0.5 })
+      const r = run({ h, fps: 60, seconds: 7, seed: i, pointer, place: at(from.x, from.z), measureFrom: 0.5 })
       const o = r.m.orb
       expect(inside(pad, o.x, o.z), `${what}: up on it`).toBe(true)
       expect(o.y).toBeCloseTo(pad.height + ORB_R, 3)
       expect(r.summary.teleports, what).toBe(0)
       // Resting there, the last second: nothing moves.
       const last = r.samples.slice(-60)
-      expect(Math.max(...last.slice(1).map((s, k) => Math.hypot(s.sx - last[k].sx, s.sy - last[k].sy))), `${what}: still on it`).toBeLessThan(0.1)
+      expect(Math.max(...last.slice(1).map((q, k) => Math.hypot(q.sx - last[k].sx, q.sy - last[k].sy))), `${what}: still on it`).toBeLessThan(0.1)
     }
+  })
+  it('a flick (a toss) beside one, tilted gently toward it, lands it on top', () => {
+    for (const [what, pick] of things) {
+      const h = buildWorld(PHONE)
+      const i = pick(h)
+      const pad = h.world.pads.find((p) => p.id === 1000 + i)!
+      const b = beside(h, i)
+      const r = run({ h, fps: 60, seconds: 4.5, seed: 5, gyro: { noise: 0.5, tilt: (t) => (t < 0.3 || t > 2.2 ? [0, 0] : [b.down * 8, b.right * 8]) }, tosses: [{ t: 2400, vy: 5 }], place: at(b.x, b.z), measureFrom: 0 })
+      const landed = r.hits.find((q) => q.kind === 'button' && q.pad === i && q.landed && !q.soft)
+      expect(landed, `${what}: landed on it`).toBeDefined()
+      expect(r.samples.some((q) => q.t > 2400 && inside(pad, q.x, q.z) && Math.abs(q.y - pad.height - ORB_R) < 0.01), `${what}: on it`).toBe(true)
+    }
+  })
+  it('rolled off one, it drops to the floor: a knock as hard as a fall of its height, then each bounce lower', () => {
+    const h = buildWorld(PHONE)
+    const i = h.pad(/see what/i)
+    const pad = h.world.pads.find((p) => p.id === 1000 + i)!
+    const [cx, cz] = pad.spot
+    const r = run({ h, fps: 60, seconds: 5, seed: 4, spikes: 0, gyro: { noise: 0.5, tilt: tipped(8, 0) }, place: at(cx, cz), measureFrom: 0 })
+    const floor = r.hits.filter((q) => q.kind === 'floor' && q.landed)
+    expect(floor.length).toBeGreaterThan(1)
+    expect(floor[0].speed).toBeGreaterThan(Math.sqrt(2 * 18 * PAD_H) * 0.8)
+    expect(floor[0].speed).toBeLessThan(Math.sqrt(2 * 18 * PAD_H) * 1.1)
+    for (let k = 1; k < floor.length; k++) expect(floor[k].speed).toBeLessThan(floor[k - 1].speed)
+    expect(r.summary.teleports).toBe(0)
   })
 })
 

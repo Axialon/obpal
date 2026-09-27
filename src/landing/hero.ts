@@ -106,6 +106,16 @@ export interface Hero {
   counters(): { letter: number; x: number; y: number }[]
   /** The gaps between two letters narrower than a marble, where each is narrowest (hero px, on the letters' tops; tests). */
   gaps(): { a: number; b: number; x: number; y: number }[]
+  /**
+   * Each raised thing as a block (tests): its words, how tall it stands (em), its side as the field sees it (px, from
+   * its top's near edge down to the floor; null: not there), and as it's drawn (its --pad-dx, --pad-dy).
+   */
+  steps(): { text: string; height: number; side: { dx: number; dy: number } | null; drawn: { dx: number; dy: number } }[]
+  /**
+   * The marbles' own clock (s: their physics' fixed steps so far) and whether the hero's loop is running (something
+   * moves, or someone steers): tests wait on it rather than the wall clock, which a busy machine outpaces.
+   */
+  sim(): { t: number; busy: boolean }
 }
 
 export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HTMLElement, opts: { still: boolean; onInput?: () => void; meter?: boolean }): Hero {
@@ -320,7 +330,8 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   const padState = new Map(padEls.map((el) => [el, { press: 0, pressV: 0, glow: 0, flash: 0, radius: NaN, shown: '', rx: { x: 0, v: 0 }, ry: { x: 0, v: 0 } }]))
   /** Each button's box (hero px), in the order the field counts them; empty while one isn't there to stand on. */
   let padRects: PadRect[] = []
-  let padDepth = -1
+  /** Each raised thing's side as last drawn (px, to the half pixel): where its foot is on screen from its top. */
+  const padSide = padEls.map(() => '')
   function measurePads(): PadRect[] {
     const hr = hero.getBoundingClientRect()
     padRects = padEls.map((el) => {
@@ -348,6 +359,21 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     const k = ROCK_W * (0.6 + 2.4 * h.strength)
     st.ry.v += k * dx
     st.rx.v -= k * dy
+  }
+  /**
+   * Each raised thing is drawn as a block (home.css): its side as tall as its step looks from here, leaning the way it's
+   * seen (./field.ts padSides()), so a marble climbs onto it and rolls off it at the edges drawn.
+   */
+  function drawSides(f: Field) {
+    f.padSides().forEach((d, i) => {
+      if (!d) return
+      const dx = Math.round(d.dx * 2) / 2, dy = Math.round(d.dy * 2) / 2
+      const key = `${dx},${dy}`
+      if (key === padSide[i]) return
+      padSide[i] = key
+      padEls[i].style.setProperty('--pad-dx', `${dx}px`)
+      padEls[i].style.setProperty('--pad-dy', `${dy}px`)
+    })
   }
   /** Each button's light and press, from the marbles on it and near it. Returns whether any is still settling. */
   function answerPads(dt: number): boolean {
@@ -420,6 +446,8 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
 
   /** The frame being drawn (its rAF time, ms): a hit is heard at the moment within it that it happened. */
   let frameAt = 0
+  /** Whether the loop goes on after the last frame (something moves, or someone steers). */
+  let looping = false
   /** Where a hit is heard from: -1 left … 1 right, as it's on screen. */
   const panOf = (f: Field, h: Hit) => (f.project(h.x, h.y, h.z).x / Math.max(1, W)) * 2 - 1
   function onHit(h: Hit) {
@@ -505,7 +533,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
 
   addActor((now, dt) => {
     // (Off screen, nothing moves: the knocks foreseen won't come.)
-    if (!visible || !field) { glass.foresee([], 0); return false }
+    if (!visible || !field) { glass.foresee([], 0); looping = false; return false }
     readPhones(now)
     const f = field
     const o = me()
@@ -518,16 +546,15 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     o.push = tilting ? tiltPush : null
     for (const [id, ph] of phones) if (ph.gone) { f.removeOrb(id); phones.delete(id) }
     f.pads(measurePads())
-    // The buttons are drawn as blocks as deep as their step looks from here.
-    const depth = Math.round(f.padDepth() * 2) / 2
-    if (depth !== padDepth) { padDepth = depth; hero.style.setProperty('--pad-depth', `${depth}px`) }
+    drawSides(f)
     frameAt = now
     const busy = f.step(dt)
     foresee(f, dt)
     const padsBusy = answerPads(dt)
     f.render()
     if (busy) pace(dt)
-    return busy || padsBusy || mine || tilting || tour
+    looping = busy || padsBusy || mine || tilting || tour
+    return looping
   })
 
   // Only on screen does anything draw (and three.js loads only then).
@@ -658,6 +685,16 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       if (!field) return []
       const f = field
       return f.gaps(2 * R).map((g) => ({ a: g.a, b: g.b, ...f.project(g.x, TOP, g.z) }))
+    },
+    sim: () => ({ t: field?.clock() ?? 0, busy: looping }),
+    steps: () => {
+      if (!field) return []
+      const sides = field.padSides()
+      const height = field.padHeight
+      return padEls.map((el, i) => ({
+        text: el.textContent?.trim() ?? '', height, side: sides[i] ?? null,
+        drawn: { dx: parseFloat(el.style.getPropertyValue('--pad-dx')) || 0, dy: parseFloat(el.style.getPropertyValue('--pad-dy')) || 0 },
+      }))
     },
   }
   return heroApi

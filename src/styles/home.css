@@ -40,36 +40,44 @@ html.field3d .hero-stage { opacity: 1; }
 html.field3d .hero::after { opacity: 0; }
 @media (forced-colors: active) { html.field3d .hero h1.lit { color: CanvasText; } html.field3d .hero-stage { display: none; } }
 .hero .lede { margin: 0 0 32px; max-width: 34em; color: var(--secondary); font-size: clamp(17px, 1.5vw, 20px); line-height: 1.55; }
-.hero .cta { display: flex; flex-wrap: wrap; gap: 12px; }
+.hero .cta { display: flex; flex-wrap: wrap; gap: calc(12px + var(--pad-room)) 12px; }
 .cta-main { position: relative; overflow: hidden; min-height: 54px; padding: 0 26px; font-size: 16px; text-decoration: none; }
 /* One sweep of light across the main button when the pointer arrives. */
 .cta-main::after { content: ''; position: absolute; inset: 0; background: linear-gradient(105deg, transparent 30%, rgb(255 255 255 / 0.45) 50%, transparent 70%); transform: translateX(-120%); pointer-events: none; }
 @media (hover: hover) and (pointer: fine) { .cta-main:hover::after { transform: translateX(120%); transition: transform 0.75s var(--ease); } }
 .cta-alt { min-height: 54px; padding: 0 22px; font-size: 16px; color: var(--ink); text-decoration: none; background: rgb(var(--hl-rgb) / 0.05); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
 .cta-alt:hover { background: rgb(var(--hl-rgb) / 0.09); }
-/* The hero's buttons are raised blocks in the marbles' world (hero.ts): a marble rolls into one's side and bumps
-   against it, and climbs it with a good tilt. Each shows its side below its top, as tall as the step is on screen
-   (--pad-depth, from the field), and a shadow on the floor. A marble near one lights it where it is, in its own colour,
-   brighter the nearer; its weight sinks it a touch (the script moves it with `translate`, and --sink shows that much
-   less side), and a knock rocks it (the script's `rotate`, seen through the perspective here). The sound control and
-   the three steps' icons below the buttons are blocks of the same height. */
-.hero { perspective: 1200px; perspective-origin: 50% 85%; }
+/* The hero's raised things (its buttons, the hint, the sound control, the three steps' icons) are blocks in the
+   marbles' world (hero.ts): a marble knocks against one's side, and climbs it with a clear tilt. Each is its top, and
+   below that its side, as tall as the block stands on screen and leaning the way it's seen (--pad-dx, --pad-dy: from
+   the middle of its top's near edge down to the floor, from the field): lit along its top edge, darker toward the
+   floor (four bands, each upper one laid over those below it), then a shadow on the floor. A marble near one lights
+   it where it is, in its own colour, brighter the nearer; its weight sinks it a touch (the script moves it with
+   `translate`, and --sink shows that much less side), and a knock rocks it (the script's `rotate`, seen through the
+   perspective here). --pad-room leaves room below each for its side: about as tall as it stands (0.3 em of the
+   headline's type). */
+.hero { --pad-room: calc(0.15 * clamp(46px, 7.2vw, 104px)); perspective: 1200px; perspective-origin: 50% 85%; }
 .hero .cta { perspective: 700px; }
-.hero .cta .btn { position: relative; }
+.hero .cta .btn, .hero .qi { position: relative; }
 .hero .cta .btn, .hero-hint, .hero-sound, .hero .qi { isolation: isolate;
-  --side: max(0px, var(--pad-depth, 0px) - var(--sink, 0px));
-  --block: 0 var(--side) 0 0 rgb(var(--haze-rgb) / 0.2), 0 calc(var(--side) + 1px) 0 0 rgb(var(--hl-rgb) / 0.16), 0 calc(var(--side) + 12px) 24px -10px rgb(0 0 0 / 0.75);
+  --dx: var(--pad-dx, 0px); --dy: max(0px, var(--pad-dy, 0px) - var(--sink, 0px));
+  --side-1: rgb(var(--haze-rgb) / 0.06); --side-2: rgb(var(--haze-rgb) / 0.045); --side-3: rgb(var(--haze-rgb) / 0.035); --side-4: rgb(var(--haze-rgb) / 0.13);
+  --foot: rgb(var(--hl-rgb) / 0.1); --floor: calc(var(--dx) * 1.3) calc(var(--dy) + 12px) 24px -10px rgb(0 0 0 / 0.75);
+  --block: calc(var(--dx) / 4) calc(var(--dy) / 4) 0 0 var(--side-1), calc(var(--dx) / 2) calc(var(--dy) / 2) 0 0 var(--side-2),
+    calc(var(--dx) * 3 / 4) calc(var(--dy) * 3 / 4) 0 0 var(--side-3), var(--dx) var(--dy) 0 0 var(--side-4), var(--dx) calc(var(--dy) + 1px) 0 0 var(--foot), var(--floor);
   box-shadow: var(--block), inset 0 1px 0 rgb(var(--hl-rgb) / 0.12); }
-.hero .cta .btn.primary { --block: 0 var(--side) 0 0 var(--accent2), 0 calc(var(--side) + 1px) 0 0 var(--bb-accent-strong), 0 calc(var(--side) + 14px) 30px -8px rgb(var(--accent-rgb) / 0.32);
+.hero .cta .btn.primary { --side-1: var(--accent2); --side-2: color-mix(in srgb, var(--accent2) 67%, var(--bb-accent-strong)); --side-3: color-mix(in srgb, var(--accent2) 33%, var(--bb-accent-strong)); --side-4: var(--bb-accent-strong);
+  --foot: rgb(var(--accent-rgb) / 0.35); --floor: calc(var(--dx) * 1.3) calc(var(--dy) + 14px) 30px -8px rgb(var(--accent-rgb) / 0.32);
   box-shadow: var(--block), inset 0 1px 0 rgb(255 255 255 / 0.45); }
 /* The hint is centred by its transform, so it rocks about its middle from there. */
 .hero-hint { transform-origin: 0 50%; }
-.hero .cta .btn::before, .hero-hint::before, .hero-sound::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
+.hero .cta .btn::before, .hero-hint::before, .hero-sound::before, .hero .qi::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
   background: radial-gradient(84px circle at var(--orb-x, 50%) var(--orb-y, 50%), rgb(var(--orb-rgb, 198 255 52) / 0.55), rgb(var(--orb-rgb, 198 255 52) / 0.14) 42%, transparent 72%);
   opacity: var(--orb-glow, 0); mix-blend-mode: screen; }
-.quick { display: flex; flex-wrap: wrap; gap: 10px 24px; margin: 34px 0 0; padding: 0; list-style: none; color: var(--secondary); font-size: 14.5px; font-weight: 600; }
+.quick { display: flex; flex-wrap: wrap; gap: calc(10px + var(--pad-room)) 24px; margin: calc(24px + var(--pad-room)) 0 0; padding: 0; list-style: none; color: var(--secondary); font-size: 14.5px; font-weight: 600; }
 .quick li { display: inline-flex; align-items: center; gap: 10px; }
-.qi { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; border: 1px solid var(--line); background: rgb(var(--hl-rgb) / 0.05); color: var(--accent-text); }
+/* Each step's icon, a small glass block like the sound control. */
+.qi { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; border: 1px solid var(--line); background: rgb(var(--base-rgb) / 0.5); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); color: var(--accent-text); }
 .qi .ic { width: 18px; height: 18px; }
 
 /* Try it right here: a real pairing code (computers only), in glass lit from above. */
@@ -92,7 +100,7 @@ html.field3d .hero::after { opacity: 0; }
 .hero .pair { --obpal-accent: var(--bb-accent); --obpal-font: var(--font); }
 .hero[data-live] .pair::before { background: linear-gradient(160deg, rgb(var(--accent-rgb) / 0.9), rgb(var(--accent-rgb) / 0.2) 50%, rgb(var(--haze-rgb) / 0.5)); }
 
-.hero-hint { position: absolute; left: 50%; bottom: 34px; z-index: 1; display: inline-flex; align-items: center; gap: 10px; padding: 10px 16px 10px 12px; border-radius: 999px;
+.hero-hint { position: absolute; left: 50%; bottom: calc(30px + var(--pad-room)); z-index: 1; display: inline-flex; align-items: center; gap: 10px; padding: 10px 16px 10px 12px; border-radius: 999px;
   border: 1px solid var(--line); background: rgb(var(--base-rgb) / 0.5); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
   color: var(--secondary); font: 650 13.5px/1 var(--font); white-space: nowrap; transform: translate3d(-50%, 0, 0); transition: opacity 0.6s var(--ease), transform 0.6s var(--ease);
   animation: hint-bob 3.2s var(--ease) 1.2s 3; }
@@ -101,7 +109,7 @@ html.field3d .hero::after { opacity: 0; }
 @keyframes hint-bob { 0%, 100% { transform: translate3d(-50%, 0, 0); } 50% { transform: translate3d(-50%, -5px, 0); } }
 /* The marbles' sound: a glass button in the corner. On or off, it's an icon; waiting for the click or tap a browser
    wants before a page may sound, it says so, and asks softly a few times. */
-.hero-sound { position: absolute; right: max(var(--gut), 24px); bottom: 30px; z-index: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 44px; height: 44px; padding: 0 16px 0 12px; border-radius: 999px; font: 650 13.5px/1 var(--font);
+.hero-sound { position: absolute; right: max(var(--gut), 24px); bottom: calc(26px + var(--pad-room)); z-index: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 44px; height: 44px; padding: 0 16px 0 12px; border-radius: 999px; font: 650 13.5px/1 var(--font);
   border: 1px solid var(--line); background: rgb(var(--base-rgb) / 0.5); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); color: var(--secondary); cursor: pointer;
   transition: color 0.2s var(--ease), border-color 0.2s var(--ease), box-shadow 0.3s var(--ease), transform 0.2s var(--ease); }
 .hero-sound:hover { color: var(--ink); border-color: rgb(var(--accent-rgb) / 0.45); }
@@ -145,12 +153,21 @@ html.field3d .hero::after { opacity: 0; }
 .scene.wide { grid-column: span 2; display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); align-items: center; }
 /* A scene plays under the finger or mouse: nothing in it selects, calls out or flashes when pressed. */
 .scene-art { position: relative; aspect-ratio: 400 / 260; touch-action: pan-y; cursor: crosshair; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; transition: transform 0.25s var(--ease); }
-.play-cue { position: absolute; right: 12px; bottom: 12px; display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px 7px 8px; border-radius: 999px; border: 1px solid var(--line);
-  background: rgb(var(--base-rgb) / 0.62); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: var(--secondary); font: 650 12px/1 var(--font); pointer-events: none; transition: opacity 0.4s var(--ease); }
-.play-cue .ic { width: 16px; height: 16px; color: var(--accent-text); }
+/* A card's caption row: its kind, how to play its scene (on a touch screen, till you have once: it fades where it is),
+   and the scene's switch if it has one, with a line under them on what to do. Nothing sits on a scene's drawing. */
+.scene-cap { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 10px; }
+.play-cue { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--secondary); font: 650 12.5px/1.25 var(--font); transition: opacity 0.4s var(--ease); }
+.play-cue .ic { flex: none; width: 16px; height: 16px; color: var(--accent-text); }
 html.played .play-cue { opacity: 0; }
-/* A scene's switch between its ways to play (the arm's Move and Grab): glass like the cards', in the corner. */
-.scene-modes { position: absolute; top: 12px; right: 12px; z-index: 2; display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; border: 1px solid var(--line);
+/* All a line may say is there, in one place (as wide and tall as the largest), and only what it means now is seen. */
+.play-cue-t, .scene-tip { display: grid; }
+.play-cue-t > span, .scene-tip > span { grid-area: 1 / 1; }
+html.tilting .play-cue-t > :first-child, html:not(.tilting) .play-cue-t > :last-child { visibility: hidden; }
+.scene-tip { flex-basis: 100%; color: var(--secondary); font: 600 12.5px/1.4 var(--font); }
+.scene-tip > span { visibility: hidden; opacity: 0; transition: opacity 0.25s var(--ease), visibility 0.25s; }
+.scene-tip > span[data-on] { visibility: visible; opacity: 1; }
+/* A scene's switch between its ways to play (the arm's Motion and Drag): glass like the cards', at the row's end. */
+.scene-modes { flex: none; display: inline-flex; gap: 2px; margin-left: auto; padding: 3px; border-radius: 999px; border: 1px solid var(--line);
   background: rgb(var(--base-rgb) / 0.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: inset 0 1px 0 rgb(var(--hl-rgb) / 0.08); cursor: default; }
 .scene-modes button { display: grid; place-items: center; width: 32px; height: 26px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--secondary); cursor: pointer; transition: background 0.2s, color 0.2s; }
 .scene-modes button:hover { color: var(--ink); }
@@ -158,12 +175,12 @@ html.played .play-cue { opacity: 0; }
 .scene-modes button:focus-visible { outline: 2px solid rgb(var(--accent-rgb) / 0.8); outline-offset: 1px; }
 .scene-modes .ic { width: 16px; height: 16px; }
 @media (pointer: coarse) { .scene-modes button { width: 38px; height: 32px; } }
-.scene-art[data-mode='grab'] { cursor: grab; }
-.scene-art[data-mode='grab']:active { cursor: grabbing; }
+.scene-art[data-mode='drag'] { cursor: grab; }
+.scene-art[data-mode='drag']:active { cursor: grabbing; }
 .scene-svg { display: block; width: 100%; height: 100%; }
 .scene-text { padding: 6px 26px 26px; }
 .scene.wide .scene-text { padding: 26px 30px 26px 8px; }
-.scene-k { display: inline-block; margin-bottom: 10px; padding: 5px 10px; border-radius: 999px; background: rgb(var(--accent-rgb) / 0.12); color: var(--accent-text); font: 700 11.5px/1 var(--font); letter-spacing: 0.1em; text-transform: uppercase; }
+.scene-k { flex: none; display: inline-block; padding: 5px 10px; border-radius: 999px; background: rgb(var(--accent-rgb) / 0.12); color: var(--accent-text); font: 700 11.5px/1 var(--font); letter-spacing: 0.1em; text-transform: uppercase; }
 .scene-text h3 { margin: 0 0 8px; font: 800 clamp(22px, 2.1vw, 28px)/1.12 var(--font-display); letter-spacing: -0.03em; }
 .scene-text p { margin: 0 0 14px; color: var(--secondary); font-size: 16px; line-height: 1.55; max-width: 34ch; }
 .scene-text a { font-weight: 700; text-decoration: none; }
@@ -223,18 +240,20 @@ html.played .play-cue { opacity: 0; }
 }
 @media (max-width: 760px) {
   .home { --top-h: 57px; }
+  .hero { --pad-room: calc(0.15 * clamp(44px, 13.4vw, 64px)); }
   .hero { min-height: calc(100svh - 8px); padding: calc(var(--top-h) + 28px) 0 104px; align-items: start; }
   .hero h1 { margin-bottom: 18px; font-size: clamp(44px, 13.4vw, 64px); }
   .hero .lede { margin-bottom: 26px; }
   .hero .cta { display: grid; grid-template-columns: minmax(0, 1fr); }
   .cta-main, .cta-alt { width: 100%; }
-  .quick { gap: 12px 18px; margin-top: 26px; font-size: 13.5px; }
-  .hero-hint { bottom: 22px; }
+  .quick { gap: calc(12px + var(--pad-room)) 18px; margin-top: calc(18px + var(--pad-room)); font-size: 13.5px; }
+  .hero-hint { bottom: calc(20px + var(--pad-room)); }
+  .hero-sound { bottom: calc(28px + var(--pad-room)); }
   /* Beside the hint there's room for the icon only: it still asks (the ring), and says so to a screen reader. */
   .hero-sound[data-state="blocked"] { padding: 0; }
   .hero-sound[data-state="blocked"] [data-sound-label] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .show { grid-template-columns: minmax(0, 1fr); gap: 16px; }
-  .scene.wide { grid-column: auto; display: flex; }
+  .scene.wide { grid-column: auto; display: flex; align-items: stretch; }
   .scene.wide .scene-text, .scene-text { padding: 4px 22px 22px; }
   .build-grid { grid-template-columns: minmax(0, 1fr); }
   .closer { margin-top: 48px; margin-bottom: 48px; padding: 52px 20px; border-radius: 28px; }

@@ -8,7 +8,8 @@ import '../styles/base.css'
 import '../styles/sim.css'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+import { batch, bolt, cylinder, environment, floorMaterial, maker, plastic, softKey } from './kit'
+import { blobShadow } from './devices/view'
 import { Mode, type Frame, type Layout, type PadState } from '@obpal/host'
 import { applyTheme, initialTheme } from '../ui/themes'
 import { mountMarks } from '../ui/icons'
@@ -21,7 +22,7 @@ mountMarks()
 mountTopBar()
 const $ = (id: string) => document.getElementById(id)!
 
-const RING = 1.7
+const RING = 2.5
 const PUCK = 0.17
 
 interface Slot {
@@ -47,14 +48,19 @@ const view = simView($('stage') as HTMLCanvasElement, { onResize: resize })
 const renderer = view.renderer
 renderer.toneMapping = THREE.ACESFilmicToneMapping
 const scene = new THREE.Scene()
-scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture
+scene.environment = environment(renderer)
+scene.add(new THREE.HemisphereLight('#ffffff', '#26313b', 1.1))
+softKey(scene, 3)
+renderer.shadowMap.enabled = true
+renderer.shadowMap.type = THREE.PCFSoftShadowMap
 scene.background = new THREE.Color('#06080c')
 const camera = new THREE.PerspectiveCamera(40, 1, 0.05, 60)
 camera.position.set(0, 4.3, 3.4)
 camera.lookAt(0, 0, 0.15)
 
 // The ring: a glass disc with a glowing edge over the void.
-const disc = new THREE.Mesh(new THREE.CylinderGeometry(RING, RING, 0.08, 128), new THREE.MeshStandardMaterial({ color: '#10141c', metalness: 0.3, roughness: 0.55 }))
+const disc = new THREE.Mesh(new THREE.CylinderGeometry(RING, RING, 0.08, 96), floorMaterial('#252e34'))
+disc.receiveShadow = true
 disc.position.y = -0.04
 scene.add(disc)
 const edge = new THREE.Mesh(new THREE.TorusGeometry(RING, 0.018, 12, 160), new THREE.MeshStandardMaterial({ color: '#0b0f14', emissive: '#c6ff34', emissiveIntensity: 0.9 }))
@@ -64,6 +70,18 @@ const inner = new THREE.Mesh(new THREE.RingGeometry(0.34, 0.36, 96), new THREE.M
 inner.rotation.x = -Math.PI / 2
 inner.position.y = 0.001
 scene.add(inner)
+const plinth = cylinder(RING * 0.92, 0.3, plastic('#151b20'), 96)
+plinth.position.y = -0.23
+scene.add(plinth)
+const lanes = new THREE.Group()
+for (let i = 0; i < 24; i++) {
+  const a = i / 24 * Math.PI * 2
+  const mark = new THREE.Mesh(new THREE.PlaneGeometry(0.018, 0.18), plastic('#566569'))
+  mark.rotation.set(-Math.PI / 2, 0, -a)
+  mark.position.set(Math.sin(a) * RING * 0.9, 0.002, Math.cos(a) * RING * 0.9)
+  lanes.add(mark)
+}
+batch(lanes); scene.add(lanes)
 
 const FACTIONS = [
   { faction: 'CVC', model: '/models/cvc/CVC_insignia.glb' },
@@ -79,15 +97,24 @@ const slots: Slot[] = FACTIONS.map((f, i) => {
   const puck = new THREE.Mesh(new THREE.CylinderGeometry(PUCK, PUCK * 1.05, 0.07, 64), new THREE.MeshStandardMaterial({ color: '#171c25', metalness: 0.7, roughness: 0.3 }))
   puck.position.y = 0.035
   group.add(puck)
+  const bumper = new THREE.Mesh(new THREE.TorusGeometry(PUCK, 0.014, 8, 48), plastic('#11171d'))
+  bumper.rotation.x = Math.PI / 2; bumper.position.y = 0.027; group.add(bumper)
+  for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2; const screw = bolt(0.007); screw.position.set(Math.cos(a) * PUCK * 0.76, 0.073, Math.sin(a) * PUCK * 0.76); group.add(screw) }
+  maker(group, 0, 0.073, PUCK * 0.64, 0.025)
+  group.add(blobShadow(PUCK * 1.15, 0.5))
   const ring = new THREE.Mesh(new THREE.TorusGeometry(PUCK * 1.02, 0.012, 10, 80), new THREE.MeshStandardMaterial({ color: '#0b0f14', emissive: '#5b6472', emissiveIntensity: 1 }))
   ring.rotation.x = Math.PI / 2
   ring.position.y = 0.07
   group.add(ring)
+  batch(group, [ring])
   group.visible = false
   scene.add(group)
   // The faction's insignia rides on top of its puck.
   loader.load(f.model, (g) => {
     const m = g.scene
+    // These small, rigid insignias need one draw per finish, including their crystal facets.
+    m.traverse(o => { if (!(o as THREE.Mesh).isMesh) o.userData.static = true })
+    batch(m, [], true)
     const box = new THREE.Box3().setFromObject(m)
     const size = box.getSize(new THREE.Vector3())
     const k = (PUCK * 1.5) / Math.max(size.x, size.y, size.z)
@@ -181,14 +208,14 @@ function loop(now: number) {
     padA.set(who, a)
     const d = steer(f, pad)
     if (d.lengthSq() > 1) d.normalize()
-    s.vel.addScaledVector(d, 3.4 * dt)
+    s.vel.addScaledVector(d, 4.3 * dt)
   }
   // Rolling: drag, a speed cap, then collisions between pucks.
   for (const s of active) {
     if (s.falling) continue
     s.vel.multiplyScalar(Math.exp(-1.5 * dt))
     const sp = s.vel.length()
-    if (sp > 3.2) s.vel.multiplyScalar(3.2 / sp)
+    if (sp > 3.8) s.vel.multiplyScalar(3.8 / sp)
     s.pos.addScaledVector(s.vel, dt)
   }
   for (let i = 0; i < active.length; i++) {
@@ -274,7 +301,9 @@ function resize() {
   const h = view.height
   camera.aspect = w / h
   // Keep the whole ring in view on narrow screens, and centred beside (or above) the panel.
-  camera.position.set(0, w < h ? 6.4 : 4.3, w < h ? 5 : 3.4)
+  camera.position.set(0, w < h ? 9.5 : 6.4, w < h ? 7.4 : 5)
+  const halfAngle = Math.atan(Math.tan(camera.fov * Math.PI / 360) * Math.min(1, w / h))
+  camera.position.setLength(Math.max(camera.position.length(), RING * 1.08 / Math.sin(halfAngle)))
   camera.lookAt(0, 0, 0.15)
   const panel = document.querySelector('.sim-panel')!.getBoundingClientRect()
   if (w > 860) camera.setViewOffset(w, h, -panel.right / 2, 0, w, h)

@@ -5,21 +5,23 @@
  *   icon-128.png                             the store icon: the build's own (extension/dist/icons/icon-128.png)
  *   screenshot-1.png … screenshot-5.png      1280 × 800 (shot.html around real renders)
  *
- * The screenshots are made of real renders: the built extension (extension/dist) in Chromium, its popup laid out as the
- * popup (640 px wide) and its options page, and the phone controller of the site build (dist/client), paired with the
- * extension through the real signaling service the way the extension's e2e test pairs them. What the popup and the
- * options page show is written into chrome.storage the way the service worker writes it, and the popup is shown an
- * ordinary web page in front (example.com addresses).
+ * The screenshots are made of real renders at 150%: the built extension (extension/dist) in Chromium, its popup laid
+ * out as the popup (640 px wide), and the phone controller of the site build (dist/client), paired with the extension
+ * through the real signaling service the way the extension's e2e test pairs them. What the popup shows is written into
+ * chrome.storage the way the service worker writes it, and the popup is shown an ordinary web page in front
+ * (example.com addresses).
  *
  * Safety: the extension runs from a temporary copy without its `key` (so its ID isn't the one ob.Pal Desktop allows)
  * and with the native host renamed to one that isn't installed, so no ob.Pal Desktop is ever started. Nothing touches
  * the registry; the only browsers are Playwright's Chromium, in throwaway profiles.
  *
- * Every image is written as a 24-bit PNG without alpha (the store's format), rendered at twice its size and scaled down.
+ * Every image is written as a 24-bit PNG without alpha (the store's format), drawn at its size (see SCALE).
  *
  * Usage: pnpm run store:art                               (builds the site and the extension first)
  *        node extension/store/src/render.mjs [art] [shots] [--only <n,n>] [--out <dir>]
  *        (--only 1: write screenshot-1.png alone; every render is captured all the same)
+ *        OBPAL_STORE_KEEP_CAPTURES=1 keeps the renders; OBPAL_STORE_CAPTURES=<their folder> lays the screenshots out
+ *        from them again, without capturing.
  * Chromium: OBPAL_E2E_CHROMIUM=<path to chrome.exe> (a full Chromium, which can load an extension), or Playwright's own.
  */
 import { existsSync, statSync } from 'node:fs'
@@ -30,6 +32,8 @@ import { fileURLToPath } from 'node:url'
 import { chromium, devices } from 'playwright'
 import sharp from 'sharp'
 import { renderSVG } from 'uqr'
+import { downsample } from '../../scripts/downsample.mjs'
+import { markSVG } from '../../scripts/mark.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const store = resolve(here, '..')
@@ -39,6 +43,23 @@ const dist = join(extension, 'dist')
 const site = join(repo, 'dist', 'client')
 /** The origin the art pages are served at (the repository, and the captured renders under /captures/). */
 const ORIGIN = 'https://store.obpal.test'
+/**
+ * How many times over the tiles and screenshots are drawn before they're averaged down (STORE_ART_SCALE). 1, the
+ * default, draws them at their size, so text is hinted to whole pixels like a web page's: the owner picked it as the
+ * clearest over 2 and 4 (2026-09-27), which are smoother but soften the text.
+ */
+const SCALE = Number(process.env.STORE_ART_SCALE ?? 1)
+/**
+ * The scale the screenshots show the extension and the phone at: 150%, so their smallest text is about 17 px and most
+ * of it 19 px or more. They're rendered at that scale and placed pixel for pixel, never resized.
+ */
+const SHOWN = 1.5
+/**
+ * Text smoothed in grey, never in colour: ClearType-style subpixel smoothing only works live on one screen's stripes, and
+ * baked into an image it leaves coloured, stepped edges that scaling makes worse. Colours in plain sRGB, whatever the
+ * machine's monitor profile.
+ */
+const CLEAN = ['--disable-lcd-text', '--force-color-profile=srgb']
 const SERVICE = 'https://obpal.blackboxes.net'
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
 // Two browsers on one machine: real host candidates instead of mDNS names, so WebRTC connects over loopback.
@@ -78,6 +99,9 @@ const doShots = !parts.length || parts.includes('shots')
 function serve(page, captures) {
   return page.route(`${ORIGIN}/**`, (route) => {
     const path = decodeURIComponent(new URL(route.request().url()).pathname)
+    // The mark drawn for the size it's shown at (/mark/<px>.svg), its lines on whole pixels (extension/scripts/mark.mjs).
+    const mark = path.match(/^\/mark\/(\d+)\.svg$/)
+    if (mark) return route.fulfill({ body: markSVG(Number(mark[1]), { bold: true }), contentType: 'image/svg+xml' })
     const [base, rel] = captures && path.startsWith('/captures/') ? [captures, path.slice('/captures/'.length)] : [repo, path.slice(1)]
     const file = resolve(base, rel)
     if (!inside(file, base) || !existsSync(file) || !statSync(file).isFile()) return route.fulfill({ status: 404, body: '' })
@@ -85,9 +109,9 @@ function serve(page, captures) {
   })
 }
 
-/** Render `url` at twice [w, h] and write it at [w, h] as a 24-bit PNG. */
+/** Render `url` at [w, h] (drawn SCALE times over and averaged down as light, downsample.mjs) as a 24-bit PNG. */
 async function render(browser, url, [w, h], file, captures) {
-  const page = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: 2 })
+  const page = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: SCALE })
   await serve(page, captures)
   await page.goto(url)
   await page.evaluate(async () => {
@@ -97,7 +121,7 @@ async function render(browser, url, [w, h], file, captures) {
   await sleep(200)
   const png = await page.screenshot()
   await page.close()
-  await sharp(png).resize(w, h, { kernel: 'lanczos3' }).flatten({ background: PAGE }).removeAlpha().png({ compressionLevel: 9 }).toFile(file)
+  await (SCALE > 1 ? await downsample(png, SCALE) : sharp(png)).flatten({ background: PAGE }).removeAlpha().png({ compressionLevel: 9 }).toFile(file)
   const m = await sharp(file).metadata()
   if (m.width !== w || m.height !== h || m.channels !== 3) throw new Error(`${file}: ${m.width}x${m.height}, ${m.channels} channels`)
   console.log(`  ${relative(repo, file)}  ${w}x${h}`)
@@ -159,6 +183,13 @@ function fakeTab() {
   if (!patch()) queueMicrotask(patch)
 }
 
+/** The phone in landscape, in CSS pixels. */
+const LAND = { width: 740, height: 360 }
+/**
+ * The phone upright, for typing: as tall as makes its top bar to the top of its keyboard (290 px, the stand-in's) fill
+ * the screenshot's height at 150%, under its bezel.
+ */
+const UPRIGHT = { width: 412, height: 796 }
 /** The phone's name in the popup: what the controller calls an Android phone that doesn't give its model. */
 const DEVICE = 'Android phone'
 /** ob.Pal Desktop as the service worker mirrors it into storage.session "pc" (shared/native.ts PcState). */
@@ -169,7 +200,7 @@ const PROGRAMS = [
   { path: 'C:\\Games\\Racer\\racer.exe', name: 'racer.exe', keyboard: true, mouse: false },
   { path: 'C:\\Program Files\\Player\\player.exe', name: 'player.exe', keyboard: false, mouse: true },
 ]
-/** Whole PC on, with a few programs allowed from before: the popup and the options page show the same helper. */
+/** Whole PC on, with a few programs allowed from before. */
 const PC = {
   link: 'ready', version: '0.3.0', desktopCap: true, hotkey: 'Ctrl+Alt+Backspace', error: null, stats: null,
   config: { paused: false, desktop: { keyboard: true, mouse: true }, programs: PROGRAMS },
@@ -182,10 +213,10 @@ async function capture(captures) {
   const ext = await safeCopy()
   const profile = await mkdtemp(join(tmpdir(), 'obpal-store-profile-'))
   const desk = await chromium.launchPersistentContext(profile, {
-    executablePath, headless: true, viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2,
-    args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`, ...RTC_ARGS],
+    executablePath, headless: true, viewport: { width: 1280, height: 800 }, deviceScaleFactor: SHOWN,
+    args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`, ...RTC_ARGS, ...CLEAN],
   })
-  const phones = await chromium.launch({ executablePath, headless: true, args: RTC_ARGS })
+  const phones = await chromium.launch({ executablePath, headless: true, args: [...RTC_ARGS, ...CLEAN] })
   try {
     await desk.addInitScript(fakeTab)
     const worker = desk.serviceWorkers()[0] ?? (await desk.waitForEvent('serviceworker'))
@@ -239,19 +270,6 @@ async function capture(captures) {
       console.log(`  captured ${name} (${box.w}x${box.h})`)
     }
 
-    /** The options page in a 1280 × 800 window. */
-    async function options(name, pc) {
-      const page = await desk.newPage()
-      await page.setViewportSize({ width: 1280, height: 800 })
-      await page.goto(`${base}/options.html`)
-      await page.evaluate(() => document.fonts.ready)
-      await showPc(pc)
-      await sleep(900)
-      await page.screenshot({ path: shot(name) })
-      await page.close()
-      console.log(`  captured ${name}`)
-    }
-
     // Ready to pair. A pairing link in a store picture would lead a scanning visitor to a room nobody hosts, so the
     // code shown there holds the site's address instead.
     const ready = await until('a pairing code', async () => { const l = await read('session', 'link'); return l?.status === 'ready' && l.url ? l : null }, 30000)
@@ -260,7 +278,8 @@ async function capture(captures) {
     await popup('popup-pair', { tab: 'https://play.example.com/', qr: `${SERVICE}/` })
 
     // The phone: this checkout's controller (dist/client) at the service's address; signaling goes to the real service.
-    const phoneCtx = await phones.newContext({ ...devices['Pixel 7 landscape'], serviceWorkers: 'block' })
+    // In landscape it's 740 × 360 (a Galaxy S9's screen), which at 150% fits the screenshot whole.
+    const phoneCtx = await phones.newContext({ ...devices['Pixel 7 landscape'], viewport: LAND, deviceScaleFactor: SHOWN, serviceWorkers: 'block' })
     await phoneCtx.route(`${SERVICE}/**`, (route) => {
       const path = decodeURIComponent(new URL(route.request().url()).pathname)
       if (path.startsWith('/r/') || path.startsWith('/api/')) return route.continue()
@@ -295,40 +314,30 @@ async function capture(captures) {
     const live = await until('the phone connected', async () => { const l = await read('session', 'link'); return l?.status === 'connected' ? l : null }, 20000)
     const connected = { ...live, device: DEVICE }
 
-    // Controller: the gamepad face, and the popup in Controller mode.
+    // Controller: the gamepad face.
     await tap('.modes [data-tab=gamepad]')
     await phone.locator('.gp-f[data-k=a]').waitFor({ timeout: 8000 })
     await phoneShot('phone-gamepad')
-    await phone.setViewportSize({ width: 412, height: 839 })
-    await phoneShot('phone-gamepad-portrait')
-    await phone.setViewportSize({ width: 863, height: 360 })
-    await session({ link: connected, tab: 4242 })
-    await popup('popup-gamepad', { tab: 'https://play.example.com/' })
 
-    // 3D: the trackpad, and the popup in 3D mode.
+    // 3D: the trackpad.
     await send({ to: 'bg', type: 'mode', mode: 'viewer' })
     await tap('.gp-mini[data-act=exit]')
     await tap('.modes [data-tab=rotate]')
     await phone.locator('#pad').waitFor({ timeout: 8000 })
     await phoneShot('phone-rotate')
-    await session({ link: connected, tab: 4242 })
-    await popup('popup-viewer', { tab: 'https://3d.example.com/' })
 
-    // PC: the mouse face (Point), the popup controlling the whole PC, and the options page with allowed programs. The
-    // phone is new to this PC: allowed first, as the person at it would in the popup's prompt.
+    // PC: the popup controlling the whole PC. The phone is new to this PC: allowed first, as the person at it would in
+    // the popup's prompt.
     const me = await until('the phone, as Link knows it', () => read('session', 'phone'))
     await send({ to: 'bg', type: 'answer', key: me.key, allow: true })
     await send({ to: 'bg', type: 'mode', mode: 'pc' })
     await until('the helper check', async () => (await read('session', 'pc'))?.link === 'missing')
-    await tap('.modes [data-tab=point]')
-    await phone.locator('#mouse').waitFor({ state: 'visible', timeout: 8000 })
-    await phoneShot('phone-mouse')
     await session({ link: connected, tab: 4242 })
     await popup('popup-pc', { tab: 'https://play.example.com/', pc: PC })
-    await options('options', PC)
 
-    // Typing: a text field has the focus on the PC, so the phone offers Type; one tap opens its keyboard dock.
-    await phone.setViewportSize({ width: 412, height: 839 })
+    // Typing: a text field has the focus on the PC, so the phone offers Type; one tap opens its keyboard dock. The
+    // phone stands upright, UPRIGHT tall.
+    await phone.setViewportSize(UPRIGHT)
     await tap('.modes [data-tab=rotate]')
     // What the service worker tells the link when ob.Pal Desktop reports a focused text field. The link takes it only
     // from a context without a tab, so it goes from the worker.
@@ -373,64 +382,57 @@ async function capture(captures) {
 
 // ---- the screenshots: a caption and the renders, laid out on shot.html ---------------------------------------------------
 
-const cap = { x: 64, y: 58, w: 560 }
+// One render per picture, at 150% and as big as the frame allows: a caption above it (or beside a phone standing
+// upright), one light behind it. A render that doesn't fit runs off the frame's edge rather than being made smaller.
+const above = { x: 64, y: 54, w: 1152, align: 'center' }
 const SHOTS = [
   {
     title: 'Your phone controls *any website*',
     sub: 'Scan the code: the controller opens in your phone’s browser. No app to install.',
-    cap,
-    glow: [{ x: 60, y: 360, w: 700, h: 360, a: 0.14 }, { x: 800, y: 80, w: 420, h: 600, a: 0.16 }],
-    items: [
-      { src: 'popup-pair', kind: 'popup', x: 64, y: 340, w: 660 },
-      { src: 'phone-gamepad-portrait', kind: 'phone', x: 860, y: 96, w: 300, z: 2 },
-    ],
+    cap: above,
+    light: { x: 120, y: 330, w: 1040, h: 560 },
+    items: [{ src: 'popup-pair', kind: 'popup', x: 160, y: 232 }],
   },
   {
     title: 'A *gamepad* for browser games',
     sub: 'For any game that uses the Gamepad API. Rumble reaches your phone.',
-    cap,
-    glow: [{ x: 60, y: 420, w: 820, h: 340, a: 0.16 }, { x: 760, y: 40, w: 460, h: 300, a: 0.12 }],
-    items: [
-      { src: 'popup-gamepad', kind: 'popup', x: 700, y: 64, w: 520, z: 2 },
-      { src: 'phone-gamepad', kind: 'phone', land: true, x: 64, y: 372, w: 860 },
-    ],
+    cap: above,
+    light: { x: 120, y: 330, w: 1040, h: 560 },
+    items: [{ src: 'phone-gamepad', kind: 'phone', x: 69, y: 200 }],
   },
   {
     title: 'Rotate, pan and zoom in *3D*',
     sub: 'Drag to rotate, two fingers to pan, pinch to zoom, on any 3D viewer in the page.',
-    cap,
-    glow: [{ x: 360, y: 420, w: 820, h: 340, a: 0.16 }, { x: 40, y: 40, w: 460, h: 300, a: 0.08 }],
-    items: [
-      { src: 'popup-viewer', kind: 'popup', x: 700, y: 64, w: 520, z: 2 },
-      { src: 'phone-rotate', kind: 'phone', land: true, x: 356, y: 372, w: 860 },
-    ],
+    cap: above,
+    light: { x: 120, y: 330, w: 1040, h: 560 },
+    items: [{ src: 'phone-rotate', kind: 'phone', x: 69, y: 200 }],
   },
   {
     title: 'Your *whole PC*, with ob.Pal Desktop',
     sub: 'Every window, or only the programs you allow. Ctrl + Alt + Backspace stops it all.',
-    cap: { x: 64, y: 58, w: 600 },
-    glow: [{ x: 660, y: 40, w: 580, h: 440, a: 0.16 }, { x: 40, y: 420, w: 760, h: 340, a: 0.12 }],
-    items: [
-      { src: 'popup-pc', kind: 'popup', x: 708, y: 56, w: 512, z: 2 },
-      { src: 'options', kind: 'page', x: 64, y: 336, w: 704 },
-    ],
+    cap: above,
+    light: { x: 120, y: 330, w: 1040, h: 560 },
+    // Down to the trackpad's gestures; the frame's edge cuts it below them.
+    items: [{ src: 'popup-pc', kind: 'popup', x: 160, y: 252 }],
   },
   {
     title: 'Your PC’s *mouse and keyboard*',
     sub: 'Point, tap and scroll, and type with your phone’s own keyboard. When a text field has the focus, your phone offers it.',
-    cap: { x: 64, y: 58, w: 620 },
-    glow: [{ x: 40, y: 420, w: 820, h: 340, a: 0.14 }, { x: 900, y: 100, w: 340, h: 600, a: 0.16 }],
-    items: [
-      { src: 'phone-mouse', kind: 'phone', land: true, x: 64, y: 408, w: 800 },
-      { src: 'phone-typing', kind: 'phone', x: 926, y: 116, w: 290, z: 2 },
-    ],
+    cap: { x: 64, y: 226, w: 462 },
+    light: { x: 440, y: 160, w: 880, h: 760 },
+    // The phone rising from the frame's edge, which cuts it at the top of its keyboard (UPRIGHT).
+    items: [{ src: 'phone-typing', kind: 'phone', x: 566, y: 24 }],
   },
 ]
 
 async function screenshots(browser, captures) {
   for (const [i, s] of SHOTS.entries()) {
     if (only && !only.has(i + 1)) continue
-    const spec = { ...s, items: s.items.map((it) => ({ ...it, src: `/captures/${it.src}.png` })) }
+    const items = await Promise.all(s.items.map(async (it) => {
+      const { width: w, height: h } = await sharp(join(captures, `${it.src}.png`)).metadata()
+      return { ...it, w, h, src: `/captures/${it.src}.png` }
+    }))
+    const spec = { ...s, items }
     await render(browser, `${ORIGIN}/extension/store/src/shot.html#${encodeURIComponent(JSON.stringify(spec))}`, [1280, 800], join(out, `screenshot-${i + 1}.png`), captures)
   }
 }
@@ -438,17 +440,21 @@ async function screenshots(browser, captures) {
 // ---- run --------------------------------------------------------------------------------------------------------------
 
 await mkdir(out, { recursive: true })
-const browser = await chromium.launch({ executablePath, headless: true })
-const captures = await mkdtemp(join(tmpdir(), 'obpal-store-captures-'))
+const browser = await chromium.launch({ executablePath, headless: true, args: CLEAN })
+/** Renders kept by an earlier run (OBPAL_STORE_KEEP_CAPTURES), to lay the screenshots out again without capturing. */
+const kept = process.env.OBPAL_STORE_CAPTURES ? resolve(process.env.OBPAL_STORE_CAPTURES) : null
+const captures = kept ?? (await mkdtemp(join(tmpdir(), 'obpal-store-captures-')))
 try {
   console.log(`ob.Pal Link store art -> ${out}`)
   if (doArt) await art(browser)
   if (doShots) {
-    await capture(captures)
+    if (!kept) await capture(captures)
     await screenshots(browser, captures)
   }
 } finally {
   await browser.close()
-  if (process.env.OBPAL_STORE_KEEP_CAPTURES) console.log(`  renders kept in ${captures}`)
-  else await rm(captures, { recursive: true, force: true }).catch(() => {})
+  if (!kept) {
+    if (process.env.OBPAL_STORE_KEEP_CAPTURES) console.log(`  renders kept in ${captures}`)
+    else await rm(captures, { recursive: true, force: true }).catch(() => {})
+  }
 }

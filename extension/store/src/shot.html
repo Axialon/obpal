@@ -1,8 +1,10 @@
 <!doctype html>
-<!-- One Chrome Web Store screenshot, 1280 × 800: a short caption and real renders of the extension and the phone
+<!-- One Chrome Web Store screenshot, 1280 × 800: a caption and one or two real renders of the extension or the phone
      controller, on Carbon. render.mjs passes the layout as JSON in the hash:
-       { title, sub, cap: { x, y, w }, items: [{ src, kind: 'popup' | 'phone' | 'page', x, y, w, z? }], glow: [{ x, y, w, h, a }] }
-     Positions and widths are CSS pixels of the 1280 × 800 frame; each render keeps its own aspect ratio. -->
+       { title, sub, cap: { x, y, w, align? }, light?: { x, y, w, h },
+         items: [{ src, kind: 'popup' | 'phone', w, h, x, y, crop?: [x, y, w, h], z? }] }
+     The renders are at 150% and are placed pixel for pixel, never resized: x and y are the frame's pixels (the item's
+     outer corner, bezel included), w and h the render's size, and crop the part of it shown. -->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -10,66 +12,60 @@
     <link rel="stylesheet" href="look.css" />
     <style>
       body { width: 1280px; height: 800px; }
-      .grid { opacity: 0.8; }
       .cap { position: absolute; z-index: 5; }
-      .cap h1 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 50px; line-height: 1.04; letter-spacing: -0.035em; text-wrap: balance; }
+      .cap h1 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 62px; line-height: 1.04; letter-spacing: -0.035em; text-wrap: balance; }
       .cap h1 em { font-style: normal; color: var(--lime); }
-      /* At display size the comma's side bearing shows as a gap after a letter: kern it in. */
+      /* At display size the comma's and the point's side bearings show as gaps beside a letter: kern them in. */
       .cap h1 .pn { margin-left: -0.06em; }
-      .cap p { margin: 16px 0 0; color: var(--ink-2); font-size: 21px; line-height: 1.45; letter-spacing: -0.005em; text-wrap: pretty; }
-      .cap .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 26px; }
-      .cap .brand img { width: 40px; height: 40px; }
-      .cap .brand .word { font-size: 25px; }
-      .cap .brand .tag { height: 22px; padding: 0 9px 0 11px; font-size: 11px; }
+      .cap h1 .dot { margin: 0 -0.05em; }
+      .cap p { margin: 14px 0 0; color: var(--ink-2); font-size: 25px; font-weight: 450; line-height: 1.4; letter-spacing: -0.01em; text-wrap: pretty; }
       .item { position: absolute; }
-      .item img { display: block; width: 100%; height: auto; }
-      /* The popup and pages: a lifted window with a light edge. */
-      .popup, .page {
-        border-radius: 18px; overflow: hidden; border: 1px solid rgb(255 255 255 / 0.16);
-        box-shadow: 0 0 0 1px rgb(0 0 0 / 0.6), 0 40px 90px -30px rgb(0 0 0 / 0.95), 0 0 70px -20px rgb(var(--lime-rgb) / 0.22);
-      }
-      .page { border-radius: 14px; }
+      .screen { position: relative; overflow: hidden; }
+      .screen img { position: absolute; display: block; max-width: none; }
+      /* The popup: a window with a clear edge, lifted off the page. */
+      .popup .screen { border-radius: 20px; box-shadow: 0 0 0 2px rgb(255 255 255 / 0.14), 0 50px 110px -30px rgb(0 0 0 / 0.95); }
       /* A phone: its render inside a dark bezel with a light rim. */
       .phone {
-        padding: 11px; border-radius: 46px; background: linear-gradient(160deg, #26272a, #0a0a0b 40%, #151517);
-        box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.16), 0 0 0 1px rgb(0 0 0 / 0.7), 0 50px 100px -35px rgb(0 0 0 / 0.95), 0 0 80px -25px rgb(var(--lime-rgb) / 0.25);
+        padding: 16px; border-radius: 60px; background: linear-gradient(160deg, #2a2b2e, #0b0b0c 40%, #17171a);
+        box-shadow: inset 0 0 0 2px rgb(255 255 255 / 0.16), 0 60px 120px -40px rgb(0 0 0 / 0.95);
       }
-      .phone img { border-radius: 36px; }
-      .phone.land { border-radius: 40px; }
-      .phone.land img { border-radius: 30px; }
+      .phone .screen { border-radius: 44px; }
     </style>
   </head>
   <body>
-    <div class="grid"></div>
-    <div id="glow"></div>
+    <div class="light" id="light"></div>
     <div class="cap" id="cap">
-      <div class="brand"><img src="/public/logo-mark.svg" alt="" /><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span><span class="tag">LINK</span></div>
       <h1 id="title"></h1>
       <p id="sub"></p>
     </div>
     <script>
       const spec = JSON.parse(decodeURIComponent(location.hash.slice(1)))
       const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+      const px = (n) => `${n}px`
       // *word* in a title is lit in the accent.
-      document.getElementById('title').innerHTML = esc(spec.title).replace(/\*([^*]+)\*/g, '<em>$1</em>').replace(/(\w),/g, '$1<span class="pn">,</span>')
+      document.getElementById('title').innerHTML = esc(spec.title)
+        .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+        .replace(/(\w),/g, '$1<span class="pn">,</span>')
+        .replace(/(\w)\.(\w)/g, '$1<span class="dot">.</span>$2')
       document.getElementById('sub').textContent = spec.sub ?? ''
-      const cap = document.getElementById('cap')
-      Object.assign(cap.style, { left: `${spec.cap.x}px`, top: `${spec.cap.y}px`, width: `${spec.cap.w}px`, textAlign: spec.cap.align ?? 'left' })
-      if (spec.cap.align === 'center') cap.querySelector('.brand').style.justifyContent = 'center'
-      for (const g of spec.glow ?? []) {
-        const d = document.createElement('div')
-        d.className = 'aura'
-        Object.assign(d.style, { left: `${g.x}px`, top: `${g.y}px`, width: `${g.w}px`, height: `${g.h}px`, background: g.color ?? `rgb(198 255 52 / ${g.a ?? 0.2})`, '--blur': `${g.blur ?? 90}px` })
-        document.getElementById('glow').appendChild(d)
-      }
+      Object.assign(document.getElementById('cap').style, { left: px(spec.cap.x), top: px(spec.cap.y), width: px(spec.cap.w), textAlign: spec.cap.align ?? 'left' })
+      const light = document.getElementById('light')
+      if (spec.light) Object.assign(light.style, { left: px(spec.light.x), top: px(spec.light.y), width: px(spec.light.w), height: px(spec.light.h) })
+      else light.remove()
       for (const it of spec.items) {
+        const [cx, cy, cw, ch] = it.crop ?? [0, 0, it.w, it.h]
         const d = document.createElement('div')
-        d.className = `item ${it.kind}${it.land ? ' land' : ''}`
-        Object.assign(d.style, { left: `${it.x}px`, top: `${it.y}px`, width: `${it.w}px`, zIndex: it.z ?? 1 })
+        d.className = `item ${it.kind}`
+        Object.assign(d.style, { left: px(it.x), top: px(it.y), zIndex: it.z ?? 1 })
+        const screen = document.createElement('div')
+        screen.className = 'screen'
+        Object.assign(screen.style, { width: px(cw), height: px(ch) })
         const img = document.createElement('img')
         img.src = it.src
         img.alt = ''
-        d.appendChild(img)
+        Object.assign(img.style, { left: px(-cx), top: px(-cy), width: px(it.w), height: px(it.h) })
+        screen.appendChild(img)
+        d.appendChild(screen)
         document.body.appendChild(d)
       }
     </script>

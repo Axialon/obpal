@@ -100,29 +100,54 @@ export const PADS = [{ x: 318, turn: 0 }, { x: 96, turn: Math.PI }].map((p) => (
 /** How high the hand goes over a pad. */
 const HOVER = 150
 
-type Pad = (typeof PADS)[number]
-type Leg = [turn: number, r: number, y: number, grip: number, seconds: number]
+/** A spot on the table at `x`, and how the arm reaches it: facing its side of the base, that far out. */
+export const spotAt = (x: number) => ({ x, turn: x >= SHOULDER.x ? 0 : Math.PI, r: Math.abs(x - SHOULDER.x) })
+type Spot = ReturnType<typeof spotAt>
+/** A step of a plan: where the hand heads (the base turned so, the hand this far out and this high), the grip (0 open … 1 closed), and how long it takes (s). */
+export type Leg = [turn: number, r: number, y: number, grip: number, seconds: number]
+/** Over the block at `at`, down, grip, up. */
+const pick = (at: Spot): Leg[] => [[at.turn, at.r, HOVER, 0, 1.1], [at.turn, at.r, LOW, 0, 0.6], [at.turn, at.r, LOW, 1, 0.3], [at.turn, at.r, HOVER - 10, 1, 0.6]]
+/** Across to `at`, down, let go, up. */
+const place = (at: Spot): Leg[] => [[at.turn, at.r, HOVER - 10, 1, 1.3], [at.turn, at.r, LOW, 1, 0.6], [at.turn, at.r, LOW, 0, 0.3], [at.turn, at.r, HOVER, 0, 0.6]]
 // Over the block, down, grip, up, turn across, down, let go, up; then back the other way.
-const legs = (from: Pad, to: Pad): Leg[] => [
-  [from.turn, from.r, HOVER, 0, 1.1], [from.turn, from.r, LOW, 0, 0.6], [from.turn, from.r, LOW, 1, 0.3], [from.turn, from.r, HOVER - 10, 1, 0.6],
-  [to.turn, to.r, HOVER - 10, 1, 1.3], [to.turn, to.r, LOW, 1, 0.6], [to.turn, to.r, LOW, 0, 0.3], [to.turn, to.r, HOVER, 0, 0.6],
-]
-const STORY = [...legs(PADS[0], PADS[1]), ...legs(PADS[1], PADS[0])]
+const STORY = [...pick(PADS[0]), ...place(PADS[1]), ...pick(PADS[1]), ...place(PADS[0])]
 /** How long the story takes, once round (s). */
 export const STORY_S = STORY.reduce((s, l) => s + l[4], 0)
+/** Where in the story the arm starts over the block on pad `i` (s). */
+export const storyFrom = (i: number) => (i ? STORY_S / 2 : 0)
 
-/** The pick and place the arm plays by itself: where it's headed at time `t` (s), and its grip (0 open … 1 closed). */
-export function story(t: number): { arm: Arm; grip: number } {
-  let tt = ((t % STORY_S) + STORY_S) % STORY_S
-  let prev = STORY[STORY.length - 1]
-  for (const l of STORY) {
+/**
+ * A plan played: where the arm is headed `t` seconds in, easing from `from` (where it was) through its legs, its grip,
+ * and whether the plan is over.
+ */
+export function play(legs: readonly Leg[], from: Leg, t: number): { arm: Arm; grip: number; done: boolean } {
+  let tt = t
+  let prev = from
+  for (const l of legs) {
     if (tt <= l[4]) {
       const k = smooth(tt / l[4])
       const at = (i: number) => prev[i] + (l[i] - prev[i]) * k
-      return { arm: { turn: at(0), r: at(1), y: at(2) }, grip: at(3) }
+      return { arm: { turn: at(0), r: at(1), y: at(2) }, grip: at(3), done: false }
     }
     tt -= l[4]
     prev = l
   }
-  return { arm: { turn: STORY[0][0], r: STORY[0][1], y: STORY[0][2] }, grip: 0 }
+  return { arm: { turn: prev[0], r: prev[1], y: prev[2] }, grip: prev[3], done: true }
+}
+
+/** The pick and place the arm plays by itself: where it's headed at time `t` (s), and its grip (0 open … 1 closed). */
+export function story(t: number): { arm: Arm; grip: number } {
+  const { arm, grip } = play(STORY, STORY[STORY.length - 1], ((t % STORY_S) + STORY_S) % STORY_S)
+  return { arm, grip }
+}
+
+/**
+ * Tidying up after someone played, before the story goes on: the block to the pad nearest it, carried there if the arm
+ * holds it, else picked up from where it lies first (nothing to do if it's on a pad already). Returns the legs, and
+ * the pad the block ends on, where the story takes over.
+ */
+export function tidy(block: { x: number; held: boolean }): { legs: Leg[]; pad: number } {
+  const pad = Math.abs(block.x - PADS[0].x) <= Math.abs(block.x - PADS[1].x) ? 0 : 1
+  if (!block.held && Math.abs(block.x - PADS[pad].x) < 2) return { legs: [], pad }
+  return { legs: [...(block.held ? [] : pick(spotAt(block.x))), ...place(PADS[pad])], pad }
 }

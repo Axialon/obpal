@@ -16,14 +16,26 @@
  *     drawn meets the edge within a pixel, and its rim is there in the screenshot.
  *   - A knock against the edge of the screen is heard with the frame that shows it: foreseen and started ahead, the
  *     speakers' own lag made up (nothing of ours in between otherwise); leaning on it is quiet.
- *   - On a phone, tilted up from below the buttons, the marble rolls up onto them, across and off. The sound control
- *     and the three steps' icons are raised things too.
+ *   - On a phone, tilted up from below the buttons (clearly: past the 13° a raised thing takes), the marble rolls up
+ *     onto them, across and off.
+ *   - The raised things (the buttons, the hint, the sound control, the three steps' icons) are blocks 0.3 em tall
+ *     (three times the first ones), each drawn as tall as the field sees it: the icons have a side, a glass top and a
+ *     shadow like the sound control's, on a phone and a computer.
  *   - On a phone in a noisy hand (a tremble, stray readings), a marble in the o and in the p rests dead still, with
  *     no jumps; so does one across the narrow gap between the r and the full stop.
  *   - A marble in a letter's counter rests there without a tremor, and leaves when pointed away.
- *   - The Move card switches between Move and Grab: in Grab a click (or on a phone a tap) closes the gripper on the
- *     block and a drag carries it, the arm never freezing; arrow keys change it and the visit keeps it.
+ *   - On a phone, a card's scene plays under a held finger; a flick on it scrolls the page, even when the page is busy
+ *     as the finger lands (the events carry their own times, as a phone's do); a long press selects nothing.
+ *   - No cue or switch covers a scene's drawing, on phones (upright and sideways), a tablet and computers; the cue
+ *     fades where it is once you've played.
+ *   - The Move card switches between Motion and Drag, with a mouse and on a phone. In Motion the hand follows the
+ *     mouse over the card, or the phone's tilt (its first tap turns the tilt on, and the card says so), and a click or
+ *     tap works the clamp, moving nothing. In Drag a drag moves the hand, a click or tap sends it there, and a double
+ *     one works the clamp once it's there. A whole pick and place in each; arrow keys change it and the visit keeps it.
  *   - The Play card's ball stays in play, alone or with the mouse pushing it into the corners.
+ * What the marbles do is waited for on their own clock (window.__home.sim(): their physics' fixed steps), not the
+ * wall clock: on a machine busy with other work the page draws fewer frames, and the marbles get less of their time
+ * in the same wall-clock second.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch.
  */
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -59,15 +71,44 @@ async function restingOnDot(page) {
 }
 const field3d = (page) => until('the 3D field', () => page.evaluate(() => document.documentElement.classList.contains('field3d')), 20000)
 const me = (page) => page.evaluate(() => window.__home.tips().find((t) => t.id === 'me'))
-/** Drive the marble (a tilt, a pointer) until it stops: still within 0.3 px over four looks. */
-async function settle(page, drive, timeout = 10000) {
-  let prev = null, same = 0
-  const end = Date.now() + timeout
+/**
+ * The marbles' own clock (s of their physics' fixed steps) and whether the hero's loop runs. The hero's checks wait on
+ * it, not on the wall clock: on a machine busy with other work the page draws fewer frames, each at most 0.05 s of
+ * the marbles' time, so a wall-clock wait gives them less time to do what's checked.
+ */
+const sim = (page) => page.evaluate(() => window.__home.sim())
+/** Wait `s` s of the marbles' time, or until the loop has run and stopped (nothing moves any more). */
+async function simWait(page, s, wall = 45000) {
+  const t0 = (await sim(page)).t, end = Date.now() + wall
+  for (;;) {
+    const q = await sim(page)
+    if (q.t - t0 >= s || (!q.busy && q.t > t0) || Date.now() > end) return
+    await sleep(40)
+  }
+}
+/** Until `fn` gives something, within `s` s of the marbles' time (and a wall-clock backstop). */
+async function simUntil(page, what, fn, s, every = 100, wall = 90000) {
+  const t0 = (await sim(page)).t, end = Date.now() + wall
+  for (;;) {
+    const v = await fn()
+    if (v) return v
+    if ((await sim(page)).t - t0 > s || Date.now() > end) throw new Error(`timed out: ${what}`)
+    await sleep(every)
+  }
+}
+/**
+ * Drive the marble (a tilt, a pointer) until it stops: within 0.3 px over the last 0.4 s of the marbles' time, having
+ * been driven at least `least` s of it.
+ */
+async function settle(page, drive, least = 1.5, wall = 45000) {
+  const t0 = (await sim(page)).t, end = Date.now() + wall
+  const seen = []
   while (Date.now() < end) {
     await drive()
-    const t = await me(page)
-    if (prev && Math.hypot(t.x - prev.x, t.y - prev.y) < 0.3) { if (++same >= 4) return t } else same = 0
-    prev = t
+    const { t, q } = await page.evaluate(() => ({ t: window.__home.tips().find((m) => m.id === 'me'), q: window.__home.sim() }))
+    seen.push({ x: t.x, y: t.y, at: q.t })
+    const recent = seen.filter((p) => p.at >= q.t - 0.45)
+    if (q.t - t0 >= least && q.t - recent[0].at >= 0.4 && recent.every((p) => Math.hypot(p.x - t.x, p.y - t.y) < 0.3)) return t
     await sleep(110)
   }
   return me(page)
@@ -95,11 +136,14 @@ function tilter(page) {
  * 14 px of `at` along it: the marble's rim, if it's there; the night sky, if it isn't.
  */
 async function rimAt(page, wall, at, a) {
-  const top = await page.evaluate(() => document.querySelector('.hero').getBoundingClientRect().top)
+  const [top, vw, vh] = await page.evaluate(() => [document.querySelector('.hero').getBoundingClientRect().top, innerWidth, innerHeight])
   const clip = wall === 'left' ? { x: a.left, y: top + at - 14, width: 2, height: 28 }
     : wall === 'right' ? { x: a.right - 2, y: top + at - 14, width: 2, height: 28 }
     : wall === 'top' ? { x: at - 14, y: top + a.top, width: 28, height: 2 }
     : { x: at - 14, y: top + a.bottom - 2, width: 28, height: 2 }
+  // (Within the screen: near a corner, the stretch beside it runs off it.)
+  const x0 = Math.max(0, clip.x), y0 = Math.max(0, clip.y)
+  Object.assign(clip, { x: x0, y: y0, width: Math.min(vw, clip.x + clip.width) - x0, height: Math.min(vh, clip.y + clip.height) - y0 })
   const { data, info } = await sharp(await page.screenshot({ clip })).raw().toBuffer({ resolveWithObject: true })
   let best = 0
   for (let i = 0; i < data.length; i += info.channels) best = Math.max(best, 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2])
@@ -211,11 +255,11 @@ try {
     // Tip it left and settle; then right and toward you: it glides over, and down. (Over as far as the screen's edge,
     // which it doesn't roll past: from the full stop that's under 60px.)
     for (let i = 1; i <= 8; i++) { await tilt(60, -i * 2); await sleep(40) }
-    await sleep(900)
+    await simWait(page, 0.9)
     const left = await tip()
     for (let i = 1; i <= 16; i++) { await tilt(60 + i, -16 + i * 2.5); await sleep(40) }
     const width = await page.evaluate(() => innerWidth)
-    const moved = await until('the marble rolled with the tilt', async () => { const t = await tip(); return t.x - left.x > 30 && t.y - left.y > 20 ? t : null }, 4000)
+    const moved = await simUntil(page, 'the marble rolled with the tilt', async () => { const t = await tip(); return t.x - left.x > 30 && t.y - left.y > 20 ? t : null }, 4)
     if (moved.x > width) throw new Error(`the marble rolled off the screen: x ${moved.x.toFixed(0)} on a ${width}px screen`)
     // Flicked upward, screen level: the marble jumps (it never bounces by itself).
     const flick = await page.evaluate(async () => {
@@ -237,38 +281,65 @@ try {
     return `stick ${left.x.toFixed(0)},${left.y.toFixed(0)} → ${moved.x.toFixed(0)},${moved.y.toFixed(0)}; a flick tossed it ${flick.toFixed(2)} em up; pointing scene's cursor at ${dot.x.toFixed(0)},${dot.y.toFixed(0)}`
   })
 
-  await check('on a phone, a scene plays under a held finger, a flick still scrolls, and a long press selects nothing', async () => {
+  /** Scroll a scene's card to the middle of the screen, and wait for it to finish arriving (it rises as it comes into view). */
+  const cardInView = async (page, scene) => {
+    await page.evaluate((s) => document.querySelector(`[data-scene="${s}"]`).scrollIntoView({ block: 'center' }), scene)
+    await until(`the ${scene} card in place`, () => page.evaluate((s) => document.querySelector(`[data-scene="${s}"]`).closest('.scene').classList.contains('in'), scene), 8000)
+    await until(`the ${scene} card still`, () => page.evaluate((s) => document.querySelector(`[data-scene="${s}"]`).closest('.scene').getAnimations({ subtree: true }).length === 0, scene), 8000)
+    const art = await page.locator(`[data-scene="${scene}"]`).boundingBox()
+    return { art, at: (x, y) => [art.x + (x / 400) * art.width, art.y + (y / 260) * art.height], k: art.width / 400 }
+  }
+
+  await check('on a phone, a scene plays under a held finger, a flick still scrolls (even as the page is busy), and a long press selects nothing', async () => {
     const ctx = await browser.newContext({ ...devices['Pixel 7'], ignoreHTTPSErrors: true })
     const page = await ctx.newPage()
     await page.goto(`${local.origin}/`)
-    await page.evaluate(() => document.querySelector('[data-scene="arm"]').scrollIntoView({ block: 'center' }))
-    await sleep(900)
+    const { art, at } = await cardInView(page, 'point')
     const cdp = await ctx.newCDPSession(page)
-    const art = await page.locator('[data-scene="arm"]').boundingBox()
-    const cx = art.x + art.width / 2, cy = art.y + art.height / 2
+    const [cx, cy] = at(200, 130)
     const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 1 }] })
-    const gripper = () => page.evaluate(() => { const l = document.querySelectorAll('[data-scene="arm"] svg line'); const f = [...l].find((e) => e.getAttribute('stroke-width') === '10'); return { x: +f.getAttribute('x2'), y: +f.getAttribute('y2') } })
-    // Hold still a moment, then drag up and across: the scene has the finger, the page stays put.
+    /**
+     * A flick straight up from (x, y) on a card, no hold: that's a scroll. The events carry their own times, as a
+     * phone's do, the first move 10 ms after the landing: however late the page hears it, it's a flick. With `busy`,
+     * the page is busy for 400 ms just after it hears the finger land, so it hears that move after its hold is up.
+     * Returns how far the page scrolled.
+     */
+    const flick = async (x, y, busy) => {
+      const from = await page.evaluate(() => scrollY)
+      const at = Date.now() / 1000
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }], timestamp: at })
+      if (busy) cdp.send('Runtime.evaluate', { expression: '(() => { const t = performance.now(); while (performance.now() - t < 400) {} })()' }).catch(() => {})
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y - 30, id: 1 }], timestamp: at + 0.01 })
+      for (let i = 2; i <= 6; i++) { await sleep(16); await touch('touchMove', x, y - i * 30) }
+      await touch('touchEnd')
+      await until('the page scrolled', async () => (await page.evaluate(() => scrollY)) - from >= 60, 3000).catch(() => {})
+      await sleep(500)
+      return (await page.evaluate(() => scrollY)) - from
+    }
+    // The Point card's cursor, as drawn (viewBox units).
+    const cursor = () => page.evaluate(() => { const d = document.querySelector('[data-scene="point"] svg circle[fill="#f4ffd6"]'); return { x: +d.getAttribute('cx'), y: +d.getAttribute('cy') } })
+    const lit = () => page.evaluate(() => document.querySelector('[data-scene="point"]').closest('.scene').classList.contains('held'))
+    // Hold still till the card lights up, then drag up and across: the scene has the finger (its cursor goes where the
+    // finger goes), and the page stays put.
     const y0 = await page.evaluate(() => scrollY)
-    const before = await gripper()
     await touch('touchStart', cx, cy)
-    await sleep(260)
-    const held = await page.evaluate(() => document.querySelector('[data-scene="arm"]').closest('.scene').classList.contains('held'))
-    for (let i = 1; i <= 10; i++) { await touch('touchMove', cx - i * 8, cy - i * 9); await sleep(30) }
-    await sleep(150)
-    const during = await gripper()
+    const held = await until('the card lit under the finger', lit, 3000).catch(() => false)
+    for (let i = 1; i <= 10; i++) { await touch('touchMove', cx + i * 6, cy - i * 5); await sleep(30) }
+    const finger = { x: ((cx + 60 - art.x) / art.width) * 400, y: ((cy - 50 - art.y) / art.height) * 260 }
+    const during = await until('the cursor under the finger', async () => { const d = await cursor(); return Math.hypot(d.x - finger.x, d.y - finger.y) < 4 ? d : null }, 3000).catch(() => null)
     await touch('touchEnd')
     const y1 = await page.evaluate(() => scrollY)
     if (!held) throw new Error('holding a finger on the scene did not hand it the gesture')
     if (Math.abs(y1 - y0) > 2) throw new Error(`the page scrolled ${y1 - y0}px under a held finger`)
-    if (Math.hypot(during.x - before.x, during.y - before.y) < 15) throw new Error('the arm did not follow the finger')
-    // A flick straight up, no hold: that's a scroll.
-    await touch('touchStart', cx, cy + 40)
-    for (let i = 1; i <= 6; i++) { await touch('touchMove', cx, cy + 40 - i * 30); await sleep(16) }
-    await touch('touchEnd')
-    await sleep(500)
-    const y2 = await page.evaluate(() => scrollY)
-    if (y2 - y1 < 60) throw new Error(`a flick scrolled only ${y2 - y1}px`)
+    if (!during) throw new Error(`the scene didn't follow the finger: its cursor at ${JSON.stringify(await cursor())}, the finger at ${JSON.stringify(finger)}`)
+    const flicked = await flick(cx, cy + 40, false)
+    if (flicked < 60) throw new Error(`a flick scrolled only ${flicked}px`)
+    // Again, the card back in the middle, the page busy as the finger lands (a phone busy loading, say): still a scroll.
+    await page.evaluate(() => document.querySelector('[data-scene="point"]').scrollIntoView({ block: 'center' }))
+    await sleep(300)
+    const again = await page.locator('[data-scene="point"]').boundingBox()
+    const busy = await flick(again.x + again.width / 2, again.y + again.height / 2 + 40, true)
+    if (busy < 60) throw new Error(`a flick on a busy page scrolled only ${busy}px`)
     // A long press: nothing selected.
     await page.evaluate(() => document.querySelector('[data-scene="together"]').scrollIntoView({ block: 'center' }))
     await sleep(600)
@@ -279,106 +350,296 @@ try {
     const selected = await page.evaluate(() => getSelection().toString())
     await ctx.close()
     if (selected) throw new Error(`a long press selected "${selected.slice(0, 40)}"`)
-    return `arm ${before.x.toFixed(0)},${before.y.toFixed(0)} → ${during.x.toFixed(0)},${during.y.toFixed(0)} with the page still; flick scrolled ${y2 - y1}px`
+    return `the cursor under the finger at ${during.x.toFixed(0)},${during.y.toFixed(0)} with the page still; a flick scrolled ${flicked}px, ${busy}px on a busy page`
   })
 
-  /** The Move card's arm, as drawn: where its hand is, and the block (viewBox units). */
-  const armState = (page) => page.evaluate(() => {
-    const svg = document.querySelector('[data-scene="arm"] svg')
-    const f = [...svg.querySelectorAll('line')].find((e) => e.getAttribute('stroke-width') === '10')
-    const b = [...svg.querySelectorAll('rect')].find((e) => e.getAttribute('fill') === '#c6ff34')
-    return { x: +f.getAttribute('x2'), y: +f.getAttribute('y2'), bx: +b.getAttribute('x') + 10, by: +b.getAttribute('y') + 10 }
-  })
-  const modeOf = (page) => page.evaluate(() => document.querySelector('[data-scene="arm"] .scene-modes [aria-checked="true"]')?.dataset.mode)
-
-  await check('the Move card switches between Move and Grab: in Grab a click closes the gripper on the block and a drag carries it, the arm never freezing; arrows and the visit keep the choice', async () => {
-    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, ignoreHTTPSErrors: true })
-    const page = await ctx.newPage()
-    await page.goto(`${local.origin}/`)
-    await page.evaluate(() => document.querySelector('[data-scene="arm"]').scrollIntoView({ block: 'center' }))
-    await sleep(900)
-    const art = await page.locator('[data-scene="arm"]').boundingBox()
-    const at = (x, y) => [art.x + (x / 400) * art.width, art.y + (y / 260) * art.height]
-    const radios = await page.locator('[data-scene="arm"] .scene-modes [role="radio"]').count()
-    if (radios !== 2) throw new Error(`the switch has ${radios} choices`)
-    if ((await modeOf(page)) !== 'move') throw new Error(`it opened in ${await modeOf(page)}`)
-    // Move: pressing and dragging from the block moves the arm, and leaves the block be.
-    await page.mouse.move(...at(200, 120))
-    await sleep(900)
-    const bx = (await armState(page)).bx
-    const to = bx > 200 ? -1 : 1
-    await page.mouse.move(...at(bx, 232))
-    await sleep(900)
-    await page.mouse.down()
-    for (let i = 1; i <= 10; i++) { await page.mouse.move(...at(bx + to * i * 20, 232 - i * 6)); await sleep(40) }
-    await sleep(700)
-    const moved = await armState(page)
-    await page.mouse.up()
-    if (Math.abs(moved.x - (bx + to * 200)) > 30) throw new Error(`in Move the arm stayed at ${moved.x.toFixed(0)} under a drag`)
-    if (Math.hypot(moved.bx - moved.x, moved.by - moved.y - 10) < 20) throw new Error('in Move a press picked the block up')
-    // Grab: a click over the block closes the gripper on it; dragging with the button down carries it across.
-    await page.locator('[data-scene="arm"] .scene-modes [data-mode="grab"]').click()
-    if ((await modeOf(page)) !== 'grab') throw new Error('the switch did not change to Grab')
-    const gx = (await armState(page)).bx
-    const way = gx > 200 ? -1 : 1
-    await page.mouse.move(...at(gx, 232))
-    await sleep(1500)
-    await page.mouse.down()
-    await sleep(500)
-    for (let i = 1; i <= 12; i++) { await page.mouse.move(...at(gx + way * i * 16, 232 - i * 6)); await sleep(40) }
-    await sleep(800)
-    const carried = await armState(page)
-    if (Math.abs(carried.x - (gx + way * 192)) > 30 || Math.hypot(carried.bx - carried.x, carried.by - carried.y - 10) > 4) throw new Error(`the block didn't come along: ${JSON.stringify(carried)}`)
-    // Held still with the button down, past the 3 s a still pointer keeps a scene: it stays with the pointer.
-    await sleep(3600)
-    const still = await armState(page)
-    await page.mouse.up()
-    if (Math.hypot(still.x - carried.x, still.y - carried.y) > 3) throw new Error(`the arm wandered off a held button: ${JSON.stringify(still)}`)
-    // The keyboard moves between the choices, and the choice lasts the visit.
-    await page.locator('[data-scene="arm"] .scene-modes [aria-checked="true"]').focus()
-    await page.keyboard.press('ArrowLeft')
-    const focused = await page.evaluate(() => document.activeElement?.dataset?.mode)
-    if ((await modeOf(page)) !== 'move' || focused !== 'move') throw new Error(`an arrow key left it at ${await modeOf(page)} (focus on ${focused})`)
-    await page.keyboard.press('ArrowRight')
-    await page.reload()
-    await sleep(600)
-    const kept = await modeOf(page)
-    await ctx.close()
-    if (kept !== 'grab') throw new Error(`after a reload it was ${kept}`)
-    return `Move drag: arm ${bx.toFixed(0)} → ${moved.x.toFixed(0)}, the block left be; Grab: carried ${gx.toFixed(0)} → ${carried.bx.toFixed(0)}, held still ${Math.hypot(still.x - carried.x, still.y - carried.y).toFixed(1)} off; arrows and reload kept it`
-  })
-
-  await check('on a phone, in Grab, a tap closes the gripper and a held finger drags the block along', async () => {
+  await check("no cue or switch covers a scene's drawing, on phones, tablets and computers; the cue fades where it is once you've played", async () => {
+    const PHONE = { isMobile: true, hasTouch: true, deviceScaleFactor: 3 }
+    const sizes = [
+      { name: '360x800', viewport: { width: 360, height: 800 }, ...PHONE },
+      { name: '390x844', viewport: { width: 390, height: 844 }, ...PHONE },
+      { name: '412x915', viewport: { width: 412, height: 915 }, ...PHONE },
+      { name: '844x390 sideways', viewport: { width: 844, height: 390 }, ...PHONE },
+      { name: '768x1024 tablet', viewport: { width: 768, height: 1024 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 },
+      { name: '1280x800', viewport: { width: 1280, height: 800 } },
+      { name: '1920x1080', viewport: { width: 1920, height: 1080 } },
+    ]
+    /** Each card: whether it has a cue, a switch and a line on what to do, and those of them on its drawing. */
+    const cards = (page) => page.evaluate(() => {
+      const box = (e) => { const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, w: b.width, h: b.height } }
+      const meet = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+      return [...document.querySelectorAll('[data-scene]')].map((host) => {
+        const card = host.closest('.scene'), art = box(host)
+        const parts = [...card.querySelectorAll('.play-cue, .scene-modes, .scene-tip')]
+        return {
+          scene: host.dataset.scene, cue: !!card.querySelector('.play-cue'), modes: !!card.querySelector('.scene-modes'), tip: !!card.querySelector('.scene-tip'),
+          over: parts.filter((e) => e.getBoundingClientRect().width > 0 && meet(box(e), art)).map((e) => e.className),
+        }
+      })
+    })
+    const seen = []
+    for (const { name, ...size } of sizes) {
+      const ctx = await browser.newContext({ ...size, ignoreHTTPSErrors: true })
+      const page = await ctx.newPage()
+      await page.goto(`${local.origin}/`)
+      await until('the scenes drawn', () => page.evaluate(() => document.querySelectorAll('[data-scene] svg').length === 6), 8000)
+      const all = await cards(page)
+      for (const c of all) {
+        if (c.over.length) throw new Error(`${name}: on the ${c.scene} card, ${c.over.join(' and ')} covers the drawing`)
+        const arm = c.scene === 'arm'
+        if (arm && !(c.modes && c.tip)) throw new Error(`${name}: the Move card has no switch, or no line on what to do`)
+        if (!arm && c.cue !== !!size.hasTouch) throw new Error(`${name}: the ${c.scene} card ${c.cue ? 'has a cue without a touch screen' : 'has no cue on a touch screen'}`)
+      }
+      seen.push(name)
+      await ctx.close()
+    }
+    // Once you've played (a finger held on a scene), the cues fade where they are: nothing on the page moves.
     const ctx = await browser.newContext({ ...devices['Pixel 7'], ignoreHTTPSErrors: true })
     const page = await ctx.newPage()
     await page.goto(`${local.origin}/`)
-    await page.evaluate(() => document.querySelector('[data-scene="arm"]').scrollIntoView({ block: 'center' }))
-    await sleep(900)
+    const { at } = await cardInView(page, 'turn')
+    const layout = () => page.evaluate(() => [...document.querySelectorAll('.scene h3')].map((h) => Math.round(h.getBoundingClientRect().top + scrollY)).join(','))
+    const cueShown = () => page.evaluate(() => getComputedStyle(document.querySelector('.play-cue')).opacity)
+    const before = await layout(), shown = await cueShown()
     const cdp = await ctx.newCDPSession(page)
     const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 1 }] })
-    const grab = await page.locator('[data-scene="arm"] .scene-modes [data-mode="grab"]').boundingBox()
-    await touch('touchStart', grab.x + grab.width / 2, grab.y + grab.height / 2)
+    await touch('touchStart', ...at(200, 130))
+    await until('played', () => page.evaluate(() => document.documentElement.classList.contains('played')), 3000)
     await touch('touchEnd')
-    await sleep(200)
-    if ((await modeOf(page)) !== 'grab') throw new Error('a tap on the switch did not pick Grab')
-    const art = await page.locator('[data-scene="arm"]').boundingBox()
-    const at = (x, y) => [art.x + (x / 400) * art.width, art.y + (y / 260) * art.height]
-    // A tap on the block: the arm reaches for it and the gripper closes on it.
-    const bx = (await armState(page)).bx
-    const way = bx > 200 ? -1 : 1
-    await touch('touchStart', ...at(bx, 232))
-    await touch('touchEnd')
-    await sleep(1200)
-    // Hold, then drag across.
-    await touch('touchStart', ...at(bx, 232))
-    await sleep(260)
-    for (let i = 1; i <= 10; i++) { await touch('touchMove', ...at(bx + way * i * 20, 232 - i * 6)); await sleep(40) }
     await sleep(700)
-    const carried = await armState(page)
-    await touch('touchEnd')
+    const after = await layout(), faded = await cueShown()
     await ctx.close()
-    if (Math.abs(carried.bx - bx) < 100 || Math.hypot(carried.bx - carried.x, carried.by - carried.y - 10) > 4) throw new Error(`the block didn't come along: ${JSON.stringify({ bx, ...carried })}`)
-    return `the block carried ${bx.toFixed(0)} → ${carried.bx.toFixed(0)}`
+    if (shown !== '1' || faded !== '0') throw new Error(`the cue's opacity was ${shown} before playing and ${faded} after`)
+    if (after !== before) throw new Error(`the cards moved when the cues faded: headings at ${before}, then ${after}`)
+    return `${seen.join(', ')}; the cue faded in place`
+  })
+
+  /**
+   * The Move card's arm, as drawn (viewBox units): where its hand is, the block, whether the arm holds it and whether
+   * closing now would take it, and how far apart its fingers are.
+   */
+  const armState = (page) => page.evaluate(() => {
+    const svg = document.querySelector('[data-scene="arm"] svg')
+    const f = [...svg.querySelectorAll('line')].find((e) => e.getAttribute('stroke-width') === '10')
+    const fingers = [...svg.querySelectorAll('line')].filter((e) => e.getAttribute('stroke') === '#e9e4ff').map((e) => +e.getAttribute('x1'))
+    const b = svg.querySelector('[data-block]')
+    return {
+      x: +f.getAttribute('x2'), y: +f.getAttribute('y2'), bx: +b.getAttribute('x') + 10, by: +b.getAttribute('y') + 10,
+      held: b.getAttribute('data-held') === '1', ready: b.getAttribute('data-ready') === '1', span: Math.abs(fingers[1] - fingers[0]),
+    }
+  })
+  /** The Move card, its switch's choice, and its line on what to do. */
+  const ARM = 'article.scene:has([data-scene="arm"])'
+  const modeOf = (page) => page.evaluate((c) => document.querySelector(`${c} .scene-modes [aria-checked="true"]`)?.dataset.mode, ARM)
+  const lineOf = (page) => page.evaluate((c) => document.querySelector(`${c} .scene-tip > [data-on]`)?.textContent, ARM)
+  // The block rests on the table with its middle this high; the hand is over it, low enough to take it, this high.
+  const REST = 212, LOW_HAND = 202
+  /** The hand at (x, y) (viewBox units), once it's got there. */
+  const handAt = (page, x, y) => until(`the hand at ${x.toFixed(0)},${y.toFixed(0)}`, async () => { const s = await armState(page); return Math.hypot(s.x - x, s.y - y) < 1 ? s : null }, 6000)
+  /**
+   * A click or tap in Motion, anywhere: it works the clamp (the fingers close, or open again, `shut`) and moves nothing,
+   * the hand staying put to a pixel. Returns how far the hand went.
+   */
+  const clampClick = async (page, click, shut) => {
+    // (From a hand at rest: easing on to where it was sent isn't the click's doing.)
+    const s0 = await until('the hand at rest', async () => { const a = await armState(page); await sleep(150); const b = await armState(page); return Math.hypot(b.x - a.x, b.y - a.y) < 0.05 ? b : null }, 4000)
+    await click()
+    let s1 = s0, off = 0
+    for (const end = Date.now() + 1000; Date.now() < end;) { s1 = await armState(page); off = Math.max(off, Math.hypot(s1.x - s0.x, s1.y - s0.y)); await sleep(40) }
+    if (off > 1) throw new Error(`a click or tap in Motion moved the hand ${off.toFixed(2)}: ${JSON.stringify({ s0, s1 })}`)
+    if (shut ? s1.span > 12 : s1.span < 30) throw new Error(`the clamp didn't ${shut ? 'close' : 'open'}: ${JSON.stringify({ s0, s1 })}`)
+    return off
+  }
+  /** The story may have been carrying the block when the hand was taken: a click (in Motion) lets it go, where it is. */
+  const letGo = async (page, click) => {
+    if (!(await armState(page)).held) return
+    await click()
+    await until('let go', async () => !(await armState(page)).held, 4000)
+    await sleep(700)
+  }
+  /**
+   * A pick and place in Motion, by `steer` (puts the hand at a point: the mouse over the card, or the phone's tilt) and
+   * `click` (a click or tap, anywhere): the hand over the block, low, a click takes it; up, across to the other pad
+   * and down, the block comes along; a click lets it go, onto the pad. The clicks never move the hand. Returns where
+   * the block went.
+   */
+  const motionPlace = async (page, steer, click) => {
+    await steer(200, 120)
+    await letGo(page, click)
+    let s = await armState(page)
+    const from = s.bx
+    const pad = Math.abs(from - 318) > Math.abs(from - 96) ? 318 : 96
+    await steer(from, 150)
+    await steer(from, LOW_HAND)
+    s = await armState(page)
+    if (!s.ready) throw new Error(`over the block, it isn't ready to take it: ${JSON.stringify(s)}`)
+    await click()
+    await until('held', async () => (await armState(page)).held, 4000)
+    await sleep(300)
+    const took = await armState(page)
+    if (Math.hypot(took.x - s.x, took.y - s.y) > 1) throw new Error(`the hand moved when it clamped: ${JSON.stringify({ s, took })}`)
+    await steer(from, 150)
+    await steer(pad, 150)
+    s = await armState(page)
+    if (!s.held || Math.abs(s.bx - pad) > 3) throw new Error(`the block didn't come along: ${JSON.stringify(s)}`)
+    await steer(pad, LOW_HAND)
+    const over = await armState(page)
+    await click()
+    await until('let go', async () => !(await armState(page)).held, 4000)
+    await sleep(700)
+    const put = await armState(page)
+    if (Math.hypot(put.x - over.x, put.y - over.y) > 1) throw new Error(`the hand moved when it let go: ${JSON.stringify({ over, put })}`)
+    if (Math.abs(put.bx - pad) > 3 || Math.abs(put.by - REST) > 0.5) throw new Error(`the block isn't on the pad: ${JSON.stringify(put)}`)
+    return `${Math.round(from)} → ${Math.round(put.bx)}`
+  }
+  /**
+   * Drag's clamp and a pick and place in Drag, by `click` (a click or tap at a point, viewBox units) and `double` (a
+   * double one): a double click on the block sends the hand to it and takes it, and another there lets it go; then a
+   * double click on the block takes it again, a click over the other pad carries it there, and a double click on the
+   * pad puts it down. Returns where the block went.
+   */
+  const dragPlace = async (page, click, double) => {
+    let s = await armState(page)
+    // The story may have been carrying the block: let it go first, where it is.
+    if (s.held) { await double(s.x, s.y); await until('let go', async () => !(await armState(page)).held, 5000); await sleep(700) }
+    s = await armState(page)
+    const from = s.bx
+    const pad = Math.abs(from - 318) > Math.abs(from - 96) ? 318 : 96
+    await double(from, REST)
+    await until('held after a double click on the block', async () => (await armState(page)).held, 5000)
+    await double(from, REST)
+    await until('let go after another', async () => !(await armState(page)).held, 5000)
+    await sleep(500)
+    await double(from, REST)
+    await until('held again', async () => (await armState(page)).held, 5000)
+    await click(pad, 150)
+    s = await handAt(page, pad, 150)
+    if (!s.held || Math.abs(s.bx - pad) > 3) throw new Error(`the block didn't come along: ${JSON.stringify(s)}`)
+    await double(pad, REST)
+    await until('let go on the pad', async () => !(await armState(page)).held, 5000)
+    await sleep(700)
+    const put = await armState(page)
+    if (Math.abs(put.bx - pad) > 3 || Math.abs(put.by - REST) > 0.5) throw new Error(`the block isn't on the pad: ${JSON.stringify(put)}`)
+    return `${Math.round(from)} → ${Math.round(put.bx)}`
+  }
+
+  await check('the Move card with a mouse: in Motion the hand follows the mouse over the card and a click works the clamp, moving nothing; in Drag a drag moves the hand, a click sends it there and a double click works the clamp there; a whole pick and place in each; arrows and the visit keep the choice', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, ignoreHTTPSErrors: true })
+    const page = await ctx.newPage()
+    await page.goto(`${local.origin}/`)
+    const { at } = await cardInView(page, 'arm')
+    const radios = await page.locator(`${ARM} .scene-modes [role="radio"]`).count()
+    if (radios !== 2) throw new Error(`the switch has ${radios} choices`)
+    if ((await modeOf(page)) !== 'motion') throw new Error(`it opened in ${await modeOf(page)}`)
+    const tips = await page.evaluate((c) => [...document.querySelectorAll(`${c} .scene-modes button`)].map((b) => b.title), ARM)
+    const choose = async (m) => { await page.locator(`${ARM} .scene-modes [data-mode="${m}"]`).click(); await until(`${m} picked`, async () => (await modeOf(page)) === m, 3000) }
+    // Motion: the hand goes where the mouse is over the card; a click, where the mouse is, works the clamp.
+    const line = await lineOf(page)
+    const steer = async (x, y) => { await page.mouse.move(...at(x, y), { steps: 10 }); await handAt(page, x, y) }
+    const click = async () => { await page.mouse.down(); await page.mouse.up() }
+    await steer(150, 110)
+    await letGo(page, click)
+    const shut = await clampClick(page, click, true)
+    const opened = await clampClick(page, click, false)
+    const motion = await motionPlace(page, steer, click)
+    // Drag: the mouse passing over moves nothing; a drag moves the hand by as much as the mouse moves; a click sends it
+    // there.
+    await choose('drag')
+    const d0 = await armState(page)
+    await page.mouse.move(...at(60, 200), { steps: 8 })
+    await page.mouse.move(...at(330, 60), { steps: 8 })
+    await sleep(600)
+    const d1 = await armState(page)
+    if (Math.hypot(d1.x - d0.x, d1.y - d0.y) > 1) throw new Error(`the mouse passing over in Drag moved the hand: ${JSON.stringify({ d0, d1 })}`)
+    await page.mouse.click(...at(150, 100))
+    await handAt(page, 150, 100)
+    await page.mouse.move(...at(260, 60))
+    await page.mouse.down()
+    for (let i = 1; i <= 12; i++) { await page.mouse.move(...at(260 + (40 * i) / 12, 60 + (30 * i) / 12)); await sleep(25) }
+    await page.mouse.up()
+    await handAt(page, 190, 130)
+    const drag = await dragPlace(page, (x, y) => page.mouse.click(...at(x, y)), (x, y) => page.mouse.dblclick(...at(x, y)))
+    // The keyboard moves between the choices, and the choice lasts the visit.
+    await page.locator(`${ARM} .scene-modes [aria-checked="true"]`).focus()
+    await page.keyboard.press('ArrowRight')
+    const focused = await page.evaluate(() => document.activeElement?.dataset?.mode)
+    if ((await modeOf(page)) !== 'motion' || focused !== 'motion') throw new Error(`an arrow key left it at ${await modeOf(page)} (focus on ${focused})`)
+    await page.keyboard.press('ArrowRight')
+    await page.reload({ waitUntil: 'load' })
+    await until('the switch again', () => modeOf(page).catch(() => null), 8000)
+    const kept = await modeOf(page)
+    await ctx.close()
+    if (kept !== 'drag') throw new Error(`after a reload it was ${kept}`)
+    return `tips "${tips.join('", "')}"; Motion's line "${line}"; clicks: hand ${Math.max(shut, opened).toFixed(2)} off, closed and opened; block ${motion} in Motion, ${drag} in Drag; arrows and reload kept it`
+  })
+
+  await check('the Move card on a phone: in Motion the first tap turns the tilt on and says so, then the hand follows the tilt and a tap works the clamp, moving nothing; in Drag a held finger drags the hand, a tap sends it there and a double tap works the clamp there; a whole pick and place in each', async () => {
+    const ctx = await browser.newContext({ ...devices['Pixel 7'], ignoreHTTPSErrors: true })
+    const page = await ctx.newPage()
+    await page.goto(`${local.origin}/`)
+    // The hero's opening over first: when it ends, however the phone's held becomes level for the tilt.
+    await until('the marble at rest after the opening', () => restingOnDot(page), 25000, 300)
+    const { at, k } = await cardInView(page, 'arm')
+    const cdp = await ctx.newCDPSession(page)
+    const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 1 }] })
+    // Both halves of a tap at once: sent one after the other, a busy page can see them far enough apart to be a long press.
+    const tapAt = (x, y) => Promise.all([touch('touchStart', x, y), touch('touchEnd')])
+    // A double tap's events carry their own times, as a phone's do (the second tap 150 ms after the first), so
+    // however late a busy page hears them, they're a double tap.
+    const doubleAt = (x, y) => {
+      const t = Date.now() / 1000 - 0.25
+      const send = (type, dt) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 1 }], timestamp: t + dt })
+      return Promise.all([send('touchStart', 0), send('touchEnd', 0.04), send('touchStart', 0.15), send('touchEnd', 0.19)])
+    }
+    const choose = async (m) => {
+      const b = await page.locator(`${ARM} .scene-modes [data-mode="${m}"]`).boundingBox()
+      await tapAt(b.x + b.width / 2, b.y + b.height / 2)
+      await until(`${m} picked by a tap`, async () => (await modeOf(page)) === m, 3000)
+    }
+    const tap = () => tapAt(...at(40, 40))
+    // Motion: before the tilt's on, the card says a tap turns it on; the first tap does, and the card says so.
+    const asked = await lineOf(page)
+    await tap()
+    await until('the tilt on', () => page.evaluate(() => document.documentElement.classList.contains('tilting')), 3000)
+    const told = await until('the card saying so', async () => { const l = await lineOf(page); return l !== asked ? l : null }, 3000)
+    // The phone's tilt, from how it's held when the tilt starts (the middle of its first readings): turned so the
+    // scene's tilt point is at (x, y) (viewBox units) by the page's own mapping (24 degrees past a 1.2 degree dead zone
+    // reach 0.42 of the width, and 0.4 of the height, from the middle), smoothly, as a hand turns it, and held there.
+    const send = (b, g) => page.evaluate(([b, g]) => dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 0, beta: b, gamma: g })), [b, g])
+    for (let i = 0; i < 8; i++) { await send(40, 0); await sleep(10) }
+    let now = { b: 40, g: 0 }
+    const deg = (v) => (v ? Math.sign(v) * (Math.abs(v) + 1.2) : 0)
+    const tiltTo = async (x, y) => {
+      const to = { b: 40 + deg(((y - 130) / (260 * 0.4)) * 24), g: deg(((x - 200) / (400 * 0.42)) * 24) }
+      for (let i = 1; i <= 12; i++) { await send(now.b + ((to.b - now.b) * i) / 12, now.g + ((to.g - now.g) * i) / 12); await sleep(30) }
+      for (let i = 0; i < 3; i++) { await send(to.b, to.g); await sleep(30) }
+      now = to
+    }
+    const steer = async (x, y) => { await tiltTo(x, y); await handAt(page, x, y) }
+    await steer(150, 110)
+    await letGo(page, tap)
+    const shut = await clampClick(page, tap, true)
+    const opened = await clampClick(page, tap, false)
+    const motion = await motionPlace(page, steer, tap)
+    // Drag: a finger held still a moment takes the hand, and drags it by as much as the finger moves; a tap sends it
+    // there.
+    await choose('drag')
+    await tapAt(...at(150, 100))
+    await handAt(page, 150, 100)
+    const [x0, y0] = at(260, 110)
+    await touch('touchStart', x0, y0)
+    await until('the finger taken', () => page.evaluate((c) => document.querySelector(c).classList.contains('held'), ARM), 3000)
+    // A phone sends no moves until the finger has gone a little way (its touch slop): up and out of it first, then to
+    // where the drag ends (40 across and 30 down from where it was held, in the scene's units).
+    for (let i = 1; i <= 3; i++) { await touch('touchMove', x0, y0 - 10 * i); await sleep(30) }
+    for (let i = 1; i <= 12; i++) { await touch('touchMove', x0 + (40 * k * i) / 12, y0 - 30 + ((30 * k + 30) * i) / 12); await sleep(30) }
+    // The last move heard before the finger lifts.
+    await sleep(120)
+    await touch('touchEnd')
+    await handAt(page, 190, 130)
+    const drag = await dragPlace(page, (x, y) => tapAt(...at(x, y)), (x, y) => doubleAt(...at(x, y)))
+    await ctx.close()
+    return `"${asked}", then "${told}"; taps: hand ${Math.max(shut, opened).toFixed(2)} off, closed and opened; block ${motion} in Motion, ${drag} in Drag`
   })
 
   await check('the Play card keeps its ball in play: never still for 2 s, alone or with the mouse pushing it into the corners', async () => {
@@ -458,12 +719,30 @@ try {
         await page.evaluate(() => scrollTo(0, 0))
         await tilt.on()
         await sleep(250)
-        // Hopped onto open floor (a tap there), then tipped into each side and toward you.
-        const open = await page.evaluate(() => { const q = document.querySelector('.quick li')?.getBoundingClientRect(); return q && q.bottom < innerHeight - 30 ? { x: q.right + 40, y: q.top + q.height / 2 } : { x: innerWidth * 0.78, y: innerHeight * 0.6 } })
-        await page.touchscreen.tap(open.x, open.y)
-        await sleep(1400)
-        // (Sideways, a little toward you too: along the bottom, clear of the headline.)
-        for (const [wall, down, right] of [['left', 6, -16], ['right', 6, 16], ['bottom', 14, 0]]) {
+        // Before each press, hopped onto open floor (a tap there) with a clear way to that side, and tipped straight
+        // into it, harder than it takes to climb a raised thing: along the lowest row clear right across the screen
+        // (below the headline, clear of the raised things and their sides), and down the column clear from there to
+        // the bottom nearest the middle.
+        const ways = await page.evaluate(() => {
+          const blocks = [...document.querySelectorAll('.hero .cta .btn, .hero [data-hint], .hero [data-sound], .hero .quick .qi, #hero-h')]
+            .map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0).map((r) => ({ l: r.left, t: r.top, r: r.right, b: r.bottom + 16 }))
+          const m = 16
+          const free = (l, t, r, b) => blocks.every((q) => q.r < l || q.l > r || q.b < t || q.t > b)
+          let row = NaN, col = NaN, down = NaN
+          for (let y = innerHeight - 30; y >= 90 && Number.isNaN(row); y -= 1) if (free(0, y - m, innerWidth, y + m)) row = y
+          // The column down to the bottom: nearest the middle, starting as high up as it's clear.
+          for (let k = 0; k < innerWidth / 2 && Number.isNaN(col); k += 2) {
+            for (const x of [innerWidth / 2 + k, innerWidth / 2 - k]) {
+              if (!Number.isNaN(col) || x < m || x > innerWidth - m) continue
+              for (let y = 90; y <= innerHeight - 40; y += 1) if (free(x - m, y - m, x + m, innerHeight)) { col = x; down = y; break }
+            }
+          }
+          return [['left', innerWidth / 2, row, 0, -16], ['right', innerWidth / 2, row, 0, 16], ['bottom', col, down, 16, 0]]
+        })
+        if (ways.some((w) => Number.isNaN(w[1]) || Number.isNaN(w[2]))) throw new Error(`${name}: no clear way to an edge: ${JSON.stringify(ways)}`)
+        for (const [wall, x, y, down, right] of ways) {
+          await page.touchscreen.tap(x, y)
+          await simWait(page, 1.4)
           await settle(page, () => tilt.tip(down, right))
           await measure(wall)
           await tilt.tip(0, 0)
@@ -471,10 +750,10 @@ try {
         // The top: onto the headline's first letter, a short hop to the line above it, and tipped away from you.
         const first = await page.evaluate(() => { const r = document.createRange(); const h = document.getElementById('hero-h'); r.setStart(h.firstChild, 0); r.setEnd(h.firstChild, 1); const b = r.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height * 0.6 } })
         await page.touchscreen.tap(first.x, first.y)
-        await sleep(1400)
+        await simWait(page, 1.6)
         const line = await page.evaluate(() => { const e = document.querySelector('.hero .eyebrow').getBoundingClientRect(); return { x: e.left + 40, y: e.top + e.height / 2 } })
         await page.touchscreen.tap(line.x, line.y)
-        await sleep(1400)
+        await simWait(page, 1.4)
         await settle(page, () => tilt.tip(-14, 0))
         await measure('top')
       } else {
@@ -505,17 +784,18 @@ try {
     await page.evaluate(() => scrollTo(0, 0))
     await tilt.on()
     await sleep(250)
-    const open = await page.evaluate(() => { const q = document.querySelector('.quick li').getBoundingClientRect(); return { x: q.right + 40, y: q.top + q.height / 2 } })
+    // Hopped onto open floor (below the steps' icons, clear of everything raised).
+    const open = await page.evaluate(() => { const q = document.querySelector('.quick').getBoundingClientRect(), h = document.querySelector('[data-hint]').getBoundingClientRect(); return { x: innerWidth / 2, y: (q.bottom + h.top) / 2 } })
     await page.touchscreen.tap(open.x, open.y)
-    await sleep(1600)
+    await simWait(page, 1.6)
     const before = await audio()
     // Tipped hard to the right: across, and a knock against the side.
-    const knock = await until('a knock heard', async () => { await tilt.tip(0, 20); const a = await audio(); return a.kinds.wall > before.kinds.wall && a.peakDb > -30 ? a : null }, 8000, 90)
+    const knock = await simUntil(page, 'a knock heard', async () => { await tilt.tip(0, 20); const a = await audio(); return a.kinds.wall > before.kinds.wall && a.peakDb > -30 ? a : null }, 6, 90)
     // Leaning on it, and rolling along it: no more knocks.
     await settle(page, () => tilt.tip(0, 20))
     const leaning = (await audio()).kinds.wall
-    const end = Date.now() + 1500
-    while (Date.now() < end) { await tilt.tip(8, 18); await sleep(90) }
+    const t0 = (await sim(page)).t
+    while ((await sim(page)).t - t0 < 1.5) { await tilt.tip(8, 18); await sleep(90) }
     const after = await audio()
     await ctx.close()
     if (knock.state !== 'on') throw new Error(`sound is ${knock.state}`)
@@ -545,16 +825,20 @@ try {
     await sleep(250)
     const pads = await page.evaluate(() => window.__home.pads())
     const send = 1000 + pads.findIndex((p) => /send it/i.test(p)), see = 1000 + pads.findIndex((p) => /see what/i.test(p))
-    const open = await page.evaluate(() => { const q = document.querySelector('.quick li').getBoundingClientRect(); return { x: q.right + 40, y: q.top + q.height / 2 } })
+    // Hopped onto open floor below the buttons (below the steps' icons, clear of everything raised).
+    const open = await page.evaluate(() => { const q = document.querySelector('.quick').getBoundingClientRect(), h = document.querySelector('[data-hint]').getBoundingClientRect(); return { x: innerWidth / 2, y: (q.bottom + h.top) / 2 } })
     await page.touchscreen.tap(open.x, open.y)
-    await sleep(1600)
+    await simWait(page, 1.6)
     const top = await page.evaluate(() => document.querySelector('[data-send]').getBoundingClientRect().top)
     const path = []
-    const end = Date.now() + 7000
-    while (Date.now() < end) {
-      await tilt.tip(-10, 0)
+    const t0 = (await sim(page)).t, end = Date.now() + 60000
+    // (A clear tilt, 16°: a raised thing takes more than 13° to climb.)
+    let atop = NaN
+    while ((await sim(page)).t - t0 < 9 && Date.now() < end) {
+      await tilt.tip(-16, 0)
       const t = await me(page)
       if (path.at(-1) !== t.on) path.push(t.on)
+      if (t.on === see && Number.isNaN(atop)) atop = t.h
       if (t.y < top - 30 && path.includes(send)) break
       await sleep(90)
     }
@@ -564,7 +848,9 @@ try {
     if (onSee < 0 || onSend < onSee) throw new Error(`it went ${path.join(' → ')} (the buttons are ${see} and ${send})`)
     if (path.at(-1) !== -1 && path.at(-1) !== -2) throw new Error(`it ended on ${path.at(-1)}`)
     if (acted) throw new Error(`a button acted ${acted} time(s)`)
-    return `floor → "${pads[see - 1000]}" → "${pads[send - 1000]}" → floor above them; no button acted`
+    // Up on a block 0.3 em tall.
+    if (!(Math.abs(atop - 0.3) < 0.02)) throw new Error(`on "${pads[see - 1000]}" it was ${atop} em up, not 0.3`)
+    return `floor → "${pads[see - 1000]}" (${atop.toFixed(2)} em up) → "${pads[send - 1000]}" → floor above them; no button acted`
   })
 
   await check('on a phone in a noisy hand, a marble in the o, in the p, and across the r and the full stop rests dead still, with no jumps', async () => {
@@ -607,7 +893,7 @@ try {
       if (letters[i] !== what) throw new Error(`letter ${i} is "${letters[i]}", not "${what}"`)
       const c = counters.find((q) => q.letter === i)
       await page.evaluate(([x, y]) => window.__home.drop(x, y), [c.x, c.y])
-      await sleep(3000)
+      await simWait(page, 3)
       const w = await watch(3000)
       if (!w.held) throw new Error(`the marble isn't sitting in the ${what}: ${JSON.stringify(w)}`)
       if (w.most > 0.1) throw new Error(`in the ${what}, it moved ${w.most.toFixed(3)} px in a frame`)
@@ -619,13 +905,65 @@ try {
     const gap = (await page.evaluate(() => window.__home.gaps())).find((q) => q.a === last - 1 && q.b === last)
     if (!gap) throw new Error('no gap narrower than a marble between the r and the full stop')
     await page.evaluate(([x, y]) => window.__home.drop(x, y), [gap.x, gap.y])
-    await sleep(3000)
+    await simWait(page, 3)
     const w = await watch(3000)
     if (w.most > 0.1) throw new Error(`between the r and the full stop, it moved ${w.most.toFixed(3)} px in a frame (${JSON.stringify(w)})`)
     seen.push(`r|. ${w.most.toFixed(3)} px (${w.held ? 'held across the gap' : w.on === -1 ? 'on the floor between them' : `on raised thing or letter ${w.on}`})`)
     await page.evaluate(() => clearInterval(window.__hand))
     await ctx.close()
     return `the most it moved in a frame: ${seen.join(', ')}`
+  })
+
+  await check('the raised things are blocks 0.3 em tall, drawn as tall as the field sees them; the steps\' icons have a side, a glass top and a shadow like the sound control', async () => {
+    const seen = []
+    for (const [name, size] of [['390x844', { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 }], ['1280x800', { viewport: { width: 1280, height: 800 } }]]) {
+      const ctx = await browser.newContext({ ...size, ignoreHTTPSErrors: true, reducedMotion: 'reduce' })
+      const page = await ctx.newPage()
+      await page.goto(`${local.origin}/?quality=low`)
+      await field3d(page)
+      await until('the raised things drawn', () => page.evaluate(() => window.__home.steps().some((s) => s.drawn.dy > 0)), 10000)
+      await sleep(300)
+      const steps = await page.evaluate(() => window.__home.steps())
+      const shown = steps.filter((s) => s.side)
+      if (shown.length < 6) throw new Error(`${name}: ${shown.length} raised things: ${JSON.stringify(steps)}`)
+      for (const s of shown) {
+        // Three times the first ones (0.1 em), and drawn as the field sees them, to the half pixel.
+        if (Math.abs(s.height - 0.3) > 1e-9) throw new Error(`${name}: "${s.text}" is ${s.height} em tall`)
+        if (Math.abs(s.drawn.dx - s.side.dx) > 0.5 || Math.abs(s.drawn.dy - s.side.dy) > 0.5) throw new Error(`${name}: "${s.text}" drawn ${JSON.stringify(s.drawn)}, seen ${JSON.stringify(s.side)}`)
+        if (s.drawn.dy < (name === '390x844' ? 3.5 : 7)) throw new Error(`${name}: "${s.text}" is drawn only ${s.drawn.dy} px tall`)
+      }
+      // The icons and the sound control: a glass top, and a side lighter than the floor's shadow below it.
+      const look = await page.evaluate(() => [...document.querySelectorAll('.hero .quick .qi, .hero [data-sound]')].map((el) => {
+        const r = el.getBoundingClientRect(), cs = getComputedStyle(el)
+        const alpha = (cs.backgroundColor.match(/[\d.]+/g) ?? []).map(Number)[3] ?? 1
+        return { sound: el.matches('[data-sound]'), x: r.left, y: r.top, w: r.width, h: r.height, alpha, dy: parseFloat(el.style.getPropertyValue('--pad-dy')) || 0, dx: parseFloat(el.style.getPropertyValue('--pad-dx')) || 0, shadow: cs.boxShadow }
+      }))
+      const shot = await page.screenshot()
+      const dpr = size.deviceScaleFactor ?? 1
+      const { data, info } = await sharp(shot).raw().toBuffer({ resolveWithObject: true })
+      const lum = (x0, y0, x1, y1) => {
+        let sum = 0, n = 0
+        for (let y = Math.round(y0 * dpr); y < Math.round(y1 * dpr); y++) for (let x = Math.round(x0 * dpr); x < Math.round(x1 * dpr); x++) {
+          const k = (y * info.width + x) * info.channels
+          sum += 0.2126 * data[k] + 0.7152 * data[k + 1] + 0.0722 * data[k + 2]; n++
+        }
+        return n ? sum / n : 0
+      }
+      const sides = []
+      for (const q of look) {
+        if (!q.sound && q.alpha < 0.3) throw new Error(`${name}: an icon's top is clear glass (alpha ${q.alpha})`)
+        if (!/px \d/.test(q.shadow) || q.shadow === 'none') throw new Error(`${name}: no side drawn: ${q.shadow}`)
+        // Its side: the band under its middle, as tall as it's drawn (leaning with it); the floor's shadow just under that.
+        const mx = q.x + q.w * 0.3 + q.dx * 0.5, bw = q.w * 0.4
+        const side = lum(mx, q.y + q.h + 1, mx + bw, q.y + q.h + q.dy - 1)
+        const floor = lum(mx + q.dx * 0.5, q.y + q.h + q.dy + 3, mx + q.dx * 0.5 + bw, q.y + q.h + q.dy + 7)
+        if (!(side > floor + 6)) throw new Error(`${name}: ${q.sound ? 'the sound control' : 'an icon'} shows no side (side ${side.toFixed(1)}, floor ${floor.toFixed(1)})`)
+        sides.push(`${q.sound ? 'sound' : 'icon'} ${side.toFixed(0)}/${floor.toFixed(0)}`)
+      }
+      seen.push(`${name}: ${shown.length} blocks 0.3 em, drawn ${Math.min(...shown.map((s) => s.drawn.dy))}–${Math.max(...shown.map((s) => s.drawn.dy))} px tall; sides over floor ${sides.join(', ')}`)
+      await ctx.close()
+    }
+    return seen.join('; ')
   })
 
   const screenCtx = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true })
@@ -637,8 +975,8 @@ try {
     await until('the 3D field', () => screen.evaluate(() => document.documentElement.classList.contains('field3d')), 15000)
     const tip = () => screen.evaluate(() => window.__home.tips().find((t) => t.id === 'me'))
     const path = []
-    const end = Date.now() + 25000
-    while (Date.now() < end) {
+    const t0 = (await sim(screen)).t, end = Date.now() + 90000
+    while ((await sim(screen)).t - t0 < 25 && Date.now() < end) {
       path.push(await tip())
       if (path.length > 20 && (await restingOnDot(screen))) break
       await sleep(80)
@@ -676,8 +1014,8 @@ try {
     await screen.mouse.move(x, y)
     await screen.mouse.down()
     await screen.mouse.up()
-    const on = await until('the marble resting on a letter', async () => { const t = await screen.evaluate(() => window.__home.tips().find((q) => q.id === 'me')); return t.on >= 0 ? t : null }, 8000)
-    await sleep(800)
+    const on = await simUntil(screen, 'the marble resting on a letter', async () => { const t = await screen.evaluate(() => window.__home.tips().find((q) => q.id === 'me')); return t.on >= 0 ? t : null }, 8)
+    await simWait(screen, 0.8)
     const later = await screen.evaluate(() => window.__home.tips().find((q) => q.id === 'me'))
     if (later.on !== on.on) throw new Error(`it rolled off letter ${on.on} onto ${later.on}`)
     if (Math.hypot(later.x - x, later.y - y) > 80) throw new Error(`it landed ${Math.hypot(later.x - x, later.y - y).toFixed(0)}px from the click`)
@@ -688,10 +1026,10 @@ try {
     // The o of "Your": a click hops the marble onto it; pointed at the middle of its counter, it goes in.
     const o = await screen.evaluate(() => { const r = document.createRange(); const h = document.getElementById('hero-h'); r.setStart(h.firstChild, 1); r.setEnd(h.firstChild, 2); const b = r.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height * 0.62, w: b.width } })
     await screen.mouse.click(o.x - o.w * 0.3, o.y)
-    await sleep(1200)
-    await until('the marble in the counter', async () => { await screen.mouse.move(o.x + Math.random() * 0.5, o.y); return (await me(screen)).held }, 8000, 150)
+    await simWait(screen, 1.2)
+    await simUntil(screen, 'the marble in the counter', async () => { await screen.mouse.move(o.x + Math.random() * 0.5, o.y); return (await me(screen)).held }, 8, 150)
     // Left there (the mouse still): it settles, and stays in the counter.
-    await sleep(3200)
+    await simWait(screen, 3.2)
     const held = await me(screen)
     if (!held.held) throw new Error(`it didn't stay in the counter: ${JSON.stringify(held)}`)
     // Still: its position read every frame for a second and a half.
@@ -726,20 +1064,26 @@ try {
     // From the open floor beside it (a click hops the marble there: rolling, it can't get past the headline's letters)...
     const beside = { x: b.x + b.width + 130, y: b.y + b.height / 2 }
     await screen.mouse.click(beside.x, beside.y)
-    await until('the marble beside the button', async () => { const t = await tip(); return t.on === -1 && Math.hypot(t.x - beside.x, t.y - beside.y) < 40 ? t : null }, 10000, 200)
-    // ...pointing at the button (not clicking): the marble rolls over and is helped up onto it.
+    await simUntil(screen, 'the marble beside the button', async () => { const t = await tip(); return t.on === -1 && Math.hypot(t.x - beside.x, t.y - beside.y) < 40 ? t : null }, 10, 200)
+    // ...pointing at the button (not clicking): the marble rolls over, is helped up onto it, and comes to where it's
+    // pointed (it's on it from the moment its middle is over the edge: waited for, over the button).
     const at = { x: b.x + b.width * 0.6, y: b.y + b.height / 2 }
     await screen.mouse.move(at.x, at.y, { steps: 10 })
-    const on = await until('the marble on the button', async () => { await screen.mouse.move(at.x + Math.random(), at.y); const t = await tip(); return t.on === 1000 + i ? t : null }, 12000, 200)
+    let last = null
+    const on = await simUntil(screen, 'the marble on the button', async () => {
+      await screen.mouse.move(at.x + Math.random(), at.y)
+      const t = (last = await tip())
+      return t.on === 1000 + i && t.x > b.x + 4 && t.x < b.x + b.width - 4 && t.y > b.y - 25 && t.y < b.y + b.height ? t : null
+    }, 12, 200).catch((e) => { throw new Error(`${e.message}: the marble is at ${last?.x.toFixed(0)},${last?.y.toFixed(0)} on ${last?.on}`) })
     const lit = await until('the button lit under it', () => screen.evaluate(() => { const s = document.querySelector('.cta-alt').style; const g = parseFloat(s.getPropertyValue('--orb-glow') || '0'); return g > 0.5 ? { glow: g, press: s.translate } : null }), 4000)
-    if (on.x < b.x || on.x > b.x + b.width || on.y < b.y - 25 || on.y > b.y + b.height) throw new Error(`the marble is at ${on.x.toFixed(0)},${on.y.toFixed(0)}, not over the button`)
+    const up = await simUntil(screen, 'the marble resting on its top', async () => { const t = await tip(); return t.on === 1000 + i && Math.abs(t.h - 0.3) < 0.02 ? t : null }, 4, 100)
     // Pointing below it: the marble rolls off its edge and drops to the floor.
     const below = b.y + b.height + 110
     await screen.mouse.move(at.x, below, { steps: 6 })
-    const off = await until('the marble back on the floor', async () => { await screen.mouse.move(at.x + Math.random(), below); const t = await tip(); return t.on === -1 && t.y > b.y + b.height ? t : null }, 12000, 200)
+    const off = await simUntil(screen, 'the marble back on the floor', async () => { await screen.mouse.move(at.x + Math.random(), below); const t = await tip(); return t.on === -1 && t.y > b.y + b.height ? t : null }, 12, 200)
     const acted = await screen.evaluate(() => window.__acted)
     if (acted || screen.url() !== url) throw new Error(`the button acted: ${acted} clicks, now at ${screen.url()}`)
-    return `on "${pads[i]}" at ${on.x.toFixed(0)},${on.y.toFixed(0)} (lit ${lit.glow}, pressed ${lit.press || 'none'}), then off to ${off.x.toFixed(0)},${off.y.toFixed(0)}; no click, no navigation`
+    return `on "${pads[i]}" at ${on.x.toFixed(0)},${on.y.toFixed(0)}, ${up.h.toFixed(2)} em up (lit ${lit.glow}, pressed ${lit.press || 'none'}), then off to ${off.x.toFixed(0)},${off.y.toFixed(0)}; no click, no navigation`
   })
 
   const dir = await mkdtemp(join(tmpdir(), 'obpal-home-'))
@@ -771,7 +1115,7 @@ try {
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x0, y: y0, id: 1 }] })
     for (let i = 1; i <= 12; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x0 + i * 9, y: y0 - i * 5, id: 1 }] }); await sleep(30) }
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
-    const after = await until('the marble moved', async () => { const t = await tip(); return Math.hypot(t.x - before.x, t.y - before.y) > 20 ? t : null }, 5000)
+    const after = await simUntil(screen, 'the marble moved', async () => { const t = await tip(); return Math.hypot(t.x - before.x, t.y - before.y) > 20 ? t : null }, 5)
     if (after.x <= before.x) throw new Error(`it went left (${before.x.toFixed(0)} → ${after.x.toFixed(0)}) for a swipe right`)
     return `stick ${before.x.toFixed(0)},${before.y.toFixed(0)} → ${after.x.toFixed(0)},${after.y.toFixed(0)}, lit ${after.life.toFixed(2)}`
   })
@@ -781,12 +1125,12 @@ try {
     const high = async (what, go) => {
       // Settled: low and staying there (a marble still bouncing dips under 0.25 em too, and a toss that comes while
       // it's in the air only waits a moment for it to land).
-      await until(`${what}: the marble settled`, async () => { const a = await tip(); await sleep(150); const b = await tip(); return a.h < 0.25 && Math.abs(a.h - b.h) < 0.01 }, 8000)
+      await simUntil(screen, `${what}: the marble settled`, async () => { const a = await tip(); await sleep(150); const b = await tip(); return a.h < 0.25 && Math.abs(a.h - b.h) < 0.01 }, 8)
       await go()
       // (What it did instead, if it doesn't: the highest it went, and where it was.)
       let seen = null
       try {
-        return await until(what, async () => { const t = await tip(); if (!seen || t.h > seen.h) seen = t; return t.h > 0.3 ? t.h : null }, 5000)
+        return await simUntil(screen, what, async () => { const t = await tip(); if (!seen || t.h > seen.h) seen = t; return t.h > 0.3 ? t.h : null }, 5, 50)
       } catch (e) {
         throw new Error(`${e.message} (at most ${seen?.h.toFixed(2)} em up, on ${seen?.on} at ${seen?.x.toFixed(0)},${seen?.y.toFixed(0)})`)
       }
@@ -828,11 +1172,11 @@ try {
     await sleep(60)
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
     await until('the gyro on', () => phone.evaluate(() => document.getElementById('gyro').getAttribute('aria-pressed') === 'true'), 5000)
-    await until('the marble settled', async () => (await tip()).h < 0.25, 8000)
+    await simUntil(screen, 'the marble settled', async () => (await tip()).h < 0.25, 8)
     const before = await tip()
     // Tipped to the right: the marble rolls right.
     await phone.evaluate(() => { window.__tray.gamma = 22 })
-    const after = await until('the marble rolled right', async () => { const t = await tip(); return t.x - before.x > 40 ? t : null }, 6000)
+    const after = await simUntil(screen, 'the marble rolled right', async () => { const t = await tip(); return t.x - before.x > 40 ? t : null }, 6)
     await phone.evaluate(() => { window.__tray.gamma = 0 })
     return `${before.x.toFixed(0)} → ${after.x.toFixed(0)}px`
   })

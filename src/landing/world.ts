@@ -23,11 +23,11 @@ export const DEPTH = 0.3
 /** A marble has weight: it follows its steering on a soft spring, and in the air mostly keeps its momentum. */
 const STEER = { omega: 4.6, zeta: 0.78, air: 0.3 }
 /**
- * The page's raised things are steps this high (em: half a marble's radius, a block it bumps against and needs a good
- * tilt, about 9°, or a point, to get up onto), and footprints up to CLIMB high can be climbed (./bounce.ts).
+ * The page's raised things are blocks this high (em: half as tall again as a marble's radius, and taller than the
+ * letters): a marble knocks off one's side, and needs a clear tilt, about 13°, or a point, to be helped up onto it. They
+ * are steps (./bounce.ts Footprint.step) whatever their height; the letters never are (a marble hops onto a letter).
  */
-export const PAD_H = 0.1
-const CLIMB = 0.15
+export const PAD_H = 0.3
 /** A raised thing's footprint id is this plus its index (letters count from 0). */
 export const PAD_ID = 1000
 /** Hits slower than this (em/s) aren't reported at all. */
@@ -253,7 +253,7 @@ export function createWorld(): World {
         x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z)
       }
       const c = rawFloorAt(b.x + b.w / 2, b.y + b.h / 2, PAD_H)
-      return [{ id: PAD_ID + i, height: PAD_H, box: [x0, z0, x1, z1], rings: [ring], spot: [c.x, c.z] }]
+      return [{ id: PAD_ID + i, height: PAD_H, box: [x0, z0, x1, z1], rings: [ring], spot: [c.x, c.z], step: true }]
     })
     solid = [...footprints, ...pads]
   }
@@ -440,7 +440,7 @@ export function createWorld(): World {
   }
 
   /** The marbles as the physics steps them, with what moves each. */
-  const bodiesOf = (all: WorldMarble[]): Body[] => all.map((m) => ({ o: m.orb, opts: { hop: HOP, bounds, climb: CLIMB, ...STEER, push: m.push ?? undefined } as StepOptions }))
+  const bodiesOf = (all: WorldMarble[]): Body[] => all.map((m) => ({ o: m.orb, opts: { hop: HOP, bounds, ...STEER, push: m.push ?? undefined } as StepOptions }))
   /** A marble's copy, to step without it (its memory too). */
   const copyOrb = (o: Orb): Orb => ({
     ...o, target: o.target && { ...o.target }, route: o.route.map((p) => ({ ...p })), aim: o.aim && { ...o.aim }, toss: o.toss && { ...o.toss },

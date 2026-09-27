@@ -4,13 +4,16 @@
  * catalogue shows on a device's card.
  */
 import * as THREE from 'three'
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
+import * as kit from '../kit'
+export { box } from '../kit'
 import type { Theme } from '../../ui/themes'
 import type { DeviceLogic } from './types'
 import type { Framing, Stage } from './stage'
 
 export interface DeviceView {
   framing: Framing
+  /** A close look at one unit, without changing what any phone controls. */
+  inspect?(): Framing
   /** The height of the floor a pointing phone drives on (DeviceInput.spot), for a device that has one. */
   pickY?: number
   /** Draw a frame: each unit's holder's colour (null: nobody holds it). */
@@ -44,17 +47,14 @@ export interface ViewModule {
 export const IDLE = '#5b6472'
 
 export const mats = {
-  body: () => new THREE.MeshPhysicalMaterial({ color: '#dfe4eb', metalness: 0.35, roughness: 0.32, clearcoat: 0.6, clearcoatRoughness: 0.25 }),
-  metal: () => new THREE.MeshStandardMaterial({ color: '#c9d1dc', metalness: 0.85, roughness: 0.28 }),
-  dark: () => new THREE.MeshStandardMaterial({ color: '#1b2029', metalness: 0.5, roughness: 0.5 }),
-  rubber: () => new THREE.MeshStandardMaterial({ color: '#15181e', metalness: 0, roughness: 0.85 }),
-  glass: () => new THREE.MeshPhysicalMaterial({ color: '#9fb4d0', metalness: 0, roughness: 0.05, transmission: 0.6, thickness: 0.02, transparent: true, opacity: 0.55 }),
+  body: () => kit.plastic(),
+  metal: () => kit.metal,
+  dark: () => kit.plastic(kit.palette.carbon),
+  rubber: () => kit.rubber,
+  glass: () => kit.glass,
   /** A light that wears a colour: dim grey at rest, bright in its holder's colour. */
   glow: (c = IDLE) => new THREE.MeshStandardMaterial({ color: '#0b0f14', emissive: c, emissiveIntensity: 0.9, metalness: 0.2, roughness: 0.4 }),
 }
-
-/** A box with rounded edges (radius `r`, by default a fifth of its thinnest side). */
-export const box = (w: number, h: number, d: number, m: THREE.Material, r = Math.min(w, h, d) * 0.2) => new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 3, r), m)
 
 /** Set a glow material to its holder's colour (brighter), or back to rest. */
 export function wear(m: THREE.MeshStandardMaterial, color: string | null, rest = 0.6, lit = 2.2) {

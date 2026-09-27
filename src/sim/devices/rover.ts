@@ -47,7 +47,21 @@ export const ROVER = {
   steerMax: 0.52,
   steerRate: 3.2,
   /** The yard: half its width (x) and depth (z). */
-  yard: [4.6, 3] as const,
+  yard: [9.2, 6] as const,
+}
+
+/** Low traversable bridges. The same profile places the deck, wheels and chassis. */
+export const RAMPS = [
+  { x: -5.7, z: -1.8, halfWidth: 0.85, halfLength: 2, height: 0.46 },
+  { x: 5.7, z: -1.8, halfWidth: 0.85, halfLength: 2, height: 0.46 },
+]
+export const GATES = [{ x: -3.3, z: -4.4, width: 1.8 }, { x: 3.3, z: -4.4, width: 1.8 }]
+/** Ground height at a wheel, continuous at both ends of a ramp. */
+export function roverGround(x: number, z: number) {
+  for (const r of RAMPS) if (Math.abs(x - r.x) <= r.halfWidth && Math.abs(z - r.z) <= r.halfLength) {
+    return r.height * Math.min(1, (1 - Math.abs(z - r.z) / r.halfLength) * 2)
+  }
+  return 0
 }
 
 export interface Rover {
@@ -164,7 +178,7 @@ export class RoverLogic implements DeviceLogic {
     this.rovers = Array.from({ length: count }, (_, n) => parked(n, count))
     this.sticks = this.rovers.map(() => new DragStick())
     // A slalom of cones across the yard, and two further back.
-    const spots: [number, number][] = [[-3, -0.7], [-1.5, -1.2], [0, -0.7], [1.5, -1.2], [3, -0.7], [-2.2, -2.2], [2.2, -2.2]]
+    const spots: [number, number][] = [[-3, -0.7], [-1.5, -1.2], [0, -0.7], [1.5, -1.2], [3, -0.7], [-2.2, -2.2], [2.2, -2.2], [-7.8, -3.8], [-7.8, 0], [7.8, -3.8], [7.8, 0]]
     this.cones = spots.map(([x, z]) => ({ x, z, vx: 0, vz: 0, home: [x, z] }))
   }
 
@@ -205,6 +219,16 @@ export class RoverLogic implements DeviceLogic {
       let vx = fx * r.v
       let vz = fz * r.v
       let hit = 0
+      for (const gate of GATES) for (const side of [-1, 1]) {
+        const x = gate.x + side * gate.width / 2, dx = r.x - x, dz = r.z - gate.z
+        const distance = Math.hypot(dx, dz), clearance = R + 0.055
+        if (distance < clearance) {
+          const nx = distance > 1e-6 ? dx / distance : 1, nz = distance > 1e-6 ? dz / distance : 0
+          r.x = x + nx * clearance; r.z = gate.z + nz * clearance
+          const speed = vx * nx + vz * nz
+          if (speed < 0) { hit = Math.max(hit, -speed); vx -= nx * speed * 1.25; vz -= nz * speed * 1.25 }
+        }
+      }
       if (Math.abs(r.x) > X - R) { r.x = Math.sign(r.x) * (X - R); if (vx * Math.sign(r.x) > 0) { hit = Math.abs(vx); vx *= -0.25 } }
       if (Math.abs(r.z) > Z - R) { r.z = Math.sign(r.z) * (Z - R); if (vz * Math.sign(r.z) > 0) { hit = Math.max(hit, Math.abs(vz)); vz *= -0.25 } }
       if (hit) { r.v = vx * fx + vz * fz; this.bump(`f${n}`, n, hit) }

@@ -33,11 +33,11 @@ export const CLAW_SPEC: DeviceSpec = {
 /** Metres and seconds, in a cabinet's own frame (its middle at x = z = 0; y up from the room's floor). */
 export const CLAW = {
   /** The pit: half its side, its floor, and the gantry's height. */
-  half: 0.42,
+  half: 0.65,
   floor: 0.62,
   top: 1.48,
   /** The chute in the near left corner: prizes let go over it are won. */
-  chute: { x: -0.31, z: 0.31, half: 0.1 },
+  chute: { x: -0.53, z: 0.53, half: 0.1 },
   speed: 0.5,
   drop: 0.55,
   lift: 0.45,
@@ -50,7 +50,7 @@ export const CLAW = {
 }
 
 /** Where each cabinet stands in the room. */
-export const CABINETS: [number, number][] = [[-0.75, 0], [0.75, 0]]
+export const CABINETS: [number, number][] = [[-1, 0], [1, 0]]
 
 export type ClawPhase = 'idle' | 'drop' | 'close' | 'lift' | 'carry' | 'open'
 
@@ -76,19 +76,25 @@ export interface Claw {
 
 const PRIZE_COLORS = ['#c6ff34', '#b3a4ff', '#38bdf8', '#fb7185', '#fcd34d', '#6ee7b7']
 
-/** A cabinet's prizes: laid out on the pit's floor with a little jitter, clear of the chute. */
+/** A cabinet's prize bed, with a loose second layer in the middle, clear of the chute. */
 function prizes(seed: number): Prize[] {
   const rnd = seeded(seed)
   const out: Prize[] = []
-  for (let i = 0; i < 4; i++) {
-    for (let j = 0; j < 4; j++) {
-      const x = -0.3 + i * 0.2 + (rnd() - 0.5) * 0.05
-      const z = -0.3 + j * 0.2 + (rnd() - 0.5) * 0.05
+  for (let i = 0; i < 8; i++) {
+    for (let j = 0; j < 8; j++) {
+      const x = -0.53 + i * 0.148 + (rnd() - 0.5) * 0.025
+      const z = -0.53 + j * 0.148 + (rnd() - 0.5) * 0.025
       if (Math.abs(x - CLAW.chute.x) < CLAW.chute.half + 0.07 && Math.abs(z - CLAW.chute.z) < CLAW.chute.half + 0.07) continue
       const kind = rnd() < 0.6 ? 'orb' : 'cube'
       const r = kind === 'orb' ? 0.055 : 0.048
       out.push({ x, y: CLAW.floor + r, z, r, kind, color: PRIZE_COLORS[out.length % PRIZE_COLORS.length], held: false, won: 0 })
     }
+  }
+  const middle = out.filter(p => Math.abs(p.x) < 0.36 && Math.abs(p.z) < 0.36)
+  for (let i = 0; i < middle.length; i += 2) {
+    const base = middle[i], r = 0.055
+    out.push({ x: base.x + (rnd() - 0.5) * 0.025, y: base.y + base.r + r * 0.7, z: base.z + (rnd() - 0.5) * 0.025,
+      r, kind: 'orb', color: PRIZE_COLORS[(i + 3) % PRIZE_COLORS.length], held: false, won: 0 })
   }
   return out
 }
@@ -253,7 +259,7 @@ export class ClawLogic implements DeviceLogic {
         if (p.won > 1.6) this.respawn(p, n)
         continue
       }
-      const rest = Math.max(CLAW.floor + p.r, ...all.filter((o) => o !== p && !o.held && !o.won && Math.hypot(o.x - p.x, o.z - p.z) < (o.r + p.r) * 0.75).map((o) => o.y + o.r + p.r * 0.7))
+      const rest = Math.max(CLAW.floor + p.r, ...all.filter((o) => o !== p && !o.held && !o.won && o.y < p.y - 1e-5 && Math.hypot(o.x - p.x, o.z - p.z) < (o.r + p.r) * 0.75).map((o) => o.y + o.r + p.r * 0.7))
       if (p.y > rest) p.y = Math.max(rest, p.y - dt * 1.4)
       else p.y = rest
     }

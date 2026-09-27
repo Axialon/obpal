@@ -33,7 +33,7 @@ gh release create v<v> -R Axialon/obpal-link --title "ob.Pal Link <v>" --notes-f
   extension/release/obpal-link.zip extension/release/obpal-link-<v>.zip desktop/release/obpal-desktop-windows-x64.zip
 ```
 Check it:
-- `gh release view -R Axialon/obpal-link --json tagName,isLatest,assets` shows it as Latest with three assets.
+- `gh api repos/Axialon/obpal-link/releases/latest --jq '.tag_name + " " + ([.assets[].name]|join(","))'` shows the new tag as latest with three assets (`gh release view --json` has no `isLatest` field).
 - Download `https://github.com/Axialon/obpal-link/releases/latest/download/obpal-link.zip` and compare its SHA-256 (`Get-FileHash` / `sha256sum`) with the local `obpal-link.zip`.
 
 ## 5. The site

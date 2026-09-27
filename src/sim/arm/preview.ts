@@ -86,7 +86,7 @@ export function armPreview(id: ArmKindId): ArmPreview {
       object.traverse((o) => { const m = (o as THREE.Mesh).material; if (m) for (const x of Array.isArray(m) ? m : [m]) used.add(x) })
       model.dispose()
       block.geometry.dispose()
-      for (const m of used) m.dispose()
+      for (const m of used) if (!m.userData.simShared) m.dispose()
       object.removeFromParent()
     },
   }

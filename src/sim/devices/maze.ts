@@ -32,8 +32,8 @@ export const MAZE_SPEC: DeviceSpec = {
 /** Metres, seconds, radians. */
 export const MAZE = {
   /** The board's side, and its cells across. */
-  size: 1,
-  cells: 7,
+  size: 1.5,
+  cells: 9,
   wall: 0.014,
   ball: 0.028,
   hole: 0.042,

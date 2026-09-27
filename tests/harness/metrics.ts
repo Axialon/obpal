@@ -127,3 +127,26 @@ export function counters(fp: Footprint, counterOf: (fp: Footprint, x: number, z:
 export function gaps(h: Harness, width: number): { a: number; b: number; x: number; z: number; w: number }[] {
   return h.world.gaps(width)
 }
+
+/**
+ * Open floor right beside raised thing `i`, straight out from its middle (in front of it, else behind it, left of it,
+ * right of it: as it's seen, below it on screen, above, left, right), clear of everything else, and the tilt that runs
+ * a marble from there straight into it (degrees toward you and to the right, each -1, 0 or 1).
+ */
+export function beside(h: Harness, i: number): { x: number; z: number; down: number; right: number } {
+  const pad = h.world.pads.find((p) => p.id === 1000 + i)
+  if (!pad) throw new Error(`no raised thing ${i}`)
+  const [cx, cz] = pad.spot
+  const r = 0.2
+  for (const [dx, dz] of [[0, 1], [0, -1], [-1, 0], [1, 0]]) {
+    for (let d = 0; d < 3; d += 0.01) {
+      const x = cx + dx * d, z = cz + dz * d
+      const near = distTo(pad, x, r, z)
+      if (near < r + 0.02) continue
+      // Right beside it, and nothing else as near.
+      if (near > r + 0.06) break
+      if (h.world.surface(x, z).id === -1 && [...h.world.pads, ...h.world.footprints].every((fp) => fp === pad || distTo(fp, x, r, z) > r + 0.03)) return { x, z, down: -dz, right: -dx }
+    }
+  }
+  throw new Error(`no open floor beside raised thing ${i}`)
+}

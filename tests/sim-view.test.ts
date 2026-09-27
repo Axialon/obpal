@@ -45,6 +45,17 @@ describe("the sims' ladder: the screen's own pixels, or exactly twice them", () 
 })
 
 describe('the still picture', () => {
+  it('redraws when a lamp dims or an instanced prize moves', () => {
+    const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera()
+    const light = new THREE.PointLight(), prizes = new THREE.InstancedMesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial(), 2)
+    scene.add(light, prizes)
+    const before = signature(scene, camera)
+    light.intensity = 0.4
+    expect(changed(before, signature(scene, camera), 1e-5)).toBe(true)
+    const dimmed = signature(scene, camera)
+    prizes.setMatrixAt(0, new THREE.Matrix4().makeTranslation(0, 1, 0)); prizes.instanceMatrix.needsUpdate = true
+    expect(changed(dimmed, signature(scene, camera), 1e-5)).toBe(true)
+  })
   it('averages frames shifted over the whole pixel evenly, the first one not shifted at all', () => {
     expect(jitterOf(0)).toEqual([0, 0])
     const js = Array.from({ length: STILL_FRAMES }, (_, k) => jitterOf(k))

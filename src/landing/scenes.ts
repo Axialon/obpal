@@ -4,7 +4,8 @@
  * phone. SVG with gradients only: no filters, and nothing draws unless main.ts asks for a frame (on screen, lately
  * looked at), so a phone stays cool.
  */
-import { aim, BLOCK, FINGER, follow, HOLD, JOINT_R, LINK_W, PADS, PLATE, pose, RIM, story, TABLE, type Arm } from './arm'
+import { ICONS } from '../ui/icons'
+import { aim, BLOCK, FINGER, follow, HOLD, JOINT_R, LINK_W, PADS, play, PLATE, pose, RIM, SHOULDER, story, storyFrom, TABLE, tidy, type Arm, type Leg } from './arm'
 import { BALL_R, FIELD, PUCK_R, rally, stepRally } from './rally'
 
 const NS = 'http://www.w3.org/2000/svg'
@@ -36,8 +37,13 @@ const ROSE = '#fb7185'
 const AMBER = '#fcd34d'
 
 export interface Point { x: number; y: number }
-/** A way to play a scene, for the switch on its card: its name and tooltip, an icon, and whether a press presses. */
-export interface SceneMode { id: string; name: string; tip: string; icon: string; presses: boolean }
+/**
+ * A way to play a scene, for the switch on its card: its name, an icon, what to do in it (`tip` with a mouse, `touch`
+ * with a finger), and how it's played (./main.ts): 'motion', the scene's hand follows the phone's tilt, or the mouse
+ * over the card, and a click or tap works its gripper; 'drag', a drag steers the hand, a click or tap sends it there,
+ * and a double one works the gripper where it arrives.
+ */
+export interface SceneMode { id: string; name: string; tip: string; touch: string; icon: string; act: 'motion' | 'drag' }
 export interface Scene {
   svg: SVGSVGElement
   /**
@@ -48,16 +54,17 @@ export interface Scene {
   /** A tap or click at `p`. */
   press?(p: Point): void
   /**
-   * The ways to play it that its card switches between, the first by default. The pointer plays the scene in every
-   * one; a tap or click presses only in those that say so. None: every tap or click presses.
+   * The ways to play it that its card switches between, the first by default. A scene with them is played through
+   * them (its hand stays where it's left, ./main.ts); one without follows the pointer, and every tap or click presses.
    */
   modes?: readonly SceneMode[]
+  /** Where its hand is now (viewBox units), to keep it there; what it holds, it keeps holding. */
+  hold?(): Point
+  /** The nearest place to `p` its hand reaches. */
+  reach?(p: Point): Point
+  /** Work its gripper, a clamp (it lets go of what it holds, else closes, or opens again): now, or with `at`, once its hand gets there. */
+  grip?(at?: Point): void
 }
-
-/** The icons a scene's switch shows (the site's stroke icons, ../ui/icons.ts): move, and the gripper. */
-const icon = (d: string) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`
-const MOVE_ICON = icon('<path d="M12 3.5v17M3.5 12h17"/><path d="M9.3 6.2 12 3.5l2.7 2.7M9.3 17.8l2.7 2.7 2.7-2.7M6.2 9.3 3.5 12l2.7 2.7M17.8 9.3l2.7 2.7-2.7 2.7"/>')
-const GRIP_ICON = icon('<path d="M12 21v-5.5"/><path d="M6.5 15.5h11"/><path d="M6.5 15.5V9.2l2.6-4.7"/><path d="M17.5 15.5V9.2l-2.6-4.7"/>')
 
 let seq = 0
 /** A scene's frame: the stage light, and the gradients its parts share. */
@@ -244,7 +251,9 @@ export function armScene(): Scene {
   // Two pads the block goes between.
   for (const pd of PADS) el('rect', { x: pd.x - 24, y: TABLE - 5, width: 48, height: 5, rx: 2.5, fill: HAZE, 'fill-opacity': 0.22 }, svg)
   const handPath = el('path', { fill: 'none', stroke: LIME, 'stroke-opacity': 0.3, 'stroke-width': 1.2, 'stroke-dasharray': '1.5 4.5', 'stroke-linecap': 'round' }, svg)
-  const block = el('rect', { width: BLOCK, height: BLOCK, rx: 4, fill: LIME, stroke: DEEP, 'stroke-width': 1 }, svg)
+  // The block, and its glow when it's between the fingers: closing them now would take it.
+  const halo = el('rect', { width: BLOCK + 12, height: BLOCK + 12, rx: 9, fill: CORE, 'fill-opacity': 0 }, svg)
+  const block = el('rect', { width: BLOCK, height: BLOCK, rx: 4, fill: LIME, stroke: DEEP, 'stroke-width': 1, 'data-block': '' }, svg)
   // The turntable on the table, with a mark on its rim where the arm faces: it crosses the middle as the base turns.
   el('rect', { x: PLATE.x, y: PLATE.y, width: PLATE.w, height: PLATE.h, rx: 5, fill: u('glass'), stroke: HAZE, 'stroke-opacity': 0.4 }, svg)
   const mark = el('line', { y1: PLATE.y + 5, y2: PLATE.y + 9, stroke: LIME, 'stroke-opacity': 0.8, 'stroke-width': 2, 'stroke-linecap': 'round' }, svg)
@@ -255,24 +264,74 @@ export function armScene(): Scene {
   const f2 = el('line', { stroke: '#e9e4ff', 'stroke-width': FINGER.w, 'stroke-linecap': 'round' }, svg)
   const { g: ph, screen } = phone(svg, u, 0.9)
   el('path', { d: 'M-5 4 L-5 -4 Q-5 -7 -2 -7 L2 -7 Q5 -7 5 -4 L5 6', fill: 'none', stroke: LIME, 'stroke-width': 1.6, 'stroke-linecap': 'round' }, screen)
-  // It plays a pick and place by itself (./arm.ts), or reaches for your pointer; either way, its elbow up and every
-  // part above the table, turning its base to reach the other side.
-  let arm: Arm = story(0).arm, grip = 0, held = false, wantGrip = 0, lean = 0
+  // It plays a pick and place by itself (./arm.ts), or goes where someone puts its hand; either way, its elbow up and
+  // every part above the table, turning its base to reach the other side. When someone lets it be, it first puts the
+  // block back on a pad (./arm.ts: tidy), then plays on from there.
+  let arm: Arm = story(0).arm, grip = 0, held = false, wantGrip = 0, lean = 0, glow = 0, gripWas = 0
   let lastX = pose(arm).wrist.x
   let bxy = { x: PADS[0].x, y: TABLE - BLOCK / 2 }
   const hand: Point[] = []
+  /** The story's own clock; someone's hand on the arm (true while they have it); the tidying plan after they let go. */
+  let clock = 0, manual = false
+  let plan: { legs: Leg[]; from: Leg; t: number; pad: number } | null = null
+  /**
+   * Where the hand is headed when the gripper is to work once it's there (a double click sends it, then clamps); the
+   * fingers to open and then close on the block; whether the block is between the fingers.
+   */
+  let gripAt: Point | null = null, regrab = false, near = false
+  /**
+   * The gripper, a clamp: it lets go of the block it holds; with the block between its fingers, it takes it (opening
+   * first, if they're shut on nothing); otherwise its fingers close, or open again.
+   */
+  const toggle = () => {
+    if (held) wantGrip = 0
+    else if (near && wantGrip) { wantGrip = 0; regrab = true }
+    else wantGrip = wantGrip ? 0 : 1
+  }
+  /** The turntable's rim: a block that falls on it slides off, where the arm reaches it again. */
+  const RIM_CLEAR = 36
+  const reachPoint = (a: Arm): Point => ({ x: SHOULDER.x + a.r * Math.cos(a.turn), y: a.y })
   return {
     svg,
-    // Move: the pointer (or a finger) moves the arm, and a click doesn't grip. Grab: a click or tap closes or opens
-    // the gripper, and the arm keeps following while the button is down, to carry the block.
     modes: [
-      { id: 'move', name: 'Move', tip: 'Move: the arm follows your pointer', icon: MOVE_ICON, presses: false },
-      { id: 'grab', name: 'Grab', tip: 'Grab: click or tap to close or open the gripper', icon: GRIP_ICON, presses: true },
+      { id: 'motion', name: 'Motion', tip: 'Point to steer, click to clamp', touch: 'Tilt to steer, tap to clamp', icon: ICONS.gyro, act: 'motion' },
+      { id: 'drag', name: 'Drag', tip: 'Drag or click to move, double-click to clamp', touch: 'Drag or tap to move, double-tap to clamp', icon: ICONS.drag, act: 'drag' },
     ],
-    press() { wantGrip = wantGrip ? 0 : 1 },
-    step(dt, p, t) {
+    grip(at) {
+      if (at) gripAt = at
+      else toggle()
+    },
+    hold() {
+      wantGrip = held ? 1 : 0
+      return pose(arm).wrist
+    },
+    reach: (p) => reachPoint(aim(p, arm.turn)),
+    step(dt, p) {
       let to: Arm, tg: number
-      if (p) { to = aim(p, arm.turn); tg = wantGrip } else { ({ arm: to, grip: tg } = story(t)); wantGrip = 0 }
+      if (p) {
+        manual = true
+        plan = null
+        to = aim(p, arm.turn)
+        tg = wantGrip
+      } else {
+        if (manual) {
+          manual = false
+          const t = tidy({ x: bxy.x, held })
+          plan = { legs: t.legs, from: [arm.turn, arm.r, arm.y, held ? 1 : grip, 0], t: 0, pad: t.pad }
+        }
+        if (plan) {
+          plan.t += dt
+          const r = play(plan.legs, plan.from, plan.t)
+          ;({ arm: to, grip: tg } = r)
+          if (r.done) { clock = storyFrom(plan.pad); plan = null }
+        } else {
+          clock += dt
+          ;({ arm: to, grip: tg } = story(clock))
+        }
+        wantGrip = 0
+        gripAt = null
+        regrab = false
+      }
       arm = follow(arm, to, dt)
       grip = ease(grip, tg, dt, 14)
       const { shoulder: s, elbow: e, wrist: w, facing } = pose(arm)
@@ -282,15 +341,33 @@ export function armScene(): Scene {
       set(mark, { x1: s.x + facing * (PLATE.w / 2 - 7), x2: s.x + facing * (PLATE.w / 2 - 7) })
       // The gripper hangs straight down, its fingers closing on the block (or all the way, on nothing); edge on as the
       // base turns.
-      const near = Math.abs(w.x - bxy.x) < 14 && Math.abs(w.y + HOLD - bxy.y) < 16
+      near = Math.abs(w.x - bxy.x) < 14 && Math.abs(w.y + HOLD - bxy.y) < 16
       const gap = Math.max(held || near ? BLOCK / 2 + FINGER.w / 2 : 3, 17 - grip * 14) * Math.abs(facing)
       set(f1, { x1: w.x - gap, y1: w.y + FINGER.from, x2: w.x - gap, y2: w.y + FINGER.to })
       set(f2, { x1: w.x + gap, y1: w.y + FINGER.from, x2: w.x + gap, y2: w.y + FINGER.to })
-      if (!held && grip > 0.8 && near) held = true
+      // The fingers closing on it take it (fingers already shut, coming down on it, don't); opening lets it go.
+      if (!held && near && grip > 0.8 && gripWas <= 0.8) held = true
       if (held && grip < 0.4) held = false
+      gripWas = grip
+      if (regrab && grip < 0.15) { regrab = false; wantGrip = 1 }
+      // A clamp waiting for the hand works once it's there; sent somewhere else first, the hand doesn't clamp.
+      if (gripAt) {
+        if (!p || Math.hypot(p.x - gripAt.x, p.y - gripAt.y) > 2) gripAt = null
+        else if (Math.hypot(w.x - p.x, w.y - p.y) < 1.5) { gripAt = null; toggle() }
+      }
       if (held) bxy = { x: w.x, y: w.y + HOLD }
-      else bxy.y = Math.min(TABLE - BLOCK / 2, bxy.y + dt * 260)
+      else {
+        bxy.y = Math.min(TABLE - BLOCK / 2, bxy.y + dt * 260)
+        // Dropped on the turntable, it slides off its rim.
+        const dx = bxy.x - SHOULDER.x
+        if (Math.abs(dx) < RIM_CLEAR) bxy.x += (dx < 0 ? -1 : 1) * Math.min(dt * 160, RIM_CLEAR - Math.abs(dx))
+      }
       set(block, { x: bxy.x - BLOCK / 2, y: bxy.y - BLOCK / 2 })
+      const ready = !held && near && grip < 0.5
+      glow = ease(glow, ready ? 1 : 0, dt, 12)
+      set(halo, { x: bxy.x - BLOCK / 2 - 6, y: bxy.y - BLOCK / 2 - 6, 'fill-opacity': 0.4 * glow })
+      block.setAttribute('data-ready', ready ? '1' : '0')
+      block.setAttribute('data-held', held ? '1' : '0')
       // The phone, up in the air, making the same moves at a smaller scale and leaning the way it goes: the arm
       // follows the hand.
       const hx = 64 + (w.x - s.x) * 0.3, hy = 74 + (w.y - 150) * 0.3

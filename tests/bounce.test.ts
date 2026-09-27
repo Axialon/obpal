@@ -308,45 +308,104 @@ describe('a low step (a button)', () => {
   })
 })
 
-describe('a raised button (0.1 em, twice the first ones), tilted into', () => {
+describe("a raised block (a button, 0.3 em tall: half as tall again as a marble's radius)", () => {
   const R = 0.2
-  const pad: Footprint = { id: 1000, height: 0.1, box: [-1.5, 0, 1.5, 1], rings: [ring(-1.5, 0, 1.5, 0, 1.5, 1, -1.5, 1)], spot: [0, 0.5] }
+  const H = 0.3
+  const pad: Footprint = { id: 1000, height: H, box: [-1.5, 0, 1.5, 1], rings: [ring(-1.5, 0, 1.5, 0, 1.5, 1, -1.5, 1)], spot: [0, 0.5], step: true }
+  const opts = (extra: { push?: [number, number] } = {}) => ({ hop: 0.8, bounds: BOUNDS, omega: 4.6, zeta: 0.78, air: 0.3, ...extra })
   /** A phone tipped this many degrees, as the hero turns it into a push (0.55 em/s² a degree past 1.2°). */
   const tipped = (deg: number) => (deg - 1.2) * 0.55
-  /** Tilted toward the button (-z) from 1 em in front of it, for 4 s: where it went, and whether it bumped the edge. */
+  /**
+   * Tilted toward the block (-z) from 1 em in front of it, for 4 s: whether it knocked its side, whether it got up onto
+   * it, the most it moved in a step (em), and its landings on the floor after it was up.
+   */
   const tiltInto = (deg: number) => {
     const b = newOrb(0, 2, R)
     b.resting = false
-    let bumped = false, onIt = false
+    let bumped = false, onIt = false, most = 0
+    const drops: number[] = []
     for (let t = 0; t < 4; t += 1 / 60) {
-      const r = step(b, [pad], 1 / 60, { hop: 0.8, bounds: BOUNDS, climb: 0.15, push: [0, -tipped(deg)] })
+      const p = [b.x, b.y, b.z]
+      const r = step(b, [pad], 1 / 60, opts({ push: [0, -tipped(deg)] }))
+      most = Math.max(most, Math.hypot(b.x - p[0], b.y - p[1], b.z - p[2]))
       if (r.bumped === 1000) bumped = true
-      if (surfaceAt([pad], b.x, b.z).id === 1000 && b.y - R > 0.09) onIt = true
+      if (surfaceAt([pad], b.x, b.z).id === 1000 && b.y - R > H - 0.01) onIt = true
+      if (onIt && r.landed === -1) drops.push(r.impact)
     }
-    return { b, bumped, onIt }
+    return { b, bumped, onIt, most, drops }
   }
-  it('a gentle tilt (5°) runs the marble into its edge, where it bumps and stays, on the floor', () => {
+  it('a gentle tilt (5°) runs the marble into its side, where it knocks and stays, on the floor', () => {
     const { b, bumped, onIt } = tiltInto(5)
     expect(bumped).toBe(true)
     expect(onIt).toBe(false)
     expect(b.y).toBeCloseTo(R, 2)
-    expect(b.z).toBeGreaterThan(1)
-    expect(b.z).toBeLessThan(1 + R)
+    expect(b.z).toBeCloseTo(1 + R, 2)
   })
-  it('more tilt, 8°, still doesn\'t take it up; 10° does: onto it, across, and off the far side', () => {
+  it("more, 8° or 11°, still doesn't take it up; 15° does: up its side, over its edge, across, and a drop off the far side", () => {
     expect(tiltInto(8).onIt).toBe(false)
-    const { b, onIt } = tiltInto(10)
+    expect(tiltInto(11).onIt).toBe(false)
+    const { b, onIt, most, drops } = tiltInto(15)
     expect(onIt).toBe(true)
     expect(b.z).toBeLessThan(0)
     expect(b.y).toBeCloseTo(R, 2)
+    // Rolled up and over, never thrown: no step moves it further than its speed allows at the pace it climbs.
+    expect(most).toBeLessThan(0.1)
+    // Off the far side it drops to the floor: as hard as a fall of the block's height (it tips over its edge first).
+    expect(drops[0]).toBeGreaterThan(Math.sqrt(2 * G * H) * 0.8)
+    expect(drops[0]).toBeLessThan(Math.sqrt(2 * G * H) * 1.1)
   })
-  it('pointed at, it still goes up onto it, from a standstill beside it', () => {
-    const b = newOrb(0, 1.15, R)
+  it("rolled into its side fast, it bounces back off it, like a letter's side", () => {
+    const b = newOrb(0, 2, R)
+    b.resting = false
+    b.vz = -3
+    let bumped = false, back = 0
+    for (let t = 0; t < 1; t += 1 / 120) {
+      const r = step(b, [pad], 1 / 120, opts())
+      if (r.bumped === 1000) bumped = true
+      back = Math.max(back, b.vz)
+    }
+    expect(bumped).toBe(true)
+    expect(back).toBeGreaterThan(0.5)
+    expect(surfaceAt([pad], b.x, b.z).id).toBe(-1)
+  })
+  it('pointed at, it goes up onto it, from a standstill beside it', () => {
+    const b = newOrb(0, 1 + R + 0.01, R)
     b.target = { x: 0, z: 0.6 }
     b.resting = false
-    for (let t = 0; t < 3; t += 1 / 60) step(b, [pad], 1 / 60, { hop: 0.8, bounds: BOUNDS, climb: 0.15, omega: 4.6, zeta: 0.78 })
+    for (let t = 0; t < 3; t += 1 / 60) step(b, [pad], 1 / 60, opts())
     expect(surfaceAt([pad], b.x, b.z).id).toBe(1000)
-    expect(b.y).toBeCloseTo(0.1 + R, 3)
+    expect(b.y).toBeCloseTo(H + R, 3)
+    expect(Math.hypot(b.x, b.z - 0.6)).toBeLessThan(0.05)
+  })
+  it('a precise hop over it: from a way off, one arc that clears it (no higher than 1.6 em); from right beside it, up onto it first, then on', () => {
+    for (const [from, onto] of [[2.2, false], [1 + R + 0.02, true]] as const) {
+      const b = newOrb(0, from, R)
+      hopTo(b, { x: 0, z: -3 })
+      let peak = 0, deepest = 0, stops = 0
+      for (let t = 0; t < 4; t += 1 / 120) {
+        const r = step(b, [pad], 1 / 120, opts())
+        peak = Math.max(peak, b.y - R)
+        if (inside(pad, b.x, b.z) || (b.z > 0 && b.z < 1)) deepest = Math.max(deepest, H + R - b.y)
+        if (r.landed === 1000) stops++
+      }
+      // There, and never into it (at most a hair: its bottom over its top wherever it's over it).
+      expect(Math.hypot(b.x, b.z + 3), `from ${from}`).toBeLessThan(0.01)
+      expect(peak, `from ${from}`).toBeLessThan(1.6 + 0.01)
+      expect(deepest, `from ${from}`).toBeLessThan(0.02)
+      expect(stops > 0, `from ${from}: up onto it on the way`).toBe(onto)
+    }
+  })
+  it('flicked up beside it (a toss), tilted gently toward it, it lands on top, and stays there once the tilt eases', () => {
+    const b = newOrb(0, 1 + R + 0.01, R)
+    b.resting = false
+    for (let t = 0; t < 0.5; t += 1 / 60) step(b, [pad], 1 / 60, opts({ push: [0, -tipped(8)] }))
+    toss(b, 5, [pad])
+    let landed = false
+    for (let t = 0; t < 1.5 && !landed; t += 1 / 60) if (step(b, [pad], 1 / 60, opts({ push: [0, -tipped(8)] })).landed === 1000) landed = true
+    expect(landed).toBe(true)
+    for (let t = 0; t < 2; t += 1 / 60) step(b, [pad], 1 / 60, opts())
+    expect(surfaceAt([pad], b.x, b.z).id).toBe(1000)
+    expect(b.y).toBeCloseTo(H + R, 3)
   })
 })
 

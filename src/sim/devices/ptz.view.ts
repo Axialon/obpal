@@ -4,6 +4,7 @@
  * in its holder's colour, flashing as it takes one.
  */
 import * as THREE from 'three'
+import { batch, bolt, cable, cylinder, floorMaterial, maker, plastic } from '../kit'
 import { offCentre, PTZ, PtzLogic, TRACK, trainAt, type Cam } from './ptz'
 import type { Stage } from './stage'
 import type { Theme } from '../../ui/themes'
@@ -19,8 +20,11 @@ function buildCam(n: number): CamModel {
     const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.016, 1.5, 8), dark)
     const a = (i / 3) * Math.PI * 2
     leg.position.set(Math.cos(a) * 0.22, 0.7, Math.sin(a) * 0.22)
-    leg.rotation.set(Math.sin(a) * 0.3, 0, -Math.cos(a) * 0.3)
+    leg.rotation.set(-Math.sin(a) * 0.3, 0, Math.cos(a) * 0.3)
     root.add(leg)
+    const foot = cylinder(0.038, 0.025, dark, 12)
+    foot.position.set(Math.cos(a) * 0.44, 0.018, Math.sin(a) * 0.44)
+    root.add(foot)
   }
   const column = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.3, 12), mats.metal())
   column.position.y = 1.28
@@ -30,11 +34,21 @@ function buildCam(n: number): CamModel {
   root.add(head)
   const yoke = box(0.2, 0.05, 0.12, dark, 0.015)
   head.add(yoke)
+  for (const side of [-1, 1]) {
+    const fork = box(0.035, 0.14, 0.1, dark); fork.position.set(side * 0.12, 0.07, 0); head.add(fork)
+    const bearing = cylinder(0.034, 0.018); bearing.rotation.z = Math.PI / 2; bearing.position.set(side * 0.135, 0.1, 0); head.add(bearing)
+    const screw = bolt(0.012); screw.rotation.z = Math.PI / 2; screw.position.set(side * 0.145, 0.1, 0); head.add(screw)
+  }
+  const collar = cylinder(0.07, 0.055); collar.position.y = -0.025; head.add(collar)
+  root.add(cable([[0.04, 1.42, 0.04], [0.08, 1.26, 0.06], [0.07, 0.75, 0.06], [0.18, 0.015, 0.13]], 0.008))
   const body = new THREE.Group()
   body.position.y = 0.1
   head.add(body)
   const shell = box(0.18, 0.13, 0.26, mats.body(), 0.03)
+  shell.castShadow = true
   body.add(shell)
+  for (let i = 0; i < 5; i++) { const vent = box(0.11, 0.004, 0.006, dark); vent.position.set(0, 0.066, 0.01 + i * 0.018); body.add(vent) }
+  maker(body, 0, 0.067, -0.06, 0.035)
   const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.055, 0.12, 32), dark)
   lens.rotation.x = Math.PI / 2
   lens.position.z = -0.17
@@ -43,6 +57,8 @@ function buildCam(n: number): CamModel {
   glass.position.y = -0.061
   glass.rotation.x = Math.PI / 2
   lens.add(glass)
+  const bezel = new THREE.Mesh(new THREE.TorusGeometry(0.046, 0.005, 8, 32), mats.metal()); bezel.rotation.x = Math.PI / 2; bezel.position.y = -0.06; lens.add(bezel)
+  const iris = new THREE.Mesh(new THREE.CircleGeometry(0.022, 20), plastic('#080f18')); iris.rotation.x = Math.PI / 2; iris.position.y = -0.062; lens.add(iris)
   body.add(lens)
   const tally = mats.glow('#3b1016')
   const light = new THREE.Mesh(new THREE.SphereGeometry(0.014, 12, 8), tally)
@@ -57,6 +73,7 @@ function buildCam(n: number): CamModel {
   const eye = new THREE.PerspectiveCamera((PTZ.fov * 180) / Math.PI, 16 / 9, 0.05, 40)
   eye.position.set(0, 0, -0.24)
   body.add(eye)
+  batch(root, [lens])
   return { root, head, body, lens, tally, eye }
 }
 
@@ -111,10 +128,24 @@ function buildTrain() {
 /** The set: a round floor, the track's rails and sleepers, a turning sculpture and a few blocks. */
 function buildSet() {
   const g = new THREE.Group()
-  const floorMat = new THREE.MeshStandardMaterial({ color: '#262c37', roughness: 0.9 })
-  const floor = new THREE.Mesh(new THREE.CylinderGeometry(3.1, 3.1, 0.04, 96), floorMat)
+  const floorMat = floorMaterial()
+  const floor = box(10, 0.06, 8, floorMat, 0.03)
   floor.position.y = -0.02
   g.add(floor)
+  const architecture = new THREE.Group()
+  const wall = plastic('#57616a'), trim = mats.dark()
+  const back = box(10, 2.5, 0.12, wall); back.position.set(0, 1.25, -4); architecture.add(back)
+  for (let i = 0; i < 5; i++) {
+    const x = -4 + i * 2
+    const recess = box(1.55, 1.4, 0.02, trim); recess.position.set(x, 1.45, -3.93); architecture.add(recess)
+    const window = box(1.35, 1.2, 0.025, plastic('#718d91')); window.position.set(x, 1.45, -3.91); architecture.add(window)
+    const mullion = box(0.025, 1.23, 0.035, mats.metal()); mullion.position.set(x, 1.45, -3.89); architecture.add(mullion)
+  }
+  for (const side of [-1, 1]) {
+    const planter = box(0.75, 0.4, 1.7, trim); planter.position.set(side * 4.2, 0.2, -1.8); architecture.add(planter)
+    for (let i = 0; i < 5; i++) { const leaf = new THREE.Mesh(new THREE.IcosahedronGeometry(0.28, 1), plastic('#405e46')); leaf.position.set(side * 4.2, 0.64 + (i % 2) * 0.15, -2.4 + i * 0.3); leaf.scale.y = 1.5; architecture.add(leaf) }
+  }
+  batch(architecture); g.add(architecture)
   const rail = mats.metal()
   for (const k of [-0.07, 0.07]) {
     const curve = new THREE.EllipseCurve(0, 0, TRACK.rx + k, TRACK.rz + k, 0, Math.PI * 2, false, 0)
@@ -150,6 +181,7 @@ function buildSet() {
     b.position.set(x, 0.12, z)
     g.add(b)
   }
+  batch(g, [sculpture, floor])
   return { group: g, sculpture, floor: floorMat }
 }
 
@@ -157,13 +189,19 @@ function buildSet() {
  * The pictures' frames on the screen, and where each goes: down the right on a wide screen (ending above the pairing
  * chip in the corner: its offset, its 44px and a gap), side by side on a narrow one.
  */
-function insetRects(count: number) {
-  const W = innerWidth
+export function insetRects(count: number, W = innerWidth, H = innerHeight) {
+  if (W <= 860 && W > H) {
+    // Leave the centre for the courtyard, and stop above the pairing chip and bottom sheet.
+    const sheet = Math.max(H * 0.24, Math.min(H * 0.44, H - 432))
+    const h = Math.max(36, Math.min(86, Math.floor((H - sheet - 76 - 70 - (count - 1) * 8) / count)))
+    const w = Math.round(h * 16 / 9)
+    return Array.from({ length: count }, (_, i) => ({ x: W - 12 - w, y: 70 + i * (h + 8), w, h }))
+  }
   if (W <= 860) {
     const w = Math.floor((W - 24 - (count - 1) * 8) / count)
     return Array.from({ length: count }, (_, i) => ({ x: 12 + i * (w + 8), y: 70, w, h: Math.round((w * 9) / 16) }))
   }
-  const fits = (((innerHeight - 88 - 76 - (count - 1) * 14) / count) * 16) / 9
+  const fits = (((H - 88 - 76 - (count - 1) * 14) / count) * 16) / 9
   const w = Math.round(Math.max(160, Math.min(420, Math.max(240, W * 0.24), fits)))
   const h = Math.round((w * 9) / 16)
   return Array.from({ length: count }, (_, i) => ({ x: W - 20 - w, y: 88 + i * (h + 14), w, h }))
@@ -200,7 +238,8 @@ export function createView(stage: Stage, logic: PtzLogic): DeviceView {
   const size = new THREE.Vector2()
   const clear = new THREE.Color()
   return {
-    framing: { target: [0.75, 0.45, -0.35], wide: [0.75, 4.6, 7.2], tall: [0, 6, 7.5], radius: 2.9, min: 2.5, max: 16 },
+    inspect() { const [x, y, z] = logic.cams[0].at; return { target: [x, y, z], wide: [x + 0.65, y + 0.4, z - 0.8], tall: [x + 0.8, y + 0.5, z - 1], radius: 0.35, min: 0.3, max: 24 } },
+    framing: { target: [0, 0.7, -0.3], wide: [0, 7.5, 12], tall: [0, 9, 12], radius: 5.2, min: 1, max: 24 },
     update(colors, t) {
       set.sculpture.rotation.y = t * 0.25
       train.place(logic.time)
@@ -260,7 +299,7 @@ export function preview(): Preview {
   m.root.position.set(c.at[0], 0, c.at[2])
   scene.add(m.root)
   const camera = new THREE.PerspectiveCamera(38, 16 / 10, 0.05, 40)
-  camera.position.set(0.9, 3.2, 5)
+  camera.position.set(0.9, 5, 8)
   camera.lookAt(0, 0.5, -0.7)
   return {
     scene, camera,
