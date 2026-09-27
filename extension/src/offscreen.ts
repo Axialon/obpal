@@ -10,7 +10,7 @@
 import { Mode, PointerFlag, pointerDelta, Remote, type Frame, type Layout, type PointerState, type ProfileId } from '@obpal/host'
 import type { PadState } from '@obpal/core'
 import { APP_NAME, DEFAULT_MODE, PORT_NAME, SERVICE, isTargetMode, type TargetMode } from './shared/constants'
-import { KeyMapper } from './shared/keys'
+import { DEFAULT_KEYS, DESKTOP_KEYS, KeyMapper } from './shared/keys'
 import type { PadInput } from './shared/math'
 import { parseConfig, parseFromPage, parseOffscreenRequest, type BgRequest, type LinkState, type PadTuple, type ToPage } from './shared/messages'
 import { buildNativeFrame, HeldState, heldSignature, isIdleFrame, NATIVE_HEARTBEAT_MS, NATIVE_PORT_NAME } from './shared/native'
@@ -54,8 +54,11 @@ const layout: Layout = {
     },
   ],
 }
-/** The layout with the site's suggested catalogue profile (CATALOGUE §3), when the table has one. */
-const layoutFor = (profile: ProfileId | null): Layout => (profile ? { ...layout, profile } : layout)
+/**
+ * The layout with the site's suggested catalogue profile (CATALOGUE §3), when the table has one. The PC target gets
+ * the mouse face in Point (Left, Right and a wheel instead of A and B) and a scroll wheel on the trackpad.
+ */
+const layoutFor = (profile: ProfileId | null): Layout => ({ ...layout, ...(profile ? { profile } : {}), ...(config.mode === 'pc' ? { point: 'mouse' as const, wheel: true } : {}) })
 
 let remote: Remote | null = null
 let config: { tabId: number | null; mode: TargetMode } = { tabId: null, mode: DEFAULT_MODE }
@@ -81,7 +84,7 @@ chrome.runtime.onMessage.addListener((raw: unknown, sender: chrome.runtime.Messa
   const req = parseOffscreenRequest(raw)
   if (!req) return
   switch (req.type) {
-    case 'config': applyConfig(req.tabId, req.mode); break
+    case 'config': applyConfig(req.tabId, req.mode, req.desktop === true); break
     case 'unpair': remote?.disconnect(); break
     case 'forget': void remote?.forget(req.id); break
     case 'lan': remote?.selectLan(req.id); break
@@ -107,10 +110,13 @@ chrome.runtime.onConnect.addListener((port) => {
   syncSuggestion()
 })
 
-function applyConfig(tabId: number | null, mode: TargetMode) {
+function applyConfig(tabId: number | null, mode: TargetMode, desktop = false) {
   const modeChanged = mode !== config.mode
   config = { tabId, mode }
   configured = true
+  // The whole PC gets a desktop controller (no letters typed into whatever has focus); a program, the game keys.
+  const keys = desktop ? DESKTOP_KEYS : DEFAULT_KEYS
+  if (pc.mapper.cfg !== keys) { pc.held.apply(pc.mapper.releaseAll()); pc.mapper.cfg = keys }
   for (const l of [...links]) {
     if (l.tabId === tabId) continue
     forget(l)
@@ -120,6 +126,8 @@ function applyConfig(tabId: number | null, mode: TargetMode) {
     for (const l of links) l.sig = ''
     if (mode !== 'pc') pcLetGo()
     remote?.setValues({ target: mode })
+    // Into or out of the PC: Point's face changes with it.
+    remote?.setLayout(layoutFor(suggested))
   }
   syncSuggestion()
 }
@@ -183,7 +191,7 @@ function pcTick(f: Frame, pad: PadState | null, ptr: PointerState | null, now: n
   pc.held.apply(out)
   const g = pc.gestures.tick({ now, connected: f.connected, touching: f.touching, move: out.move, pan: f.pad2, pinch: f.zoom })
   if (g.buzz) remote?.rumble(BUZZ.strong, BUZZ.weak, BUZZ.ms)
-  const frame = buildNativeFrame(pc.held, g.move, g.wheel, { buttons: g.buttons, keys: g.ctrl ? CTRL : [] })
+  const frame = buildNativeFrame(pc.held, g.move, [g.wheel[0] + out.wheel[0], g.wheel[1] + out.wheel[1]], { buttons: g.buttons, keys: g.ctrl ? CTRL : [] })
   const sig = heldSignature(frame)
   if (isIdleFrame(frame) && sig === pc.lastSig && now - pc.lastSent < NATIVE_HEARTBEAT_MS) return
   const port = pcPort()
@@ -372,6 +380,8 @@ async function boot() {
   // The phone's tray picker switches the target mode; the service worker stores it and pushes it back as config.
   r.on('value', ({ id, v }) => {
     if (id === 'target' && isTargetMode(v)) void toBg({ to: 'bg', type: 'mode', mode: v })
+    // The mouse face's wheel, turned by a finger.
+    else if (id === 'mouse-wheel' && typeof v === 'number' && config.mode === 'pc') { pc.gestures.wheel(v); tick() }
   })
   report()
   const cfg = parseConfig(await toBg({ to: 'bg', type: 'offscreen-ready' }))

@@ -12,8 +12,9 @@ export async function startPairing(slot: HTMLElement): Promise<Paired> {
   const [{ Remote }, { Mode }, { ScreenPointer: Pointer }] = await Promise.all([import('@obpal/host'), import('@obpal/core'), import('../viewer/pointer')])
   const remote = await Remote.create({
     appName: 'ob.Pal',
-    // Wii-style pointing only: the phone opens straight into it. Flicking it upward tosses its marble.
-    layout: { v: 1, tray: [], modes: [Mode.point], toss: true },
+    // The phone is a tray first (its tilt rolls its marble, as on the phone's own page), then a pointer. Flicking it
+    // upward tosses its marble either way.
+    layout: { v: 1, tray: [], modes: [Mode.tilt, Mode.point], toss: true },
     seats: 4,
   })
   slot.replaceChildren()

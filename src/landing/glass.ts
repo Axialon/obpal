@@ -69,6 +69,9 @@ export function createGlass(): Glass {
       }
       const c = ready()
       if (!c) return false
+      // Asked for, so heard: on an iPhone, the silent switch would otherwise mute a page's sound.
+      const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession
+      if (session) try { session.type = 'playback' } catch { /* older Safari */ }
       try { await c.resume() } catch { /* not allowed yet */ }
       on = c.state === 'running'
       if (on) write('on')

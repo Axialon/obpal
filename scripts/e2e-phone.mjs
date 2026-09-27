@@ -120,6 +120,40 @@ try {
     for (const want of ['wii-a:tap', 'wii-b:down', 'wii-b:up']) if (!btns.includes(want)) throw new Error(`screen saw ${JSON.stringify(btns)}`)
     return btns.join(', ')
   })
+
+  await check('the settings sheet fits the visible screen; a swipe down, Back or its × closes it; Disconnect asks once, then says so', async () => {
+    await clear()
+    await cdp.send('Emulation.setDeviceMetricsOverride', portrait)
+    await sleep(400)
+    const open = async () => { await phone.locator('#gear').click(); await phone.locator('.sheet.settings').waitFor({ timeout: 3000 }); await sleep(350) }
+    const gone = (how) => until(`${how} closed it`, () => phone.evaluate(() => !document.querySelector('.sheet.settings')), 3000)
+    await open()
+    // Its answer buttons are on the visible screen, however long the sheet.
+    const fit = await phone.evaluate(() => ({ bottom: document.getElementById('done').getBoundingClientRect().bottom, vh: innerHeight }))
+    if (fit.bottom > fit.vh) throw new Error(`Done is at ${fit.bottom.toFixed(0)}px of a ${fit.vh}px screen`)
+    const g = await phone.locator('.sheet.settings .grip').boundingBox()
+    const x = g.x + g.width / 2, y = g.y + g.height / 2
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] })
+    for (let i = 1; i <= 8; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y + i * 20, id: 1 }] }); await sleep(16) }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await gone('a swipe down')
+    await open()
+    await phone.goBack()
+    await gone('Back')
+    if (!(await phone.locator('.modes').isVisible())) throw new Error('Back left the controller')
+    await open()
+    await phone.locator('#set-close').click()
+    await gone('the ×')
+    await open()
+    await phone.locator('#disc').click()
+    const asked = (await phone.locator('#disc').textContent()) ?? ''
+    if (!/again/i.test(asked)) throw new Error(`the first tap said "${asked}"`)
+    await phone.locator('#disc').click()
+    await sleep(1500)
+    const left = await phone.evaluate(() => ({ title: document.querySelector('.msg h1')?.textContent ?? '', back: !!document.getElementById('act') }))
+    if (left.title !== 'Disconnected' || !left.back) throw new Error(`after disconnecting: ${JSON.stringify(left)}`)
+    return `Done at ${fit.bottom.toFixed(0)} of ${fit.vh}px; swipe, Back and × close it; Disconnect asks, then says so`
+  })
 } catch (e) {
   console.error(e)
   exitCode = 1

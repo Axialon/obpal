@@ -6,6 +6,7 @@ import {
   type Contribution, type MotionUtility, type Profile, type ProfileId, type ProfileOverrides, type Route, type UtilitySettings,
 } from '@obpal/core'
 import { toUi, uiRect } from './uiframe'
+import { sheetExits } from './sheet'
 import { hapticsKind, tick } from './haptics'
 import { GyroSmoother, playerSpaceRates, TiltStick } from './gyro'
 import type { Motion } from './motion'
@@ -737,17 +738,21 @@ export class GamepadMode {
     const wrap = document.createElement('div')
     wrap.className = 'sheet-wrap gp-sheet-wrap'
     wrap.innerHTML = `<div class="sheet gp-sheet glass" role="dialog" aria-label="${label}"><div class="grip" aria-hidden="true"></div>${body}</div>`
-    wrap.onclick = (e) => { if (e.target === wrap) this.closeSheet() }
     wrap.querySelector<HTMLButtonElement>('[data-act="done"]')?.addEventListener('click', () => this.closeSheet())
     document.body.appendChild(wrap)
     this.sheet = wrap
+    this.sheetExits = sheetExits(wrap, () => this.closeSheet())
     return wrap
   }
+
+  private sheetExits = () => {}
 
   private closeSheet() {
     const s = this.sheet
     if (!s) return
     this.sheet = null
+    this.sheetExits()
+    this.sheetExits = () => {}
     s.classList.add('out')
     setTimeout(() => s.remove(), 200)
   }

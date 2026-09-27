@@ -28,6 +28,13 @@ export class NativeBridge {
   private pages = 0
   private retries = 0
   private retryTimer: ReturnType<typeof setTimeout> | undefined
+  /** Called when whole-PC control turns on or off. */
+  onDesktop: ((on: boolean) => void) | null = null
+
+  /** ob.Pal Desktop controls the whole PC (not one program). */
+  get desktop(): boolean {
+    return !!this.state.config?.desktop
+  }
 
   /** Reconcile with the target mode: connect and arm for PC, disarm (and let go) otherwise. */
   async sync(mode: TargetMode) {
@@ -109,9 +116,12 @@ export class NativeBridge {
         this.set({ link: 'ready', version: m.version, desktopCap: m.caps.desktop, hotkey: m.hotkey, error: null })
         this.arm(this.wantMode)
         break
-      case 'config':
+      case 'config': {
+        const was = this.desktop
         this.set({ config: { paused: m.paused, desktop: m.desktop, programs: m.programs } })
+        if (this.desktop !== was) this.onDesktop?.(this.desktop)
         break
+      }
       case 'status':
         this.set({ status: { enabled: m.enabled, panic: m.panic, held: m.held, front: m.front, program: m.program } })
         break

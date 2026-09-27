@@ -1,6 +1,7 @@
 /**
- * Keys mode: turn a phone controller into keyboard and mouse input for keyboard/mouse web games.
- * Pure: the mapper returns key and mouse edges; the MAIN-world page script dispatches them.
+ * Keys mode: turn a phone controller into keyboard and mouse input for keyboard/mouse web games, and (DESKTOP_KEYS)
+ * into a desktop controller for the whole PC, which types no letters.
+ * Pure: the mapper returns key and mouse edges; the MAIN-world page script (or ob.Pal Desktop) carries them out.
  */
 import { PadButton } from '@obpal/core'
 import { Accum, buttonValue, clamp, hysteresis, stickCurve, type PadInput } from './math'
@@ -36,23 +37,26 @@ export type MouseButton = 0 | 1 | 2
 
 /** Everything Keys mode does, in one editable object. */
 export interface KeysConfig {
-  /** Left stick (or the phone's tilt stick) to four keys. Pressed at |axis| >= press, released below release. */
-  move: { up: KeyName; down: KeyName; left: KeyName; right: KeyName; press: number; release: number }
-  /** Standard gamepad buttons to keys (the D-pad is Up/Down/Left/Right). LT/RT are left to `mouse`. */
-  buttons: Partial<Record<PadButtonName, KeyName>>
+  /** Left stick (or the phone's tilt stick) to four keys, or none. Pressed at |axis| >= press, released below release. */
+  move: { up: KeyName; down: KeyName; left: KeyName; right: KeyName; press: number; release: number } | null
+  /** Standard gamepad buttons to a key, or a chord pressed together (the D-pad is Up/Down/Left/Right). */
+  buttons: Partial<Record<PadButtonName, KeyName | readonly KeyName[]>>
   mouse: {
-    /** Right stick: px/s at full deflection, per-axis deadzone and response exponent. */
+    /** The stick that moves the pointer (default right): px/s at full deflection, per-axis deadzone and response exponent. */
+    stick?: 'left' | 'right'
     speed: number
     deadzone: number
     expo: number
     /** Screen px per degree of phone aim (Point mode gyro), and per px of phone trackpad travel. */
     aimGain: number
     padGain: number
-    /** Analog triggers to mouse buttons, with hysteresis. */
-    buttons: Partial<Record<'LT' | 'RT', MouseButton>>
+    /** Gamepad buttons (the triggers are analog) to mouse buttons, with hysteresis. */
+    buttons: Partial<Record<PadButtonName, MouseButton>>
     press: number
     release: number
   }
+  /** A stick that turns the mouse wheel: wheel units/s at full deflection (120 a notch), deadzone and exponent. */
+  scroll?: { stick: 'left' | 'right'; speed: number; deadzone: number; expo: number }
   /** Use the phone's tilt stick as the left stick while the phone is not in gamepad mode. */
   tiltMoves: boolean
 }
@@ -67,6 +71,23 @@ export const DEFAULT_KEYS: KeysConfig = {
   tiltMoves: true,
 }
 
+/**
+ * The whole PC (ob.Pal Desktop's whole-PC mode): a controller for the desktop, the way Gopher360 and Steam's desktop
+ * layout work, that types no letters into whatever has focus. Left stick: the pointer. Right stick: scroll. A or RT:
+ * click (held, it drags). X or LT: right-click. Left stick press: middle click. B: Esc. Y: Enter. D-pad: arrows.
+ * LB / RB: back / forward (Alt+Left / Alt+Right). Menu: the Start menu (Ctrl+Esc). View: the last app (Alt+Tab).
+ */
+export const DESKTOP_KEYS: KeysConfig = {
+  move: null,
+  buttons: {
+    B: 'Escape', Y: 'Enter', Up: 'ArrowUp', Down: 'ArrowDown', Left: 'ArrowLeft', Right: 'ArrowRight',
+    LB: ['AltLeft', 'ArrowLeft'], RB: ['AltLeft', 'ArrowRight'], Menu: ['ControlLeft', 'Escape'], View: ['AltLeft', 'Tab'],
+  },
+  mouse: { stick: 'left', speed: 1400, deadzone: 0.14, expo: 2, aimGain: 14, padGain: 1.5, buttons: { A: 0, RT: 0, X: 2, LT: 2, L3: 1 }, press: 0.5, release: 0.35 },
+  scroll: { stick: 'right', speed: 2400, deadzone: 0.18, expo: 1.8 },
+  tiltMoves: false,
+}
+
 export interface Mods { shift: boolean; ctrl: boolean; alt: boolean }
 /** A key transition, with the modifier state after it (so Shift's own keydown reports shiftKey). */
 export interface KeyEdge { key: KeyName; down: boolean; mods: Mods }
@@ -76,6 +97,8 @@ export interface KeysOutput {
   /** Whole-pixel relative mouse motion (movementX/Y) for this frame. */
   move: [number, number]
   buttons: MouseEdge[]
+  /** Whole wheel units for this frame from a scrolling stick (DOM convention: + scrolls down / right). */
+  wheel: [number, number]
 }
 
 export interface KeysInput {
@@ -98,9 +121,10 @@ const DIRS = ['up', 'down', 'left', 'right'] as const
 export class KeyMapper {
   private held = new Set<KeyName>()
   private dir: Record<(typeof DIRS)[number], boolean> = { up: false, down: false, left: false, right: false }
-  private trig = { LT: false, RT: false }
+  private trig: Partial<Record<PadButtonName, boolean>> = {}
   private mouseHeld = new Set<MouseButton>()
   private acc = new Accum()
+  private wheelCarry: [number, number] = [0, 0]
 
   constructor(public cfg: KeysConfig = DEFAULT_KEYS) {}
 
@@ -114,47 +138,59 @@ export class KeyMapper {
   }
 
   update(input: KeysInput): KeysOutput {
-    const { move, buttons, mouse } = this.cfg
+    const { move, buttons, mouse, scroll } = this.cfg
     const pad = input.pad
     const stick: readonly [number, number] = pad
       ? [pad.axes[0], pad.axes[1]]
       : this.cfg.tiltMoves && input.tilt ? input.tilt : [0, 0]
 
     // Movement keys with hysteresis. Gamepad +Y is down, so up is -Y.
-    this.dir.up = hysteresis(this.dir.up, -stick[1], move.press, move.release)
-    this.dir.down = hysteresis(this.dir.down, stick[1], move.press, move.release)
-    this.dir.left = hysteresis(this.dir.left, -stick[0], move.press, move.release)
-    this.dir.right = hysteresis(this.dir.right, stick[0], move.press, move.release)
     const want = new Set<KeyName>()
-    for (const d of DIRS) if (this.dir[d]) want.add(move[d])
+    if (move) {
+      this.dir.up = hysteresis(this.dir.up, -stick[1], move.press, move.release)
+      this.dir.down = hysteresis(this.dir.down, stick[1], move.press, move.release)
+      this.dir.left = hysteresis(this.dir.left, -stick[0], move.press, move.release)
+      this.dir.right = hysteresis(this.dir.right, stick[0], move.press, move.release)
+      for (const d of DIRS) if (this.dir[d]) want.add(move[d])
+    }
     if (pad) {
-      for (const [name, key] of Object.entries(buttons) as [PadButtonName, KeyName | undefined][]) {
-        if (key && buttonValue(pad, PadButton[name]) >= 0.5) want.add(key)
+      for (const [name, key] of Object.entries(buttons) as [PadButtonName, KeyName | readonly KeyName[] | undefined][]) {
+        if (!key || buttonValue(pad, PadButton[name]) < 0.5) continue
+        for (const one of typeof key === 'string' ? [key] : key) want.add(one)
       }
     }
     const keys = this.diff(want)
 
-    // Triggers to mouse buttons.
+    // Buttons (the triggers analog) to mouse buttons.
     const wantBtn = new Set<MouseButton>()
-    for (const t of ['LT', 'RT'] as const) {
-      const b = mouse.buttons[t]
-      const v = pad ? buttonValue(pad, PadButton[t]) : 0
-      this.trig[t] = hysteresis(this.trig[t], v, mouse.press, mouse.release)
-      if (this.trig[t] && b !== undefined) wantBtn.add(b)
+    for (const [name, b] of Object.entries(mouse.buttons) as [PadButtonName, MouseButton | undefined][]) {
+      const v = pad ? buttonValue(pad, PadButton[name]) : 0
+      this.trig[name] = hysteresis(!!this.trig[name], v, mouse.press, mouse.release)
+      if (this.trig[name] && b !== undefined) wantBtn.add(b)
     }
     const btnEdges: MouseEdge[] = []
     for (const b of [...this.mouseHeld]) if (!wantBtn.has(b)) { this.mouseHeld.delete(b); btnEdges.push({ button: b, down: false }) }
     for (const b of wantBtn) if (!this.mouseHeld.has(b)) { this.mouseHeld.add(b); btnEdges.push({ button: b, down: true }) }
 
-    // Relative mouse motion: right stick (rate), phone aim and trackpad (deltas). Aim is + left/up, so negate.
+    // Relative mouse motion: a stick (rate; the right one unless set), phone aim and trackpad (deltas). Aim is + left/up, so negate.
     const dt = clamp(input.dtMs, 0, 100) / 1000
     let dx = -input.aim[0] * mouse.aimGain + input.pad1[0] * mouse.padGain
     let dy = -input.aim[1] * mouse.aimGain + input.pad1[1] * mouse.padGain
-    if (pad) {
-      dx += stickCurve(pad.axes[2], mouse.deadzone, mouse.expo) * mouse.speed * dt
-      dy += stickCurve(pad.axes[3], mouse.deadzone, mouse.expo) * mouse.speed * dt
+    const axes = (s: 'left' | 'right'): [number, number] => (pad ? (s === 'left' ? [pad.axes[0], pad.axes[1]] : [pad.axes[2], pad.axes[3]]) : [0, 0])
+    const aim = axes(mouse.stick ?? 'right')
+    dx += stickCurve(aim[0], mouse.deadzone, mouse.expo) * mouse.speed * dt
+    dy += stickCurve(aim[1], mouse.deadzone, mouse.expo) * mouse.speed * dt
+    // A scrolling stick turns the wheel: pushed down scrolls down, as a wheel rolled toward you does.
+    const wheel: [number, number] = [0, 0]
+    if (scroll) {
+      const s = axes(scroll.stick)
+      for (const i of [0, 1] as const) {
+        const v = stickCurve(s[i], scroll.deadzone, scroll.expo) * scroll.speed * dt + this.wheelCarry[i]
+        wheel[i] = Math.trunc(v) || 0
+        this.wheelCarry[i] = v - wheel[i]
+      }
     }
-    return { keys, move: this.acc.take(dx, dy), buttons: btnEdges }
+    return { keys, move: this.acc.take(dx, dy), buttons: btnEdges, wheel }
   }
 
   /** Release everything (mode change, lost link, deactivation). */
@@ -163,9 +199,10 @@ export class KeyMapper {
     const buttons = [...this.mouseHeld].map((button): MouseEdge => ({ button, down: false }))
     this.mouseHeld.clear()
     this.dir = { up: false, down: false, left: false, right: false }
-    this.trig = { LT: false, RT: false }
+    this.trig = {}
     this.acc.reset()
-    return { keys, move: [0, 0], buttons }
+    this.wheelCarry = [0, 0]
+    return { keys, move: [0, 0], buttons, wheel: [0, 0] }
   }
 
   /** Edges from the held set to `want`: releases first (modifiers last), then presses (modifiers first). */

@@ -111,6 +111,8 @@ export interface Field {
   toss(o: FieldOrb, vy: number): void
   /** A marble, created on first use, in a colour. */
   orb(id: string, color: string): FieldOrb
+  /** A marble takes another colour (its glass, glow, halo and light). */
+  recolor(id: string, color: string): void
   removeOrb(id: string): void
   orbs(): FieldOrb[]
   /** Advance everything by dt; returns whether anything still moves. */
@@ -539,6 +541,14 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
     under: (x, z) => surfaceAt(footprints, x, z).id,
     toss: (o, vy) => { toss(o.orb, vy, footprints) },
     orb: (id, color) => orbMap.get(id) ?? makeOrb(id, color),
+    recolor(id, color) {
+      const o = orbMap.get(id)
+      if (!o) return
+      // The glass's tint is this same colour object; the rest carry copies.
+      o.color.set(color)
+      o.halo.material.color.set(color)
+      for (const m of [o.pool, o.caustic]) (m.material as MeshBasicMaterial).color.set(color)
+    },
     removeOrb(id) {
       const o = orbMap.get(id)
       if (!o) return

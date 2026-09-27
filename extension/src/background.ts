@@ -22,6 +22,8 @@ const ALL_SITES: chrome.permissions.Permissions = { origins: ['<all_urls>'] }
 const SELF = { id: chrome.runtime.id, origin: chrome.runtime.getURL('').replace(/\/$/, '') }
 /** The PC target: the native messaging port to ob.Pal Desktop, connected while the target is PC. */
 const native = new NativeBridge()
+// Whole PC on or off: the offscreen link switches the gamepad between the desktop and the game keys.
+native.onDesktop = () => void pushConfig()
 
 // ---- state -------------------------------------------------------------------------------------
 
@@ -73,7 +75,7 @@ const toOffscreen = (m: OffscreenRequest) => chrome.runtime.sendMessage(m).catch
 
 async function pushConfig() {
   const [tabId, mode] = await Promise.all([controlledTab(), targetMode()])
-  await toOffscreen({ to: 'offscreen', type: 'config', tabId, mode })
+  await toOffscreen({ to: 'offscreen', type: 'config', tabId, mode, desktop: mode === 'pc' && native.desktop })
 }
 
 // ---- injection ---------------------------------------------------------------------------------

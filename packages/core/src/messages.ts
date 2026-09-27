@@ -39,11 +39,14 @@ export interface Layout {
    */
   keys?: Partial<Record<HardwareKey, string>>
   /**
-   * The Point face. wii (the default): A selects, hold B to grab, - / + zoom, home centres. mouse: a mouse's
-   * Left and Right buttons (btn mouse-left / mouse-right, down and up) either side of B as the middle bar (hold to
-   * scroll, or drag a finger along it), with - / + to zoom.
+   * The Point face. wii (the default): A selects, hold B to grab, - / + zoom, home centres. mouse (for a host that
+   * drives a mouse pointer): a mouse's Left and Right (btn mouse-left / mouse-right, down and up) either side of a
+   * wheel. Turning the wheel sends value{mouse-wheel: units}, 120 a notch, + scrolls down. Tapping it sends btn
+   * mouse-middle tap, and holding it is B (wii-b down and up: aim to scroll). - / + zoom.
    */
   point?: 'wii' | 'mouse'
+  /** The trackpad gets a scroll wheel along its edge, turned by a finger: value{mouse-wheel: units} as above. */
+  wheel?: boolean
   /**
    * Send toss{v} when the device is flicked upward, screen level, the way you'd throw a ball off a tray: v is how fast
    * it went up, m/s. For hosts that bounce things.

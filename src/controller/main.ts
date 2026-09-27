@@ -13,6 +13,9 @@ import { hapticsKind, tick } from './haptics'
 import { GyroSmoother, playerSpaceRates, TiltStick } from './gyro'
 import { GamepadMode } from './gamepad'
 import { WiiPointer } from './pointing'
+import { MouseFace } from './mouseface'
+import { ScrollWheel } from './wheel'
+import { sheetExits } from './sheet'
 import { calmMarks, icon, ICONS, logo, logoMark } from '../ui/icons'
 import { dismissHint, hint, repositionHints, setHintFrame } from '../ui/hints'
 import { HardwareButtons, type HwAction, type HwSource } from './hardware'
@@ -211,6 +214,17 @@ async function boot(code: PairingCode) {
     headset: 'Headset buttons work here: press = A · next / previous',
   }
   const hwAnnounced = new Set<HwSource>()
+  /** Point's face on a PC (Layout.point 'mouse'): Left, Right and a wheel instead of A and B. */
+  const mouseFace = new MouseFace({
+    send: (m) => link.sendCtl(m),
+    feel: (kind) => {
+      if (kind === 'press') tick()
+      else if (hapticsKind() === 'vibrate') navigator.vibrate(kind === 'notch' ? 3 : 5)
+    },
+    recenter: () => { recenterPointer(); dismissHint('point') },
+  })
+  const mouseOn = () => layout.point === 'mouse'
+  let padWheel: ScrollWheel | null = null
   /** Set when the surface is built: the Wii face's A and B, held or released. */
   let wiiA: (down: boolean) => void = () => {}
   let wiiB: (down: boolean) => void = () => {}
@@ -220,6 +234,7 @@ async function boot(code: PairingCode) {
     return id ? layout.tray.find((c) => c.id === id && (c.type ?? 'button') === 'button') : undefined
   }
   function hwHelp(source: HwSource) {
+    if (mode === Mode.point && mouseOn()) return { volume: 'Volume keys work here: up = click · down = hold the wheel', keys: 'Keys work here: Enter = click · Esc = hold the wheel · arrows = zoom', headset: 'Headset buttons work here: press = click' }[source]
     const [a, b] = [boundTo('primary'), boundTo('secondary')]
     if (!a && !b) return HW_HELP[source]
     const names = { volume: ['Volume up', 'Volume down'], keys: ['Enter', 'Esc'], headset: ['Press', 'Next'] }[source]
@@ -237,6 +252,15 @@ async function boot(code: PairingCode) {
     }
     if (mode === Mode.gamepad) {
       gamepad.hardware(action === 'primary' ? PadButton.A : action === 'secondary' ? PadButton.B : action === 'next' ? PadButton.Right : PadButton.Left, down)
+      return
+    }
+    if (mode === Mode.point && mouseOn()) {
+      // The mouse face: volume up / Enter is Left, volume down / Esc holds the wheel, next and previous zoom.
+      if (action === 'primary') return mouseFace.button('left', down)
+      if (action === 'secondary') return mouseFace.hold(down)
+      if (!down) return
+      tick()
+      link.sendCtl({ t: 'btn', id: action === 'next' ? 'wii-plus' : 'wii-minus', ev: 'tap' })
       return
     }
     if (mode === Mode.point) {
@@ -284,6 +308,8 @@ async function boot(code: PairingCode) {
   let R: Quat | null = null
   let lastRel: Quat | null = null
   let started = false
+  /** The person disconnected: nothing reconnects or covers the Disconnected screen. */
+  let hungUp = false
   let surface: HTMLElement | null = null
   let pad: Trackpad | null = null
   let hostName = 'Screen'
@@ -305,7 +331,7 @@ async function boot(code: PairingCode) {
     if (tab === 'gamepad') return Mode.gamepad
     if (tab === 'point') return Mode.point
     if (tab === 'track') return Mode.track
-    if (settings.style === 'game' && styleAvailable('game')) return Mode.tilt
+    if (styleAvailable('game') && (settings.style === 'game' || !styleAvailable('match'))) return Mode.tilt
     return Mode.hold
   }
   let mode: ModeId = currentMode()
@@ -378,7 +404,8 @@ async function boot(code: PairingCode) {
   // The motion sensors run only while something reads them; the input loop ticks every frame only while something
   // is driven; and after two minutes untouched the screen rests (black, and free to sleep) until a touch.
   function motionWanted() {
-    return document.visibilityState === 'visible' && !resting && (!tierSettled || gyroOn || mode === Mode.point || mode === Mode.track || mode === Mode.gamepad)
+    // A screen that takes tosses listens for a flick in any mode, gyro on or not.
+    return document.visibilityState === 'visible' && !resting && (!tierSettled || gyroOn || mode === Mode.point || mode === Mode.track || mode === Mode.gamepad || !!layout.toss)
   }
   /** Start or stop the sensors to match what's needed; true if they just started. */
   function syncMotion(): boolean {
@@ -442,6 +469,8 @@ async function boot(code: PairingCode) {
   }
 
   function onStatus(s: LinkStatus) {
+    // Left on purpose: the link closing says nothing more (the Disconnected screen stays).
+    if (hungUp) return
     if (s === 'connected') {
       banner(null)
       if (started) showSurface()
@@ -482,8 +511,8 @@ async function boot(code: PairingCode) {
 
   function onHost(m: HostMsg) {
     if (m.t === 'rumble') return gamepad.rumble(m.strong, m.weak, m.ms)
-    if (m.t === 'welcome') { hostName = m.name; layout = m.layout }
-    else if (m.t === 'layout') layout = m.layout
+    if (m.t === 'welcome') { hostName = m.name; layout = m.layout; syncMotion() }
+    else if (m.t === 'layout') { layout = m.layout; syncMotion() }
     // The catalogue side of the layout: which motion utilities the host takes, and the profile it suggests for what it controls.
     if (m.t === 'welcome' || m.t === 'layout') gamepad.setHost({ name: hostName, profile: layout.profile, utilities: layout.utilities })
     else if (m.t === 'state') {
@@ -559,7 +588,8 @@ async function boot(code: PairingCode) {
     if (mode === Mode.point) {
       if (woke) recenterOnSample = true
       else recenterPointer()
-      hint('point', () => document.getElementById('wii-home'), 'Point the top of your phone at the screen · press ⌂ to centre', { place: 'top', delay: 400 })
+      if (mouseOn()) hint('point', () => document.getElementById('mouse-home'), 'Point the top of your phone at the screen · hold the wheel and aim to scroll', { place: 'bottom', delay: 400 })
+      else hint('point', () => document.getElementById('wii-home'), 'Point the top of your phone at the screen · press ⌂ to centre', { place: 'top', delay: 400 })
     }
     render()
   }
@@ -598,6 +628,7 @@ async function boot(code: PairingCode) {
         <div class="pad glass" id="pad" aria-label="Trackpad">
           <div class="pad-part glass" id="pad-part" hidden><span class="pp-dot"></span><span class="pp-name"></span><span class="pp-tag"></span><button class="pp-x" aria-label="Release part">${ICONS.close}</button></div>
           <div class="gestures" id="gestures" aria-hidden="true"></div>
+          <div class="pad-wheel" id="pad-wheel" role="button" aria-label="Scroll wheel · turn it to scroll" hidden></div>
           <div class="level" id="level" aria-hidden="true"><div class="level-ring"></div><div class="level-dot" id="level-dot"></div></div>
           <button class="track-start glass" id="track-start" hidden>${ICONS.cube}<b>Start 3D</b><small></small></button>
           <button class="glow-end" id="glow-end" hidden aria-label="Stop glowing">${ICONS.close}</button>
@@ -613,6 +644,7 @@ async function boot(code: PairingCode) {
           </div>
           <button class="wii-b" id="wii-b" aria-label="B: hold to grab"><b>B</b><span>hold to grab</span></button>
         </div>
+        <div class="mouse" id="mouse" hidden>${mouseFace.html()}</div>
         <div class="tray" id="tray"></div>
         <div class="dock">
           <button class="gyro glass" id="gyro" aria-pressed="false"><span class="gyro-ic">${ICONS.gyro}</span><span class="gyro-label">Gyro</span><span class="gyro-state"></span></button>
@@ -625,6 +657,12 @@ async function boot(code: PairingCode) {
     document.body.classList.add('live')
     calmMarks(surface)
     gamepad.mount(surface)
+    mouseFace.bind(document.getElementById('mouse')!)
+    // The trackpad's scroll wheel along its edge, for a screen that drives a mouse pointer (Layout.wheel).
+    padWheel = new ScrollWheel(document.getElementById('pad-wheel')!, {
+      turn: (v) => link.sendCtl({ t: 'value', id: 'mouse-wheel', v }),
+      notch: () => { if (hapticsKind() === 'vibrate') navigator.vibrate(3) },
+    })
     pad = new Trackpad(document.getElementById('pad')!)
     pad.onTap = (kind) => {
       // In 3D the thumb rests on the pad as the deadman: a long or double press there means nothing.
@@ -731,7 +769,14 @@ async function boot(code: PairingCode) {
     styles.hidden = tab !== 'rotate' || !(styleAvailable('game') && styleAvailable('match'))
     styles.querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.style === settings.style)))
     const pointing = mode === Mode.point && tier !== Tier.touch
-    document.getElementById('wii')!.hidden = !pointing
+    const mouseFaceEl = document.getElementById('mouse')!
+    if (!mouseFaceEl.hidden && !(pointing && mouseOn())) mouseFace.reset()
+    mouseFaceEl.hidden = !(pointing && mouseOn())
+    document.getElementById('wii')!.hidden = !pointing || mouseOn()
+    const wheelEl = document.getElementById('pad-wheel')!
+    const wheelOn = !!layout.wheel && !pointing && mode !== Mode.track
+    if (!wheelEl.hidden && !wheelOn) padWheel?.reset()
+    wheelEl.hidden = !wheelOn
     document.getElementById('pad')!.hidden = pointing
     document.getElementById('gyro')!.hidden = pointing || mode === Mode.track
     // 3D: offered where the host takes it and this phone can track itself.
@@ -973,10 +1018,11 @@ async function boot(code: PairingCode) {
       }
       grid.appendChild(cell)
     }
-    const close = () => { wrap.classList.add('out'); setTimeout(() => wrap.remove(), 200) }
-    wrap.onclick = (e) => { if (e.target === wrap) close() }
+    let exits = () => {}
+    const close = () => { exits(); wrap.classList.add('out'); setTimeout(() => wrap.remove(), 200) }
     wrap.querySelector<HTMLButtonElement>('#pick-close')!.onclick = close
     document.body.appendChild(wrap)
+    exits = sheetExits(wrap, close)
     list.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'center' })
   }
 
@@ -1001,13 +1047,14 @@ async function boot(code: PairingCode) {
     const sheet = document.createElement('div')
     sheet.className = 'sheet-wrap'
     sheet.innerHTML = `
-      <div class="sheet glass" role="dialog" aria-label="Settings">
-        <div class="grip" aria-hidden="true"></div>
+      <div class="sheet settings glass" role="dialog" aria-label="Settings">
+        <div class="sheet-head"><div class="grip" aria-hidden="true"></div><button class="icon-btn glass sheet-x" id="set-close" aria-label="Close">${ICONS.close}</button></div>
         <label class="bb-field"><span>Sensitivity</span><output id="gv"></output><input class="bb-range" type="range" id="gain" min="0.5" max="3" step="0.1"></label>
         <label class="bb-field"><span>Steadiness</span><output id="sv"></output><input class="bb-range" type="range" id="smooth" min="0" max="1" step="0.05"></label>
+        <p class="sheet-k">Surface</p>
         <div class="theme-row" role="radiogroup" aria-label="Surface">${THEMES.map((t) => `<button class="theme-opt" role="radio" data-theme="${t.id}" aria-checked="${document.documentElement.dataset.theme === t.id}">${swatch(t)}<span>${t.name}</span></button>`).join('')}</div>
-        ${seatColor ? '<div class="seat-row"><span class="seat-dot"></span><span>Your colour in this scene</span></div>' : ''}
-        <div class="accent-row" role="radiogroup" aria-label="Accent"${seatColor ? ' hidden' : ''}>${family.ACCENTS.map((a) => `<button class="bb-accent${a.id === 'product' ? ' product' : ''}" role="radio" data-accent="${a.id}" aria-checked="${family.getAccent() === a.id}" aria-label="${a.id === 'product' ? 'ob.Pal lime (default)' : a.name}" style="--sw:${a.color ?? '#c6ff34'}">${family.icons.check}</button>`).join('')}</div>
+        <p class="sheet-k">Colour${seatColor ? '<small> · yours in this scene</small>' : ''}</p>
+        <div class="accent-row" role="radiogroup" aria-label="Colour">${family.ACCENTS.map((a) => `<button class="bb-accent${a.id === 'product' ? ' product' : ''}" role="radio" data-accent="${a.id}" aria-checked="${family.getAccent() === a.id}" aria-label="${a.id === 'product' ? 'ob.Pal lime (default)' : a.name}" style="--sw:${a.color ?? '#c6ff34'}">${family.icons.check}</button>`).join('')}</div>
         <label class="row"><input type="checkbox" id="left"> Left-handed</label>
         <label class="row"><input type="checkbox" id="lockgyro"> Lock rotation while the gyro is on</label>
         <div class="row track3d" role="radiogroup" aria-label="3D follows"><span>3D follows</span>${(['motion', 'xr', 'glow'] as const).map((w) => `<button class="way-opt" role="radio" data-way="${w}" aria-checked="${settings.track3d === w}"><span>${{ motion: 'The phone’s motion', xr: 'Its camera (Android)', glow: 'A glow for the screen’s camera' }[w]}</span></button>`).join('')}</div>
@@ -1015,7 +1062,7 @@ async function boot(code: PairingCode) {
         <p class="hw-note" id="hw-note" hidden></p>
         <a class="support-link" href="/sponsor/" target="_blank" rel="noopener">${ICONS.heart}<span>Support ob.Pal</span></a>
         <button class="btn" id="forget" hidden>${ICONS.close}<span>Forget remembered screens</span></button>
-        <div class="row gap"><button class="btn" id="disc">Disconnect</button><button class="btn primary" id="done">Done</button></div>
+        <div class="actions"><button class="btn" id="disc">Disconnect</button><button class="btn primary" id="done">Done</button></div>
       </div>`
     document.body.appendChild(sheet)
     // Screens this phone can reach with a direct code; forgetting them means pairing online again.
@@ -1080,14 +1127,34 @@ async function boot(code: PairingCode) {
         syncThemeRows()
       }
     })
-    const close = () => { sheet.classList.add('out'); setTimeout(() => sheet.remove(), 200) }
+    let exits = () => {}
+    const close = () => { exits(); sheet.classList.add('out'); setTimeout(() => sheet.remove(), 200) }
     sheet.querySelector<HTMLButtonElement>('#done')!.onclick = close
-    sheet.onclick = (e) => { if (e.target === sheet) close() }
-    sheet.querySelector<HTMLButtonElement>('#disc')!.onclick = () => {
+    sheet.querySelector<HTMLButtonElement>('#set-close')!.onclick = close
+    exits = sheetExits(sheet, close)
+    // Disconnect asks once (a tap by mistake costs nothing), then says it's done, with the way back.
+    const disc = sheet.querySelector<HTMLButtonElement>('#disc')!
+    let armed = 0
+    disc.onclick = () => {
+      if (!armed) {
+        tick()
+        disc.classList.add('armed')
+        disc.textContent = 'Tap again to disconnect'
+        armed = window.setTimeout(() => { armed = 0; disc.classList.remove('armed'); disc.textContent = 'Disconnect' }, 3000)
+        return
+      }
+      clearTimeout(armed)
+      tick(true)
+      close()
+      hungUp = true
       link.close()
-      try { sessionStorage.removeItem('obpal.pair') } catch { /* ignore */ }
       surface = null
-      screenMessage({ title: 'Disconnected', art: ICONS.phone, body: 'Scan the code again to reconnect.' })
+      screenMessage({
+        title: 'Disconnected',
+        art: ICONS.phone,
+        body: hostName ? `You left <b>${esc(hostName)}</b>. Reconnect, or scan another code.` : 'Reconnect, or scan another code.',
+        action: { label: 'Reconnect', run: () => location.reload() },
+      })
     }
   }
 

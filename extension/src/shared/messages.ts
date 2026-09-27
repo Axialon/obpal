@@ -238,7 +238,8 @@ export function parseBgRequest(x: unknown): BgRequest | null {
 
 /** Service worker -> offscreen. */
 export type OffscreenRequest =
-  | { to: 'offscreen'; type: 'config'; tabId: number | null; mode: TargetMode }
+  /** desktop: ob.Pal Desktop controls the whole PC (the gamepad then drives the desktop, never typing letters). */
+  | { to: 'offscreen'; type: 'config'; tabId: number | null; mode: TargetMode; desktop?: boolean }
   | { to: 'offscreen'; type: 'unpair' }
   | { to: 'offscreen'; type: 'forget'; id: string }
   | { to: 'offscreen'; type: 'lan'; id: string }
@@ -250,7 +251,7 @@ export function parseOffscreenRequest(x: unknown): OffscreenRequest | null {
   if (x.type === 'unpair' || x.type === 'diag') return { to: 'offscreen', type: x.type }
   if (x.type === 'forget' || x.type === 'lan') return isPairId(x.id) ? { to: 'offscreen', type: x.type, id: x.id } : null
   const cfg = parseConfig(x)
-  return x.type === 'config' && cfg ? { to: 'offscreen', type: 'config', ...cfg } : null
+  return x.type === 'config' && cfg ? { to: 'offscreen', type: 'config', ...cfg, ...(x.desktop === true ? { desktop: true } : {}) } : null
 }
 
 /** The routing config the offscreen link needs: which tab is controlled and in which mode. */

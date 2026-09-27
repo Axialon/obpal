@@ -424,7 +424,7 @@ try {
   }
 
   if (!DESKTOP) {
-    await check('PC (stub helper): starts on the PC target, the popup allows the program in front, frames carry the held keys and trackpad clicks, whole PC on and off, leaving disarms', async () => {
+    await check('PC (stub helper): starts on the PC target, the popup allows the program in front, frames carry the held keys, trackpad clicks and its scroll strip, the mouse face, whole PC on and off, leaving disarms', async () => {
       await tap('.modes [data-tab=gamepad]')
       await phone.locator('.gp-f[data-k=a]').waitFor({ timeout: 5000 })
       await setTarget(popup, 'pc')
@@ -448,6 +448,27 @@ try {
       from = frames().length
       await hold('#pad', () => sleep(800))
       await until('a hold, then lift, presses the right button', () => frames().slice(from).some((f) => f.b?.includes(2)))
+      await until('then lets it go', () => { const f = frames(); return f.length > 0 && !f[f.length - 1].b })
+      // The trackpad's scroll wheel along its edge: a thumb turning it down scrolls down.
+      await phone.locator('#pad-wheel').waitFor({ state: 'visible', timeout: 5000 })
+      from = frames().length
+      {
+        await clearHints()
+        const [x, y] = await centre('#pad-wheel')
+        await touches('touchStart', [[x, y - 60]])
+        for (let i = 1; i <= 10; i++) { await touches('touchMove', [[x, y - 60 + i * 8]]); await sleep(30) }
+        await touches('touchEnd', [])
+      }
+      await until('the scroll strip scrolls down', () => frames().slice(from).some((f) => f.w?.[1] > 0))
+      // Point's face on a PC is a mouse: Left clicks, and a tap on its wheel is a middle click.
+      await tap('.modes [data-tab=point]')
+      await phone.locator('#mouse').waitFor({ state: 'visible', timeout: 5000 })
+      from = frames().length
+      await tap('#mouse-left')
+      await until('Left presses the left button', () => frames().slice(from).some((f) => f.b?.includes(0)))
+      from = frames().length
+      await tap('#mouse-wheel')
+      await until('a tap on the wheel is a middle click', () => frames().slice(from).some((f) => f.b?.includes(1)))
       await until('then lets it go', () => { const f = frames(); return f.length > 0 && !f[f.length - 1].b })
       // Whole PC: on from the popup, shown with the gesture legend, and off again.
       const action = (label) => popup.locator('#pc-actions .btn', { hasText: label }).first()

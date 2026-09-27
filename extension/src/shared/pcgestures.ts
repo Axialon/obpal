@@ -8,6 +8,9 @@
  *             two fingers: scroll, the page following them, with a flick carrying on · pinch: zoom
  *   Point     A: click where A went down (the pointer holds still while A is down) · keep holding A: right-click
  *             · press A and aim away: drag · hold B and aim: scroll, the page following the pointer · + / −: zoom
+ *   Mouse     (the Point face a PC gets) Left and Right: a press held still where it went down, a click when let go,
+ *             a drag when aimed away, held as it is when kept down · the wheel: turned by a finger (mouse-wheel
+ *             values), tapped for a middle click, held to scroll by aiming (B) · + / −: zoom
  *
  * A click is a press held for CLICK_MS then a release held for CLICK_MS, so it spans frames the helper can diff,
  * and a double-click stays inside Windows' double-click time.
@@ -63,6 +66,8 @@ export const GRAB_PER_PX = 2
 /** Pinch (log2) per zoom step: a pinch to double the finger spread zooms three steps. */
 const PINCH_PER_NOTCH = 1 / 3
 const NOTCH = 120
+/** The most the wheel may turn between two ticks (units): a stalled link catching up doesn't fling the page. */
+const WHEEL_MAX = 40 * NOTCH
 /** A flick keeps scrolling after the fingers lift when faster than this (units/ms), fading with this time constant (ms). */
 const FLING_MIN = 0.6
 const FLING_TAU = 330
@@ -81,6 +86,10 @@ export class PcGestures {
   private hold: { dx: number; dy: number; drag: boolean } | null = null
   /** Point's B held: aiming scrolls. */
   private grab = false
+  /** The mouse face's Left (0) and Right (2) while down: held still where they went down until they mean something. */
+  private press: { [B in 0 | 2]?: { at: number; dx: number; dy: number; drag: boolean; held: boolean } } = {}
+  /** Wheel units the mouse face's wheel turned since the last tick (+ scrolls down). */
+  private turn = 0
   /** The two-finger gesture while fingers are down. */
   private two: { mode: TwoMode; pan: number; pinch: number } | null = null
   private pinchAcc = 0
@@ -115,6 +124,20 @@ export class PcGestures {
         if (ev === 'down') this.grab = true
         else if (ev === 'up') this.grab = false
         return
+      case 'mouse-left':
+      case 'mouse-right': {
+        const b = id === 'mouse-left' ? 0 : 2
+        if (ev === 'down') this.press[b] ??= { at: now, dx: 0, dy: 0, drag: false, held: false }
+        else if (ev === 'up') {
+          const p = this.press[b]
+          if (p && !p.drag && !p.held) this.queue.push(b)
+          delete this.press[b]
+        }
+        return
+      }
+      case 'mouse-middle':
+        if (ev === 'tap') this.queue.push(1)
+        return
       case 'wii-plus':
         if (ev === 'tap') this.steps -= 1
         return
@@ -122,6 +145,13 @@ export class PcGestures {
         if (ev === 'tap') this.steps += 1
         return
     }
+  }
+
+  /** The mouse face's wheel turned: wheel units, 120 a notch, + scrolls down. */
+  wheel(units: number) {
+    if (!Number.isFinite(units)) return
+    this.fling = null
+    this.turn = Math.max(-WHEEL_MAX, Math.min(WHEEL_MAX, this.turn + units))
   }
 
   tick(t: GestureTick): GestureOut {
@@ -155,6 +185,23 @@ export class PcGestures {
         }
       }
       if (a.drag) held.add(0)
+    }
+
+    // The mouse face's buttons: like A, held still where they went down; aimed away they drag from there, and kept
+    // down without aiming they are simply held (a long press where the pointer is).
+    for (const b of [0, 2] as const) {
+      const p = this.press[b]
+      if (!p) continue
+      if (!p.drag && !p.held) {
+        p.dx += out.move[0]
+        p.dy += out.move[1]
+        out.move = [0, 0]
+        if (Math.hypot(p.dx, p.dy) > A_DRAG_PX) {
+          p.drag = true
+          out.move = [p.dx, p.dy]
+        } else if (t.now - p.at >= HOLD_MS) p.held = true
+      }
+      if (p.drag || p.held) held.add(b)
     }
 
     // A trackpad hold: lifting is a right-click, moving is a drag that starts where the hold was.
@@ -232,6 +279,10 @@ export class PcGestures {
       this.steps -= Math.sign(this.steps)
     }
 
+    // The mouse face's wheel, as turned.
+    wheel[1] += this.turn
+    this.turn = 0
+
     // Point's B: aiming scrolls, the page following the pointer, which stays put.
     if (this.grab) {
       wheel[0] -= out.move[0] * GRAB_PER_PX
@@ -260,7 +311,7 @@ export class PcGestures {
 
   /** Something is going on that needs frames even without phone input: a click, a drag, a flick, a zoom step. */
   get busy() {
-    return !!(this.click || this.queue.length || this.a?.drag || this.hold?.drag || this.grab || this.fling || this.steps || this.a)
+    return !!(this.click || this.queue.length || this.a?.drag || this.hold?.drag || this.grab || this.fling || this.steps || this.a || this.press[0] || this.press[2] || this.turn)
   }
 
   /** Let go of everything: the phone went away, or the PC target was left. */
@@ -270,6 +321,8 @@ export class PcGestures {
     this.a = null
     this.hold = null
     this.grab = false
+    this.press = {}
+    this.turn = 0
     this.two = null
     this.pinchAcc = 0
     this.steps = 0

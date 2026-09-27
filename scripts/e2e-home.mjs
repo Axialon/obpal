@@ -4,8 +4,9 @@
  *   - On phone widths the page never scrolls sideways (nothing reaches past the screen's edge).
  *   - On a computer, the hero makes a real code once someone is there; a phone that opens it joins the page.
  *   - The phone's own marble follows it (here by its trackpad, as a phone without motion sensors steers).
- *   - A click hops the marble onto the letter clicked, where it stays; the phone flicked upward (or its A) tosses its
- *     marble, and on a phone, a flick tosses the page's own marble once motion is on.
+ *   - A click hops the marble onto the letter clicked, where it stays; the phone flicked upward (or a tap on its
+ *     trackpad) tosses its marble, and on a phone, a flick tosses the page's own marble once motion is on.
+ *   - A phone held as a tray (its gyro on) rolls its marble with its tilt, as the phone's own page does.
  *   - When the phone leaves, the page lets its marble go.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch.
  */
@@ -253,7 +254,7 @@ try {
     await until('the phone on the page', () => screen.evaluate(() => (window.__obpal?.participants.length ?? 0) === 1), 20000)
     await until('the hero live', () => screen.evaluate(() => document.querySelector('.hero').hasAttribute('data-live')), 5000)
     const hint = await screen.locator('[data-hint-text]').textContent()
-    if (!/point your phone/i.test(hint ?? '')) throw new Error(`hint says "${hint}"`)
+    if (!/tilt your phone/i.test(hint ?? '')) throw new Error(`hint says "${hint}"`)
     // Playing with a phone brings the sound button (sound itself waits for a click on the page).
     await until('the sound button', () => screen.evaluate(() => !document.querySelector('[data-sound]').hidden), 5000)
     return hint
@@ -275,7 +276,7 @@ try {
     return `stick ${before.x.toFixed(0)},${before.y.toFixed(0)} → ${after.x.toFixed(0)},${after.y.toFixed(0)}, lit ${after.life.toFixed(2)}`
   })
 
-  await check("the phone flicked upward tosses its marble, and so does its A", async () => {
+  await check("the phone flicked upward tosses its marble, and so does a tap on its trackpad", async () => {
     const tip = () => screen.evaluate(() => window.__home.tips().find((t) => t.id !== 'me'))
     const high = async (what, go) => {
       await until(`${what}: the marble settled`, async () => (await tip()).h < 0.25, 8000)
@@ -289,15 +290,43 @@ try {
       const wait = () => new Promise((r) => setTimeout(r, 16))
       for (const [a, n] of [[0, 8], [15, 5], [-15, 5], [0, 10]]) for (let i = 0; i < n; i++) { at(a); await wait() }
     }))
-    const a = await high('A tossed it', async () => {
+    const a = await high('a tap tossed it', async () => {
       const cdp = await phoneCtx.newCDPSession(phone)
-      const b = await phone.locator('#wii-a').boundingBox()
+      const b = await phone.locator('#pad').boundingBox()
       const p = { x: b.x + b.width / 2, y: b.y + b.height / 2, id: 1 }
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [p] })
       await sleep(60)
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
     })
-    return `flick ${flick.toFixed(2)} em up, A ${a.toFixed(2)} em up`
+    return `flick ${flick.toFixed(2)} em up, tap ${a.toFixed(2)} em up`
+  })
+
+  await check('the phone held as a tray (its gyro on) rolls its marble with its tilt', async () => {
+    const tip = () => screen.evaluate(() => window.__home.tips().find((t) => t.id !== 'me'))
+    // Level to start with; the phone sees its motion, then its gyro goes on (the tray's level is how it's held).
+    await phone.evaluate(() => {
+      const m = (window.__tray = { beta: 0, gamma: 0 })
+      setInterval(() => {
+        dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 0, beta: m.beta, gamma: m.gamma }))
+        dispatchEvent(new DeviceMotionEvent('devicemotion', { acceleration: { x: 0, y: 0, z: 0 }, accelerationIncludingGravity: { x: 0, y: 0, z: 9.81 }, rotationRate: { alpha: 0, beta: 0, gamma: 0 }, interval: 16 }))
+      }, 16)
+    })
+    await phone.locator('#gyro').waitFor({ state: 'visible', timeout: 5000 })
+    await sleep(1200)
+    const cdp = await phoneCtx.newCDPSession(phone)
+    const g = await phone.locator('#gyro').boundingBox()
+    const at = { x: g.x + g.width / 2, y: g.y + g.height / 2, id: 1 }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [at] })
+    await sleep(60)
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await until('the gyro on', () => phone.evaluate(() => document.getElementById('gyro').getAttribute('aria-pressed') === 'true'), 5000)
+    await until('the marble settled', async () => (await tip()).h < 0.25, 8000)
+    const before = await tip()
+    // Tipped to the right: the marble rolls right.
+    await phone.evaluate(() => { window.__tray.gamma = 22 })
+    const after = await until('the marble rolled right', async () => { const t = await tip(); return t.x - before.x > 40 ? t : null }, 6000)
+    await phone.evaluate(() => { window.__tray.gamma = 0 })
+    return `${before.x.toFixed(0)} → ${after.x.toFixed(0)}px`
   })
 
   await check('a phone that leaves lets its marble go', async () => {

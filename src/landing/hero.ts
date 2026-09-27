@@ -21,12 +21,17 @@ import { createGlass } from './glass'
 import type { Participant, Remote } from '@obpal/host'
 import type { ScreenPointer } from '../viewer/pointer'
 import type { Field, Hit } from './field'
+import { family } from '../family'
 
 const LIME = '#c6ff34'
 /** A hand that stops moving keeps steering its marble this long; then the marble rolls to a stop. */
 const HOLD_MS = 2600
 /** A phone's marble stops following it after this long without moving. */
 const PHONE_REST_MS = 6000
+/** A paired phone as a tray: its tilt stick at full (30° of tilt) pushes this hard (em/s²), as the phone page's does. */
+const PHONE_TILT_PUSH = 15
+/** Mode.tilt in @obpal/core (the page's first script doesn't load it). */
+const TILT_MODE = 3
 /** A tilt of this many degrees pushes the marble this hard (em/s² per degree): a marble on a tray. */
 const TILT_PUSH = 0.55
 /** A toss: the phone's up-speed (m/s) to the marble's (em/s), and the least and most a toss gives. */
@@ -183,9 +188,11 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   let remote: Remote | null = null
   let Pointer: typeof ScreenPointer | null = null
   const pointers = new Map<string, ScreenPointer>()
-  const phones = new Map<string, { at: number; gone: boolean; buzzAt: number }>()
+  const phones = new Map<string, { at: number; gone: boolean; buzzAt: number; pointing: boolean }>()
+  /** Colours phones picked for their marbles (their accent), over their seats' own. */
+  const colors = new Map<string, string>()
   function join(p: Participant) {
-    phones.set(p.id, { at: performance.now(), gone: false, buzzAt: 0 })
+    phones.set(p.id, { at: performance.now(), gone: false, buzzAt: 0, pointing: false })
     if (!pointers.has(p.id)) pointers.set(p.id, new Pointer!())
     setExperience()
     wake()
@@ -197,10 +204,18 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       const ph = phones.get(p.id)!
       const f = remote.consumeOf(p.id, now)
       const st = pointers.get(p.id)!.step(f.aim, f.pad1, W, H)
-      if (Math.abs(st.dx) + Math.abs(st.dy) > 0.25) ph.at = now
-      const o = field.orb(p.id, p.color)
+      const o = field.orb(p.id, colors.get(p.id) ?? p.color)
+      // Held as a tray (Tilt, with its gyro on), the phone's tilt rolls its marble; pointed (Point, or a finger on
+      // its trackpad), the marble rolls to where it points.
+      const push: [number, number] = f.mode === TILT_MODE ? [f.tilt[0] * PHONE_TILT_PUSH, f.tilt[1] * PHONE_TILT_PUSH] : [0, 0]
+      const tilted = Math.hypot(push[0], push[1]) > 0.05
+      const pointed = Math.abs(st.dx) + Math.abs(st.dy) > 0.25
+      if (tilted || pointed) ph.at = now
+      if (tilted) ph.pointing = false
+      else if (pointed) ph.pointing = true
       o.live = now - ph.at < PHONE_REST_MS
-      o.orb.target = o.live ? field.pointAt(Math.max(0, Math.min(W, st.x)), Math.max(0, Math.min(H, st.y))) : null
+      o.push = tilted ? push : null
+      o.orb.target = o.live && ph.pointing ? field.pointAt(Math.max(0, Math.min(W, st.x)), Math.max(0, Math.min(H, st.y))) : null
       if (o.live) o.orb.resting = false
     }
   }
@@ -208,7 +223,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     if (!field || !visible) return
     const ph = phones.get(who.id)
     if (ph) ph.at = performance.now()
-    field.toss(field.orb(who.id, who.color), vy)
+    field.toss(field.orb(who.id, colors.get(who.id) ?? who.color), vy)
     wake()
   }
 
@@ -228,7 +243,8 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     if (!field) return
     const p = field.project(h.x, h.y, h.z)
     glass.hit(h.kind, h.strength, (p.x / Math.max(1, W)) * 2 - 1)
-    const ms = Math.round((h.kind === 'marble' ? 10 : 8) + 22 * h.strength)
+    // Long enough to feel: many phones' motors don't answer pulses much under 20 ms.
+    const ms = Math.round((h.kind === 'marble' ? 24 : 18) + 42 * h.strength)
     for (const id of [h.orb, h.other]) {
       if (!id) continue
       if (id === 'me') { if (tiltOn() && coarse) navigator.vibrate?.(ms); continue }
@@ -236,7 +252,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       const now = performance.now()
       if (!ph || ph.gone || now - ph.buzzAt < BUZZ_GAP) continue
       ph.buzzAt = now
-      remote?.rumble(Math.max(0.35, h.strength), 0, ms, id)
+      remote?.rumble(0.45 + 0.55 * h.strength, 0, ms, id)
     }
   }
 
@@ -333,12 +349,22 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       remote = r
       Pointer = P
       r.on('join', join)
-      r.on('leave', (p) => { const ph = phones.get(p.id); if (ph) ph.gone = true; pointers.delete(p.id); setExperience(); wake() })
+      r.on('leave', (p) => { const ph = phones.get(p.id); if (ph) ph.gone = true; pointers.delete(p.id); colors.delete(p.id); setExperience(); wake() })
       r.on('recenter', (p) => pointers.get(p.id)?.recenter())
       r.on('input', () => wake())
       r.on('toss', (e, who) => phoneToss(who, tossSpeed(e.v)))
-      // A on the phone tosses too (phones that can't feel a flick, or a person who'd rather press).
-      r.on('button', (e, who) => { if (e.id === 'wii-a' && e.ev === 'down') phoneToss(who, A_TOSS) })
+      // A, or a tap on the trackpad, tosses too (a phone that can't feel a flick, or a person who'd rather press).
+      r.on('button', (e, who) => { if ((e.id === 'wii-a' && e.ev === 'down') || (e.id === 'pad' && e.ev === 'tap')) phoneToss(who, A_TOSS) })
+      // A colour picked on the phone becomes its marble's, and its seat's, so the phone wears it too.
+      r.on('value', (e, who) => {
+        if (e.id !== 'accent' || typeof e.v !== 'string') return
+        const a = family.ACCENTS.find((x) => x.id === e.v)
+        const color = a?.color ?? LIME
+        colors.set(who.id, color)
+        field?.recolor(who.id, color)
+        r.setValues({ color }, who.id)
+        wake()
+      })
     },
     async tilt() {
       // From the same tap: motion (iOS asks), and sound.

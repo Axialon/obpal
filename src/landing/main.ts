@@ -36,7 +36,12 @@ const settleHint = () => {
 const hero = mountHero(heroEl, $<HTMLCanvasElement>('.hero-stage'), $('#hero-h'), { still, onInput: settleHint })
 // Playing with a phone brings sound: a button in the corner switches it on (browsers want a click for that) or off.
 const soundBtn = $<HTMLButtonElement>('[data-sound]')
-const showSound = () => { soundBtn.setAttribute('aria-pressed', String(hero.soundOn)); soundBtn.setAttribute('aria-label', hero.soundOn ? 'Sound on' : 'Sound off') }
+const soundLabel = soundBtn.querySelector('[data-sound-label]')!
+const showSound = () => {
+  soundBtn.setAttribute('aria-pressed', String(hero.soundOn))
+  soundBtn.setAttribute('aria-label', hero.soundOn ? 'Sound on' : 'Sound off')
+  soundLabel.textContent = hero.soundOn ? 'Sound on' : 'Turn on sound'
+}
 hero.onExperience = (on) => { soundBtn.hidden = !on; showSound() }
 soundBtn.addEventListener('click', async () => { await hero.sound(!hero.soundOn); showSound() })
 // For the end-to-end test (scripts/e2e-home.mjs), as the viewer exposes its own.
@@ -55,7 +60,7 @@ if (desk) {
         const live = () => {
           const n = remote.participants.length
           heroEl.toggleAttribute('data-live', n > 0)
-          if (n) { hint.classList.remove('gone'); hintText.textContent = n > 1 ? `${n} phones: point to roll, flick up to toss` : 'Point your phone to roll, flick it up to toss'; hintAway = 0; settleHint() }
+          if (n) { hint.classList.remove('gone'); hintText.textContent = n > 1 ? `${n} phones: tilt to roll, flick up to toss` : 'Tilt your phone to roll, flick it up to toss'; hintAway = 0; settleHint() }
         }
         remote.on('join', live)
         remote.on('leave', live)

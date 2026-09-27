@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { MIN_VIEW_AREA } from '../extension/src/shared/constants'
-import { DEFAULT_KEYS, KEYS, KeyMapper, keyInit, pressCharCode, type KeysInput } from '../extension/src/shared/keys'
+import { DEFAULT_KEYS, DESKTOP_KEYS, KEYS, KeyMapper, keyInit, pressCharCode, type KeysInput } from '../extension/src/shared/keys'
 import { hysteresis, stickCurve, type PadInput } from '../extension/src/shared/math'
 import {
   allowedFrom, envelope, parseBgRequest, parseBridgeRequest, parseFromPage, parseInputFrame, parseLink,
@@ -352,5 +352,37 @@ describe('routing and wire encoding', () => {
     expect(isActive([0, 0.01, 0, 0, 0, 0, 0], null, null)).toBe(false)
     expect(isActive([0, 0.5, 0, 0, 0, 0, 0], null, null)).toBe(true)
     expect(isActive(null, d, null)).toBe(true)
+  })
+})
+
+describe('keys: the whole PC (a desktop controller that types no letters)', () => {
+  it('the left stick and the tilt move the pointer and never press a key', () => {
+    const m = new KeyMapper(DESKTOP_KEYS)
+    const out = m.update(input({ pad: pad({ axes: [1, -1, 0, 0] }), dtMs: 50 }))
+    expect(out.keys).toEqual([])
+    expect(out.move[0]).toBeGreaterThan(40)
+    expect(out.move[1]).toBeLessThan(-40)
+    expect(m.update(input({ tilt: [1, 1] })).keys).toEqual([])
+  })
+  it('the right stick scrolls: pushed down, down; to the side, sideways', () => {
+    const m = new KeyMapper(DESKTOP_KEYS)
+    let w = [0, 0]
+    for (let i = 0; i < 10; i++) { const o = m.update(input({ pad: pad({ axes: [0, 0, 0.6, 1] }), dtMs: 16 })); w = [w[0] + o.wheel[0], w[1] + o.wheel[1]]; expect(o.move).toEqual([0, 0]) }
+    expect(w[1]).toBeGreaterThan(200)
+    expect(w[0]).toBeGreaterThan(0)
+  })
+  it('A clicks (held, it drags), X right-clicks, the left stick press middle-clicks; B, Y and the D-pad are keys', () => {
+    const m = new KeyMapper(DESKTOP_KEYS)
+    expect(m.update(input({ pad: pad({ buttons: bit(0) }) })).buttons).toEqual([{ button: 0, down: true }])
+    expect(m.update(input({ pad: pad() })).buttons).toEqual([{ button: 0, down: false }])
+    expect(m.update(input({ pad: pad({ buttons: bit(2) }) })).buttons).toEqual([{ button: 2, down: true }])
+    expect(m.update(input({ pad: pad({ buttons: bit(10) }) })).buttons).toEqual([{ button: 2, down: false }, { button: 1, down: true }])
+    expect(edges(m.update(input({ pad: pad({ buttons: bit(1, 3, 12) }) })))).toEqual(['Escape+', 'Enter+', 'ArrowUp+'])
+  })
+  it('LB and RB are back and forward, Menu the Start menu: chords, the modifier pressed first and let go last', () => {
+    const m = new KeyMapper(DESKTOP_KEYS)
+    expect(edges(m.update(input({ pad: pad({ buttons: bit(4) }) })))).toEqual(['AltLeft+', 'ArrowLeft+'])
+    expect(edges(m.update(input({ pad: pad() })))).toEqual(['ArrowLeft-', 'AltLeft-'])
+    expect(edges(m.update(input({ pad: pad({ buttons: bit(9) }) })))).toEqual(['ControlLeft+', 'Escape+'])
   })
 })
