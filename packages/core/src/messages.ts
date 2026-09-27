@@ -179,3 +179,8 @@ export type SignalPayload =
   | { cand: RTCIceCandidateInit }
   /** To a device whose restart offer names a connection the host no longer has: build a new one. */
   | { gone: true }
+  /**
+   * To a device offering through an invite the host has moved on from (PROTOCOL §2): this code has paired a device
+   * already and takes nobody new. The device stops, and asks for the code on the screen now.
+   */
+  | { spent: true }

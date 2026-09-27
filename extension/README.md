@@ -44,6 +44,10 @@ After a rebuild, click the reload icon on the extension's card.
 - The pairing stays up until the browser closes, or until you press × in the popup.
 - To reconnect after that, scan the code again: the online one, or the direct one below.
 
+**One code, one phone.** Once a phone pairs, the popup shows a new code (and a new short code), so a photo of the old one pairs nothing later. The phone that paired keeps its way back in through its code: a reload, or a new network, finds the same screen. Another phone that opens the old code is told it was used, and scans the one the popup shows now. Forgetting a phone ends its way back in too.
+
+The popup's bar shows the link beside the phone's name, as the pairing chip on the site does: a lock, the path (**Direct** or **Relayed**) and the round trip. Its tooltip says the rest: encrypted end to end (with DTLS's version and cipher), and how the phone proved itself (the QR code, a typed code, or a remembered pairing).
+
 ## No internet: the direct code
 
 After a phone has paired once, the extension and the phone remember each other. From then on they can connect over the local network with no server at all:
@@ -121,8 +125,11 @@ Real OS input from the phone, delivered by **ob.Pal Desktop** (`desktop/`, a sma
 
 1. Install the helper: download it from the [install guide](https://obpal.blackboxes.net/link/#desktop) and run `install.cmd`, or build it and run `obpal-desktop.exe install` (per user, no admin; see [desktop/README.md](../desktop/README.md)).
 2. Click **PC** in the popup. The browser asks once for the *nativeMessaging* permission.
-3. Click **Control the whole PC**: the phone is now the mouse and keyboard of every window, the browser included. The popup shows *Controlling this PC*, with what each gesture does.
-4. Or one program at a time: switch to the program, then back to the popup: it names the program you just left. Choose keys and/or mouse and click **Allow**, then switch back to it.
+3. The first time a phone would control this PC (PC is the target, chosen here or in the phone's tray), the PC asks you: *&lt;phone&gt; wants to control this PC*, **Allow** or **Deny**. The question sits on top of the popup (a **!** on the toolbar icon says it's waiting), and comes as a notification too if you turned that on in the options page. Until you allow it, ob.Pal Desktop stays disarmed and the phone shows *Waiting for approval on the PC*. Your answer is kept for that phone, so an allowed phone never asks again.
+4. Click **Control the whole PC**: the phone is now the mouse and keyboard of every window, the browser included. The popup shows *Controlling this PC*, with what each gesture does.
+5. Or one program at a time: switch to the program, then back to the popup: it names the program you just left. Choose keys and/or mouse and click **Allow**, then switch back to it.
+
+**Deny** keeps that phone off the PC and nothing else: Controller, 3D and Keys still work for it, and its own tray can't pick PC (a switch to PC it made itself goes back). The PC card then says *&lt;phone&gt; can't control this PC*, with **Allow &lt;phone&gt;** to change your mind. The options page lists every phone you answered for, each with a switch. Forgetting a phone (× under the code) takes its answer away: it's a new phone again.
 
 On the PC, the phone works like a laptop touchpad and a mouse:
 
@@ -148,6 +155,8 @@ On the mouse face the phone's volume keys work too: up is Left, down holds the w
 
 | Popup shows | Meaning |
 |---|---|
+| *&lt;phone&gt; wants to control this PC* | A phone this PC hasn't answered for yet. **Allow** or **Deny**; ob.Pal Desktop stays disarmed until you allow it. |
+| *&lt;phone&gt; can't control this PC* | You said no to this phone. **Allow &lt;phone&gt;** changes your mind. |
 | *Allow PC control* | The permission has not been granted yet. |
 | *ob.Pal Desktop isn't installed* | The browser found no helper. Install it, then Retry. |
 | *Control the whole PC* | The helper can drive every window; nothing does yet. |
@@ -159,7 +168,7 @@ On the mouse face the phone's volume keys work too: up is Left, down holds the w
 | *Paused* | Nothing reaches any program until *Resume*. |
 | *Stopped · Panic key* | `Ctrl+Alt+Backspace` was pressed on the PC. *Resume* continues. |
 
-The extension's **options page** (right-click the icon → Options, or the sliders button beside the helper's version in the PC card) turns **Whole PC** on and off, lists every allowed program with its scope, removes them, and has **Pause all**. It also shows the helper's version and panic key.
+The extension's **options page** (right-click the icon → Options, or the sliders button beside the helper's version in the PC card) turns **Whole PC** on and off, lists every allowed program with its scope, removes them, and has **Pause all**. Under **Phones** it lists every phone you answered for, each a switch (may it control this PC or not), and **Notify me** turns on a notification with Allow and Deny for the next phone that asks while the popup is closed (the browser asks once for the *notifications* permission). It also shows the helper's version and panic key, and a phone's question when one is waiting (the notification opens this page).
 
 Both pages wear the ob.Pal look, with the family's surfaces and colours as the phone's settings offer them: the palette button in the popup, or **Look** on the options page. A choice applies at once, on both pages, and is kept in `chrome.storage`. The family's own keys in the pages' `localStorage` are its cache: the options page's first script puts the last look on before anything is drawn, so a light surface never opens dark. (The popup needs no such script: Chrome shows it only once it has loaded.)
 
@@ -196,12 +205,13 @@ The controller is visible in every bridged frame, as a real one would be. Keys g
 | Permission | Why |
 |---|---|
 | `offscreen` | An MV3 service worker can't hold a WebRTC connection, so an offscreen document (reason `WEB_RTC`) keeps the link to the phone. |
-| `storage` | Remembers the chosen mode and the look. Session storage, cleared when the browser closes, holds the controlled tab and link status for the popup. (Remembered phones and the link's own certificate live in the offscreen document's IndexedDB, not in `chrome.storage`.) |
+| `storage` | Remembers the chosen mode, the look, and your answer for each phone that wanted the PC. Session storage, cleared when the browser closes, holds the controlled tab and link status for the popup. (Remembered phones and the link's own certificate live in the offscreen document's IndexedDB, not in `chrome.storage`; each pairing key there is a non-extractable key, which the extension can use but no script can read back.) |
 | `activeTab` | Clicking the toolbar icon grants access to the current tab only (its address for the popup, and script injection), so **This tab** needs no broad host access. |
 | `scripting` | Injects the bridge (isolated world) and the page script (main world) into the controlled tab. |
 | `https://obpal.blackboxes.net/*` | Signaling and TURN credentials for the phone link. |
 | `<all_urls>` (optional, **All sites**) | Requested only when you turn it on. It reaches game iframes served from other domains, and keeps control across navigation and newly added frames. |
 | `nativeMessaging` (optional, **PC**) | Requested when you first choose the PC target. It lets the extension start and talk to ob.Pal Desktop (`net.blackboxes.obpal`), and nothing else. |
+| `notifications` (optional, **Notify me**) | Requested when you turn on **Notify me** in the options page. When a phone asks to control this PC while the popup is closed, a notification asks you, with Allow and Deny. Nothing else is ever shown. |
 
 Scripts run only in the tab you enabled:
 - While **All sites** is on and a tab is controlled, a small bridge loads at page start in other tabs too, but it stays idle there.
@@ -210,6 +220,14 @@ Scripts run only in the tab you enabled:
 The extension has no analytics and loads no remote code:
 - Extension pages use `script-src 'self'`.
 - Their network access is limited to the ob.Pal service.
+
+## Running your own service
+
+Link talks only to the service it was built for: its host permission, its pages' policy and its code name that one origin. To point it at a service of your own (spec/SECURITY.md §6):
+
+1. Build it with your origin: `OBPAL_PUBLIC_ORIGIN=https://your.host pnpm run build:extension`, the same variable the site's build takes.
+2. Give it an ID of its own: `node extension/scripts/key.mjs <your key file>` prints a manifest `key`; put it in `extension/vite.config.ts` (`EXTENSION_KEY`). Keep the private key out of the repository.
+3. Install ob.Pal Desktop for that ID: `obpal-desktop install --origin chrome-extension://<your id>/`.
 
 ## Limitations
 
@@ -256,7 +274,7 @@ offscreen.html ◀── text-field ── background.js ◀── status.text (
 - Creates the offscreen document, at browser start and whenever it is needed.
 - Injects the bridge when you enable a tab. Each bridge then asks the worker for the page script in its own frame.
 - Stores the mode and the controlled tab.
-- For the PC target, holds the native messaging port to the helper (`src/native.ts`), arms it only while PC is the target and only once the link has the gamepad mapping for what the helper's config says (the desktop controller for the whole PC, the game keys for one program), and mirrors what the helper reports into session storage for the popup and options page. A restarted worker picks the helper's config back up from there, and a restarted link document gets the whole config, whole PC included. It tells the link when a text field in front would take typing (the phone's Type prompt), and when typing didn't get through.
+- For the PC target, holds the native messaging port to the helper (`src/native.ts`), arms it only while PC is the target, the phone connected is one you allowed (`src/shared/access.ts`: the link says who is connected, by the pairing it proved; your answers live in `chrome.storage.local`), and the link has the gamepad mapping for what the helper's config says (the desktop controller for the whole PC, the game keys for one program). It mirrors what the helper reports into session storage for the popup and options page. A restarted worker picks the helper's config back up from there, and a restarted link document gets the whole config, whole PC included. It tells the link when a text field in front would take typing (the phone's Type prompt), and when typing didn't get through. It asks about a new phone (the popup's prompt, the **!** badge, the notification) and takes the answer only from Link's own pages.
 
 **Connecting fast**
 - The phone requests ICE servers and opens its signaling socket at the same time, and builds its offer (gathering host candidates) while the socket connects, so the offer leaves the moment the host is seen. It never waits more than 250 ms for TURN credentials: on a LAN the host candidates carry the connection.
@@ -273,8 +291,8 @@ offscreen.html ◀── text-field ── background.js ◀── status.text (
 |---|---|
 | `pnpm run build:extension` | Runs the Vite build (see below). |
 | `pnpm run typecheck` | Includes `extension/tsconfig.json`. |
-| `pnpm test` | `tests/extension.test.ts` covers key mapping and hysteresis (and the whole PC's desktop mapping), the 3D drag and wheel synthesis, message validation and frame routing; `tests/lan.test.ts` the direct code, derived credentials and the controller's service worker routing; `tests/native.test.ts` the PC frames, typing requests, helper message validation, the popup's PC states and when the phone offers Type; `tests/pcgestures.test.ts` the PC clicks, holds, drags, scrolling, flicks and zoom, the mouse face, and the key row's taps and typing (order, modifiers, pacing, merging); `tests/typing.test.ts` the phone's keyboard diff; `tests/link-pages.test.ts` the stored look and its first-paint cache, and the radio groups' keys. |
-| `pnpm run e2e:extension` | Builds the site and the extension, then runs `scripts/e2e.mjs`: the extension in one Chromium, an emulated phone in another, online through the real service, then offline through a direct code (see below). Needs Playwright's Chromium, or `OBPAL_E2E_CHROMIUM=<path to chrome.exe>`. The PC target runs against a stub helper (`e2e/native-stub.mjs`), and the run can't reach an installed ob.Pal Desktop: the test copy has no manifest key (the helper refuses its ID) and names only the stub's host (the run won't launch otherwise), and it fails if the helper's own log shows a session from the test browser. `node extension/scripts/e2e.mjs --desktop` is the one run meant to reach the installed ob.Pal Desktop: it injects real input into its harness window. |
+| `pnpm test` | `tests/extension.test.ts` covers key mapping and hysteresis (and the whole PC's desktop mapping), the 3D drag and wheel synthesis, message validation and frame routing; `tests/lan.test.ts` the direct code, derived credentials and the controller's service worker routing; `tests/native.test.ts` the PC frames, typing requests, helper message validation, the popup's PC states and when the phone offers Type; `tests/pcgestures.test.ts` the PC clicks, holds, drags, scrolling, flicks and zoom, the mouse face, and the key row's taps and typing (order, modifiers, pacing, merging); `tests/typing.test.ts` the phone's keyboard diff; `tests/link-pages.test.ts` the stored look and its first-paint cache, and the radio groups' keys; `tests/access.test.ts` which phones may control the PC (answers, when to ask, the messages that carry them); `tests/invite.test.ts` the invite moving on once a phone pairs (the old link refused to others, the phone that paired back through its room); `tests/lan.test.ts` also the non-extractable pairing keys. |
+| `pnpm run e2e:extension` | Builds the site and the extension, then runs `scripts/e2e.mjs`: the extension in one Chromium, an emulated phone in another, online through the real service, then offline through a direct code (see below). It also proves the security items of spec/SECURITY.md §8: the invite moving on (a second phone with the old link is refused), the PC's question (a new phone can't arm the helper; Deny, Allow, remembered, forgotten), and non-extractable keys on both sides. `OBPAL_E2E_SHOTS=<dir>` saves screenshots, the prompt's in both surfaces among them. Needs Playwright's Chromium, or `OBPAL_E2E_CHROMIUM=<path to chrome.exe>`. The PC target runs against a stub helper (`e2e/native-stub.mjs`), and the run can't reach an installed ob.Pal Desktop: the test copy has no manifest key (the helper refuses its ID) and names only the stub's host (the run won't launch otherwise), and it fails if the helper's own log shows a session from the test browser. `node extension/scripts/e2e.mjs --desktop` is the one run meant to reach the installed ob.Pal Desktop: it injects real input into its harness window. |
 | `pnpm run bench:extension` | `scripts/bench.mjs`: time to connected, time to first input, press-to-page latency and data channel RTT over several pairings, with the phone's timeline. |
 | `pnpm run store:extension` | Builds, then `scripts/store.mjs` writes the Chrome Web Store zip, `release/obpal-link-<version>-store.zip`: the release's files with a manifest without its `key`, read back and checked (every file one the extension uses, the manifest parses, no key). With `-- --with-key [<pem>]` (default `~/.obpal-keys/extension-key.pem`) it also writes the item's first-upload zip, with the private key as `key.pem` so the store keeps Link's ID: only next to the key, in `<key folder>/store/`, never inside a git working tree, and only when the key gives the ID ob.Pal Desktop allows. |
 | `pnpm run store:art` | Builds the site and the extension, then `store/src/render.mjs` renders the store's images into `store/`: the promo tiles, the icon, and five 1280 × 800 screenshots made of real renders (the popup, the options page, and the phone paired through the real service). It runs a copy of the extension without its key and with the native host renamed, so no ob.Pal Desktop is started. Needs Chromium, as the end-to-end test does. |
@@ -294,12 +312,12 @@ The build does the following:
 | `src/background.ts` | Service worker: routing, per-tab enablement, injection, badge, warm start, the helper port |
 | `src/native.ts` | The native messaging bridge to ob.Pal Desktop (service worker side) |
 | `src/offscreen.ts` | Phone link (remembered phones, direct code) and the sampler (`src/ticker.ts` is its worker clock); PC frames |
-| `src/popup/` | Popup UI: the link's status, codes, remembered phones, controls, the PC card and its gestures |
-| `src/options/` | Options page: Whole PC, Pause all, the PC allowlist, the look |
-| `src/ui/` | What both pages share: the look (surface and colour, applied live, stored, and cached for the first paint), the radio groups' keys, the cards and controls, the light on the cards, the logo. Tokens and icons come from the app (`src/family`, `src/styles/base.css`, `src/ui/icons.ts`) |
+| `src/popup/` | Popup UI: the link's status and badge, codes, remembered phones, a phone's question for the PC, controls, the PC card and its gestures |
+| `src/options/` | Options page: Whole PC, Pause all, the PC allowlist, the phones and their answers, the notification switch, the look |
+| `src/ui/` | What both pages share: the look (surface and colour, applied live, stored, and cached for the first paint), the radio groups' keys, the cards and controls, the light on the cards, the logo, a phone's question for the PC (`ask.ts`). Tokens and icons come from the app (`src/family`, `src/styles/base.css`, `src/ui/icons.ts`) |
 | `src/fonts/` | Inter and Plus Jakarta Sans (SIL Open Font License 1.1, whose text ships with them), bundled so the pages load nothing from the network |
 | `e2e/` | Test page, the local stand-in service (it makes a throwaway test certificate on first run), the stub helper |
 | `store/` | The Chrome Web Store listing: every field to paste (`listing.md`), the upload steps (`UPLOAD.md`), the images, and their sources (`store/src/`) |
 | `src/content/bridge.ts` | Isolated-world bridge |
 | `src/content/page.ts` | Main-world page script |
-| `src/shared/` | Pure logic: constants, messages and validation, routing, key mapping, 3D synthesis, the helper protocol (`native.ts`) |
+| `src/shared/` | Pure logic: constants, messages and validation, routing, key mapping, 3D synthesis, the helper protocol (`native.ts`), which phones may control the PC (`access.ts`) |

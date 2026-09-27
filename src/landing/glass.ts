@@ -7,6 +7,16 @@
  * marble has a pitch of its own, and no two knocks are quite alike; each is heard from where it happened, left to
  * right. When many ring at once, each new one is a little quieter and there are never more than a few at a time.
  *
+ * Each knock starts at the moment it happened, as near as the output allows: a knock is given the moment on screen it
+ * belongs to, turned into the audio clock's time through the output's own timestamp, and started then, or at once if
+ * that's already past. Knocks of the same frame keep the spacing they happened with. Nothing is added on the way: no
+ * look-ahead, no queue, no limiter that looks ahead. Speakers are further behind than the screen (most of all over
+ * Bluetooth), so the knocks the physics foresees (./world.ts foresee(): a few steps on, what moves the marbles held as
+ * it is) are started ahead, to be heard the moment they're seen: when the knock itself comes, it's the one already
+ * playing. Each is started only where the next frame can still call it off, and one no longer foreseen (the phone was
+ * tipped back) is called off, silently, before it starts. ?debug=audio shows the output's latency, how late the last
+ * knock was, and the knocks foreseen: met by the knock itself, called off, and heard though it never came.
+ *
  * Sound is on unless the person switched it off (remembered on this device). Browsers let a page make sound only once
  * the person has clicked, tapped or pressed a key on it (some, like Safari, only from inside that event), so every such
  * gesture anywhere on the page is offered to gesture(), which starts the sound right there, synchronously. Until then
@@ -48,10 +58,31 @@ export interface GlassStats {
   /** The output's level now and its peak over the last second or so (dBFS; null without the meter, -Infinity silent). */
   levelDb: number | null
   peakDb: number | null
-  /** The context's sample rate and its output latency (ms), where known. */
+  /** The context's sample rate and its output latency (ms), where known: in all, and its two parts. */
   rate: number | null
   latencyMs: number | null
+  baseMs: number | null
+  outputMs: number | null
+  /**
+   * The last knock heard: how long after it happened its sound starts at the speaker, as the output reports it (ms),
+   * and how much of that was waiting on our side (ms: 0, but for a knock kept in step with an earlier one that frame).
+   */
+  behindMs: number | null
+  oursMs: number | null
+  /**
+   * Knocks foreseen and started ahead: met by the knock itself, called off before they started (no longer foreseen),
+   * and heard though the knock never came (too near its start to call off); and how much of the speakers' lag the
+   * foresight makes up now (ms: 0, not foreseeing).
+   */
+  foreseen: { met: number; calledOff: number; wrong: number; leadMs: number }
 }
+
+/**
+ * A knock foreseen: its name (the marble and what it will strike: the same as the knock itself will have), what, how
+ * hard (em/s), where (-1 left … 1 right), which marbles, and the moment on screen it will happen (performance.now()
+ * time, ms).
+ */
+export interface Foreseen { key: string; kind: GlassHit; speed: number; pan: number; marbles?: [string, string?]; at: number }
 
 export interface Glass {
   readonly state: SoundState
@@ -62,12 +93,24 @@ export interface Glass {
   /** The person's switch (from a click on it, so the sound can start at once): blocked or off turns on, on turns off. */
   toggle(): void
   /**
-   * A knock: on what, how fast it came in (em/s), where (-1 left … 1 right), and which marbles (each has its own pitch;
-   * two for glass on glass).
+   * A knock: on what, how fast it came in (em/s), where (-1 left … 1 right), which marbles (each has its own pitch; two
+   * for glass on glass), and when it happened on screen (performance.now() time, ms; left out: now). `key` names it
+   * (the marble and what it struck): foreseen under that name and already playing, it isn't started again.
    */
-  hit(kind: GlassHit, speed: number, pan: number, marbles?: [string, string?]): Verdict
+  hit(kind: GlassHit, speed: number, pan: number, marbles?: [string, string?], at?: number, key?: string): Verdict
   /** A knock too soft (or too soon) to sound, for the log: the field decided, and says why. */
   note(kind: GlassHit, speed: number, why: string): void
+  /**
+   * This frame's knocks foreseen, earliest first (frames `frame` s apart): each is started to be heard the moment it
+   * happens on screen, or as soon after as the output allows, but only where the next frame can still call it off. One
+   * foreseen before and not now is called off; too near its start for that, it stands (the knock itself should come).
+   */
+  foresee(knocks: readonly Foreseen[], frame: number): void
+  /**
+   * How far ahead to foresee knocks now, for frames `frame` s apart (s): as far as the speakers lag the screen (at
+   * most LEAD_MAX), and room to call a knock off. 0: not worth it (the sound isn't on, or the speakers keep up).
+   */
+  lead(frame: number): number
   stats(): GlassStats
 }
 
@@ -104,6 +147,24 @@ const SOFT_V = 0.2
 const HARD_V = 6
 /** Never more than this many rings at once; each new one is quieter the more are ringing. */
 const MAX_VOICES = 8
+/** A frame is on screen about this long after its time (ms): the moment a knock is to be heard, when it can be. */
+const SCREEN_MS = 20
+/**
+ * Knocks are foreseen where the speakers lag the screen by more than LATE_MIN (s): as far ahead as they lag, but at
+ * most LEAD_MAX (s: the further ahead, the likelier what moves the marbles changes first). One foreseen again for a
+ * moment more than RETIME (s) from before is started again at the new one. The knock itself is the one foreseen if
+ * it comes within MEET (ms) of the moment foreseen (or once that can't be called off any more).
+ */
+const LATE_MIN = 0.005
+const LEAD_MAX = 0.06
+const RETIME = 0.002
+const MEET = 25
+
+/**
+ * A knock foreseen and started ahead: what (for the log), the moment on screen it was foreseen for (ms), when it's
+ * wanted, starts and ends on the audio clock (s), how loud (dB), and its voices (to call it off).
+ */
+interface Ahead { kind: GlassHit; speed: number; at: number; want: number; start: number; end: number; db: number; sources: AudioScheduledSourceNode[] }
 /**
  * Knocks together are held under the ceiling rather than clipped: from this level (as a gain, -6 dBFS) the output bends
  * smoothly toward CEILING. A curve, not a compressor: a Web Audio compressor looks 6 ms ahead (every knock would come
@@ -141,6 +202,13 @@ export function createGlass(opts: { meter?: boolean } = {}): Glass {
   let peak = 0, peakAt = 0
   /** When each ringing knock ends (the context's clock). */
   let ringing: number[] = []
+  /** The knocks being started in this task (one frame's): the first's moment and start, to keep the rest in step. */
+  let batch = { task: -1, at: 0, when: 0 }
+  let behind: number | null = null, ours: number | null = null
+  /** The knocks foreseen and started ahead, by name; what became of them; how much of the lag is made up now (s). */
+  const ahead = new Map<string, Ahead>()
+  const foreseen = { met: 0, calledOff: 0, wrong: 0 }
+  let madeUp = 0
 
   function read() { try { return localStorage.getItem(STORE) } catch { return null } }
   const write = (v: string) => { try { localStorage.setItem(STORE, v) } catch { /* private mode: not remembered */ } }
@@ -159,6 +227,7 @@ export function createGlass(opts: { meter?: boolean } = {}): Glass {
       if (shown === 'on') {
         wanted = false
         write('off')
+        drop()
         void ctx?.suspend().catch(() => undefined)
       } else {
         wanted = true
@@ -167,7 +236,26 @@ export function createGlass(opts: { meter?: boolean } = {}): Glass {
       }
       update()
     },
-    hit(kind, speed, pan, marbles) {
+    hit(kind, speed, pan, marbles, at, key) {
+      // Foreseen and started ahead: it's this knock, already playing, if it was foreseen for this moment or can't be
+      // called off any more; foreseen for another moment, it's called off, and this one is heard as it comes.
+      const early = key ? ahead.get(key) : undefined
+      if (early) {
+        ahead.delete(key!)
+        const c = ctx
+        const moment = at ?? performance.now()
+        if (c && c.state === 'running' && (Math.abs(moment - early.at) <= MEET || !callable(c, early))) {
+          foreseen.met++
+          played++
+          kinds[kind]++
+          ours = Math.round((early.start - c.currentTime) * 10000) / 10
+          const heard = heardWhen(c, early.start)
+          behind = heard === null ? null : Math.round((heard - moment) * 10) / 10
+          remember({ kind, speed, verdict: 'heard', db: Math.round(early.db) })
+          return 'heard'
+        }
+        quiet(early)
+      }
       const verdict = ((): Verdict => {
         if (!AC) return 'none'
         if (!wanted) return 'off'
@@ -184,11 +272,67 @@ export function createGlass(opts: { meter?: boolean } = {}): Glass {
       kinds[kind]++
       // Each new knock gives way a little to those still ringing.
       const db = knockDb(speed) - 10 * Math.log10(1 + 0.5 * ringing.length)
-      ringing.push(playKnock(ctx!, out!, kind, speed, db, pan, marbles))
+      ringing.push(playKnock(ctx!, out!, kind, speed, db, pan, marbles, when(ctx!, at)))
       remember({ kind, speed, verdict, db: Math.round(db) })
       return verdict
     },
     note(kind, speed, why) { remember({ kind, speed, verdict: why }) },
+    foresee(knocks, frame) {
+      const c = ctx
+      const t = performance.now()
+      const named = new Set<string>()
+      if (c && out && wanted && c.state === 'running') {
+        const now = c.currentTime
+        for (const k of knocks) {
+          // The first knock of a name is the one foreseen (a later one is another, foreseen in its time).
+          if (named.has(k.key)) continue
+          named.add(k.key)
+          const want = heardAt(c, k.at)
+          const was = ahead.get(k.key)
+          if (was) {
+            // Foreseen for much the same moment as before, or too near its start to stop now: it stands.
+            if (Math.abs(want - was.want) < RETIME || !callable(c, was)) continue
+            // Foreseen for another moment now: started again at that one.
+            quiet(was)
+            ahead.delete(k.key)
+          }
+          // On time where the next frame can still call it off, else as soon after as that allows; and only if that's
+          // sooner than the knock itself would start, as it comes.
+          const start = Math.max(want, now + safe(c) + frame)
+          if (start >= now + (k.at - t) / 1000) continue
+          ringing = ringing.filter((e) => e > now)
+          if (ringing.length >= MAX_VOICES) continue
+          const sources: AudioScheduledSourceNode[] = []
+          const db = knockDb(k.speed) - 10 * Math.log10(1 + 0.5 * ringing.length)
+          const end = playKnock(c, out, k.kind, k.speed, db, k.pan, k.marbles, start, sources)
+          ringing.push(end)
+          ahead.set(k.key, { kind: k.kind, speed: k.speed, at: k.at, want, start, end, db, sources })
+        }
+      }
+      // Foreseen before and not now: called off while that can be done cleanly. One too near its start stands for the
+      // knock itself to meet; if that never comes, it was heard for nothing.
+      for (const [key, a] of ahead) {
+        if (named.has(key)) continue
+        if (c && callable(c, a)) {
+          quiet(a)
+          ahead.delete(key)
+          foreseen.calledOff++
+        } else if (t - a.at > 2 * MEET) {
+          ahead.delete(key)
+          foreseen.wrong++
+          remember({ kind: a.kind, speed: a.speed, verdict: 'foreseen, never came', db: Math.round(a.db) })
+        }
+      }
+    },
+    lead(frame) {
+      const c = ctx
+      madeUp = 0
+      if (!c || !wanted || c.state !== 'running') return 0
+      const late = latencyOf(c) - SCREEN_MS / 1000
+      if (late <= LATE_MIN) return 0
+      madeUp = Math.min(LEAD_MAX, late)
+      return madeUp + safe(c) + 2 * Math.min(frame, 0.05)
+    },
     stats() {
       let levelDb: number | null = null, peakDb: number | null = null
       if (meter) {
@@ -197,9 +341,12 @@ export function createGlass(opts: { meter?: boolean } = {}): Glass {
         peakDb = db(peak)
       }
       const latency = ctx ? (ctx.outputLatency || 0) + (ctx.baseLatency || 0) : 0
+      const ms = (v: number | undefined) => (ctx && Number.isFinite(v) ? Math.round((v as number) * 10000) / 10 : null)
       return {
         state: shown, context: ctx?.state ?? null, session: session()?.type ?? null, played, kinds: { ...kinds }, skipped, log: [...log],
         levelDb, peakDb, rate: ctx?.sampleRate ?? null, latencyMs: ctx ? Math.round(latency * 1000) : null,
+        baseMs: ms(ctx?.baseLatency), outputMs: ms(ctx?.outputLatency), behindMs: behind, oursMs: ours,
+        foreseen: { ...foreseen, leadMs: Math.round(madeUp * 1000) },
       }
     },
   }
@@ -248,7 +395,68 @@ export function createGlass(opts: { meter?: boolean } = {}): Glass {
     update()
   }
 
+  /**
+   * When a knock that happened at `at` (performance.now() time, ms) starts, on the audio clock: when its moment on screen
+   * reaches the speakers (through the output's own timestamp), or at once if that's past; and in step with the knocks
+   * before it this frame.
+   */
+  function when(c: AudioContext, at: number | undefined): number {
+    const now = c.currentTime
+    const t = performance.now()
+    at ??= t
+    // The output's timestamp: which moment of the audio clock the speakers play at which performance.now() time.
+    const stamp = typeof c.getOutputTimestamp === 'function' ? c.getOutputTimestamp() : null
+    const ct = stamp?.contextTime, pt = stamp?.performanceTime
+    const known = ct !== undefined && !!pt
+    let start = Math.max(now, known ? ct + (at + SCREEN_MS - pt) / 1000 : now)
+    if (Math.abs(t - batch.task) < 1 && at >= batch.at) start = Math.max(start, batch.when + (at - batch.at) / 1000)
+    else batch = { task: t, at, when: start }
+    ours = Math.round((start - now) * 10000) / 10
+    behind = known ? Math.round((pt + (start - ct) * 1000 - at) * 10) / 10 : null
+    return start
+  }
+
+  /** The output's timestamp: which moment of the audio clock the speakers play at which performance.now() time. */
+  function stampOf(c: AudioContext): { ct: number; pt: number } | null {
+    const s = typeof c.getOutputTimestamp === 'function' ? c.getOutputTimestamp() : null
+    return s && s.contextTime !== undefined && s.performanceTime ? { ct: s.contextTime, pt: s.performanceTime } : null
+  }
+  /** The audio clock's time at which a moment on screen (performance.now() time, ms) is heard, where the output says. */
+  function heardAt(c: AudioContext, at: number): number {
+    const s = stampOf(c)
+    return s ? s.ct + (at + SCREEN_MS - s.pt) / 1000 : c.currentTime
+  }
+  /** When (performance.now() time, ms) the audio clock's `t` is heard, where the output says. */
+  function heardWhen(c: AudioContext, t: number): number | null {
+    const s = stampOf(c)
+    return s ? s.pt + (t - s.ct) * 1000 : null
+  }
+  /** How long after now a knock started at once is heard (s): as the output's timestamp shows it, else as it reports. */
+  function latencyOf(c: AudioContext): number {
+    const s = stampOf(c)
+    const l = s ? c.currentTime - s.ct - (performance.now() - s.pt) / 1000 : NaN
+    return l >= 0 && l < 1 ? l : (c.baseLatency || 0) + (c.outputLatency || 0)
+  }
+  /**
+   * How near its start a knock can still be stopped cleanly (s): the output works a callback ahead of what the page
+   * sees of it (its base latency, taken as at least 10 ms), and a render quantum.
+   */
+  const safe = (c: AudioContext) => Math.max(c.baseLatency || 0, 0.01) + 128 / c.sampleRate
+  const callable = (c: AudioContext, a: Ahead) => a.start > c.currentTime + safe(c)
+  /** A knock foreseen, stopped before it starts (so it's never heard), its voice given back. */
+  function quiet(a: Ahead) {
+    for (const s of a.sources) try { s.stop() } catch { /* not started: nothing to stop */ }
+    const i = ringing.indexOf(a.end)
+    if (i >= 0) ringing.splice(i, 1)
+  }
+  /** Every knock foreseen, stopped (the sound is going off, or the system took it). */
+  function drop() {
+    for (const a of ahead.values()) quiet(a)
+    ahead.clear()
+  }
+
   function update() {
+    if (ctx?.state !== 'running') drop()
     const next = soundState(!!AC, wanted, ctx?.state ?? null)
     if (next === shown) return
     shown = next
@@ -292,9 +500,9 @@ export function ceiling(n = 4097): Float32Array<ArrayBuffer> {
  * One knock, played into `out` at `level` (dBFS for a knock alone): returns when it's done ringing (the context's clock).
  * Exported to measure it: rendered offline, its peak is how loud it is.
  */
-export function playKnock(ctx: BaseAudioContext, out: AudioNode, kind: GlassHit, speed: number, level: number, pan: number, marbles?: [string, string?]): number {
-  // Now: a knock is heard in the same frame it's seen (the output's own latency apart).
-  const t = ctx.currentTime
+export function playKnock(ctx: BaseAudioContext, out: AudioNode, kind: GlassHit, speed: number, level: number, pan: number, marbles?: [string, string?], at?: number, sources?: AudioScheduledSourceNode[]): number {
+  // At its moment (the caller's: glass.hit() works it out), else now.
+  const t = at ?? ctx.currentTime
   const s = hardness(speed)
   const a = AGAINST[kind]
   const hit = ctx.createGain()
@@ -325,6 +533,7 @@ export function playKnock(ctx: BaseAudioContext, out: AudioNode, kind: GlassHit,
       o.connect(g).connect(hit)
       o.start(t)
       o.stop(t + len + 0.02)
+      sources?.push(o)
       end = Math.max(end, t + len + 0.02)
     }
   }
@@ -347,6 +556,7 @@ export function playKnock(ctx: BaseAudioContext, out: AudioNode, kind: GlassHit,
     o.connect(g).connect(hit)
     o.start(t)
     o.stop(t + 0.1)
+    sources?.push(o)
   }
   // The contact itself: a short bright click.
   if (a.click > 0) {
@@ -359,6 +569,7 @@ export function playKnock(ctx: BaseAudioContext, out: AudioNode, kind: GlassHit,
     g.gain.value = a.click * (0.25 + 0.75 * s) * 0.6
     n.connect(hp).connect(g).connect(hit)
     n.start(t)
+    sources?.push(n)
   }
   return end
 }

@@ -1,30 +1,45 @@
 /**
- * The hero's bounce field as physics: glass marbles that roll and bounce on a floor and on raised letters. Pure (no
+ * The hero's marbles as physics: glass marbles that roll and bounce on a floor and on raised letters. Pure (no
  * three.js), unit-tested in node. Units are the letters' em: the floor is the x-z plane, y is up. A letter is a
- * footprint (outline polygons with holes, from its glyph) raised to a height; a marble has a position, a velocity and
- * a radius, and some weight: it never bounces by itself.
+ * footprint (outline polygons with holes, from its glyph) raised to its height; a marble is a ball with a position, a
+ * velocity, a radius and some weight: it never bounces by itself.
  *
- * - Steered, it rolls after its target on a damped spring; in the air it mostly keeps its momentum.
+ * It moves in fixed steps (H: 240 a second, whatever the frame rate), each solved as a whole. Everything a marble
+ * touches, or will reach within the step, is a contact: the floor, a letter's top, its sides, the rounded rim of its
+ * top edge, a step's edge, the edges of the screen, another marble. All of them are solved together (impulses, each
+ * started from what it took the step before), so a marble held by two things at once (the rim of a counter all round,
+ * the edges of two letters either side of a gap narrower than itself, a corner) rests on both at once instead of being
+ * pushed off one into the other. A contact it will reach within the step stops it exactly at the surface (so nothing
+ * is passed through, however fast), and whatever overlap is left is eased out (within a hair, SLOP, it's left alone,
+ * so a resting marble never trembles).
+ *
+ * - Steered, it rolls after its target on a damped spring; in the air it mostly keeps its momentum. Tilted, it's
+ *   pushed along like a marble on a tray.
  * - Tossed (a phone flicked upward, a click), it leaves the surface at that speed. A toss that comes while it's still
  *   in the air waits a moment for it to touch down, the way a tray can only throw a ball that's on it.
- * - Given a route, it hops from spot to spot back to back: each hop leaves with exactly the sideways speed that
- *   lands it on the next spot, and it stops dead there (no sliding on past it).
+ * - Given a route, it hops from spot to spot back to back: each hop leaves with exactly the sideways speed that lands
+ *   it on the next spot, flies untouched by any tilt or steering (and clear of the letters on its way up), and stops
+ *   dead there (no sliding on past it).
+ * - It lands on a letter where it comes down over one, rolls over an edge (a top edge is round to it: it touches it
+ *   along its rim) and bumps off a side. A contact bounces only when it's struck: slower than a knock, it just holds,
+ *   so a marble pressed against a side, into a corner or onto a rim rests there. A knock is reported once, when a
+ *   contact begins, with its moment within the step, where and how hard: resting or rolling against something is
+ *   silent.
  * - Left alone, each bounce is lower than the last and the surface's grip takes some of its sideways speed, until it
- *   rests; then nothing moves and nothing needs drawing.
- * - It lands on a letter where it comes down over one, bumps off a letter's side where it runs into one, and two
- *   marbles knock into each other.
- * - A low step (a button, raised less than StepOptions.climb) has a rounded top edge instead of a wall: a marble
- *   rolling into it fast enough rides up over the edge onto it, a slower one rolls back, and one steered or tilted onto
- *   it (someone pointing at the button, a phone tipped toward it) is helped up, as a hand would. Rolling off its edge,
- *   it tips over and drops.
- * - A letter's counters (the holes in o, p, e) are narrower than a marble: one that finds itself in one sits on the
- *   counter's rim, held by all the rim's points it touches at once, and comes to rest there. Steered or tilted toward
- *   a side, it rides up over the rim and out. Rolling across the letter's top, or coming down on it, a marble stays out
- *   of its counters unless it's steered or tilted into one. (A counter wider than a marble, as in O, is a pit it can
- *   drop into, and leave the same way.)
+ *   stops. Rolling has a little resistance, more to start from still than to keep going, so a marble comes to rest,
+ *   and then it sleeps: nothing moves and nothing needs drawing, until something moves it (a tilt or a pull that what
+ *   holds it can't hold against, a knock, a toss).
+ * - A counter narrower than a marble (the holes in o, p, e), or a gap between two letters, is a cup: the marble sits on
+ *   its rim, settles in the lowest place, and sleeps there. A counter wider than a marble (O) is a pit, the floor at
+ *   its bottom. Rolling slowly across a letter, a marble can settle into one; fast, it rolls on over.
+ * - A low step (a button, raised no more than StepOptions.climb) stops a marble rolled into its edge (fast enough, it
+ *   rides up over it). Steered onto it, or pushed into its edge by a clear tilt held a moment (LIFT_PER_EM a em of its
+ *   height), it's helped up and over, as a hand would. Out of a cup the same: steered out, or a clear tilt held a moment
+ *   (BREAK), helps it up over the rim. It rolls up the edge and over, never jumps. A letter's outside, from the floor,
+ *   is a wall. Rolling off an edge, it tips over and drops.
  * - Given walls (the planes through the camera and the edges of what's on screen), it's kept inside them as it's
  *   drawn: its outline, a little bigger the higher it is, just touches the edge of the screen, and a knock against one
- *   is reported for its sound.
+ *   is reported like any other.
  */
 
 export interface Footprint {
@@ -51,19 +66,18 @@ export interface Orb {
   target: { x: number; z: number } | null
   /** Spots to hop to, one per bounce, back to back (the choreography's precise hops). */
   route: { x: number; z: number }[]
-  /** In the air on a precise hop: no steering, and it stops dead where it lands. */
+  /** In the air on a precise hop: no steering or tilt, and it stops dead where it lands. */
   flying: boolean
   /** Where the precise hop in the air is headed. */
   aim?: { x: number; z: number } | null
   /** A toss waiting for it to touch down: the speed it leaves at, and how much longer it waits (s). */
   toss: { vy: number; ttl: number } | null
-  /** At rest on a surface: no motion at all. */
+  /** Asleep: at rest where what it touches holds it; nothing moves until something wakes it. */
   resting: boolean
-  /** Held up by a counter's rim (as of the last step): it rolls there as on any surface. */
+  /** Held up by edges alone (the rim of a counter, the edges of a gap between two letters), as of its last step. */
   held?: boolean
-  /** In a letter's counter (on its rim, or down in its pit), and how long a clear tilt has been pulling it out (s). */
-  cup?: boolean
-  strain?: number
+  /** What the physics carries from one step to the next (its own). */
+  mem?: Mem
 }
 
 /**
@@ -90,7 +104,7 @@ export interface StepOptions {
   push?: [number, number]
   /** How much of the steering still acts while it's in the air (0: none, it flies on its momentum; 1: all). */
   air?: number
-  /** Footprints this low or lower are steps with a rounded top edge a marble can roll over (0, the default: none). */
+  /** Footprints this low or lower are steps, with an edge a marble can be helped over (0, the default: none). */
   climb?: number
   /**
    * The walls to keep it inside, in place of the bounds (which then only matter to whoever draws the field), and how
@@ -102,42 +116,164 @@ export interface StepOptions {
 
 /** Gravity, em/s². */
 export const G = 18
-/** How much of its speed a bounce keeps (glass on a hard surface), and the speed below which it rests. */
+/** The fixed step (s): the physics moves 240 times a second, whatever the frame rate. */
+export const H = 1 / 240
+/**
+ * How much of its speed into a surface a bounce keeps: coming down on one (glass on a hard surface; not from a small
+ * fall, one it would leave slower than REST_VY), running into a side (from LEAN), two marbles (from CLINK_V). A step's
+ * edge doesn't bounce: rolled into, it's climbed or it's not.
+ */
 const SETTLE = 0.55
 const REST_VY = 0.9
-/** Side bumps keep this much of the speed into the letter; two marbles, this much of the speed between them. */
 const BUMP = 0.55
+const LEAN = 0.3
 const CLINK = 0.9
-/** Rolling slows by this factor per second when nothing steers it; on a counter's rim, much sooner (it settles). */
-const FRICTION = 1.8
-const RIM_FRICTION = 8
+const CLINK_V = 0.05
+/** Coming down faster than this (em/s) onto something is landing on it; slower, it has rolled into it. */
+const FALLING = 0.3
+/**
+ * Dropped into a cup (caught by two edges or more at once), it hops straight up with CATCH of the speed it came down at
+ * (if that's more than CATCH_V), a small clink of a bounce, and settles.
+ */
+const CATCH = 0.3
+const CATCH_V = 0.35
 /** A real bounce keeps this much of its sideways speed (the surface's grip). */
 const GRIP = 0.6
+/**
+ * Rolling slows by this factor per second when nothing steers it; in a cup, much sooner: it settles. And it rolls
+ * against a little resistance, as a share of its weight: ROLL to keep rolling, STICK to start from still (about 1.5°
+ * of a phone's tilt past its dead zone).
+ */
+const FRICTION = 1.8
+const CUP_FRICTION = 8
+const ROLL = 0.02
+const STICK = 0.045
+/** Steered and asleep where it was pointed, it wakes when its target is off by more than a hair (a pull of AIMED × G). */
+const AIMED = 0.001
 const MAX_SPEED = 14
 /** How long a toss waits for a marble in the air to come down (s). */
 const TOSS_WAIT = 0.25
-/** Running into a side slower than this (em/s) is leaning on it, not a bump. */
-const LEAN = 0.3
 /**
- * A tilt pushing this hard (em/s², about 2° of a phone's tilt), within about 65° of the way to a step's edge or out of a
- * counter, is someone meaning to go there: the marble is helped up and over.
- */
-const MEANT = 1
-const TOWARD = 0.42
-/**
- * A step's edge, and how hard a tilt must push into it to help the marble up: this much per em of the step's height
- * (a button 0.1 em high takes 4.4 em/s², a phone tipped about 9°; a gentler tilt bumps it against the edge).
+ * Being helped up and over: a step's edge takes a push into it of LIFT_PER_EM a em of the step's height (a button
+ * 0.1 em high takes 4.4 em/s², a phone tipped about 9°), at least MEANT; a cup's rim, BREAK (a phone tipped 4.5°).
+ * A tilt has to be held STRAIN (s), so a hand's tremble or a stray reading doesn't do it; steering helps at once. Once
+ * going, it keeps going while the push stays over KEEP of that, pointing within about 60° (TOWARD) of the way over.
  */
 const LIFT_PER_EM = 44
+const MEANT = 1
+const BREAK = 1.8
+const STRAIN = 0.15
+const KEEP = 0.6
+const TOWARD = 0.5
 /**
- * In a counter, a tilt pulls the marble out only past this (em/s², a phone tipped about 5°) and held this long (s): a
- * hand's tremble and stray readings don't, and a marble that stops there sleeps.
+ * Leaving a cup, its weight is carried (a hand lifting it) while the push rolls it up the rim and over, whichever way;
+ * steered out of a gap, when its target is at least CUP_OUT (em) off (then until it's out). (CUP: what it's being helped
+ * over, when that's a cup.)
  */
-const BREAK = 2.2
-const BREAK_TIME = 0.25
+const CUP_OUT = 0.12
+const CUP = -3
+/**
+ * Two things within TOUCH (em) touch. SLOP of overlap is left alone (a resting marble isn't nudged every step), and
+ * more is taken out at most MAX_FIX a step (a marble found inside something eases out of it; it never jumps).
+ */
+const TOUCH = 0.004
+const SLOP = 0.001
+const MAX_FIX = 0.02
+/** Higher than this off the floor (em), a marble touching a letter's edge is up on edges, not beside it on the floor. */
+const ABOVE = 0.01
+/** Impulse iterations a step. */
+const ITERATIONS = 10
+/** A marble this slow (em/s) for this long (s), held by what it touches, sleeps. */
+const SLEEP_V = 0.01
+const SLEEP_T = 0.2
+/** What a contact is with, besides a footprint (by its id): the floor, a wall (WALL − its index), another marble (MARBLE − its index). */
+export const FLOOR = -1
+const WALL = -10
+const MARBLE = -1000
+
+/** What a marble keeps from one step to the next. */
+export interface Mem {
+  /** Where its last step left it: moved from there (by anyone else), what it knew is forgotten. */
+  x: number
+  y: number
+  z: number
+  /** What it ended its last step touching: the push each took (a start for the next), and a knock still to bounce. */
+  touch: Touch[]
+  /** How much held it up (the pushes up of what it stands on, em/s a step), and whether edges alone did, two or more. */
+  load: number
+  cup: boolean
+  /** Held still by static friction, and how long it has been nearly still (s). */
+  stuck: boolean
+  still: number
+  /** How long a clear tilt has pushed it to climb (s), and what it's being helped over (a footprint's id), if anything. */
+  strain: number
+  climb: number | null
+  /** Caught by a cup this step: how fast it came down (em/s), for its small hop once it's in. */
+  caught: number
+}
+interface Touch { id: number; nx: number; ny: number; nz: number; lambda: number; knock: number }
+
+/** A contact being solved. */
+interface Contact {
+  /** What with: a footprint's id, FLOOR, WALL − i, MARBLE − j. */
+  id: number
+  /** The marble's index among those stepped, and the other marble's (−1: something fixed). */
+  a: number
+  b: number
+  /** From what it touches toward the marble (a wall's, along the floor). */
+  nx: number
+  ny: number
+  nz: number
+  /** How far apart they are (em; overlapping: below 0), and how that changes with the marble's rise (a wall's). */
+  gap: number
+  gy: number
+  /** Where it touches, on what it touches. */
+  px: number
+  py: number
+  pz: number
+  /** A step's edge or a cup's rim: how hard a push over it takes (em/s²; 0: it's not one); a step's edge (no bounce). */
+  over: number
+  step: boolean
+  /** The push it has taken this step (em/s), the least speed away from it allowed (em/s), a knock still to bounce. */
+  lambda: number
+  min: number
+  knock: number
+  /** How far apart they'll be as the step ends (em), and how fast it came at it as the step began (em/s). */
+  end: number
+  vn: number
+}
+
+/** A marble knocked into something this step. */
+export interface Knock {
+  /** When, from the start of the step (s). */
+  t: number
+  /** The marble (its index in what was stepped). */
+  i: number
+  /** Coming down on something (land), into a side or an edge (bump), a wall, another marble. */
+  kind: 'land' | 'bump' | 'wall' | 'marble'
+  /** What it struck: a footprint's id or FLOOR; a wall's index; the other marble's index. */
+  id: number
+  /** How fast it came in (em/s), where it touched and which way (from what it struck, toward the marble). */
+  speed: number
+  x: number
+  y: number
+  z: number
+  nx: number
+  ny: number
+  nz: number
+  /** A precise hop coming down. */
+  hop?: boolean
+}
 
 export function newOrb(x: number, z: number, r: number, surface = 0): Orb {
   return { x, y: surface + r, z, vx: 0, vy: 0, vz: 0, r, target: null, route: [], flying: false, toss: null, resting: true }
+}
+
+/** Whether it's on something (as of its last step): held up by the floor, a top, a step's edge or a rim. */
+function standing(o: Orb, fps: readonly Footprint[]): boolean {
+  const m = o.mem
+  if (m && m.x === o.x && m.y === o.y && m.z === o.z) return m.load > 0
+  return o.y - o.r - surfaceAt(fps, o.x, o.z).h < 0.02
 }
 
 /**
@@ -149,7 +285,7 @@ export function toss(o: Orb, vy: number, fps: readonly Footprint[]): boolean {
   o.flying = false
   o.aim = null
   o.resting = false
-  if ((o.held || o.y - o.r - surfaceAt(fps, o.x, o.z).h < 0.02) && o.vy <= 0.5) {
+  if (standing(o, fps) && o.vy <= 0.5) {
     o.vy = Math.max(o.vy, vy)
     o.toss = null
     return true
@@ -167,7 +303,8 @@ export function hopTo(o: Orb, spot: { x: number; z: number }) {
 
 /**
  * Two marbles that meet knock into each other (they weigh the same): pushed apart, and the speed between them bounces
- * back, most of it (glass on glass). Returns how hard they met (em/s), 0 if they didn't.
+ * back, most of it (glass on glass). Returns how hard they met (em/s), 0 if they didn't. (tick() does this within its
+ * step for the marbles it steps together; this is for a pair on their own.)
  */
 export function collide(a: Orb, b: Orb): number {
   const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z
@@ -260,210 +397,6 @@ export function landingSpot(rings: Float64Array[], box: [number, number, number,
   return [sx, sz]
 }
 
-export interface StepResult {
-  /** It came down on something this step (a real landing, not rolling along it): a letter's id, or -1 for the floor. */
-  landed: number | null
-  /** It ran into a letter's side this step (that letter's id). */
-  bumped: number | null
-  /** How hard the hardest of those was: its speed into the surface, em/s (0 if none). */
-  impact: number
-  /** It knocked against a wall this step (the wall's index in StepOptions.walls), and how hard (em/s into it). */
-  wall: number | null
-  wallImpact: number
-  /** Anything moved. */
-  moving: boolean
-}
-
-/** Advance one orb by dt seconds among the letters. */
-export function step(o: Orb, fps: readonly Footprint[], dt: number, opts: StepOptions): StepResult {
-  const res: StepResult = { landed: null, bumped: null, impact: 0, wall: null, wallImpact: 0, moving: false }
-  // In a counter, a tilt has to mean it: a hand's tremble, a slight lean or a stray reading doesn't shift it (static
-  // friction); only a clear tilt, held a moment, does.
-  let push = opts.push
-  if (o.cup && push) {
-    o.strain = Math.hypot(push[0], push[1]) > BREAK ? (o.strain ?? 0) + Math.min(dt, 1 / 30) : 0
-    if (o.strain < BREAK_TIME) push = undefined
-  } else o.strain = 0
-  if (o.resting && !o.target && !o.route.length && !o.toss && !push) return res
-  if (push !== opts.push) opts = { ...opts, push }
-  dt = Math.min(dt, 1 / 30)
-  if (o.toss && (o.toss.ttl -= dt) <= 0) o.toss = null
-  // Small substeps keep a fast orb from passing through a letter's side.
-  const n = Math.max(1, Math.ceil((Math.hypot(o.vx, o.vz) * dt) / (o.r * 0.5)))
-  const h = dt / n
-  for (let s = 0; s < n; s++) {
-    const r = sub(o, fps, h, opts)
-    if (r.landed !== null) res.landed = r.landed
-    if (r.bumped !== null) res.bumped = r.bumped
-    res.impact = Math.max(res.impact, r.impact)
-    if (r.wall !== null && r.wallImpact > res.wallImpact) { res.wall = r.wall; res.wallImpact = r.wallImpact }
-  }
-  res.moving = !o.resting
-  return res
-}
-
-function sub(o: Orb, fps: readonly Footprint[], h: number, opts: StepOptions): StepResult {
-  const res: StepResult = { landed: null, bumped: null, impact: 0, wall: null, wallImpact: 0, moving: false }
-  const base = surfaceAt(fps, o.x, o.z)
-  const climb = opts.climb ?? 0
-  const wasHeld = !!o.held
-  // On the ground, on a low step's edge (rolling up onto it, or off it), or held by a counter's rim: steering and
-  // rolling friction hold there.
-  const grounded = (o.y - o.r <= base.h + 1e-3 && o.vy <= 0) || (climb > 0 && onEdge(o, fps, climb)) || !!o.held
-
-  // Sideways: steered (a spring that doesn't overshoot; in the air, only as much as `air`), carried through a precise
-  // hop, pushed by a tilt, or rolling to a stop.
-  if (!o.flying) {
-    const w = opts.omega ?? 7, zeta = opts.zeta ?? 0.9
-    if (o.target) {
-      const k = grounded ? 1 : opts.air ?? 1
-      o.vx += k * (w * w * (o.target.x - o.x) - 2 * zeta * w * o.vx) * h
-      o.vz += k * (w * w * (o.target.z - o.z) - 2 * zeta * w * o.vz) * h
-    } else if (grounded) {
-      // (Settling on a counter's rim, it grips: nothing's tilting it on.)
-      const k = Math.exp(-(wasHeld && !opts.push ? RIM_FRICTION : FRICTION) * h)
-      o.vx *= k; o.vz *= k
-    }
-  }
-  if (opts.push) { o.vx += opts.push[0] * h; o.vz += opts.push[1] * h }
-  const sp = Math.hypot(o.vx, o.vz)
-  if (sp > MAX_SPEED) { o.vx *= MAX_SPEED / sp; o.vz *= MAX_SPEED / sp }
-
-  // Up and down. (Where it was a moment ago tells a landing on a letter's top from running into its side.)
-  const wasBottom = o.y - o.r
-  o.vy -= G * h
-  o.x += o.vx * h
-  o.z += o.vz * h
-  o.y += o.vy * h
-
-  // The field's edges: the walls where it has them (as it's drawn, so it stays wholly on screen), else the bounds: far
-  // and near, then the sides where it is.
-  let touched = 0
-  if (opts.walls) touched = walls(o, opts.walls, opts.grow ?? 0, res)
-  else {
-    const [, z0, , z1] = opts.bounds
-    if (o.z < z0 + o.r) { o.z = z0 + o.r; o.vz = Math.abs(o.vz) * BUMP }
-    if (o.z > z1 - o.r) { o.z = z1 - o.r; o.vz = -Math.abs(o.vz) * BUMP }
-    const [x0, x1] = sidesAt(opts, o.z)
-    if (o.x < x0 + o.r) { o.x = x0 + o.r; o.vx = Math.abs(o.vx) * BUMP }
-    if (o.x > x1 - o.r) { o.x = x1 - o.r; o.vx = -Math.abs(o.vx) * BUMP }
-  }
-
-  // Letters' sides: an orb lower than a letter's top that touches its outline is pushed back out and bounces off. (A
-  // precise hop on its way up is clear of them: it left from beside one and is over it a moment later.) A low step
-  // has a rounded edge instead, and a counter its rim. Touching several at once (between two letters, say), it's set
-  // clear of all of them together: a few passes, each from where the last left it, so none of them shoves it back
-  // into another.
-  o.held = false
-  o.cup = false
-  for (let pass = 0; pass < 3; pass++) {
-    let moved = false
-    for (const fp of fps) {
-      if (o.flying && o.vy > 0) break
-      const b = fp.box
-      if (o.x < b[0] - o.r || o.x > b[2] + o.r || o.z < b[1] - o.r || o.z > b[3] + o.r) continue
-      if (fp.height <= climb) { if (pass === 0) edge(o, fp, res, opts.push); continue }
-      // In a counter: its rim holds it (a precise hop is on its way to a spot on the letter itself, and lands there).
-      const hole = o.flying ? null : counterOf(fp, o.x, o.z)
-      if (hole) { if (pass === 0) counter(o, fp, hole, wasBottom, wasHeld, res, opts); continue }
-      if (o.y - o.r >= fp.height - 0.01 || wasBottom >= fp.height - 0.01) continue
-      const inLetter = inside(fp, o.x, o.z)
-      const e = nearest(fp, o.x, o.z)
-      if (!inLetter && e.d >= o.r - 1e-9) continue
-      // Out of the letter, along the way it came in.
-      const nx = inLetter ? -e.nx : e.nx, nz = inLetter ? -e.nz : e.nz
-      const push = inLetter ? e.d + o.r : o.r - e.d
-      o.x += nx * push
-      o.z += nz * push
-      moved = true
-      const vn = o.vx * nx + o.vz * nz
-      if (vn < 0) { o.vx -= (1 + BUMP) * vn * nx; o.vz -= (1 + BUMP) * vn * nz }
-      // Knocked off course: the route is off.
-      if (o.flying) { o.flying = false; o.aim = null; o.route = [] }
-      if (pass === 0 && vn < -LEAN) { res.bumped = fp.id; res.impact = Math.max(res.impact, -vn) }
-    }
-    if (!moved) break
-  }
-
-  // Coming down on the surface under it: bounce (or settle). On a counter's rim, the rim has done that; a hop or a
-  // toss leaves from there all the same.
-  const under = surfaceAt(fps, o.x, o.z)
-  const rim = !!o.held
-  if (rim || (o.y - o.r <= under.h && o.vy < 0)) {
-    const vin = rim ? 0 : -o.vy
-    if (!rim) o.y = under.h + o.r
-    // Rolling along a surface touches it every step; only coming down on it is a landing.
-    if (!rim && (vin > REST_VY * 0.5 || o.flying)) { res.landed = under.id; res.impact = Math.max(res.impact, vin) }
-    // Arriving from a precise hop: it's there, exactly (not wherever the step's end happened to be). Stop dead.
-    if (o.flying) {
-      if (o.aim) { o.x = o.aim.x; o.z = o.aim.z; o.y = surfaceAt(fps, o.x, o.z).h + o.r }
-      o.vx = o.vz = 0
-      o.flying = false
-      o.aim = null
-    }
-    const next = o.route.shift()
-    if (next) {
-      // A precise hop: the sideways speed that lands it on the spot as it comes back down (to the spot's surface).
-      o.vy = Math.sqrt(2 * G * opts.hop)
-      o.resting = false
-      const t = flightTime(o.vy, o.y - o.r, surfaceAt(fps, next.x, next.z).h)
-      o.vx = (next.x - o.x) / t
-      o.vz = (next.z - o.z) / t
-      o.flying = true
-      o.aim = next
-    } else if (o.toss) {
-      // The toss that was waiting for it.
-      o.vy = Math.max(o.toss.vy, vin * SETTLE)
-      o.toss = null
-      o.resting = false
-    } else if (!rim) {
-      // A real bounce (not just resting contact) loses some of its sideways speed to the surface's grip.
-      if (vin > REST_VY) { o.vx *= GRIP; o.vz *= GRIP }
-      o.vy = vin * SETTLE
-      if (o.vy < REST_VY) {
-        o.vy = 0
-        const pushed = !!opts.push && Math.hypot(opts.push[0], opts.push[1]) > 1e-3
-        if (!o.target && !pushed && Math.hypot(o.vx, o.vz) < 0.05) { o.vx = o.vz = 0; o.resting = true }
-      } else o.resting = false
-    }
-  } else if (o.vy !== 0 || Math.hypot(o.vx, o.vz) > 0.001) o.resting = false
-  // Against a wall this step: once more now the surface has set its height, so it touches it exactly.
-  if (opts.walls && touched) walls(o, opts.walls, opts.grow ?? 0, res, touched)
-  return res
-}
-
-/**
- * A low step's rounded top edge, for a marble beside it (over it, its top is simply the surface). Steered onto the
- * step, or tilted into its edge, the edge is a ramp: the marble rides up it at the edge's height under it, as a hand
- * would lift it. Otherwise it rolls on the edge: pushed out along the line from the edge to its centre, and it loses
- * its speed into the edge; fast enough, what's left carries it up and over, else gravity rolls it back. Off the step's
- * side, it tips over the edge the same way.
- */
-function edge(o: Orb, fp: Footprint, res: StepResult, tilt?: [number, number]) {
-  if (inside(fp, o.x, o.z)) return
-  const e = nearest(fp, o.x, o.z)
-  if (e.d >= o.r) return
-  const up = o.y - fp.height
-  const dist = Math.hypot(e.d, up)
-  if (dist >= o.r) return
-  // Tilted into the edge: the tilt's part toward the step (e.n points from the edge out to the marble).
-  const tilted = !!tilt && -(tilt[0] * e.nx + tilt[1] * e.nz) > Math.max(MEANT, LIFT_PER_EM * fp.height, TOWARD * Math.hypot(tilt[0], tilt[1]))
-  if (tilted || (o.target && inside(fp, o.target.x, o.target.z))) {
-    o.y = fp.height + Math.sqrt(o.r * o.r - e.d * e.d)
-    if (o.vy < 0) o.vy = 0
-    return
-  }
-  const nx = dist > 1e-9 ? (e.nx * e.d) / dist : 0, ny = dist > 1e-9 ? up / dist : 1, nz = dist > 1e-9 ? (e.nz * e.d) / dist : 0
-  const push = o.r - dist
-  o.x += nx * push
-  o.y += ny * push
-  o.z += nz * push
-  const vn = o.vx * nx + o.vy * ny + o.vz * nz
-  if (vn < 0) { o.vx -= vn * nx; o.vy -= vn * ny; o.vz -= vn * nz }
-  if (o.flying) { o.flying = false; o.aim = null; o.route = [] }
-  if (vn < -LEAN) { res.bumped = fp.id; res.impact = Math.max(res.impact, -vn) }
-}
-
 /** Is (x, z) inside this one outline (even-odd)? */
 function inRing(ring: Float64Array, x: number, z: number): boolean {
   let c = false
@@ -491,120 +424,6 @@ export function counterOf(fp: Footprint, x: number, z: number): Float64Array | n
   return count >= 2 && count % 2 === 0 ? hole : null
 }
 
-/**
- * A marble whose centre is over a letter's counter. The counter's rim (its outline, at the letter's height) holds it
- * up: every point of the rim at once, which comes to the nearest one holding it highest. So it sits on the rim, lower
- * the deeper into the counter it is, and moves on it as on any surface (with more grip: it settles quickly). A
- * counter wider than the marble lets it drop through to the floor, and the rim is a wall to it there (a pit, as in O).
- * Meaning to leave (steered to somewhere outside the counter, or tilted toward a side), it rides up over the rim that
- * way, as a hand would lift it. Rolling across the letter's top, it doesn't drop in unless it's meant to: it stays on
- * the rim's edge. (`wasBottom` is where its bottom was before this step; `wasHeld`, whether the rim held it then.)
- */
-function counter(o: Orb, fp: Footprint, hole: Float64Array, wasBottom: number, wasHeld: boolean, res: StepResult, opts: StepOptions) {
-  const top = fp.height
-  const n = hole.length / 2
-  // The rim's nearest point, and the way into the counter from it.
-  let bd = Infinity, bx = 0, bz = 0
-  for (let i = 0, j = n - 1; i < n; j = i++) {
-    const ax = hole[j * 2], az = hole[j * 2 + 1], ex = hole[i * 2] - ax, ez = hole[i * 2 + 1] - az
-    const t = Math.max(0, Math.min(1, ((o.x - ax) * ex + (o.z - az) * ez) / (ex * ex + ez * ez || 1e-12)))
-    const d = Math.hypot(o.x - ax - ex * t, o.z - az - ez * t)
-    if (d < bd) { bd = d; bx = ax + ex * t; bz = az + ez * t }
-  }
-  const inX = bd > 1e-9 ? (o.x - bx) / bd : 0, inZ = bd > 1e-9 ? (o.z - bz) / bd : 0
-  // Where it's meant to go: to its target, or the way it's tilted.
-  const push = opts.push && Math.hypot(opts.push[0], opts.push[1]) > MEANT ? opts.push : null
-  let ix = 0, iz = 0
-  if (o.target) { ix = o.target.x - o.x; iz = o.target.z - o.z } else if (push) { ix = push[0]; iz = push[1] }
-  const il = Math.hypot(ix, iz)
-  if (il > 1e-6) { ix /= il; iz /= il }
-  const stay = !!o.target && inRing(hole, o.target.x, o.target.z)
-  // Rolling on the letter's top (not coming down from above) and not meant to go in or across: it stays on the rim's
-  // edge, and rolls back from it.
-  const enter = stay || (il > 1e-6 && ix * inX + iz * inZ > TOWARD)
-  if (!wasHeld && Math.abs(wasBottom - top) < 0.01 && o.y - o.r < top && !enter) {
-    o.x = bx - inX * 1e-4
-    o.z = bz - inZ * 1e-4
-    const vn = o.vx * inX + o.vz * inZ
-    if (vn > 0) { o.vx -= (1 + BUMP) * vn * inX; o.vz -= (1 + BUMP) * vn * inZ }
-    return
-  }
-  o.cup = true
-  // How high the rim holds it here (nowhere, if the rim is out of its reach: it's over the middle of a pit).
-  const rim = bd < o.r ? top + Math.sqrt(o.r * o.r - bd * bd) : -Infinity
-  if (rim > o.r + 1e-6 && (wasHeld || wasBottom + o.r >= rim - 0.02)) {
-    // On the rim (or coming down onto it): held there.
-    if (o.y <= rim) {
-      const vin = -o.vy
-      o.y = rim
-      if (o.vy < 0) o.vy = 0
-      if (!wasHeld && vin > REST_VY * 0.5) {
-        res.landed = fp.id
-        res.impact = Math.max(res.impact, vin)
-        o.vx *= GRIP; o.vz *= GRIP
-      }
-      o.held = true
-      // Settled, with nobody steering or tilting it anywhere: at rest.
-      const pushed = !!opts.push && Math.hypot(opts.push[0], opts.push[1]) > 1e-3
-      if (!o.target && !pushed && !o.route.length && !o.toss && Math.hypot(o.vx, o.vz) < 0.05) { o.vx = o.vz = 0; o.resting = true }
-    }
-    return
-  }
-  // Down in a pit, on its floor: the rim is a wall, unless it's meant to leave this way (then up and over it).
-  const reach = Math.sqrt(Math.max(0, o.r * o.r - (o.y - top) ** 2))
-  if (bd >= reach) return
-  if (il > 1e-6 && !stay && -(inX * ix + inZ * iz) > TOWARD) {
-    if (rim > o.y) { o.y = rim; if (o.vy < 0) o.vy = 0; o.held = true }
-    return
-  }
-  const p = reach - bd
-  o.x += inX * p
-  o.z += inZ * p
-  const vn = o.vx * inX + o.vz * inZ
-  if (vn < 0) {
-    o.vx -= (1 + BUMP) * vn * inX; o.vz -= (1 + BUMP) * vn * inZ
-    if (vn < -LEAN) { res.bumped = fp.id; res.impact = Math.max(res.impact, -vn) }
-  }
-}
-
-/**
- * The walls: the marble, as drawn (r · (1 + grow · (y − r)), bigger the higher it is), stays inside each, set back
- * along the floor if it's gone past one (the rest of its motion goes on) and bouncing off it. A few passes, for a
- * corner. The hardest knock is reported, and which wall. Returns the walls it touched (a bit each). `touching` sets
- * it back exactly against those walls, closer or further (after its height has changed: an edge of the screen
- * leans, so its height moves it on screen), with no bounce.
- */
-function walls(o: Orb, ws: readonly Wall[], grow: number, res: StepResult, touching = 0): number {
-  const rho = o.r * (1 + grow * Math.max(0, o.y - o.r))
-  let touched = 0
-  for (let pass = 0; pass < 3; pass++) {
-    let moved = false
-    ws.forEach((w, i) => {
-      const s = w.n[0] * o.x + w.n[1] * o.y + w.n[2] * o.z + w.d
-      const exact = (touching >> i) & 1
-      if (s >= rho && !(exact && s > rho + 1e-9)) return
-      const hl = Math.hypot(w.n[0], w.n[2])
-      if (hl < 1e-6) return
-      const nx = w.n[0] / hl, nz = w.n[2] / hl
-      const p = (rho - s) / hl
-      o.x += nx * p
-      o.z += nz * p
-      moved = true
-      touched |= 1 << i
-      if (exact) return
-      const vn = o.vx * nx + o.vz * nz
-      if (vn < 0) {
-        o.vx -= (1 + BUMP) * vn * nx
-        o.vz -= (1 + BUMP) * vn * nz
-        if (-vn > res.wallImpact) { res.wall = i; res.wallImpact = -vn }
-      }
-      if (o.flying) { o.flying = false; o.aim = null; o.route = [] }
-    })
-    if (!moved) break
-  }
-  return touched
-}
-
 /** Where (x, z) must move to, on the floor plan, for a sphere of drawn radius rho at height y to be inside the walls. */
 export function withinWalls(ws: readonly Wall[], x: number, y: number, z: number, rho: number): { x: number; z: number } {
   for (let pass = 0; pass < 4; pass++) {
@@ -624,18 +443,6 @@ export function withinWalls(ws: readonly Wall[], x: number, y: number, z: number
   return { x, z }
 }
 
-/** Is the marble touching a low step's edge (beside the step, resting on or rolling over its rounded top edge)? */
-function onEdge(o: Orb, fps: readonly Footprint[], climb: number): boolean {
-  for (const fp of fps) {
-    if (fp.height > climb) continue
-    const b = fp.box
-    if (o.x < b[0] - o.r || o.x > b[2] + o.r || o.z < b[1] - o.r || o.z > b[3] + o.r || inside(fp, o.x, o.z)) continue
-    const e = nearest(fp, o.x, o.z)
-    if (e.d < o.r && Math.hypot(e.d, o.y - fp.height) <= o.r + 1e-3) return true
-  }
-  return false
-}
-
 /** The field's left and right sides at depth z (StepOptions.sides, else the bounds'). */
 export function sidesAt(opts: Pick<StepOptions, 'bounds' | 'sides'>, z: number): [number, number] {
   const [x0, z0, x1, z1] = opts.bounds
@@ -650,4 +457,599 @@ export function flightTime(vy: number, y0: number, y1: number): number {
   // y0 + vy t - G t²/2 = y1  →  the later root.
   const d = vy * vy + 2 * G * (y0 - y1)
   return d <= 0 ? (2 * vy) / G : (vy + Math.sqrt(d)) / G
+}
+
+export interface StepResult {
+  /** It came down on something this step (a real landing, not rolling along it): a letter's id, or -1 for the floor. */
+  landed: number | null
+  /** It ran into a letter's side this step (that letter's id). */
+  bumped: number | null
+  /** How hard the hardest of those was: its speed into the surface, em/s (0 if none). */
+  impact: number
+  /** It knocked against a wall this step (the wall's index in StepOptions.walls), and how hard (em/s into it). */
+  wall: number | null
+  wallImpact: number
+  /** Anything moved. */
+  moving: boolean
+  /** Every knock, in order, with its moment from the start of this step (s). */
+  knocks: Knock[]
+}
+
+/** What the marbles are kept inside: walls, and how much bigger a marble is drawn per em it rises. */
+export interface Env { walls: readonly Wall[]; grow: number }
+
+/**
+ * The bounds (and their sides) as walls, for a field without the camera's: far and near, and each side, the marble's
+ * own radius from each, measured across x at the sides (as sidesAt() gives them).
+ */
+export function boundsWalls(opts: Pick<StepOptions, 'bounds' | 'sides'>): Wall[] {
+  const [x0, z0, x1, z1] = opts.bounds
+  const s = opts.sides ?? [x0, x1, x0, x1]
+  // Each side as x = its x at the far edge + its slope × the depth from there: n·p + d is the distance across x.
+  const dz = z1 - z0 || 1
+  const bl = (s[2] - s[0]) / dz, br = (s[3] - s[1]) / dz
+  return [
+    { n: [0, 0, 1], d: -z0 },
+    { n: [0, 0, -1], d: z1 },
+    { n: [1, 0, -bl], d: bl * z0 - s[0] },
+    { n: [-1, 0, br], d: s[1] - br * z0 },
+  ]
+}
+
+/**
+ * Advance one orb by dt seconds among the letters: in even steps of at most H, each solved whole. (The field steps its
+ * marbles together, H at a time, with tick().)
+ */
+export function step(o: Orb, fps: readonly Footprint[], dt: number, opts: StepOptions): StepResult {
+  const res: StepResult = { landed: null, bumped: null, impact: 0, wall: null, wallImpact: 0, moving: false, knocks: [] }
+  dt = Math.min(dt, 0.1)
+  const n = Math.max(1, Math.ceil(dt / H - 1e-9))
+  const h = dt / n
+  const env: Env = opts.walls ? { walls: opts.walls, grow: opts.grow ?? 0 } : { walls: boundsWalls(opts), grow: 0 }
+  const bodies = [{ o, opts }]
+  for (let s = 0; s < n; s++) {
+    for (const k of tick(bodies, fps, h, env)) {
+      k.t += s * h
+      res.knocks.push(k)
+      if (k.kind === 'wall') { if (k.speed > res.wallImpact) { res.wall = k.id; res.wallImpact = k.speed } }
+      else if (k.kind === 'land' && (k.speed > REST_VY * 0.5 || k.hop)) { res.landed = k.id; res.impact = Math.max(res.impact, k.speed) }
+      else if (k.kind === 'bump' && k.speed > LEAN) { res.bumped = k.id; res.impact = Math.max(res.impact, k.speed) }
+    }
+  }
+  res.moving = !o.resting
+  return res
+}
+
+/** One marble to step, with what moves it (its steering, the tilt, its hops). */
+export interface Body { o: Orb; opts: StepOptions }
+
+/**
+ * One fixed step, h seconds (H, or less), for every marble at once: forces, contacts (all at once, marble on marble
+ * too), the solve, and the knocks it made, each with its moment within the step. A marble asleep stays put, and costs
+ * next to nothing, unless something would move it.
+ */
+export function tick(bodies: readonly Body[], fps: readonly Footprint[], h: number, env: Env): Knock[] {
+  const knocks: Knock[] = []
+  const n = bodies.length
+  const awake: boolean[] = []
+  // Each marble's memory, as the step begins (moved since, it's started over).
+  const mems = bodies.map((b) => memOf(b.o))
+  for (let i = 0; i < n; i++) {
+    const { o, opts } = bodies[i]
+    if (o.toss && (o.toss.ttl -= h) <= 0) o.toss = null
+    awake.push(!o.resting || wake(o, opts, fps, env, h))
+  }
+  // A marble asleep that another comes at wakes too.
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      if (!awake[i] || awake[j] || i === j) continue
+      const a = bodies[i].o, b = bodies[j].o
+      const reach = Math.hypot(a.vx, a.vy, a.vz) * h * 1.5 + TOUCH
+      if (Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) - a.r - b.r < reach) awake[j] = true
+    }
+  }
+  const contacts: Contact[] = []
+  const v0: [number, number, number][] = []
+  for (let i = 0; i < n; i++) {
+    const { o, opts } = bodies[i]
+    v0.push([o.vx, o.vy, o.vz])
+    if (!awake[i]) continue
+    const m = mems[i]
+    // Woken: it has to be still a while again before it sleeps.
+    if (o.resting) m.still = 0
+    o.resting = false
+    // In the cup it was dropped into: its small hop (or none, from a small drop), and it loses most of its sideways speed.
+    if (m.caught > 0 && m.load > 0) {
+      if (CATCH * m.caught > CATCH_V) o.vy = Math.max(o.vy, CATCH * m.caught)
+      o.vx *= GRIP * 0.5; o.vz *= GRIP * 0.5
+      m.caught = 0
+    }
+    // Leaving: the next precise hop, or the toss that was waiting, from wherever it's standing.
+    if (m.load > 0 && !o.flying) {
+      const next = o.route.length ? o.route[0] : null
+      if (next) {
+        o.route.shift()
+        o.vy = Math.sqrt(2 * G * opts.hop)
+        const t = flightTime(o.vy, o.y - o.r, surfaceAt(fps, next.x, next.z).h)
+        o.vx = (next.x - o.x) / t
+        o.vz = (next.z - o.z) / t
+        o.flying = true
+        o.aim = next
+      } else if (o.toss) {
+        o.vy = Math.max(o.vy, o.toss.vy)
+        o.toss = null
+      }
+    }
+    // On a precise hop, still headed for its spot: its sideways speed kept to what lands it there (a wall that kept it
+    // on screen as it rose has nudged it, say).
+    if (o.flying && o.aim) {
+      const t = flightTime(o.vy, o.y - o.r, surfaceAt(fps, o.aim.x, o.aim.z).h)
+      if (t > h) { o.vx = (o.aim.x - o.x) / t; o.vz = (o.aim.z - o.z) / t }
+    }
+    v0[i] = [o.vx, o.vy, o.vz]
+    // What it touches, or will reach within the step; then what moves it.
+    const first = contacts.length
+    gather(o, i, fps, env, Math.hypot(o.vx, o.vy, o.vz) * h * 1.5 + (G + 20) * h * h + TOUCH, opts.climb ?? 0, contacts)
+    forces(o, opts, contacts, first, m, fps, h)
+  }
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      if (!awake[i] && !awake[j]) continue
+      const a = bodies[i].o, b = bodies[j].o
+      const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z
+      const d = Math.hypot(dx, dy, dz)
+      if (d < 1e-9 || d - a.r - b.r >= Math.hypot(a.vx - b.vx, a.vy - b.vy, a.vz - b.vz) * h * 1.5 + TOUCH) continue
+      const c = contact(MARBLE - j, i, dx / d, dy / d, dz / d, d - a.r - b.r, b.x + (dx / d) * b.r, b.y + (dy / d) * b.r, b.z + (dz / d) * b.r, 0, false)
+      c.b = j
+      contacts.push(c)
+    }
+  }
+  // Each contact's start. New, and closing within the step, it's a knock (at the moment it touches), bounced once it
+  // touches. Caught by two edges or more at once (dropped into a cup), a marble doesn't bounce off them: it settles,
+  // after a small hop straight up (once it's in).
+  const caught = new Set<number>()
+  const rims = new Map<number, number>()
+  for (const c of contacts) {
+    const vn = normalSpeed(bodies, c)
+    c.vn = vn
+    const t = touchOf(bodies[c.a].o, c)
+    c.knock = t ? t.knock : 0
+    if (!t && vn < 0 && c.gap + vn * h <= TOUCH) {
+      const speed = -vn
+      knocks.push(knockOf(bodies, c, speed, c.gap > 0 ? Math.min(h, c.gap / speed) : 0))
+      c.knock = speed
+      if (c.b < 0 && c.id >= 0 && c.ny > 0.5 && c.ny < 0.9999) rims.set(c.a, (rims.get(c.a) ?? 0) + 1)
+    }
+  }
+  for (const [i, k] of rims) {
+    if (k < 2) continue
+    caught.add(i)
+    const o = bodies[i].o
+    if (!o.flying) mems[i].caught = Math.max(mems[i].caught, -o.vy)
+  }
+  // The least speed away from each: any gap left closes within the step, never more; a knock bounces once it touches.
+  for (const c of contacts) {
+    if (caught.has(c.a) && c.b < 0) c.knock = 0
+    c.min = -Math.max(0, c.gap) / h
+    if (c.gap <= TOUCH && c.knock > 0) { c.min = Math.max(c.min, bounce(bodies, c, c.knock)); c.knock = 0 }
+  }
+  // Each starts from what it took last step.
+  for (const c of contacts) {
+    const t = touchOf(bodies[c.a].o, c)
+    if (!t || t.lambda <= 0) continue
+    c.lambda = t.lambda * 0.85
+    impulse(bodies, c, c.lambda)
+  }
+  // The solve: every contact pushes only away, and only as much as it must.
+  for (let it = 0; it < ITERATIONS; it++) {
+    for (const c of contacts) {
+      const next = Math.max(0, c.lambda + (c.min - normalSpeed(bodies, c)) * (c.b >= 0 ? 0.5 : 1))
+      const dl = next - c.lambda
+      if (dl === 0) continue
+      c.lambda = next
+      impulse(bodies, c, dl)
+    }
+  }
+  for (const c of contacts) c.end = c.gap + normalSpeed(bodies, c) * h
+  // Rolling on what holds it up; then it moves: free in the air along its exact arc, else as the solve left it.
+  for (let i = 0; i < n; i++) {
+    if (!awake[i]) continue
+    const o = bodies[i].o
+    const m = mems[i]
+    let sx = 0, sy = 0, sz = 0, edges = 0, faces = 0, bounced = false, pushed = false, arrive = h
+    // Knocked off course: a knock this step against a side, a wall or another marble (not a wall it's only kept in by).
+    const off = o.flying && knocks.some((k) => (k.i === i && k.kind !== 'land') || (k.kind === 'marble' && k.id === i))
+    for (const c of contacts) {
+      if ((c.a !== i && c.b !== i) || c.lambda <= 0) continue
+      pushed = true
+      const s = c.a === i ? 1 : -1
+      const ny = s * c.ny
+      if (ny <= 0.2) continue
+      sx += s * c.nx * c.lambda; sy += ny * c.lambda; sz += s * c.nz * c.lambda
+      if (c.min > 0) bounced = true
+      // (When within the step it reached what's under it: a precise hop comes down exactly there.)
+      if (c.b < 0 && c.vn < 0) arrive = Math.min(arrive, Math.max(0, c.gap) / -c.vn)
+      if (ny > 0.9999 || c.b >= 0) faces++; else edges++
+    }
+    const landing = o.flying && sy > 0
+    // (A precise hop's landing doesn't bounce, now or once it touches.)
+    if (landing) { o.flying = false; o.aim = null; for (const c of contacts) if (c.a === i && c.b < 0) c.knock = 0 }
+    // Knocked off course: the route is off.
+    else if (off) { o.flying = false; o.aim = null; o.route = [] }
+    const load = Math.hypot(sx, sy, sz)
+    m.load = sy > 0.2 * G * h ? sy : 0
+    m.cup = m.load > 0 && faces === 0 && edges >= 2
+    o.held = m.cup
+    if (m.load > 0 && !landing) {
+      const ux = sx / load, uy = sy / load, uz = sz / load
+      const vn = o.vx * ux + o.vy * uy + o.vz * uz
+      let tx = o.vx - vn * ux, ty = o.vy - vn * uy, tz = o.vz - vn * uz
+      let t = Math.hypot(tx, ty, tz)
+      // A real bounce loses some of its sideways speed to the surface's grip.
+      if (bounced) { tx *= GRIP; ty *= GRIP; tz *= GRIP; t *= GRIP }
+      // (Steered, its spring and its damping are all there is: it goes exactly where it's pointed.)
+      const stick = o.target ? 0 : STICK, roll = o.target ? 0 : ROLL
+      if (m.stuck && t <= stick * m.load) { tx = ty = tz = 0 }
+      else {
+        m.stuck = false
+        const k = t > 1e-12 ? Math.max(0, t - roll * m.load) / t : 0
+        if (k === 0) m.stuck = true
+        // Rolling to a stop when nothing steers it (in a cup, soon, unless it's leaving).
+        const f = o.target ? 1 : Math.exp(-(m.cup && m.climb !== CUP ? CUP_FRICTION : FRICTION) * h)
+        tx *= k * f; ty *= k * f; tz *= k * f
+      }
+      o.vx = vn * ux + tx; o.vy = vn * uy + ty; o.vz = vn * uz + tz
+    } else if (m.load === 0) m.stuck = false
+    // (A precise hop flies as fast as its spot needs, however far.)
+    const sp = Math.hypot(o.vx, o.vz)
+    if (sp > MAX_SPEED && !o.flying) { o.vx *= MAX_SPEED / sp; o.vz *= MAX_SPEED / sp }
+    const [ax, ay, az] = v0[i]
+    if (landing) {
+      // A precise hop comes down dead where it lands: on its arc, at the moment it touches (its spot, exactly).
+      o.x += ax * arrive; o.z += az * arrive; o.y += o.vy * h
+      o.vx = o.vy = o.vz = 0
+    } else if (!pushed) { o.x += ((ax + o.vx) / 2) * h; o.y += ((ay + o.vy) / 2) * h; o.z += ((az + o.vz) / 2) * h }
+    else { o.x += o.vx * h; o.y += o.vy * h; o.z += o.vz * h }
+  }
+  // What overlap is left, taken out: the least move that clears everything, eased (at most MAX_FIX a step).
+  for (let i = 0; i < n; i++) if (awake[i]) settle(bodies[i].o, i, fps, env, bodies[i].opts.climb ?? 0)
+  for (const c of contacts) {
+    if (c.b < 0) continue
+    const a = bodies[c.a].o, b = bodies[c.b].o
+    const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z
+    const d = Math.hypot(dx, dy, dz), over = a.r + b.r - d - SLOP
+    if (over <= 0 || d < 1e-9) continue
+    const k = Math.min(over, MAX_FIX) / 2 / d
+    a.x += dx * k; a.y += dy * k; a.z += dz * k
+    b.x -= dx * k; b.y -= dy * k; b.z -= dz * k
+  }
+  // What each touches now, for the next step; asleep, once it's been still and held a moment.
+  for (let i = 0; i < n; i++) {
+    if (!awake[i]) continue
+    const o = bodies[i].o
+    const m = mems[i]
+    const touch: Touch[] = []
+    for (const c of contacts) {
+      if (c.a !== i && c.b !== i) continue
+      if (c.end > TOUCH && c.knock === 0) continue
+      // (Two marbles each keep it, each its own way round.)
+      const s = c.a === i ? 1 : -1
+      touch.push({ id: c.a === i ? c.id : MARBLE - c.a, nx: s * c.nx, ny: s * c.ny, nz: s * c.nz, lambda: c.lambda, knock: c.a === i ? c.knock : 0 })
+    }
+    m.touch = touch
+    const slow = Math.hypot(o.vx, o.vy, o.vz) < SLEEP_V
+    m.still = slow && m.load > 0 && !o.flying && !o.route.length && !o.toss && m.climb === null ? m.still + h : 0
+    if (m.still >= SLEEP_T) { o.vx = o.vy = o.vz = 0; o.resting = true; m.stuck = true }
+    m.x = o.x; m.y = o.y; m.z = o.z
+  }
+  knocks.sort((p, q) => p.t - q.t)
+  return knocks
+}
+
+/** A marble's memory: made, or started over if it was moved since. */
+function memOf(o: Orb): Mem {
+  const m = o.mem
+  if (m && m.x === o.x && m.y === o.y && m.z === o.z) return m
+  const fresh: Mem = { x: o.x, y: o.y, z: o.z, touch: [], load: 0, cup: false, stuck: false, still: 0, strain: 0, climb: null, caught: 0 }
+  o.mem = fresh
+  return fresh
+}
+
+/** What it touched last step that's this contact (the same thing, facing much the same way). */
+function touchOf(o: Orb, c: Contact): Touch | undefined {
+  return o.mem?.touch.find((t) => t.id === c.id && t.nx * c.nx + t.ny * c.ny + t.nz * c.nz > 0.9)
+}
+
+/**
+ * Asleep: should it wake? When it has somewhere to go (a route, a toss), a climb it's pushed into (steering, or a tilt
+ * held STRAIN), or when what it touches can't hold it against what pushes it now (its weight, the tilt, its steering):
+ * a step tried from still, against the contacts it rests on, that static friction doesn't hold.
+ */
+function wake(o: Orb, opts: StepOptions, fps: readonly Footprint[], env: Env, h: number): boolean {
+  if (o.route.length || o.toss) return true
+  const m = memOf(o)
+  if (!m.load || !m.touch.length) return true
+  const [ax, az] = pull(o, opts, true)
+  if (ax || az || o.target) {
+    const cs: Contact[] = []
+    gather(o, 0, fps, env, TOUCH, opts.climb ?? 0, cs)
+    if (meant(o, opts, cs, 0, fps, m)) {
+      if (o.target) return true
+      m.strain += h
+      if (m.strain >= STRAIN) return true
+    } else m.strain = 0
+  }
+  // A step from still: its weight and the pushes, against what it rests on (each pushing only away, as in the solve).
+  let vx = ax * h, vy = -G * h, vz = az * h
+  const lambda = m.touch.map(() => 0)
+  for (let it = 0; it < ITERATIONS; it++) {
+    m.touch.forEach((t, k) => {
+      const next = Math.max(0, lambda[k] - (vx * t.nx + vy * t.ny + vz * t.nz))
+      const dl = next - lambda[k]
+      lambda[k] = next
+      vx += dl * t.nx; vy += dl * t.ny; vz += dl * t.nz
+    })
+  }
+  return Math.hypot(vx, vy, vz) > (o.target ? AIMED : STICK) * G * h
+}
+
+/**
+ * Whether it's meant to go over this step's edge, and how much (0: not). Steered, when its target is past the edge, that
+ * way: always, however near the target. Tilted, when the tilt presses it into the edge past the step's threshold (once
+ * going, KEEP of it), within about 60° of the way over.
+ */
+function drive(o: Orb, c: Contact, push: readonly [number, number] | undefined, going: boolean): number {
+  if (!c.over || !c.step) return 0
+  const hl = Math.hypot(c.nx, c.nz)
+  if (hl < 1e-6) return 0
+  const ux = -c.nx / hl, uz = -c.nz / hl
+  if (o.target) {
+    const tx = o.target.x - o.x, tz = o.target.z - o.z
+    const along = tx * ux + tz * uz
+    const edge = (c.px - o.x) * ux + (c.pz - o.z) * uz
+    return along >= edge && along >= TOWARD * Math.hypot(tx, tz) ? c.over + along : 0
+  }
+  if (!push) return 0
+  const along = push[0] * ux + push[1] * uz
+  return along >= (going ? c.over * KEEP : c.over) && along >= TOWARD * Math.hypot(push[0], push[1]) ? along : 0
+}
+
+/**
+ * What it's meant to be helped over now: a step's edge (that contact), or the cup it's in, or nothing. A cup: a counter
+ * it's in (on its rim, or down in its pit), or edges holding it up from both sides, as in a gap between two letters
+ * (or, once it's leaving, any edge still under it). It's meant to leave one steered somewhere else (CUP_OUT off, and
+ * not elsewhere in the same counter: pointing always gets it out), or tilted past BREAK (KEEP of it once going) any
+ * way at all: the rim turns it up and over.
+ */
+function meant(o: Orb, opts: StepOptions, cs: readonly Contact[], from: number, fps: readonly Footprint[], m: Mem): { edge?: Contact; cup?: true } | null {
+  let best: Contact | null = null, most = 0, rim: Contact | null = null
+  for (let k = from; k < cs.length; k++) {
+    const c = cs[k]
+    if (c.gap > TOUCH * 2 || !c.over) continue
+    if (c.step) { const d = drive(o, c, opts.push, m.climb === c.id); if (d > most) { best = c; most = d } }
+    else rim = c
+  }
+  if (best) return { edge: best }
+  if (!rim) return null
+  const id = rim.id
+  const letter = fps.find((f) => f.id === id)
+  const hole = letter ? counterOf(letter, o.x, o.z) : null
+  if (!hole && !m.cup && m.climb !== CUP) return null
+  if (o.target) {
+    // Out of a counter: steered anywhere not over it. Out of a gap: steered far enough off to mean it.
+    if (hole && letter) return counterOf(letter, o.target.x, o.target.z) === hole ? null : { cup: true }
+    return Math.hypot(o.target.x - o.x, o.target.z - o.z) >= (m.climb === CUP ? CUP_OUT * 0.2 : CUP_OUT) ? { cup: true } : null
+  }
+  const push = opts.push ? Math.hypot(opts.push[0], opts.push[1]) : 0
+  return push >= (m.climb === CUP ? BREAK * KEEP : BREAK) ? { cup: true } : null
+}
+
+/** What pulls it sideways now (em/s²): the tilt, and its steering (a spring toward its target, damped). */
+function pull(o: Orb, opts: StepOptions, grounded: boolean): [number, number] {
+  if (o.flying) return [0, 0]
+  let ax = 0, az = 0
+  if (o.target) {
+    const w = opts.omega ?? 7, zeta = opts.zeta ?? 0.9
+    const k = grounded ? 1 : opts.air ?? 1
+    ax += k * (w * w * (o.target.x - o.x) - 2 * zeta * w * o.vx)
+    az += k * (w * w * (o.target.z - o.z) - 2 * zeta * w * o.vz)
+  }
+  if (opts.push) { ax += opts.push[0]; az += opts.push[1] }
+  return [ax, az]
+}
+
+/**
+ * Its forces for a step: its weight, the tilt and its steering (none on a precise hop), and, when it's meant to go over
+ * something (meant()), a hand's help once the tilt has been held STRAIN (steering, and a climb under way, at once): up
+ * a step's edge, as much as its weight pulls it back down that way, so the push rolls it up and over; out of a cup, its
+ * weight carried while the push rolls it up the rim and over (once it's out, it drops back onto whatever's there).
+ */
+function forces(o: Orb, opts: StepOptions, cs: Contact[], first: number, m: Mem, fps: readonly Footprint[], h: number) {
+  const [ax, az] = pull(o, opts, m.load > 0)
+  let fx = ax, fy = -G, fz = az
+  const want = meant(o, opts, cs, first, fps, m)
+  if (want) {
+    const id = want.edge ? want.edge.id : CUP
+    m.strain = o.target || m.climb === id ? STRAIN : m.strain + h
+    if (m.strain >= STRAIN) {
+      m.climb = id
+      const e = want.edge
+      if (e) {
+        // Up along the edge, square to the contact: its weight's pull back down that way, taken off.
+        let tx = -e.ny * e.nx, ty = 1 - e.ny * e.ny, tz = -e.ny * e.nz
+        const tl = Math.hypot(tx, ty, tz)
+        if (tl > 1e-9) {
+          tx /= tl; ty /= tl; tz /= tl
+          fx += G * ty * tx; fy += G * ty * ty; fz += G * ty * tz
+        }
+      } else fy += G
+    }
+  } else { m.strain = 0; m.climb = null }
+  o.vx += fx * h
+  o.vy += fy * h
+  o.vz += fz * h
+}
+
+/** How fast the marble moves away from what it touches, along the contact (negative: toward it). */
+function normalSpeed(bodies: readonly Body[], c: Contact): number {
+  const a = bodies[c.a].o
+  let vx = a.vx, vy = a.vy, vz = a.vz
+  if (c.b >= 0) { const b = bodies[c.b].o; vx -= b.vx; vy -= b.vy; vz -= b.vz }
+  return vx * c.nx + vy * c.ny + vz * c.nz + c.gy * vy
+}
+
+function impulse(bodies: readonly Body[], c: Contact, dl: number) {
+  const a = bodies[c.a].o
+  a.vx += dl * c.nx; a.vy += dl * c.ny; a.vz += dl * c.nz
+  if (c.b >= 0) { const b = bodies[c.b].o; b.vx -= dl * c.nx; b.vy -= dl * c.ny; b.vz -= dl * c.nz }
+}
+
+/**
+ * The speed a struck contact leaves at: coming down on something, SETTLE of it (none from a small fall; on an edge,
+ * less the more it glances off it); into a side or a wall, BUMP of it from LEAN; a step's edge, none; two marbles,
+ * CLINK. A precise hop doesn't bounce.
+ */
+function bounce(bodies: readonly Body[], c: Contact, speed: number): number {
+  const o = bodies[c.a].o
+  if (c.b >= 0) return speed > CLINK_V ? CLINK * speed : 0
+  if (c.ny > 0.5) {
+    const e = SETTLE * c.ny * c.ny
+    return o.flying || speed * e < REST_VY ? 0 : e * speed
+  }
+  return c.step || speed <= LEAN ? 0 : BUMP * speed
+}
+
+function knockOf(bodies: readonly Body[], c: Contact, speed: number, t: number): Knock {
+  const o = bodies[c.a].o
+  // Coming down on it (falling onto it, not rolled into it from the side) is a landing.
+  const down = c.ny > 0.5 && o.vy < -FALLING
+  const kind: Knock['kind'] = c.b >= 0 ? 'marble' : c.id <= WALL ? 'wall' : down ? 'land' : 'bump'
+  const id = c.b >= 0 ? c.b : kind === 'wall' ? WALL - c.id : c.id
+  const k: Knock = { t, i: c.a, kind, id, speed, x: c.px, y: c.py, z: c.pz, nx: c.nx, ny: c.ny, nz: c.nz }
+  if (o.flying && kind === 'land') k.hop = true
+  return k
+}
+
+function contact(id: number, a: number, nx: number, ny: number, nz: number, gap: number, px: number, py: number, pz: number, over: number, step: boolean): Contact {
+  return { id, a, b: -1, nx, ny, nz, gap, gy: 0, px, py, pz, over, step, lambda: 0, min: 0, knock: 0, end: gap, vn: 0 }
+}
+
+/**
+ * Everything within `reach` of the marble's surface: the floor; each footprint (its top, where the marble is over it;
+ * else its sides below the top and the rim of its top edge, every place near enough that faces the marble, one for
+ * each way they face); and the walls. Footprints `climb` high or lower are steps. A precise hop on its way up is clear
+ * of the letters' sides: it left from beside one and is over it a moment later.
+ */
+function gather(o: Orb, i: number, fps: readonly Footprint[], env: Env, reach: number, climb: number, out: Contact[]) {
+  const { x, y, z, r } = o
+  const far = r + reach
+  if (y - r < reach) out.push(contact(FLOOR, i, 0, 1, 0, y - r, x, 0, z, 0, false))
+  const rising = o.flying && o.vy > 0
+  for (const fp of fps) {
+    const b = fp.box, top = fp.height
+    if (x < b[0] - far || x > b[2] + far || z < b[1] - far || z > b[3] + far || y - r - top >= reach) continue
+    if (inside(fp, x, z)) {
+      // Over it: its top (found somehow inside it, it's lifted back out onto it).
+      out.push(contact(fp.id, i, 0, 1, 0, y - top - r, x, top, z, 0, false))
+      continue
+    }
+    if (rising) continue
+    const step = top <= climb
+    // Something it can be helped over: a step's edge from beside it; a cup's rim (a counter's; or any letter's edge
+    // while the marble is up off the floor on edges, as in a gap between two letters). A letter's outside, from the
+    // floor, is a wall.
+    const over = step ? Math.max(MEANT, LIFT_PER_EM * top) : counterOf(fp, x, z) || y - r > ABOVE ? BREAK : 0
+    const from = out.length
+    for (const ring of fp.rings) {
+      const m = ring.length / 2
+      for (let k = 0, j = m - 1; k < m; j = k++) {
+        const ax = ring[j * 2], az = ring[j * 2 + 1], ex = ring[k * 2] - ax, ez = ring[k * 2 + 1] - az
+        const l2 = ex * ex + ez * ez || 1e-12
+        const t = Math.max(0, Math.min(1, ((x - ax) * ex + (z - az) * ez) / l2))
+        const qx = ax + ex * t, qz = az + ez * t
+        const dx = x - qx, dz = z - qz
+        const s = Math.hypot(dx, dz)
+        const above = Math.max(0, y - top)
+        const d = Math.hypot(s, above)
+        if (d - r >= reach) continue
+        // The way from the outline out to the marble; a stretch whose outside faces away (seen through the letter,
+        // from across a stroke) isn't touched.
+        let hx: number, hz: number
+        if (s > 1e-9) { hx = dx / s; hz = dz / s } else {
+          const el = Math.sqrt(l2)
+          hx = ez / el; hz = -ex / el
+          if (inside(fp, qx + hx * 1e-4, qz + hz * 1e-4)) { hx = -hx; hz = -hz }
+        }
+        if (inside(fp, qx + hx * 1e-4, qz + hz * 1e-4)) continue
+        const c = d > 1e-9
+          ? contact(fp.id, i, (hx * s) / d, above / d, (hz * s) / d, d - r, qx, Math.min(y, top), qz, y > top ? over : 0, step)
+          : contact(fp.id, i, 0, 1, 0, -r, qx, top, qz, over, step)
+        // One contact for each way it faces: a curved outline is many short stretches, several near enough.
+        let dup = false
+        for (let q = from; q < out.length; q++) {
+          const p = out[q]
+          if (p.nx * c.nx + p.ny * c.ny + p.nz * c.nz > 0.966 && Math.hypot(p.px - c.px, p.pz - c.pz) < 0.35 * r) {
+            if (c.gap < p.gap) out[q] = c
+            dup = true
+            break
+          }
+        }
+        if (!dup) out.push(c)
+      }
+    }
+    // The nearest few at most.
+    if (out.length - from > 8) out.push(...out.splice(from).sort((p, q) => p.gap - q.gap).slice(0, 8))
+  }
+  // The walls: the marble as drawn (bigger the higher it is) against each, set back along the floor.
+  const lift = Math.max(0, y - r)
+  const rho = r * (1 + env.grow * lift)
+  env.walls.forEach((w, k) => {
+    const hl = Math.hypot(w.n[0], w.n[2])
+    if (hl < 1e-6) return
+    const gap = (w.n[0] * x + w.n[1] * y + w.n[2] * z + w.d - rho) / hl
+    if (gap >= reach) return
+    const nx = w.n[0] / hl, nz = w.n[2] / hl
+    const c = contact(WALL - k, i, nx, 0, nz, gap, x - nx * (gap + rho), y, z - nz * (gap + rho), 0, false)
+    // Rising, the plane's lean and the marble's growth close or open the gap too.
+    c.gy = (w.n[1] - (y > r ? r * env.grow : 0)) / hl
+    out.push(c)
+  })
+}
+
+/**
+ * Overlap left after a step, taken out: the least move of the marble that clears everything it overlaps (within SLOP
+ * it's left be), at most MAX_FIX a step, found again after each move (edges are round). Whatever speed it had into
+ * them is gone.
+ */
+function settle(o: Orb, i: number, fps: readonly Footprint[], env: Env, climb: number) {
+  for (let pass = 0; pass < 3; pass++) {
+    const cs: Contact[] = []
+    gather(o, i, fps, env, 0, climb, cs)
+    const over = cs.filter((c) => c.gap < -SLOP)
+    if (!over.length) return
+    // The least move d with n·d ≥ −(gap + SLOP) for each: one constraint at a time, round and round (Hildreth).
+    const mu = over.map(() => 0)
+    let dx = 0, dy = 0, dz = 0
+    for (let it = 0; it < 40; it++) {
+      let change = 0
+      over.forEach((c, k) => {
+        const need = -(c.gap + SLOP) - (c.nx * dx + c.ny * dy + c.nz * dz)
+        const d = Math.max(-mu[k], need)
+        if (d === 0) return
+        mu[k] += d
+        dx += d * c.nx; dy += d * c.ny; dz += d * c.nz
+        change = Math.max(change, Math.abs(d))
+      })
+      if (change < 1e-9) break
+    }
+    const len = Math.hypot(dx, dy, dz)
+    if (len < 1e-12) return
+    const k = Math.min(1, MAX_FIX / len)
+    o.x += dx * k; o.y += dy * k; o.z += dz * k
+    for (const c of over) {
+      const vn = o.vx * c.nx + o.vy * c.ny + o.vz * c.nz
+      if (vn < 0) { o.vx -= vn * c.nx; o.vy -= vn * c.ny; o.vz -= vn * c.nz }
+    }
+    if (k < 1) return
+  }
 }

@@ -526,18 +526,27 @@ describe("a letter's counters (the holes in o, p, e)", () => {
     expect(counterOf(fp, o.x, o.z)).not.toBeNull()
     expect(still(o, [fp], 2)).toBeLessThan(0.001)
   })
-  it('rolling across the letter\'s top with nobody steering or tilting it, it doesn\'t drop into the counter', () => {
+  it('rolling slowly across the letter\'s top, it dips into the counter and settles there; fast, it rolls on over it', () => {
     const { fp, counters } = glyph('o')
     const c = counters[0]
-    // On the o's stroke, left of the counter, rolling right toward it.
-    const o = newOrb(fp.spot[0], fp.spot[1], R, TOP)
-    const toward = Math.sign(c.x - o.x) || 1
-    o.resting = false
-    o.vx = 1.2 * toward
-    for (let t = 0; t < 2; t += 1 / 60) {
-      step(o, [fp], 1 / 60, opts())
-      if (counterOf(fp, o.x, o.z)) expect(o.y).toBeGreaterThan(TOP + R - 0.011)
+    const across = (speed: number) => {
+      // On the o's stroke, left of the counter, rolling right toward it; nobody steering or tilting it.
+      const o = newOrb(fp.spot[0], fp.spot[1], R, TOP)
+      const toward = Math.sign(c.x - o.x) || 1
+      o.resting = false
+      o.vx = speed * toward
+      let lowest = Infinity
+      for (let t = 0; t < 3; t += 1 / 60) { step(o, [fp], 1 / 60, opts()); lowest = Math.min(lowest, o.y) }
+      return { o, lowest, past: (o.x - c.x) * toward }
     }
+    const slow = across(1.2)
+    expect(counterOf(fp, slow.o.x, slow.o.z)).not.toBeNull()
+    expect(slow.o.held).toBe(true)
+    expect(slow.o.resting).toBe(true)
+    // Fast: over the counter's rim (it dips a little as it crosses) and on, out the far side.
+    const fast = across(4)
+    expect(counterOf(fp, fast.o.x, fast.o.z)).toBeNull()
+    expect(fast.past).toBeGreaterThan(0.2)
   })
   it('tilted across it, it rolls in and out the far side', () => {
     const { fp, counters } = glyph('o')

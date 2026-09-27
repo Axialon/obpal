@@ -86,8 +86,11 @@ try {
       if (s) window.__at[s] = Date.now()
     })
   })
-  const linkUrl = pairing.replace(`https://${UPSTREAM}`, local.origin)
   const diag = () => popup.evaluate(() => chrome.runtime.sendMessage({ to: 'bg', type: 'diag' }).catch(() => null))
+  /** The link the popup shows now: Link makes a new one each time a phone pairs, and each run is a new phone. */
+  const currentLink = async () => (await until('pairing link', () => popup.evaluate(async () => (await chrome.storage.session.get('link')).link?.url || ''), 20000, 10))
+    .replace(`https://${UPSTREAM}`, local.origin)
+  let linkUrl = pairing.replace(`https://${UPSTREAM}`, local.origin)
 
   for (let run = 1; run <= RUNS; run++) {
     const ctx = await phoneBrowser.newContext({ ...devices['Pixel 7 landscape'] })
@@ -97,6 +100,7 @@ try {
       new MutationObserver(() => { if (!window.__surfaceAt && document.querySelector('.modes')) window.__surfaceAt = Date.now() }).observe(document, { childList: true, subtree: true })
     })
     await popup.evaluate(() => { window.__at = {} })
+    if (run > 1) linkUrl = await currentLink()
     const t0 = Date.now()
     await phone.goto(linkUrl)
     const connectedAt = await until('connected', () => popup.evaluate(() => window.__at.connected || 0), 20000, 10)

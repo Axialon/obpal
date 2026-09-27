@@ -76,6 +76,17 @@ body { min-height: 100vh; }
 .empty-art { display: grid; place-items: center; width: 64px; height: 64px; margin-bottom: 6px; border-radius: 22px; border: 1px dashed rgb(var(--accent-rgb) / 0.4); background: rgb(var(--accent-rgb) / 0.06); color: var(--accent-text); }
 .empty-art .ic { width: 28px; height: 28px; }
 
+/* The phones asked about: each a switch (allowed to control this PC, or not), and a notification for the next one. */
+.phones { padding: 20px 14px 10px; }
+.card-say { margin: -4px 4px 14px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.phone-row { padding: 10px 12px; border: 1px solid var(--line); border-radius: 18px; background: rgb(var(--base-rgb) / 0.35); }
+[data-bb-theme='light'] .phone-row { background: rgb(15 23 42 / 0.025); }
+button.phone-row:hover:not(:disabled) { border-color: var(--line-strong); background: var(--fill); }
+.phone-row[aria-checked='false'] .row-ic { border-color: rgb(252 211 77 / 0.35); background: rgb(252 211 77 / 0.1); color: var(--warn-text); }
+.phones .empty { padding: 14px 16px 12px; }
+.phones .notify { margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); border-radius: 0 0 16px 16px; }
+.opts > .ask { margin: 0 0 18px; }
+
 /* The look, and the way to the helper and the pages about the Link. */
 .side { position: sticky; top: 18px; }
 .look-card { padding: 20px 18px 16px; }

@@ -3,7 +3,7 @@ import { MIN_VIEW_AREA } from '../extension/src/shared/constants'
 import { DEFAULT_KEYS, DESKTOP_KEYS, KEYS, KeyMapper, keyInit, pcKeys, pressCharCode, type KeysInput } from '../extension/src/shared/keys'
 import { hysteresis, stickCurve, type PadInput } from '../extension/src/shared/math'
 import {
-  allowedFrom, envelope, linkConfig, parseBgRequest, parseBridgeRequest, parseConfig, parseFromPage, parseInputFrame, parseLink,
+  allowedFrom, envelope, linkConfig, parseBgRequest, parseBridgeRequest, parseConfig, parseFacts, parseFromPage, parseInputFrame, parseLink,
   parseOffscreenRequest, parseToPage, readDown, readUp, sanitizeRumble, senderKind,
 } from '../extension/src/shared/messages'
 import { buildFrame, deltaTuple, electFrame, isActive, padTuple, recipients, tiltTuple, type FrameInfo } from '../extension/src/shared/route'
@@ -299,6 +299,21 @@ describe('messages: validation', () => {
     expect(parseOffscreenRequest({ to: 'offscreen', type: 'config', tabId: 1.5, mode: 'viewer' })).toBeNull()
     expect(parseBridgeRequest({ to: 'bridge', type: 'deactivate' })).toEqual({ to: 'bridge', type: 'deactivate' })
     expect(parseBridgeRequest({ to: 'bridge', type: 'exec' })).toBeNull()
+  })
+
+  it('the popup asks the link for its facts (its badge), and reads the answer strictly', () => {
+    const facts = { verified: 'qr', path: 'relay', relay: 'tls', rttMs: 41, dtls: 'DTLS 1.3', cipher: 'TLS_AES_128_GCM_SHA256' }
+    expect(parseBgRequest({ to: 'bg', type: 'facts' })).toEqual({ to: 'bg', type: 'facts' })
+    expect(parseOffscreenRequest({ to: 'offscreen', type: 'facts' })).toEqual({ to: 'offscreen', type: 'facts' })
+    expect(parseFacts(facts)).toEqual(facts)
+    expect(parseFacts({ verified: 'lan', path: 'lan' })).toEqual({ verified: 'lan', path: 'lan' })
+    expect(parseFacts({ ...facts, verified: 'trust me' })).toBeNull()
+    expect(parseFacts({ ...facts, path: 'wormhole' })).toBeNull()
+    expect(parseFacts({ ...facts, cipher: '<img src=x>' })).toBeNull()
+    expect(parseFacts({ ...facts, rttMs: -1 })).toBeNull()
+    expect(parseFacts(null)).toBeNull()
+    expect(allowedFrom('facts', 'extension')).toBe(true)
+    expect(allowedFrom('facts', 'page')).toBe(false)
   })
 
   it('only lets each kind of sender make its own requests', () => {

@@ -50,7 +50,7 @@ hero.onSound = (s) => {
 }
 soundBtn.addEventListener('click', () => hero.toggleSound())
 // For the end-to-end test (scripts/e2e-home.mjs), as the viewer exposes its own.
-Object.assign(window, { __home: { tips: () => hero.tips(), dot: () => hero.dot(), pads: () => hero.pads(), outline: (id: string) => hero.outline(id), gfx: () => hero.gfx(), audio: () => hero.audio() } })
+Object.assign(window, { __home: { tips: () => hero.tips(), dot: () => hero.dot(), pads: () => hero.pads(), outline: (id: string) => hero.outline(id), gfx: () => hero.gfx(), audio: () => hero.audio(), drop: (x: number, y: number) => hero.drop(x, y), counters: () => hero.counters(), gaps: () => hero.gaps() } })
 if (debug.size) void import('./debug').then(({ mountDebug }) => mountDebug(debug, { audio: () => hero.audio(), gfx: () => hero.gfx() }))
 
 if (desk) {

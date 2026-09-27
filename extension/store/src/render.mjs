@@ -314,7 +314,10 @@ async function capture(captures) {
     await session({ link: connected, tab: 4242 })
     await popup('popup-viewer', { tab: 'https://3d.example.com/' })
 
-    // PC: the mouse face (Point), the popup controlling the whole PC, and the options page with allowed programs.
+    // PC: the mouse face (Point), the popup controlling the whole PC, and the options page with allowed programs. The
+    // phone is new to this PC: allowed first, as the person at it would in the popup's prompt.
+    const me = await until('the phone, as Link knows it', () => read('session', 'phone'))
+    await send({ to: 'bg', type: 'answer', key: me.key, allow: true })
     await send({ to: 'bg', type: 'mode', mode: 'pc' })
     await until('the helper check', async () => (await read('session', 'pc'))?.link === 'missing')
     await tap('.modes [data-tab=point]')

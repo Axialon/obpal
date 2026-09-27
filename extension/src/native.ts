@@ -3,9 +3,9 @@
  *
  * - Connects when the target is PC (or while an extension page that shows the helper is open, to edit the
  *   allowlist) and the optional `nativeMessaging` permission is granted; arms injection (`enable`) only while
- *   the target is PC, and only once the offscreen link has the gamepad mapping for what the helper's config says
- *   (the whole PC or one program). Otherwise the helper is closed, so it isn't left running (and its file locked)
- *   for nothing.
+ *   the target is PC and the phone connected is one the person at the PC allowed (shared/access.ts), and only once
+ *   the offscreen link has the gamepad mapping for what the helper's config says (the whole PC or one program).
+ *   Otherwise the helper is closed, so it isn't left running (and its file locked) for nothing.
  * - Forwards action frames and typing from the offscreen link (already validated there, validated again here).
  * - Mirrors what the helper reports (hello, config, status) into storage.session "pc" for the popup and
  *   the options page, and turns their requests into helper requests. A worker that starts again (it idled out)
@@ -31,6 +31,8 @@ export class NativeBridge {
   private configured = false
   private armed = false
   private wantMode = false
+  /** The phone connected now may control this PC: the person at the PC said so (shared/access.ts). */
+  private allowed = false
   /** Extension pages holding a PC_PAGE_PORT_NAME port. */
   private pages = 0
   private retries = 0
@@ -69,9 +71,13 @@ export class NativeBridge {
     return this.field
   }
 
-  /** Reconcile with the target mode: connect and arm for PC, disarm (and let go) otherwise. */
-  async sync(mode: TargetMode) {
+  /**
+   * Reconcile with the target mode and the phone: connect for PC, and arm only while a phone the person at the PC
+   * allowed is connected; disarm (and let go) otherwise.
+   */
+  async sync(mode: TargetMode, allowed: boolean) {
     this.wantMode = mode === 'pc'
+    this.allowed = allowed
     await this.reconcile()
   }
 
@@ -120,7 +126,7 @@ export class NativeBridge {
     if (!this.wantMode && !this.pages) return this.drop('off')
     if (!(await chrome.permissions.contains(NATIVE_PERMISSION))) return this.drop('permission')
     if (!this.port) this.connect()
-    this.arm(this.wantMode)
+    this.arm(this.wantMode && this.allowed)
   }
 
   private arm(on: boolean) {
@@ -169,7 +175,7 @@ export class NativeBridge {
         const through = () => {
           if (port !== this.port) return
           this.configured = true
-          this.arm(this.wantMode)
+          this.arm(this.wantMode && this.allowed)
         }
         void Promise.resolve(passed).then(through, through)
         break

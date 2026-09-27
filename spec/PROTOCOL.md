@@ -30,6 +30,12 @@ Status: draft, implemented by `packages/core` and `packages/host`. Keywords foll
 
 This defeats a malicious room service, TURN operator or network attacker. None of them can see `S` or substitute either DTLS identity.
 
+**One invite, one device (hosts MAY).** A host MAY move its invite on once a device has bound through it (by the QR code, its link, or a short code, §2b), so that a photo of the code or a replayed link binds nothing later. ob.Pal Link does (`RemoteOptions.rotateInvite` in `@obpal/host`):
+- It makes a new `S`, and so a new room, link, QR code and short code, and drops the old room's short code.
+- It keeps the old room for the devices that bound in it, whose pages reload with its code and whose ICE restarts (§1) come through it. There it takes offers only from the DTLS fingerprints that bound there, and answers any other offer `{t:"sig", d:{spent: true}}`.
+- A device told `spent` stops, leaves the room, and asks for the code the screen shows now; it MUST NOT retry by itself.
+- The kept room goes once no device may use it any more: each bound again through a newer invite, or was forgotten.
+
 ## 2a. Remembered pairings and the direct LAN code (no room service)
 
 After one online pairing, a host and a device can find each other again on the local network with **no server at all**. Everything the device needs comes from a second kind of code on the host's screen; the host learns the device's address from the device's own ICE connectivity checks.
@@ -37,6 +43,8 @@ After one online pairing, a host and a device can find each other again on the l
 **Persistent identities.** A host or device that supports this keeps one DTLS certificate across sessions (browsers: `RTCPeerConnection.generateCertificate` stored in IndexedDB, renewed a week before it expires), so its fingerprint can be pinned later. Certificates expire after at most a year; a new certificate simply needs a new online pairing.
 
 **Pairing grant.** When a device binds online (§2 step 6), a remembering host mints a 16-byte pairing id `P` (kept for that device's fingerprint across re-pairings) and a fresh 32-byte pairing key `K` and sends both in `welcome{pair:{id: b64url(P), key: b64url(K)}}`. They travel only inside the DTLS-protected channel, between two authenticated endpoints; someone who saw the QR code does not have `K`. The host stores `{P, K, fpD, name}`, the device stores `{P, K, fpH, name}`. Every online bind rotates `K`. Either side MAY forget a pairing at any time.
+
+Both sides SHOULD keep `K` where script can use it but never read it back: `@obpal/core` imports it as a non-extractable WebCrypto HKDF key (usages `deriveBits` for the ICE credentials, `deriveKey` for the binding) and stores that key object in IndexedDB. The host sends the bytes once, in the grant, and keeps only the key; the device imports what it receives. Pairings stored as bytes by earlier versions become keys as they're read.
 
 **The direct code.** When the host wants to be reachable without the room service (it cannot reach the service, or the person asks for it), it takes one remembered pairing and prepares a peer connection: its persistent certificate, no ICE servers, both channels, a local offer, host candidates gathered. It then publishes
 
@@ -134,7 +142,7 @@ Unknown message types and fields MUST be ignored.
 - `welcome{proto, name, layout, pair?, invite?, restart?}`: `pair{id, key}` is a pairing grant (§2a) from a host that remembers this device; `invite` is the QR link's pairing code, for a device that joined by short code (§2b); `restart: true` when the host takes ICE restarts on this connection (§1; not on a direct LAN code's)
 - `pake{y, mac}`: the host's share and confirmation in the short-code exchange (§2b)
 - `layout{layout}`
-- `state{values}`
+- `state{values}`: values the device shows, or acts on, by id. Devices know `textField` (Typing, below) and `notice`: a line the device shows over its controls until it changes or is `false`, for whatever holds its input up on the host's side (ob.Pal Link: "Waiting for approval on the PC" while the person at the PC hasn't allowed this phone yet, or its refusal). A host MAY repeat a notice as a `feedback` toast, for devices from before `notice`; a device that shows the notice skips a toast that says the same.
 - `feedback{haptic?: tick|bump, toast?}`
 - `pong{t0}`
 - `scene{you, people, nodes?, held}`: a shared scene (CATALOGUE §5). Sent to every participant when anyone joins, leaves, claims or releases.
@@ -235,7 +243,7 @@ A browser-extension host that drives programs outside the browser talks to a nat
 
 **Extension → helper:**
 - `hello{v}`: protocol version (1).
-- `enable{on}`: arm or disarm injection. Off at start; disarming releases everything held.
+- `enable{on}`: arm or disarm injection. Off at start; disarming releases everything held. ob.Pal Link arms the helper only while the PC is its target and the phone connected is one the person at the PC allowed (asked once per phone, in Link's own pages: spec/SECURITY.md §8).
 - `f{k?, b?, m?, w?}`: an **action frame**, the whole desired state, never edges:
   - `k`: held keys by `KeyboardEvent.code` (`KeyW`, `Space`, `ArrowUp`, …), at most 16, each in the helper's allowlisted key table (unknown key: the frame is rejected as a whole);
   - `b`: held mouse buttons, 0 left, 1 middle, 2 right, 3 back, 4 forward;

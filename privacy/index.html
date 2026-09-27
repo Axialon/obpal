@@ -70,7 +70,7 @@
           <li><b>Only the tab you switch on.</b> It sends your phone's input into the tab you turned on with <b>This tab</b>, and nowhere else. With <b>All sites</b> turned on, a small bridge also loads in other tabs so control can follow the page as it navigates, but it stays idle there.</li>
           <li><b>Doesn't read your browsing.</b> It doesn't read page content, your browsing history or what you type on the computer. Its only job is to turn your phone's input into input on the controlled page or, with ob.Pal Desktop, on your PC.</li>
           <li><b>Addresses stay in the browser.</b> The popup shows which site the current tab is on. The extension also checks the sites in the controlled tab against a built-in list, to suggest control settings to your phone (flight controls for a flight game, say). The phone gets the suggestion, never the address.</li>
-          <li><b>Local storage only.</b> It remembers the mode you picked (Controller, 3D, Keys or PC) and the look of its pages. Until the browser closes, it also keeps which tab is controlled, whether your phone is connected and, for PC, what ob.Pal Desktop reports (the program in front and your allowed programs). All of this stays in the browser.</li>
+          <li><b>Local storage only.</b> It remembers the mode you picked (Controller, 3D, Keys or PC), the look of its pages, and your answer for each phone that asked to control your PC (the phone's name, and allowed or not). Until the browser closes, it also keeps which tab is controlled, whether your phone is connected and, for PC, what ob.Pal Desktop reports (the program in front and your allowed programs). All of this stays in the browser.</li>
           <li><b>Typing passes straight through.</b> What you type on the phone's keyboard goes over the encrypted connection to the extension and on to ob.Pal Desktop, which types it. Neither keeps it. For a password field, the phone uses a password field too, so nothing is suggested, learned or kept.</li>
           <li><b>Remembered phones stay on your devices.</b> After you pair a phone online, the extension and the phone each keep a pairing key and the other device's connection certificate fingerprint (the extension also keeps the phone's name and when you paired it), so the phone can connect directly over your local network when the internet is down. None of it leaves the device, and you can forget a phone in the popup or in the phone's settings.</li>
           <li><b>Talks only to ob.Pal and your phone.</b> Its only network use is the ob.Pal service (for pairing and relay credentials) and the connection to your phone. For PC, it also talks to ob.Pal Desktop, on the same computer. It loads no remote code and has no analytics.</li>
@@ -78,11 +78,12 @@
         <table class="perms">
           <tr><th>Permission</th><th>Why</th></tr>
           <tr><td>Offscreen document</td><td>Keeps the connection to your phone open (extension service workers can't hold one).</td></tr>
-          <tr><td>Storage</td><td>Remembers your chosen mode and, until the browser closes, the controlled tab and the connection status.</td></tr>
+          <tr><td>Storage</td><td>Remembers your chosen mode and your answer for each phone that asked to control your PC and, until the browser closes, the controlled tab and the connection status.</td></tr>
           <tr><td>Active tab, scripting</td><td>When you click the extension on a page, it can control that page, and only that page.</td></tr>
           <tr><td>obpal.blackboxes.net</td><td>Pairing and relay credentials.</td></tr>
           <tr><td>All sites (optional, off by default)</td><td>Only if you turn it on: reaches game frames served from other domains and keeps control across navigation. You can turn it off again in the popup.</td></tr>
           <tr><td>Native messaging (optional, off by default)</td><td>Only if you pick the PC target, or turn on PC control in its options: talks to ob.Pal Desktop on your computer.</td></tr>
+          <tr><td>Notifications (optional, off by default)</td><td>Only if you turn on <b>Notify me</b> in its options: when a phone asks to control your PC while the popup is closed, a notification asks you, with Allow and Deny. It shows nothing else.</td></tr>
         </table>
 
         <h2>The ob.Pal Desktop helper</h2>

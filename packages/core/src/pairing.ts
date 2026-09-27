@@ -103,8 +103,27 @@ export async function certFingerprint(cert: RTCCertificate): Promise<Uint8Array>
   return fp
 }
 
-async function hkdf(key: Uint8Array, salt: Uint8Array, info: string, bytes: number): Promise<Uint8Array> {
-  const base = await crypto.subtle.importKey('raw', key as BufferSource, 'HKDF', false, ['deriveBits'])
+/**
+ * A key both ends of a binding hold: the QR code's secret as bytes, or a remembered pairing's key, which is kept as a
+ * non-extractable HKDF key (importPairKey).
+ */
+export type BindKey = Uint8Array | CryptoKey
+
+/**
+ * A remembered pairing's key as both ends keep it: a non-extractable HKDF key, good for the binding's MAC (deriveKey)
+ * and the direct code's ICE credentials (deriveBits). Script can use it, but no script, the page's own included, can
+ * read it back.
+ */
+export function importPairKey(raw: Uint8Array): Promise<CryptoKey> {
+  return crypto.subtle.importKey('raw', raw as BufferSource, 'HKDF', false, ['deriveBits', 'deriveKey'])
+}
+
+/** HKDF's input key: bytes are imported for this one use, and a kept key is used as it is. */
+const hkdfKey = (key: BindKey, usage: KeyUsage): Promise<CryptoKey> =>
+  key instanceof Uint8Array ? crypto.subtle.importKey('raw', key as BufferSource, 'HKDF', false, [usage]) : Promise.resolve(key)
+
+async function hkdf(key: BindKey, salt: Uint8Array, info: string, bytes: number): Promise<Uint8Array> {
+  const base = await hkdfKey(key, 'deriveBits')
   const bits = await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: salt as BufferSource, info: enc.encode(info) }, base, bytes * 8)
   return new Uint8Array(bits)
 }
@@ -114,8 +133,8 @@ async function hkdf(key: Uint8Array, salt: Uint8Array, info: string, bytes: numb
  * context of this attempt (the room id online, "lan:<nonce>" for a direct LAN connection).
  * mac = HMAC-SHA256(HKDF(key, salt=context, info="obpal bind v1"), fpDevice || fpHost || context)
  */
-export async function bindMac(key: Uint8Array, fpDevice: Uint8Array, fpHost: Uint8Array, context: string): Promise<string> {
-  const base = await crypto.subtle.importKey('raw', key as BufferSource, 'HKDF', false, ['deriveKey'])
+export async function bindMac(key: BindKey, fpDevice: Uint8Array, fpHost: Uint8Array, context: string): Promise<string> {
+  const base = await hkdfKey(key, 'deriveKey')
   const mac = await crypto.subtle.deriveKey(
     { name: 'HKDF', hash: 'SHA-256', salt: enc.encode(context), info: enc.encode('obpal bind v1') },
     base,
@@ -238,7 +257,7 @@ export function parsePairingCode(fragment: string): PairingCode | null {
  * HKDF-SHA256(key, salt = nonce, info = "obpal lan ice v1") -> 24 bytes -> base64 (the ice-char alphabet):
  * 8 characters of ufrag and 24 of password.
  */
-export async function lanIceCredentials(key: Uint8Array, nonce: Uint8Array): Promise<{ ufrag: string; pwd: string }> {
+export async function lanIceCredentials(key: BindKey, nonce: Uint8Array): Promise<{ ufrag: string; pwd: string }> {
   const bytes = await hkdf(key, nonce, 'obpal lan ice v1', 24)
   const s = btoa(String.fromCharCode(...bytes))
   return { ufrag: s.slice(0, 8), pwd: s.slice(8, 32) }

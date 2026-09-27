@@ -32,6 +32,10 @@ html.in-tab .pop { width: auto; max-width: 720px; margin: 0 auto; padding: 16px;
 .conn[data-s='connected'] .status i::after { content: ''; position: absolute; inset: -3px; border-radius: 50%; border: 2px solid rgb(var(--accent-rgb) / 0.8); opacity: 0; animation: ring-out 1.3s var(--ease) 0.1s 2; }
 .conn[data-s='connected'] #status-t { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 #device-name { min-width: 0; max-width: 190px; overflow: hidden; font-weight: 700; letter-spacing: -0.01em; text-overflow: ellipsis; }
+/* The link's badge beside the name: a lock, the path and the round trip (its title says the rest). */
+.facts { display: inline-flex; align-items: center; gap: 5px; flex: none; height: 18px; margin: 0 6px 0 4px; padding-left: 9px; border-left: 1px solid rgb(var(--accent-rgb) / 0.3); color: var(--secondary); font: 600 11.5px/1 var(--font); white-space: nowrap; font-variant-numeric: tabular-nums; cursor: default; }
+.facts .ic { width: 13px; height: 13px; color: var(--accent-text); }
+@container pop (width < 480px) { #facts-t { display: none; } }
 .unpair { display: grid; place-items: center; width: 26px; height: 26px; flex: none; margin-right: 3px; padding: 0; border: 0; border-radius: 50%; background: rgb(var(--hl-rgb) / 0.08); color: var(--secondary); transition: background 0.2s, color 0.2s, transform 0.12s var(--ease); }
 .unpair:hover { background: rgb(251 113 133 / 0.18); color: var(--bad-text); }
 .unpair:active { transform: scale(0.9); }

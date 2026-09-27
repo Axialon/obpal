@@ -6,7 +6,7 @@
 
 /* while the controller is up: the rest of the surface doesn't render, the backdrop holds still, coach marks wait */
 .surface.gp-on > :not(.gp):not(.banner) { display: none !important; }
-.surface.gp-on > .banner { position: fixed; z-index: 12; top: calc(env(safe-area-inset-top) + 86px); left: 0; right: 0; width: fit-content; max-width: 70vw; margin: 0 auto; }
+.surface.gp-on > .banner { position: fixed; z-index: 12; top: calc(env(safe-area-inset-top) + 86px); left: 0; right: 0; width: fit-content; max-width: 70vw; margin: 0 auto; pointer-events: none; }
 html.gp-mode .aurora i { animation-play-state: paused; }
 html.gp-mode .hint { display: none !important; }
 

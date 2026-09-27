@@ -2,10 +2,15 @@
  * ?debug=audio,gfx on the home page: a small readout in the corner, to read on a real device what the tests can't
  * hear or see there. audio: the audio context's state (and an iPhone's audio session: `playback` is heard with the
  * silent switch on), the output's level (what reaches the speakers, from a meter at the very end of the chain), the
- * hits played (of each kind: a wall is the edge of the screen) and skipped, and the last few knocks: how fast each came
- * in (em/s) and whether it was heard (how loud) or why not (too soft, too soon after the last, sound blocked or off, too
- * many ringing). gfx: the canvas and its drawing buffer, the quality step the governor chose, multisampling, and the
- * GPU's time per frame where the browser can measure it. Loaded only when asked for.
+ * hits played (of each kind: a wall is the edge of the screen) and skipped, the output's latency (the context's base
+ * latency and the device's output latency, each as the browser reports it: a Bluetooth link shows here) and how long
+ * after it happened the last knock reached the speakers (and how much of that was ours: nothing, but for keeping a
+ * knock in step with an earlier one the same frame; below 0, it was foreseen and started ahead), the knocks foreseen
+ * (how much of the lag that makes up, and how many were met by the knock itself, called off, or heard though the knock
+ * never came), and the last few knocks: how fast each came in (em/s) and whether it was heard (how loud) or why not
+ * (too soft, sound blocked or off, too many ringing). gfx: the canvas and its drawing buffer, the quality step the
+ * governor chose, multisampling, and the GPU's time per frame where the browser can measure it. Loaded only when asked
+ * for.
  */
 import type { GlassStats } from './glass'
 import type { Hero } from './hero'
@@ -28,7 +33,10 @@ export function mountDebug(kinds: Set<string>, src: { audio: () => GlassStats; g
       lines.push(`level  ${dbs(a.levelDb)}   peak ${dbs(a.peakDb)}`)
       const kinds = Object.entries(a.kinds).filter(([, v]) => v > 0).map(([k, v]) => `${k} ${v}`).join(', ')
       lines.push(`hits   ${a.played} played${kinds ? ` (${kinds})` : ''}, ${a.skipped} skipped`)
-      if (a.rate) lines.push(`       ${a.rate} Hz, ${a.latencyMs} ms latency`)
+      if (a.rate) lines.push(`       ${a.rate} Hz, latency ${a.baseMs ?? '?'} ms base + ${a.outputMs ?? '?'} ms output`)
+      if (a.behindMs !== null) lines.push(`       last knock at the speakers ${a.behindMs} ms after it happened (ours ${a.oursMs ?? 0} ms)`)
+      const f = a.foreseen
+      if (f.leadMs || f.met || f.calledOff || f.wrong) lines.push(`       foreseen ${f.leadMs} ms ahead: ${f.met} met, ${f.calledOff} called off, ${f.wrong} never came`)
       // Newest first: what, how fast, and what became of it.
       a.log.slice(-5).reverse().forEach((k, i) => {
         const what = k.verdict === 'heard' ? `heard, ${k.db} dB` : k.verdict

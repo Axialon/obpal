@@ -52,8 +52,11 @@ const R = 0.2
 const PAD_ID = 1000
 /** A phone feels at most one knock this often (ms). */
 const BUZZ_GAP = 70
-/** The page's buttons in the hero that marbles roll onto, and how far a marble's weight presses one (px). */
-const PADS = '.cta .btn, [data-hint], [data-sound]'
+/**
+ * The page's raised things in the hero that marbles roll onto (its buttons, the hint, the sound control, the three
+ * steps' icons), and how far a marble's weight presses one (px).
+ */
+const PADS = '.cta .btn, [data-hint], [data-sound], .quick .qi'
 const PRESS_PX = 1.5
 /**
  * A knocked button rocks like a spring: how fast (6 swings a second), how soon it settles (in a fifth of a second), and
@@ -97,6 +100,12 @@ export interface Hero {
   outline(id: string): { left: number; right: number; top: number; bottom: number; area: { left: number; right: number; top: number; bottom: number } } | null
   /** How the field draws (the ?debug=gfx readout, tests): its canvas and buffer, and the governor's step. */
   gfx(): (Gfx & { level: number; steps: Step[]; pinned: boolean }) | null
+  /** Drop the lime marble in from a little above the letters' tops, over a point on the hero (hero px; tests). */
+  drop(x: number, y: number): void
+  /** Where each letter's counters are on the hero (hero px: the deepest point of each, on the letters' tops; tests). */
+  counters(): { letter: number; x: number; y: number }[]
+  /** The gaps between two letters narrower than a marble, where each is narrowest (hero px, on the letters' tops; tests). */
+  gaps(): { a: number; b: number; x: number; y: number }[]
 }
 
 export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HTMLElement, opts: { still: boolean; onInput?: () => void; meter?: boolean }): Hero {
@@ -288,8 +297,8 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       else if (pointed) ph.pointing = true
       o.live = now - ph.at < PHONE_REST_MS
       o.push = tilted ? push : null
+      // (Its marble wakes by itself when that moves it: ./bounce.ts.)
       o.orb.target = o.live && ph.pointing ? field.pointAt(Math.max(0, Math.min(W, st.x)), Math.max(0, Math.min(H, st.y))) : null
-      if (o.live) o.orb.resting = false
     }
   }
   function phoneToss(who: Participant, vy: number) {
@@ -409,11 +418,14 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
 
   // ---- what a hit sounds like, and the knock felt in the hand ----
 
+  /** The frame being drawn (its rAF time, ms): a hit is heard at the moment within it that it happened. */
+  let frameAt = 0
+  /** Where a hit is heard from: -1 left … 1 right, as it's on screen. */
+  const panOf = (f: Field, h: Hit) => (f.project(h.x, h.y, h.z).x / Math.max(1, W)) * 2 - 1
   function onHit(h: Hit) {
     if (!field) return
     if (h.kind === 'button') padHit(h)
-    const p = field.project(h.x, h.y, h.z)
-    glass.hit(h.kind, h.speed, (p.x / Math.max(1, W)) * 2 - 1, [h.orb, h.other])
+    glass.hit(h.kind, h.speed, panOf(field, h), [h.orb, h.other], frameAt - h.ago * 1000, h.key)
     // Long enough to feel: many phones' motors don't answer pulses much under 20 ms. (The knocks are felt where the
     // visitor asks for less motion too: they aren't motion on the screen.)
     const ms = Math.round((h.kind === 'marble' ? 24 : 18) + 42 * h.strength)
@@ -426,6 +438,18 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       ph.buzzAt = now
       remote?.rumble(0.45 + 0.55 * h.strength, 0, ms, id)
     }
+  }
+
+  /**
+   * The knocks coming within the speakers' lag behind the screen, foreseen and started ahead so each is heard the
+   * moment it's seen (./glass.ts foresee()), and called off if it stops being foreseen before it starts. ?foresee=off
+   * leaves them to be heard as they come (to hear the difference).
+   */
+  const foresight = new URLSearchParams(location.search).get('foresee') !== 'off'
+  function foresee(f: Field, dt: number) {
+    const lead = foresight ? glass.lead(dt) : 0
+    const ahead = lead > 0 ? f.foresee(lead) : []
+    glass.foresee(ahead.map((h) => ({ key: h.key, kind: h.kind, speed: h.speed, pan: panOf(f, h), marbles: [h.orb, h.other], at: frameAt - h.ago * 1000 })), dt)
   }
 
   // ---- the opening: drop in, hop along the headline a word at a time, rest on the full stop ----
@@ -480,24 +504,26 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   }
 
   addActor((now, dt) => {
-    if (!visible || !field) return false
+    // (Off screen, nothing moves: the knocks foreseen won't come.)
+    if (!visible || !field) { glass.foresee([], 0); return false }
     readPhones(now)
     const f = field
     const o = me()
     const mine = now - local.at < HOLD_MS
     const tilting = !!tiltPush && now - tiltAt < HOLD_MS
     if (tour && !o.orb.route.length && !o.orb.flying && o.orb.resting) { tour = false; recentre() }
+    // (The marble wakes by itself when its steering or the tilt would move it: ./bounce.ts.)
     if (!tour) o.orb.target = !mine ? null : anchor ? { x: anchor.x, z: anchor.z } : f.pointAt(local.x, local.y)
-    if (mine) o.orb.resting = false
     o.live = mine || tilting || now - tossAt < HOLD_MS
     o.push = tilting ? tiltPush : null
-    if (tilting) o.orb.resting = false
     for (const [id, ph] of phones) if (ph.gone) { f.removeOrb(id); phones.delete(id) }
     f.pads(measurePads())
     // The buttons are drawn as blocks as deep as their step looks from here.
     const depth = Math.round(f.padDepth() * 2) / 2
     if (depth !== padDepth) { padDepth = depth; hero.style.setProperty('--pad-depth', `${depth}px`) }
+    frameAt = now
     const busy = f.step(dt)
+    foresee(f, dt)
     const padsBusy = answerPads(dt)
     f.render()
     if (busy) pace(dt)
@@ -590,12 +616,14 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       if (!field) return []
       const f = field
       return f.orbs().map((o) => {
-        const p = f.project(o.orb.x, o.orb.y, o.orb.z)
-        const s = f.surface(o.orb.x, o.orb.z)
+        // Where it's drawn (a step behind the physics at most).
+        const [x, y, z] = o.m.shown
+        const p = f.project(x, y, z)
+        const s = f.surface(x, z)
         // What it's on: a letter, a button (1000 + its number: pads()), the floor (-1), or nothing yet (in the air, -2);
-        // held: sitting on the rim of a letter's counter.
-        const on = Math.abs(o.orb.y - o.orb.r - s.h) < 0.01 && Math.abs(o.orb.vy) < 0.5 ? s.id : -2
-        return { id: o.id, x: p.x, y: p.y, life: o.life, h: o.orb.y - o.orb.r, on, held: !!o.orb.held }
+        // held: sitting on a rim (of a letter's counter, or across a narrow gap).
+        const on = Math.abs(y - o.orb.r - s.h) < 0.01 && Math.abs(o.orb.vy) < 0.5 ? s.id : -2
+        return { id: o.id, x: p.x, y: p.y, life: o.life, h: y - o.orb.r, on, held: !!o.orb.held }
       })
     },
     pads: () => padEls.map((el) => el.textContent?.trim() ?? ''),
@@ -612,6 +640,25 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       return d ? field.project(d.spot[0], TOP + R, d.spot[1]) : null
     },
     gfx: () => field && { ...field.gfx(), level: pinned ?? governor.level, steps, pinned: pinned !== null },
+    drop: (x, y) => {
+      if (!field) return
+      takeOver()
+      const p = field.planeAt(x, y, TOP)
+      Object.assign(me().orb, { x: p.x, z: p.z, y: TOP + R + 0.3, vx: 0, vy: 0, vz: 0, target: null, route: [], flying: false, toss: null, resting: false })
+      anchor = null
+      local.at = -1e9
+      wake()
+    },
+    counters: () => {
+      if (!field) return []
+      const f = field
+      return f.counters().map((c) => ({ letter: c.letter, ...f.project(c.x, TOP, c.z) }))
+    },
+    gaps: () => {
+      if (!field) return []
+      const f = field
+      return f.gaps(2 * R).map((g) => ({ a: g.a, b: g.b, ...f.project(g.x, TOP, g.z) }))
+    },
   }
   return heroApi
 }

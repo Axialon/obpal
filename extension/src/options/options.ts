@@ -1,27 +1,39 @@
 /**
  * Options page: PC control. Whole-PC mode on or off, a global Pause, and every allowed program with its scope
- * (keyboard / mouse) and remove; ob.Pal Desktop's version and panic key; and the look (../ui/look.ts), as in the
- * popup. It renders from storage.session "pc" (mirrored there by the service worker from the helper) and asks the
- * worker to change things; the helper is the one that persists them.
+ * (keyboard / mouse) and remove; the phones asked about and whether each may control this PC (spec/SECURITY.md §8,
+ * L1), with a notification for the next one if you like; ob.Pal Desktop's version and panic key; and the look
+ * (../ui/look.ts), as in the popup. A phone's question for the PC shows here too, on top (its notification opens this
+ * page). It renders from storage (the helper's state, mirrored into storage.session "pc" by the service worker, and
+ * the answers) and asks the worker to change things; the helper is the one that persists its own.
  */
 import '../../../src/family'
 import '../../../src/styles/base.css'
 import '../ui/link.css'
 import './options.css'
 import { ICONS, LOGO_WORD } from '../../../src/ui/icons'
+import { askFor, parseAnswers, parsePhone, type Answers, type Phone } from '../shared/access'
+import { DEFAULT_MODE, isTargetMode, type TargetMode } from '../shared/constants'
 import { DESKTOP_URL, EMPTY_PC, parsePcState, PC_PAGE_PORT_NAME, type PcProgramEntry, type PcState } from '../shared/native'
-import type { BgRequest } from '../shared/messages'
+import { parseLink, type BgRequest } from '../shared/messages'
 import { LINK_ICONS } from '../popup/icons'
+import { askCard, showAsk } from '../ui/ask'
 import { lightCards, mountLogo, mountLook, settle, startLook } from '../ui/look'
 
 startLook()
 
 const NATIVE_PERMISSION: chrome.permissions.Permissions = { permissions: ['nativeMessaging'] }
+const NOTIFY: chrome.permissions.Permissions = { permissions: ['notifications'] }
 const LINK_PAGE = 'https://obpal.blackboxes.net/link/'
 const PRIVACY = 'https://obpal.blackboxes.net/privacy/'
 const app = document.getElementById('app') as HTMLElement
 let pc: PcState = { ...EMPTY_PC }
 let permission = false
+/** What the question for the PC, and the phones' list, are made of. */
+let mode: TargetMode = DEFAULT_MODE
+let phone: Phone | null = null
+let linked = false
+let answers: Answers = {}
+let notify = false
 
 app.innerHTML = `
   <header class="top rise">
@@ -31,7 +43,7 @@ app.innerHTML = `
   </header>
   <section class="hero rise" style="--i:1" aria-labelledby="title">
     <p class="kicker">${LINK_ICONS.pc}<span>ob.Pal Desktop · Windows</span></p>
-    <h1 id="title">PC control</h1>
+    <h1 id="title" tabindex="-1">PC control</h1>
     <p class="lede">Your phone as this computer’s mouse and keyboard: in every window, or only in the programs you allow.</p>
     <div class="helper" id="helper" hidden>
       <span class="helper-ver" id="helper-ver"></span>
@@ -59,6 +71,17 @@ app.innerHTML = `
         <div class="list" id="list"></div>
         <div class="empty swap" id="empty" hidden><span class="empty-art">${LINK_ICONS.pc}</span><b>No programs allowed</b><span>Switch to a program, open ob.Pal Link and choose PC to allow it.</span></div>
       </section>
+      <section class="card phones rise" style="--i:4" aria-labelledby="phones-h">
+        <header class="card-h"><h2 id="phones-h">Phones</h2><span class="count" id="phones-n" hidden></span></header>
+        <p class="card-say">A phone controls this PC only once you allow it. Link asks the first time it picks PC.</p>
+        <div class="list" id="phones" role="group" aria-labelledby="phones-h"></div>
+        <div class="empty swap" id="phones-empty" hidden><span class="empty-art">${ICONS.phone}</span><b>No phone has asked yet</b><span>Your answer for each phone shows here, and you can change it.</span></div>
+        <button class="row notify" id="notify" type="button" role="switch" aria-checked="false" title="A notification with Allow and Deny when a phone asks for this PC and Link's popup is closed">
+          <span class="row-ic">${LINK_ICONS.bell}</span>
+          <span class="row-t"><b>Notify me</b><small>When a phone asks for this PC and the popup is closed</small></span>
+          <span class="sw" aria-hidden="true"><i></i></span>
+        </button>
+      </section>
     </div>
     <aside class="col side">
       <section class="card look-card rise" style="--i:3" aria-labelledby="look-h">
@@ -80,6 +103,43 @@ document.getElementById('ver')!.textContent = `v${chrome.runtime.getManifest().v
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement
 const send = (m: BgRequest): Promise<unknown> => chrome.runtime.sendMessage(m).catch((e: unknown) => ({ ok: false, error: String(e) }))
+// A phone's question for the PC, right under the heading (the notification about it opens this page).
+const askEl = askCard((key, allow) => void send({ to: 'bg', type: 'answer', key, allow }))
+app.insertBefore(askEl, $('note'))
+
+/**
+ * The phones asked about, newest answer first, each a switch: allowed to control this PC, or not. A change goes to the
+ * service worker, which keeps it (and arms or disarms ob.Pal Desktop if that phone is connected).
+ */
+function renderPhones() {
+  const list = $('phones')
+  const rows = Object.entries(answers).sort((a, b) => b[1].at - a[1].at)
+  list.replaceChildren(...rows.map(([key, a]) => {
+    const row = document.createElement('button')
+    row.type = 'button'
+    row.className = 'row phone-row'
+    row.setAttribute('role', 'switch')
+    row.setAttribute('aria-checked', String(a.allow))
+    row.innerHTML = `<span class="row-ic">${ICONS.phone}</span><span class="row-t"><b></b><small></small></span><span class="sw" aria-hidden="true"><i></i></span>`
+    row.querySelector('b')!.textContent = a.name
+    row.querySelector('small')!.textContent = `${a.allow ? 'Can control this PC' : 'Can’t control this PC'}${phone?.key === key && linked ? ' · connected' : ''}`
+    row.title = a.allow ? `Stop ${a.name} controlling this PC` : `Let ${a.name} control this PC`
+    row.onclick = () => void send({ to: 'bg', type: 'answer', key, allow: !a.allow })
+    return row
+  }))
+  $('phones-empty').hidden = rows.length > 0
+  $('phones-n').hidden = !rows.length
+  $('phones-n').textContent = String(rows.length)
+  const n = $('notify')
+  n.setAttribute('aria-checked', String(notify))
+}
+
+// A notification for the next question: the optional permission, asked for (or given back) in the click.
+$('notify').addEventListener('click', () => {
+  const done = (on: boolean) => { notify = on; renderPhones() }
+  if (notify) chrome.permissions.remove(NOTIFY).then((gone) => done(!gone), () => renderPhones())
+  else chrome.permissions.request(NOTIFY).then(done, () => renderPhones())
+})
 
 /** A program's badge: its initial on a tint of its own, so the list reads at a glance. */
 const TINTS = ['56 189 248', '251 113 133', '252 211 77', '110 231 183', '210 195 246', '153 225 217']
@@ -172,6 +232,8 @@ function render() {
   }
 
   renderList(pc.config?.programs ?? [])
+  renderPhones()
+  showAsk(askEl, askFor(mode, linked ? phone : null, answers, permission), () => $('title').focus())
 
   const note = $('note')
   const notice = noticeFor()
@@ -226,15 +288,36 @@ $('pause').addEventListener('click', () => void send({ to: 'bg', type: 'pc-pause
 $('whole').addEventListener('click', () => void send({ to: 'bg', type: 'pc-desktop', on: !pc.config?.desktop, keyboard: true, mouse: true }))
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'session' || !changes.pc) return
-  pc = parsePcState(changes.pc.newValue) ?? { ...EMPTY_PC }
+  if (area === 'session') {
+    if (changes.pc) pc = parsePcState(changes.pc.newValue) ?? { ...EMPTY_PC }
+    if (changes.phone) phone = parsePhone(changes.phone.newValue)
+    if (changes.link) linked = parseLink(changes.link.newValue)?.status === 'connected'
+  } else if (area === 'local') {
+    if (changes.mode && isTargetMode(changes.mode.newValue)) mode = changes.mode.newValue
+    if (changes.answers) answers = parseAnswers(changes.answers.newValue)
+  }
   render()
 })
+chrome.permissions.onAdded.addListener(() => void refreshPermissions())
+chrome.permissions.onRemoved.addListener(() => void refreshPermissions())
+
+async function refreshPermissions() {
+  ;[permission, notify] = await Promise.all([chrome.permissions.contains(NATIVE_PERMISSION), chrome.permissions.contains(NOTIFY)])
+  render()
+}
 
 async function init() {
-  const [session, granted] = await Promise.all([chrome.storage.session.get('pc'), chrome.permissions.contains(NATIVE_PERMISSION)])
+  const [session, local, granted, notes] = await Promise.all([
+    chrome.storage.session.get(['pc', 'phone', 'link']), chrome.storage.local.get(['mode', 'answers']),
+    chrome.permissions.contains(NATIVE_PERMISSION), chrome.permissions.contains(NOTIFY),
+  ])
   pc = parsePcState(session.pc) ?? { ...EMPTY_PC }
+  phone = parsePhone(session.phone)
+  linked = parseLink(session.link)?.status === 'connected'
+  mode = isTargetMode(local.mode) ? local.mode : DEFAULT_MODE
+  answers = parseAnswers(local.answers)
   permission = granted
+  notify = notes
   render()
   settle()
   // Holding this port keeps the helper up while the page is open (it closes with the page).

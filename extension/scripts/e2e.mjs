@@ -44,7 +44,13 @@
  * Automation can't click the toolbar icon, which is what grants activeTab. The test copy of the extension
  * therefore also gets host access to the local test page (http://127.0.0.1/*), and "This tab" is switched on
  * with the same message the popup sends. Optional permissions can't be granted by automation either, so the
- * test copy has nativeMessaging as a required permission.
+ * test copy has nativeMessaging and notifications as required permissions.
+ *
+ * Security (spec/SECURITY.md §8): the invite moves on once the phone pairs, and a second phone with the old link is
+ * told it was used, while the phone that paired comes back through it (a reload, a network change). The PC waits for
+ * the person at it: a new phone can't arm ob.Pal Desktop until it's allowed, Deny keeps it out (its other targets
+ * work, and its own tray can't pick PC), Allow lets it in and is remembered, and forgetting the phone takes it away.
+ * Both sides keep the pairing key as a non-extractable CryptoKey.
  */
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, statSync } from 'node:fs'
@@ -59,7 +65,8 @@ import { startLocal, UPSTREAM } from '../e2e/local.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const HEADED = process.argv.includes('--headed')
-const SHOTS = process.argv.find((a) => a.startsWith('--shots='))?.slice(8)
+// Screenshots: --shots=<dir>, or OBPAL_E2E_SHOTS (through e2e:all, which passes its environment on).
+const SHOTS = process.argv.find((a) => a.startsWith('--shots='))?.slice(8) ?? process.env.OBPAL_E2E_SHOTS
 const DESKTOP = process.argv.includes('--desktop')
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
 const HARNESS = process.env.OBPAL_E2E_HARNESS || resolve(root, '..', 'desktop', 'target', 'release', 'obpal-harness.exe')
@@ -100,8 +107,8 @@ await cp(join(root, 'dist'), ext, { recursive: true })
 const manifestPath = join(ext, 'manifest.json')
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
 manifest.host_permissions = [...manifest.host_permissions, 'http://127.0.0.1/*']
-manifest.permissions = [...manifest.permissions, 'nativeMessaging']
-manifest.optional_permissions = (manifest.optional_permissions ?? []).filter((p) => p !== 'nativeMessaging')
+manifest.permissions = [...manifest.permissions, 'nativeMessaging', 'notifications']
+manifest.optional_permissions = (manifest.optional_permissions ?? []).filter((p) => p !== 'nativeMessaging' && p !== 'notifications')
 // No key: the copy gets an ID of its own, which an installed ob.Pal Desktop refuses (its allowed_origins name only
 // the fixed ID). Nothing here needs the fixed ID: the stub is registered for the ID the copy gets, and the service
 // and the test pages don't look at it. --desktop keeps the key, to reach the installed helper.
@@ -267,6 +274,11 @@ async function openPopup(ctx) {
 const linkOf = (popup) => popup.evaluate(async () => (await chrome.storage.session.get('link')).link ?? null)
 const enable = (popup, tabId) => popup.evaluate((t) => chrome.runtime.sendMessage({ to: 'bg', type: 'enable', tabId: t, on: true }), tabId)
 const setTarget = (popup, mode) => popup.evaluate((m) => chrome.runtime.sendMessage({ to: 'bg', type: 'mode', mode: m }), mode)
+/** What the extension keeps: storage.session / storage.local by key. */
+const sessionOf = (popup, k) => popup.evaluate(async (k) => (await chrome.storage.session.get(k))[k] ?? null, k)
+const localOf = (popup, k) => popup.evaluate(async (k) => (await chrome.storage.local.get(k))[k] ?? null, k)
+/** A second phone, for the old link: a browser of its own, so a certificate (an identity) of its own. */
+let stranger = null
 
 /** Touch helpers for a phone page (CDP touch events, so the trackpad and buttons see real touches). */
 async function touchOn(ctx, phone) {
@@ -306,6 +318,31 @@ try {
     await phone.locator('.modes').waitFor({ timeout: 20000 })
     await until('popup shows connected', () => popup.evaluate(() => document.getElementById('status')?.dataset.s === 'connected'), 15000)
     return `${new URL(pairing).host}, controls in ${Date.now() - t0} ms`
+  })
+
+  // ---- the invite moves on once a phone pairs (spec/SECURITY.md §8, L2) ----
+  await check('the invite moves on once the phone pairs: the popup has a new link', async () => {
+    const next = await until('a new pairing link', async () => { const u = (await linkOf(popup))?.url; return u && u !== pairing ? u : null }, 8000)
+    return `#${new URL(pairing).hash.slice(1, 10)}… → #${new URL(next).hash.slice(1, 10)}…`
+  })
+
+  await check('the old QR link pairs nobody new: a second phone is told it was used, and the first stays connected', async () => {
+    stranger = await chromium.launch({ executablePath, headless: !HEADED, args: [...RTC_ARGS, '--ignore-certificate-errors'] })
+    const other = await (await stranger.newContext({ ...devices['Pixel 7 landscape'] })).newPage()
+    await other.goto(onPhone(pairing))
+    const said = await other.locator('.msg-card h1').filter({ hasText: 'This code was used' }).textContent({ timeout: 15000 })
+    const link = await linkOf(popup)
+    if (link?.status !== 'connected') throw new Error(`the first phone's link: ${link?.status}`)
+    if (!(await phone.locator('.modes').isVisible())) throw new Error('the first phone lost its controls')
+    await stranger.close()
+    stranger = null
+    return `"${said}"; ${link.device} still connected`
+  })
+
+  await check('the popup shows the link as the pairing chip does: encrypted, verified by the QR code, the path and the round trip', async () => {
+    const f = await until('the badge', () => popup.evaluate(() => { const el = document.getElementById('facts'); return el && !el.hidden ? { text: el.textContent, title: el.title } : null }), 8000)
+    if (!f.title.startsWith('Encrypted end to end') || !f.title.includes('Verified by the QR code') || !/^Direct/.test(f.text)) throw new Error(JSON.stringify(f))
+    return `${f.text}; ${f.title.split('\n').join(' · ')}`
   })
 
   await check('Controller: Gamepad API pad, A = button 0', async () => {
@@ -487,8 +524,110 @@ try {
     try { return await during() } finally { await touches('touchEnd', []) }
   }
 
+  // ---- who may control the PC (spec/SECURITY.md §8, L1) ----
+  /** The phone connected now, as Link knows it ({ key, name }). */
+  const thisPhone = () => until('the phone, as Link knows it', () => sessionOf(popup, 'phone'))
+  const armings = () => stubLog().filter((e) => e.in?.t === 'enable' && e.in.on === true).length
+  const helperFrames = () => stubLog().filter((e) => e.in?.t === 'f').length
+  /** The line the phone shows over its controls (the screen's notice, or the link's own), or ''. */
+  const phoneLine = () => phone.evaluate(() => { const b = document.getElementById('banner'); return b && !b.hidden ? b.textContent : '' })
+  const notified = () => popup.evaluate(async () => Object.keys(await chrome.notifications.getAll()))
+  /** The popup as Chrome shows it (its own width, not a tab's), on `theme`, saved as <name>; then the surface it had. */
+  async function popupShot(name, theme) {
+    if (!SHOTS) return
+    await mkdir(SHOTS, { recursive: true })
+    const was = await popup.evaluate(() => document.documentElement.dataset.theme)
+    await popup.evaluate((t) => { document.querySelector(`.look[data-theme="${t}"]`)?.click(); document.documentElement.classList.remove('in-tab') }, theme)
+    await sleep(700)
+    await popup.locator('#app').screenshot({ path: join(SHOTS, name) })
+    await popup.evaluate((t) => { document.querySelector(`.look[data-theme="${t}"]`)?.click(); document.documentElement.classList.add('in-tab') }, was)
+  }
+
   if (!DESKTOP) {
+    /** The phone picks a target in its own tray: 0 Controller, 1 3D, 2 Keys, 3 PC (the surface's tray, not the gamepad's). */
+    async function pickOnPhone(n) {
+      await phone.locator('.tray-btn[data-id=target]').waitFor({ state: 'visible', timeout: 5000 })
+      await tap('.tray-btn[data-id=target]')
+      await phone.locator('.picker .pick').nth(n).waitFor({ timeout: 5000 })
+      await tap(`.picker .pick >> nth=${n}`)
+    }
+
+    await check('PC: a new phone that picks PC waits for the person at the PC (prompt, badge, notification); Deny keeps ob.Pal Desktop disarmed and takes the phone back to its target, which works, and its tray can’t pick PC; Allow arms it', async () => {
+      await setTarget(popup, 'keys')
+      await tap('.modes [data-tab=rotate]')
+      await pickOnPhone(3)
+      await until('the phone switched the target to PC', async () => (await localOf(popup, 'mode')) === 'pc')
+      await helperReady((s) => s.status?.program?.name === 'stubgame.exe')
+      const me = await thisPhone()
+      // Asked: the popup's prompt names the phone, the icon's badge says so, a notification asks too, and the phone waits.
+      const asked = await until('the popup asks', () => popup.evaluate(() => { const a = document.getElementById('ask'); return a && !a.hidden ? a.querySelector('#ask-t')?.textContent : null }))
+      if (!asked.includes(me.name)) throw new Error(`the prompt says "${asked}"`)
+      if ((await sessionOf(popup, 'asking')) !== me.key) throw new Error('not asking about this phone')
+      if ((await popup.evaluate(() => chrome.action.getBadgeText({}))) !== '!') throw new Error('no badge')
+      await until('a notification asks', async () => (await notified()).includes('obpal-ask'))
+      await until('the phone waits for the PC', async () => (await phoneLine()) === 'Waiting for approval on the PC')
+      // Nothing reaches the PC meanwhile: a tap and a hold on the phone's trackpad arm nothing and send nothing.
+      await tap('#pad')
+      await hold('#pad', () => sleep(700))
+      await sleep(300)
+      if (armings() || helperFrames()) throw new Error(`a phone nobody allowed reached the helper: ${armings()} armings, ${helperFrames()} frames`)
+      if (SHOTS) {
+        await popupShot('ask-popup-dark.png', 'carbon')
+        await popupShot('ask-popup-light.png', 'light')
+        await phone.screenshot({ path: join(SHOTS, 'ask-phone-waiting.png') })
+        const opts = await desk.newPage()
+        await opts.goto(`chrome-extension://${id}/options.html`)
+        await opts.locator('#ask:not([hidden])').waitFor({ timeout: 5000 })
+        await sleep(700)
+        await opts.screenshot({ path: join(SHOTS, 'ask-options-dark.png') })
+        await opts.close()
+        await page.bringToFront()
+      }
+      // Deny: kept, the prompt and the notification go, the helper stays disarmed, and the phone, which picked PC
+      // itself, is back on the target it had.
+      await popup.locator('#ask button[data-allow="false"]').click()
+      await until('the answer kept', async () => (await localOf(popup, 'answers'))?.[me.key]?.allow === false)
+      await until('the prompt goes', () => popup.evaluate(() => document.getElementById('ask').hidden))
+      await until('the notification goes', async () => !(await notified()).includes('obpal-ask'))
+      await until('back on Keys', async () => (await localOf(popup, 'mode')) === 'keys')
+      await until('its picker shows Keys', () => phone.evaluate(() => document.querySelector('.tray-btn[data-id=target] .sel-v')?.textContent === 'Keys'))
+      await until('the phone isn’t held up on a page target', async () => !(await phoneLine()))
+      if (armings()) throw new Error('armed after Deny')
+      // Its other targets work: Keys.
+      await tap('.modes [data-tab=gamepad]')
+      await phone.locator('.gp-f[data-k=a]').waitFor({ timeout: 5000 })
+      await page.evaluate(() => { window.__log.keys.length = 0 })
+      await hold('.gp-f[data-k=a]', () => until('Space down', () => page.evaluate(() => window.__log.keys.some((k) => k.t === 'down' && k.code === 'Space'))))
+      // Its own tray can't pick PC now: the target stays, and its picker shows it again.
+      await tap('.gp-mini[data-act=exit]')
+      await tap('.modes [data-tab=rotate]')
+      await pickOnPhone(3)
+      await sleep(800)
+      if ((await localOf(popup, 'mode')) !== 'keys') throw new Error('a phone the PC said no to switched the target to PC')
+      await until('its picker shows Keys again', () => phone.evaluate(() => document.querySelector('.tray-btn[data-id=target] .sel-v')?.textContent === 'Keys'))
+      // PC from the popup: no question (the answer is kept); the PC card and the phone say no.
+      await setTarget(popup, 'pc')
+      await until('the PC card says no', () => popup.evaluate(() => (document.getElementById('pc-title')?.textContent ?? '').includes('can’t control this PC')))
+      await until('the phone is told', async () => (await phoneLine()).startsWith('Not allowed on this PC'))
+      if (await sessionOf(popup, 'asking')) throw new Error('asked again about a phone already answered for')
+      if (armings()) throw new Error('armed for a refused phone')
+      // Then Allow from the PC card: armed, and input gets through.
+      const allow = popup.locator('#pc-actions .btn', { hasText: `Allow ${me.name}` })
+      await allow.waitFor({ timeout: 5000 })
+      await allow.click()
+      await until('allowed', async () => (await localOf(popup, 'answers'))?.[me.key]?.allow === true)
+      await until('the helper is armed', () => armings() > 0)
+      await until('the phone isn’t held up', async () => !(await phoneLine()))
+      await phone.locator('#pad').waitFor({ state: 'visible', timeout: 5000 })
+      await tap('#pad')
+      await until('input reaches the helper', () => stubLog().some((e) => e.in?.t === 'f' && e.in.b?.includes(0)))
+      const log = stubLog()
+      if (log.findIndex((e) => e.in?.t === 'f') < log.findIndex((e) => e.in?.t === 'enable' && e.in.on === true)) throw new Error('a frame came before the helper was armed')
+      return `${me.name}: picked PC and was asked; refused (back on Keys, which works; its tray kept off PC); then allowed and armed`
+    })
+
     await check('PC (stub helper): starts on the PC target, the popup allows the program in front, frames carry the held keys, trackpad clicks and its scroll strip, the mouse face, whole PC on and off, the keyboard (Type, typing, ↵), leaving disarms', async () => {
+      const logAt = stubLog().length
       await tap('.modes [data-tab=gamepad]')
       await phone.locator('.gp-f[data-k=a]').waitFor({ timeout: 5000 })
       await setTarget(popup, 'pc')
@@ -564,7 +703,7 @@ try {
       await stubFocus({ text: null, front: 'game' })
       await until('the dock closes with the field', () => phone.evaluate(() => document.getElementById('kbd')?.hidden === true && document.getElementById('type-prompt')?.hidden === true))
       await setTarget(popup, 'keys')
-      await until('the helper port closed', () => stubLog().some((e) => e.eof))
+      await until('the helper port closed', () => stubLog().slice(logAt).some((e) => e.eof))
       const log = stubLog()
       const armed = log.findIndex((e) => e.in?.t === 'enable' && e.in.on === true)
       const firstFrame = log.findIndex((e) => e.in?.t === 'f')
@@ -584,6 +723,9 @@ try {
         await phone.locator('.gp-f[data-k=a]').waitFor({ timeout: 5000 })
         await setTarget(popup, 'pc')
         const ready = await helperReady((s) => s.status?.program?.path?.toLowerCase() === info.path.toLowerCase())
+        // This phone is new to the PC: allowed, as the person at it would in the popup's prompt.
+        const me = await thisPhone()
+        await popup.evaluate((k) => chrome.runtime.sendMessage({ to: 'bg', type: 'answer', key: k, allow: true }), me.key)
         // Not allowed yet: nothing arrives, and the helper counts the refusal. (Only events tagged by the helper's
         // injector count: the harness window holds the real foreground, so a person's own typing would land in it.)
         await hold('.gp-f[data-k=a]', () => sleep(700))
@@ -625,27 +767,68 @@ try {
     })
   }
 
+  // ---- the phone that paired comes back through its own room; an allowed phone stays allowed ----------------------
+
+  if (!DESKTOP) {
+    await check('the paired phone reloads with the old link and comes back through its own room; allowed, it gets the PC with no question', async () => {
+      const armed = armings()
+      const invite = (await linkOf(popup))?.url
+      await phone.reload()
+      await phone.locator('.modes').waitFor({ timeout: 20000 })
+      await until('popup shows connected', () => popup.evaluate(() => document.getElementById('status')?.dataset.s === 'connected'), 15000)
+      // It paired through the old invite's room, which moved nothing on: the invite on show is the same.
+      if ((await linkOf(popup))?.url !== invite) throw new Error('the invite moved on for a phone coming back')
+      await setTarget(popup, 'pc')
+      await until('armed again', () => armings() > armed)
+      if (await sessionOf(popup, 'asking')) throw new Error('asked again about an allowed phone')
+      if (await popup.evaluate(() => !document.getElementById('ask').hidden)) throw new Error('the popup asks again')
+      await setTarget(popup, 'keys')
+      return 'reconnected through the old room, armed with no question'
+    })
+  }
+
+  await check('the paired phone finds a new path through its own room when its network changes (an ICE restart)', async () => {
+    ;({ touches, centre, clearHints, tap, hold } = await touchOn(phoneCtx, phone))
+    await setTarget(popup, 'keys')
+    await phone.evaluate(() => performance.clearMarks('obpal:restart'))
+    await phone.evaluate(() => dispatchEvent(new Event('online')))
+    await until('an ICE restart', () => phone.evaluate(() => performance.getEntriesByName('obpal:restart').length > 0), 10000)
+    await sleep(1500)
+    if ((await linkOf(popup))?.status !== 'connected') throw new Error('the link went')
+    await tap('.modes [data-tab=gamepad]')
+    await phone.locator('.gp-f[data-k=a]').waitFor({ timeout: 5000 })
+    await page.evaluate(() => { window.__log.keys.length = 0 })
+    await hold('.gp-f[data-k=a]', () => until('Space down', () => page.evaluate(() => window.__log.keys.some((k) => k.t === 'down' && k.code === 'Space'))))
+    await tap('.gp-mini[data-act=exit]')
+    return 'restarted, still connected, input arrives'
+  })
+
   // ---- remembered on both sides, controller cached ------------------------------------------------------------
 
-  const phonePairs = () => phone.evaluate(() => new Promise((res) => {
+  /** A side's remembered pairings (IndexedDB 'obpal'), read in its page: the key must be a non-extractable CryptoKey. */
+  const pairsIn = (p) => p.evaluate(() => new Promise((res) => {
     const r = indexedDB.open('obpal')
     r.onerror = () => res([])
     r.onsuccess = () => {
       const db = r.result
       if (!db.objectStoreNames.contains('pairs')) return res([])
       const q = db.transaction('pairs').objectStore('pairs').getAll()
-      q.onsuccess = () => res(q.result.map((p) => ({ id: p.id, name: p.peerName, key: p.key?.length, fp: p.peerFp?.length })))
+      q.onsuccess = () => res(q.result.map((x) => ({ id: x.id, name: x.peerName, key: x.key instanceof CryptoKey && !x.key.extractable, fp: x.peerFp?.length })))
       q.onerror = () => res([])
     }
   }))
+  const phonePairs = () => pairsIn(phone)
 
-  await check('both sides remember the pairing (id, key, fingerprints)', async () => {
+  await check('both sides remember the pairing (id, a non-extractable key, fingerprints)', async () => {
     const link = await until('remembered on the extension', async () => { const l = await linkOf(popup); return l?.pairs?.length ? l : null })
     const mine = await until('remembered on the phone', async () => { const p = await phonePairs(); return p.length ? p : null })
     if (mine[0].id !== link.pairs[0].id) throw new Error(`ids differ: phone ${mine[0].id}, extension ${link.pairs[0].id}`)
-    if (mine[0].key !== 32 || mine[0].fp !== 32) throw new Error(`phone record ${JSON.stringify(mine[0])}`)
+    if (mine[0].key !== true || mine[0].fp !== 32) throw new Error(`phone record ${JSON.stringify(mine[0])}`)
+    // Link's own record, in the IndexedDB of its origin (the popup shares it with the link document).
+    const theirs = (await pairsIn(popup)).find((p) => p.id === link.pairs[0].id)
+    if (theirs?.key !== true || theirs.fp !== 32) throw new Error(`extension record ${JSON.stringify(theirs)}`)
     if (link.status !== 'connected' || link.lanFor !== link.pairs[0].id) throw new Error(`link ${JSON.stringify({ status: link.status, lanFor: link.lanFor })}`)
-    return `${link.pairs[0].name} ↔ ${mine[0].name}`
+    return `${link.pairs[0].name} ↔ ${mine[0].name}, keys non-extractable on both`
   })
 
   await check('the phone has the controller cached for offline use', async () => {
@@ -720,11 +903,15 @@ try {
     return `${new URL(link.lan).hash.slice(2, 12)}… ≠ ${new URL(lanUrl).hash.slice(2, 12)}…`
   })
 
-  await check('forgetting the phone removes the direct code (popup) and the screen (phone)', async () => {
+  await check('forgetting the phone removes the direct code (popup), its answer for the PC, and the screen (phone)', async () => {
     await popup.evaluate(() => chrome.runtime.sendMessage({ to: 'bg', type: 'unpair' }))
     const l0 = await until('disconnected', async () => { const l = await linkOf(popup); return l?.status !== 'connected' ? l : null }, 10000)
+    const answered = !DESKTOP && (await localOf(popup, 'answers'))?.[l0.pairs[0].id]
+    if (!DESKTOP && !answered) throw new Error('no answer kept for the phone before forgetting it')
     await popup.evaluate((id) => chrome.runtime.sendMessage({ to: 'bg', type: 'forget', id }), l0.pairs[0].id)
     const l1 = await until('forgotten', async () => { const l = await linkOf(popup); return l && !l.pairs.length && !l.lan ? l : null }, 5000)
+    // A new phone again: its answer for the PC goes with it.
+    if ((await localOf(popup, 'answers'))?.[l0.pairs[0].id]) throw new Error('the answer for a forgotten phone stayed')
     // The phone can forget too, from its settings sheet.
     await phone.locator('#gear').waitFor({ timeout: 5000 }).catch(() => {})
     const gone = await phone.evaluate(async () => {
@@ -739,7 +926,7 @@ try {
   console.error(e)
   exitCode = 1
 } finally {
-  await Promise.allSettled([desk.close(), phoneCtx.close()])
+  await Promise.allSettled([desk.close(), phoneCtx.close(), stranger?.close()])
   server.close()
   await local.close()
   unregisterStub()

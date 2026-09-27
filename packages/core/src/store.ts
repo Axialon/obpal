@@ -3,7 +3,7 @@
  * stable and the other side can pin it) and the pairings it remembers. Everything degrades to "this session
  * only" where storage is unavailable (private mode, storage denied, a browser that can't store certificates).
  */
-import { certFingerprint } from './pairing'
+import { certFingerprint, importPairKey } from './pairing'
 
 const DB = 'obpal'
 const VERSION = 1
@@ -15,8 +15,12 @@ const CERT_RENEW = 7 * 24 * 3600 * 1000
 export interface StoredPair {
   /** Pairing id, base64url (16 bytes). */
   id: string
-  /** 32-byte pairing key, minted by the host and sent to the phone inside the DTLS-protected channel. */
-  key: Uint8Array
+  /**
+   * The pairing key: 32 bytes the host mints and sends to the phone inside the DTLS-protected channel, then kept on both
+   * sides as a non-extractable HKDF key (importPairKey), which script can use but never read. Rows from before keep
+   * the bytes, and become keys as they're read.
+   */
+  key: CryptoKey
   /** The other side's DTLS fingerprint (32 bytes). */
   peerFp: Uint8Array
   peerName: string
@@ -80,13 +84,14 @@ export async function loadCertificate(role: 'device' | 'host'): Promise<{ cert: 
 }
 
 export async function listPairs(): Promise<StoredPair[]> {
-  const rows = (await tx<StoredPair[]>('pairs', 'readonly', (s) => s.getAll())) ?? [...memory.pairs.values()]
-  return rows.filter(isPair).sort((a, b) => b.at - a.at)
+  const rows = (await tx<unknown[]>('pairs', 'readonly', (s) => s.getAll())) ?? [...memory.pairs.values()]
+  const pairs = await Promise.all(rows.map((r) => readPair(r)))
+  return pairs.filter((p): p is StoredPair => !!p).sort((a, b) => b.at - a.at)
 }
 
 export async function getPair(id: string): Promise<StoredPair | null> {
-  const row = (await tx<StoredPair>('pairs', 'readonly', (s) => s.get(id))) ?? memory.pairs.get(id)
-  return row && isPair(row) ? row : null
+  const row = (await tx<unknown>('pairs', 'readonly', (s) => s.get(id))) ?? memory.pairs.get(id)
+  return row ? readPair(row) : null
 }
 
 export async function findPairByPeer(fp: Uint8Array): Promise<StoredPair | null> {
@@ -108,8 +113,34 @@ export async function forgetAllPairs(): Promise<void> {
   await tx('pairs', 'readwrite', (s) => s.clear())
 }
 
-function isPair(x: unknown): x is StoredPair {
+/** A row kept before pairing keys were non-extractable: the key as its 32 bytes. */
+type BytesPair = Omit<StoredPair, 'key'> & { key: Uint8Array }
+
+/**
+ * A stored row as a pairing, or null for anything that isn't one. A row that still holds its key's bytes is turned
+ * into a non-extractable key and written back (`save`: where, putPair unless a test says otherwise), so the bytes
+ * don't outlive their first read.
+ */
+export async function readPair(row: unknown, save: (p: StoredPair) => Promise<void> = putPair): Promise<StoredPair | null> {
+  if (isPair(row)) return row
+  if (!hasPairFields(row) || !(row.key instanceof Uint8Array) || row.key.length !== 32) return null
+  const bytes = row as BytesPair
+  const p: StoredPair = { id: bytes.id, key: await importPairKey(bytes.key), peerFp: bytes.peerFp, peerName: bytes.peerName, at: bytes.at }
+  bytes.key.fill(0)
+  await save(p)
+  return p
+}
+
+/** Everything a pairing has but its key. */
+function hasPairFields(x: unknown): x is Omit<StoredPair, 'key'> & { key: unknown } {
   const p = x as StoredPair
-  return !!p && typeof p === 'object' && typeof p.id === 'string' && p.key instanceof Uint8Array && p.key.length === 32 &&
-    p.peerFp instanceof Uint8Array && p.peerFp.length === 32 && typeof p.peerName === 'string' && typeof p.at === 'number'
+  return !!p && typeof p === 'object' && typeof p.id === 'string' && p.peerFp instanceof Uint8Array && p.peerFp.length === 32 &&
+    typeof p.peerName === 'string' && typeof p.at === 'number'
+}
+
+/** A pairing whose key is kept as it should be: a non-extractable HKDF key. */
+function isPair(x: unknown): x is StoredPair {
+  if (!hasPairFields(x)) return false
+  const k = x.key
+  return typeof CryptoKey !== 'undefined' && k instanceof CryptoKey && k.algorithm.name === 'HKDF' && !k.extractable
 }

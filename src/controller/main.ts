@@ -424,6 +424,9 @@ async function boot(code: Join) {
   const wii = new WiiPointer()
   let wiiLast: [number, number] = [0, 0]
   const values: Record<string, number | boolean | string> = {}
+  /** The banner's two sources (see banner()): the link's own trouble, and the screen's `notice`. */
+  let linkLine: string | null = null
+  let hostNotice = ''
   let tier: TierId = Tier.touch
   let tab: Tab = 'rotate'
   let lastTab: Exclude<Tab, 'gamepad'> = 'rotate' // where Leave returns from gamepad mode
@@ -637,9 +640,10 @@ async function boot(code: Join) {
       if (started) showSurface()
       return
     }
-    // Whatever had the focus on the screen, it says so again once it's back.
+    // Whatever had the focus on the screen, or held this phone up there, it says so again once it's back.
     values.textField = false
     keyboard.setField(false)
+    hostNotice = ''
     if (s === 'taken-over') {
       surface = null
       return screenMessage({ title: 'Another phone took over', art: ICONS.phone, body: 'One phone controls a screen at a time.', action: { label: 'Take back control', run: () => location.reload() } })
@@ -662,6 +666,15 @@ async function boot(code: Join) {
         title: 'That code didn’t match', art: ICONS.close, body: 'Each code works once. Type the new one your screen shows now.',
         action: { label: 'Type it', run: () => location.replace(location.pathname) },
       })
+    }
+    if (s === 'invite-used') {
+      // The screen showed a new code once a phone paired with this one (ob.Pal Link does): only that phone gets back in
+      // with it. A code typed just as it moved on meets the same.
+      surface = null
+      try { sessionStorage.removeItem('obpal.pair') } catch { /* private mode */ }
+      return code.v === 'code'
+        ? screenMessage({ title: 'That code was just used', art: ICONS.close, body: 'Type the new one your screen shows now.', action: { label: 'Type it', run: () => location.replace(location.pathname) } })
+        : screenMessage({ title: 'This code was used', art: ICONS.phone, body: 'Once a phone pairs, the screen shows a new code. Scan the one it shows now.' })
     }
     if (s === 'lan-failed') {
       surface = null
@@ -700,6 +713,11 @@ async function boot(code: Join) {
       Object.assign(values, m.values)
       // A text or password field has the focus on the screen (textField 'text' or 'secret'): the Type prompt.
       if ('textField' in m.values) keyboard.setField(m.values.textField)
+      // What holds this phone's input up on the screen's side, if anything: shown until it clears.
+      if ('notice' in m.values) {
+        hostNotice = typeof m.values.notice === 'string' ? m.values.notice.slice(0, 120) : ''
+        banner(linkLine)
+      }
       if (typeof m.values.theme === 'string') { applyTheme(themeById(m.values.theme)); syncThemeRows() }
       // A shared scene gives this device a colour of its own: wear it as the accent for this session, not as a preference.
       if (typeof m.values.color === 'string' && /^#[0-9a-f]{6}$/i.test(m.values.color)) {
@@ -1271,17 +1289,25 @@ async function boot(code: Join) {
     list.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'center' })
   }
 
+  /**
+   * The line over the controls: the link's own trouble (reconnecting, waiting for the screen), else what the screen says
+   * holds this phone's input up on its side (the host value `notice`: ob.Pal Link waiting for an answer on the PC).
+   */
   function banner(text: string | null) {
+    linkLine = text
     const b = document.getElementById('banner')
     if (!b) return
-    b.hidden = !text
-    b.textContent = text ?? ''
+    const line = text ?? (hostNotice || null)
+    b.hidden = !line
+    b.textContent = line ?? ''
   }
 
   let toastTimer: ReturnType<typeof setTimeout> | undefined
   function toast(text: string) {
     const t = document.getElementById('toast')
     if (!t) return
+    // The screen repeats its notice as a toast for phones from before notices: here the banner says it already.
+    if (text === hostNotice) return
     t.textContent = text
     t.classList.add('show')
     clearTimeout(toastTimer)

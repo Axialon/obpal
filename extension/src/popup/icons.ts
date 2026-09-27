@@ -22,6 +22,8 @@ export const LINK_ICONS = {
   play: s('<path d="M8 5.5v13l10-6.5Z"/>'),
   /** Something to know (the popup's notes). */
   info: s('<circle cx="12" cy="12" r="8.6"/><path d="M12 11v5.2"/><path d="M12 7.8h.01" stroke-width="2.4"/>'),
+  /** A notification: a phone's question for the PC can come as one. */
+  bell: s('<path d="M6.3 16.4V11a5.7 5.7 0 0 1 11.4 0v5.4l1.7 1.9H4.6Z"/><path d="M10 20.4a2.1 2.1 0 0 0 4 0"/>'),
   // The PC gestures, as the trackpad feels them.
   tap: s(`${tip(12, 12)}<circle cx="12" cy="12" r="7.6" opacity=".45"/>`),
   hold: s(`${tip(12, 12)}<path d="M12 4.4a7.6 7.6 0 1 1-7.6 7.6"/><path d="M4.4 12A7.6 7.6 0 0 1 12 4.4" opacity=".3"/>`),

@@ -1,10 +1,10 @@
 import {
   b64url, bindMac, candidatesOf, certFingerprint, controllerOf, CONTROLLERS, DEFAULT_SERVICE, encodeLanPairing, encodePairing, equalBytes,
-  fetchIce, forgetPair, iceRefreshIn, fromB64url, isControllerId, lanAnswerSdp, lanContext, lanIceCredentials, linkInfo, listPairs, loadCertificate, MAX_NODE_ID, MAX_TEXT, MAX_TOSS, Mode, newSecret, PAD_HEADER,
+  fetchIce, forgetPair, ICE_REFRESH_BEFORE_MS, iceRefreshIn, fromB64url, importPairKey, isControllerId, lanAnswerSdp, lanContext, lanIceCredentials, linkInfo, listPairs, loadCertificate, MAX_NODE_ID, MAX_TEXT, MAX_TOSS, Mode, newSecret, PAD_HEADER,
   packetType, POINTER_HEADER, POSE_HEADER, PROTO, putPair, randomBytes, REACH_TIMEOUT_MS, readLocalIce, readMode, roomIdFor, roomSocketUrl, sdpFingerprint, sdpSession, SignalClient,
   withControllers,
   type Caps, type DeviceMsg, type HostMsg, type Layout, type ModeId, type PadState, type PairGrant, type PointerState, type SceneNode,
-  type ScenePerson, type SignalIn, type SignalPayload, type StoredPair, type LinkInfo, type VerifiedBy,
+  type ScenePerson, type SignalIn, type SignalPayload, type StoredPair, type IceSet, type LinkInfo, type VerifiedBy,
 } from '@obpal/core'
 import { CODE_SECRET_DIGITS, CodePake, isCodeHandle, randomDigits, solveWork } from '@obpal/core'
 import { Stream, type Frame } from './stream'
@@ -40,7 +40,29 @@ export interface RemoteOptions {
    * Default true.
    */
   shortCode?: boolean
+  /**
+   * Move the invite on each time a device pairs through it (the QR code, its link, or a short code): a new secret, and
+   * so a new room, link, QR code and short code. A photo of the old code or a replayed link then pairs nothing. The
+   * room a device paired in is kept for it (and only it): through it the device reloads and finds new paths
+   * (PROTOCOL §2). Default false.
+   */
+  rotateInvite?: boolean
 }
+
+/**
+ * A room this host has moved its invite on from (rotateInvite), kept for the devices that paired in it: their pages
+ * reload with its code, and their ICE restarts come through it. It takes offers from those devices alone.
+ */
+interface KeptRoom {
+  secret: Uint8Array
+  roomId: string
+  sig: SignalClient
+  /** The DTLS fingerprints (base64url) of the devices that paired in this room: the only offers it takes. */
+  fps: Set<string>
+}
+
+/** At most this many kept rooms: past it, the oldest nobody is connected through goes. */
+const MAX_KEPT_ROOMS = 8
 
 /** A device's hello when it joins by short code. */
 type CodeHello = Extract<DeviceMsg, { t: 'hello'; code: string }>
@@ -49,10 +71,14 @@ type CodeHello = Extract<DeviceMsg, { t: 'hello'; code: string }>
  * A device in the scene (CATALOGUE §5). The lead is the oldest; while it holds nothing it drives the shared view.
  * `controller`: the catalogue controller it uses now (CATALOGUE §9.1), as it says in `mode{c}` or, from a device that
  * doesn't say, as its mode implies; `profile`: the profile it applies, where it says (`mode{p}`).
+ * Who it is, for a host that keeps something per device (ob.Pal Link's answer to "may this phone control the PC"):
+ * `pair`, the id of the pairing this host remembers it by (remember: true), and `fp`, its DTLS certificate's
+ * fingerprint (base64url), which it proved when it connected.
  */
 export interface Participant {
   id: string; name: string; color: string; lead: boolean; since: number; caps: Caps | null
   controller?: string; profile?: string
+  pair?: string; fp?: string
 }
 
 /** A connected device's link (Remote.links): who, how it proved itself, and what its connection says of itself. */
@@ -92,7 +118,7 @@ interface RemoteEvents {
   lan: () => void
   /** The short code changed (see `code`; empty when there's none). */
   code: () => void
-  /** A new invite (resetInvite): the pairing link and the QR code changed. */
+  /** A new invite (resetInvite, or a pairing with rotateInvite): the pairing link and the QR code changed. */
   invite: () => void
 }
 
@@ -100,6 +126,10 @@ interface Peer {
   id: string
   /** The signaling socket it talks through: its first, or a new one after its phone's socket was lost and came back. */
   sig: string
+  /** The kept room that socket is in (rotateInvite), or none: the current invite's room. */
+  room?: KeptRoom
+  /** The id of the pairing this host remembers it by, once it's bound (remember: true). */
+  pair?: string
   /** Its offer's SDP session (sdpSession): a later offer in the same session renegotiates this connection. */
   session: string | null
   /** An ICE restart's offer is being applied: its candidates wait until it has. */
@@ -171,6 +201,8 @@ export class Remote {
   private roomId = ''
   private cert!: RTCCertificate
   private ice: RTCIceServer[] = []
+  /** What the last lookup that counted gave: TURN or not, and when its credentials lapse. */
+  private iceSet: IceSet | null = null
   /** The next ICE server lookup (refreshIce). */
   private iceTimer: ReturnType<typeof setTimeout> | null = null
   /** The first lookup is done (iceFirst settles then): answers carry the service's ICE servers, TURN included. */
@@ -181,6 +213,10 @@ export class Remote {
   private early = new Map<string, RTCIceCandidateInit[]>()
   private destroyed = false
   private sig!: SignalClient
+  /** Rooms the invite has moved on from, oldest first, each kept for the devices that paired in it (rotateInvite). */
+  private kept: KeptRoom[] = []
+  /** The invite moves on one pairing at a time. */
+  private moving: Promise<void> = Promise.resolve()
   private peers = new Map<string, Peer>()
   /** With one seat, the device in control; in a shared scene, the lead. */
   private active: Peer | null = null
@@ -248,12 +284,18 @@ export class Remote {
       this.fp = await certFingerprint(this.cert)
     }
     await this.openRoom()
+    this.refreshIce()
     void this.prepareLan()
   }
 
   /** Join the signaling room of the current secret: the invite the pairing code carries. */
   private async openRoom() {
     this.roomId = await roomIdFor(this.secret)
+    this.joinRoom()
+  }
+
+  /** The current invite's room (its secret and room id are set): the pairing link, and this host's socket there. */
+  private joinRoom() {
     this.pairingUrl = `${this.service}/p/#${encodePairing({ secret: this.secret, fp: this.fp })}`
     this.sig = new SignalClient(roomSocketUrl(this.service, this.roomId, 'host'))
     this.sig.onmessage = (m) => this.onSignal(m)
@@ -266,24 +308,30 @@ export class Remote {
       else this.setCode(null)
     }
     this.sig.connect()
-    this.refreshIce(this.roomId)
   }
 
   /**
-   * Fetch the room's ICE servers, and again before their TURN credentials lapse: a relay drops an allocation whose
-   * credentials have run out, and a host can stay open for days (ob.Pal Link's lives as long as the browser). TURN is
-   * only minted for rooms with a live host, so the first fetch waits until this host has joined.
+   * Fetch ICE servers, and again before their TURN credentials lapse: a relay drops an allocation whose credentials
+   * have run out, and a host can stay open for days (ob.Pal Link's lives as long as the browser). They're asked for
+   * with the current invite's room, since TURN is only minted for rooms with a live host (so the first fetch waits
+   * until this host has joined). The credentials name no room: they serve every room this host is in.
    */
-  private refreshIce(room: string, delay = 400) {
+  private refreshIce(delay = 400) {
     if (this.iceTimer) clearTimeout(this.iceTimer)
     this.iceTimer = setTimeout(async () => {
       this.iceTimer = null
-      const set = await fetchIce(this.service, room)
-      if (room !== this.roomId || this.destroyed) return
-      this.ice = set.servers
+      const set = await fetchIce(this.service, this.roomId)
+      if (this.destroyed) return
+      // An answer without TURN (a room this host has only just joined isn't live yet, or the lookup failed) leaves
+      // credentials that still hold where they are, and asks again in a minute.
+      const held = this.iceSet?.turn && !set.turn && (this.iceSet.expires ?? 0) - Date.now() > ICE_REFRESH_BEFORE_MS
+      if (!held) {
+        this.iceSet = set
+        this.ice = set.servers
+      }
       this.iceLoaded = true
       this.iceFirstDone()
-      this.refreshIce(room, iceRefreshIn(set))
+      this.refreshIce(held ? 60_000 : iceRefreshIn(set))
     }, delay)
   }
 
@@ -297,13 +345,73 @@ export class Remote {
     old.onmessage = () => {}
     old.onstatus = () => {}
     old.close()
-    for (const p of [...this.peers.values()]) if (!p.bound && !p.lan) this.dropPeer(p.id)
+    for (const p of [...this.peers.values()]) if (!p.bound && !p.lan && !p.room) this.dropPeer(p.id)
     this.setCode(null)
     this.spentCodes.clear()
     await this.openRoom()
     for (const c of this.cards) this.renderQr(c)
     this.emit('invite')
     this.renderCards()
+  }
+
+  /**
+   * The invite moves on once a device has paired through it (rotateInvite, spec/SECURITY.md §8, L2). The room it
+   * paired in is kept for it: the phone's page reloads with that room's code, and its ICE restarts come through it,
+   * but the room takes offers from no one else, so a photo of the old code or a replayed link pairs nothing. A device
+   * still on its way in through the old room scans the new code. A new secret makes the new room, link, QR code and
+   * short code. `from` is the socket the device paired through: if the invite has moved on since, there's nothing to do.
+   */
+  private moveInvite(by: Peer, from: SignalClient) {
+    this.moving = this.moving.then(async () => {
+      if (by.room || this.sig !== from || this.destroyed) return
+      const secret = newSecret()
+      const roomId = await roomIdFor(secret)
+      if (by.room || this.sig !== from || this.destroyed) return
+      const kept: KeptRoom = { secret: this.secret, roomId: this.roomId, sig: from, fps: new Set() }
+      // Whoever paired here keeps the room (the device that moved the invite, even if it has gone already).
+      for (const p of [by, ...this.peers.values()]) {
+        if (p.lan || p.room) continue
+        if (p.bound || p === by) {
+          p.room = kept
+          if (p.fp) kept.fps.add(b64url(p.fp))
+        } else this.dropPeer(p.id)
+      }
+      // A device that paired here is done with the room it paired in before: its page keeps the latest code it used.
+      for (const r of this.kept) for (const fp of kept.fps) r.fps.delete(fp)
+      // The service forgets this room's short code; the new room gets one of its own.
+      if (this.shortCode) from.send({ t: 'code', op: 'drop' })
+      this.setCode(null)
+      this.spentCodes.clear()
+      from.onmessage = (m) => this.onSignal(m, kept)
+      // What the screen says (ready, offline) follows the current invite's room alone.
+      from.onstatus = () => {}
+      this.kept.push(kept)
+      this.pruneKept()
+      this.secret = secret
+      this.roomId = roomId
+      this.joinRoom()
+      for (const c of this.cards) this.renderQr(c)
+      this.emit('invite')
+      this.renderCards()
+    }).catch(() => {})
+  }
+
+  /**
+   * Close the kept rooms nobody needs: those no device may use any more (each paired again elsewhere, or was
+   * forgotten) with nobody connected through them, and past MAX_KEPT_ROOMS the oldest that nobody is connected through.
+   */
+  private pruneKept() {
+    const used = (r: KeptRoom) => [...this.peers.values()].some((p) => p.room === r)
+    const close = (r: KeptRoom) => {
+      this.kept = this.kept.filter((k) => k !== r)
+      r.sig.onmessage = () => {}
+      r.sig.close()
+    }
+    for (const r of [...this.kept]) if (!r.fps.size && !used(r)) close(r)
+    for (const r of [...this.kept]) {
+      if (this.kept.length <= MAX_KEPT_ROOMS) break
+      if (!used(r)) close(r)
+    }
   }
 
   on<K extends keyof RemoteEvents>(ev: K, fn: RemoteEvents[K]) { this.handlers[ev].push(fn); return this }
@@ -340,9 +448,17 @@ export class Remote {
     void this.prepareLan()
   }
 
-  /** Forget a remembered phone: it can only pair online again. */
+  /**
+   * Forget a remembered phone: it can only pair online again, and only through the invite on the screen now (the room
+   * it paired in, if it was kept for it, takes it no more).
+   */
   async forget(id: string) {
+    const gone = this.pairs.find((p) => p.id === id)
     this.pairs = this.pairs.filter((p) => p.id !== id)
+    if (gone) {
+      for (const r of this.kept) r.fps.delete(b64url(gone.peerFp))
+      this.pruneKept()
+    }
     if (this.lanChoice === id) this.lanChoice = null
     await forgetPair(id)
     if (this.lan?.pairId === id) this.discardLan()
@@ -356,15 +472,25 @@ export class Remote {
     if (l) this.dropPeer(l.peer.id)
   }
 
-  /** After an online pairing: a (new) key for this phone, kept here and handed to it in `welcome`. Stored in the background. */
-  private rememberDevice(peer: Peer, name: string): PairGrant | null {
-    if (!this.opts.remember || !peer.fp) return null
+  /**
+   * After an online pairing: a (new) key for this phone, handed to it in `welcome` (the one time its bytes travel) and
+   * kept here only as `minted.key`, the non-extractable key made from them (mintKey). Stored in the background.
+   */
+  private rememberDevice(peer: Peer, name: string, minted: { raw: Uint8Array; key: CryptoKey } | null): PairGrant | null {
+    if (!this.opts.remember || !peer.fp || !minted) return null
     const existing = this.pairs.find((p) => equalBytes(p.peerFp, peer.fp!))
-    const key = randomBytes(32)
-    const rec: StoredPair = { id: existing?.id ?? b64url(randomBytes(16)), key, peerFp: peer.fp, peerName: name, at: Date.now() }
+    const rec: StoredPair = { id: existing?.id ?? b64url(randomBytes(16)), key: minted.key, peerFp: peer.fp, peerName: name, at: Date.now() }
     this.pairs = [rec, ...this.pairs.filter((p) => p.id !== rec.id)]
     void putPair(rec).then(() => this.emit('lan'))
-    return { id: rec.id, key: b64url(key) }
+    const grant = { id: rec.id, key: b64url(minted.raw) }
+    minted.raw.fill(0)
+    return grant
+  }
+
+  /** A pairing key: 32 random bytes for the grant, and the non-extractable key this host keeps (importPairKey). */
+  private async mintKey(): Promise<{ raw: Uint8Array; key: CryptoKey }> {
+    const raw = randomBytes(32)
+    return { raw, key: await importPairKey(raw) }
   }
 
   /**
@@ -378,7 +504,8 @@ export class Remote {
   }
 
   private async buildLan() {
-    if (!this.opts.remember) return
+    // A code asked for before destroy() waits its turn; by then there's nothing to make one for.
+    if (!this.opts.remember || this.destroyed) return
     const pair = this.pairs.find((p) => p.id === this.lanChoice) ?? this.pairs[0]
     if (!pair) { if (this.lan) { this.discardLan(); this.emit('lan') } return }
     if (this.lan?.pairId === pair.id && this.lan.peer.pc.connectionState === 'new') return
@@ -409,11 +536,16 @@ export class Remote {
 
   // ---- signaling and peers ------------------------------------------------------------------------------------
 
-  private onSignal(m: SignalIn) {
-    if (m.t === 'peer' && m.ev === 'leave') this.peerLeft(m.id, m.clean !== false)
-    if (m.t === 'sig') void this.onPayload(m.from, m.d)
-    if (m.t === 'code') this.onCode(m)
+  /** A message from the room service: in the current invite's room, or in a kept one (`room`). */
+  private onSignal(m: SignalIn, room?: KeptRoom) {
+    if (m.t === 'peer' && m.ev === 'leave') this.peerLeft(m.id, m.clean !== false, room)
+    if (m.t === 'sig') void this.onPayload(m.from, m.d, room)
+    // Short codes belong to the current invite's room.
+    if (m.t === 'code' && !room) this.onCode(m)
   }
+
+  /** The socket that talks to a peer: its kept room's, or the current invite's. */
+  private sigOf(peer: Peer): SignalClient { return peer.room?.sig ?? this.sig }
 
   /**
    * A device's signaling socket went. A device that closed it (`clean`: it left or reloaded), or one still connecting,
@@ -421,9 +553,9 @@ export class Remote {
    * through the room service (and a phone that changes networks loses its socket first): it goes only if the
    * connection fails too (scheduleLost). A service that doesn't say which counts as clean.
    */
-  private peerLeft(sig: string, clean: boolean) {
-    this.early.delete(sig)
-    const p = this.bySig(sig)
+  private peerLeft(sig: string, clean: boolean, room?: KeptRoom) {
+    if (!room) this.early.delete(sig)
+    const p = this.bySig(sig, room)
     if (!p) return
     const s = p.pc.connectionState
     if (clean || !p.bound || s === 'closed' || s === 'failed') return this.dropPeer(p.id)
@@ -473,62 +605,67 @@ export class Remote {
   /** Whether a bound device's input counts: every participant in a shared scene, only the device in control otherwise. */
   private listening(peer: Peer) { return peer.bound && (this.shared || this.active === peer) }
 
-  private async onPayload(id: string, d: SignalPayload) {
+  private async onPayload(id: string, d: SignalPayload, room?: KeptRoom) {
+    const sig = room?.sig ?? this.sig
     if ('offer' in d) {
       // The same connection again (its phone changed networks): renegotiate it, and keep everything else. A restart
       // for a connection this host no longer has can't be taken up: the phone builds a new one at once.
-      const again = this.sameConnection(d.offer?.sdp)
+      const again = this.sameConnection(d.offer?.sdp, room)
       if (again) return this.renegotiate(again, id, d.offer)
-      if (d.restart) { this.sig.send({ t: 'sig', to: id, d: { gone: true } }); return }
-      const old = this.bySig(id)
+      if (d.restart) { sig.send({ t: 'sig', to: id, d: { gone: true } }); return }
+      const old = this.bySig(id, room)
       if (old) this.dropPeer(old.id)
       // An offer that doesn't commit to exactly one fingerprint (the one DTLS will check) could never bind: no answer.
-      if (!sdpFingerprint(d.offer?.sdp)) return
+      const fp = sdpFingerprint(d.offer?.sdp)
+      if (!fp) return
+      // A kept room takes the devices that paired in it, and nobody else: its code has been used.
+      if (room && !room.fps.has(b64url(fp))) { sig.send({ t: 'sig', to: id, d: { spent: true } }); return }
       if (this.status !== 'connected') this.setStatus('connecting')
       // An offer in this host's first moments may come before its ICE servers: a moment for them, so the answer
       // carries a relay where one is needed (its candidates wait meanwhile). A newer offer from the same socket wins.
       const early: RTCIceCandidateInit[] = []
-      if (!this.iceLoaded) {
+      if (!this.iceLoaded && !room) {
         this.early.set(id, early)
         await Promise.race([this.iceFirst, new Promise((r) => setTimeout(r, REACH_TIMEOUT_MS))])
         if (this.early.get(id) !== early) return
         this.early.delete(id)
       }
       const pc = new RTCPeerConnection({ iceServers: this.ice, certificates: [this.cert] })
-      const peer = this.addPeer(id, pc, sdpFingerprint(d.offer.sdp))
+      const peer = this.addPeer(id, pc, fp)
+      peer.room = room
       peer.session = sdpSession(d.offer.sdp)
       peer.cands.push(...early)
-      pc.onicecandidate = (e) => { if (e.candidate) this.sig.send({ t: 'sig', to: peer.sig, d: { cand: e.candidate.toJSON() } }) }
+      pc.onicecandidate = (e) => { if (e.candidate) this.sigOf(peer).send({ t: 'sig', to: peer.sig, d: { cand: e.candidate.toJSON() } }) }
       await pc.setRemoteDescription(d.offer)
       for (const c of peer.cands.splice(0)) await pc.addIceCandidate(c).catch(() => {})
       const answer = await pc.createAnswer()
       await pc.setLocalDescription(answer)
-      this.sig.send({ t: 'sig', to: id, d: { answer: pc.localDescription!.toJSON() } })
+      this.sigOf(peer).send({ t: 'sig', to: id, d: { answer: pc.localDescription!.toJSON() } })
     } else if ('cand' in d) {
-      const peer = this.bySig(id)
-      if (!peer) { this.early.get(id)?.push(d.cand); return }
+      const peer = this.bySig(id, room)
+      if (!peer) { if (!room) this.early.get(id)?.push(d.cand); return }
       if (peer.pc.remoteDescription && !peer.renegotiating) await peer.pc.addIceCandidate(d.cand).catch(() => {})
       else peer.cands.push(d.cand)
     }
   }
 
-  /** The peer that talks through signaling socket `sig`. */
-  private bySig(sig: string): Peer | undefined {
-    for (const p of this.peers.values()) if (p.sig === sig) return p
+  /** The peer that talks through signaling socket `sig`, in the current invite's room or the kept room `room`. */
+  private bySig(sig: string, room?: KeptRoom): Peer | undefined {
+    for (const p of this.peers.values()) if (p.sig === sig && p.room === room) return p
     return undefined
   }
 
   /**
    * The bound peer an offer renegotiates, if it does: the same DTLS fingerprint and the same SDP session (a connection
-   * keeps its session through all its offers; a new one starts another), on a connection that isn't closed. Anyone
-   * else's offer, or a phone's new connection, is a new peer.
+   * keeps its session through all its offers; a new one starts another), on a connection that isn't closed, through
+   * the room it talks through. Anyone else's offer, or a phone's new connection, is a new peer.
    */
-  private sameConnection(sdp: string | undefined): Peer | null {
+  private sameConnection(sdp: string | undefined, room?: KeptRoom): Peer | null {
     const fp = sdpFingerprint(sdp)
     const session = sdpSession(sdp)
     if (!fp || !session) return null
     for (const p of this.peers.values()) {
-      if (p.bound && !p.lan && p.fp && p.session === session && equalBytes(p.fp, fp) && p.pc.connectionState !== 'closed') return p
+      if (p.bound && !p.lan && p.room === room && p.fp && p.session === session && equalBytes(p.fp, fp) && p.pc.connectionState !== 'closed') return p
     }
     return null
   }
@@ -547,7 +684,7 @@ export class Remote {
       peer.pc.setConfiguration({ ...peer.pc.getConfiguration(), iceServers: this.ice })
       await peer.pc.setRemoteDescription(offer)
       await peer.pc.setLocalDescription(await peer.pc.createAnswer())
-      this.sig.send({ t: 'sig', to: sig, d: { answer: peer.pc.localDescription!.toJSON() } })
+      this.sigOf(peer).send({ t: 'sig', to: sig, d: { answer: peer.pc.localDescription!.toJSON() } })
     } catch {
       // Not one this connection can take: the phone builds a new one when its restart doesn't come up.
     } finally {
@@ -562,19 +699,26 @@ export class Remote {
     try { m = JSON.parse(data) } catch { return }
     if (!peer.bound) {
       if (m.t === 'pake' || (m.t === 'hello' && 'code' in m)) {
-        // By short code: the exchange proves the code, then the device's hello goes on like a verified one.
+        // By short code: the exchange proves the code, then the device's hello goes on like a verified one. Codes
+        // belong to the current invite's room: a kept room has none.
+        if (peer.room) { this.reject(peer); return }
         const hello = await this.codeStep(peer, m)
         if (!hello) return
         m = hello
       } else {
         if (m.t !== 'hello' || !peer.fp) return
-        // Online: the code's secret and the room. Direct: the remembered pairing key and the code's nonce.
+        // Online: the code's secret and the room (the current invite's, or the kept room the device came back through).
+        // Direct: the remembered pairing key and the code's nonce.
+        const room = peer.room ?? { secret: this.secret, roomId: this.roomId }
         const expected = peer.lan
           ? await bindMac(peer.lan.pair.key, peer.fp, this.fp, lanContext(peer.lan.nonce))
-          : await bindMac(this.secret, peer.fp, this.fp, this.roomId)
+          : await bindMac(room.secret, peer.fp, this.fp, room.roomId)
         if (peer.lan && m.pair !== peer.lan.pair.id) { this.reject(peer); return }
         if (!equalBytes(new TextEncoder().encode(expected), new TextEncoder().encode(m.mac))) { this.reject(peer); return }
       }
+      // A remembered phone's new key is made before anything about this bind changes: making it is the one wait.
+      const minted = !peer.lan && this.opts.remember ? await this.mintKey() : null
+      if (peer.bound || this.peers.get(peer.id) !== peer) return
       if (this.shared && this.bound().length >= this.seats) {
         this.send(peer, { t: 'lock', reason: 'full' })
         setTimeout(() => this.dropPeer(peer.id), 200)
@@ -609,14 +753,17 @@ export class Remote {
         peer.lan.pair.peerName = peer.name
         void putPair(peer.lan.pair)
       } else {
-        pair = this.rememberDevice(peer, peer.name) ?? undefined
+        pair = this.rememberDevice(peer, peer.name, minted) ?? undefined
       }
+      peer.pair = peer.lan?.pair.id ?? pair?.id
       // A device that came by short code gets the QR link's code, to reconnect and reload with like a scanned one.
       const invite = 'code' in m ? encodePairing({ secret: this.secret, fp: this.fp }) : undefined
       // Through the room service, the phone may renegotiate this connection when its path goes (restart).
       this.send(peer, { t: 'welcome', proto: PROTO, name: this.opts.appName, layout: this.layout, ...(pair ? { pair } : {}), ...(invite ? { invite } : {}), ...(peer.lan ? {} : { restart: true }) })
       // A shared scene's settings so far, and this participant's colour (a device wears it as its accent).
       if (this.shared) this.send(peer, { t: 'state', values: { ...this.values, color: peer.color } })
+      // Paired through the invite: it moves on, so the code that paired this device pairs nobody else.
+      if (this.opts.rotateInvite && !peer.lan && !peer.room) this.moveInvite(peer, this.sig)
       const first = this.status !== 'connected'
       this.setStatus('connected')
       if (first || !this.shared) this.emit('connect', { name: peer.name, caps: m.caps })
@@ -805,6 +952,7 @@ export class Remote {
     return {
       id: p.id, name: p.name, color: p.color, lead: p === this.active, since: p.since, caps: p.caps,
       ...(p.controller ? { controller: p.controller } : {}), ...(p.profile ? { profile: p.profile } : {}),
+      ...(p.pair ? { pair: p.pair } : {}), ...(p.fp ? { fp: b64url(p.fp) } : {}),
     }
   }
 
@@ -927,6 +1075,7 @@ export class Remote {
     if (this.codeWait) { clearTimeout(this.codeWait); this.codeWait = null }
     for (const id of [...this.peers.keys()]) this.dropPeer(id)
     this.sig?.close()
+    for (const r of this.kept.splice(0)) r.sig.close()
     for (const c of this.cards) c.el.remove()
     this.cards = []
   }
@@ -954,6 +1103,8 @@ export class Remote {
     if (p.lost) { clearTimeout(p.lost); p.lost = null }
     if (this.lan?.peer === p) this.lan = null
     try { p.pc.close() } catch { /* closed */ }
+    // The last one through a kept room nobody may use any more: the room goes too.
+    if (p.room) this.pruneKept()
     if (!p.bound) return
     const who = this.participant(p)
     p.bound = false

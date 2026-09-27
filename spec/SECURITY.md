@@ -4,7 +4,8 @@ How ob.Pal keeps the link between a phone and a screen private, authentic and qu
 doesn't do yet, and how to run all of it yourself. To report a vulnerability, see [SECURITY.md](../SECURITY.md). The
 wire formats are in [PROTOCOL.md](PROTOCOL.md).
 
-This is the state on 27 September 2026. File references point into this repository as it was then.
+This is the state on 27 September 2026, with the ob.Pal Link 1.6.0 items of §8. File references point into this
+repository as it was then.
 
 ## 1. The connection path
 
@@ -39,7 +40,7 @@ never `S`.
 - a 5-digit secret, which never leaves the two devices.
 
 The handle is spent as soon as it's looked up, and the screen allows one attempt per code
-(`packages/host/src/remote.ts:770-795`). The two sides then run CPace's construction on X25519 over the DTLS
+(`packages/host/src/remote.ts:917-942`). The two sides then run CPace's construction on X25519 over the DTLS
 channel, bound to both DTLS fingerprints (`code.ts:171-267`).
 
 **The direct LAN code** (PROTOCOL §2a) is `#2.<pairing id>.<nonce>.<ufrag>.<pwd>.<candidates>`: the screen's own ICE
@@ -64,19 +65,22 @@ of two places:
 - this service, which mints them from a shared secret for any standard TURN server (`ice.ts:66-107`).
 
 Credentials are good for a day (`ice.ts:35`). The answer includes `expires`, so a long-lived screen fetches fresh
-ones before they lapse (`packages/host/src/remote.ts:272-288`).
+ones before they lapse (`packages/host/src/remote.ts:313-336`).
 
-**The link.** One `RTCPeerConnection` carries two pre-negotiated channels (`packages/core/src/device.ts:269-270`,
-`remote.ts:435-436`):
+**The link.** One `RTCPeerConnection` carries two pre-negotiated channels (`packages/core/src/device.ts:280-281`,
+`remote.ts:567-568`):
 - `ctl` (id 0, reliable and ordered): buttons, typing and settings;
 - `st` (id 1, `ordered: false, maxRetransmits: 0`): motion. The newest sample wins, and a stale one is dropped
-  rather than queued (`device.ts:649-655`).
+  rather than queued (`device.ts:663-669`).
 
 **Link and Desktop.** ob.Pal Link's offscreen document holds the screen's side of the link. For the PC target, it
 turns input into action frames and typing, and the path to the PC runs like this:
 1. A runtime port carries them to the service worker. Only the offscreen document may open that port
-   (`extension/src/background.ts:256-261`).
-2. Chrome native messaging carries them on to ob.Pal Desktop.
+   (`extension/src/background.ts:401-406`), and it sends nothing for a phone the person at the PC hasn't allowed
+   (`extension/src/offscreen.ts:436`).
+2. The service worker arms the helper only while the PC is the target and the phone connected is one the person at
+   the PC allowed (`extension/src/background.ts:87-95`, `extension/src/shared/access.ts`); Chrome native messaging
+   carries the frames on to ob.Pal Desktop.
 3. The helper serves only the extension ID it was installed for (`desktop/src/win/install.rs:23`,
    `desktop/src/main.rs:96-105`), and gates every frame (PROTOCOL §7).
 
@@ -91,23 +95,27 @@ turns input into action frames and typing, and the path to the PC runs like this
 
 | Who | Could try | What stops them | What's left |
 |---|---|---|---|
-| **Someone on the network** (Wi-Fi, ISP), passive or active | Read or change the link; pass as either end | DTLS on every packet. The phone pins the screen's fingerprint from the QR, parsed strictly: one media section, one fingerprint (`pairing.ts:65-79`). The screen admits a phone only after an HMAC over both fingerprints and the room (`remote.ts:570-576`), or CPace bound to both (code) | Traffic analysis (timing, sizes); blocking the link |
-| **The room service or a TURN relay** (Cloudflare, or whoever self-hosts) | Sit between two DTLS sessions (a man in the middle); read the traffic; inject input | It never sees `S`, the code's secret or a pairing key, and a man in the middle needs one of them. The phone takes one answer per offer, and a later one (an ICE restart) only with the fingerprint already bound (`device.ts:230-244`). With a typed code, nothing the screen says counts until it proves the code (`device.ts:438-440`). A relay sees only ciphertext | Addresses and timing; denial of service; with a typed code, one guess in 100,000 per code; trust in the site's origin (last row) |
-| **Someone who can see the screen** | Scan the QR or type the code | Nothing: seeing the screen is what pairing means. One device controls at a time unless the screen shares the scene, and the phone that loses control is told (`remote.ts:588-598`). The screen can remove a device (`disconnect`), and a new invite locks out anyone not yet connected (`remote.ts:294-307`) | A photo of Link's popup QR works for as long as Link keeps that invite (Link item L2) |
+| **Someone on the network** (Wi-Fi, ISP), passive or active | Read or change the link; pass as either end | DTLS on every packet. The phone pins the screen's fingerprint from the QR, parsed strictly: one media section, one fingerprint (`pairing.ts:65-79`). The screen admits a phone only after an HMAC over both fingerprints and the room (`remote.ts:709-717`), or CPace bound to both (code) | Traffic analysis (timing, sizes); blocking the link |
+| **The room service or a TURN relay** (Cloudflare, or whoever self-hosts) | Sit between two DTLS sessions (a man in the middle); read the traffic; inject input | It never sees `S`, the code's secret or a pairing key, and a man in the middle needs one of them. The phone takes one answer per offer, and a later one (an ICE restart) only with the fingerprint already bound (`device.ts:241-255`). With a typed code, nothing the screen says counts until it proves the code (`device.ts:449-451`). A relay sees only ciphertext | Addresses and timing; denial of service; with a typed code, one guess in 100,000 per code; trust in the site's origin (last row) |
+| **Someone who can see the screen** | Scan the QR or type the code, now or from a photo later | Nothing, at the time: seeing the screen is what pairing means. One device controls at a time unless the screen shares the scene, and the phone that loses control is told (`remote.ts:732-742`). The screen can remove a device (`disconnect`), and a new invite locks out anyone not yet connected (`remote.ts:342-355`). ob.Pal Link makes a new invite each time a phone pairs (`rotateInvite`, `remote.ts:364-397`): the old room takes only the phone that paired in it and tells anyone else the code was used (`remote.ts:622`) | A web page's QR code works until the page makes a new invite |
+| **A phone that paired with Link** (or whoever pairs from its QR code) | Take the PC over: the PC target, or Whole PC | The person at the PC allows each phone once, in Link's own pages or its notification; until then ob.Pal Desktop stays disarmed and nothing is sent (`extension/src/background.ts:87-95`, `extension/src/offscreen.ts:436`). A phone they refused can't pick PC from its tray (`background.ts:154-167`). Only Link's own pages give an answer (`extension/src/shared/messages.ts:349-377`) | An allowed phone keeps its answer until it's changed (options page) or the phone is forgotten |
 | **A remote guesser** | Find a live code blind; flood the service; abuse TURN | One CPace attempt per code (1 in 100,000). Per-network limits and proof of work on lookups (`worker/codes.ts:20-39`). Rate limits on sockets and ICE lookups. TURN only for live rooms | A minted TURN credential relays for a day, whoever holds it; volume attacks meet Cloudflare's own protection |
 | **A malicious screen** (a page that embeds ob.Pal) | Attack the phone through labels, images or toasts | The controller runs on ob.Pal's origin, never the screen's. Text from the screen is set as text or escaped, images must be `https:`, and colours are checked (`src/controller/main.ts:39-40`). The controller's policy allows scripts from its own origin only (`vite.config.ts:23-68`) | It decides what its own page does with your input, as any app does |
-| **A web page in a tab Link controls** | Make the PC type; change what the helper may do | Pages reach Link only through its content scripts, which can ask only about their own tab. The `pc-*` requests that change the helper come only from Link's own pages (`extension/src/shared/messages.ts:300-324`). The helper refuses anything but its extension | None known |
+| **A web page in a tab Link controls** | Make the PC type; change what the helper may do | Pages reach Link only through its content scripts, which can ask only about their own tab. The `pc-*` requests that change the helper come only from Link's own pages (`extension/src/shared/messages.ts:349-377`). The helper refuses anything but its extension | None known |
 | **Software on the PC** | Drive the helper | Chrome starts the helper only for the allowed extension, over stdio, and the helper checks the origin it's given (`desktop/src/main.rs:96-105`) | Local code can already inject input on its own |
-| **A compromised origin or supply chain** | Serve script that reads the QR fragment or pairing keys | HSTS. A strict policy: scripts from this origin only, no inline script, no eval. No third-party scripts or fonts. The source is public. Pairing keys stay on the device | Trust in the site's origin is WebRTC's own model (RFC 8826 §4). Pairing keys are extractable bytes in IndexedDB until Link item L5 |
+| **A compromised origin or supply chain** | Serve script that reads the QR fragment or pairing keys | HSTS. A strict policy: scripts from this origin only, no inline script, no eval. No third-party scripts or fonts. The source is public. Pairing keys stay on the device | Trust in the site's origin is WebRTC's own model (RFC 8826 §4). Pairing keys are non-extractable keys in IndexedDB (`pairing.ts:117-119`): script on the origin can use one while it runs, but can't copy it out |
 
 **Who can make the PC type or move its mouse.** All of these must hold at once:
 - The device is bound to Link: it proved the QR's secret, a typed code or a remembered pairing.
-- The PC target is chosen, in Link's popup or from the phone's tray. The phone's tray needs no approval on the PC
-  today: that's item L1.
+- The PC target is chosen, in Link's popup or from the phone's tray.
+- The person at the PC allowed this phone: asked once per phone (Link's popup and options page, and a notification if
+  they turned that on), and kept by its pairing until they change it or forget the phone
+  (`extension/src/shared/access.ts`).
 - Link has its optional native messaging permission, which Chrome asks the person at the PC for.
 - ob.Pal Desktop is installed for this extension.
 - A program is allowed in Link's options, or Whole PC is turned on there. Only Link's own pages change these.
-- The helper is enabled, which Link does only while the target is PC (`extension/src/native.ts:126-129`).
+- The helper is enabled, which Link does only while the target is PC and the phone connected is allowed
+  (`extension/src/native.ts:129`, `:132-135`).
 - It isn't paused, and the panic key (Ctrl+Alt+Backspace, `desktop/src/win/hotkey.rs:10`) hasn't been pressed.
 - The input fits that program's scope (keyboard, mouse).
 
@@ -129,8 +137,8 @@ Status values:
 ### WebRTC security (RFC 8826, RFC 8827)
 | Requirement | Status | Where |
 |---|---|---|
-| Data only over DTLS-protected transports (8827 §6.5) | meets (browser) | data channels only: `device.ts:269-270`, `remote.ts:435-436` |
-| The peer's DTLS fingerprint checked against an authenticated channel | meets | QR pin at `device.ts:236-244`; strict parser at `pairing.ts:65-79`; the screen's MAC check at `remote.ts:570-576`; CPace at `code.ts:240-267`; a remembered pairing's fingerprints at `pairing.ts:270-286` |
+| Data only over DTLS-protected transports (8827 §6.5) | meets (browser) | data channels only: `device.ts:280-281`, `remote.ts:567-568` |
+| The peer's DTLS fingerprint checked against an authenticated channel | meets | QR pin at `device.ts:247-255`; strict parser at `pairing.ts:65-79`; the screen's MAC check at `remote.ts:709-717`; CPace at `code.ts:240-267`; a remembered pairing's fingerprints at `pairing.ts:289-305` |
 | Consent freshness (RFC 7675) | meets (browser) | |
 | Local addresses (RFC 8828): mDNS names instead of local IP addresses unless the page has camera or microphone permission | meets (browser) | The phone asks for neither. A screen that uses its camera (the glow) shows its local addresses to the paired phone and the room service |
 | DTLS with ECDHE and an AEAD cipher (8827 §6.5) | meets (browser) | measured: DTLS 1.3 with TLS_AES_128_GCM_SHA256 on every run (Chromium) |
@@ -141,31 +149,31 @@ Status values:
 | Requirement | Status | Where |
 |---|---|---|
 | Full ICE, with direct paths before relays (candidate priorities) | meets (browser) | no `iceTransportPolicy` is ever set |
-| ICE restart (8445 §9) when a path goes | meets | phone at `device.ts:531-600`; screen at `remote.ts:476-482` and `:521-557`; `welcome{restart}` at `remote.ts:617`. Hosts that don't take restarts get a new connection (PROTOCOL §1) |
-| Trickle ICE both ways (8838) | meets | `device.ts:295-299`, `remote.ts:501` |
+| ICE restart (8445 §9) when a path goes | meets | phone at `device.ts:545-614`; screen at `remote.ts:608-615` and `:658-694`; `welcome{restart}` at `remote.ts:762`. Hosts that don't take restarts get a new connection (PROTOCOL §1) |
+| Trickle ICE both ways (8838) | meets | `device.ts:306-310`, `remote.ts:638` |
 | End-of-candidates indication (8838 §13) | gap (low) | a null candidate isn't sent, so ICE concludes by its own timers |
-| Gathering starts early: the offer is built while the socket connects | meets | `device.ts:170-180`, `:281-321` |
-| An unsent offer is built again when TURN servers arrive, and an attempt that makes no progress starts again | meets | `device.ts:321-362` |
-| mDNS host candidates (draft-ietf-mmusic-mdns-ice-candidates) | meets (browser) | the LAN code carries them (`pairing.ts:159-200`) |
+| Gathering starts early: the offer is built while the socket connects | meets | `device.ts:172-182`, `:292-332` |
+| An unsent offer is built again when TURN servers arrive, and an attempt that makes no progress starts again | meets | `device.ts:332-373` |
+| mDNS host candidates (draft-ietf-mmusic-mdns-ice-candidates) | meets (browser) | the LAN code carries them (`pairing.ts:178-219`) |
 
 ### DTLS and SCTP data channels (RFC 6347, RFC 9147, RFC 8261, RFC 8831, RFC 8832, RFC 8841)
 | Requirement | Status | Where |
 |---|---|---|
 | DTLS 1.2 (6347) | meets (browser) | |
 | DTLS 1.3 (9147) | meets (browser) | used wherever both ends have it |
-| Certificates: ECDSA P-256; persistent ones last at most a year and are renewed a week early | meets | `packages/core/src/store.ts:10`, `:66-76`; `remote.ts:247` |
+| Certificates: ECDSA P-256; persistent ones last at most a year and are renewed a week early | meets | `packages/core/src/store.ts:10`, `:70-80`; `remote.ts:283` |
 | SCTP over DTLS (8261) | meets (browser) | |
-| Reliability chosen per channel (8831): motion unordered and never retransmitted, control reliable | meets | `device.ts:269-270` |
-| The newest motion wins, and nothing stale is queued | meets | `device.ts:649-655` |
+| Reliability chosen per channel (8831): motion unordered and never retransmitted, control reliable | meets | `device.ts:280-281` |
+| The newest motion wins, and nothing stale is queued | meets | `device.ts:663-669` |
 | DCEP (8832) | n.a. | channels are negotiated out of band, with ids 0 and 1 (PROTOCOL §1) |
-| SDP for SCTP (8841): `sctp-port`, `max-message-size` | meets | written by the browser, and by the LAN code's rebuilt descriptions (`pairing.ts:270-275`) |
+| SDP for SCTP (8841): `sctp-port`, `max-message-size` | meets | written by the browser, and by the LAN code's rebuilt descriptions (`pairing.ts:289-294`) |
 
 ### TURN and STUN (RFC 8656, RFC 8489)
 | Requirement | Status | Where |
 |---|---|---|
 | TURN over UDP, TCP and TLS on 443 | meets | Cloudflare TURN (UDP 3478 and 443, TCP 3478 and 80, TLS 5349 and 443), or `TURN_URLS`; port 53 is dropped (`worker/ice.ts:41-58`) |
 | Short-lived credentials, made on the server | meets | Cloudflare's API or the TURN REST API's shared secret (`ice.ts:66-107`); a day (`:35`); `expires` in the answer (`:137`) |
-| Relayed links outlive their credentials | meets | Screens fetch new credentials 10 minutes before they lapse (`remote.ts:272-288`, `packages/core/src/signal.ts:95-125`). An ICE restart takes fresh ones (`device.ts:592-600`, `remote.ts:547`) |
+| Relayed links outlive their credentials | meets | Screens fetch new credentials 10 minutes before they lapse (`remote.ts:313-336`, `packages/core/src/signal.ts:95-125`). An ICE restart takes fresh ones (`device.ts:606-614`, `remote.ts:684`) |
 | Relay abuse (8656 §21) | partial | Credentials go only to live rooms, with per-address limits. A minted credential still relays for a day, whoever holds it |
 | TCP allocations (RFC 6062) | n.a. | WebRTC relays UDP |
 | STUN (8489) | meets (browser) | `STUN_URLS` replaces the default server |
@@ -175,18 +183,18 @@ Status values:
 | Requirement | Status | Where |
 |---|---|---|
 | CPace (draft-irtf-cfrg-cpace): generator from the hashed secret and context, X25519, identity refused, ISK over the transcript, key confirmation | partial | The construction is there (`code.ts:171-267`), with both DTLS fingerprints in the transcript. But it uses its own encoding (label `obpal code v1`, length-prefixed fields, an HKDF-SHA256 ISK), not the draft's (DSI `CPace255`, zero padding, a SHA-512 ISK), so the draft's test vectors don't apply |
-| A screen that skips the exchange is never listened to | meets | `device.ts:438-440` |
+| A screen that skips the exchange is never listened to | meets | `device.ts:449-451` |
 | X25519 (RFC 7748) | meets | WebCrypto where the platform has it: native and constant time (`code.ts:200-233`). The BigInt ladder elsewhere (`code.ts:133-160`), which isn't constant time. RFC 7748's vector and a cross-check against WebCrypto are in `tests/code.test.ts:47-67` |
 | An all-zero shared secret is refused (7748 §6.1) | meets | `code.ts:220-233`, `:248`, `:254` |
 | Hash to curve (RFC 9380) | partial | `map_to_curve_elligator2` for curve25519 (`code.ts:162-169`) matches RFC 9380's vectors (`tests/code.test.ts:69-85`). The field element comes from CPace-style hashing, not `hash_to_field`. It runs in BigInt, so not in constant time. What timing could leak is about one code's secret, which is used once and lapses in 10 minutes |
-| HKDF (RFC 5869) and HMAC (RFC 2104) | meets | WebCrypto (`pairing.ts:106-128`, `code.ts:258-263`); MACs compared in constant time (`pairing.ts:25-30`) |
+| HKDF (RFC 5869) and HMAC (RFC 2104) | meets | WebCrypto (`pairing.ts:106-147`, `code.ts:258-263`); MACs compared in constant time (`pairing.ts:25-30`) |
 | Randomness | meets | `crypto.getRandomValues` (`pairing.ts:40-41`, `code.ts:55`, `:217`) |
-| Pairing keys at rest | partial | stored as bytes in the origin's IndexedDB (`store.ts:19`); non-extractable keys are Link item L5 |
+| Pairing keys at rest | meets | non-extractable HKDF keys in the origin's IndexedDB, on the phone and in Link (`pairing.ts:117-119`, `store.ts:23`); the host sends the bytes once, in the grant, and keeps only the key (`remote.ts:479-495`); rows kept as bytes before become keys as they're read (`store.ts:124-133`) |
 
 ### The web platform
 | Requirement | Status | Where |
 |---|---|---|
-| WebSocket over TLS | meets | `wss:` from an `https:` service only; `http:` is allowed only on localhost (`remote.ts:131-141`, `signal.ts:7-9`) |
+| WebSocket over TLS | meets | `wss:` from an `https:` service only; `http:` is allowed only on localhost (`remote.ts:161-171`, `signal.ts:7-9`) |
 | HSTS (RFC 6797) | meets | `public/_headers:10`: a year, on this host only |
 | CSP Level 3 | meets | Each page's own policy comes first in its head (`vite.config.ts:23-68`): scripts and fonts from this origin only; connections to this service only (the arm sim may also reach the robot socket the person names, and the viewer the files the person opens); no inline script, no eval, no plugins, no frames. `frame-ancestors`, `object-src` and `base-uri` are in the headers (`public/_headers:13`). Each of the site's e2e suites fails on any violation (`scripts/csp-watch.mjs`), and `scripts/e2e-pages.mjs` checks every page. e2e:extension, which tests Link under Link's own policy, doesn't watch for violations |
 | Trusted Types | partial | The pairing chip, its QR code and `<obpal-remote>` build no markup, and run under an enforcing policy in e2e:embed (`scripts/e2e-embed.mjs:238`). The site's own pages still fill their templates with `innerHTML`, so they don't set `require-trusted-types-for` |
@@ -202,11 +210,11 @@ Status values:
 | 1.1.2 threat model | meets | this document |
 | 2.2.1, 11.1.4 anti-automation | meets | rate limits (`worker/limits.ts`); code limits and proof of work (`worker/codes.ts:20-39`) |
 | 2.7.2 an out-of-band code expires within 10 minutes | meets | `code.ts:18`, `worker/codes.ts:12` |
-| 2.7.3 used once | meets | spent at lookup, with one CPace attempt (`remote.ts:770-795`) |
+| 2.7.3 used once | meets | spent at lookup, with one CPace attempt (`remote.ts:917-942`) |
 | 2.7.6 at least 20 bits of entropy | partial | The code's secret part is 5 digits (16.6 bits). CPace allows one online guess per code, and lookups are limited per network, with proof of work under pressure |
-| 4.1.1, 4.1.3 access control enforced where it can't be bypassed | meets | The screen ignores unbound devices (`remote.ts:563`, `:629`). Link's PC settings change only from its own pages. The helper has its own gates (§2) |
+| 4.1.1, 4.1.3 access control enforced where it can't be bypassed | meets | The screen ignores unbound devices (`remote.ts:700`, `:776`). Link's PC settings change only from its own pages. The helper has its own gates (§2) |
 | 4.2.2 CSRF | meets | no cookies or credentials anywhere; `/api/code` takes same-origin JSON only |
-| 5.1.3, 5.1.4 input validated against allow lists | meets | control messages (`remote.ts:559`); rooms and sizes (`worker/index.ts:17`, `:140`); native frames checked twice: in Link (`extension/src/shared/native.ts:105`), then against the helper's key table and limits (`desktop/src/protocol.rs:194`) |
+| 5.1.3, 5.1.4 input validated against allow lists | meets | control messages (`remote.ts:696`); rooms and sizes (`worker/index.ts:17`, `:140`); native frames checked twice: in Link (`extension/src/shared/native.ts:105`), then against the helper's key table and limits (`desktop/src/protocol.rs:194`) |
 | 5.3.3 output encoding | meets | the controller escapes or sets as text everything a screen sends (`src/controller/main.ts:39-40`) |
 | 6.2.2 proven cryptography | partial | WebCrypto for SHA-2, HKDF, HMAC and X25519. The Elligator 2 map, and X25519 on older browsers, run in script |
 | 6.2.5 no insecure algorithms | meets | HMAC-SHA1 appears only where the TURN REST API requires it |
@@ -219,7 +227,7 @@ Status values:
 | 8.3.4 data inventory | meets | §7 and `/privacy/` |
 | 9.1.1 TLS for all connections | meets | HTTPS, WSS, DTLS, and TURN over TLS |
 | 9.1.2, 9.1.3 strong ciphers, TLS 1.2 and later only | partial | The edge's minimum TLS version is a Cloudflare zone setting (default 1.0), not something the code sets. The owner checks that it's 1.2 or above |
-| 10.3.2 no code from untrusted sources | meets | the page policies; Link's own policy (`extension/vite.config.ts:63-64`) |
+| 10.3.2 no code from untrusted sources | meets | the page policies; Link's own policy (`extension/vite.config.ts:78-79`) |
 | 13.2.1, 13.2.5 HTTP methods and content types | meets | `/api/code` takes POST only, with a JSON content type (`worker/codes.ts:119-127`) |
 | 14.4.1–14.4.7 security headers | meets | `public/_headers` |
 | 14.5.3 CORS | meets | see the web platform table |
@@ -239,22 +247,23 @@ Status values:
 |---|---|---|
 | Native messaging only for this extension | meets | `allowed_origins` (`desktop/src/win/install.rs:23`, `:48-54`), checked again at start (`desktop/src/main.rs:96-105`) |
 | Every frame gated: enabled, not paused, no panic, an allowed program or Whole PC, scope, rate, watchdog | meets | `desktop/src/session.rs:32-36`, `:364-389` |
-| What the helper may do changes only from Link's own pages | meets | `extension/src/shared/messages.ts:315-323` |
-| A new phone doesn't get PC control until the person at the PC agrees | gap | L1 below |
-| A photo of the QR code can't pair later | gap | L2 below |
-| The strict fingerprint parser, ICE restarts and TURN refresh on Link's screen side | partial | In the next Link release (L3). The phone side, served by the site, already closes the man in the middle |
+| What the helper may do changes only from Link's own pages | meets | `extension/src/shared/messages.ts:368-376` |
+| A new phone doesn't get PC control until the person at the PC agrees | meets | From Link 1.6.0 (L1 below): `extension/src/shared/access.ts`, `extension/src/background.ts:87-95` |
+| A photo of the QR code can't pair later | meets | From Link 1.6.0 (L2 below): `remote.ts:364-397`, `:622` |
+| The strict fingerprint parser, ICE restarts and TURN refresh on Link's screen side | meets | Link 1.6.0 bundles the current `@obpal/host` (L3 below) |
 | Self-hosting | meets | rebuild Link with your origin (§6) |
 
 **Totals** (83 requirements):
 
 | Status | Count |
 |---|---|
-| meets | 66 (11 of them provided by the browser) |
-| partial | 11 |
-| gap | 3 |
+| meets | 70 (11 of them provided by the browser) |
+| partial | 9 |
+| gap | 1 |
 | n.a. | 3 |
 
-Without the rows the browser provides, ob.Pal itself meets 55.
+Without the rows the browser provides, ob.Pal itself meets 59. Four of those (the pairing keys at rest, and Link's
+three rows) came with the Link 1.6.0 items of §8.
 
 ## 4. The shortest, fastest path
 
@@ -300,10 +309,10 @@ negotiated on every run.
 
 ## 5. What the connection badges say
 
-The phone's badge (`src/controller/linkbadge.ts`) and the pairing chip's (`packages/host/src/chip.ts`) claim only
-what the connection itself shows. The phone reads its connection's statistics through `linkInfo()`
-(`packages/core/src/signal.ts:151`), and the chip reads each device's through `Remote.links()` (`remote.ts:818`),
-which uses the same function.
+The phone's badge (`src/controller/linkbadge.ts`), the pairing chip's (`packages/host/src/chip.ts`) and ob.Pal
+Link's, beside the phone's name in its popup (`extension/src/popup/popup.ts`), claim only what the connection itself
+shows. The phone reads its connection's statistics through `linkInfo()` (`packages/core/src/signal.ts:151`), and the
+chip and Link read each device's through `Remote.links()` (`remote.ts:966`), which uses the same function.
 - **Encrypted end to end.** A WebRTC data channel is always DTLS between the two devices. The details add the DTLS
   version and cipher when the browser reports them.
 - **Verified by the QR code, the code you typed, or your pairing.** This is how the phone knew this screen:
@@ -393,19 +402,24 @@ For coturn or eturnal, then tell the service about the relay:
    `"TURN_URLS": "turn:turn.example.org:3478?transport=udp,turn:turn.example.org:3478?transport=tcp,turns:turn.example.org:5349?transport=tcp"`.
 3. Optionally, set `STUN_URLS` (a var) to replace the default STUN server, if you'd rather not use Cloudflare's.
 
-**ob.Pal Link** talks only to the service it was built for: its policy and host permissions name it. To point it at
-yours:
-1. Rebuild it with your origin (`extension/src/shared/constants.ts`, `extension/vite.config.ts`).
+**ob.Pal Link** talks only to the service it was built for: its policy, its host permission and its code name it. To
+point it at yours:
+1. Rebuild it with your origin: `OBPAL_PUBLIC_ORIGIN=https://your.host pnpm run build:extension`, the same variable
+   the site's build takes (`extension/vite.config.ts` puts it in the manifest and the code).
 2. Make your own extension key with `node extension/scripts/key.mjs <your key file>`, and put the `key` it prints in
    `extension/vite.config.ts`.
 3. Install ob.Pal Desktop for your extension's ID: `obpal-desktop install --origin chrome-extension://<your id>/`.
+
+The same steps are in `extension/README.md` ("Running your own service").
 
 ## 7. What is kept, and where
 
 | What | Where | How long |
 |---|---|---|
 | The QR code's secret | the phone's tab (`sessionStorage`) | until the tab closes |
-| Pairing keys, both devices' DTLS fingerprints, a device's name | each device's IndexedDB, and Link's | until forgotten; certificates renew yearly |
+| An invite Link has moved on from (its secret and room), for the phone that paired through it | Link's link document, in memory | until that phone pairs through a newer invite or is forgotten, or the browser closes (8 at most) |
+| Pairing keys (non-extractable), both devices' DTLS fingerprints, a device's name | each device's IndexedDB, and Link's | until forgotten; certificates renew yearly |
+| Whether each phone may control this PC (the answer, and the phone's name) | Link's `chrome.storage.local` | until changed, or the phone is forgotten |
 | A short code's handle, its room, the screen's address | the service's Codes object | 10 minutes at most |
 | Room membership (socket ids, and the screen's address for its codes) | the room's Durable Object, with its sockets | while the sockets are open |
 | Rate-limit counters (by address or network) | the service, in memory | minutes |
@@ -414,56 +428,68 @@ yours:
 | Relay metadata (addresses, ports, timing) | Cloudflare TURN, under its policy | |
 | Allowed programs, the Whole PC setting, a lifecycle log (never input) | ob.Pal Desktop, in `%APPDATA%\obpal` | until removed |
 
-## 8. The next ob.Pal Link release
+## 8. ob.Pal Link 1.6.0
 
-Each item below is what the next Link release needs to do, with the tests that show it's done.
+The items the review set for the next Link release, and how Link 1.6.0 does each. The phone's side of them (the
+`spent` answer, the `notice` line, the keys) ships with the site; the tests are in `pnpm test` and `e2e:extension`.
 
-**L1. Ask on the PC before a new phone gets PC control.**
-- *When:* a device binds while the target is PC, or switches the target to PC from its tray, and it hasn't been
-  approved on this PC before.
+**L1. Ask on the PC before a new phone gets PC control.** Done.
+- *When:* a phone is connected while the PC is the target (chosen in the popup, or from the phone's tray), and nobody
+  has answered for it on this PC.
 - *What Link does:*
-  - It keeps the helper disarmed, and asks in its own UI: a badge and a prompt in the popup, plus a system
-    notification if the popup is closed.
-  - The prompt reads `"<phone's name> wants to control this PC"`, with **Allow once**, **Always** and **Deny**.
-  - Meanwhile, the phone shows "Waiting for approval on the PC".
-- *Approvals:*
-  - They're keyed by the pairing id, or by the DTLS fingerprint for a device without one.
-  - They're kept with Link's remembered phones, and removed when that phone is forgotten.
-- *No approval needed:* a page target (Controller, 3D, Keys).
-- *Tests:*
-  - a new phone can't arm the helper by choosing PC;
-  - an approved phone can;
-  - forgetting a phone takes its approval away.
+  - ob.Pal Desktop stays disarmed, and the link sends it nothing for that phone (`extension/src/background.ts:87-95`,
+    `extension/src/offscreen.ts:436`).
+  - It asks in its own pages: `"<phone's name> wants to control this PC"`, with **Allow** and **Deny**, on top of the
+    popup (with a **!** on the toolbar icon) and of the options page (`extension/src/ui/ask.ts`), and as a
+    notification with the same buttons while the popup is closed, for whoever turned that on in the options page
+    (the optional `notifications` permission).
+  - Meanwhile the phone shows "Waiting for approval on the PC" (the host value `notice`, PROTOCOL §3; older phones
+    get it as a toast).
+- *Answers:*
+  - Allow or Deny, kept per phone, keyed by the pairing id Link remembers it by, or by the DTLS fingerprint for a
+    device without one. Both are what the phone proved, never what it says.
+  - Kept in `chrome.storage.local`, removed when the phone is forgotten, and listed in the options page, each a switch.
+  - Only Link's own pages (and the notification, handled in the service worker) give one
+    (`extension/src/shared/messages.ts:349-377`).
+  - The plan's *Allow once* was left out: both answers are kept, so a refused phone asks no more. Deny leaves its other
+    targets working: its own tray can't pick PC (`background.ts:154-167`), and a switch to PC it made itself goes back.
+- *No answer needed:* a page target (Controller, 3D, Keys).
+- *Tests:* `tests/access.test.ts`; e2e: a new phone can't arm the helper (A held: no `enable`, no frame), the prompt,
+  badge and notification show, Deny keeps it disarmed while Keys works and its tray can't pick PC, Allow arms it, the
+  allowed phone reloads and gets the PC with no question, and forgetting it drops its answer.
 
-**L2. Make a new invite once a phone has paired.**
-- *What Link does:* after a device binds through the invite (the QR link or a short code), Link makes a new one
-  (`Remote.resetInvite()`). A photo of the popup's QR code, or a replayed link, then can't pair later.
-- *Devices already bound* must keep recovering: reloads, network changes and ICE restarts. Pick one of two ways:
-  - Keep the old room open for them, and accept a rebind there only from a DTLS fingerprint that bound there before.
-  - Hand them the new invite over the link. This adds to the protocol: the phone replaces its stored pairing, as it
-    already does with a short code's invite (`device.ts:493-501`).
-- *Tests:*
-  - the old QR link is refused after a pairing;
-  - the paired phone still recovers from a network change and from a reload.
+**L2. Make a new invite once a phone has paired.** Done, the first way the plan offered.
+- *What Link does:* its `Remote` runs with `rotateInvite` (`remote.ts:364-397`): once a phone pairs through the invite
+  (the QR link or a short code), a new secret makes a new room, link, QR code and short code.
+- *Devices already bound* keep recovering: the old room stays open for them. It takes an offer only from a DTLS
+  fingerprint that bound there before, and answers anyone else `{spent: true}` (`remote.ts:622`); the phone then says
+  "This code was used" and stops (`device.ts:232-240`). A room goes once no device may use it: each paired again
+  through a newer invite, or was forgotten (8 kept at most). No protocol change for bound phones, so phones on an older
+  controller keep working.
+- *Tests:* `tests/invite.test.ts`; e2e: the popup's link changes after a pairing, a second phone with the old link is
+  told it was used while the first stays connected, and the paired phone comes back through its room after a reload
+  and after a network change (an ICE restart).
 
-**L3. Take the current `@obpal/host`.** It brings:
+**L3. Take the current `@obpal/host`.** Done: Link 1.6.0 bundles it, with:
 - the strict fingerprint parser and the code-exchange gating;
 - ICE restarts (`welcome{restart}`);
-- TURN credentials refreshed before they lapse (Link's screen side lives as long as the browser);
+- TURN credentials refreshed before they lapse (they name no room, so the kept rooms use the same);
 - handling for `leave{clean}`;
 - hosts that wait for their first ICE servers;
-- the connection facts (`Remote.links()`), so the popup can show the same badge as the chip.
+- the connection facts (`Remote.links()`): the popup's bar shows the same badge as the chip (a lock, the path, the round
+  trip; the rest in its tooltip).
 
-**L4. Document self-hosting** as "rebuild Link with your origin" (§6).
+**L4. Document self-hosting** as "rebuild Link with your origin". Done: `OBPAL_PUBLIC_ORIGIN` names it at build time
+(§6, and `extension/README.md`).
 
-**L5. Non-extractable pairing keys.**
-- Store each pairing key as a non-extractable HKDF `CryptoKey` (usages `deriveBits` and `deriveKey`) in IndexedDB,
-  on both the phone and Link. Turn old byte rows into keys as they're read.
-- `bindMac` and `lanIceCredentials` accept either form.
-- The screen sends the raw key once, in `welcome.pair`, and keeps only the imported key.
-- In `extension/scripts/e2e.mjs`, change the check on the phone's record from `p.key?.length === 32` to
-  `p.key instanceof CryptoKey && !p.key.extractable`. That check lives in the extension's suite, which is why this
-  waits for the Link release.
+**L5. Non-extractable pairing keys.** Done.
+- Each pairing key is a non-extractable HKDF `CryptoKey` (usages `deriveBits` and `deriveKey`) in IndexedDB, on both
+  the phone and Link (`pairing.ts:117-119`, `store.ts:23`). Rows kept as bytes become keys as they're read, and are
+  written back (`store.ts:124-133`).
+- `bindMac` and `lanIceCredentials` take either form.
+- The screen sends the raw key once, in `welcome.pair`, and keeps only the imported key (`remote.ts:479-495`).
+- *Tests:* `tests/lan.test.ts`; e2e: the phone's record and Link's are `p.key instanceof CryptoKey &&
+  !p.key.extractable`, and the direct LAN code still connects with them.
 
 ## 9. Open items
 

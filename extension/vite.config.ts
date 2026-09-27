@@ -18,6 +18,20 @@ const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
 const TARGET = 'chrome120'
 
 /**
+ * The ob.Pal service this build talks to, and the only one it may reach: the room service for signaling and TURN
+ * credentials. OBPAL_PUBLIC_ORIGIN names your own for a build of your own (spec/SECURITY.md §6), as the site's build
+ * takes it: https, or http on this machine.
+ */
+function serviceOrigin(s: string): string {
+  const u = new URL(s)
+  if (u.protocol !== 'https:' && !(u.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(u.hostname))) throw new Error(`OBPAL_PUBLIC_ORIGIN must be https: ${s}`)
+  return u.origin
+}
+const SERVICE = serviceOrigin(process.env.OBPAL_PUBLIC_ORIGIN ?? 'https://obpal.blackboxes.net')
+/** What the code sees of it (src/shared/constants.ts SERVICE), in every bundle, the classic scripts' included. */
+const define = { __OBPAL_SERVICE__: JSON.stringify(SERVICE) }
+
+/**
  * Classic scripts cannot be ES modules or share chunks: each is bundled alone as an IIFE. The content scripts, and the
  * first-paint script, which the options page's <head> loads as a plain <script> (MV3 allows no inline script) so that
  * it runs before the first paint; a module script is deferred and may run after it.
@@ -55,13 +69,14 @@ const manifest = {
   background: { service_worker: 'background.js', type: 'module' },
   options_ui: { page: 'options.html', open_in_tab: true },
   permissions: ['offscreen', 'storage', 'activeTab', 'scripting'],
-  // The PC target talks to the ob.Pal Desktop helper; asked for when the PC target is first chosen.
-  optional_permissions: ['nativeMessaging'],
-  host_permissions: ['https://obpal.blackboxes.net/*'],
+  // The PC target talks to the ob.Pal Desktop helper; asked for when the PC target is first chosen. A phone's question
+  // for the PC can come as a notification: asked for when that's turned on in the options page.
+  optional_permissions: ['nativeMessaging', 'notifications'],
+  host_permissions: [`${SERVICE}/*`],
   optional_host_permissions: ['<all_urls>'],
   // Bundled code only: no eval, no remote scripts; network limited to the ob.Pal service.
   content_security_policy: {
-    extension_pages: "script-src 'self'; object-src 'self'; connect-src 'self' https://obpal.blackboxes.net wss://obpal.blackboxes.net",
+    extension_pages: `script-src 'self'; object-src 'self'; connect-src 'self' ${SERVICE} ${SERVICE.replace(/^http/, 'ws')}`,
   },
 }
 
@@ -118,6 +133,7 @@ function extension(): Plugin {
           root,
           publicDir: false,
           logLevel: 'warn',
+          define,
           build: {
             outDir, emptyOutDir: false, copyPublicDir: false, target: TARGET, sourcemap: false, minify: false,
             lib: { entry: resolve(root, c.entry), formats: ['iife'], name: c.name, fileName: () => c.file },
@@ -133,6 +149,7 @@ export default defineConfig({
   root,
   base: '/',
   publicDir: false,
+  define,
   plugins: [extension()],
   worker: { format: 'es' },
   build: {

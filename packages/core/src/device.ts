@@ -1,7 +1,7 @@
 import type { Caps, DeviceMsg, HostMsg, PairGrant, SignalIn, SignalPayload } from './messages'
 import { CodePake } from './code'
 import {
-  b64url, bindMac, equalBytes, fromB64url, lanContext, lanIceCredentials, lanOfferSdp, mungeIce, parsePairing, roomIdFor, sdpFingerprint,
+  b64url, bindMac, equalBytes, fromB64url, importPairKey, lanContext, lanIceCredentials, lanOfferSdp, mungeIce, parsePairing, roomIdFor, sdpFingerprint,
   type LanPairing, type Pairing,
 } from './pairing'
 import { fetchIce, ICE_REFRESH_BEFORE_MS, linkInfo, roomSocketUrl, SignalClient, type IceSet, type LinkInfo } from './signal'
@@ -13,6 +13,8 @@ export type LinkStatus =
   | 'reconnecting' | 'taken-over' | 'host-mismatch' | 'lan-failed' | 'lan-unsupported' | 'removed' | 'full' | 'closed'
   /** Joining by short code failed: the code was wrong, or already had its one attempt (PROTOCOL §2b). */
   | 'code-wrong'
+  /** The code this device came with has paired a device already, and the screen has moved on to a new one (PROTOCOL §2). */
+  | 'invite-used'
 
 /**
  * How this device knew the screen was the right one: `qr`, its fingerprint pinned by the QR code and the code's secret
@@ -225,6 +227,15 @@ export class DeviceLink {
     if ('gone' in d) {
       // The host no longer has the connection an ICE restart was for: a new one, at once.
       if (this.restarting) { this.restarting = false; this.restart(0, true) }
+      return
+    }
+    if ('spent' in d) {
+      // This code paired a device already, and the screen moved on to a new one: trying again won't help. The device that
+      // paired with it comes back through it; this one needs the code on the screen now.
+      if (this.status === 'connected' || this.restarting) return
+      this.teardown()
+      this.sig?.close()
+      this.setStatus('invite-used')
       return
     }
     if ('answer' in d) {
@@ -501,11 +512,14 @@ export class DeviceLink {
     this.emit('invite', invite!)
   }
 
+  /** The host's pairing grant, kept: its key as a non-extractable key (importPairKey), and the bytes let go. */
   private async remember(grant: PairGrant, hostName: string) {
     if (!('pairing' in this.opts)) return
     try {
-      const key = fromB64url(grant.key)
-      if (key.length !== 32 || fromB64url(grant.id).length !== 16) return
+      const raw = fromB64url(grant.key)
+      if (raw.length !== 32 || fromB64url(grant.id).length !== 16) return
+      const key = await importPairKey(raw)
+      raw.fill(0)
       const p: StoredPair = { id: grant.id, key, peerFp: this.opts.pairing.fp, peerName: String(hostName || 'Screen').slice(0, 40), at: Date.now() }
       await putPair(p)
       this.emit('pair', p)

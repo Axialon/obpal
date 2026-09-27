@@ -15,6 +15,7 @@
  */
 import { PAD_BUTTON_COUNT } from '@obpal/core'
 import type { HostStatus } from '@obpal/host'
+import { isPcAccess, parsePhone, PHONE_KEY_RE, type PcAccess, type Phone } from './access'
 import { CHANNEL, isTargetMode, SERVICE, type TargetMode } from './constants'
 import { clamp } from './math'
 import { isTextField, isTypingRefusal, parsePcRequest, type PcRequest, type TextField, type TypingRefusal } from './native'
@@ -163,11 +164,37 @@ export interface RememberedPhone { id: string; name: string; at: number }
  */
 export interface LinkState { status: LinkStatus; url: string; device: string | null; lan: string; lanFor: string | null; pairs: RememberedPhone[] }
 
+/**
+ * What the phone's link says of itself (Remote.links(), the connection's own statistics), for the popup's badge as the
+ * pairing chip shows it: encrypted end to end, how the phone proved itself (the QR code, a typed code, a remembered
+ * pairing), the path its ICE pair takes (relayed, and over what), the round trip, and DTLS's version and cipher.
+ */
+export interface LinkFacts {
+  verified: 'qr' | 'code' | 'lan'
+  path: 'lan' | 'nat' | 'direct' | 'relay' | 'unknown'
+  relay?: string
+  rttMs?: number
+  dtls?: string
+  cipher?: string
+}
+
+export function parseFacts(x: unknown): LinkFacts | null {
+  if (!isObj(x) || !['qr', 'code', 'lan'].includes(x.verified as string) || !['lan', 'nat', 'direct', 'relay', 'unknown'].includes(x.path as string)) return null
+  const word = (v: unknown, max: number) => typeof v === 'string' && v.length <= max && /^[\w .-]*$/.test(v)
+  if ((x.relay !== undefined && !word(x.relay, 8)) || (x.dtls !== undefined && !word(x.dtls, 16)) || (x.cipher !== undefined && !word(x.cipher, 64))) return null
+  if (x.rttMs !== undefined && !(Number.isInteger(x.rttMs) && within(x.rttMs, 0, 60_000))) return null
+  return {
+    verified: x.verified as LinkFacts['verified'], path: x.path as LinkFacts['path'],
+    ...(x.relay !== undefined ? { relay: x.relay as string } : {}), ...(x.rttMs !== undefined ? { rttMs: x.rttMs as number } : {}),
+    ...(x.dtls !== undefined ? { dtls: x.dtls as string } : {}), ...(x.cipher !== undefined ? { cipher: x.cipher as string } : {}),
+  }
+}
+
 /** Pairing ids are 16 random bytes, base64url. */
 export const PAIR_ID_RE = /^[A-Za-z0-9_-]{22}$/
 const isPairId = (v: unknown): v is string => typeof v === 'string' && PAIR_ID_RE.test(v)
 
-function parsePhone(x: unknown): RememberedPhone | null {
+function parseRemembered(x: unknown): RememberedPhone | null {
   if (!isObj(x) || !isPairId(x.id) || typeof x.name !== 'string' || x.name.length > 60 || !within(x.at, 0, 1e14)) return null
   return { id: x.id, name: x.name, at: x.at }
 }
@@ -182,7 +209,7 @@ export function parseLink(x: unknown): LinkState | null {
   if (lanFor !== null && !isPairId(lanFor)) return null
   const rawPairs = x.pairs ?? []
   if (!Array.isArray(rawPairs) || rawPairs.length > 32) return null
-  const pairs = rawPairs.map(parsePhone)
+  const pairs = rawPairs.map(parseRemembered)
   if (pairs.some((p) => !p)) return null
   return { status: x.status as LinkStatus, url: x.url, device: x.device, lan, lanFor, pairs: pairs as RememberedPhone[] }
 }
@@ -207,6 +234,15 @@ export type BgRequest =
   | { to: 'bg'; type: 'rescan' }
   /** The controlled tab's top frame: visible frames from other sites (the largest one's host, and whether it dominates the page). */
   | { to: 'bg'; type: 'frames'; count: number; host: string; big: boolean }
+  /**
+   * The link: the phone connected now (null: none), answered with where it stands on this PC ({ access }, see
+   * shared/access.ts).
+   */
+  | { to: 'bg'; type: 'phone'; phone: Phone | null }
+  /** The person at the PC: whether this phone may control the PC (the popup's prompt, or the options page). */
+  | { to: 'bg'; type: 'answer'; key: string; allow: boolean }
+  /** What the connected phone's link says of itself, for the popup's badge (answered with LinkFacts, or null). */
+  | { to: 'bg'; type: 'facts' }
   /** PC target: allowlist and helper control from the popup and options page (shared/native.ts). */
   | PcRequest
 export type BgRequestType = BgRequest['type']
@@ -215,7 +251,7 @@ export function parseBgRequest(x: unknown): BgRequest | null {
   if (!isObj(x) || x.to !== 'bg') return null
   if (typeof x.type === 'string' && x.type.startsWith('pc-')) return parsePcRequest(x)
   switch (x.type) {
-    case 'ensure': case 'version': case 'unpair': case 'offscreen-ready': case 'hello': case 'rescan': case 'diag':
+    case 'ensure': case 'version': case 'unpair': case 'offscreen-ready': case 'hello': case 'rescan': case 'diag': case 'facts':
       return { to: 'bg', type: x.type }
     case 'forget': case 'lan':
       return isPairId(x.id) ? { to: 'bg', type: x.type, id: x.id } : null
@@ -232,6 +268,12 @@ export function parseBgRequest(x: unknown): BgRequest | null {
       const link = parseLink(x.link)
       return link ? { to: 'bg', type: 'link', link } : null
     }
+    case 'phone': {
+      const phone = x.phone === null ? null : parsePhone(x.phone)
+      return phone || x.phone === null ? { to: 'bg', type: 'phone', phone } : null
+    }
+    case 'answer':
+      return typeof x.key === 'string' && PHONE_KEY_RE.test(x.key) && typeof x.allow === 'boolean' ? { to: 'bg', type: 'answer', key: x.key, allow: x.allow } : null
   }
   return null
 }
@@ -244,17 +286,24 @@ export type OffscreenRequest =
   | { to: 'offscreen'; type: 'lan'; id: string }
   /** Answered with the link's connection timeline (see LinkDiag in @obpal/host). */
   | { to: 'offscreen'; type: 'diag' }
+  /** Answered with what the connected phone's link says of itself (LinkFacts), or null. */
+  | { to: 'offscreen'; type: 'facts' }
   /** PC target: a text or password field has the focus there and would take typing (null: none); the phone offers its keyboard. */
   | { to: 'offscreen'; type: 'text-field'; field: TextField | null }
   /** PC target: typing from the phone didn't get through; the phone says why. */
   | { to: 'offscreen'; type: 'typing'; refused: TypingRefusal }
+  /** The person at the PC answered for this phone (or its answer went): where it stands on this PC now. */
+  | { to: 'offscreen'; type: 'access'; key: string; access: PcAccess }
 
 export function parseOffscreenRequest(x: unknown): OffscreenRequest | null {
   if (!isObj(x) || x.to !== 'offscreen') return null
-  if (x.type === 'unpair' || x.type === 'diag') return { to: 'offscreen', type: x.type }
+  if (x.type === 'unpair' || x.type === 'diag' || x.type === 'facts') return { to: 'offscreen', type: x.type }
   if (x.type === 'forget' || x.type === 'lan') return isPairId(x.id) ? { to: 'offscreen', type: x.type, id: x.id } : null
   if (x.type === 'text-field') return x.field === null || isTextField(x.field) ? { to: 'offscreen', type: 'text-field', field: x.field } : null
   if (x.type === 'typing') return isTypingRefusal(x.refused) ? { to: 'offscreen', type: 'typing', refused: x.refused } : null
+  if (x.type === 'access') {
+    return typeof x.key === 'string' && PHONE_KEY_RE.test(x.key) && isPcAccess(x.access) ? { to: 'offscreen', type: 'access', key: x.key, access: x.access } : null
+  }
   const cfg = parseConfig(x)
   return x.type === 'config' && cfg ? { to: 'offscreen', type: 'config', ...cfg } : null
 }
@@ -312,6 +361,10 @@ export const ALLOWED_SENDERS: Record<BgRequestType, readonly SenderKind[]> = {
   hello: ['page'],
   rescan: ['page'],
   frames: ['page'],
+  // Who is connected comes from the link alone; whether a phone may control the PC, from Link's own pages alone.
+  phone: ['offscreen'],
+  answer: ['extension'],
+  facts: ['extension'],
   // Only extension UI (popup, options) changes what the PC helper may do. Never a page, never the phone.
   'pc-connect': ['extension'],
   'pc-allow': ['extension'],

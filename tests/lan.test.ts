@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  b64url, bindMac, candidatesOf, encodeLanPairing, encodePairing, fingerprintHex, fromB64url, lanAnswerSdp, lanContext, lanIceCredentials,
-  lanOfferSdp, LAN_MAX_CANDIDATES, mungeIce, parseLanPairing, parsePairingCode, readLocalIce, sdpFingerprint,
+  b64url, bindMac, candidatesOf, encodeLanPairing, encodePairing, fingerprintHex, fromB64url, importPairKey, lanAnswerSdp, lanContext, lanIceCredentials,
+  lanOfferSdp, LAN_MAX_CANDIDATES, mungeIce, parseLanPairing, parsePairingCode, readLocalIce, readPair, sdpFingerprint, type StoredPair,
 } from '@obpal/core'
 import { cacheName, route, staleCaches } from '../src/sw/routes'
 
@@ -54,6 +54,37 @@ describe('direct LAN code', () => {
     expect(a.pwd.length).toBe(24)
     expect(await lanIceCredentials(key, bytes(16, 3))).not.toEqual(a)
     expect(await lanIceCredentials(bytes(32, 6), bytes(16, 2))).not.toEqual(a)
+  })
+
+  it('a pairing key kept non-extractable derives what its bytes do, and never gives them back', async () => {
+    const raw = bytes(32, 5)
+    const key = await importPairKey(raw)
+    expect(key.extractable).toBe(false)
+    expect(key.algorithm.name).toBe('HKDF')
+    expect([...key.usages].sort()).toEqual(['deriveBits', 'deriveKey'])
+    await expect(crypto.subtle.exportKey('raw', key)).rejects.toThrow()
+    expect(await lanIceCredentials(key, bytes(16, 2))).toEqual(await lanIceCredentials(raw, bytes(16, 2)))
+    const ctx = lanContext(bytes(16, 2))
+    expect(await bindMac(key, bytes(32, 1), bytes(32, 2), ctx)).toBe(await bindMac(raw, bytes(32, 1), bytes(32, 2), ctx))
+  })
+
+  it('a pairing stored as bytes becomes a non-extractable key as it is read, and is written back that way', async () => {
+    const saved: StoredPair[] = []
+    const save = async (p: StoredPair) => { saved.push(p) }
+    const old = { id: b64url(bytes(16, 1)), key: bytes(32, 5), peerFp: bytes(32, 9), peerName: 'Pixel 7', at: 1 }
+    const p = await readPair(old, save)
+    expect(p?.key).toBeInstanceOf(CryptoKey)
+    expect(p?.key.extractable).toBe(false)
+    expect(saved).toEqual([p])
+    expect(old.key.every((b) => b === 0)).toBe(true)
+    expect(await lanIceCredentials(p!.key, bytes(16, 2))).toEqual(await lanIceCredentials(bytes(32, 5), bytes(16, 2)))
+    // A row that is a key already is taken as it is; anything else isn't a pairing.
+    expect(await readPair(p, save)).toBe(p)
+    expect(saved).toHaveLength(1)
+    expect(await readPair({ ...old, key: bytes(16, 5) }, save)).toBeNull()
+    expect(await readPair({ ...old, key: await crypto.subtle.importKey('raw', bytes(32, 5), { name: 'HMAC', hash: 'SHA-256' }, true, ['sign']) }, save)).toBeNull()
+    expect(await readPair({ ...old, peerFp: bytes(20, 1) }, save)).toBeNull()
+    expect(await readPair(null, save)).toBeNull()
   })
 
   it('binds with the code nonce as context, distinct from the room', async () => {

@@ -14,8 +14,12 @@
  *     does its own thing.
  *   - Pressed into each edge of what's on screen (tilted on phones, pointed at on computers), the marble's outline as
  *     drawn meets the edge within a pixel, and its rim is there in the screenshot.
- *   - A knock against the edge of the screen is heard; leaning on it is quiet.
- *   - On a phone, tilted up from below the buttons, the marble rolls up onto them, across and off.
+ *   - A knock against the edge of the screen is heard with the frame that shows it: foreseen and started ahead, the
+ *     speakers' own lag made up (nothing of ours in between otherwise); leaning on it is quiet.
+ *   - On a phone, tilted up from below the buttons, the marble rolls up onto them, across and off. The sound control
+ *     and the three steps' icons are raised things too.
+ *   - On a phone in a noisy hand (a tremble, stray readings), a marble in the o and in the p rests dead still, with
+ *     no jumps; so does one across the narrow gap between the r and the full stop.
  *   - A marble in a letter's counter rests there without a tremor, and leaves when pointed away.
  *   - The Move card switches between Move and Grab: in Grab a click (or on a phone a tap) closes the gripper on the
  *     block and a drag carries it, the arm never freezing; arrow keys change it and the visit keeps it.
@@ -516,7 +520,15 @@ try {
     await ctx.close()
     if (knock.state !== 'on') throw new Error(`sound is ${knock.state}`)
     if (after.kinds.wall !== leaning) throw new Error(`${after.kinds.wall - leaning} knock(s) while leaning on the side`)
-    return `${knock.kinds.wall - before.kinds.wall} knock(s) heard, peak ${knock.peakDb} dBFS; none while leaning on it and rolling along it`
+    // Started the moment it happened: nothing of ours in between (what's left is the output's own latency, and the
+    // frame it was found in).
+    if (!(knock.oursMs <= 10)) throw new Error(`the knock waited ${knock.oursMs} ms on our side`)
+    if (knock.behindMs !== null && knock.behindMs > knock.baseMs + knock.outputMs + 25) throw new Error(`the knock reached the speakers ${knock.behindMs} ms after it happened (latency ${knock.baseMs} + ${knock.outputMs} ms)`)
+    // Where the speakers lag the screen, it was foreseen and started ahead: heard with the frame that shows it (20 ms
+    // after its moment, and a frame at most).
+    const f = knock.foreseen
+    if (knock.baseMs + knock.outputMs > 30 && !(f.met >= 1 && knock.behindMs <= 37)) throw new Error(`the knock wasn't heard on time: foreseen ${JSON.stringify(f)}, at the speakers ${knock.behindMs} ms after it happened`)
+    return `${knock.kinds.wall - before.kinds.wall} knock(s) heard, peak ${knock.peakDb} dBFS, started ${knock.oursMs} ms on our side, at the speakers ${knock.behindMs} ms after it happened (output latency ${knock.baseMs} + ${knock.outputMs} ms; foreseen ${f.leadMs} ms ahead: ${f.met} met, ${f.calledOff} called off, ${f.wrong} never came); none while leaning on it and rolling along it`
   })
 
   await check('on a phone, tilted up from below the buttons, the marble rolls up onto them, across, and off; they do nothing', async () => {
@@ -553,6 +565,67 @@ try {
     if (path.at(-1) !== -1 && path.at(-1) !== -2) throw new Error(`it ended on ${path.at(-1)}`)
     if (acted) throw new Error(`a button acted ${acted} time(s)`)
     return `floor → "${pads[see - 1000]}" → "${pads[send - 1000]}" → floor above them; no button acted`
+  })
+
+  await check('on a phone in a noisy hand, a marble in the o, in the p, and across the r and the full stop rests dead still, with no jumps', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3, ignoreHTTPSErrors: true, reducedMotion: 'reduce' })
+    const page = await ctx.newPage()
+    await page.goto(`${local.origin}/?quality=low`)
+    await field3d(page)
+    await sleep(600)
+    await page.locator('[data-hint]').tap()
+    await page.evaluate(() => scrollTo(0, 0))
+    // The raised things: the buttons, the hint, the sound control and the three steps' icons.
+    const pads = await page.evaluate(() => window.__home.pads())
+    if (pads.length !== 8 || pads.filter((t) => t === '').length !== 3 || !pads.some((t) => /sound/i.test(t))) throw new Error(`raised things: ${JSON.stringify(pads)}`)
+    // A hand holding the phone: 60 readings a second, each a little off (±1°), and now and then a stray one (6° off).
+    await page.evaluate(() => {
+      let seed = 7
+      const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 }
+      window.__hand = setInterval(() => {
+        const spike = rand() < 1 / 40 ? (rand() - 0.5) * 12 : 0
+        dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 0, beta: 40 + (rand() - 0.5) * 2 + spike, gamma: (rand() - 0.5) * 2 }))
+      }, 16)
+    })
+    await sleep(400)
+    /** Its largest move in a frame (px) over `ms`, as drawn (a jump would show here), and what holds it at the end. */
+    const watch = (ms) => page.evaluate((ms) => new Promise((done) => {
+      let prev = window.__home.tips().find((t) => t.id === 'me'), most = 0
+      const end = performance.now() + ms
+      const frame = () => {
+        const t = window.__home.tips().find((q) => q.id === 'me')
+        most = Math.max(most, Math.hypot(t.x - prev.x, t.y - prev.y))
+        prev = t
+        if (performance.now() < end) requestAnimationFrame(frame); else done({ most, held: t.held, on: t.on })
+      }
+      requestAnimationFrame(frame)
+    }), ms)
+    const seen = []
+    const counters = await page.evaluate(() => window.__home.counters())
+    const letters = await page.evaluate(() => { const h = document.getElementById('hero-h'); return [...h.textContent.replace(/\s+/g, '')] })
+    for (const [what, i] of [['o', 1], ['p', 4]]) {
+      if (letters[i] !== what) throw new Error(`letter ${i} is "${letters[i]}", not "${what}"`)
+      const c = counters.find((q) => q.letter === i)
+      await page.evaluate(([x, y]) => window.__home.drop(x, y), [c.x, c.y])
+      await sleep(3000)
+      const w = await watch(3000)
+      if (!w.held) throw new Error(`the marble isn't sitting in the ${what}: ${JSON.stringify(w)}`)
+      if (w.most > 0.1) throw new Error(`in the ${what}, it moved ${w.most.toFixed(3)} px in a frame`)
+      seen.push(`${what} ${w.most.toFixed(3)} px`)
+    }
+    // Into the narrow gap between the r and the full stop, where it's narrowest.
+    const last = letters.length - 1
+    if (letters[last] !== '.' || letters[last - 1] !== 'r') throw new Error(`the headline ends "${letters.slice(-2).join('')}", not "r."`)
+    const gap = (await page.evaluate(() => window.__home.gaps())).find((q) => q.a === last - 1 && q.b === last)
+    if (!gap) throw new Error('no gap narrower than a marble between the r and the full stop')
+    await page.evaluate(([x, y]) => window.__home.drop(x, y), [gap.x, gap.y])
+    await sleep(3000)
+    const w = await watch(3000)
+    if (w.most > 0.1) throw new Error(`between the r and the full stop, it moved ${w.most.toFixed(3)} px in a frame (${JSON.stringify(w)})`)
+    seen.push(`r|. ${w.most.toFixed(3)} px (${w.held ? 'held across the gap' : w.on === -1 ? 'on the floor between them' : `on raised thing or letter ${w.on}`})`)
+    await page.evaluate(() => clearInterval(window.__hand))
+    await ctx.close()
+    return `the most it moved in a frame: ${seen.join(', ')}`
   })
 
   const screenCtx = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true })
