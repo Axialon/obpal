@@ -468,6 +468,35 @@ Public sims (2026-09-26): [/sim/](https://obpal.blackboxes.net/sim/) hosts the r
   - Why the owner had to reload the extension on every browser start: Chrome loaded it from `extension/dist`, which every build wipes. Owners and users load a release folder.
 - **Not yet tried on the real PC** (tests: 45 helper units, 223 site/extension units, e2e 15/15 with the stub helper). Pointer feel (gains, Windows acceleration) needs the owner's hands. A later option: absolute Wii pointing for Point mode, and typing text from the phone.
 
+**Done 2026-09-27 (owner: the hero's ribbon "slashed around"; then "a different effect... the characters as 3D objects and a glowing orb that can be bounced on them... 3D bounce game... overhead view"; "more transparent like glass marbles with subtle glow... the glow spreads and passes through the obstacles"):**
+- The hero is a 3D bounce field (commit c29c4d0).
+  - `letters.ts`: headline layout from the font's outlines.
+  - `bounce.ts`: physics.
+  - `field.ts`: three.js, loaded when the hero is on screen.
+  - `hero.ts`: input and the opening.
+- Glass marbles bounce on the extruded letters. Their glow spreads through the dots and passes through the letters, and each bounce sends out a ring of light. Letters light up where a marble lands, and when all are lit they celebrate.
+- The opening: the marble drops in, hops a word at a time, and rests on the full stop.
+- The pen of light (the stopgap in between) is gone.
+- **Layout bug on wide screens.** The built CSS linked `landing.css` after the home page's styles, so `.hero{max-width:760px}` won and the hero was 760 px wide on 1920 px screens. `landing.css` base rules are now `:where()`, and e2e:home checks 1920, 1440 and 1280.
+- A phone opens in a mode the screen takes (Point for the home page's try-out).
+- "Nothing to install" is gone.
+
+**Next, owner's list of 2026-09-27 (after whole PC):**
+1. PC controls on the phone, the current step:
+   - a mouse face for Point (Left and Right click either side of B as the middle scroll bar);
+   - a trackpad scroll strip along the edge;
+   - the gamepad's desktop mapping (no stray letters in text fields);
+   - the phone keyboard (a `keyboard` tray control and the `text` message are in `packages/core`/`host`, uncommitted; `src/controller/typing.ts` is written);
+   - an automatic "Type" prompt when a text field is focused on the PC (the helper finds focus through UI Automation);
+   - branded icons on everything we ship (the helper exe icon).
+2. Link popup and options redesign to the home page's standard: themes, adaptive layout, thin themed scrollbars, glass, live interactions.
+3. Embed + branded QR + host-branded pairing (below).
+4. Trackpad depth field.
+5. Shared view: scenes and robot cameras visible to every phone.
+6. Arms.
+7. Bluetooth research.
+8. Chrome Web Store, once the owner has the developer account.
+
 **Next, in this order (owner OK'd 2026-09-27: "go ahead in that order"):**
 
 1. **Embed, branded QR and host-branded pairing, as one piece.** It's all about how other sites carry ob.Pal.

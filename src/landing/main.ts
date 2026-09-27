@@ -1,4 +1,4 @@
-// The home page: a hero you paint with light, the use cases as live scenes (./scenes.ts), and the ways in.
+// The home page: a hero you bounce light across (./hero.ts), the use cases as live scenes (./scenes.ts), and the ways in.
 import { applyTheme, initialTheme } from '../ui/themes'
 import { calmMarks, mountMarks } from '../ui/icons'
 import { mountTopBar } from './topbar'
@@ -35,10 +35,10 @@ const settleHint = () => {
 }
 const hero = mountHero(heroEl, $<HTMLCanvasElement>('.hero-stage'), $('#hero-h'), { still, onInput: settleHint })
 // For the end-to-end test (scripts/e2e-home.mjs), as the viewer exposes its own.
-Object.assign(window, { __home: { tips: () => hero.tips() } })
+Object.assign(window, { __home: { tips: () => hero.tips(), dot: () => hero.dot() } })
 
 if (desk) {
-  // A real code, made on the first sign that someone's here; each phone that scans it gets a ribbon.
+  // A real code, made on the first sign that someone's here; each phone that scans it gets an orb.
   const pair = $('[data-pair]')
   const slot = $('[data-pair-slot]')
   pair.hidden = false
@@ -82,12 +82,12 @@ if (desk) {
     hintText.textContent = 'Tap, then tilt your phone'
     hint.addEventListener('click', async () => {
       if (!(await hero.tilt())) return
-      hintText.textContent = 'Tilt your phone to paint'
+      hintText.textContent = 'Tilt your phone to roll the light'
       hintAway = 0
       for (const cue of document.querySelectorAll('.play-cue span')) cue.textContent = 'Tilt or hold to play'
     })
   } else {
-    hintText.textContent = 'Tap to paint with light'
+    hintText.textContent = 'Tap to bounce the light'
     hint.addEventListener('click', () => hint.classList.add('gone'))
   }
 }

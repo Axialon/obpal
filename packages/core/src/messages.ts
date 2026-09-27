@@ -4,8 +4,12 @@ import type { ModeId, TierId } from './state'
 export interface TrayControl {
   id: string
   label: string
-  /** button: sends btn{tap}; toggle: sends value{bool}; select: opens a picker, sends value{option value}. */
-  type?: 'button' | 'toggle' | 'select'
+  /**
+   * button: sends btn{tap}; toggle: sends value{bool}; select: opens a picker, sends value{option value};
+   * keyboard: opens the device's own keyboard, whose typing arrives as text{s, del} and whose key row (Esc, Tab,
+   * arrows, Enter) as btn{key-<KeyboardEvent.code>, tap}.
+   */
+  type?: 'button' | 'toggle' | 'select' | 'keyboard'
   /** A standard icon name (reset, frame, spin, grid, glow, models, …) the device may draw instead of text. */
   icon?: string
   /** Options for type 'select', optionally grouped under headings. image: https URL thumbnail; glyph/color: drawn thumbnail. */
@@ -34,7 +38,16 @@ export interface Layout {
    * btn{tap} when pressed. Unbound ones keep the mode's own use; gamepad mode keeps them as A, B and the d-pad.
    */
   keys?: Partial<Record<HardwareKey, string>>
+  /**
+   * The Point face. wii (the default): A selects, hold B to grab, - / + zoom, home centres. mouse: a mouse's
+   * Left and Right buttons (btn mouse-left / mouse-right, down and up) either side of B as the middle bar (hold to
+   * scroll, or drag a finger along it), with - / + to zoom.
+   */
+  point?: 'wii' | 'mouse'
 }
+
+/** The longest text{s} a device sends at once, and the most characters one may delete. */
+export const MAX_TEXT = 256
 
 export interface Caps {
   tier: TierId
@@ -66,6 +79,8 @@ export type DeviceMsg =
   /** pair: the pairing id when connecting through a direct LAN code. */
   | { t: 'hello'; proto: number; caps: Caps; mac: string; name: string; pair?: string }
   | { t: 'btn'; id: string; ev: 'tap' | 'down' | 'up' | 'double' | 'long' }
+  /** Typing on the device's keyboard (a `keyboard` tray control): delete `del` characters before the caret, then type `s` ('\n' is Enter). */
+  | { t: 'text'; s: string; del?: number }
   | { t: 'value'; id: string; v: number | boolean | string; add?: boolean }
   | { t: 'mode'; m: ModeId }
   | { t: 'recenter' }

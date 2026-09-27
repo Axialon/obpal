@@ -3,8 +3,8 @@
  * proxied to production):
  *   - On phone widths the page never scrolls sideways (nothing reaches past the screen's edge).
  *   - On a computer, the hero makes a real code once someone is there; a phone that opens it joins the page.
- *   - The phone's own ribbon follows it (here by its trackpad, as a phone without motion sensors steers).
- *   - When the phone leaves, the page lets its ribbon go.
+ *   - The phone's own marble follows it (here by its trackpad, as a phone without motion sensors steers).
+ *   - When the phone leaves, the page lets its marble go.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch.
  */
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -15,7 +15,8 @@ import { startLocal } from '../extension/e2e/local.mjs'
 
 const HEADED = process.argv.includes('--headed')
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
-const RTC_ARGS = ['--disable-features=WebRtcHideLocalIpsWithMdns', '--ignore-certificate-errors']
+// Software WebGL for the hero's 3D field in headless runs.
+const RTC_ARGS = ['--disable-features=WebRtcHideLocalIpsWithMdns', '--ignore-certificate-errors', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 async function until(what, fn, timeout = 10000, every = 100) {
   const end = Date.now() + timeout
@@ -27,6 +28,14 @@ async function until(what, fn, timeout = 10000, every = 100) {
   }
 }
 const results = []
+/** The lime marble is resting on the headline's full stop (the 3D field is up, the opening is over). */
+async function restingOnDot(page) {
+  const a = await page.evaluate(() => ({ t: window.__home.tips().find((t) => t.id === 'me'), d: window.__home.dot() }))
+  await sleep(250)
+  const b = await page.evaluate(() => window.__home.tips().find((t) => t.id === 'me'))
+  if (!a.t || !a.d || !b) return false
+  return Math.hypot(b.x - a.t.x, b.y - a.t.y) < 0.5 && Math.hypot(b.x - a.d.x, b.y - a.d.y) < 6
+}
 async function check(name, fn) {
   try {
     const detail = await fn()
@@ -68,13 +77,33 @@ try {
     return seen.join(', ')
   })
 
-  await check('on a phone, one tap switches the tilt on: it moves the ribbon (after the opening stroke), and the scene on screen', async () => {
+  await check('on wide screens the hero spans the page and the headline fits (the built CSS, whatever order it loads in)', async () => {
+    const seen = []
+    for (const [w, h] of [[1920, 1080], [1440, 900], [1280, 800]]) {
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, ignoreHTTPSErrors: true })
+      const page = await ctx.newPage()
+      await page.goto(`${local.origin}/`)
+      await sleep(500)
+      const r = await page.evaluate(() => {
+        const hero = document.querySelector('.hero').getBoundingClientRect()
+        const h1 = document.getElementById('hero-h')
+        return { hero: hero.width, vw: document.documentElement.clientWidth, over: h1.scrollWidth > h1.clientWidth + 1, font: parseFloat(getComputedStyle(h1).fontSize) }
+      })
+      if (Math.abs(r.hero - r.vw) > 2) throw new Error(`${w}px: the hero is ${r.hero.toFixed(0)}px wide`)
+      if (r.over) throw new Error(`${w}px: the headline overflows its box`)
+      seen.push(`${w}px (${r.font.toFixed(0)}px type)`)
+      await ctx.close()
+    }
+    return seen.join(', ')
+  })
+
+  await check('on a phone, one tap switches the tilt on: it rolls the marble like a tray (after the opening), and moves the scene on screen', async () => {
     const ctx = await browser.newContext({ ...devices['Pixel 7'], ignoreHTTPSErrors: true, permissions: ['accelerometer', 'gyroscope', 'magnetometer'] })
     const page = await ctx.newPage()
     await page.goto(`${local.origin}/`)
-    // Let the opening flourish finish, so the ribbon is resting where it ended.
-    await sleep(9000)
     const tip = () => page.evaluate(() => window.__home.tips().find((t) => t.id === 'me'))
+    // Let the opening finish, so the marble is resting on the full stop.
+    await until('the marble at rest after the opening', () => restingOnDot(page), 25000, 300)
     const tilt = (beta, gamma) => page.evaluate(([b, g]) => dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 0, beta: b, gamma: g })), [beta, gamma])
     // Motion is the visitor's to switch on: one tap on the hint (iOS asks its own question too).
     await page.locator('[data-hint]').tap()
@@ -86,13 +115,13 @@ try {
     const still = await tip()
     await sleep(400)
     const after = await tip()
-    if (Math.hypot(after.x - still.x, after.y - still.y) > 2) throw new Error('a steady hand kept the ribbon moving')
+    if (Math.hypot(after.x - still.x, after.y - still.y) > 2) throw new Error('a steady hand kept the marble moving')
     // Tip it left and settle; then right and toward you: it glides over, and down.
     for (let i = 1; i <= 8; i++) { await tilt(60, -i * 2); await sleep(40) }
     await sleep(900)
     const left = await tip()
     for (let i = 1; i <= 16; i++) { await tilt(60 + i, -16 + i * 2.5); await sleep(40) }
-    const moved = await until('the ribbon followed the tilt', async () => { const t = await tip(); return t.x - left.x > 60 && t.y - left.y > 20 ? t : null }, 4000)
+    const moved = await until('the marble rolled with the tilt', async () => { const t = await tip(); return t.x - left.x > 60 && t.y - left.y > 20 ? t : null }, 4000)
     // Down the page, the scene on screen follows the tilt too: tipped left, the cursor goes to the far left,
     // where its own loop never takes it.
     await page.evaluate(() => document.querySelector('[data-scene="point"]').scrollIntoView({ block: 'center' }))
@@ -153,41 +182,26 @@ try {
   const screenErrors = []
   screen.on('pageerror', (e) => screenErrors.push(e.message))
   await screen.goto(`${local.origin}/`)
-  await check('with nobody steering, the light draws one smooth stroke and comes to rest on the full stop', async () => {
+  await check('with nobody steering, the marble drops in, hops along the headline and comes to rest on the full stop', async () => {
+    await until('the 3D field', () => screen.evaluate(() => document.documentElement.classList.contains('field3d')), 15000)
     const tip = () => screen.evaluate(() => window.__home.tips().find((t) => t.id === 'me'))
     const path = []
-    const end = Date.now() + 9000
-    while (Date.now() < end) { path.push(await tip()); await sleep(50) }
-    // Where the headline's full stop is, as the page lays it out.
-    const dot = await screen.evaluate(() => {
-      const h = document.getElementById('hero-h'), r = document.querySelector('.hero').getBoundingClientRect()
-      const w = document.createTreeWalker(h, NodeFilter.SHOW_TEXT)
-      let last = null
-      while (w.nextNode()) if (w.currentNode.data.trim()) last = w.currentNode
-      const range = document.createRange()
-      const n = last.data.trimEnd().length
-      range.setStart(last, n - 1); range.setEnd(last, n)
-      const d = range.getBoundingClientRect()
-      return { x: d.left - r.left + d.width / 2, y: d.bottom - r.top - d.height * 0.27 }
-    })
+    const end = Date.now() + 25000
+    while (Date.now() < end) {
+      path.push(await tip())
+      if (path.length > 20 && (await restingOnDot(screen))) break
+      await sleep(80)
+    }
+    const dot = await screen.evaluate(() => window.__home.dot())
     const rest = path.at(-1)
     const off = Math.hypot(rest.x - dot.x, rest.y - dot.y)
-    if (off > 3) throw new Error(`it rested ${off.toFixed(1)}px from the full stop`)
-    // Smooth: between samples 50 ms apart it never turns sharply, and never jumps.
-    let turn = 0, jump = 0
-    for (let i = 2; i < path.length; i++) {
-      const [a, b, c] = [path[i - 2], path[i - 1], path[i]]
-      const s1 = Math.hypot(b.x - a.x, b.y - a.y), s2 = Math.hypot(c.x - b.x, c.y - b.y)
-      if (s1 > 3 && s2 > 3) {
-        let d = Math.abs(Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(b.y - a.y, b.x - a.x))
-        if (d > Math.PI) d = 2 * Math.PI - d
-        turn = Math.max(turn, d)
-      }
-      jump = Math.max(jump, s2)
-    }
-    if (turn > 1.2) throw new Error(`a sharp turn (${((turn * 180) / Math.PI).toFixed(0)}° in 50 ms)`)
-    if (jump > 120) throw new Error(`a jump of ${jump.toFixed(0)}px in 50 ms`)
-    return `rested ${off.toFixed(1)}px from the full stop; sharpest turn ${((turn * 180) / Math.PI).toFixed(0)}° per 50 ms`
+    if (off > 4) throw new Error(`it rested ${off.toFixed(1)}px from the full stop`)
+    // Along the headline: it crossed most of its width on the way.
+    const xs = path.map((p) => p.x)
+    const span = Math.max(...xs) - Math.min(...xs)
+    const box = await screen.evaluate(() => { const r = document.createRange(); r.selectNodeContents(document.getElementById('hero-h')); const b = r.getBoundingClientRect(); return b.width })
+    if (span < box * 0.45) throw new Error(`it only travelled ${span.toFixed(0)}px of a ${box.toFixed(0)}px headline`)
+    return `rested ${off.toFixed(1)}px from the full stop, after hopping across ${span.toFixed(0)}px`
   })
 
   let invite = ''
@@ -216,9 +230,9 @@ try {
     return hint
   })
 
-  await check("the phone's ribbon follows it", async () => {
+  await check("the phone's marble follows it", async () => {
     const tip = () => screen.evaluate(() => window.__home.tips().find((t) => t.id !== 'me'))
-    await until('a ribbon for the phone', tip, 5000)
+    await until('a marble for the phone', tip, 5000)
     const before = await tip()
     // No motion sensors here, so the phone steers with its trackpad, as a real phone without a gyro does.
     const cdp = await phoneCtx.newCDPSession(phone)
@@ -227,16 +241,16 @@ try {
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x0, y: y0, id: 1 }] })
     for (let i = 1; i <= 12; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x0 + i * 9, y: y0 - i * 5, id: 1 }] }); await sleep(30) }
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
-    const after = await until('the ribbon moved', async () => { const t = await tip(); return Math.hypot(t.x - before.x, t.y - before.y) > 20 ? t : null }, 5000)
+    const after = await until('the marble moved', async () => { const t = await tip(); return Math.hypot(t.x - before.x, t.y - before.y) > 20 ? t : null }, 5000)
     if (after.x <= before.x) throw new Error(`it went left (${before.x.toFixed(0)} → ${after.x.toFixed(0)}) for a swipe right`)
     return `stick ${before.x.toFixed(0)},${before.y.toFixed(0)} → ${after.x.toFixed(0)},${after.y.toFixed(0)}, lit ${after.life.toFixed(2)}`
   })
 
-  await check('a phone that leaves lets its ribbon go', async () => {
+  await check('a phone that leaves lets its marble go', async () => {
     await phone.close()
     await until('nobody on the page', () => screen.evaluate(() => window.__obpal.participants.length === 0), 20000)
     await until('the hero not live', () => screen.evaluate(() => !document.querySelector('.hero').hasAttribute('data-live')), 5000)
-    await until('the ribbon gone', () => screen.evaluate(() => window.__home.tips().every((t) => t.id === 'me')), 8000)
+    await until('the marble gone', () => screen.evaluate(() => window.__home.tips().every((t) => t.id === 'me')), 8000)
   })
 
   await check('no page errors on the computer', async () => { if (screenErrors.length) throw new Error(screenErrors.join(' | ')) })

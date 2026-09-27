@@ -27,12 +27,13 @@
 .hero-copy { min-width: 0; }
 .hero h1 { margin: 0 0 24px; max-width: 11.5ch; font: 800 clamp(46px, 7.2vw, 104px)/0.98 var(--font-display); letter-spacing: -0.045em; text-wrap: balance; }
 .hero h1 .keep { white-space: nowrap; }
-/* The headline catches the ribbon's light: white-hot where it is, lime around it, then back to ink. */
-.hero h1.lit {
-  background: radial-gradient(circle var(--lr, 0px) at var(--lx, -999px) var(--ly, -999px), rgb(var(--core-rgb)) 0%, var(--bb-accent) 32%, rgb(var(--haze-rgb)) 64%, var(--ink) 100%);
-  -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent;
-}
-@media (forced-colors: active) { .hero h1.lit { background: none; color: CanvasText; -webkit-text-fill-color: CanvasText; } }
+/* Once the bounce field is up, its 3D letters stand where the headline's text was: the text stays for screen
+   readers and the layout, and gives way to them (a crossfade, the letters rising out of the page). */
+.hero h1.lit { color: var(--ink); transition: color 0.25s var(--ease); }
+.hero-stage { opacity: 0; transition: opacity 0.6s var(--ease) 0.18s; }
+html.field3d .hero h1.lit { color: transparent; }
+html.field3d .hero-stage { opacity: 1; }
+@media (forced-colors: active) { html.field3d .hero h1.lit { color: CanvasText; } html.field3d .hero-stage { display: none; } }
 .hero .lede { margin: 0 0 32px; max-width: 34em; color: var(--secondary); font-size: clamp(17px, 1.5vw, 20px); line-height: 1.55; }
 .hero .cta { display: flex; flex-wrap: wrap; gap: 12px; }
 .cta-main { position: relative; overflow: hidden; min-height: 54px; padding: 0 26px; font-size: 16px; text-decoration: none; }

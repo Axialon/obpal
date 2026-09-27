@@ -18,7 +18,7 @@ export async function startPairing(slot: HTMLElement): Promise<Paired> {
   })
   slot.replaceChildren()
   // 'This device' opens the phone controller in a tab: no phone at hand, and it still paints (with its trackpad).
-  remote.mountPairing(slot, { variant: 'compact', title: 'Scan to paint' })
+  remote.mountPairing(slot, { variant: 'compact', title: 'Scan to play' })
   addEventListener('pagehide', () => remote.destroy(), { once: true })
   return { remote, Pointer }
 }

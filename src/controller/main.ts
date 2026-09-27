@@ -731,6 +731,16 @@ async function boot(code: PairingCode) {
     const trackTab = surface.querySelector<HTMLElement>('.modes [data-tab=track]')!
     trackTab.hidden = !hostModes().includes(Mode.track)
     if (tab === 'track' && trackTab.hidden) { tab = 'rotate'; queueMicrotask(setMode) }
+    // Only the modes this screen takes: a screen that only takes pointing (the home page's try-out) opens in Point.
+    const rotateTab = surface.querySelector<HTMLElement>('.modes [data-tab=rotate]')!
+    const pointTab = surface.querySelector<HTMLElement>('.modes [data-tab=point]')!
+    const hm = hostModes()
+    rotateTab.hidden = !(hm.includes(Mode.hold) || hm.includes(Mode.tilt))
+    pointTab.hidden = !hm.includes(Mode.point)
+    if ((tab === 'rotate' && rotateTab.hidden) || (tab === 'point' && pointTab.hidden)) {
+      const next: Tab = !pointTab.hidden ? 'point' : !rotateTab.hidden ? 'rotate' : tab
+      if (next !== tab) { tab = next; queueMicrotask(setMode) }
+    }
     if (mode !== Mode.track) glowing = false
     const start = document.getElementById('track-start')!
     // The phone's own sensors need no start: hold the pad and move. The camera ways start from a tap.

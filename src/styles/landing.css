@@ -1,9 +1,11 @@
 .land { max-width: 1040px; margin: 0 auto; padding: 24px 20px 48px; }
-.hero { padding: 72px 0 48px; max-width: 760px; }
-.eyebrow { color: var(--accent-text); font-weight: 700; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 12px; }
-.hero h1 { font-family: var(--font-display); font-weight: 800; font-size: clamp(38px, 5.2vw, 64px); line-height: 1.08; letter-spacing: -0.035em; margin: 0 0 18px; }
-.lede { font-size: 18px; color: var(--secondary); margin: 0 0 28px; max-width: 620px; }
-.cta { display: flex; flex-wrap: wrap; gap: 12px; }
+/* Base styles for the site's simple pages, at zero specificity (:where) so a page's own stylesheet always wins,
+   whatever order the build links them in (the home page's hero was capped at 760px when this one loaded last). */
+:where(.hero) { padding: 72px 0 48px; max-width: 760px; }
+:where(.eyebrow) { color: var(--accent-text); font-weight: 700; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 12px; }
+:where(.hero) :where(h1) { font-family: var(--font-display); font-weight: 800; font-size: clamp(38px, 5.2vw, 64px); line-height: 1.08; letter-spacing: -0.035em; margin: 0 0 18px; }
+:where(.lede) { font-size: 18px; color: var(--secondary); margin: 0 0 28px; max-width: 620px; }
+:where(.cta) { display: flex; flex-wrap: wrap; gap: 12px; }
 .cta .btn { text-decoration: none; }
 .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; padding: 24px 0; }
 .steps article { padding: 22px; border-radius: 22px; background: var(--glass); border: 1px solid var(--line); }

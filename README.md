@@ -1,6 +1,6 @@
 # ob-pal
 
-Turn any phone into a remote for 3D and on-screen navigation. Scan a QR code and your phone steers the screen: turn it to rotate objects, point to aim, swipe to orbit. There's nothing to install on the phone or the screen.
+Turn any phone into a remote for 3D and on-screen navigation. Scan a QR code and your phone steers the screen: turn it to rotate objects, point to aim, swipe to orbit. The phone needs no app: the controller opens in its browser.
 
 **Live:** https://obpal.blackboxes.net. Open [/view](https://obpal.blackboxes.net/view/) on a computer, then scan the code with your phone.
 
