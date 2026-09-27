@@ -18,7 +18,10 @@ const version = /^version\s*=\s*"([^"]+)"/m.exec(await readFile(resolve(here, 'C
 // Windows text: CRLF line ends, which batch files need and every editor reads.
 const crlf = (s) => s.replace(/\r?\n/g, '\r\n')
 const text = async (p) => crlf(await readFile(p, 'utf8'))
-const readme = (await text(resolve(here, 'package/README.txt'))).replace('{version}', version.replace(/\.0$/, ''))
+// The title carries the version, and its underline follows its length.
+const readme = (await text(resolve(here, 'package/README.txt')))
+  .replace('{version}', version.replace(/\.0$/, ''))
+  .replace(/^(.*)\r\n=+\r\n/, (_, title) => `${title}\r\n${'='.repeat(title.length)}\r\n`)
 
 const bytes = await zip([], here, {
   'obpal-desktop/obpal-desktop.exe': await readFile(exe),

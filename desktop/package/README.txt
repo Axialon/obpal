@@ -29,7 +29,10 @@ Safety
   - Windows keeps programs running as administrator out of reach.
 
 Uninstall
-  Double-click uninstall.cmd, then delete this folder.
+  Double-click uninstall.cmd. It removes the browser registration, the settings and the files
+  in this folder, and the folder itself once it's empty. The browser can stay open: a running
+  ob.Pal Desktop notices and stops by itself. To start over completely, also remove ob.Pal Link
+  from the browser's extensions page (that clears its pairings).
 
 Windows may warn that the program is unrecognised: it isn't code-signed yet. Source:
 https://github.com/Axialon/obpal (desktop/). Questions: hello@obpal.blackboxes.net

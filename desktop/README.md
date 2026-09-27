@@ -26,7 +26,12 @@ obpal-desktop.exe install      # writes net.blackboxes.obpal.json next to the ex
                                # Chrome, Chromium, Edge, Brave and Vivaldi under HKCU (this user only)
 obpal-desktop.exe status       # where it is registered, and whether the keys point at this exe
 obpal-desktop.exe uninstall    # removes exactly those registry keys and the manifest
+obpal-desktop.exe uninstall --purge   # and the settings (%APPDATA%\obpal)
 ```
+
+A helper the browser is running checks every second that its manifest is still there; once `uninstall` has removed it, the helper lets go of everything and stops, so the folder can be deleted with the browser open. `install` refuses to run from a temporary folder (install.cmd double-clicked inside the zip), which Windows would clear later.
+
+The release zip's `uninstall.cmd` asks, then runs `uninstall --purge`, waits for a running helper to stop, deletes the files it installed and removes the folder if nothing else is left in it (`uninstall.cmd /y` doesn't ask). `node desktop/pack.mjs` builds that zip after `cargo build --release`.
 
 Keep the exe where you installed it from: the manifest points at that path. Moving it means `install` again.
 
@@ -76,7 +81,7 @@ Remote-input tools have a history of remote code execution (PLAN.md §9). The he
 - **Panic hotkey:** `Ctrl+Alt+Backspace`, registered system-wide while the helper runs. It releases everything and stops injection until *Resume* in the extension. If another program owns that combination, the extension shows that there is no panic key.
 
 **Configuration**
-- `%APPDATA%\obpal\desktop.json`: the allowlist and the pause flag. Written only by the helper, atomically, in response to validated messages from the extension. A damaged or hand-edited file with invalid entries is treated as empty. Nothing else is stored: no input, no titles.
+- `%APPDATA%\obpal\desktop.json`: the allowlist, Whole PC and the pause flag. Written only by the helper, atomically, in response to validated messages from the extension. A damaged or hand-edited file with invalid entries is treated as empty. Nothing else is stored: no input, no titles.
 - `%APPDATA%\obpal\desktop.log`: lifecycle lines (start, origin, hotkey, stop with counters). Never input.
 
 ## Protocol

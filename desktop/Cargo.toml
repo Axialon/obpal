@@ -1,6 +1,6 @@
 [package]
 name = "obpal-desktop"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "MIT"
 description = "ob.Pal Desktop: the native helper that turns phone input into keyboard and mouse input for allowed programs, reached only through the ob.Pal Link browser extension (Chrome Native Messaging)."

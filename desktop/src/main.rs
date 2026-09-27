@@ -22,10 +22,12 @@ use scope::Config;
 use session::Session;
 
 const POLL: Duration = Duration::from_millis(50);
+/// How often a running helper checks that it is still installed.
+const INSTALLED_CHECK: Duration = Duration::from_secs(1);
 
 fn usage() {
     println!(
-        "obpal-desktop {}\n\n  obpal-desktop install [--origin chrome-extension://<id>/ ...]   register for Chrome, Chromium, Edge, Brave, Vivaldi (this user)\n  obpal-desktop uninstall                                        remove that registration\n  obpal-desktop status                                           show where it is registered\n\nWithout a command it serves the browser that launched it over stdin/stdout.",
+        "obpal-desktop {}\n\n  obpal-desktop install [--origin chrome-extension://<id>/ ...]   register for Chrome, Chromium, Edge, Brave, Vivaldi (this user)\n  obpal-desktop uninstall [--purge]                              remove that registration (--purge: and the settings)\n  obpal-desktop status                                           show where it is registered\n\nWithout a command it serves the browser that launched it over stdin/stdout. It stops by itself when uninstalled.",
         session::VERSION
     );
 }
@@ -47,7 +49,11 @@ fn main() -> ExitCode {
             }
             report(platform::install(&origins))
         }
-        Some("uninstall") => report(platform::uninstall()),
+        Some("uninstall") => match args[1..].iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+            [] => report(platform::uninstall(false)),
+            ["--purge"] => report(platform::uninstall(true)),
+            [other, ..] => fail(&format!("unknown option {other}")),
+        },
         Some("status") => report(platform::status()),
         Some("--version" | "-V" | "version") => {
             println!("obpal-desktop {}", session::VERSION);
@@ -139,6 +145,10 @@ fn serve(args: &[String]) -> ExitCode {
     log.line(&format!("browser: {}", browser.as_deref().unwrap_or("not found")));
     let (injector, foreground) = platform::backends(browser);
     let mut session = Session::new(injector, foreground, cfg, cfg_path, hotkey);
+    // Uninstalled while running (its manifest is gone): let go of everything and stop, so the folder can be
+    // deleted without closing the browser. Only when it was there at the start (a development run has none).
+    let manifest = platform::manifest_path().filter(|p| p.exists());
+    let mut checked = Instant::now();
     let mut out = io::stdout().lock();
     let send = |replies: Vec<Reply>, out: &mut io::StdoutLock| -> bool {
         for r in replies {
@@ -150,6 +160,13 @@ fn serve(args: &[String]) -> ExitCode {
     };
 
     loop {
+        if checked.elapsed() >= INSTALLED_CHECK {
+            checked = Instant::now();
+            if manifest.as_ref().is_some_and(|m| !m.exists()) {
+                log.line("uninstalled: stopping");
+                break;
+            }
+        }
         if panic.swap(false, Ordering::SeqCst) {
             log.line("panic hotkey pressed: released everything, stopped");
             if !send(session.on_panic(), &mut out) {
@@ -214,8 +231,11 @@ mod platform {
     pub fn install(origins: &[String]) -> Result<Vec<String>, String> {
         win::install::install(origins).map(|r| r.lines)
     }
-    pub fn uninstall() -> Result<Vec<String>, String> {
-        win::install::uninstall().map(|r| r.lines)
+    pub fn uninstall(purge: bool) -> Result<Vec<String>, String> {
+        win::install::uninstall(purge).map(|r| r.lines)
+    }
+    pub fn manifest_path() -> Option<std::path::PathBuf> {
+        win::install::manifest_path().ok()
     }
     pub fn status() -> Result<Vec<String>, String> {
         win::install::status().map(|r| r.lines)
@@ -251,8 +271,11 @@ mod platform {
     pub fn install(_: &[String]) -> Result<Vec<String>, String> {
         Err(UNSUPPORTED.into())
     }
-    pub fn uninstall() -> Result<Vec<String>, String> {
+    pub fn uninstall(_: bool) -> Result<Vec<String>, String> {
         Err(UNSUPPORTED.into())
+    }
+    pub fn manifest_path() -> Option<std::path::PathBuf> {
+        None
     }
     pub fn status() -> Result<Vec<String>, String> {
         Err(UNSUPPORTED.into())

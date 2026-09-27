@@ -1,9 +1,11 @@
 //! Native messaging host registration, per user and without admin rights.
 //!
 //! `install` writes the host manifest next to the executable and points the browsers' per-user registry
-//! keys at it; `uninstall` removes exactly those keys and the manifest. Chrome, Chromium, Edge, Brave and
-//! Vivaldi each read their own `HKCU\Software\<vendor>\NativeMessagingHosts\<name>` key, whose default
-//! value is the manifest path.
+//! keys at it; `uninstall` removes exactly those keys and the manifest (and with `--purge`, the settings too).
+//! Chrome, Chromium, Edge, Brave and Vivaldi each read their own
+//! `HKCU\Software\<vendor>\NativeMessagingHosts\<name>` key, whose default value is the manifest path.
+//! A helper the browser is running notices its manifest is gone and stops (see `serve`), so the folder can be
+//! deleted without closing the browser.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -46,7 +48,7 @@ pub fn valid_origin(o: &str) -> bool {
 pub fn manifest_json(exe: &Path, origins: &[String]) -> String {
     let m = serde_json::json!({
         "name": HOST_NAME,
-        "description": "ob.Pal Desktop: keyboard and mouse for allowed programs, from your phone through ob.Pal Link.",
+        "description": "ob.Pal Desktop: your phone as this PC's mouse and keyboard, through ob.Pal Link.",
         "path": exe.to_string_lossy(),
         "type": "stdio",
         "allowed_origins": origins,
@@ -134,6 +136,14 @@ pub struct Report {
     pub lines: Vec<String>,
 }
 
+/// Is `exe` inside `temp`? Double-clicking install.cmd inside a zip runs it from a temporary copy that
+/// Windows clears later, which would leave the browsers pointing at nothing.
+pub fn in_temp(exe: &Path, temp: &Path) -> bool {
+    let norm = |p: &Path| p.to_string_lossy().replace('/', "\\").trim_end_matches('\\').to_lowercase();
+    let (exe, temp) = (norm(exe), norm(temp));
+    !temp.is_empty() && exe.starts_with(&format!("{temp}\\"))
+}
+
 /// Write the manifest and register it for every supported browser.
 pub fn install(extra_origins: &[String]) -> Result<Report, String> {
     for o in extra_origins {
@@ -142,6 +152,14 @@ pub fn install(extra_origins: &[String]) -> Result<Report, String> {
         }
     }
     let exe = exe_path()?;
+    // Long paths on both sides: TEMP may be written in 8.3 form.
+    let long = |p: PathBuf| fs::canonicalize(&p).unwrap_or(p);
+    if in_temp(&long(exe.clone()), &long(std::env::temp_dir())) {
+        return Err(format!(
+            "this copy runs from a temporary folder ({}), which Windows clears. Unzip ob.Pal Desktop into a folder you'll keep, then run install.cmd from there.",
+            exe.parent().map_or_else(String::new, |p| p.display().to_string())
+        ));
+    }
     let manifest = manifest_path()?;
     let mut origins = default_origins();
     for o in extra_origins {
@@ -160,8 +178,9 @@ pub fn install(extra_origins: &[String]) -> Result<Report, String> {
     Ok(Report { lines })
 }
 
-/// Remove the registry keys and the manifest. Reports what was actually there.
-pub fn uninstall() -> Result<Report, String> {
+/// Remove the registry keys and the manifest, and with `purge` the settings folder (the allowlist, Whole PC,
+/// the pause and the log). Reports what was actually there.
+pub fn uninstall(purge: bool) -> Result<Report, String> {
     let manifest = manifest_path()?;
     let mut lines = Vec::new();
     for (name, sub) in BROWSERS {
@@ -176,7 +195,27 @@ pub fn uninstall() -> Result<Report, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => lines.push(format!("absent    {}", manifest.display())),
         Err(e) => return Err(format!("cannot delete {}: {e}", manifest.display())),
     }
+    if purge {
+        if let Some(dir) = crate::scope::Config::default_path().and_then(|p| p.parent().map(Path::to_path_buf)) {
+            lines.push(remove_settings(&dir)?);
+        }
+    }
     Ok(Report { lines })
+}
+
+/// Delete the settings folder. A helper the browser started keeps its log open until it notices the uninstall
+/// (within a second or so), so this tries for a few seconds.
+fn remove_settings(dir: &Path) -> Result<String, String> {
+    let mut last = None;
+    for _ in 0..30 {
+        match fs::remove_dir_all(dir) {
+            Ok(()) => return Ok(format!("deleted   {} (settings)", dir.display())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(format!("absent    {} (settings)", dir.display())),
+            Err(e) => last = Some(e),
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    Err(format!("cannot delete {}: {}", dir.display(), last.map_or_else(String::new, |e| e.to_string())))
 }
 
 /// Where the host is registered right now, and whether it points at this executable's manifest.
@@ -219,6 +258,26 @@ mod tests {
         assert!(!valid_origin("https://example.com/"));
         assert!(!valid_origin("chrome-extension://jnnpcnoilofjaffabnhecfokjjknlemq/"), "q is outside a-p");
         assert!(default_origins().iter().all(|o| valid_origin(o)));
+    }
+
+    #[test]
+    fn refuses_to_install_from_a_temporary_copy() {
+        let temp = Path::new("C:\\Users\\me\\AppData\\Local\\Temp");
+        assert!(in_temp(Path::new("C:\\Users\\me\\AppData\\Local\\Temp\\Temp1_obpal-desktop-windows-x64.zip\\obpal-desktop\\obpal-desktop.exe"), temp));
+        assert!(in_temp(Path::new("c:/users/me/appdata/local/temp/x/obpal-desktop.exe"), Path::new("C:\\Users\\me\\AppData\\Local\\Temp\\")));
+        assert!(!in_temp(Path::new("C:\\Users\\me\\Downloads\\obpal-desktop\\obpal-desktop.exe"), temp));
+        assert!(!in_temp(Path::new("C:\\Users\\me\\AppData\\Local\\TempTools\\obpal-desktop.exe"), temp), "a sibling that merely starts the same");
+        assert!(!in_temp(Path::new("C:\\x\\obpal-desktop.exe"), Path::new("")));
+    }
+
+    #[test]
+    fn removing_settings_that_are_not_there_is_fine() {
+        let dir = std::env::temp_dir().join(format!("obpal-desktop-settings-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("desktop.json"), b"{}").unwrap();
+        assert!(remove_settings(&dir).unwrap().starts_with("deleted"));
+        assert!(!dir.exists());
+        assert!(remove_settings(&dir).unwrap().starts_with("absent"));
     }
 
     #[test]
