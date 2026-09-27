@@ -5,3 +5,5 @@ export {
   Mode, Tier, PadButton, PadFlag, PointerFlag, pointerDelta, PROFILES, PROFILE_IDS, isProfileId,
   type Layout, type TrayControl, type ModeId, type TierId, type Quat, type PadState, type PointerState, type Profile, type ProfileId,
 } from '@obpal/core'
+export { handMove, handTurn, headingOf } from './hand'
+export { findBlob, GlowCamera, GlowFollower, glowMove, hsv, hueOf, type Blob } from './glow'

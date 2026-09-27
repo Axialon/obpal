@@ -7,7 +7,11 @@
 //!   frame cannot leave a key down that the extension thinks is up.
 //! - Every frame is gated on the foreground program, looked up per frame (the `Foreground` backend makes an
 //!   unchanged window cheap): only an allowed program receives input, and only the kinds its scope allows. An elevated window is refused and reported.
-//! - Everything held is released when the foreground changes, on disable, pause, panic, disconnect, and
+//! - Whole-PC mode, when a person turns it on, replaces the per-program gate: every window receives input with
+//!   its scope, the browser included. Elevated windows are reported, not refused: Windows drops input to them
+//!   (UIPI), and the pointer must stay free to leave them.
+//! - Everything held is released when the foreground changes (except in whole-PC mode, where a click that
+//!   brings a window to the front must not end its own drag), on disable, pause, panic, disconnect, and
 //!   after `WATCHDOG` without frames. Frames are rate-limited to `MAX_FRAMES_PER_SEC`.
 //!
 //! OS access goes through the `Injector` and `Foreground` traits, so this module is unit-tested with mocks
@@ -151,7 +155,7 @@ impl<I: Injector, F: Foreground> Session<I, F> {
                     version: VERSION,
                     os: OS,
                     hotkey: self.hotkey.clone(),
-                    caps: Caps { keyboard: true, mouse: true, gamepad: false },
+                    caps: Caps { keyboard: true, mouse: true, gamepad: false, desktop: true },
                 });
                 out.push(self.config_reply());
                 self.refresh_front(now, true);
@@ -192,6 +196,13 @@ impl<I: Injector, F: Foreground> Session<I, F> {
             },
             Request::Forget { path } => {
                 if self.cfg.forget(&path) {
+                    self.release_all();
+                    self.persist(&mut out);
+                }
+                out.push(self.config_reply());
+            }
+            Request::Desktop { on, keyboard, mouse } => {
+                if self.cfg.set_desktop(on.then_some(Scope { keyboard, mouse, gamepad: false })) {
                     self.release_all();
                     self.persist(&mut out);
                 }
@@ -292,6 +303,11 @@ impl<I: Injector, F: Foreground> Session<I, F> {
             return Err(Refusal::Paused);
         }
         self.refresh_front(now, false);
+        // Whole PC: whatever is in front, the browser included. Windows itself drops input to an elevated window
+        // (UIPI); the status reports it, and the pointer can still move off it and click another window.
+        if let Some(scope) = self.cfg.desktop_scope() {
+            return Ok(scope);
+        }
         let Some(w) = &self.front else { return Err(Refusal::NoWindow) };
         if w.path.is_empty() {
             return Err(Refusal::NoWindow);
@@ -374,7 +390,10 @@ impl<I: Injector, F: Foreground> Session<I, F> {
             (None, None) => true,
             _ => false,
         };
-        if !same && self.is_holding() {
+        // A new window in front gets nothing that was held for the old one. In whole-PC mode the held state belongs
+        // to the PC, not a window: pressing on a window in the background brings it to the front, and releasing
+        // then would end every drag that starts there.
+        if !same && self.is_holding() && self.cfg.desktop_scope().is_none() {
             self.release_all();
         }
         if let Some(w) = &next {
@@ -419,7 +438,7 @@ impl<I: Injector, F: Foreground> Session<I, F> {
     }
 
     fn config_reply(&self) -> Reply {
-        Reply::Config { paused: self.cfg.paused, programs: self.cfg.programs.clone() }
+        Reply::Config { paused: self.cfg.paused, desktop: self.cfg.desktop, programs: self.cfg.programs.clone() }
     }
 
     fn persist(&mut self, out: &mut Vec<Reply>) {
@@ -535,7 +554,7 @@ mod tests {
     fn hello_answers_with_hello_config_and_status() {
         let mut t = T::new();
         let out = t.s.handle(Request::Hello { v: 1 }, t.at(0));
-        assert!(matches!(out[0], Reply::Hello { v: PROTO, caps: Caps { keyboard: true, mouse: true, gamepad: false }, .. }));
+        assert!(matches!(out[0], Reply::Hello { v: PROTO, caps: Caps { keyboard: true, mouse: true, gamepad: false, desktop: true }, .. }));
         assert!(matches!(out[1], Reply::Config { paused: false, .. }));
         assert!(matches!(out[2], Reply::Status { enabled: false, panic: false, held: false, front: None, program: None }));
         assert_eq!(out.len(), 3);
@@ -781,5 +800,101 @@ mod tests {
         assert_eq!(refused(&t).no_window, 1);
         assert!(t.take().is_empty());
         assert!(lookup("KeyW").is_some());
+    }
+
+    fn desktop(t: &mut T, on: bool, keyboard: bool, mouse: bool, ms: u64) -> Vec<Reply> {
+        t.s.handle(Request::Desktop { on, keyboard, mouse }, t.at(ms))
+    }
+
+    #[test]
+    fn whole_pc_mode_reaches_every_window_until_it_is_turned_off() {
+        let mut t = T::new();
+        t.s.handle(Request::Hello { v: 1 }, t.at(0));
+        t.s.handle(Request::Enable { on: true }, t.at(0));
+        t.front(Some(win(&abs("notepad.exe"))));
+        t.s.handle(frame(&["KeyW"]), t.at(10));
+        assert_eq!(refused(&t).not_allowed, 1, "off by default: nothing is allowed");
+        let out = desktop(&mut t, true, true, true, 20);
+        assert!(matches!(&out[0], Reply::Config { desktop: Some(Scope { keyboard: true, mouse: true, .. }), .. }), "{out:?}");
+        t.s.handle(full(&["KeyW"], &[0], [4, 2], [0, 120]), t.at(30));
+        assert_eq!(t.take(), ["KeyW+", "b0+", "m4,2", "w0,120"]);
+        // the browser, an elevated window, and no window at all: all still receive input
+        let mut b = win(&abs("chrome.exe"));
+        b.browser = true;
+        b.pid = 7;
+        t.front(Some(b));
+        t.s.handle(full(&["KeyW"], &[0], [1, 0], [0, 0]), t.at(40));
+        assert_eq!(t.take(), ["m1,0"], "still held across the switch, and the pointer moves");
+        let mut e = win(&abs("taskmgr.exe"));
+        e.elevated = true;
+        e.pid = 8;
+        t.front(Some(e));
+        t.s.handle(full(&[], &[], [2, 0], [0, 0]), t.at(50));
+        assert_eq!(t.take(), ["KeyW-", "b0-", "m2,0"]);
+        t.front(None);
+        t.s.handle(full(&[], &[2], [0, 0], [0, 0]), t.at(60));
+        assert_eq!(t.take(), ["b2+"]);
+        assert_eq!(t.s.stats().refused.elevated + t.s.stats().refused.no_window, 0);
+        // off again: released, and back to the allowlist
+        t.front(Some(win(&abs("notepad.exe"))));
+        desktop(&mut t, false, true, true, 70);
+        assert_eq!(t.take(), ["b2-"]);
+        t.s.handle(frame(&["KeyW"]), t.at(80));
+        assert_eq!(refused(&t).not_allowed, 2);
+        assert!(t.take().is_empty());
+    }
+
+    #[test]
+    fn whole_pc_mode_keeps_a_drag_across_the_click_that_raises_a_window() {
+        let mut t = T::new();
+        t.s.handle(Request::Hello { v: 1 }, t.at(0));
+        t.s.handle(Request::Enable { on: true }, t.at(0));
+        desktop(&mut t, true, true, true, 0);
+        t.front(Some(win(&abs("explorer.exe"))));
+        t.s.handle(full(&[], &[0], [0, 0], [0, 0]), t.at(10));
+        assert_eq!(t.take(), ["b0+"]);
+        // the press brought another window to the front: the button stays down and the drag goes on
+        let mut w = win(&abs("notepad.exe"));
+        w.pid = 9;
+        t.front(Some(w));
+        t.s.poll(t.at(20));
+        t.s.handle(full(&[], &[0], [30, 5], [0, 0]), t.at(30));
+        t.s.handle(full(&[], &[], [0, 0], [0, 0]), t.at(40));
+        assert_eq!(t.take(), ["m30,5", "b0-"]);
+    }
+
+    #[test]
+    fn whole_pc_mode_honours_its_scope_pause_panic_and_the_watchdog() {
+        let mut t = T::new();
+        t.s.handle(Request::Hello { v: 1 }, t.at(0));
+        t.s.handle(Request::Enable { on: true }, t.at(0));
+        t.front(Some(win(&abs("notepad.exe"))));
+        desktop(&mut t, true, false, true, 0);
+        t.s.handle(full(&["KeyW"], &[0], [1, 1], [0, 0]), t.at(10));
+        assert_eq!(t.take(), ["b0+", "m1,1"], "mouse only");
+        desktop(&mut t, true, true, false, 20);
+        assert_eq!(t.take(), ["b0-"], "a scope change releases");
+        t.s.handle(full(&["KeyW"], &[0], [1, 1], [0, 0]), t.at(30));
+        assert_eq!(t.take(), ["KeyW+"], "keyboard only");
+        t.s.handle(Request::Pause { on: true }, t.at(40));
+        assert_eq!(t.take(), ["KeyW-"]);
+        t.s.handle(frame(&["KeyW"]), t.at(50));
+        assert_eq!(refused(&t).paused, 1);
+        t.s.handle(Request::Pause { on: false }, t.at(60));
+        t.s.handle(frame(&["KeyW"]), t.at(70));
+        assert_eq!(t.take(), ["KeyW+"]);
+        t.s.on_panic();
+        assert_eq!(t.take(), ["KeyW-"]);
+        t.s.handle(frame(&["KeyW"]), t.at(80));
+        assert_eq!(refused(&t).panic, 1);
+        t.s.handle(Request::Resume, t.at(90));
+        t.s.handle(frame(&["KeyW"]), t.at(100));
+        t.take();
+        t.s.poll(t.at(700));
+        assert_eq!(t.take(), ["KeyW-"], "the watchdog still lets go");
+        // on with nothing allowed is off
+        desktop(&mut t, true, false, false, 710);
+        t.s.handle(frame(&["KeyW"]), t.at(720));
+        assert_eq!(refused(&t).not_allowed, 1);
     }
 }

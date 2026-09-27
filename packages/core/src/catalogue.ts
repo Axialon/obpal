@@ -107,3 +107,45 @@ export function offeredMotion(utilities: readonly string[] | undefined): MotionU
   if (!utilities) return [...MOTION_UTILITIES]
   return MOTION_UTILITIES.filter((m) => utilities.includes(m))
 }
+
+/** A profile anyone can write (the catalogue's builder, the SDK, an AI agent): a built-in's shape with its own id. */
+export type ProfileSpec = Omit<Profile, 'id'> & { id: string }
+
+/** The ranges resolveProfile() keeps settings in, and the id a new profile may take. */
+export const PROFILE_LIMITS = { gain: [0.25, 4], curve: [0.5, 3], deadzone: [0, 0.5], id: /^[a-z][a-z0-9-]{1,31}$/, name: 40, for: 120 } as const
+
+/**
+ * Check a proposed profile (spec/CATALOGUE.md §3; public/profile.schema.json says the same): every field present and
+ * in range, routes the utility can take, an id that isn't a built-in's. Returns the profile, or what's wrong.
+ */
+export function checkProfile(x: unknown): { profile: ProfileSpec | null; errors: string[] } {
+  const errors: string[] = []
+  const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>
+  const id = typeof o.id === 'string' ? o.id : ''
+  if (!PROFILE_LIMITS.id.test(id)) errors.push('id: 2 to 32 characters, lowercase letters, digits and dashes, starting with a letter')
+  else if (isProfileId(id)) errors.push(`id: "${id}" is a built-in profile`)
+  for (const k of ['name', 'for'] as const) {
+    const v = o[k]
+    if (typeof v !== 'string' || !v.trim()) errors.push(`${k}: required`)
+    else if (v.length > PROFILE_LIMITS[k]) errors.push(`${k}: at most ${PROFILE_LIMITS[k]} characters`)
+  }
+  const on = Array.isArray(o.on) ? o.on : []
+  if (!Array.isArray(o.on)) errors.push('on: a list of utilities (it may be empty)')
+  for (const u of on) if (!(MOTION_UTILITIES as readonly unknown[]).includes(u)) errors.push(`on: "${String(u)}" isn't one of ${MOTION_UTILITIES.join(', ')}`)
+  const settings = {} as Record<'aim' | 'steer' | 'point', UtilitySettings>
+  for (const utility of MOTION_UTILITIES) {
+    const key = utilityKey(utility)
+    const s = (o[key] && typeof o[key] === 'object' ? o[key] : null) as Record<string, unknown> | null
+    if (!s) { errors.push(`${key}: required`); continue }
+    const routes = ROUTES[utility] as readonly unknown[]
+    if (!routes.includes(s.route)) errors.push(`${key}.route: one of ${routes.join(', ')}`)
+    for (const n of ['gain', 'curve', 'deadzone'] as const) {
+      const [lo, hi] = PROFILE_LIMITS[n]
+      if (typeof s[n] !== 'number' || !Number.isFinite(s[n]) || (s[n] as number) < lo || (s[n] as number) > hi) errors.push(`${key}.${n}: a number from ${lo} to ${hi}`)
+    }
+    for (const b of ['invertY', 'edgeTurn'] as const) if (typeof s[b] !== 'boolean') errors.push(`${key}.${b}: true or false`)
+    settings[key] = { route: s.route as Route, gain: s.gain as number, curve: s.curve as number, deadzone: s.deadzone as number, invertY: !!s.invertY, edgeTurn: !!s.edgeTurn }
+  }
+  if (errors.length) return { profile: null, errors }
+  return { profile: { id, name: (o.name as string).trim(), for: (o.for as string).trim(), on: on as MotionUtility[], ...settings }, errors }
+}

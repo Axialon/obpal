@@ -1,7 +1,7 @@
 /**
  * Popup: the ob.Pal lockup, the pairing QR (or the connected phone), and the controls: control this tab,
  * what the phone drives (Controller / 3D / Keys / PC), the optional "All sites" permission, and for the PC
- * target the program in front: allow it, or see what is being controlled.
+ * target: the whole PC, or the program in front (allow it, or see what is being controlled).
  * It renders from storage (written by the service worker) and asks the worker to change things.
  *
  * Two kinds of code: the online one (through the room service) and, for a remembered phone, a direct LAN code
@@ -27,7 +27,7 @@ const MODES: Record<TargetMode, { label: string; icon: string; title: string }> 
   gamepad: { label: 'Controller', icon: LINK_ICONS.gamepad, title: 'Controller: a virtual gamepad for Gamepad API games' },
   viewer: { label: '3D', icon: ICONS.cube, title: '3D viewer: drag to rotate, pan and zoom' },
   keys: { label: 'Keys', icon: LINK_ICONS.keys, title: 'Keys: WASD, arrows, action keys and mouse' },
-  pc: { label: 'PC', icon: LINK_ICONS.pc, title: 'PC: keyboard and mouse for programs you allow, through ob.Pal Desktop' },
+  pc: { label: 'PC', icon: LINK_ICONS.pc, title: 'PC: this computer’s mouse and keyboard, through ob.Pal Desktop' },
 }
 const STATUS: Record<LinkStatus, string> = { starting: 'Starting', ready: 'Ready', connecting: 'Connecting', connected: 'Connected', offline: 'Offline' }
 
@@ -98,6 +98,10 @@ app.innerHTML = `
         <button class="kind" type="button" data-kind="mouse" aria-pressed="true">${LINK_ICONS.mouse}<span>mouse</span></button>
       </div>
       <div class="pc-actions" id="pc-actions"></div>
+      <div class="pc-legend" id="pc-legend" hidden>
+        <p><b>Trackpad</b><span>tap click</span><span>hold right-click</span><span>hold, move drag</span><span>two fingers scroll</span><span>pinch zoom</span></p>
+        <p><b>Point</b><span>A click</span><span>hold A right-click</span><span>hold B, aim scroll</span><span>+ − zoom</span></p>
+      </div>
     </div>
     <button class="row" id="all" type="button" role="switch" aria-checked="false" title="Reach game frames hosted on other sites, and keep control across navigation">
       <span class="row-ic">${LINK_ICONS.globe}</span>
@@ -264,6 +268,7 @@ function renderPc() {
   if (!on) return
   const view = state.pcPermission ? pcView(state.pc) : { kind: 'permission' as const }
   const { icon, title, sub, actions, kinds, live } = describe(view)
+  $('pc-legend').hidden = !live
   const ic = $('pc-ic')
   ic.innerHTML = icon
   ic.classList.toggle('on', live)
@@ -287,9 +292,15 @@ function renderPc() {
 function describe(v: PcView): { icon: string; title: string; sub: string; actions: PcAction[]; kinds: boolean; live: boolean } {
   const pc = LINK_ICONS.pc
   const retry: PcAction = { label: 'Retry', run: () => void send({ to: 'bg', type: 'pc-connect' }) }
+  const pause: PcAction = { label: 'Pause', run: () => void send({ to: 'bg', type: 'pc-pause', on: true }) }
+  /** Offered beside the one-program views: the whole PC, or the helper update that brings it. */
+  const whole = (desktop: boolean, primary = false): PcAction =>
+    desktop
+      ? { label: primary ? 'Control the whole PC' : 'Whole PC', primary, run: () => setDesktop(true) }
+      : { label: 'Update for whole PC', run: () => void chrome.tabs.create({ url: DESKTOP_URL }) }
   switch (v.kind) {
     case 'permission':
-      return { icon: pc, title: 'PC', sub: 'Keyboard and mouse for programs you allow', actions: [{ label: 'Allow PC control', primary: true, run: requestNative }], kinds: false, live: false }
+      return { icon: pc, title: 'PC', sub: 'This computer’s mouse and keyboard', actions: [{ label: 'Allow PC control', primary: true, run: requestNative }], kinds: false, live: false }
     case 'connecting':
       return { icon: pc, title: 'Starting…', sub: 'ob.Pal Desktop', actions: [], kinds: false, live: false }
     case 'missing':
@@ -303,22 +314,39 @@ function describe(v: PcView): { icon: string; title: string; sub: string; action
       return { icon: LINK_ICONS.pause, title: 'Paused', sub: 'Nothing reaches any program', actions: [{ label: 'Resume', primary: true, run: () => void send({ to: 'bg', type: 'pc-pause', on: false }) }], kinds: false, live: false }
     case 'panic':
       return { icon: LINK_ICONS.pause, title: 'Stopped', sub: v.hotkey ? `Panic key ${v.hotkey}` : 'Panic key', actions: [{ label: 'Resume', primary: true, run: () => void send({ to: 'bg', type: 'pc-resume' }) }], kinds: false, live: false }
+    case 'desktop': {
+      const blocked = v.front?.elevated ? `${v.front.name} runs as administrator: Windows keeps it out of reach` : ''
+      return {
+        icon: pc, title: 'Controlling this PC', sub: blocked || `${scopeLabel(v.scope)} · every window`, kinds: false, live: true,
+        actions: [pause, { label: 'One program', run: () => setDesktop(false) }],
+      }
+    }
     case 'idle':
-      return { icon: pc, title: 'Switch to a program', sub: 'Then come back here to allow it', actions: [], kinds: false, live: false }
+      return v.desktop
+        ? { icon: pc, title: 'This PC', sub: 'Every window, or one program: switch to it, then come back', actions: [whole(true, true)], kinds: true, live: false }
+        : { icon: pc, title: 'Switch to a program', sub: 'Then come back here to allow it', actions: [whole(false)], kinds: false, live: false }
     case 'elevated':
-      return { icon: LINK_ICONS.shield, title: v.program.name, sub: 'Runs as administrator: can’t be controlled', actions: [], kinds: false, live: false }
+      return { icon: LINK_ICONS.shield, title: v.program.name, sub: 'Runs as administrator: can’t be controlled', actions: [whole(v.desktop)], kinds: v.desktop, live: false }
     case 'allow':
       return {
         icon: pc, title: v.program.name, sub: v.program.title || v.program.path, kinds: true, live: false,
-        actions: [{ label: `Allow ${v.program.name}`, primary: true, run: () => allowProgram(v.program.path) }],
+        actions: [{ label: `Allow ${v.program.name}`, primary: true, run: () => allowProgram(v.program.path) }, whole(v.desktop)],
       }
     case 'active':
       return {
         icon: pc, title: v.inFront ? `Controlling ${v.program.name}` : v.program.name, live: v.inFront, kinds: false,
         sub: scopeLabel(v.scope) + (v.inFront ? '' : ' · switch to it'),
-        actions: [{ label: 'Pause', run: () => void send({ to: 'bg', type: 'pc-pause', on: true }) }],
+        actions: [pause, whole(v.desktop)],
       }
   }
+}
+
+/** Whole-PC mode on (with the kinds chosen above) or off (back to one program at a time). */
+function setDesktop(on: boolean) {
+  const kind = (k: string) => pressed(pcKinds.find((b) => b.dataset.kind === k)!)
+  const keyboard = on ? kind('keyboard') : true
+  const mouse = on ? kind('mouse') : true
+  void send({ to: 'bg', type: 'pc-desktop', on, keyboard, mouse })
 }
 
 function allowProgram(path: string) {

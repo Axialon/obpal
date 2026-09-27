@@ -16,6 +16,7 @@ It does not become a one-off mode. The wire formats are in [PROTOCOL.md](PROTOCO
 | `motion.aim` | Motion | Gyro **turn rate** drives a look output. Moving the phone turns; holding it still stops. | Mixed into PAD axes, or a relative POINTER 0x14 (the `mouse` route) |
 | `motion.steer` | Motion | Tilt **angle** drives a stick. The tilt is held while the phone is held tilted. | Mixed into PAD axes |
 | `motion.point` | Pointer | Wii-style absolute pointing (PROTOCOL §4, Point mode): the cursor is where the phone points | POINTER 0x14 |
+| `motion.track` | 3D | 6-DOF: the phone's position and orientation in space (mode 6). By default from the phone's own sensors, Wii-style (no camera): the gyro's orientation through an arm model gives where the hand is, and the accelerometer adds pushes and pulls along where the phone points (`src/controller/imu3d.ts`). In settings, the camera instead (Android WebXR), or a glow for the host's camera. Hosts move what's held as the hand moves. In the Viewer, a held part moves and turns with the phone, a live value drags, and the lead with nothing held moves the scene. `handMove`, `handTurn` and `headingOf` in `@obpal/host` put a pose in the hand's terms | POSE 0x15 |
 | `touch.trackpad` | Touch | One-finger drag, two-finger pan, pinch, twist | STATE 0x11 |
 | `motion.hold` | 3D | 1:1 orientation while held | STATE 0x11 (qRel) |
 | `motion.tilt` | 3D | Racing-style tilt stick | STATE 0x11 (tilt) |
@@ -145,7 +146,7 @@ A control system is a kind of host. It decides what its nodes are, which utiliti
 | `system.scene3d` | ob.Pal Viewer | Each object, its movable parts, and the view (the lead's) | Point, Hold, Steer and Tilt, the trackpad, the gamepad | Shared scenes shipped |
 | `system.gamepad-slots` | ob.Pal Link in a browser game | Player 1–4 gamepad slots | `pad` and the Motion utilities | Public sim at [/sim/arena/](https://obpal.blackboxes.net/sim/arena/). In ob.Pal Link: planned. Each participant claims a slot, so a local-multiplayer game gets one pad per phone. |
 | `system.desktop` | ob.Pal Desktop | The allowed program in front (keyboard, mouse) | The Keys and mouse routes | Shipped, one participant |
-| `system.robot-arm` | A bridge beside the arm's control software | The joints, the tool pose (end effector), the gripper | Hold → tool orientation. Steer → joint or tool velocity. The triggers → the gripper. | Public sim at [/sim/arm/](https://obpal.blackboxes.net/sim/arm/), with the whole safety envelope. A hardware bridge is planned. |
+| `system.robot-arm` | A bridge beside the arm's control software | Each arm whole (the tool follows the phone), its joints and its gripper; several arms per scene | Hold (gyro on) → the tool follows the phone. Drag, tilt, the sticks → tool or joint velocity. The triggers, a tap or Grip → the gripper. | [/sim/arm/](https://obpal.blackboxes.net/sim/arm/): one to four arms with the whole safety envelope. Each drives a real arm when the screen connects one: Feetech bus servos (SO-100, SO-101) or the ob.Pal serial sketch over Web Serial, or ROS 2 through rosbridge. Not yet tried on hardware. |
 
 **`system.robot-arm`.** The host is a small bridge next to the arm's own control software. It is a web page using `@obpal/host` or ob.Pal Desktop, and it speaks the arm's interface:
 - ROS 2 (through rosbridge, or `ros2_control` topics);
@@ -161,13 +162,24 @@ Nodes map to the arm: one participant can steer the tool while another works the
 - **Approval:** the host approves each participant before its first claim. Having the link isn't enough.
 - **Record:** the bridge logs who held which node, and when.
 
-**The sim** (`src/sim/arm.ts`) is the reference for this envelope. Five joints and a gripper are nodes.
-- **Deadman:** a finger on the trackpad, the 1:1 grab held, or a stick deflected.
-- **Input:** dragging moves the joint, tilting drives it, and 1:1 turns it like a dial.
+**The reference bridge** (`src/sim/arm/`) runs this envelope for one to four arms, each a digital twin of a real one.
+- **Nodes, by the arm's control profile:** the whole arm, its joints, or both. A joint is inside its arm (`SceneNode.parent`), so while someone holds the whole arm nobody else can take one of its joints, and the reverse.
+- **Point and go** (Wii-style, the default; `reach.ts`): each person's pointer lands on the floor as a dot in their colour. Hold B and the gripper goes over the spot, hovering 20 cm up. A picks up or puts down like a claw (down, close or open, back up). Plus and minus change the height by 5 cm, and ⌂ sends the arm home. Aiming straight at the screen is the middle of the floor.
+- **Camera** (any phone, `GlowFollower` in `@obpal/host`, also in the Viewer's People panel): where the phone can't track itself (an iPhone), Start 3D makes its screen glow in its seat colour, with a Stop button kept on it. The screen turns on "Follow glowing phones with this camera", and each glow's move in the picture (its size gives the distance) moves the gripper the same way while a thumb is on the glowing screen.
+- **3D** (every phone with motion sensors, `motion.track`; no camera): in the 3D tab, hold the pad and move the phone. Its own sensors follow it, Wii-style: swing it and the gripper swings, tip it and the gripper rises and tips, push it toward the screen and the gripper reaches. The camera (Android WebXR) or a glow for the screen's camera can take over in settings. The gripper moves as the hand does (×1.5 in the sim), toward the screen as the screen shows it, and the phone's tip and twist set the gripper's angle and roll. Letting go holds; pressing again carries on from there.
+- **The whole arm follows the phone** (1:1; kinematics in `kinematics.ts`): with the gyro on and a thumb on the pad, turning the phone swings the arm, tipping it raises the tool, and twisting it rolls the wrist. Dragging reaches and swings; two fingers raise and tip the tool. Letting go holds the pose; pressing again carries on from there. Past the arm's reach or a joint's limit, the arm holds the last pose it could reach and the phone bumps.
+- **Buttons:** Stop, Grip and Home in every phone's tray. The phone's hardware buttons are bound through `Layout.keys`: volume up grips, volume down (or Esc) stops everything, and next sends what you hold home. A gamepad's A grips and B sends the arm home.
+- **Deadman:** a finger on the trackpad, or a stick deflected. For a joint, the 1:1 grab held also counts.
 - **Limits:** speed and acceleration caps, and joint limits.
 - **Watchdog:** 200 ms without input stops the joint.
-- **E-stop:** a Stop button on every phone's tray, and on the screen (Space). Only the screen resumes.
+- **E-stop:** a Stop button on every phone's tray and on the screen (Space). It holds position rather than cutting power, and only the screen resumes. The screen going to the background while an arm is live also stops everything.
 - **Approval:** the screen lets each person in before their first claim.
+- **Real arms** (`drivers.ts`):
+  - **Connect:** the screen connects a driver, and the twin then follows the real arm.
+  - **Calibrate:** pose the arm like the twin's home, then set home and flip any reversed joints.
+  - **Go live:** only the screen can, after a confirmation and at a speed cap (25% by default). The twin starts from the arm's own pose, so nothing jumps.
+  - **Watch:** while live, a real arm that stops reporting, or lags its twin by more than 12° for 0.6 s, stops everything.
+  - **Arduino:** `hardware/arduino/obpal-arm` is a reference sketch for hobby servos. It speaks the ob.Pal serial protocol (`J`, `?`, `S`, `T` lines at 115200 baud) and keeps its own limits, speed caps and a 0.5 s hold.
 
 `Claims` in `@obpal/host` gives any control system the same one-per-node rules.
 

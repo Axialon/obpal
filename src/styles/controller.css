@@ -5,6 +5,8 @@ body { letter-spacing: -0.006em; background: var(--page); }
 /* ---- living backdrop for the glass to refract ---- */
 .aurora { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; background: radial-gradient(130% 90% at 50% -10%, rgb(var(--surface-rgb)) 0%, var(--page) 62%); }
 .aurora i { position: absolute; width: 90vmax; height: 90vmax; border-radius: 50%; will-change: transform; animation: drift 20s ease-in-out infinite alternate; }
+/* Once the controls are up, the backdrop holds still: moving it under the glass costs the phone warmth every frame. */
+body.live .aurora i { animation-play-state: paused; }
 .aurora i:nth-child(1) { left: -45vmax; top: -50vmax; background: radial-gradient(circle, rgb(var(--accent-rgb) / 0.42), rgb(var(--accent-rgb) / 0) 62%); }
 .aurora i:nth-child(2) { right: -55vmax; top: -10vmax; background: radial-gradient(circle, rgb(var(--aurora-2-rgb) / 0.26), rgb(var(--aurora-2-rgb) / 0) 60%); animation-duration: 26s; animation-delay: -8s; }
 .aurora i:nth-child(3) { left: -30vmax; bottom: -65vmax; background: radial-gradient(circle, rgb(var(--aurora-3-rgb) / 0.3), rgb(var(--aurora-3-rgb) / 0) 60%); animation-duration: 30s; animation-delay: -14s; }
@@ -27,7 +29,7 @@ body { letter-spacing: -0.006em; background: var(--page); }
 .gate { position: fixed; inset: 0; z-index: 20; display: grid; place-items: end center; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); background: rgb(var(--base-rgb) / 0.45); animation: fade 0.25s var(--ease); }
 .gate-card { width: min(440px, 100%); padding: 28px 22px 22px; border-radius: 30px; display: flex; flex-direction: column; align-items: center; text-align: center; animation: rise 0.35s var(--ease); }
 .gate-art { width: 76px; height: 76px; display: grid; place-items: center; border-radius: 26px; color: var(--accent-soft); background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.45), rgb(var(--accent2-rgb) / 0.16)); border: 1px solid var(--glass-edge); box-shadow: 0 14px 34px rgb(var(--accent-rgb) / 0.3); }
-.gate-art .ic { width: 40px; height: 40px; animation: gyro-spin 6s linear infinite; }
+.gate-art .ic { width: 40px; height: 40px; animation: gyro-spin 6s linear 2; }
 .gate-card h1 { font-family: var(--font-display); margin: 18px 0 6px; font-size: 26px; letter-spacing: -0.03em; font-weight: 750; }
 .gate-card p { margin: 0 0 22px; color: var(--secondary); font-size: 14.5px; }
 
@@ -76,6 +78,25 @@ body { letter-spacing: -0.006em; background: var(--page); }
 .tray-btn:active { transform: scale(0.95); }
 .tray-label { font-size: 10.5px; font-weight: 650; letter-spacing: 0.01em; color: var(--muted); }
 .tray-btn.text .tray-label { font-size: 13.5px; color: var(--ink); }
+/* 3D tracking: a start button on the pad, then the controls float over the camera view. */
+.track-start { position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%); display: grid; justify-items: center; gap: 6px; width: min(260px, 80%); padding: 18px 16px; border-radius: 22px; color: var(--ink); text-align: center; cursor: pointer; }
+.track-start .ic { width: 34px; height: 34px; color: var(--accent-soft); }
+.track-start b { font-size: 17px; }
+.track-start small { color: var(--muted); font-size: 12.5px; line-height: 1.4; }
+.surface:xr-overlay { background: transparent; }
+.surface.tracking .pad { background: rgb(0 0 0 / 0.16); backdrop-filter: none; }
+/* Glowing for the computer's camera: the pad fills the screen in the phone's own colour. */
+.surface.glow > :not(.pad) { visibility: hidden; }
+.surface.glow .pad { position: fixed; inset: 0; z-index: 30; border: 0; border-radius: 0; background: var(--glow); box-shadow: none; backdrop-filter: none; }
+.surface.glow .pad > :not(.glow-end, .glow-stop) { display: none; }
+.glow-stop { position: absolute; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom)); transform: translateX(-50%); height: 52px; padding: 0 30px; border: 2px solid rgb(255 255 255 / 0.7); border-radius: 999px; background: #e11d48; color: #fff; font: 800 15px var(--font); letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; }
+.glow-stop[hidden] { display: none; }
+.glow-end { position: absolute; top: calc(14px + env(safe-area-inset-top)); left: 14px; width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 50%; background: rgb(0 0 0 / 0.28); color: #fff; cursor: pointer; }
+.glow-end .ic { width: 20px; height: 20px; }
+.glow-end[hidden] { display: none; }
+/* A safety stop (TrayControl tone 'stop'): red, in words, and never scrolled away behind the others. */
+.tray-btn.stop { min-width: 76px; background: linear-gradient(150deg, rgb(244 63 94 / 0.9), rgb(190 18 60 / 0.92)); border-color: rgb(254 205 211 / 0.45); box-shadow: 0 6px 20px -8px rgb(244 63 94 / 0.8); order: -1; }
+.tray-btn.stop .tray-label { color: #fff; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; font-size: 13px; }
 .tray-btn[aria-pressed='true'] { color: var(--accent-soft); background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.36), rgb(var(--accent2-rgb) / 0.12)); border-color: rgb(var(--accent-rgb) / 0.5); }
 .tray-btn[aria-pressed='true'] .tray-label { color: var(--accent-soft); }
 .tray-btn.select { flex-direction: row; gap: 10px; padding: 0 10px 0 8px; min-width: 0; max-width: calc(var(--ui-vw, 1vw) * 62); border-color: rgb(var(--accent-rgb) / 0.45); background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.26), rgb(var(--hl-rgb) / 0.04)); color: var(--ink); }
@@ -95,7 +116,7 @@ body { letter-spacing: -0.006em; background: var(--page); }
 .gyro-state { height: 28px; display: inline-flex; align-items: center; padding: 0 12px; border-radius: 999px; font-size: 12px; font-weight: 750; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); background: rgb(var(--hl-rgb) / 0.06); }
 .gyro.on { border-color: transparent !important; background: linear-gradient(135deg, var(--accent-soft), var(--accent) 55%, var(--accent2)); color: var(--accent-ink); box-shadow: 0 16px 38px rgb(var(--accent-rgb) / 0.4), inset 0 1px 0 rgb(255 255 255 / 0.4); }
 .gyro.on .gyro-ic { background: rgb(0 0 0 / 0.14); color: var(--accent-ink); }
-.gyro.on .gyro-ic .ic { animation: gyro-spin 3.5s linear infinite; }
+.gyro.on .gyro-ic .ic { animation: gyro-spin 1.2s var(--ease) 1; }
 .gyro.on .gyro-state { background: rgb(0 0 0 / 0.16); color: var(--accent-ink); }
 @keyframes gyro-spin { to { transform: rotate(360deg); } }
 .icon-btn.square { width: 74px; height: auto; min-height: 74px; border-radius: 26px; }
@@ -166,6 +187,11 @@ body { letter-spacing: -0.006em; background: var(--page); }
 .accent-row .bb-accent { width: 30px; height: 30px; }
 .theme-opt { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 4px 8px; border-radius: 16px; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.03); font-size: 11px; font-weight: 650; color: var(--secondary); touch-action: manipulation; }
 .theme-opt[aria-checked='true'] { border-color: rgb(var(--accent-rgb) / 0.75); background: rgb(var(--accent-rgb) / 0.12); color: var(--ink); }
+/* What 3D follows: three choices in a row, as the surface choices are. */
+.track3d { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; align-items: stretch; }
+.track3d > span { grid-column: 1 / -1; color: var(--muted); font-size: 12.5px; font-weight: 650; }
+.way-opt { display: grid; place-items: center; padding: 10px 6px; border-radius: 14px; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.03); color: var(--secondary); font: 650 11.5px/1.3 var(--font); text-align: center; touch-action: manipulation; }
+.way-opt[aria-checked='true'] { border-color: rgb(var(--accent-rgb) / 0.75); background: rgb(var(--accent-rgb) / 0.12); color: var(--ink); }
 
 /* ---- part chip: what the pointer is on / what is selected ---- */
 .pad-part { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; max-width: calc(100% - 24px); height: 36px; padding: 0 6px 0 12px; border-radius: 999px; font-size: 13px; font-weight: 700; letter-spacing: -0.01em; animation: fade 0.2s var(--ease); z-index: 2; }
@@ -265,3 +291,8 @@ html.vlock body { position: fixed; left: 50%; top: 50%; width: var(--ui-w); heig
 .lock-btn[aria-pressed='true'] { color: var(--accent-ink); background: var(--glass-light); border-color: rgb(255 255 255 / 0.3); box-shadow: 0 6px 18px rgb(var(--accent-rgb) / 0.3); }
 .row small { display: block; color: var(--muted); font-size: 12px; font-weight: 500; line-height: 1.35; margin-top: 2px; }
 .hw-note { margin: 0; color: var(--accent-text); font-size: 12.5px; font-weight: 650; }
+
+/* Resting: after two minutes untouched the screen goes black (an OLED screen then draws almost nothing) and may sleep. */
+.rest { position: fixed; inset: 0; z-index: 90; display: none; place-items: end center; padding-bottom: calc(40px + env(safe-area-inset-bottom)); background: #000; }
+body.resting .rest { display: grid; }
+.rest span { color: rgb(255 255 255 / 0.28); font: 600 12.5px var(--font); letter-spacing: 0.01em; }

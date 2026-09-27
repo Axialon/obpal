@@ -1,11 +1,14 @@
 import '../family'
 import '../styles/base.css'
+import '../styles/site.css'
 import '../styles/support.css'
 import { logo } from '../ui/icons'
 import { applyTheme, initialTheme } from '../ui/themes'
+import { mountTopBar } from '../landing/topbar'
 
 /** Sponsor / donate for ob.Pal, on the shared Blackboxes contribution ledger (same API as the other engines). */
 applyTheme(initialTheme())
+mountTopBar()
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 const page = document.body.dataset.page === 'donate' ? 'donate' : 'sponsor'
 const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: n % 1 ? 2 : 0 })

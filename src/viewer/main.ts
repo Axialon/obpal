@@ -9,7 +9,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
-import { Mode, PointerFlag, Remote, type Frame, type Layout, type ModeId, type PadState, type Participant, type PointerState } from '@obpal/host'
+import { GlowFollower, handMove, headingOf, Mode, PointerFlag, Remote, type Frame, type Layout, type ModeId, type PadState, type Participant, type PointerState } from '@obpal/host'
 import { CATALOG, CATEGORIES, DEFAULT_ITEM, LOCAL_CATEGORY, type CatalogItem } from './catalog'
 import { localFolder } from './local-folder'
 import { applyGamepad, type GamepadContext } from './gamepad-input'
@@ -846,7 +846,7 @@ const modelOptions = () => CATALOG.map((i) => ({
 }))
 const layout: Layout = {
   v: 1,
-  modes: [Mode.tilt, Mode.hold, Mode.point, Mode.gamepad],
+  modes: [Mode.tilt, Mode.hold, Mode.point, Mode.track, Mode.gamepad],
   tray: [
     { id: 'model', label: 'Models', type: 'select', icon: 'models', add: true, options: modelOptions() },
     { id: 'light', label: 'Lighting', type: 'select', icon: 'sun', options: LIGHT_PRESETS.map((p) => ({ value: p.id, label: p.name, glyph: '☀' })) },
@@ -882,6 +882,8 @@ interface Seat {
   wasClutch: boolean
   base: THREE.Quaternion
   lastGrab: number
+  /** 3D (mode 6): where the phone and what it moves were when the thumb went down. */
+  track: { gen: number; p0: [number, number, number]; q0: [number, number, number, number]; heading: number; pos0: THREE.Vector3; quat0: THREE.Quaternion; last: THREE.Vector3 } | null
   lastHoverObj: THREE.Object3D | null
   padPointing: boolean
   padAB: number
@@ -912,7 +914,7 @@ function addSeat(who: Participant): Seat {
   document.body.appendChild(el)
   const s = {
     who, hand: parts.hand(who.id, who.color), el, aim: new ScreenPointer(), pointerOn: false, x: innerWidth / 2, y: innerHeight / 2,
-    grabbing: false, wasClutch: false, base: new THREE.Quaternion(), lastGrab: -1, lastHoverObj: null, padPointing: false, padAB: 0,
+    grabbing: false, wasClutch: false, base: new THREE.Quaternion(), lastGrab: -1, track: null, lastHoverObj: null, padPointing: false, padAB: 0,
   } as Seat
   s.gpLead = leadGamepad(s)
   s.gpOwn = ownGamepad(s)
@@ -1056,13 +1058,15 @@ function seatButton(s: Seat, id: string, ev: string) {
   if (id === 'reset') { if (h.selected) parts.resetSelected(h); else if (lead) resetView() }
   else if (id === 'frame') { if (lead) frameModel() }
   else if (id === 'part-release') { parts.select(null, h); renderScene(false) }
-  else if (id === 'wii-a' && s.pointerOn) seatSelect(s)
+  else if (id === 'wii-a' && ev === 'tap' && s.pointerOn) seatSelect(s) // A also reports down and up (for the PC); a tap selects
   else if (id === 'wii-b' && s.pointerOn) seatGrab(s, ev === 'down')
   else if ((id === 'wii-plus' || id === 'wii-minus') && s.pointerOn) {
     const k = id === 'wii-plus' ? 1 : -1
     if (h.selected && !parts.live_(h.selected)) parts.scaleBy(k * 0.25, h)
     else if (lead) void controls.dolly(controls.distance * (k > 0 ? 1 - 1 / 1.25 : 1 - 1.25), true)
   } else if (id === 'pad') {
+    // In 3D the thumb rests on the pad as the deadman: a long press there is no letting go.
+    if (s.track && ev !== 'tap') return
     if (ev === 'double') { if (h.selected) parts.resetSelected(h); else if (lead) frameModel() }
     else if (ev === 'long') { if (h.selected) { parts.select(null, h); renderScene(false) } else if (lead) resetView() }
     else if (ev === 'tap' && s.pointerOn) seatSelect(s)
@@ -1231,6 +1235,41 @@ function applySeat(s: Seat, f: Frame, dt: number) {
     }
   }
   s.wasClutch = matching
+  // 3D (mode 6): while a thumb is on the pad, what the seat drives moves and turns as the phone does, through space.
+  const pose = f.pose
+  // A live part (a pillar's value) moves as a drag does: raising the phone raises it.
+  const liveSel = sel && parts.live_(sel) ? sel : null
+  const moved = target ?? liveSel?.object
+  if (f.mode === Mode.track && pose?.tracked && f.touching && moved) {
+    if (!s.track || s.track.gen !== pose.gen) {
+      const pos0 = moved.getWorldPosition(new THREE.Vector3())
+      s.track = { gen: pose.gen, p0: [...pose.p], q0: [...pose.q], heading: headingOf(pose.q), pos0, quat0: moved.getWorldQuaternion(new THREE.Quaternion()), last: pos0.clone() }
+    }
+    const k = s.track
+    const m = handMove([pose.p[0] - k.p0[0], pose.p[1] - k.p0[1], pose.p[2] - k.p0[2]], k.heading)
+    // A hand's move of a tenth of the viewing distance moves it an eighth of the way across.
+    const reach = controls.distance * 1.2
+    trFwd.set(0, 0, -1).applyQuaternion(camera.quaternion)
+    trFwd.y = 0
+    trFwd.normalize()
+    trRight.crossVectors(trFwd, WORLD_UP).normalize()
+    const world = trV.copy(k.pos0).addScaledVector(trRight, m.right * reach).addScaledVector(WORLD_UP, m.up * reach).addScaledVector(trFwd, m.forward * reach)
+    if (liveSel || !target) {
+      // Drag it by however far the hand's move goes on the screen. A value snaps to its steps, so the drag builds up
+      // from where the value last changed instead of rounding away frame by frame.
+      const a = k.last.clone().project(camera)
+      const b = world.clone().project(camera)
+      if (parts.move(((b.x - a.x) / 2) * innerWidth, ((a.y - b.y) / 2) * innerHeight, h)) k.last.copy(world)
+    } else {
+      // The phone's turn, from its tracking space onto the stage: its heading lines up with the camera's.
+      trAlign.setFromAxisAngle(WORLD_UP, Math.atan2(-trFwd.x, -trFwd.z) - k.heading)
+      trQ.set(pose.q[0], pose.q[1], pose.q[2], pose.q[3]).multiply(trQ0.set(k.q0[0], k.q0[1], k.q0[2], k.q0[3]).invert())
+      trQ.premultiply(trAlign).multiply(trQ0.copy(trAlign).invert()).multiply(k.quat0)
+      const parent = target.parent!
+      target.position.copy(parent.worldToLocal(world))
+      target.quaternion.copy(parent.getWorldQuaternion(trQ0).invert().multiply(trQ))
+    }
+  } else s.track = null
   camRight.set(1, 0, 0).applyQuaternion(camera.quaternion)
   // Rate gyro (protocol mode 1): yaw about the world vertical, pitch about the camera's right axis.
   if (f.mode === Mode.orbit && (f.aim[0] || f.aim[1])) {
@@ -1293,6 +1332,27 @@ function applySeat(s: Seat, f: Frame, dt: number) {
 const camQ = new THREE.Quaternion()
 const camQi = new THREE.Quaternion()
 const qRel = new THREE.Quaternion()
+/** Camera tracking: phones without WebXR glow in their colour, and this computer's camera follows them. */
+const follower = new GlowFollower()
+const glowView = $('glow-view') as HTMLCanvasElement
+const glowCtx = glowView.getContext('2d')!
+follower.onUnseen = (id) => remote?.feedback({ haptic: 'bump', toast: 'The camera can’t see your glow: turn the screen toward it' }, id)
+follower.onCameraOff = () => note('A phone is glowing: turn on “Follow glowing phones with this camera” in People')
+$('glow-cam').onclick = async () => {
+  if (follower.cam.on) follower.cam.stop()
+  else {
+    try { await follower.cam.start(); note('Hold glowing phones toward the camera') } catch { note('The camera didn’t start: allow it for this page') }
+  }
+  $('glow-cam').setAttribute('aria-pressed', String(follower.cam.on))
+  glowView.hidden = !follower.cam.on
+}
+/** 3D following's scratch space. */
+const trFwd = new THREE.Vector3()
+const trRight = new THREE.Vector3()
+const trV = new THREE.Vector3()
+const trAlign = new THREE.Quaternion()
+const trQ = new THREE.Quaternion()
+const trQ0 = new THREE.Quaternion()
 const tmpQ = new THREE.Quaternion()
 const tmpV = new THREE.Vector3()
 const towardViewer = new THREE.Vector3()
@@ -1366,18 +1426,39 @@ function adaptQuality(dt: number) {
   if (clamped !== quality.ratio) { quality.ratio = clamped; quality.cooldown = 2; resize() }
 }
 
+/**
+ * Resting: after a few seconds with nothing moving (no input, the camera still, nothing animating) the stage draws
+ * ten times a second instead of every frame, which a phone or tablet showing the stage feels as warmth. Anything that
+ * moves brings it straight back.
+ */
+let lastActive = performance.now()
+const markActive = () => { lastActive = performance.now() }
+for (const t of ['pointerdown', 'pointermove', 'wheel', 'keydown'] as const) addEventListener(t, markActive, { passive: true, capture: true })
+const REST_AFTER_MS = 3000
+const REST_FRAME_MS = 100
+
 function loop(now: number) {
+  if (now - lastActive > REST_AFTER_MS && lastFrame && now - lastFrame < REST_FRAME_MS) { requestAnimationFrame(loop); return }
   const dt = lastFrame ? Math.min((now - lastFrame) / 1000, 0.1) : 0
   lastFrame = now
   if (remote) {
+    // Read every seat's input once; phones glowing for the camera (3D without their own tracking) get a pose from it.
+    const frames = new Map<string, Frame>()
+    for (const seat of seats.values()) frames.set(seat.who.id, remote.consumeOf(seat.who.id, now))
+    for (const [id, pose] of follower.step(now, [...seats.values()].map((s) => ({ id: s.who.id, color: s.who.color, frame: frames.get(s.who.id)! })))) frames.set(id, { ...frames.get(id)!, pose })
+    if (follower.cam.on) follower.draw(glowCtx, (id) => seats.get(id)?.who.color ?? '')
+    for (const f of frames.values()) {
+      if (f.touching || f.clutch || f.aim[0] || f.aim[1] || f.pad1[0] || f.pad1[1] || f.pad2[0] || f.pad2[1] || f.zoom || f.twist || f.tilt[0] || f.tilt[1] || f.pose) markActive()
+    }
     for (const seat of seats.values()) {
       const id = seat.who.id
       const pad = remote.padOf(id)
       if (pad) {
+        if (pad.buttons || pad.axes.some((a) => Math.abs(a) > 0.05) || pad.triggers.some((t) => t > 0.05)) markActive()
         const pt = remote.pointerOf(id)
         applyGamepad(seatPadPointer(seat, pad, pt && !(pt.flags & PointerFlag.relative) ? pt : null), dt, isLead(seat) ? seat.gpLead : seat.gpOwn)
       } else if (seat.padPointing) seatPadPointer(seat, { ...emptyPadState, buttons: 0 }, null)
-      applySeat(seat, remote.consumeOf(id, now), dt)
+      applySeat(seat, frames.get(id)!, dt)
     }
   }
   if (view.spin && !anyClutch()) holder.rotateOnWorldAxis(WORLD_UP, dt * 0.5)
@@ -1408,7 +1489,7 @@ function loop(now: number) {
   }
   parts.update(dt)
   easeInset(now, dt)
-  controls.update(dt)
+  if (controls.update(dt) || view.spin || pop < 1 || stageInset !== insetTarget || sceneObjects.some((e) => e.mixer || e.pop < 1)) markActive()
   composer.render(dt)
   adaptQuality(dt)
   requestAnimationFrame(loop)

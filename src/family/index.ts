@@ -11,6 +11,8 @@ export interface FamilyTheme { id: FamilyThemeId; name: string; page: string; su
 export interface FamilyAccent { id: string; name: string; color?: string }
 interface Popover { open(): void; close(): void; toggle(): void }
 
+export interface SwitcherOptions { href?: (product: FamilyProduct) => string; itemClass?: string }
+
 export interface FamilyApi {
   PRODUCTS: FamilyProduct[]
   THEMES: FamilyTheme[]
@@ -29,10 +31,11 @@ export interface FamilyApi {
   /** The accent in effect as a hex colour. */
   accentColor(): string
   mark(productId: string, opts?: { accent?: string; title?: boolean }): string
-  productMenu(current: string): string
+  /** opts.href(product): a site's own link for a product (a local preview); opts.itemClass: a class for each item. */
+  productMenu(current: string, opts?: SwitcherOptions): string
   themeMenu(): string
   popover(button: HTMLElement, menu: HTMLElement, onOpen?: (menu: HTMLElement) => void): Popover
-  mountSwitcher(button: HTMLElement, menu: HTMLElement, current: string): Popover
+  mountSwitcher(button: HTMLElement, menu: HTMLElement, current: string, opts?: SwitcherOptions): Popover
   mountThemes(button: HTMLElement, menu: HTMLElement): Popover
   mountMore(button: HTMLElement, menu: HTMLElement, toolsRoot: HTMLElement): Popover
   initTips(): void

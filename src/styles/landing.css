@@ -21,3 +21,24 @@
 .link-card em { font-style: normal; color: var(--muted); font-size: 14px; }
 .link-card i { font-style: normal; font-weight: 700; font-size: 14px; color: var(--accent-text); white-space: nowrap; }
 @media (max-width: 600px) { .link-card i { display: none; } }
+
+/* ---- The site's top bar (home, catalogue): full-width glass with the row centred in it. Nothing reaches past the
+   screen's edge, so a phone never scrolls sideways. ---- */
+.top { position: sticky; top: 0; z-index: 20; background: rgb(var(--base-rgb) / 0.58); backdrop-filter: blur(18px) saturate(150%); -webkit-backdrop-filter: blur(18px) saturate(150%); border-bottom: 1px solid var(--line); }
+.top-in { display: flex; align-items: center; gap: 12px; width: min(1180px, 100% - 32px); min-height: 64px; margin: 0 auto; }
+.top .logo { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; }
+.top .mark-slot { display: inline-grid; width: 36px; height: 36px; }
+.top .mark-slot svg { width: 36px; height: 36px; }
+.top .switch-btn { margin-left: -4px; }
+.top-nav { display: flex; gap: 2px; margin-left: auto; }
+.top-nav a { padding: 8px 12px; border-radius: 10px; color: var(--secondary); font-size: 14px; font-weight: 650; text-decoration: none; transition: color 0.2s, background 0.2s; }
+.top-nav a:hover { color: var(--ink); background: rgb(var(--hl-rgb) / 0.06); }
+.top-menu { display: none; place-items: center; width: 40px; height: 40px; margin-left: auto; border: 1px solid var(--line); border-radius: 12px; background: rgb(var(--hl-rgb) / 0.04); color: var(--ink); }
+.top-menu[aria-expanded='true'] { background: rgb(var(--accent-rgb) / 0.14); color: var(--accent-text); }
+.top-go { min-height: 40px; height: 40px; padding: 0 16px; text-decoration: none; white-space: nowrap; }
+.site-menu { min-width: 220px; display: grid; }
+@media (max-width: 860px) { .top-nav { display: none; } .top-menu { display: grid; } }
+@media (max-width: 440px) { .top-in { gap: 8px; } .top .word { display: none; } .top-go { padding: 0 14px; } }
+
+/* Jumping to a section (#build) keeps its heading clear of the sticky top bar. */
+.home section[id], .cat-sec { scroll-margin-top: 84px; }

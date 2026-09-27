@@ -9,7 +9,8 @@ export const Flag = {
   quatValid: 1, gyroValid: 2, gravValid: 4, dup: 8, clutch: 16, touching: 32, tsFromSensor: 64, lowPower: 128,
 } as const
 
-export const Mode = { hold: 0, orbit: 1, point: 2, tilt: 3, pad: 4, gamepad: 5 } as const
+/** track: 6-DOF, the device's position and orientation in space (POSE packets beside STATE; see ./pose.ts). */
+export const Mode = { hold: 0, orbit: 1, point: 2, tilt: 3, pad: 4, gamepad: 5, track: 6 } as const
 export type ModeId = (typeof Mode)[keyof typeof Mode]
 export const Tier = { touch: 0, tilt: 1, compass: 2, gyro: 3 } as const
 export type TierId = (typeof Tier)[keyof typeof Tier]

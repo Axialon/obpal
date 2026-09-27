@@ -12,7 +12,12 @@ export interface TrayControl {
   options?: { value: string; label: string; group?: string; detail?: string; image?: string; glyph?: string; color?: string }[]
   /** select: options can also be added alongside the current choice; the device offers "add" and sends value{…, add: true}. */
   add?: boolean
+  /** stop: a safety stop (a robot's e-stop). The device draws it in red, as words, never as an icon alone. */
+  tone?: 'stop'
 }
+
+/** The device's hardware buttons, as the phone controller reads them (src/controller/hardware.ts). */
+export type HardwareKey = 'primary' | 'secondary' | 'next' | 'prev'
 
 export interface Layout {
   v: 1
@@ -23,6 +28,12 @@ export interface Layout {
   utilities?: string[]
   /** A catalogue profile the host suggests for what it controls right now (CATALOGUE §3). */
   profile?: string
+  /**
+   * Tray buttons the device's hardware buttons press (CATALOGUE §1): primary is volume up, Enter or a headset press;
+   * secondary is volume down or Esc; next and prev are arrows, Page Up/Down or a headset's skip. A bound button sends
+   * btn{tap} when pressed. Unbound ones keep the mode's own use; gamepad mode keeps them as A, B and the d-pad.
+   */
+  keys?: Partial<Record<HardwareKey, string>>
 }
 
 export interface Caps {
@@ -41,8 +52,11 @@ export interface PairGrant { id: string; key: string }
 /** Someone in a shared scene (CATALOGUE §5): a device, or the screen itself (id "host"). */
 export interface ScenePerson { id: string; name: string; color: string; lead?: boolean }
 
-/** Something in a shared scene one participant at a time can control. */
-export interface SceneNode { id: string; name: string; kind: string; group?: string }
+/**
+ * Something in a shared scene one participant at a time can control. `parent`: the node this one is part of (a joint
+ * of an arm). Whoever holds the parent controls this node too, so neither can be taken while the other is held.
+ */
+export interface SceneNode { id: string; name: string; kind: string; group?: string; parent?: string }
 
 /** Longest node id a device may send in `claim`. */
 export const MAX_NODE_ID = 64

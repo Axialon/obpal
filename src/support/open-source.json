@@ -1,0 +1,23 @@
+{
+  "about": "The open-source work ob.Pal is built on, and how much we rely on each (share, out of 100). scripts/oss-audit.mjs (pnpm oss:audit) checks this list against every dependency the project declares.",
+  "upstream": [
+    { "name": "three.js", "by": "Ricardo Cabello (mrdoob) and contributors", "what": "The 3D engine behind the Viewer and the sims", "license": "MIT", "share": 30, "url": "https://threejs.org", "give": "https://github.com/sponsors/mrdoob", "packages": ["three", "@types/three"] },
+    { "name": "uqr", "by": "Anthony Fu", "what": "Every pairing QR code", "license": "MIT", "share": 14, "url": "https://github.com/unjs/uqr", "give": "https://github.com/sponsors/antfu", "packages": ["uqr"] },
+    { "name": "Vite", "by": "The Vite team", "what": "Builds every page", "license": "MIT", "share": 12, "url": "https://vite.dev", "give": "https://opencollective.com/vite", "packages": ["vite"] },
+    { "name": "camera-controls", "by": "Yomotsu", "what": "The Viewer's camera", "license": "MIT", "share": 10, "url": "https://github.com/yomotsu/camera-controls", "give": "https://github.com/sponsors/yomotsu", "packages": ["camera-controls"] },
+    { "name": "Inter", "by": "Rasmus Andersson", "what": "The typeface across ob.Pal", "license": "OFL-1.1", "share": 8, "url": "https://rsms.me/inter/", "give": "https://github.com/sponsors/rsms", "fonts": ["Inter"] },
+    { "name": "Vitest", "by": "The Vitest team", "what": "Runs the tests", "license": "MIT", "share": 6, "url": "https://vitest.dev", "give": "https://opencollective.com/vitest", "packages": ["vitest"] },
+    { "name": "sharp and libvips", "by": "Lovell Fuller and the libvips team", "what": "Makes the icons", "license": "Apache-2.0 and LGPL-2.1", "share": 5, "url": "https://sharp.pixelplumbing.com", "give": "https://opencollective.com/libvips", "packages": ["sharp"] },
+    { "name": "serde", "by": "David Tolnay and contributors", "what": "ob.Pal Desktop's messages", "license": "MIT or Apache-2.0", "share": 5, "url": "https://serde.rs", "give": "https://github.com/sponsors/dtolnay", "crates": ["serde", "serde_json"] },
+    { "name": "pnpm", "by": "The pnpm team", "what": "Installs everything", "license": "MIT", "share": 5, "url": "https://pnpm.io", "give": "https://opencollective.com/pnpm", "packages": [] },
+    { "name": "Node.js", "by": "The OpenJS Foundation", "what": "Runs the tooling", "license": "MIT", "share": 5, "url": "https://nodejs.org", "give": "https://opencollective.com/nodejs", "packages": [] }
+  ],
+  "thanks": [
+    { "name": "TypeScript, Playwright and windows-rs", "by": "Microsoft", "what": "Types, the end-to-end tests, and ob.Pal Desktop's Windows calls", "packages": ["typescript", "playwright"], "crates": ["windows"] },
+    { "name": "Wrangler and Workers", "by": "Cloudflare", "what": "Where ob.Pal runs", "packages": ["wrangler", "@cloudflare/vite-plugin", "@cloudflare/workers-types"] },
+    { "name": "DefinitelyTyped", "by": "Its contributors", "what": "Types for the browser extension", "packages": ["@types/chrome"] },
+    { "name": "JetBrains Mono", "by": "JetBrains", "what": "Numbers and code", "fonts": ["JetBrains Mono"] },
+    { "name": "Plus Jakarta Sans", "by": "Tokotype", "what": "Headings", "fonts": ["Plus Jakarta Sans"] },
+    { "name": "QR Code generator", "by": "Project Nayuki", "what": "What uqr is built on", "packages": [] }
+  ]
+}

@@ -156,3 +156,9 @@ body {
 
 @keyframes pulse { 50% { opacity: 0.35; } }
 @keyframes shimmer { to { background-position: -300% 0; } }
+
+/* What the phone's gestures do on the PC, while it is being controlled. */
+.pc-legend { display: grid; gap: 4px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--glass-edge); }
+.pc-legend p { margin: 0; display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 11px; line-height: 1.45; color: var(--muted); }
+.pc-legend b { color: var(--ink); font-weight: 600; min-width: 56px; }
+.pc-legend span { white-space: nowrap; }

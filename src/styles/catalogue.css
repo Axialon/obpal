@@ -1,0 +1,46 @@
+/* The control catalogue (/catalogue/): cards of what a phone can drive, and the profile builder. */
+.cat-sec { padding: 28px 0 8px; }
+.cat-sec > h2 { margin: 0 0 4px; font-family: var(--font-display); font-size: clamp(24px, 3vw, 32px); letter-spacing: -0.03em; }
+.cat-sec > .sub { margin: 0 0 16px; color: var(--muted); }
+.cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.cat-card { display: flex; flex-direction: column; gap: 6px; padding: 18px; border-radius: 20px; border: 1px solid var(--line); background: var(--glass); min-width: 0; }
+.cat-card header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.cat-card b { font-family: var(--font-display); font-size: 17px; letter-spacing: -0.02em; }
+.cat-card code { align-self: flex-start; font-size: 12px; }
+.cat-card p { flex: 1; margin: 0; color: var(--muted); font-size: 14.5px; }
+.cat-card > a { font-weight: 700; text-decoration: none; font-size: 14px; }
+.cat-card .st { flex: none; padding: 3px 9px; border-radius: 999px; background: rgb(var(--accent-rgb) / 0.15); color: var(--accent-text); font: 700 11px var(--font); }
+.cat-card .st.plan { background: rgb(var(--hl-rgb) / 0.07); color: var(--muted); }
+.cat-card .st.com { background: rgb(56 189 248 / 0.16); color: #7dd3fc; }
+.routes { display: flex; flex-wrap: wrap; gap: 6px; }
+.routes span { display: inline-flex; gap: 6px; padding: 3px 8px; border-radius: 8px; background: rgb(var(--hl-rgb) / 0.05); color: var(--secondary); font: 600 12px var(--font-data, var(--font)); }
+.routes i { font-style: normal; color: var(--muted); }
+
+/* The builder: the form beside its JSON, checked as you go. */
+.bld { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.bld-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 18px; border-radius: 22px; border: 1px solid var(--line); background: var(--glass); }
+.bld .fld { display: grid; gap: 6px; font-size: 12.5px; font-weight: 650; color: var(--muted); }
+.bld .fld.wide, .bld-on, .bld-utils { grid-column: 1 / -1; }
+.bld input:not([type]), .bld select { height: 38px; min-width: 0; padding: 0 12px; border: 1px solid var(--line); border-radius: 12px; background: rgb(var(--hl-rgb) / 0.05); color: var(--ink); font: 600 14px var(--font); }
+.bld input:not([type]):focus, .bld select:focus { outline: 2px solid rgb(var(--accent-rgb) / 0.5); outline-offset: 1px; }
+.bld-on, .bld-u { margin: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 16px; }
+.bld-on legend, .bld-u legend { padding: 0 6px; color: var(--ink); font: 700 13.5px var(--font); }
+.bld-on div { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.bld-u legend code { margin-left: 6px; font-size: 11px; }
+.bld-utils { display: grid; gap: 10px; }
+.bld-u { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px 16px; }
+.bld .chk { display: flex; align-items: center; gap: 8px; color: var(--secondary); font-size: 13.5px; }
+.bld .rng { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; color: var(--muted); font-size: 12.5px; font-weight: 650; }
+.bld .rng input { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+.bld .rng output { color: var(--ink); font: 650 12.5px var(--font-data, var(--font)); font-variant-numeric: tabular-nums; }
+.bld-out { position: sticky; top: 84px; display: grid; gap: 10px; }
+.bld-out pre { margin: 0; max-height: 420px; overflow: auto; padding: 16px; border-radius: 18px; border: 1px solid var(--line); background: rgb(0 0 0 / 0.35); color: var(--secondary); font: 500 12.5px/1.55 var(--font-data, ui-monospace, monospace); }
+.errs { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.errs:empty { display: none; }
+.errs li { padding: 8px 12px; border-radius: 12px; background: rgb(251 113 133 / 0.12); color: #fda4af; font-size: 13px; }
+.bld-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.bld-actions .btn { text-decoration: none; }
+.bld-actions .off { opacity: 0.45; pointer-events: none; }
+.bld-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+@media (max-width: 860px) { .bld { grid-template-columns: 1fr; } .bld-out { position: static; } .bld-form { grid-template-columns: 1fr; } }
+.top-nav a[aria-current='page'] { color: var(--ink); background: rgb(var(--hl-rgb) / 0.06); }

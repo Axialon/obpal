@@ -13,6 +13,7 @@ export const ICONS: Record<string, string> = {
   settings: s('<path d="M4 7.5h9M17 7.5h3M4 16.5h3M11 16.5h9"/><circle cx="15" cy="7.5" r="2.2"/><circle cx="9" cy="16.5" r="2.2"/>'),
   models: s('<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/>'),
   reset: s('<path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4.5v4h4"/>'),
+  grip: s('<path d="M12 21v-5.5"/><path d="M6.5 15.5h11"/><path d="M6.5 15.5V9.2l2.6-4.7"/><path d="M17.5 15.5V9.2l-2.6-4.7"/>'),
   frame: s('<path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/>'),
   spin: s('<path d="M12 5.5c4.4 0 8 1.6 8 3.5s-3.6 3.5-8 3.5-8-1.6-8-3.5"/><path d="M4 9v5c0 1.9 3.6 3.5 8 3.5s8-1.6 8-3.5V9"/><path d="M7.5 3.8 4 5.5l1.8 3.3"/>'),
   grid: s('<rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M3.5 9.5h17M3.5 14.5h17M9.5 3.5v17M14.5 3.5v17"/>'),
@@ -66,6 +67,22 @@ let markSeq = 0
  * edges catch the accent light, wrapped in ob.Pal's orbit with a satellite, the "." of ob.Pal. Everything lit
  * takes the theme accent; a scan line sweeps the box on hover. Static twin: public/favicon.svg (scripts/brand-icons.mjs).
  */
+/**
+ * Let the logo's satellite finish `orbits` orbits (7.5 s each), then hold still. Its motion redraws the mark (and its
+ * blurred glow) every frame, which a page that stays open for long, like the phone controller, shouldn't pay for.
+ */
+export function calmMarks(root: ParentNode, orbits = 1) {
+  const marks = [...root.querySelectorAll<SVGSVGElement>('svg.mark')]
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches
+  setTimeout(() => { for (const m of marks) m.pauseAnimations?.() }, still ? 0 : orbits * 7500)
+}
+
+/** Fill each `[data-mark]` slot with the inline logo mark (crisp at any size); a phone lets it settle after two orbits. */
+export function mountMarks(root: ParentNode = document) {
+  for (const slot of root.querySelectorAll<HTMLElement>('[data-mark]')) slot.innerHTML = logoMark()
+  if (matchMedia('(pointer: coarse)').matches) calmMarks(root, 2)
+}
+
 export function logoMark(): string {
   const id = `obm${++markSeq}`
   const A = 'var(--accent, #C6FF34)'

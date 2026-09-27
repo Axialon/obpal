@@ -13,13 +13,13 @@ import { APP_NAME, DEFAULT_MODE, PORT_NAME, SERVICE, isTargetMode, type TargetMo
 import { KeyMapper } from './shared/keys'
 import type { PadInput } from './shared/math'
 import { parseConfig, parseFromPage, parseOffscreenRequest, type BgRequest, type LinkState, type PadTuple, type ToPage } from './shared/messages'
-import { buildNativeFrame, HeldState, isIdleFrame, NATIVE_HEARTBEAT_MS, NATIVE_PORT_NAME } from './shared/native'
+import { buildNativeFrame, HeldState, heldSignature, isIdleFrame, NATIVE_HEARTBEAT_MS, NATIVE_PORT_NAME } from './shared/native'
+import { PcGestures } from './shared/pcgestures'
 import {
   buildFrame, deltaTuple, electFrame, frameSignature, isActive, padTuple, pointerTuple, recipients, tiltTuple, withoutClickButtons, withRelativeAim,
   type FrameInfo,
 } from './shared/route'
 import { suggestForFrames } from './shared/sites'
-import { DEFAULT_VIEWER } from './shared/viewer'
 
 interface Link extends FrameInfo {
   port: chrome.runtime.Port
@@ -125,18 +125,26 @@ function applyConfig(tabId: number | null, mode: TargetMode) {
 }
 
 // ---- PC target: phone state -> keyboard/mouse actions -> the service worker -> ob.Pal Desktop ------------
-// The Keys mapping (shared/keys.ts) decides what is held; the frame carries that whole desired state plus this
-// tick's mouse motion, so the helper (which enforces the per-program scope) can never be left with a stuck key.
+// The Keys mapping (shared/keys.ts) decides what is held and how the pointer moves; the PC gestures
+// (shared/pcgestures.ts) add clicks, drags, scrolling and zoom from the trackpad and the Point face. The frame
+// carries that whole desired state plus this tick's motion, so the helper (which enforces the scope) can never
+// be left with a stuck key or button.
 
 const pc = {
   mapper: new KeyMapper(),
   held: new HeldState(),
+  gestures: new PcGestures(),
   port: null as chrome.runtime.Port | null,
   lastTick: 0,
   lastSent: 0,
+  /** What the last frame sent held: a change goes out at once, so a release never waits for the heartbeat. */
+  lastSig: '',
   retryAt: 0,
   retryMs: 250,
 }
+const CTRL = ['ControlLeft']
+/** A hold that became a right-click buzzes the phone this briefly. */
+const BUZZ = { strong: 0.5, weak: 0.3, ms: 45 }
 
 function pcPort(): chrome.runtime.Port | null {
   if (pc.port) return pc.port
@@ -173,15 +181,17 @@ function pcTick(f: Frame, pad: PadState | null, ptr: PointerState | null, now: n
   const tilt = f.connected && !pad && f.mode === Mode.tilt ? f.tilt : null
   const out = pc.mapper.update({ pad: padIn, tilt, aim: f.aim, pad1: f.pad1, dtMs: dt })
   pc.held.apply(out)
-  // A pinch scrolls, as in the 3D target: pinching out is wheel-up (negative deltaY), in 1/120 notch units.
-  const wheel = Math.round(-f.zoom * DEFAULT_VIEWER.wheelPerZoom * 1.2)
-  const frame = buildNativeFrame(pc.held, out.move, [0, wheel])
-  if (isIdleFrame(frame) && now - pc.lastSent < NATIVE_HEARTBEAT_MS) return
+  const g = pc.gestures.tick({ now, connected: f.connected, touching: f.touching, move: out.move, pan: f.pad2, pinch: f.zoom })
+  if (g.buzz) remote?.rumble(BUZZ.strong, BUZZ.weak, BUZZ.ms)
+  const frame = buildNativeFrame(pc.held, g.move, g.wheel, { buttons: g.buttons, keys: g.ctrl ? CTRL : [] })
+  const sig = heldSignature(frame)
+  if (isIdleFrame(frame) && sig === pc.lastSig && now - pc.lastSent < NATIVE_HEARTBEAT_MS) return
   const port = pcPort()
   if (!port) return
   try {
     port.postMessage(frame)
     pc.lastSent = now
+    pc.lastSig = sig
   } catch {
     pc.port = null
   }
@@ -191,7 +201,9 @@ function pcTick(f: Frame, pad: PadState | null, ptr: PointerState | null, now: n
 function pcLetGo() {
   pc.mapper.releaseAll()
   pc.held.clear()
+  pc.gestures.reset()
   pc.lastTick = 0
+  pc.lastSig = ''
   const port = pc.port
   pc.port = null
   if (!port) return
@@ -346,7 +358,16 @@ async function boot() {
     report()
     r.setValues({ target: config.mode })
   })
-  r.on('disconnect', report)
+  r.on('disconnect', () => {
+    pc.gestures.reset()
+    report()
+  })
+  // Taps, holds and the Point face's buttons: clicks and more on the PC, at once rather than on the next clock tick.
+  r.on('button', ({ id, ev }) => {
+    if (config.mode !== 'pc') return
+    pc.gestures.button(id, ev, performance.now())
+    tick()
+  })
   r.on('input', tick)
   // The phone's tray picker switches the target mode; the service worker stores it and pushes it back as config.
   r.on('value', ({ id, v }) => {

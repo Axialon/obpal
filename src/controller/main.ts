@@ -13,9 +13,12 @@ import { hapticsKind, tick } from './haptics'
 import { GyroSmoother, playerSpaceRates, TiltStick } from './gyro'
 import { GamepadMode } from './gamepad'
 import { WiiPointer } from './pointing'
-import { icon, ICONS, logo, logoMark } from '../ui/icons'
+import { calmMarks, icon, ICONS, logo, logoMark } from '../ui/icons'
 import { dismissHint, hint, repositionHints, setHintFrame } from '../ui/hints'
 import { HardwareButtons, type HwAction, type HwSource } from './hardware'
+import { Tracker } from './track'
+import { EARTH_TO_POSE, ImuTracker, toPoseFrame } from './imu3d'
+import { encodePose, POSE_BYTES, PoseFlag, qMul } from '@obpal/core'
 import { OrientationLock } from './lock'
 import { uiRect, uiSize } from './uiframe'
 import { applyTheme, initialTheme, swatch, THEMES, themeById } from '../ui/themes'
@@ -83,6 +86,7 @@ function screenMessage(opts: { title: string; body: string; spinner?: boolean; a
         ${opts.action ? `<button class="btn primary" id="act">${esc(opts.action.label)}</button>` : ''}
       </div>
     </main>`
+  calmMarks(app, 2)
   if (opts.action) document.getElementById('act')!.onclick = opts.action.run
 }
 
@@ -110,7 +114,7 @@ function syncThemeRows() {
   document.querySelectorAll<HTMLElement>('.accent-row .bb-accent').forEach((o) => o.setAttribute('aria-checked', String(o.dataset.accent === family.getAccent())))
 }
 
-type Tab = 'rotate' | 'point' | 'gamepad'
+type Tab = 'rotate' | 'point' | 'gamepad' | 'track'
 type Style = 'game' | 'match'
 
 async function boot(code: PairingCode) {
@@ -134,6 +138,8 @@ async function boot(code: PairingCode) {
     /** Lock the screen's rotation while the gyro is on, so turning the phone never re-lays out the controls. */
     lockWithGyro: store.get('obpal.lockgyro') !== '0',
     headset: false,
+    /** What 3D follows: the phone's own sensors (the default, Wii-style), its camera (Android WebXR) or a glow for the screen's camera. */
+    track3d: (['motion', 'xr', 'glow'].includes(store.get('obpal.track3d') ?? '') ? store.get('obpal.track3d') : 'motion') as 'motion' | 'xr' | 'glow',
   }
   // ---- screen lock (while steering with motion) and hardware buttons ----
   const lock = new OrientationLock()
@@ -173,6 +179,31 @@ async function boot(code: PairingCode) {
     b.setAttribute('aria-label', lock.locked ? 'Unlock screen rotation' : 'Lock screen rotation')
     b.innerHTML = lock.locked ? ICONS.lock : ICONS.unlock
   }
+  // ---- 3D tracking (mode 6): WebXR follows the phone through space; each pose goes out in a POSE packet ----
+  const tracker = new Tracker()
+  let trackOk = false
+  /** Glowing for the computer's camera (no WebXR on this phone). */
+  let glowing = false
+  /** 3D from the phone's own sensors (the default): the gyro and an arm model, pushes from the accelerometer. */
+  const imu = new ImuTracker()
+  let imuHeld = false
+  /** How 3D follows the phone here: the chosen way, if this phone can do it. */
+  function trackWay(): 'motion' | 'xr' | 'glow' {
+    if (settings.track3d === 'xr' && trackOk) return 'xr'
+    // The arm model needs only the phone's orientation (a gyro makes it smoother); no sensors at all: glow.
+    if (settings.track3d === 'glow' || tier === Tier.touch) return 'glow'
+    return 'motion'
+  }
+  let poseSeq = 0
+  const poseBuf = new ArrayBuffer(POSE_BYTES)
+  void Tracker.supported().then((ok) => { trackOk = ok; render() })
+  tracker.onPose = (p, q, tracked) => {
+    if (!link.ready) return
+    poseSeq = (poseSeq + 1) & 0xffff
+    link.sendState(encodePose({ flags: (tracked ? PoseFlag.tracked : 0) | ((pad?.touches ?? 0) > 0 ? PoseFlag.touching : 0), seq: poseSeq, t: Math.round((performance.now() - t0) * 1000) >>> 0, p, q, gen: tracker.gen }, poseBuf))
+  }
+  tracker.onEnd = () => { toast('3D tracking ended'); render() }
+
   const hw = new HardwareButtons()
   const HW_HELP: Record<HwSource, string> = {
     volume: 'Volume keys work here: up = A · down = B',
@@ -180,17 +211,37 @@ async function boot(code: PairingCode) {
     headset: 'Headset buttons work here: press = A · next / previous',
   }
   const hwAnnounced = new Set<HwSource>()
-  /** Set when the surface is built: the Wii face's B, held or released. */
+  /** Set when the surface is built: the Wii face's A and B, held or released. */
+  let wiiA: (down: boolean) => void = () => {}
   let wiiB: (down: boolean) => void = () => {}
+  /** A tray button the screen bound this hardware button to (Layout.keys), outside gamepad mode. */
+  const boundTo = (action: HwAction) => {
+    const id = mode === Mode.gamepad ? undefined : layout.keys?.[action]
+    return id ? layout.tray.find((c) => c.id === id && (c.type ?? 'button') === 'button') : undefined
+  }
+  function hwHelp(source: HwSource) {
+    const [a, b] = [boundTo('primary'), boundTo('secondary')]
+    if (!a && !b) return HW_HELP[source]
+    const names = { volume: ['Volume up', 'Volume down'], keys: ['Enter', 'Esc'], headset: ['Press', 'Next'] }[source]
+    return [a && `${names[0]} = ${a.label}`, b && source !== 'headset' && `${names[1]} = ${b.label}`].filter(Boolean).join(' · ')
+  }
   hw.onAction = (action: HwAction, down: boolean, source: HwSource) => {
     if (!surface) return
-    if (down && !hwAnnounced.has(source)) { hwAnnounced.add(source); toast(HW_HELP[source]) }
+    if (down && !hwAnnounced.has(source)) { hwAnnounced.add(source); toast(hwHelp(source)) }
+    const bound = boundTo(action)
+    if (bound) {
+      if (!down) return
+      tick()
+      link.sendCtl({ t: 'btn', id: bound.id, ev: 'tap' })
+      return
+    }
     if (mode === Mode.gamepad) {
       gamepad.hardware(action === 'primary' ? PadButton.A : action === 'secondary' ? PadButton.B : action === 'next' ? PadButton.Right : PadButton.Left, down)
       return
     }
     if (mode === Mode.point) {
       if (action === 'secondary') return wiiB(down)
+      if (action === 'primary') wiiA(down)
       if (!down) return
       tick()
       link.sendCtl({ t: 'btn', id: action === 'primary' ? 'wii-a' : action === 'next' ? 'wii-plus' : 'wii-minus', ev: 'tap' })
@@ -218,6 +269,16 @@ async function boot(code: PairingCode) {
   let tab: Tab = 'rotate'
   let lastTab: Exclude<Tab, 'gamepad'> = 'rotate' // where Leave returns from gamepad mode
   let gyroOn = false
+  // Keeping the phone cool (see keepAwake below): the screen's wake lock, whether the sensors run, and resting.
+  let wake: { release(): Promise<void> } | null = null
+  let motionOn = false
+  /** Once the gyro is known, sensors can rest when nothing reads them (before that they're how we find out). */
+  let tierSettled = false
+  /** The sensors just woke: anchor (or recentre the pointer) on their first fresh sample, not a stale one. */
+  let anchorOnSample = false
+  let recenterOnSample = false
+  let resting = false
+  let lastTouch = performance.now()
   let grab = 0
   let q0: Quat | null = null
   let R: Quat | null = null
@@ -243,6 +304,7 @@ async function boot(code: PairingCode) {
   const currentMode = (): ModeId => {
     if (tab === 'gamepad') return Mode.gamepad
     if (tab === 'point') return Mode.point
+    if (tab === 'track') return Mode.track
     if (settings.style === 'game' && styleAvailable('game')) return Mode.tilt
     return Mode.hold
   }
@@ -305,21 +367,62 @@ async function boot(code: PairingCode) {
   }
 
   async function keepAwake() {
-    try { await (navigator as Navigator & { wakeLock?: { request: (t: 'screen') => Promise<unknown> } }).wakeLock?.request('screen') } catch { /* optional */ }
+    if (resting || wake) return
+    try {
+      const w = await (navigator as Navigator & { wakeLock?: { request: (t: 'screen') => Promise<{ release(): Promise<void>; addEventListener(t: 'release', f: () => void): void }> } }).wakeLock?.request('screen')
+      if (w) { wake = w; w.addEventListener('release', () => { if (wake === w) wake = null }) }
+    } catch { /* optional */ }
+  }
+
+  // ---- keeping the phone cool (a phone left connected should do next to nothing) ----
+  // The motion sensors run only while something reads them; the input loop ticks every frame only while something
+  // is driven; and after two minutes untouched the screen rests (black, and free to sleep) until a touch.
+  function motionWanted() {
+    return document.visibilityState === 'visible' && !resting && (!tierSettled || gyroOn || mode === Mode.point || mode === Mode.track || mode === Mode.gamepad)
+  }
+  /** Start or stop the sensors to match what's needed; true if they just started. */
+  function syncMotion(): boolean {
+    const want = motionWanted()
+    if (want === motionOn) return false
+    motionOn = want
+    if (want) motion.start()
+    else motion.stop()
+    return want
+  }
+  function busy() { return gyroOn || mode === Mode.point || mode === Mode.track || mode === Mode.gamepad || (pad?.touches ?? 0) > 0 }
+  function rest(on: boolean) {
+    if (on === resting) return
+    resting = on
+    document.body.classList.toggle('resting', on)
+    if (on) { const w = wake; wake = null; void w?.release().catch(() => {}) } else { lastTouch = performance.now(); void keepAwake() }
+    syncMotion()
   }
 
   function begin() {
     started = true
-    motion.start()
-    motion.onSample = (dt) => pump(dt)
-    setInterval(() => { if (!motion.flowing) pump(16.7) }, 16)
+    syncMotion()
+    motion.onSample = (dt) => {
+      if (anchorOnSample) { anchorOnSample = false; anchor() }
+      if (recenterOnSample) { recenterOnSample = false; recenterPointer() }
+      pump(dt)
+    }
+    // Every frame while something is driven; otherwise a 15 Hz keep-alive.
+    const loop = () => { if (!motion.flowing) pump(16.7); setTimeout(loop, busy() ? 16 : 66) }
+    loop()
     void keepAwake()
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') void keepAwake()
       else setGyro(false)
+      syncMotion()
     })
+    // Any touch counts as use, and wakes a resting screen.
+    addEventListener('pointerdown', () => { lastTouch = performance.now(); if (resting) rest(false) }, { capture: true })
+    setInterval(() => { if (!resting && !busy() && performance.now() - lastTouch > 120_000) rest(true) }, 5000)
     // Sensors can start late (slow devices, permission granted later), so keep checking until the gyro shows up.
-    const tierTimer = setInterval(() => { detectTier(); if (tier === Tier.gyro) clearInterval(tierTimer) }, 700)
+    const tierTimer = setInterval(() => {
+      detectTier()
+      if (tier === Tier.gyro) { clearInterval(tierTimer); tierSettled = true; syncMotion() }
+    }, 700)
     if (link.status === 'connected') showSurface()
   }
 
@@ -422,11 +525,13 @@ async function boot(code: PairingCode) {
     if (on === gyroOn) return
     gyroOn = on
     smoother.reset()
+    const woke = syncMotion()
     // Steering with motion: the screen stops rotating until the gyro is off again (or the lock is tapped).
     if (on && settings.lockWithGyro && !lock.locked) void setLock(true, true)
     else if (!on && lockFromGyro) void setLock(false)
     if (on) {
-      anchor()
+      if (woke) anchorOnSample = true
+      else anchor()
       dismissHint('gyro')
       if (mode === Mode.tilt) hint('level', () => document.getElementById('level'), 'Tilt to spin · level to stop', { place: 'bottom', delay: 500 })
       if (mode === Mode.point) hint('point', () => document.getElementById('pad'), 'Aim to move · tap to focus', { place: 'top', delay: 500 })
@@ -438,11 +543,15 @@ async function boot(code: PairingCode) {
     const next = currentMode()
     if (next === mode) return render()
     mode = next
-    if (gyroOn && (mode === Mode.hold || mode === Mode.tilt)) anchor()
+    if (mode !== Mode.track && tracker.active) void tracker.stop()
+    const woke = syncMotion()
+    if (gyroOn && (mode === Mode.hold || mode === Mode.tilt)) { if (woke) anchorOnSample = true; else anchor() }
     smoother.reset()
     link.sendCtl({ t: 'mode', m: mode })
+    if (mode === Mode.track && trackWay() === 'motion') hint('track', () => document.getElementById('pad'), 'Hold here and move your phone: what you hold follows', { place: 'top', delay: 400 })
     if (mode === Mode.point) {
-      recenterPointer()
+      if (woke) recenterOnSample = true
+      else recenterPointer()
       hint('point', () => document.getElementById('wii-home'), 'Point the top of your phone at the screen · press ⌂ to centre', { place: 'top', delay: 400 })
     }
     render()
@@ -472,6 +581,7 @@ async function boot(code: PairingCode) {
         <div class="modes glass" role="tablist" aria-label="Control mode">
           <button role="tab" data-tab="rotate" aria-label="Rotate" title="Rotate">${ICONS.rotate}<span>Rotate</span></button>
           <button role="tab" data-tab="point" aria-label="Point" title="Point">${ICONS.point}<span>Point</span></button>
+          <button role="tab" data-tab="track" aria-label="3D: the phone's movement in space" title="3D" hidden>${ICONS.cube}<span>3D</span></button>
           <button role="tab" data-tab="gamepad" aria-label="Gamepad" title="Gamepad" hidden>${ICONS.gamepad}<span>Gamepad</span></button>
         </div>
         <div class="styles" id="styles" role="radiogroup" aria-label="Rotation style">
@@ -482,6 +592,9 @@ async function boot(code: PairingCode) {
           <div class="pad-part glass" id="pad-part" hidden><span class="pp-dot"></span><span class="pp-name"></span><span class="pp-tag"></span><button class="pp-x" aria-label="Release part">${ICONS.close}</button></div>
           <div class="gestures" id="gestures" aria-hidden="true"></div>
           <div class="level" id="level" aria-hidden="true"><div class="level-ring"></div><div class="level-dot" id="level-dot"></div></div>
+          <button class="track-start glass" id="track-start" hidden>${ICONS.cube}<b>Start 3D</b><small></small></button>
+          <button class="glow-end" id="glow-end" hidden aria-label="Stop glowing">${ICONS.close}</button>
+          <button class="glow-stop" id="glow-stop" hidden>Stop</button>
         </div>
         <div class="wii" id="wii" hidden>
           <div class="wii-part" id="wii-part" hidden><span class="pp-dot"></span><span class="wii-part-name"></span><span class="wii-part-value"></span></div>
@@ -499,14 +612,51 @@ async function boot(code: PairingCode) {
           <button class="icon-btn square glass" id="center" aria-label="Recenter">${ICONS.center}</button>
         </div>
       </div>
-      <div class="toast glass" id="toast" role="status" aria-live="polite"></div>`
+      <div class="toast glass" id="toast" role="status" aria-live="polite"></div>
+      <div class="rest" id="rest" aria-hidden="true"><span>Resting to keep your phone cool · touch to wake</span></div>`
     surface = document.getElementById('surface')!
+    document.body.classList.add('live')
+    calmMarks(surface)
     gamepad.mount(surface)
     pad = new Trackpad(document.getElementById('pad')!)
-    pad.onTap = (kind) => { link.sendCtl({ t: 'btn', id: 'pad', ev: kind }); tick(kind !== 'tap'); if (mode === Mode.point) dismissHint('point') }
-    pad.onTouchChange = (touching) => { document.getElementById('pad')!.classList.toggle('active', touching); goFullscreen() }
+    pad.onTap = (kind) => {
+      // In 3D the thumb rests on the pad as the deadman: a long or double press there means nothing.
+      if (mode === Mode.track && kind !== 'tap') return
+      link.sendCtl({ t: 'btn', id: 'pad', ev: kind })
+      tick(kind !== 'tap')
+      if (mode === Mode.point) dismissHint('point')
+    }
+    pad.onTouchChange = (touching) => { document.getElementById('pad')!.classList.toggle('active', touching); goFullscreen(); if (touching) pump(16.7) }
     document.getElementById('gyro')!.addEventListener('click', () => { tick(); setGyro(!gyroOn) })
     document.getElementById('center')!.addEventListener('click', () => { tick(); recenterHere() })
+    // The button sits on the trackpad, which captures every pointer: keep this one for the button.
+    document.getElementById('track-start')!.addEventListener('pointerdown', (e) => e.stopPropagation())
+    document.getElementById('glow-end')!.addEventListener('pointerdown', (e) => e.stopPropagation())
+    document.getElementById('glow-end')!.addEventListener('click', () => { tick(); glowing = false; render() })
+    // The host's safety stop stays within reach while the screen glows.
+    document.getElementById('glow-stop')!.addEventListener('pointerdown', (e) => e.stopPropagation())
+    document.getElementById('glow-stop')!.addEventListener('click', () => {
+      const stop = layout.tray.find((c) => c.tone === 'stop')
+      if (stop) { tick(); link.sendCtl({ t: 'btn', id: stop.id, ev: 'tap' }) }
+    })
+    document.getElementById('track-start')!.addEventListener('click', async () => {
+      tick()
+      // Glow for the computer's camera (chosen in settings, or no WebXR for the camera way).
+      if (trackWay() === 'glow') {
+        glowing = true
+        void keepAwake()
+        toast('Hold the screen toward the computer’s camera · touch it to move')
+        render()
+        return
+      }
+      try {
+        await tracker.start(surface!)
+        toast('Hold the pad and move your phone')
+      } catch {
+        toast('3D tracking didn’t start: it needs Android with Google Play Services for AR')
+      }
+      render()
+    })
     document.getElementById('lock')!.addEventListener('click', () => { tick(); dismissHint('lock'); void setLock(!lock.locked) })
     renderLock()
     surface.querySelectorAll<HTMLButtonElement>('.modes button').forEach((b) => {
@@ -520,6 +670,20 @@ async function boot(code: PairingCode) {
       document.getElementById(el)!.addEventListener('click', () => { tick(); link.sendCtl({ t: 'btn', id, ev: 'tap' }); dismissHint('point') })
     }
     tapBtn('wii-a', 'wii-a')
+    // A also reports going down and up, for hosts that act on a hold (the PC: hold A to right-click, press and aim to drag).
+    const aBtn = document.getElementById('wii-a')!
+    let aDown = false
+    wiiA = (down: boolean) => {
+      if (down === aDown) return
+      aDown = down
+      link.sendCtl({ t: 'btn', id: 'wii-a', ev: down ? 'down' : 'up' })
+    }
+    aBtn.addEventListener('pointerdown', (e) => {
+      try { aBtn.setPointerCapture(e.pointerId) } catch { /* not a live pointer */ }
+      wiiA(true)
+    })
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) aBtn.addEventListener(ev, () => wiiA(false))
+    aBtn.addEventListener('contextmenu', (e) => e.preventDefault())
     tapBtn('wii-plus', 'wii-plus')
     tapBtn('wii-minus', 'wii-minus')
     document.getElementById('wii-home')!.addEventListener('click', () => { tick(); recenterPointer(); dismissHint('point') })
@@ -562,7 +726,23 @@ async function boot(code: PairingCode) {
     const pointing = mode === Mode.point && tier !== Tier.touch
     document.getElementById('wii')!.hidden = !pointing
     document.getElementById('pad')!.hidden = pointing
-    document.getElementById('gyro')!.hidden = pointing
+    document.getElementById('gyro')!.hidden = pointing || mode === Mode.track
+    // 3D: offered where the host takes it and this phone can track itself.
+    const trackTab = surface.querySelector<HTMLElement>('.modes [data-tab=track]')!
+    trackTab.hidden = !hostModes().includes(Mode.track)
+    if (tab === 'track' && trackTab.hidden) { tab = 'rotate'; queueMicrotask(setMode) }
+    if (mode !== Mode.track) glowing = false
+    const start = document.getElementById('track-start')!
+    // The phone's own sensors need no start: hold the pad and move. The camera ways start from a tap.
+    const way = trackWay()
+    start.hidden = !(mode === Mode.track && way !== 'motion' && !tracker.active && !glowing)
+    start.querySelector('small')!.textContent = way === 'xr' ? 'The camera follows the phone through space' : 'The screen glows for the computer’s camera to follow'
+    // Glowing: the whole screen is the phone's colour, and a touch anywhere is the deadman.
+    surface.classList.toggle('glow', glowing)
+    surface.style.setProperty('--glow', seatColor || 'var(--accent)')
+    document.getElementById('glow-end')!.hidden = !glowing
+    document.getElementById('glow-stop')!.hidden = !glowing || !layout.tray.some((c) => c.tone === 'stop')
+    surface.classList.toggle('tracking', tracker.active)
     const center = document.getElementById('center')!
     center.hidden = pointing || (mode !== Mode.point && !(mode === Mode.tilt && gyroOn))
     requestAnimationFrame(repositionHints)
@@ -635,10 +815,13 @@ async function boot(code: PairingCode) {
       : `<span style="color:${/^#[0-9a-f]{3,8}$/i.test(o.color ?? '') ? o.color : 'var(--accent)'}">${esc(o.glyph ?? o.label.slice(0, 1))}</span>`
   }
 
-  /** Who holds a node, as this device should read it. */
+  /** Who controls a node, as this device should read it: its holder, or whoever holds the node it is part of. */
   function holderOf(node: string): ScenePerson | null {
-    const id = scene?.held[node]
-    return id ? scene!.people.find((p) => p.id === id) ?? null : null
+    for (let n: string | undefined = node, depth = 0; n && depth < 8; n = scene?.nodes.find((x) => x.id === n)?.parent, depth++) {
+      const id = scene?.held[n]
+      if (id) return scene!.people.find((p) => p.id === id) ?? null
+    }
+    return null
   }
 
   /** The scene list as a picker: each node with who holds it; picking one claims it, picking yours lets it go. */
@@ -648,9 +831,10 @@ async function boot(code: PairingCode) {
       id: '__scene', label: 'Scene', type: 'select',
       options: (scene?.nodes ?? []).map((n) => {
         const by = holderOf(n.id)
+        const via = by && !scene?.held[n.id] ? scene?.nodes.find((x) => x.id === n.parent)?.name : undefined
         return {
           value: n.id, label: n.name, group: n.group || undefined,
-          detail: n.id === mine ? 'Yours: tap to let go' : by ? `${by.name} has it` : 'Free',
+          detail: n.id === mine ? 'Yours: tap to let go' : by?.id === scene?.you ? `Yours, with ${via}` : by ? (via ? `${by.name} has ${via}` : `${by.name} has it`) : 'Free',
           glyph: by ? initialsOf(by.name) : n.kind === 'object' ? '◆' : '•', color: by?.color,
         }
       }),
@@ -682,13 +866,16 @@ async function boot(code: PairingCode) {
     }
     for (const c of layout.tray) {
       const b = document.createElement('button')
-      b.className = c.type === 'select' ? 'tray-btn select glass' : 'tray-btn glass'
+      b.className = c.type === 'select' ? 'tray-btn select glass' : c.tone === 'stop' ? 'tray-btn glass text stop' : 'tray-btn glass'
       b.setAttribute('aria-label', c.label)
       if (c.type === 'select') {
         const cur = c.options?.find((o) => o.value === values[c.id])
         b.innerHTML = `<span class="sel-thumb">${cur ? thumb(cur) : icon(c.icon)}</span><span class="sel-v"></span>${ICONS.chevron}`
         b.querySelector('.sel-v')!.textContent = cur?.label ?? c.label
         b.setAttribute('aria-haspopup', 'dialog')
+      } else if (c.tone === 'stop') {
+        b.innerHTML = '<span class="tray-label"></span>'
+        b.querySelector('.tray-label')!.textContent = c.label
       } else {
         b.innerHTML = `${icon(c.icon)}<span class="tray-label"></span>`
         b.querySelector('.tray-label')!.textContent = c.label
@@ -806,6 +993,7 @@ async function boot(code: PairingCode) {
         <div class="accent-row" role="radiogroup" aria-label="Accent"${seatColor ? ' hidden' : ''}>${family.ACCENTS.map((a) => `<button class="bb-accent${a.id === 'product' ? ' product' : ''}" role="radio" data-accent="${a.id}" aria-checked="${family.getAccent() === a.id}" aria-label="${a.id === 'product' ? 'ob.Pal lime (default)' : a.name}" style="--sw:${a.color ?? '#c6ff34'}">${family.icons.check}</button>`).join('')}</div>
         <label class="row"><input type="checkbox" id="left"> Left-handed</label>
         <label class="row"><input type="checkbox" id="lockgyro"> Lock rotation while the gyro is on</label>
+        <div class="row track3d" role="radiogroup" aria-label="3D follows"><span>3D follows</span>${(['motion', 'xr', 'glow'] as const).map((w) => `<button class="way-opt" role="radio" data-way="${w}" aria-checked="${settings.track3d === w}"><span>${{ motion: 'The phone’s motion', xr: 'Its camera (Android)', glow: 'A glow for the screen’s camera' }[w]}</span></button>`).join('')}</div>
         <label class="row"><input type="checkbox" id="headset"> <span>Headset buttons<small>Earbud presses act as A, next and previous. Plays silent audio, which pauses music.</small></span></label>
         <p class="hw-note" id="hw-note" hidden></p>
         <a class="support-link" href="/sponsor/" target="_blank" rel="noopener">${ICONS.heart}<span>Support ob.Pal</span></a>
@@ -835,6 +1023,16 @@ async function boot(code: PairingCode) {
     const lockgyro = sheet.querySelector<HTMLInputElement>('#lockgyro')!
     lockgyro.checked = settings.lockWithGyro
     lockgyro.onchange = () => { settings.lockWithGyro = lockgyro.checked; store.set('obpal.lockgyro', lockgyro.checked ? '1' : '0') }
+    sheet.querySelectorAll<HTMLButtonElement>('.track3d [data-way]').forEach((b) => {
+      b.onclick = () => {
+        settings.track3d = b.dataset.way as 'motion' | 'xr' | 'glow'
+        store.set('obpal.track3d', settings.track3d)
+        sheet.querySelectorAll('.track3d [data-way]').forEach((x) => x.setAttribute('aria-checked', String(x === b)))
+        if (tracker.active) void tracker.stop()
+        glowing = false
+        render()
+      }
+    })
     const headset = sheet.querySelector<HTMLInputElement>('#headset')!
     headset.checked = settings.headset
     headset.onchange = async () => {
@@ -852,7 +1050,7 @@ async function boot(code: PairingCode) {
       b.onclick = () => {
         tick()
         const t = themeById(b.dataset.theme)
-        applyTheme(t)
+        applyTheme(t, true)
         link.sendCtl({ t: 'value', id: 'theme', v: t.id })
         syncThemeRows()
       }
@@ -941,6 +1139,18 @@ async function boot(code: PairingCode) {
       st.twist = pad.twist
     }
     st.buttons = gyroOn ? 1 : 0
+    // 3D from the phone's own sensors: while the thumb is down, each sample is a pose (the host reads Frame.pose).
+    if (mode === Mode.track && trackWay() === 'motion' && q) {
+      const held = touches > 0
+      if (held) {
+        const qp = qMul(EARTH_TO_POSE, q)
+        if (!imuHeld) imu.anchor(qp)
+        const p = imu.step(qp, motion.accel ? toPoseFrame(q, motion.accel) : null, motion.hasGyro ? toPoseFrame(q, motion.gyro) : null, s)
+        poseSeq = (poseSeq + 1) & 0xffff
+        link.sendState(encodePose({ flags: PoseFlag.tracked | PoseFlag.touching, seq: poseSeq, t: st.t, p, q: qp, gen: imu.gen }, poseBuf))
+      } else if (imuHeld) imu.release()
+      imuHeld = held
+    }
     if (link.sendState(encodeState(st, buf))) lastSend = now
   }
 }

@@ -135,7 +135,9 @@ fn serve(args: &[String]) -> ExitCode {
     });
     log.line(&format!("panic hotkey: {}", hotkey.as_deref().unwrap_or("not available")));
 
-    let (injector, foreground) = platform::backends();
+    let browser = platform::browser();
+    log.line(&format!("browser: {}", browser.as_deref().unwrap_or("not found")));
+    let (injector, foreground) = platform::backends(browser);
     let mut session = Session::new(injector, foreground, cfg, cfg_path, hotkey);
     let mut out = io::stdout().lock();
     let send = |replies: Vec<Reply>, out: &mut io::StdoutLock| -> bool {
@@ -224,8 +226,11 @@ mod platform {
     pub fn start_panic_hotkey(on_panic: impl Fn() + Send + 'static) -> Option<String> {
         win::hotkey::start(on_panic)
     }
-    pub fn backends() -> (impl Injector, impl Foreground) {
-        (win::inject::WinInjector, win::foreground::WinForeground::new(win::process::parent_path()))
+    pub fn browser() -> Option<String> {
+        win::process::launcher_path()
+    }
+    pub fn backends(browser: Option<String>) -> (impl Injector, impl Foreground) {
+        (win::inject::WinInjector, win::foreground::WinForeground::new(browser))
     }
     pub fn inject_report() -> String {
         use std::sync::atomic::Ordering;
@@ -270,7 +275,10 @@ mod platform {
             None
         }
     }
-    pub fn backends() -> (impl Injector, impl Foreground) {
+    pub fn browser() -> Option<String> {
+        None
+    }
+    pub fn backends(_: Option<String>) -> (impl Injector, impl Foreground) {
         (Nothing, Nothing)
     }
     pub fn inject_report() -> String {

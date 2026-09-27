@@ -18,7 +18,8 @@
     <canvas id="stage" aria-label="Faction arena"></canvas>
     <header class="sim-top">
       <div class="sim-left">
-        <a class="logo" href="/" aria-label="ob.Pal"><img class="mark" src="/logo-mark.svg" alt="" /><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span></a>
+        <a class="logo" href="/" aria-label="ob.Pal"><span class="mark-slot" data-mark></span><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span></a>
+        <button class="switch-btn" id="t-switch" type="button" aria-label="Blackboxes apps" title="Blackboxes apps"></button>
         <a class="sim-crumb" href="/sim/">Sims</a>
       </div>
       <div class="chip glass" id="chip" hidden>
@@ -46,5 +47,6 @@
     </div>
     <div class="v-pair" id="pair"></div>
     <p class="note" id="note" role="status"></p>
+    <div class="bb-menu bb-glass switcher" id="switcher" aria-label="Blackboxes apps" hidden></div>
   </body>
 </html>

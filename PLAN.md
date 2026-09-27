@@ -384,7 +384,99 @@ r.on('button', e => ...); r.sample(frameTime); r.setLayout(json);
 
 Public sims (2026-09-26): [/sim/](https://obpal.blackboxes.net/sim/) hosts the robot arm (phase D's envelope, simulated) and the faction arena (phase B's slots), so the public can try both before the bridges ship.
 
+**Robot arms: status (2026-09-26).**
+- **Shipped in `/sim/arm/`:**
+  - one to four arms and per-arm control profiles;
+  - whole-arm follow-the-phone (IK);
+  - nested claims (`Claims.nest`, `SceneNode.parent`);
+  - `Layout.keys` and `TrayControl.tone`;
+  - real-arm drivers (Feetech Web Serial, ob.Pal serial with the Arduino sketch, rosbridge);
+  - calibration, go-live with a speed cap, and a keep-up watchdog.
+**3D from the phone's own sensors (owner, 2026-09-26: "similar to the wii controller … just using the phone hardware … instead of using camera"). DONE:**
+- `src/controller/imu3d.ts`: the gyro's orientation through an arm model (the phone swings about 45 cm around a pivot behind it), plus accelerometer pushes along where it points, with zero-velocity resets when it's still.
+- It sends POSE, like the camera way, so every host (the arm, the Viewer) takes it as is.
+- It's the default 3D. The camera (WebXR) and glow ways are settings.
+- e2e: swinging the phone 30° swings the arm about 25°.
+- Later (not required now): the screen's camera tracking a person's arm (pose estimation) to drive a robot arm.
+
+**Wii-grade following for the whole arm (owner, 2026-09-26: "we are not getting that wii experience").** The arm must follow the phone's motion reliably in 3D space. Today it maps turns to swing, tip to height and twist to roll, with reach on a drag, and it ratchets on a thumb deadman. It works, but it isn't following: moving your hand doesn't move the tool.
+- **A: phone 6-DOF tracking through WebXR** (Android Chrome and ARCore: `immersive-ar` with `dom-overlay`). **DONE 2026-09-26:**
+  - mode 6 (`track`), the POSE packet 0x15 (`packages/core/src/pose.ts`) and `Frame.pose`;
+  - the phone's "3D" tab and `src/controller/track.ts`;
+  - the arm's 3D drive (`hand.ts`: the tool moves with the hand ×1.5, and tip and twist set the gripper);
+  - e2e with a faked WebXR device (7/7).
+  - Still to do: try it on a real Android phone, and tune the scale per arm.
+  - Viewer 3D (also done 2026-09-26): a held part moves and turns with the phone, and a live value drags. With nothing held, the lead moves the whole scene. A long press on the pad no longer lets go in 3D. Shared-scenes e2e 6/6.
+  - Known flaky: e2e-phone's first check ("landscape layout took over while locked") fails now and then; the next two runs passed.
+  - The phone knows where it is in space, drift-corrected by its camera. Move the phone 10 cm and the tool moves 10 cm, scaled per arm; the phone's tilt and twist set the tool's pitch and roll.
+  - RoboTurk (Stanford, 2018) teleoperated arms this way with ARKit.
+  - Needs a POSE packet (position and orientation in the session frame), `Frame.pose`, and aligning the phone's start frame with the screen view.
+  - iOS has no WebXR, so it needs B or C.
+- **B: the screen's webcam tracks the phone. DONE 2026-09-26 (colour glow rather than a marker):**
+  - `GlowFollower` in `@obpal/host` (the arm page and the Viewer's People panel): on a phone without WebXR, Start 3D makes the screen glow its seat colour, with Stop kept on screen. The screen's "Follow glowing phones with this camera" finds each colour and turns its move into a pose.
+  - e2e with a painted fake camera (8/8).
+  - Next: lock the camera's exposure where the browser allows it, try a marker for robustness, use the phone's IMU for orientation, and try it with a real webcam and an iPhone.
+  - Original idea: the screen's webcam tracks the phone, the way PlayStation Move works: a marker on the phone's screen, located with AprilTag/ArUco in WASM, fused with the phone's IMU. Works on any phone, iPhones included.
+- **C, always available: Wii-style absolute pointing. DONE 2026-09-26: Point and go (hold B, A claws, +/− height), tested end to end.** Point the phone at the spot on the table (as seen on the screen) and the tool goes there; the pad sets height and twist sets roll. It uses orientation only, so nothing drifts. Build C first, then A, then B.
+- **Reliability throughout:** One-Euro smoothing, latency compensation, recentre, a clear deadman (a held thumb), and haptics at the edge of reach.
+
+- **Next:**
+  1. Try it on real hardware: an SO-101, an Arduino arm, and a ROS 2 arm.
+  2. Per-model geometry, so the twin has the SO-101's proportions (the kinematics already take an `ArmGeometry`).
+  3. A serial bridge in ob.Pal Desktop, for browsers without Web Serial and for a PC that bridges an arm without a page open.
+  4. Arm-to-arm collision checks in the cell.
+  5. A camera view of a remote arm, for physical spaces.
+
+**Done 2026-09-27 (owner's requests of 2026-09-26):**
+- Phone heating: an idle connected phone went from 36-42% main-thread load to about 2-4% (`pnpm perf:phone`). The cause was the logo's endless SVG orbit; the phone now calms it, and also rests its sensors, input loop and screen when idle.
+- 3D from the phone's own sensors (Wii-style, no camera), as the default.
+- The home page for the platform as it is: live use cases, the quick join kept on top, and "make it yours".
+- The /catalogue/ page with a profile builder.
+- Community profiles in catalogue/profiles/, checked at build.
+- /catalogue.json, /profile.schema.json and /llms.txt.
+- Giving back on /donate/, with the shares in src/support/open-source.json and checked by `pnpm oss:audit`.
+
+**Done 2026-09-27 (owner: the home page on phones, the demos, an attention-grabbing hero, the colours):**
+- **No sideways scroll.** The top bar's backdrop reached 100vmax past each edge, so a phone laid the page out 888–1250px wide. The bar is full-width glass now, and site pages clip overflow. `pnpm e2e:home` checks 320–412px.
+- **Hero: paint with light** (src/landing/hero.ts, ribbon.ts, stroke.ts).
+  - A ribbon of light follows the mouse, a tap, or the phone's own tilt (smoothed, with a deadzone).
+  - On a computer or tablet the page is a real host (same SDK, 4 seats, point mode). Each phone that scans its code paints its own ribbon.
+  - With nobody steering, the light draws one stroke: in from the left, once round the headline like the satellite round the logo's ring, then beneath it to rest on its full stop. The stroke is walked at an even, eased pace, and the ribbon traces it exactly.
+- **Use cases:** a bento of live scenes. Each tells a short story and hands over to your pointer. One loop drives the whole page, and it stops when nothing moves.
+- **Site palette** (styles/site.css) on the site pages: ultraviolet night, lime light, lavender haze. The apps keep the visitor's surface. A page load no longer saves a surface to the shared cookie.
+- **Precise motion, and demos that play under a finger** (owner: "too erratic"; "long click selects, swiping scrolls").
+  - Tilt (src/landing/tilt.ts) is opt-in with one tap. It waits for the opening stroke, then steers the light and the scene on screen.
+  - On touch, a scene takes the finger after a short hold or a sideways swipe. A vertical flick still scrolls, a tap is a tap, and nothing selects.
+  - `pnpm e2e:home` checks all of this.
+
+**Next, in this order (owner OK'd 2026-09-27: "go ahead in that order"):**
+
+1. **Embed, branded QR and host-branded pairing, as one piece.** It's all about how other sites carry ob.Pal.
+   - **Embed.**
+     - A hosted `https://obpal.blackboxes.net/embed.js` (ES module, built by Vite as its own entry) defines `<obpal-remote>`.
+     - Attributes: `app`, `modes` (point, hold, tilt, pad, gamepad, track), `seats`, `profile`, `corner` (default: bottom-right), `accent`, `open` (start expanded).
+     - It makes a `Remote`, shows the pairing (below), fires DOM events (`obpal-connect`, `obpal-join`, `obpal-leave`, `obpal-button`), and exposes `.remote` plus `.frame(now)` for a page's own rAF loop.
+     - A tiny `window.obpal.remote(opts)` works without the element.
+     - A page decides what's controllable: `setScene({ nodes })` passes through, so any listed model can be taken over by QR or link.
+     - Agents: an llms.txt section with a copy-paste snippet, the embed in catalogue.json, and a typed example in packages/host/README.
+     - npm: package.json and README ready, but publishing needs the owner's npm account.
+   - **Branded QR** (packages/host/src/qr.ts).
+     - uqr's matrix at ECC 'Q' or 'H'.
+     - Rounded dot modules; finder squares as the ob.Pal box, rounded with a lime or host-accent eye; the mark in the centre over a clear quiet zone.
+     - Dark modules on a light plate, so every camera reads it; a per-scene accent tint keeps each code recognisable.
+     - It must scan: test with a decoder (jsQR, dev-only) over sizes and themes, alongside the plain uqr fallback.
+   - **Host-branded, non-blocking pairing.**
+     - The card becomes a corner chip (mark, "Scan to control", a status dot). It expands on click or hover to show the code, and collapses once a phone is in, never covering the scene.
+     - It takes the host's look: its accent (the `--accent` / `--primary` custom properties, or the `accent` attribute), font (body font-family), colour scheme and corner radius.
+     - Keyboard and screen-reader friendly, with reduced motion respected.
+     - The viewer, sims and home hero move onto it too.
+2. **Trackpad depth field.** The phone trackpad's dot matrix answers a swipe with a 3D depth-of-field ripple: dots near the finger rise and sharpen, far ones soften. Canvas, and it's cool on a phone.
+3. **Arms.** Per-model geometry (SO-101 first), a serial bridge in ob.Pal Desktop, arm-to-arm collision in the sim, and a camera view of a remote arm.
+
 **Queued (owner, 2026-09-26; after the usage reset):**
+- **Top-left dropdowns across the ecosystem (first).** The Blackboxes engines' top-left dropdowns aren't standardised. Make them match ob.Pal's everywhere, in look and behaviour.
+- **Sharp, animated logo everywhere.** The logo shows pixelated. Use SVG wherever it can go (pages, the Link popup and options, the Blackboxes engines), with its animation where it fits. The Chrome toolbar icon needs PNG, so export crisp 16/32/48/128 sizes from the SVG.
+- **PC connection (ob.Pal Desktop).** The owner can't connect to the PC. The extension's "How to install" link (`DESKTOP_URL` in `extension/src/shared/native.ts`, and `options.ts`) points at `Axialon/obpal-link/tree/main/desktop`, which is a 404: the public repo has only `extension/`. Point it at the release asset (`obpal-desktop-windows-x64.zip`) and a README install section, or publish `desktop/` there. Then ship Link 1.2.1 and debug the native-messaging registration against the installed extension's ID.
 - **Embedding for developers and AI agents.** A drop-in way to add ob.Pal to any app or page: a script tag or web component, the npm package, and agent-readable docs (llms.txt, typed examples). A page's code decides which 3D models are controllable, and any of them can then be taken over through a QR code or link.
 - **Branded QR codes.** ob.Pal's own QR design (mark, dot style, colour) as brand identity: the product is free, so the code is the marketing. Each code stays scannable and unique to its scene.
 - **Non-blocking, host-branded pairing.** The invite sits in the page without covering the scene and takes on the host site's brand (colours, type, placement).

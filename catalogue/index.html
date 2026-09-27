@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en" class="site">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0a0718" />
+    <meta name="description" content="The ob.Pal control catalogue: every utility, profile, control system and bridge a phone can drive, and a builder to make and propose your own controller profile. Machine-readable as catalogue.json." />
+    <title>Control catalogue · ob.Pal</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&family=JetBrains+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/family/family.css" />
+    <link rel="stylesheet" href="/src/styles/base.css" />
+    <link rel="stylesheet" href="/src/styles/site.css" />
+    <link rel="stylesheet" href="/src/styles/landing.css" />
+    <link rel="stylesheet" href="/src/styles/catalogue.css" />
+    <link rel="alternate" type="application/json" href="/catalogue.json" title="The catalogue as JSON" />
+    <script type="module" src="/src/catalogue/main.ts"></script>
+  </head>
+  <body class="home">
+    <header class="top">
+      <div class="top-in">
+        <a class="logo" href="/" aria-label="ob.Pal"><span class="mark-slot" data-mark></span><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span></a>
+        <button class="switch-btn" id="t-switch" type="button" aria-label="Blackboxes apps" title="Blackboxes apps"></button>
+        <nav class="top-nav" aria-label="Site">
+          <a href="/sim/">Sims</a>
+          <a href="/link/">Link</a>
+          <a href="/catalogue/" aria-current="page">Catalogue</a>
+          <a href="/#build">Build</a>
+          <a href="/donate/">Donate</a>
+        </nav>
+        <button class="top-menu" id="t-menu" type="button" aria-label="Menu">
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10" /></svg>
+        </button>
+        <a class="btn primary top-go" href="/view/">Open the viewer</a>
+      </div>
+    </header>
+    <div class="bb-menu bb-glass switcher" id="switcher" aria-label="Blackboxes apps" hidden></div>
+    <nav class="bb-menu bb-glass site-menu" id="site-menu" aria-label="Site" hidden>
+      <a class="bb-menu-item" href="/sim/">Sims</a>
+      <a class="bb-menu-item" href="/link/">ob.Pal Link</a>
+      <a class="bb-menu-item" href="/catalogue/" aria-current="page">Catalogue</a>
+      <a class="bb-menu-item" href="/#build">Build with it</a>
+      <a class="bb-menu-item" href="/donate/">Donate</a>
+    </nav>
+
+    <main class="land">
+      <section class="hero">
+        <p class="eyebrow">The control catalogue</p>
+        <h1>Everything a phone can drive.</h1>
+        <p class="lede">Utilities, profiles, control systems and bridges, and a builder for your own controller profile.</p>
+        <div class="cta">
+          <a class="btn primary" href="#build">Build a profile</a>
+          <a class="btn" href="/catalogue.json">catalogue.json</a>
+        </div>
+      </section>
+
+      <section class="cat-sec" aria-labelledby="h-u">
+        <h2 id="h-u">Utilities</h2>
+        <p class="sub">What a phone offers a host.</p>
+        <div class="cat-grid" id="utilities"></div>
+      </section>
+      <section class="cat-sec" aria-labelledby="h-p">
+        <h2 id="h-p">Profiles</h2>
+        <p class="sub">Named settings for the motion utilities: built in, and from the community.</p>
+        <div class="cat-grid" id="profiles"></div>
+      </section>
+      <section class="cat-sec" aria-labelledby="h-s">
+        <h2 id="h-s">Control systems</h2>
+        <p class="sub">What a shared scene controls, one person per part.</p>
+        <div class="cat-grid" id="systems"></div>
+      </section>
+      <section class="cat-sec" aria-labelledby="h-b">
+        <h2 id="h-b">Bridges</h2>
+        <p class="sub">Other controllers, through a phone or a PC.</p>
+        <div class="cat-grid" id="bridges"></div>
+      </section>
+
+      <section class="cat-sec builder" id="build" aria-labelledby="h-build">
+        <h2 id="h-build">Build a profile</h2>
+        <p class="sub">Start from a built-in, tune it and check it. Then copy it, save it, or propose it for the catalogue.</p>
+        <div class="bld">
+          <form class="bld-form" id="bld" autocomplete="off">
+            <label class="fld"><span>Start from</span><select id="base"></select></label>
+            <label class="fld"><span>Id</span><input id="pid" placeholder="my-profile" spellcheck="false" /></label>
+            <label class="fld"><span>Name</span><input id="pname" placeholder="My profile" /></label>
+            <label class="fld wide"><span>For</span><input id="pfor" placeholder="What it is for, in one line" /></label>
+            <fieldset class="bld-on"><legend>Switch on when it applies</legend><div id="on"></div></fieldset>
+            <div class="bld-utils" id="utils"></div>
+          </form>
+          <div class="bld-out">
+            <pre id="json" aria-label="The profile as JSON"></pre>
+            <ul class="errs" id="errs" aria-live="polite"></ul>
+            <div class="bld-actions">
+              <button class="btn" id="copy" type="button">Copy</button>
+              <button class="btn" id="save" type="button">Save .json</button>
+              <a class="btn primary" id="propose" target="_blank" rel="noopener">Propose it</a>
+            </div>
+            <p class="fine">For AI agents: check it against <a href="/profile.schema.json">profile.schema.json</a> (or <code>checkProfile()</code> in <code>@obpal/core</code>), then add <code>catalogue/profiles/&lt;id&gt;.json</code> in a pull request. <a href="/llms.txt">llms.txt</a> has the rest.</p>
+          </div>
+        </div>
+      </section>
+
+      <footer class="foot">The catalogue's source is <a href="https://github.com/Axialon/obpal/blob/main/spec/CATALOGUE.md">spec/CATALOGUE.md</a>. <a href="/">Home</a> · <a href="/sim/">Sims</a> · <a href="/link/">Extension</a> · <a href="/donate/">Donate</a> · <a href="https://github.com/Axialon/obpal">Open source</a></footer>
+    </main>
+  </body>
+</html>

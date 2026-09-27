@@ -1,0 +1,205 @@
+/*
+ * The home page: a hero you can paint with light (by mouse, tilt or a paired phone), the use cases as live scenes in
+ * a bento, "make it yours", and a closing call. Colours are the site palette (site.css): ultraviolet night, lime light,
+ * lavender haze. Motion only plays on screen and settles on its own.
+ */
+.home { --top-h: 65px; --gut: max(20px, env(safe-area-inset-left)); }
+.skip { position: absolute; left: 12px; top: -60px; z-index: 40; padding: 10px 14px; border-radius: 12px; background: var(--bb-accent); color: var(--accent-ink); font-weight: 700; text-decoration: none; }
+.skip:focus { top: 12px; }
+.home .eyebrow { display: inline-flex; align-items: center; gap: 10px; margin: 0 0 18px; color: var(--accent-text); font: 700 12px/1.2 var(--font); letter-spacing: 0.14em; text-transform: uppercase; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bb-accent); box-shadow: 0 0 0 4px rgb(var(--accent-rgb) / 0.14), 0 0 14px rgb(var(--accent-rgb) / 0.8); flex: none; }
+
+/* ---- hero ---------------------------------------------------------------------------------------------------- */
+
+.hero { position: relative; isolation: isolate; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; max-width: none; min-height: min(900px, 100svh); margin-top: calc(-1 * var(--top-h)); padding: calc(var(--top-h) + 40px) 0 120px; overflow: clip; }
+.hero::before { content: ''; position: absolute; inset: 0; z-index: -2; pointer-events: none;
+  background:
+    radial-gradient(60% 55% at 80% 12%, rgb(var(--uv-rgb) / 0.5), transparent 70%),
+    radial-gradient(45% 45% at 8% 92%, rgb(var(--haze-rgb) / 0.16), transparent 70%),
+    radial-gradient(30% 30% at 58% 58%, rgb(var(--accent-rgb) / 0.05), transparent 70%),
+    linear-gradient(180deg, #0f0a28 0%, var(--page) 88%); }
+/* The stage floor: a faint grid of points that fades out toward the edges. */
+.hero::after { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background-image: radial-gradient(rgb(var(--haze-rgb) / 0.2) 1px, transparent 1.3px); background-size: 30px 30px;
+  -webkit-mask-image: radial-gradient(75% 65% at 50% 45%, #000 25%, transparent 78%); mask-image: radial-gradient(75% 65% at 50% 45%, #000 25%, transparent 78%); }
+.hero-stage { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; pointer-events: none; }
+.hero-in { position: relative; z-index: 1; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 56px; width: min(1180px, 100% - 2 * var(--gut)); margin: 0 auto; }
+.hero-copy { min-width: 0; }
+.hero h1 { margin: 0 0 24px; max-width: 11.5ch; font: 800 clamp(46px, 7.2vw, 104px)/0.98 var(--font-display); letter-spacing: -0.045em; text-wrap: balance; }
+.hero h1 .keep { white-space: nowrap; }
+/* The headline catches the ribbon's light: white-hot where it is, lime around it, then back to ink. */
+.hero h1.lit {
+  background: radial-gradient(circle var(--lr, 0px) at var(--lx, -999px) var(--ly, -999px), rgb(var(--core-rgb)) 0%, var(--bb-accent) 32%, rgb(var(--haze-rgb)) 64%, var(--ink) 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent;
+}
+@media (forced-colors: active) { .hero h1.lit { background: none; color: CanvasText; -webkit-text-fill-color: CanvasText; } }
+.hero .lede { margin: 0 0 32px; max-width: 34em; color: var(--secondary); font-size: clamp(17px, 1.5vw, 20px); line-height: 1.55; }
+.hero .cta { display: flex; flex-wrap: wrap; gap: 12px; }
+.cta-main { position: relative; overflow: hidden; min-height: 54px; padding: 0 26px; font-size: 16px; text-decoration: none; }
+/* One sweep of light across the main button when the pointer arrives. */
+.cta-main::after { content: ''; position: absolute; inset: 0; background: linear-gradient(105deg, transparent 30%, rgb(255 255 255 / 0.45) 50%, transparent 70%); transform: translateX(-120%); pointer-events: none; }
+@media (hover: hover) and (pointer: fine) { .cta-main:hover::after { transform: translateX(120%); transition: transform 0.75s var(--ease); } }
+.cta-alt { min-height: 54px; padding: 0 22px; font-size: 16px; color: var(--ink); text-decoration: none; background: rgb(var(--hl-rgb) / 0.05); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.cta-alt:hover { background: rgb(var(--hl-rgb) / 0.09); }
+.quick { display: flex; flex-wrap: wrap; gap: 10px 24px; margin: 34px 0 0; padding: 0; list-style: none; color: var(--secondary); font-size: 14.5px; font-weight: 600; }
+.quick li { display: inline-flex; align-items: center; gap: 10px; }
+.qi { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; border: 1px solid var(--line); background: rgb(var(--hl-rgb) / 0.05); color: var(--accent-text); }
+.qi .ic { width: 18px; height: 18px; }
+
+/* Try it right here: a real pairing code (computers only), in glass lit from above. */
+.pair { position: relative; width: 300px; padding: 20px; border-radius: 30px; border: 1px solid var(--line);
+  background: linear-gradient(165deg, rgb(var(--surface-rgb) / 0.6), rgb(var(--base-rgb) / 0.5));
+  backdrop-filter: blur(24px) saturate(160%); -webkit-backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: 0 40px 80px -40px rgb(0 0 0 / 0.8), inset 0 1px 0 rgb(var(--hl-rgb) / 0.12); }
+.pair::before { content: ''; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; pointer-events: none;
+  background: linear-gradient(160deg, rgb(var(--accent-rgb) / 0.55), transparent 38%, transparent 70%, rgb(var(--haze-rgb) / 0.35));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+.pair-k { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; font: 750 15px/1.2 var(--font-display); letter-spacing: -0.01em; }
+.pair-note { margin: 14px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.pair-slot { min-height: 260px; }
+.pair-wait { display: grid; justify-items: center; gap: 12px; color: var(--muted); font-size: 13px; font-weight: 600; }
+.pair-qr { width: 100%; aspect-ratio: 1; border-radius: 20px; border: 1px dashed rgb(var(--haze-rgb) / 0.3);
+  background: linear-gradient(110deg, transparent 30%, rgb(var(--hl-rgb) / 0.06) 50%, transparent 70%) 0 0 / 250% 100%, rgb(var(--hl-rgb) / 0.03);
+  animation: pair-shine 1.8s linear infinite; }
+@keyframes pair-shine { to { background-position: -250% 0, 0 0; } }
+/* The SDK's own card, fitted in: the code full width, the status under it. */
+.hero .pair .obpal-card { --obpal-ink: var(--ink); --obpal-muted: var(--muted); --obpal-accent: var(--bb-accent); --obpal-font: var(--font);
+  flex-direction: column; align-items: stretch; gap: 14px; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.hero .pair .obpal-qr { width: 100%; height: auto; aspect-ratio: 1; padding: 12px; border-radius: 20px; box-shadow: 0 0 0 1px rgb(var(--accent-rgb) / 0.35), 0 18px 40px -18px rgb(var(--accent-rgb) / 0.45); }
+.hero .pair .obpal-body { min-width: 0; gap: 8px; }
+.hero .pair .obpal-title { font: 750 16px/1.2 var(--font-display); }
+.hero .pair .obpal-ic { background: rgb(var(--accent-rgb) / 0.16); color: var(--accent-text); border-color: rgb(var(--accent-rgb) / 0.3); }
+.hero[data-live] .pair::before { background: linear-gradient(160deg, rgb(var(--accent-rgb) / 0.9), rgb(var(--accent-rgb) / 0.2) 50%, rgb(var(--haze-rgb) / 0.5)); }
+
+.hero-hint { position: absolute; left: 50%; bottom: 34px; z-index: 2; display: inline-flex; align-items: center; gap: 10px; padding: 10px 16px 10px 12px; border-radius: 999px;
+  border: 1px solid var(--line); background: rgb(var(--base-rgb) / 0.5); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  color: var(--secondary); font: 650 13.5px/1 var(--font); white-space: nowrap; transform: translate3d(-50%, 0, 0); transition: opacity 0.6s var(--ease), transform 0.6s var(--ease);
+  animation: hint-bob 3.2s var(--ease) 1.2s 3; }
+.hero-hint .ic { width: 18px; height: 18px; color: var(--accent-text); }
+.hero-hint.gone { opacity: 0; transform: translate3d(-50%, 10px, 0); pointer-events: none; }
+@keyframes hint-bob { 0%, 100% { transform: translate3d(-50%, 0, 0); } 50% { transform: translate3d(-50%, -5px, 0); } }
+
+/* ---- sections ------------------------------------------------------------------------------------------------ */
+
+.uses, .build, .closer { width: min(1180px, 100% - 2 * var(--gut)); margin: 0 auto; }
+.uses { padding: 40px 0 56px; }
+.sec-head { margin: 0 0 30px; }
+.sec-head h2 { margin: 0; max-width: 20ch; font: 800 clamp(32px, 4.6vw, 58px)/1.02 var(--font-display); letter-spacing: -0.04em; text-wrap: balance; }
+.home section[id] { scroll-margin-top: calc(var(--top-h) + 16px); }
+
+/* The use cases, as a bento: wide cards put the scene beside its words, the others above them. */
+.show { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.scene { --glass-card: linear-gradient(165deg, rgb(var(--surface-rgb) / 0.42), rgb(var(--base-rgb) / 0.4));
+  position: relative; display: flex; flex-direction: column; min-width: 0; overflow: clip; border-radius: 30px; border: 1px solid var(--line);
+  background: var(--glass-card); box-shadow: inset 0 1px 0 rgb(var(--hl-rgb) / 0.08);
+  opacity: 0; transform: translate3d(0, 26px, 0); transition: opacity 0.8s var(--ease), transform 0.9s var(--ease), border-color 0.3s, box-shadow 0.3s var(--ease); }
+.scene.in { opacity: 1; transform: none; }
+.scene:hover { border-color: rgb(var(--accent-rgb) / 0.32); }
+/* A finger that holds a scene has it: the card lights up and its scene comes forward a touch. */
+.scene.held { border-color: rgb(var(--accent-rgb) / 0.6); box-shadow: 0 0 0 1px rgb(var(--accent-rgb) / 0.3), 0 26px 60px -30px rgb(var(--accent-rgb) / 0.6); }
+.scene.held .scene-art { transform: scale(1.015); }
+/* The mouse's light, and the rim that catches it (computers only). */
+.scene::before, .scene::after, .build-card::before, .build-card::after { content: ''; position: absolute; inset: 0; z-index: 1; border-radius: inherit; pointer-events: none; opacity: 0; transition: opacity 0.45s var(--ease); }
+.scene::after, .build-card::after { background: radial-gradient(360px circle at var(--mx, 50%) var(--my, 50%), rgb(var(--accent-rgb) / 0.07), transparent 65%); }
+.scene::before, .build-card::before { padding: 1px; background: radial-gradient(220px circle at var(--mx, 50%) var(--my, 50%), rgb(var(--accent-rgb) / 0.75), transparent 72%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+@media (hover: hover) and (pointer: fine) { .scene:hover::before, .scene:hover::after, .build-card:hover::before, .build-card:hover::after { opacity: 1; } }
+.scene.wide { grid-column: span 2; display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); align-items: center; }
+/* A scene plays under the finger or mouse: nothing in it selects, calls out or flashes when pressed. */
+.scene-art { position: relative; aspect-ratio: 400 / 260; touch-action: pan-y; cursor: crosshair; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; transition: transform 0.25s var(--ease); }
+.play-cue { position: absolute; right: 12px; bottom: 12px; display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px 7px 8px; border-radius: 999px; border: 1px solid var(--line);
+  background: rgb(var(--base-rgb) / 0.62); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: var(--secondary); font: 650 12px/1 var(--font); pointer-events: none; transition: opacity 0.4s var(--ease); }
+.play-cue .ic { width: 16px; height: 16px; color: var(--accent-text); }
+html.played .play-cue { opacity: 0; }
+.scene-svg { display: block; width: 100%; height: 100%; }
+.scene-text { padding: 6px 26px 26px; }
+.scene.wide .scene-text { padding: 26px 30px 26px 8px; }
+.scene-k { display: inline-block; margin-bottom: 10px; padding: 5px 10px; border-radius: 999px; background: rgb(var(--accent-rgb) / 0.12); color: var(--accent-text); font: 700 11.5px/1 var(--font); letter-spacing: 0.1em; text-transform: uppercase; }
+.scene-text h3 { margin: 0 0 8px; font: 800 clamp(22px, 2.1vw, 28px)/1.12 var(--font-display); letter-spacing: -0.03em; }
+.scene-text p { margin: 0 0 14px; color: var(--secondary); font-size: 16px; line-height: 1.55; max-width: 34ch; }
+.scene-text a { font-weight: 700; text-decoration: none; }
+.scene-text a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* Make it yours: the SDK, your own profile, files for AI agents. */
+.build { padding: 72px 0 24px; }
+.build-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr); gap: 18px; }
+.build-card { position: relative; display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 26px; border-radius: 30px; border: 1px solid var(--line);
+  background: linear-gradient(165deg, rgb(var(--surface-rgb) / 0.42), rgb(var(--base-rgb) / 0.4)); box-shadow: inset 0 1px 0 rgb(var(--hl-rgb) / 0.08); }
+.build-card h3 { margin: 0; font: 800 21px/1.2 var(--font-display); letter-spacing: -0.025em; }
+.build-card p { margin: 0; color: var(--secondary); }
+.build-card pre { margin: 6px 0; padding: 16px; overflow-x: auto; border-radius: 18px; border: 1px solid var(--line); background: rgb(4 2 14 / 0.6); color: var(--secondary); font: 500 12.5px/1.65 var(--font-data); }
+.build-card pre .k { color: rgb(var(--haze-rgb)); }
+.build-card pre .s { color: var(--bb-accent); }
+.build-card pre .f { color: #9be7ff; }
+.build-card pre .c { color: var(--muted); font-style: italic; }
+.build-card .btn { align-self: flex-start; text-decoration: none; }
+.build-card > a:not(.btn) { margin-top: auto; font-weight: 700; text-decoration: none; }
+.files { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.files li { display: grid; gap: 2px; }
+.files a { font: 600 14px var(--font-data); text-decoration: none; }
+.files span { color: var(--muted); font-size: 13px; }
+
+/* The last word: one line and the way in. */
+.closer { position: relative; isolation: isolate; margin-top: 72px; margin-bottom: 72px; padding: 72px 24px; border-radius: 36px; text-align: center; overflow: clip; border: 1px solid var(--line);
+  background: radial-gradient(60% 90% at 50% 120%, rgb(var(--accent-rgb) / 0.16), transparent 70%), radial-gradient(70% 90% at 50% -20%, rgb(var(--uv-rgb) / 0.45), transparent 70%), rgb(var(--base-rgb) / 0.6); }
+.closer h2 { margin: 0 auto 12px; max-width: 16ch; font: 800 clamp(30px, 4.4vw, 54px)/1.04 var(--font-display); letter-spacing: -0.04em; text-wrap: balance; }
+.closer p { margin: 0 0 26px; color: var(--secondary); font-size: 17px; }
+.closer .cta { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
+.closer .btn { text-decoration: none; min-height: 50px; padding: 0 22px; }
+
+/* ---- footer -------------------------------------------------------------------------------------------------- */
+
+.site-foot { border-top: 1px solid var(--line); background: rgb(4 2 14 / 0.35); }
+.foot-in { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 2fr); gap: 40px; width: min(1180px, 100% - 2 * var(--gut)); margin: 0 auto; padding: 44px 0 calc(44px + env(safe-area-inset-bottom)); }
+.foot-brand p { margin: 14px 0 0; max-width: 36ch; color: var(--muted); font-size: 14px; line-height: 1.6; }
+.foot-brand .mark-slot, .foot-brand .mark-slot svg { width: 32px; height: 32px; }
+.foot-brand .logo .word { font-size: 19px; }
+.foot-links { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
+.foot-links div { display: grid; align-content: start; gap: 8px; }
+.foot-links b { margin-bottom: 4px; color: var(--ink); font: 700 13px/1.2 var(--font); }
+.foot-links a { color: var(--muted); font-size: 14px; text-decoration: none; }
+.foot-links a:hover { color: var(--ink); }
+
+/* ---- smaller screens ----------------------------------------------------------------------------------------- */
+
+@media (max-width: 1080px) {
+  .hero-in { grid-template-columns: minmax(0, 1fr); gap: 36px; }
+  .pair { width: min(100%, 520px); display: grid; grid-template-columns: 180px minmax(0, 1fr); column-gap: 18px; align-items: center; }
+  .pair-k { grid-column: 1 / -1; }
+  .pair-slot { min-height: 0; }
+  .hero .pair .obpal-card { flex-direction: column; }
+  .pair-note { margin: 0; }
+  .show { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .build-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .code-card { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+  .home { --top-h: 57px; }
+  .hero { min-height: calc(100svh - 8px); padding: calc(var(--top-h) + 28px) 0 104px; align-items: start; }
+  .hero h1 { margin-bottom: 18px; font-size: clamp(44px, 13.4vw, 64px); }
+  .hero .lede { margin-bottom: 26px; }
+  .hero .cta { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .cta-main, .cta-alt { width: 100%; }
+  .quick { gap: 12px 18px; margin-top: 26px; font-size: 13.5px; }
+  .hero-hint { bottom: 22px; }
+  .show { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .scene.wide { grid-column: auto; display: flex; }
+  .scene.wide .scene-text, .scene-text { padding: 4px 22px 22px; }
+  .build-grid { grid-template-columns: minmax(0, 1fr); }
+  .closer { margin-top: 48px; margin-bottom: 48px; padding: 52px 20px; border-radius: 28px; }
+  .foot-in { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .foot-links { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) and (max-height: 700px) { .quick { display: none; } }
+/* On a phone the way in is the hero's "send it to my computer"; the bar keeps to the logo and the menu. */
+html.phone .top-go { display: none; }
+html.phone .top-menu { margin-left: auto; }
+
+/* Headings and cards glide in as they arrive (script adds .rise, so without it everything simply shows). */
+.rise { opacity: 0; transform: translate3d(0, 22px, 0); transition: opacity 0.8s var(--ease), transform 0.9s var(--ease); }
+.rise.in { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .scene, .rise { opacity: 1; transform: none; transition: none; }
+  .pair-qr, .hero-hint { animation: none; }
+}

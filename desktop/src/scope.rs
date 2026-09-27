@@ -1,7 +1,7 @@
-//! Per-program scope: the allowlist of programs and what each may receive, persisted in
+//! Per-program scope: the allowlist of programs and what each may receive, and whole-PC mode, persisted in
 //! `%APPDATA%\obpal\desktop.json` (Windows) or `$XDG_CONFIG_HOME/obpal/desktop.json`.
 //!
-//! Nothing is allowed by default. The file is written only by the helper, in response to validated messages
+//! Nothing is allowed by default, and whole-PC mode is off until a person turns it on in the extension. The file is written only by the helper, in response to validated messages
 //! from the extension; a hand-edited or damaged file is treated as empty rather than trusted.
 
 use serde::{Deserialize, Serialize};
@@ -23,6 +23,9 @@ pub struct Config {
     /// A global stop: nothing is injected while set.
     #[serde(default)]
     pub paused: bool,
+    /// Whole-PC mode: while set, every window in front receives input with this scope, the browser included.
+    #[serde(default)]
+    pub desktop: Option<Scope>,
     #[serde(default)]
     pub programs: Vec<ProgramEntry>,
 }
@@ -68,7 +71,19 @@ pub fn valid_path(path: &str) -> Result<(), &'static str> {
 
 impl Config {
     pub fn new() -> Config {
-        Config { v: CONFIG_VERSION, paused: false, programs: Vec::new() }
+        Config { v: CONFIG_VERSION, paused: false, desktop: None, programs: Vec::new() }
+    }
+
+    /// Whole-PC mode's scope while it is on and allows something.
+    pub fn desktop_scope(&self) -> Option<Scope> {
+        self.desktop.filter(|s| s.any())
+    }
+
+    /// Turn whole-PC mode on with a scope, or off. Returns true when it changed.
+    pub fn set_desktop(&mut self, scope: Option<Scope>) -> bool {
+        let changed = self.desktop != scope;
+        self.desktop = scope;
+        changed
     }
 
     fn position(&self, path: &str) -> Option<usize> {
@@ -182,6 +197,7 @@ mod tests {
         let cfg = Config::new();
         assert!(cfg.programs.is_empty());
         assert!(!cfg.paused);
+        assert_eq!(cfg.desktop_scope(), None, "whole-PC mode starts off");
         assert_eq!(cfg.scope_for(&abs("game.exe")), None);
         assert!(!cfg.is_allowed(""));
     }
@@ -247,9 +263,19 @@ mod tests {
         let mut cfg = Config::new();
         cfg.allow(&abs("game.exe"), K).unwrap();
         cfg.paused = true;
+        assert!(cfg.set_desktop(Some(KM)));
+        assert!(!cfg.set_desktop(Some(KM)));
         cfg.save(&file).unwrap();
         let back = Config::load(&file);
         assert_eq!(back, cfg);
+        assert_eq!(back.desktop_scope(), Some(KM));
+        // a file from before whole-PC mode loads with it off
+        fs::write(&file, br#"{"v":1,"paused":false,"programs":[]}"#).unwrap();
+        assert_eq!(Config::load(&file).desktop, None);
+        // on with every kind off is off
+        let mut off = Config::new();
+        off.set_desktop(Some(NONE));
+        assert_eq!(off.desktop_scope(), None);
         assert!(!file.with_extension("json.tmp").exists());
         // damaged or hostile content: nothing allowed
         fs::write(&file, b"{not json").unwrap();

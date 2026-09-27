@@ -58,12 +58,19 @@ export function initialTheme(): Theme {
 }
 const LEGACY_ACCENT: Record<string, string> = { lavender: 'lavender', turquoise: 'turquoise', candy: 'candy' }
 
-/** Apply a surface: family tokens switch through data-bb-theme, and the choice is remembered across *.blackboxes.net. */
-export function applyTheme(t: Theme) {
+/**
+ * Apply a surface: family tokens switch through data-bb-theme. Only a visitor's own pick (`remember`) is saved,
+ * across *.blackboxes.net; a default just shows, so opening ob.Pal never picks a surface for the other sites.
+ */
+export function applyTheme(t: Theme, remember = false) {
   family.setProduct('obpal')
-  family.setTheme(t.id)
+  if (remember) family.setTheme(t.id)
+  else family.applyTheme(t.id)
   document.documentElement.dataset.theme = t.id
+  // Site pages wear ob.Pal's own palette (styles/site.css), so the browser's bar matches it rather than the surface.
+  if (document.documentElement.classList.contains('site')) document.querySelector('meta[name="theme-color"]')?.setAttribute('content', SITE_PAGE)
 }
+const SITE_PAGE = '#0a0718'
 
 /** Two-tone swatch markup for theme pickers: the surface with ob.Pal's accent. */
 export const swatch = (t: Theme) =>

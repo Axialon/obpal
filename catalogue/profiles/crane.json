@@ -1,0 +1,9 @@
+{
+  "id": "crane",
+  "name": "Crane",
+  "for": "Lifting with a steady yoke: slow tilt, fine aim",
+  "on": [],
+  "aim": { "route": "stick.right", "gain": 0.6, "curve": 1.6, "deadzone": 0.15, "invertY": false, "edgeTurn": false },
+  "steer": { "route": "stick.fly", "gain": 0.8, "curve": 1.4, "deadzone": 0.2, "invertY": false, "edgeTurn": false },
+  "point": { "route": "pointer", "gain": 1, "curve": 1, "deadzone": 0.2, "invertY": false, "edgeTurn": false }
+}

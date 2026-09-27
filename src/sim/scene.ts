@@ -26,6 +26,10 @@ export interface SimScene {
   take(node: string, who: string, force?: boolean): boolean
   /** Let go of what someone holds. */
   release(who: string): void
+  /** Change what the scene offers (an arm added, removed or reconfigured). Claims on nodes that went are let go. */
+  setNodes(nodes: SceneNode[]): void
+  /** A node's name as people read it (with its group, where the sim asks for that). */
+  nodeName(id: string): string
 }
 
 export interface SimOptions {
@@ -36,6 +40,8 @@ export interface SimOptions {
   approval: boolean
   /** A hint for whoever just took a node (how to drive it). */
   howTo?(node: string): string
+  /** How to name a node in toasts, the record and the phone's chip (default: its name). */
+  label?(node: SceneNode): string
   /** Called after any change of who holds what. */
   changed?(): void
   joined?(p: Participant): void
@@ -52,7 +58,8 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   const approved = new Set<string>()
   const pending = new Set<string>()
   const people = new Map<string, Participant>()
-  const nodeName = (id: string) => o.nodes.find((n) => n.id === id)?.name ?? id
+  let nodes = o.nodes
+  const nodeName = (id: string) => { const n = nodes.find((x) => x.id === id); return n ? o.label?.(n) ?? n.name : id }
   remote.setHostPerson({ name: 'Screen', color: family.accentColor() })
   remote.mountPairing($('pair'), { variant: 'compact' })
   Object.assign(window, { __obpal: remote, __sim: { claims, approved } })
@@ -84,7 +91,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
 
   let nodesSent = false
   const publish = () => {
-    remote.setScene({ held: claims.snapshot(), ...(nodesSent ? {} : { nodes: o.nodes }) })
+    remote.setScene({ held: claims.snapshot(), ...(nodesSent ? {} : { nodes }) })
     nodesSent = true
     renderPeople()
     o.changed?.()
@@ -94,14 +101,15 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
     const r = claims.take(node, who, force)
     const name = nodeName(node)
     if (!r.ok) {
-      remote.feedback({ haptic: 'bump', toast: `${nameOf(r.holder)} has ${name}` }, who)
+      remote.feedback({ haptic: 'bump', toast: `${nameOf(r.holder)} has ${nodeName(r.blocking ?? node)}` }, who)
       return false
     }
-    if (r.lost) {
-      remote.feedback({ haptic: 'bump', toast: `The screen took ${name}` }, r.lost)
-      remote.setValues({ part: '' }, r.lost)
-      log(`The screen took ${name} from ${nameOf(r.lost)}`, colorOf('host'))
-    } else log(`${nameOf(who)} took ${name}${r.released ? `, letting go of ${nodeName(r.released)}` : ''}`, colorOf(who))
+    for (const lost of [...(r.lost ? [r.lost] : []), ...(r.evicted ?? [])]) {
+      remote.feedback({ haptic: 'bump', toast: `The screen took ${name}` }, lost)
+      remote.setValues({ part: '' }, lost)
+      log(`The screen took ${name} from ${nameOf(lost)}`, colorOf('host'))
+    }
+    if (!r.lost && !r.evicted) log(`${nameOf(who)} took ${name}${r.released ? `, letting go of ${nodeName(r.released)}` : ''}`, colorOf(who))
     if (who !== 'host') {
       remote.feedback({ haptic: 'tick', toast: o.howTo?.(node) ?? `You have ${name}` }, who)
       remote.setValues({ part: name, partLive: false, partValue: '' }, who)
@@ -197,7 +205,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   remote.on('claim', ({ node }, who) => {
     if (!allowed(who.id)) { remote.feedback({ haptic: 'bump', toast: 'Waiting for the screen to let you in' }, who.id); return }
     if (node === null) { release(who.id); return }
-    if (!o.nodes.some((n) => n.id === node)) { remote.feedback({ haptic: 'bump', toast: 'That’s not in this scene' }, who.id); return }
+    if (!nodes.some((n) => n.id === node)) { remote.feedback({ haptic: 'bump', toast: 'That’s not in this scene' }, who.id); return }
     take(node, who.id)
   })
   autoAllow?.addEventListener('change', () => { if (autoAllow.checked) { for (const id of pending) approved.add(id); pending.clear() } renderPeople() })
@@ -207,6 +215,23 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   $('invite-new').onclick = async () => { await remote.resetInvite(); note('New invite link: the old code no longer works') }
   document.querySelectorAll<HTMLElement>('[data-icon]').forEach((el) => el.insertAdjacentHTML('afterbegin', ICONS[el.dataset.icon!] ?? ''))
 
+  const setNodes = (next: SceneNode[]) => {
+    for (const n of nodes) {
+      if (next.some((x) => x.id === n.id)) continue
+      const who = claims.free(n.id)
+      if (who && who !== 'host') {
+        remote.feedback({ haptic: 'bump', toast: `${nodeName(n.id)} left the scene` }, who)
+        remote.setValues({ part: '' }, who)
+        log(`${nodeName(n.id)} left the scene: ${nameOf(who)} let go`, colorOf(who))
+      }
+    }
+    nodes = next
+    result.nodes = next
+    nodesSent = false
+    publish()
+  }
+
+  const result: SimScene = { remote, claims, nodes, allowed, nameOf, colorOf, log, note, publish, take, release, setNodes, nodeName }
   publish()
-  return { remote, claims, nodes: o.nodes, allowed, nameOf, colorOf, log, note, publish, take, release }
+  return result
 }

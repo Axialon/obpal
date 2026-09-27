@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="site">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#0a0a0a" />
-    <meta name="description" content="Public sims for ob.Pal's control catalogue: a robot arm several phones drive joint by joint, a four-player arena, and a shared 3D scene. Open one on a screen and scan it with your phones." />
+    <meta name="theme-color" content="#0a0718" />
+    <meta name="description" content="Public sims for ob.Pal's control catalogue: robot arms several phones drive, whole or joint by joint, a four-player arena, and a shared 3D scene. Open one on a screen and scan it with your phones." />
     <title>Sims · ob.Pal</title>
     <link rel="icon" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -13,17 +13,38 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&family=JetBrains+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/src/family/family.css" />
     <link rel="stylesheet" href="/src/styles/base.css" />
+    <link rel="stylesheet" href="/src/styles/site.css" />
     <link rel="stylesheet" href="/src/styles/landing.css" />
     <link rel="stylesheet" href="/src/styles/pages.css" />
-    <script type="module" src="/src/landing/main.ts"></script>
+    <script type="module" src="/src/landing/site.ts"></script>
   </head>
   <body>
+        <header class="top">
+      <div class="top-in">
+        <a class="logo" href="/" aria-label="ob.Pal"><span class="mark-slot" data-mark></span><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span></a>
+        <button class="switch-btn" id="t-switch" type="button" aria-label="Blackboxes apps" title="Blackboxes apps"></button>
+        <nav class="top-nav" aria-label="Site">
+          <a href="/sim/" aria-current="page">Sims</a>
+          <a href="/link/">Link</a>
+          <a href="/catalogue/">Catalogue</a>
+          <a href="/#build">Build</a>
+          <a href="/donate/">Donate</a>
+        </nav>
+        <button class="top-menu" id="t-menu" type="button" aria-label="Menu">
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10" /></svg>
+        </button>
+        <a class="btn primary top-go" href="/view/">Open the viewer</a>
+      </div>
+    </header>
+    <div class="bb-menu bb-glass switcher" id="switcher" aria-label="Blackboxes apps" hidden></div>
+    <nav class="bb-menu bb-glass site-menu" id="site-menu" aria-label="Site" hidden>
+      <a class="bb-menu-item" href="/sim/" aria-current="page">Sims</a>
+      <a class="bb-menu-item" href="/link/">ob.Pal Link</a>
+      <a class="bb-menu-item" href="/catalogue/">Catalogue</a>
+      <a class="bb-menu-item" href="/#build">Build with it</a>
+      <a class="bb-menu-item" href="/donate/">Donate</a>
+    </nav>
     <main class="land">
-      <header class="page-top">
-        <a class="logo" href="/" aria-label="ob.Pal"><img class="mark" src="/logo-mark.svg" alt=""><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span></a>
-        <nav><a href="/view/">Viewer</a><a href="/link/">Extension</a></nav>
-      </header>
-
       <section class="hero">
         <p class="eyebrow">Sims · try the control catalogue</p>
         <h1>Take control, together.</h1>
@@ -33,8 +54,8 @@
       <section class="modes-grid sims" aria-label="Sims">
         <a class="sim-card" href="/sim/arm/">
           <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16M7 20v-3h6v3M10 17l-2-6 7-4 2 3"/><circle cx="8" cy="11" r="1.6"/><circle cx="15" cy="7" r="1.6"/><path d="M17 10l2.5-.5M17 10l1.6 2"/></svg>
-          <h2>Robot arm</h2>
-          <p>Five joints and a gripper, one person per joint. Hold the pad to move, pick up the blocks together. Deadman, limits, watchdog, e-stop and approval work as they would for a real arm.</p>
+          <h2>Robot arms</h2>
+          <p>Up to four arms. Point your phone like a Wii remote to send an arm, or move it through space and the gripper follows your hand. Pick up the blocks together, or connect a real arm.</p>
           <span class="tag">system.robot-arm</span>
         </a>
         <a class="sim-card" href="/sim/arena/">

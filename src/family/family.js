@@ -183,11 +183,17 @@
   };
   var rgbOf = function (hex) { var n = parseInt(hex.slice(1), 16); return ((n >> 16) & 255) + ' ' + ((n >> 8) & 255) + ' ' + (n & 255); };
 
-  /** Menu items linking to every product's home, current one marked. */
-  function productMenu(current) {
+  /**
+   * Menu items linking to every product's home, current one marked. A site can give its own link for a product
+   * (`opts.href(product)`: a local preview, a .dev alias) and a class for each item (`opts.itemClass`).
+   */
+  function productMenu(current, opts) {
+    opts = opts || {};
+    var href = function (p) { var h = typeof opts.href === 'function' ? opts.href(p) : ''; return h || 'https://' + p.host + '/'; };
+    var cls = 'bb-menu-item' + (opts.itemClass ? ' ' + opts.itemClass : '');
     return PRODUCTS.map(function (p, i) {
       var sep = i === 1 ? '<div class="bb-label bb-menu-group">Engines</div>' : i === PRODUCTS.length - 1 ? '<div class="bb-label bb-menu-group">Tools</div>' : '';
-      return sep + '<a class="bb-menu-item" role="menuitem" href="https://' + p.host + '/" style="--bb-item-rgb:' + rgbOf(p.accent) + '"' + (p.id === current ? ' aria-current="page"' : '') + '>' +
+      return sep + '<a class="' + cls + '" role="menuitem" href="' + esc(href(p)) + '" style="--bb-item-rgb:' + rgbOf(p.accent) + '"' + (p.id === current ? ' aria-current="page"' : '') + '>' +
         mark(p.id, { title: false }) + '<span><b style="color:' + p.accent + '">' + esc(p.name) + '</b><small>' + esc(p.category) + '</small></span></a>';
     }).join('');
   }
@@ -207,6 +213,7 @@
   }
 
   var openMenus = [];
+  var menuSeq = 0;
   function closeAll(except) {
     openMenus.slice().forEach(function (m) { if (m !== except) m.close(); });
   }
@@ -234,27 +241,57 @@
     };
     function place() {
       var r = button.getBoundingClientRect();
+      var top = Math.round(r.bottom + 10);
       menu.style.position = 'fixed';
-      menu.style.top = Math.round(r.bottom + 10) + 'px';
+      menu.style.top = top + 'px';
+      // A short screen scrolls the menu, so its last item is always reachable.
+      menu.style.maxHeight = Math.max(160, global.innerHeight - top - 12) + 'px';
+      menu.style.overflowY = 'auto';
       var w = menu.offsetWidth;
       var right = r.left + r.width / 2 > global.innerWidth / 2;
       var x = right ? r.right - w : r.left;
       menu.style.left = Math.round(Math.max(12, Math.min(x, global.innerWidth - w - 12))) + 'px';
     }
+    // Keyboard: arrows open it and move through its items, Home and End jump, Escape closes it back to the button.
+    function items() { return Array.prototype.slice.call(menu.querySelectorAll('a[href],button:not([disabled])')); }
+    function focusItem(i) { var list = items(); if (list.length) list[(i + list.length) % list.length].focus(); }
     button.setAttribute('aria-haspopup', 'true');
     button.setAttribute('aria-expanded', 'false');
+    // The button names the menu it opens, for assistive tech.
+    if (!menu.id) menu.id = 'bb-menu-' + (++menuSeq);
+    button.setAttribute('aria-controls', menu.id);
     menu.hidden = true;
     button.addEventListener('click', function (e) { e.stopPropagation(); api.toggle(); });
+    button.addEventListener('keydown', function (e) {
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      e.preventDefault();
+      if (menu.hidden) api.open();
+      focusItem(e.key === 'ArrowDown' ? 0 : -1);
+    });
+    menu.addEventListener('keydown', function (e) {
+      var list = items(), i = list.indexOf(doc.activeElement);
+      if (e.key === 'ArrowDown') { e.preventDefault(); focusItem(i + 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); focusItem(i - 1); }
+      else if (e.key === 'Home') { e.preventDefault(); focusItem(0); }
+      else if (e.key === 'End') { e.preventDefault(); focusItem(-1); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); api.close(); button.focus(); }
+    });
     menu.addEventListener('click', function (e) { e.stopPropagation(); });
     global.addEventListener('resize', function () { if (!menu.hidden) place(); });
     return api;
   }
   doc.addEventListener('click', function () { closeAll(null); });
-  doc.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeAll(null); });
+  doc.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape' || !openMenus.length) return;
+    // Escape from the button that opened a menu keeps focus there.
+    var owner = doc.activeElement;
+    closeAll(null);
+    if (owner && owner.focus) owner.focus();
+  });
 
-  function mountSwitcher(button, menu, current) {
+  function mountSwitcher(button, menu, current, opts) {
     menu.setAttribute('role', 'menu');
-    return popover(button, menu, function (m) { if (!m.childElementCount) m.innerHTML = productMenu(current); });
+    return popover(button, menu, function (m) { if (!m.childElementCount) m.innerHTML = productMenu(current, opts); });
   }
   function mountThemes(button, menu) {
     var api = popover(button, menu, function (m) { m.innerHTML = themeMenu(); });

@@ -11,3 +11,4 @@ extension/release/
 *.pem
 .claude/launch.json
 desktop/target/
+desktop/release/

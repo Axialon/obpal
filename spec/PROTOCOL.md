@@ -80,12 +80,12 @@ Unknown message types and fields MUST be ignored.
 - `scene{you, people, nodes?, held}`: a shared scene (CATALOGUE §5). Sent to every participant when anyone joins, leaves, claims or releases.
   - `you`: the receiving participant's id.
   - `people: [{id, name, color, lead?}]`: everyone in the scene, including the screen (`host`).
-  - `nodes: [{id, name, kind, group?}]`: what can be claimed; omitted when unchanged.
+  - `nodes: [{id, name, kind, group?, parent?}]`: what can be claimed; omitted when unchanged. `parent` names the node this one is part of (a joint of a robot arm): whoever holds the parent controls this node too, so the host refuses either while someone else holds the other, and devices show such a node as held with its parent.
   - `held: {nodeId: participantId}`: who holds what.
 - `lock{reason}`: `taken-over` (a one-device host gave control to another device), `host-closed`, `rejected` (binding failed), `removed` (the host removed this participant, which then MUST NOT rejoin by itself), `full` (the scene has no free place).
 - `rumble{strong, weak, ms}`: vibrate the device, Gamepad API dual-rumble semantics (magnitudes 0–1, at most 5000 ms). Devices that cannot vibrate MAY show it visually.
 
-**Layout:** `{v:1, modes:[modeId…], tray:[{id, label, type?: "button"|"toggle"|"select", icon?, options?: [{value, label, group?, detail?, image?, glyph?, color?}], add?}], utilities?: [utilityId…], profile?: string}`. The device renders the layout. The host alone decides what an `id` does. The reserved id `pad` carries trackpad taps. A `select` with `add: true` belongs to a host that composes scenes: devices offer a second action on each option that adds it alongside the current one, sent as `value{id, v, add: true}`. `utilities` lists the catalogue utilities the host accepts (CATALOGUE §1; absent means all) and `profile` suggests a catalogue profile for whatever the host controls right now (CATALOGUE §3); a host MAY send a new `layout` whenever either changes.
+**Layout:** `{v:1, modes:[modeId…], tray:[{id, label, type?: "button"|"toggle"|"select", icon?, options?: [{value, label, group?, detail?, image?, glyph?, color?}], add?, tone?: "stop"}], utilities?: [utilityId…], profile?: string, keys?: {primary?, secondary?, next?, prev?}}`. `tone: "stop"` marks a safety stop (a robot's e-stop): the device draws it in red, in words, first in the tray. `keys` binds the device's hardware buttons to tray buttons: primary is volume up, Enter or a headset press, secondary is volume down or Esc, next and prev are arrows, Page Up/Down or a headset's skip. A bound button sends `btn{id, ev: "tap"}` when pressed; unbound ones keep the mode's own use, and gamepad mode keeps them as A, B and the d-pad. The device renders the layout. The host alone decides what an `id` does. The reserved id `pad` carries trackpad taps. A `select` with `add: true` belongs to a host that composes scenes: devices offer a second action on each option that adds it alongside the current one, sent as `value{id, v, add: true}`. `utilities` lists the catalogue utilities the host accepts (CATALOGUE §1; absent means all) and `profile` suggests a catalogue profile for whatever the host controls right now (CATALOGUE §3); a host MAY send a new `layout` whenever either changes.
 
 ## 4. STATE packet (`st`, 76 bytes, little-endian)
 
@@ -95,7 +95,7 @@ Unknown message types and fields MUST be ignored.
 | 1 | u8 | flags (see below) |
 | 2 | u16 | seq; the receiver keeps only newer packets (serial arithmetic) |
 | 4 | u32 | capture time, µs, device session clock |
-| 8 | u8 | mode: 0 hold (1:1 match), 1 orbit (game-style gyro rotate, rate-based via aim), 2 point (Wii-style, see below), 3 tilt, 4 pad, 5 gamepad (§5) |
+| 8 | u8 | mode: 0 hold (1:1 match), 1 orbit (game-style gyro rotate, rate-based via aim), 2 point (Wii-style, see below), 3 tilt, 4 pad, 5 gamepad (§5), 6 track (6-DOF: POSE packets beside STATE, below) |
 | 9 | u8 | grab id; increments on each clutch press |
 | 10 | u8 | tier (bits 0–1: 0 touch, 1 tilt, 2 compass, 3 gyro); screen angle / 90 (bits 2–3): the controls' orientation, which is the locked one while the device locks rotation for motion control |
 | 11 | u8 | active touches |
@@ -183,15 +183,20 @@ A browser-extension host that drives programs outside the browser talks to a nat
 - `release`: release everything now.
 - `allow{path, keyboard, mouse}`: allow a program (its image path). The helper accepts only a program it has seen in the foreground in this session.
 - `scope{path, keyboard, mouse}`, `forget{path}`, `pause{on}`, `resume` (after the panic hotkey), `stats`.
+- `desktop{on, keyboard, mouse}`: whole-PC mode on (with that scope) or off. While it is on, every window receives input, not only allowed programs. Only a helper whose `hello` says `caps.desktop` knows it.
 
 **Helper → extension:**
-- `hello{v, version, os, hotkey, caps{keyboard, mouse, gamepad}}`: `hotkey` names the panic hotkey, null when it could not be registered.
-- `config{paused, programs[{path, name, keyboard, mouse, gamepad}]}`: after every change.
+- `hello{v, version, os, hotkey, caps{keyboard, mouse, gamepad, desktop}}`: `hotkey` names the panic hotkey, null when it could not be registered; `desktop` is true when the helper has whole-PC mode (0.2 and later).
+- `config{paused, desktop, programs[{path, name, keyboard, mouse, gamepad}]}`: after every change. `desktop` is whole-PC mode's scope `{keyboard, mouse, gamepad}` while it is on, else null (absent from helpers before 0.2).
 - `status{enabled, panic, held, front, program}`: on change. `front` is the window in front now (possibly the browser), `program` the most recent foreground program that is not the browser: what "allow this program" refers to. Each is `{name, path, title, pid, elevated, browser, allowed}` where `allowed` is the scope or null.
 - `stats{frames, injected, refused{notEnabled, paused, panic, notAllowed, elevated, noWindow, rate, invalid}}`: on request.
 - `error{code, msg}`: `bad-message`, `bad-frame`, `unknown-program`, `bad-path`, `proto`, `config-save`.
 
 **Gating, in the helper, on every frame:** enabled, not panicked, not paused, a foreground window whose process is on the allowlist, at the helper's integrity level or lower (an elevated window is refused and reported), and within that program's scope: keys only with `keyboard`, buttons, motion and wheel only with `mouse`. `gamepad` is reserved for a virtual controller. Everything held is released whenever the foreground changes.
+
+**Whole-PC mode** replaces the program check: enabled, not panicked, not paused, and within the mode's scope, whatever window is in front, the browser included. An elevated window is not refused (Windows drops input to it by itself, and the pointer must stay free to move off it); the status reports it. The held state belongs to the PC, not a window, so it is not released when the foreground changes: pressing on a window in the background brings it to the front, and a drag that starts there must go on.
+
+**Which gestures click (the extension's mapping, not the wire).** The Link extension turns the phone's events into held buttons, wheel and Ctrl for the PC: on the trackpad a tap clicks, a second tap double-clicks, a hold right-clicks on lifting and drags on moving, two fingers scroll (the page follows them, and a flick carries on) and a pinch zooms (Ctrl + wheel, in whole steps); on the Point face A clicks where it went down (the pointer holds still while A is down), holding A right-clicks, pressing A and aiming away drags, holding B turns aiming into scrolling, and + / − zoom a step. A click is a press held for 30 ms, then a release, so it spans frames the helper can diff.
 
 ## 8. Extending
 
@@ -200,3 +205,21 @@ A browser-extension host that drives programs outside the browser talks to a nat
 - New kinds of control go into the catalogue (CATALOGUE §8) with a stable id, and reuse PAD, STATE or POINTER fields where they can; a new packet type is the last resort.
 - The high nibble of byte 0 carries the packet version and the low nibble the type (`0x11` STATE, `0x12` PAD, `0x14` POINTER), so a batched v2 STATE or a native 200 Hz variant can use `0x21`. Receivers MUST ignore packet types they don't know.
 - Future work: a short-code pairing flow (commit-reveal ECDH with a SAS compared on both screens), resume without rescanning over the room service (the direct code of §2a already covers the LAN), a WSS relay fallback, and a registry of controller profiles.
+
+## POSE packet (type 5): the device in space
+
+While 3D tracking is on (mode 6, catalogue `motion.track`), the device sends a POSE packet on the unreliable channel for each tracked frame, beside STATE (which still carries touches and the mode). The device tracks itself with its camera and motion sensors (WebXR `immersive-ar` on Android), so the position doesn't drift.
+
+| Offset | Type | Field |
+|---|---|---|
+| 0 | u8 | header 0x15 (version 1, type 5) |
+| 1 | u8 | flags: b0 tracked (clear while the device has lost track of the world), b1 touching (the deadman, sampled with this pose) |
+| 2 | u16 | seq |
+| 4 | u32 | capture time, µs, device session clock |
+| 8 | f32×3 | position, metres, in the tracking space: y up, origin where tracking began |
+| 20 | i16×4 | orientation, Q15 quaternion (x, y, z, w): device → tracking space; the camera looks along −z, the top edge is +y |
+| 28 | u8 | generation: a new tracking session, with a new origin |
+| 29 | u8, u16 | reserved |
+
+Hosts read it as `Frame.pose` (`@obpal/host`), stale after 250 ms. A pose is absolute within a generation. Hosts anchor a drive when the person's deadman goes down, and re-anchor when the generation changes.
+

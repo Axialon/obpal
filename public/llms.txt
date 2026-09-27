@@ -1,0 +1,50 @@
+# ob.Pal
+
+> ob.Pal turns any phone into a controller for web pages: 3D scenes, browser games, robot arms and the computer in front of you. A page shows a QR code, a phone scans it, and the phone's browser becomes the controller: no app, no account. Phone and page talk peer to peer over WebRTC. Open source (MIT): https://github.com/Axialon/obpal
+
+## Use it in a page: the host SDK
+
+The SDK is `@obpal/host`, in the repo at packages/host. It isn't on npm yet.
+
+- `const remote = await Remote.create({ appName, layout })`, then `remote.mountPairing(element)` shows the QR code and link.
+- Each frame, `remote.consume(now)` returns what the phone does:
+  - `qRel`: its rotation while held (1:1);
+  - `tilt`: a stick from tilting;
+  - `pad1`, `pad2`, `zoom`, `twist`: trackpad gestures;
+  - `aim`: Wii-style pointing;
+  - `pose`: where the phone is, in metres, while a thumb is on its pad (mode 6, from its own sensors).
+- `remote.padOf(id)` gives a standard gamepad, and `remote.on('button', …)` gives tray and hardware buttons.
+- Shared scenes: `Remote.create({ …, seats: 8 })`, then `remote.setScene({ nodes, held })`. `Claims` keeps one person per node, and nodes can nest (an arm and its joints).
+- The layout says:
+  - `tray`: buttons (`tone: 'stop'` makes a safety stop);
+  - `modes`: which modes the page takes;
+  - `profile`: a suggested controller profile;
+  - `keys`: what the phone's volume and headset buttons press.
+
+## Specs
+
+- [PROTOCOL.md](https://github.com/Axialon/obpal/blob/main/spec/PROTOCOL.md): pairing, the control messages, and the STATE, PAD, POINTER and POSE packets.
+- [CATALOGUE.md](https://github.com/Axialon/obpal/blob/main/spec/CATALOGUE.md): utilities, the routes motion takes, profiles, shared scenes, bridges, and control systems. For robot arms it covers the safety envelope: deadman, limits, watchdog, e-stop and approval.
+
+## The catalogue, machine-readable
+
+- [/catalogue.json](https://obpal.blackboxes.net/catalogue.json): every utility, route, built-in and community profile, control system and bridge, plus the limits a profile must keep.
+- [/profile.schema.json](https://obpal.blackboxes.net/profile.schema.json): JSON Schema for a controller profile.
+
+## Add a controller profile
+
+1. Read /profile.schema.json, or the `limits` and `routes` in /catalogue.json.
+2. Write the profile: a new lowercase `id`, `name`, `for` (one line), `on` (utilities it switches on), and `aim`, `steer` and `point` settings. Each setting has `route`, `gain`, `curve`, `deadzone`, `invertY` and `edgeTurn`.
+3. Check it with the schema, or with `checkProfile()` from `@obpal/core` (it says what's wrong).
+4. Add it as `catalogue/profiles/<id>.json` to https://github.com/Axialon/obpal in a pull request; the build checks it again. Or open an issue with the JSON. The builder at https://obpal.blackboxes.net/catalogue/#build does both for people.
+
+## Try it
+
+- [Viewer](https://obpal.blackboxes.net/view/): open it on a screen and scan the code with a phone.
+- [Sims](https://obpal.blackboxes.net/sim/): robot arms and a four-player arena, for several phones at once.
+- [ob.Pal Link](https://obpal.blackboxes.net/link/): a browser extension that lets the phone control any website, and the computer through ob.Pal Desktop.
+
+## Optional
+
+- [Privacy](https://obpal.blackboxes.net/privacy/)
+- [Donate](https://obpal.blackboxes.net/donate/)

@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build, defineConfig, type Plugin } from 'vite'
 import { cloudflare } from '@cloudflare/vite-plugin'
+import { checkProfile, MOTION_UTILITIES, PROFILE_IDS, PROFILE_LIMITS, PROFILES, ROUTES, utilityKey } from './packages/core/src/catalogue'
+import { BRIDGE_ROWS, REPO, SYSTEM_ROWS, UTILITY_ROWS } from './src/catalogue/data'
 
 const root = fileURLToPath(new URL('.', import.meta.url))
 
@@ -55,8 +58,85 @@ function controllerServiceWorker(): Plugin {
   }
 }
 
+/**
+ * The control catalogue as files for people and AI agents, made from the code so they can't drift from it:
+ * /catalogue.json (utilities, routes, built-in and community profiles, systems, bridges) and /profile.schema.json.
+ * Community profiles are catalogue/profiles/<id>.json; the build checks each with checkProfile() and stops on a bad one.
+ */
+function catalogueFiles(): Plugin {
+  const community = () => {
+    const dir = join(root, 'catalogue/profiles')
+    return readdirSync(dir).filter((f) => f.endsWith('.json')).sort().map((f) => {
+      const { profile, errors } = checkProfile(JSON.parse(readFileSync(join(dir, f), 'utf8')))
+      if (!profile) throw new Error(`catalogue/profiles/${f}: ${errors.join('; ')}`)
+      if (`${profile.id}.json` !== f) throw new Error(`catalogue/profiles/${f}: name the file ${profile.id}.json`)
+      return profile
+    })
+  }
+  const settings = (routes: readonly string[]) => ({
+    type: 'object',
+    required: ['route', 'gain', 'curve', 'deadzone', 'invertY', 'edgeTurn'],
+    additionalProperties: false,
+    properties: {
+      route: { enum: routes, description: 'Where this motion goes (CATALOGUE §2)' },
+      gain: { type: 'number', minimum: PROFILE_LIMITS.gain[0], maximum: PROFILE_LIMITS.gain[1], description: 'Sensitivity' },
+      curve: { type: 'number', minimum: PROFILE_LIMITS.curve[0], maximum: PROFILE_LIMITS.curve[1], description: 'Above 1 is finer near the centre' },
+      deadzone: { type: 'number', minimum: PROFILE_LIMITS.deadzone[0], maximum: PROFILE_LIMITS.deadzone[1], description: 'The game’s own stick deadzone to jump over' },
+      invertY: { type: 'boolean' },
+      edgeTurn: { type: 'boolean', description: 'Point only: near a screen edge the right stick turns toward it' },
+    },
+  })
+  const schema = () => ({
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    $id: 'https://obpal.blackboxes.net/profile.schema.json',
+    title: 'ob.Pal controller profile',
+    description: `A named set of motion settings a phone applies (CATALOGUE §3). Check one with checkProfile() in @obpal/core, then add it as catalogue/profiles/<id>.json in ${REPO}.`,
+    type: 'object',
+    required: ['id', 'name', 'for', 'on', 'aim', 'steer', 'point'],
+    additionalProperties: false,
+    properties: {
+      id: { type: 'string', pattern: PROFILE_LIMITS.id.source, not: { enum: [...PROFILE_IDS] }, description: 'New, lowercase, and the file name' },
+      name: { type: 'string', minLength: 1, maxLength: PROFILE_LIMITS.name },
+      for: { type: 'string', minLength: 1, maxLength: PROFILE_LIMITS.for, description: 'What it is for, one line' },
+      on: { type: 'array', uniqueItems: true, items: { enum: [...MOTION_UTILITIES] }, description: 'Utilities it switches on when it applies' },
+      ...Object.fromEntries(MOTION_UTILITIES.map((u) => [utilityKey(u), settings(ROUTES[u])])),
+    },
+  })
+  const catalogue = () => ({
+    name: 'ob.Pal control catalogue',
+    about: 'Everything an ob.Pal phone can drive, and how: utilities, the routes motion takes, profiles, control systems and bridges.',
+    spec: `${REPO}/blob/main/spec/CATALOGUE.md`,
+    protocol: `${REPO}/blob/main/spec/PROTOCOL.md`,
+    profileSchema: 'https://obpal.blackboxes.net/profile.schema.json',
+    addProfile: `Check it with checkProfile() in @obpal/core (or the builder at https://obpal.blackboxes.net/catalogue/#build), then add catalogue/profiles/<id>.json to ${REPO} in a pull request, or open an issue with the JSON.`,
+    utilities: UTILITY_ROWS,
+    routes: ROUTES,
+    limits: { gain: PROFILE_LIMITS.gain, curve: PROFILE_LIMITS.curve, deadzone: PROFILE_LIMITS.deadzone, id: PROFILE_LIMITS.id.source, name: PROFILE_LIMITS.name, for: PROFILE_LIMITS.for },
+    profiles: PROFILE_IDS.map((id) => PROFILES[id]),
+    community: community(),
+    systems: SYSTEM_ROWS,
+    bridges: BRIDGE_ROWS,
+  })
+  const files = (): Record<string, string> => ({ '/catalogue.json': JSON.stringify(catalogue(), null, 2), '/profile.schema.json': JSON.stringify(schema(), null, 2) })
+  return {
+    name: 'obpal-catalogue-files',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const body = req.url ? files()[req.url.split('?')[0]] : undefined
+        if (!body) return next()
+        res.setHeader('content-type', 'application/json; charset=utf-8')
+        res.end(body)
+      })
+    },
+    generateBundle() {
+      if (this.environment?.name !== 'client') return
+      for (const [name, source] of Object.entries(files())) this.emitFile({ type: 'asset', fileName: name.slice(1), source })
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [cloudflare(), controllerServiceWorker()],
+  plugins: [cloudflare(), controllerServiceWorker(), catalogueFiles()],
   server: { port: 5175, strictPort: true },
   environments: {
     client: {
@@ -64,7 +144,7 @@ export default defineConfig({
         // Controller floor from PLAN.md: Safari 15, Chromium 95, Firefox 115.
         target: ['safari15', 'chrome95', 'firefox115', 'edge95'],
         rollupOptions: {
-          input: { index: 'index.html', controller: 'p/index.html', viewer: 'view/index.html', sponsor: 'sponsor/index.html', donate: 'donate/index.html', link: 'link/index.html', privacy: 'privacy/index.html', sims: 'sim/index.html', simArm: 'sim/arm/index.html', simArena: 'sim/arena/index.html' },
+          input: { index: 'index.html', controller: 'p/index.html', viewer: 'view/index.html', sponsor: 'sponsor/index.html', donate: 'donate/index.html', link: 'link/index.html', privacy: 'privacy/index.html', sims: 'sim/index.html', simArm: 'sim/arm/index.html', simArena: 'sim/arena/index.html', catalogue: 'catalogue/index.html' },
         },
       },
     },

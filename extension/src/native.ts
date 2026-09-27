@@ -1,8 +1,9 @@
 /**
  * Service worker side of the PC target: the Chrome Native Messaging port to ob.Pal Desktop (desktop/).
  *
- * - Connects when the target is PC (or an extension page asks, to edit the allowlist) and the optional
- *   `nativeMessaging` permission is granted; arms injection (`enable`) only while the target is PC.
+ * - Connects when the target is PC (or while an extension page that shows the helper is open, to edit the
+ *   allowlist) and the optional `nativeMessaging` permission is granted; arms injection (`enable`) only while
+ *   the target is PC. Otherwise the helper is closed, so it isn't left running (and its file locked) for nothing.
  * - Forwards action frames from the offscreen link (already validated there, validated again here).
  * - Mirrors what the helper reports (hello, config, status) into storage.session "pc" for the popup and
  *   the options page, and turns their requests into helper requests.
@@ -23,7 +24,8 @@ export class NativeBridge {
   private ready = false
   private armed = false
   private wantMode = false
-  private wantPage = false
+  /** Extension pages holding a PC_PAGE_PORT_NAME port. */
+  private pages = 0
   private retries = 0
   private retryTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -33,10 +35,21 @@ export class NativeBridge {
     await this.reconcile()
   }
 
-  /** An extension page wants the helper (to show or edit the allowlist) whatever the target is. */
+  /** Connect now if the helper is wanted (a Retry, or a page that just opened). */
   async request() {
-    this.wantPage = true
+    this.retries = 0
     await this.reconcile()
+  }
+
+  /** An extension page shows the helper's state (the allowlist) whatever the target is: keep it up while it is open. */
+  pageOpened() {
+    this.pages++
+    void this.reconcile()
+  }
+
+  pageClosed() {
+    this.pages = Math.max(0, this.pages - 1)
+    void this.reconcile()
   }
 
   /** An action frame from the offscreen link; dropped unless the helper is up and armed. */
@@ -56,7 +69,7 @@ export class NativeBridge {
   }
 
   private async reconcile() {
-    if (!this.wantMode && !this.wantPage) return this.drop('off')
+    if (!this.wantMode && !this.pages) return this.drop('off')
     if (!(await chrome.permissions.contains(NATIVE_PERMISSION))) return this.drop('permission')
     if (!this.port) this.connect()
     this.arm(this.wantMode)
@@ -93,11 +106,11 @@ export class NativeBridge {
       case 'hello':
         this.ready = true
         this.retries = 0
-        this.set({ link: 'ready', version: m.version, hotkey: m.hotkey, error: null })
+        this.set({ link: 'ready', version: m.version, desktopCap: m.caps.desktop, hotkey: m.hotkey, error: null })
         this.arm(this.wantMode)
         break
       case 'config':
-        this.set({ config: { paused: m.paused, programs: m.programs } })
+        this.set({ config: { paused: m.paused, desktop: m.desktop, programs: m.programs } })
         break
       case 'status':
         this.set({ status: { enabled: m.enabled, panic: m.panic, held: m.held, front: m.front, program: m.program } })
@@ -122,7 +135,7 @@ export class NativeBridge {
     if (/forbidden/i.test(msg)) return this.set({ link: 'error', error: 'This copy of ob.Pal Link is not allowed by the installed helper (its extension ID differs).', status: null })
     this.set({ link: 'error', error: msg || (wasReady ? 'The helper stopped.' : 'The helper did not answer.'), status: null })
     // It exited while wanted (a crash, or Windows killed it): come back, with backoff.
-    if ((this.wantMode || this.wantPage) && this.retries < RETRY_MS.length) {
+    if ((this.wantMode || this.pages) && this.retries < RETRY_MS.length) {
       this.retryTimer = setTimeout(() => void this.reconcile(), RETRY_MS[this.retries++])
     }
   }

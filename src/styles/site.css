@@ -1,0 +1,42 @@
+/*
+ * ob.Pal's site pages (home, catalogue, Link, the sims hub, support, privacy) wear one signature palette, whatever
+ * surface the visitor picked for the apps: an ultraviolet night, lime light for anything you can touch, and a lavender
+ * haze around it. The apps (viewer, phone, sims) keep the visitor's own surface.
+ * It overrides the family tokens on <html class="site">, so every alias in base.css follows.
+ */
+html.site {
+  color-scheme: dark;
+  --bb-page: #0a0718;
+  --bb-base-rgb: 14 10 34;
+  --bb-surface-rgb: 36 27 80;
+  --bb-sheet: #120d2b;
+  --bb-ink: #f5f2ff;
+  --bb-ink-2: #cdc5f0;
+  --bb-ink-3: #968fbd;
+  --bb-line: rgb(205 195 255 / 0.13);
+  --bb-line-strong: rgb(205 195 255 / 0.24);
+  --bb-hi: rgb(235 228 255 / 0.1);
+  --bb-wash: rgb(235 228 255 / 0.05);
+  --bb-shadow: 0 24px 60px -28px rgb(4 2 14 / 0.9);
+  --bb-aurora: 92 62 245;
+  --bb-accent: #c6ff34;
+  --bb-accent-rgb: 198 255 52;
+  --bb-accent-ink: #172100;
+  --bb-accent-strong: #4d7c0f;
+  --bb-accent-text: var(--bb-accent);
+  --bb-accent-soft: color-mix(in srgb, var(--bb-accent) 55%, var(--bb-ink));
+  --hl-rgb: 255 255 255;
+  /* The haze and the depth around the lime, and the white-hot core of a light. */
+  --haze-rgb: 179 164 255;
+  --uv-rgb: 92 62 245;
+  --core-rgb: 244 255 214;
+  /* Everyone else in a shared scene. */
+  --p-sky: #38bdf8;
+  --p-rose: #fb7185;
+  --p-amber: #fcd34d;
+}
+
+/* The page never scrolls sideways: anything drawn past the edge is clipped, not scrollable. */
+html.site, html.site body { overflow-x: clip; }
+html.site body { min-height: 100svh; }
+html.site ::selection { background: rgb(var(--bb-accent-rgb) / 0.35); color: var(--bb-ink); }

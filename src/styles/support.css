@@ -1,6 +1,8 @@
 body { min-height: 100vh; background: radial-gradient(120% 80% at 50% -10%, rgb(var(--surface-rgb)) 0%, var(--page) 62%); }
 .support { max-width: 560px; margin: 0 auto; padding: 22px 20px 48px; display: grid; gap: 18px; }
 .support-top { display: flex; align-items: center; justify-content: space-between; min-height: 56px; }
+/* The app switcher keeps to the logo; the way back to the viewer takes the far side. */
+.support-top .switch-btn { margin: 0 auto 0 6px; }
 .support-top .back { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 14px; border-radius: 12px; color: var(--secondary); text-decoration: none; font-size: 13px; font-weight: 650; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.04); }
 .support-top .back:hover { color: var(--ink); }
 .card { border-radius: 28px; padding: 26px 24px; }
@@ -41,3 +43,25 @@ body { min-height: 100vh; background: radial-gradient(120% 80% at 50% -10%, rgb(
 .links a { color: var(--secondary); }
 .links i { font-style: normal; opacity: 0.5; }
 @media (max-width: 480px) { .amounts { grid-template-columns: repeat(3, 1fr); } }
+
+/* Giving back (donate page): the open-source work ob.Pal is built on, by share, with the same again split among it. */
+.giveback { border-radius: 24px; padding: 22px; display: grid; gap: 12px; }
+.giveback h2 { margin: 0; font-family: var(--font-display); font-size: 22px; letter-spacing: -0.03em; }
+.gb-lede { margin: 0; color: var(--secondary); font-size: 14.5px; }
+.gb-amt { margin: 0; }
+.gb-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.gb-list li { position: relative; overflow: hidden; border-radius: 14px; background: rgb(var(--hl-rgb) / 0.03); border: 1px solid var(--glass-edge); }
+.gb-bar { position: absolute; inset: 0 auto 0 0; width: var(--w); background: linear-gradient(90deg, rgb(var(--accent-rgb) / 0.16), rgb(var(--accent-rgb) / 0.05)); pointer-events: none; }
+.gb-row { position: relative; display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 12px; padding: 10px 10px 10px 14px; }
+.gb-name { display: grid; min-width: 0; line-height: 1.3; }
+.gb-name a { color: var(--ink); font-weight: 700; font-size: 14px; text-decoration: none; }
+.gb-name small { overflow: hidden; color: var(--muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.gb-share { color: var(--secondary); font: 650 12.5px var(--font-data, var(--font)); font-variant-numeric: tabular-nums; }
+.gb-give { height: 32px; display: inline-flex; align-items: center; padding: 0 12px; border-radius: 10px; background: rgb(var(--accent-rgb) / 0.16); color: var(--accent-soft); font-size: 12.5px; font-weight: 750; text-decoration: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.gb-give:hover { background: rgb(var(--accent-rgb) / 0.26); }
+.gb-more summary { cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 650; }
+.gb-more ul { display: grid; gap: 6px; margin: 10px 0 0; padding: 0; list-style: none; font-size: 13px; }
+.gb-more b { color: var(--ink); }
+.gb-more span { color: var(--muted); }
+.gb-note { margin: 0; color: var(--muted); font-size: 12px; }
+@media (max-width: 460px) { .gb-row { grid-template-columns: 1fr auto; } .gb-share { display: none; } }

@@ -18,6 +18,8 @@ export function screenAngle(): number { return lockedAngle ?? actualScreenAngle(
 
 /** Normalizes W3C motion events into a screen-frame orientation quaternion and gyro rates. */
 export class Motion {
+  /** Linear acceleration in the screen frame (m/s², gravity removed), or null where the phone doesn't report it. */
+  accel: Vec3 | null = null
   q: Quat | null = null
   gyro: Vec3 = [0, 0, 0]
   hasOrientation = false
@@ -52,6 +54,9 @@ export class Motion {
   }
 
   private motion = (e: DeviceMotionEvent) => {
+    // Linear acceleration (gravity removed), in the screen frame like the gyro: 3D pushes and pulls (./imu3d.ts).
+    const a = e.acceleration
+    this.accel = a && a.x != null ? qRotate(qAxisAngle(0, 0, 1, screenAngle() * D2R), [a.x, a.y ?? 0, a.z ?? 0]) : null
     const r = e.rotationRate
     if (r && (r.alpha != null || r.beta != null || r.gamma != null)) {
       this.hasGyro = true

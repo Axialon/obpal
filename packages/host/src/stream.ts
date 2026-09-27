@@ -1,6 +1,6 @@
 import {
-  accumDelta, decodePad, decodePointer, decodeState, Flag, Mode, PadFlag, PointerFlag, qIdentity, qSlerp, seqNewer, Tier,
-  type ModeId, type PadState, type PointerState, type Quat, type TierId, type WireState,
+  accumDelta, decodePad, decodePointer, decodePose, decodeState, Flag, Mode, PadFlag, PointerFlag, PoseFlag, qIdentity, qSlerp, seqNewer, Tier,
+  type ModeId, type PadState, type PointerState, type Quat, type TierId, type Vec3, type WireState,
 } from '@obpal/core'
 
 /** Everything a host needs per rendered frame. Deltas are since the previous consume() call. */
@@ -20,10 +20,17 @@ export interface Frame {
   pad2: [number, number]
   zoom: number
   twist: number
+  /**
+   * Where the device is in space while it tracks itself (mode 6, POSE packets), else null. `tracked` is false while
+   * it has lost track of the world; `touching` is the deadman, sampled with the pose; a new `gen` is a new origin.
+   */
+  pose: { p: Vec3; q: Quat; tracked: boolean; touching: boolean; gen: number } | null
 }
 
 /** A pointer stream that stops (the utility was switched off, the phone went away) is gone after this long. */
 const POINTER_STALE_MS = 300
+/** A pose stream that stops is gone after this long. */
+const POSE_STALE_MS = 250
 
 /** Continuous (unwrapped) accumulator totals, so the host can interpolate them in time. */
 interface Acc { aim: [number, number]; pad1: [number, number]; pad2: [number, number]; zoom: number; twist: number }
@@ -55,6 +62,8 @@ export class Stream {
   private padAt = 0
   private ptr: PointerState | null = null
   private ptrAt = 0
+  private pose: ReturnType<typeof decodePose> = null
+  private poseAt = 0
   private stateAt = 0
   private latestAcc: Acc | null = null
   private outAcc: Acc | null = null
@@ -73,6 +82,8 @@ export class Stream {
     this.padAt = 0
     this.ptr = null
     this.ptrAt = 0
+    this.pose = null
+    this.poseAt = 0
     this.stateAt = 0
     this.latest = null
     this.latestAcc = null
@@ -127,6 +138,14 @@ export class Stream {
     this.hooks.input()
   }
 
+  onPose(data: ArrayBuffer) {
+    const p = decodePose(data)
+    if (!p || (this.pose && p.gen === this.pose.gen && !seqNewer(p.seq, this.pose.seq))) return
+    this.pose = p
+    this.poseAt = performance.now()
+    this.hooks.input()
+  }
+
   private get padLive() { return !!this.padState && performance.now() - this.padAt < 1500 }
 
   /** Latest controller state while the device is in gamepad mode (null otherwise). */
@@ -155,6 +174,7 @@ export class Stream {
       connected, mode: s?.mode ?? Mode.hold, tier: s?.tier ?? Tier.touch,
       clutch: false, grab: s?.grab ?? 0, qRel: qIdentity(), touching: false,
       aim: [0, 0], tilt: [0, 0], pad1: [0, 0], pad2: [0, 0], zoom: 0, twist: 0,
+      pose: this.pose && now - this.poseAt < POSE_STALE_MS ? { p: this.pose.p, q: this.pose.q, tracked: (this.pose.flags & PoseFlag.tracked) !== 0, touching: (this.pose.flags & PoseFlag.touching) !== 0, gen: this.pose.gen } : null,
     }
     if (!s || !this.buf.length) return frame
     // Gamepad mode: PAD packets replace STATE, so the last STATE (a held tilt, a gyro grab) must not keep driving

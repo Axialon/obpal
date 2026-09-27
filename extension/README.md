@@ -5,7 +5,7 @@ A Chromium (Manifest V3) extension that lets a phone paired through ob.Pal contr
 - **Controller**: a virtual gamepad for Gamepad API games.
 - **3D**: drag, pan and zoom for 3D viewers.
 - **Keys**: keyboard and mouse input for keyboard games.
-- **PC**: keyboard and mouse input for programs outside the browser, through the ob.Pal Desktop helper, per program and with the scope you allow.
+- **PC**: the phone as this computer's mouse and keyboard, through the ob.Pal Desktop helper: in every window (**Whole PC**), or per program with the scope you allow.
 
 It works in Chrome, Edge, Brave, Opera, Vivaldi and Arc (Chromium 120 or later). The phone needs no app: it opens the ob.Pal controller in its browser.
 
@@ -115,27 +115,43 @@ The target is the largest visible `<canvas>` or `<model-viewer>`. If there is no
 - Under pointer lock, only `movementX`/`movementY` matter.
 - Otherwise, a small lime dot shows where the virtual mouse is.
 
-### PC (programs outside the browser)
+### PC (this computer, outside the browser)
 
-The Keys mapping, delivered as real OS input by **ob.Pal Desktop** (`desktop/`, a small Rust helper) to the program in front, if you allowed it. Windows for now.
+Real OS input from the phone, delivered by **ob.Pal Desktop** (`desktop/`, a small Rust helper): to every window with **Whole PC**, or to the program in front if you allowed it. Windows for now.
 
-1. Install the helper: build it, then `obpal-desktop.exe install` (per user, no admin; see [desktop/README.md](../desktop/README.md)).
+1. Install the helper: download it from the [install guide](https://obpal.blackboxes.net/link/#desktop) and run `install.cmd`, or build it and run `obpal-desktop.exe install` (per user, no admin; see [desktop/README.md](../desktop/README.md)).
 2. Click **PC** in the popup. The browser asks once for the *nativeMessaging* permission.
-3. Switch to the program, then back to the popup: it names the program you just left. Choose keys and/or mouse and click **Allow**.
-4. Switch to the program. The popup shows *Controlling &lt;program&gt; · keyboard + mouse* while it is in front.
+3. Click **Control the whole PC**: the phone is now the mouse and keyboard of every window, the browser included. The popup shows *Controlling this PC*, with what each gesture does.
+4. Or one program at a time: switch to the program, then back to the popup: it names the program you just left. Choose keys and/or mouse and click **Allow**, then switch back to it.
+
+On the PC, the phone works like a laptop touchpad and a Wii remote:
+
+| Phone | PC |
+|---|---|
+| Trackpad (Rotate, Tilt): drag | move the pointer |
+| tap · tap again | click · double-click |
+| hold, then lift · hold, then move | right-click · drag |
+| two fingers · pinch | scroll (a flick carries on) · zoom (Ctrl + wheel) |
+| Point: aim | move the pointer |
+| A · hold A · press A and aim away | click where A went down (the pointer holds still while A is down) · right-click · drag |
+| hold B and aim · + / − | scroll · zoom |
+| Gamepad | the Keys mapping (sticks, buttons as keys, triggers as mouse buttons) |
 
 | Popup shows | Meaning |
 |---|---|
 | *Allow PC control* | The permission has not been granted yet. |
 | *ob.Pal Desktop isn't installed* | The browser found no helper. Install it, then Retry. |
+| *Control the whole PC* | The helper can drive every window; nothing does yet. |
+| *Controlling this PC* | Whole PC is on: every window receives input. *Pause* stops everything; *One program* goes back to the allowlist. |
+| *Update for whole PC* | The installed helper is older than 0.2 and knows only programs. |
 | *Allow &lt;program&gt;* | The program you last used is not on the list. |
-| *&lt;program&gt; runs as administrator* | An elevated window; Windows would drop the input, so the helper refuses it up front. |
+| *&lt;program&gt; runs as administrator* | An elevated window; Windows would drop the input, so the helper refuses it up front (with Whole PC, the popup names it and the pointer can still move off it). |
 | *Controlling &lt;program&gt;* | Input flows. *Pause* stops everything. |
 | *Stopped · Panic key* | `Ctrl+Alt+Backspace` was pressed on the PC. *Resume* continues. |
 
-The extension's **options page** (right-click the icon → Options, or the ⚙ in the PC card) lists every allowed program with its scope, removes them, and has **Pause all**.
+The extension's **options page** (right-click the icon → Options, or the ⚙ in the PC card) turns **Whole PC** on and off, lists every allowed program with its scope, removes them, and has **Pause all**.
 
-What goes over to the helper is the whole held state each frame (which keys and buttons are down) plus this frame's mouse motion and wheel, never key names from the phone and never edges: a lost frame cannot leave a key stuck, and the helper injects only keys from its own allowlisted table, only into an allowed program, only while it is in front. Everything is released when the window changes, the phone disconnects, the target changes or the helper loses the browser. A pinch on the phone scrolls.
+What goes over to the helper is the whole held state each frame (which keys and buttons are down) plus this frame's mouse motion and wheel, never key names from the phone and never edges: a lost frame cannot leave a key stuck, and the helper injects only keys from its own allowlisted table, only into an allowed program while it is in front (or, with Whole PC, into whatever is in front). Everything is released when the phone disconnects, the target changes or the helper loses the browser, and, one program at a time, when the window changes. Clicks and gestures are turned into held buttons, wheel and Ctrl in `src/shared/pcgestures.ts`; a click is a press held for 30 ms, then a release, so it spans frames the helper can diff.
 
 ### Changing the mappings
 
@@ -241,7 +257,7 @@ offscreen.html: Keys mapping → the held state ──port──▶ background.j
 |---|---|
 | `pnpm run build:extension` | Runs the Vite build (see below). |
 | `pnpm run typecheck` | Includes `extension/tsconfig.json`. |
-| `pnpm test` | `tests/extension.test.ts` covers key mapping and hysteresis, the 3D drag and wheel synthesis, message validation and frame routing; `tests/lan.test.ts` the direct code, derived credentials and the controller's service worker routing; `tests/native.test.ts` the PC frames, helper message validation and the popup's PC states. |
+| `pnpm test` | `tests/extension.test.ts` covers key mapping and hysteresis, the 3D drag and wheel synthesis, message validation and frame routing; `tests/lan.test.ts` the direct code, derived credentials and the controller's service worker routing; `tests/native.test.ts` the PC frames, helper message validation and the popup's PC states; `tests/pcgestures.test.ts` the PC clicks, holds, drags, scrolling, flicks and zoom. |
 | `pnpm run e2e:extension` | Builds the site and the extension, then runs `scripts/e2e.mjs`: the extension in one Chromium, an emulated phone in another, online through the real service, then offline through a direct code (see below). Needs Playwright's Chromium, or `OBPAL_E2E_CHROMIUM=<path to chrome.exe>`. The PC target runs against a stub helper (`e2e/native-stub.mjs`); `node extension/scripts/e2e.mjs --desktop` uses the installed ob.Pal Desktop and its harness window instead. |
 | `pnpm run bench:extension` | `scripts/bench.mjs`: time to connected, time to first input, press-to-page latency and data channel RTT over several pairings, with the phone's timeline. |
 | `node extension/scripts/icons.mjs [outDir]` | Renders the 16/32/48/128 px icons from `public/favicon.svg` with sharp. |
@@ -261,7 +277,7 @@ The build does the following:
 | `src/native.ts` | The native messaging bridge to ob.Pal Desktop (service worker side) |
 | `src/offscreen.ts` | Phone link (remembered phones, direct code) and the sampler (`src/ticker.ts` is its worker clock); PC frames |
 | `src/popup/` | Popup UI: codes, remembered phones, controls (uses `src/ui/icons.ts` and `src/styles/base.css` from the app) |
-| `src/options/` | Options page: the PC allowlist |
+| `src/options/` | Options page: Whole PC and the PC allowlist |
 | `e2e/` | Test page, the local stand-in service (it makes a throwaway test certificate on first run), the stub helper |
 | `src/content/bridge.ts` | Isolated-world bridge |
 | `src/content/page.ts` | Main-world page script |

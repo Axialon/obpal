@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="site">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="theme-color" content="#0a0718" />
     <meta name="description" content="Support ob.Pal: sponsor monthly or make a one-time donation through Stripe." />
     <title>Donate to ob.Pal</title>
     <link rel="icon" href="/favicon.svg" />
@@ -14,7 +14,7 @@
   </head>
   <body data-page="donate">
     <main class="support">
-      <header class="support-top"><a class="logo" href="/" aria-label="ob.Pal home"></a><a class="back" href="/view/">Open the viewer</a></header>
+      <header class="support-top"><a class="logo" href="/" aria-label="ob.Pal home"></a><button class="switch-btn" id="t-switch" type="button" aria-label="Blackboxes apps" title="Blackboxes apps"></button><a class="back" href="/view/">Open the viewer</a></header>
       <div class="banner" id="banner" role="status" hidden></div>
       <section class="card glass">
         <h1>Donate to ob.Pal</h1>
@@ -36,8 +36,18 @@
         <ul class="recent" id="recent"></ul>
         <p class="ledger-note">Shared with the Blackboxes ecosystem. Only settled Stripe payments are counted.</p>
       </section>
+      <section class="giveback glass" id="giveback" aria-labelledby="gb-h">
+        <h2 id="gb-h">Giving back</h2>
+        <p class="gb-lede">ob.Pal is built on open-source work. Give the same again to it, split by how much we rely on each.</p>
+        <label class="custom gb-amt"><span>$</span><input id="gb-amount" type="number" inputmode="decimal" min="1" max="10000" step="1" aria-label="Amount to give back, in US dollars" /></label>
+        <ol class="gb-list" id="gb-list"></ol>
+        <details class="gb-more"><summary>Also built with</summary><ul id="gb-thanks"></ul></details>
+        <p class="gb-note">Each gift goes straight to the project's own page. <code>pnpm oss:audit</code> checks this list against every dependency ob.Pal declares.</p>
+      </section>
       <nav class="links" id="links"></nav>
     </main>
     <script type="module" src="/src/support/main.ts"></script>
+    <script type="module" src="/src/support/giveback.ts"></script>
+    <div class="bb-menu bb-glass switcher" id="switcher" aria-label="Blackboxes apps" hidden></div>
   </body>
 </html>

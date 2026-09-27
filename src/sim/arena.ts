@@ -11,9 +11,13 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { Mode, type Frame, type Layout, type PadState } from '@obpal/host'
 import { applyTheme, initialTheme } from '../ui/themes'
+import { mountMarks } from '../ui/icons'
+import { mountTopBar } from '../landing/topbar'
 import { startSimScene, type SimScene } from './scene'
 
 applyTheme(initialTheme())
+mountMarks()
+mountTopBar()
 const $ = (id: string) => document.getElementById(id)!
 
 const RING = 1.7

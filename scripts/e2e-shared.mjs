@@ -72,11 +72,33 @@ try {
   })
 
   const phones = []
-  async function joinPhone() {
+  async function joinPhone({ xr = false } = {}) {
     const dir = await mkdtemp(join(tmpdir(), 'obpal-shared-'))
     profiles.push(dir)
     const ctx = await chromium.launchPersistentContext(dir, { ...devices['Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS })
     browsers.push(ctx)
+    // WebXR as an Android phone with ARCore has it, reporting whatever pose the test sets (window.__fakePose).
+    if (xr) await ctx.addInitScript(() => {
+      // 3D by the camera (WebXR), as chosen in settings.
+      try { localStorage.setItem('obpal.track3d', 'xr') } catch { /* private */ }
+      window.__fakePose = { p: [0, 0, 0], q: [0, 0, 0, 1], tracked: true }
+      class FakeSession extends EventTarget {
+        constructor() { super(); this.renderState = { baseLayer: null } }
+        updateRenderState(r) { this.renderState = { ...this.renderState, ...r } }
+        async requestReferenceSpace() { return {} }
+        requestAnimationFrame(cb) {
+          return setTimeout(() => cb(performance.now(), {
+            getViewerPose: () => {
+              const f = window.__fakePose
+              return { transform: { position: { x: f.p[0], y: f.p[1], z: f.p[2] }, orientation: { x: f.q[0], y: f.q[1], z: f.q[2], w: f.q[3] } }, emulatedPosition: !f.tracked }
+            },
+          }), 16)
+        }
+        async end() { this.dispatchEvent(new Event('end')) }
+      }
+      Object.defineProperty(navigator, 'xr', { configurable: true, value: { isSessionSupported: async (m) => m === 'immersive-ar', requestSession: async () => new FakeSession() } })
+      window.XRWebGLLayer = class { constructor() { this.framebuffer = null } }
+    })
     const page = ctx.pages()[0] ?? (await ctx.newPage())
     await page.goto(invite)
     await page.locator('.modes').waitFor({ timeout: 25000 })
@@ -97,7 +119,7 @@ try {
 
   let a, b
   await check('two phones join the same scene through one invite, each in its own colour', async () => {
-    a = await joinPhone()
+    a = await joinPhone({ xr: true })
     b = await joinPhone()
     const s = await until('two participants', async () => { const v = await scene(); return v.people.length === 2 ? v : null })
     if (s.people[0].color === s.people[1].color) throw new Error('both got the same colour')
@@ -131,6 +153,33 @@ try {
     }
     for (const h of s.holds) if (h.color !== s.people.find((p) => p.id === h.who)?.color) throw new Error(`halo colours ${colours}`)
     return `B was told "${toast}"; ${colours}`
+  })
+
+  await check('3D: the lead, holding nothing, moves the whole scene as the phone moves through space', async () => {
+    // A lets go of Time (tapping what you hold lets it go), so its 3D moves the scene.
+    await claimOn(a, 'Time')
+    await until('A let go of Time', async () => !(await scene()).holds.some((h) => h.part === 'Time'), 5000)
+    const where = () => screen.evaluate(() => { const p = window.__viewer.holder.position; return { x: p.x, y: p.y, z: p.z, d: window.__viewer.controls.distance } })
+    await a.page.locator('.modes [data-tab=track]').click()
+    await a.page.locator('#track-start').click()
+    await until('tracking', () => a.page.evaluate(() => document.getElementById('surface').classList.contains('tracking')), 5000)
+    const before = await where()
+    const cdp = await a.ctx.newCDPSession(a.page)
+    const box = await a.page.locator('#pad').boundingBox()
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2, id: 1 }] })
+    await sleep(300)
+    for (let i = 1; i <= 10; i++) { await a.page.evaluate((y) => { window.__fakePose.p = [0, y, 0] }, 0.01 * i); await sleep(40) }
+    await sleep(500)
+    const after = await where()
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    const rise = after.y - before.y
+    const want = before.d * 1.2 * 0.1
+    if (rise < want * 0.5) throw new Error(`the scene rose ${rise.toFixed(3)} for a 10 cm move (about ${want.toFixed(3)} expected)`)
+    // Back to Rotate, holding Time again, for the checks after this one.
+    await a.page.locator('.modes [data-tab=rotate]').click()
+    await claimOn(a, 'Time')
+    await until('A holds Time again', async () => (await scene()).holds.some((h) => h.part === 'Time'), 5000)
+    return `hand +10 cm → scene +${rise.toFixed(2)} (view distance ${before.d.toFixed(2)})`
   })
 
   await check('letting go shows: the chip on the phone flashes and fades out, and its control area flashes', async () => {

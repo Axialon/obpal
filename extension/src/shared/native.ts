@@ -18,6 +18,8 @@ export const NATIVE_HOST = 'net.blackboxes.obpal'
 export const NATIVE_PROTO = 1
 /** runtime.connect() port the offscreen link opens to the service worker for PC frames. */
 export const NATIVE_PORT_NAME = 'obpal-link/native'
+/** runtime.connect() port an extension page holds while it shows the helper's state (the options page). */
+export const PC_PAGE_PORT_NAME = 'obpal-link/pc-page'
 /** The helper releases everything after 500 ms without frames; idle frames go at least this often. */
 export const NATIVE_HEARTBEAT_MS = 250
 /** Where to get the helper. */
@@ -75,11 +77,16 @@ export class HeldState {
 
 const int = (v: number, max: number) => Math.max(-max, Math.min(max, Math.round(v))) || 0
 
+/** What the PC gestures (shared/pcgestures.ts) hold on top of the Keys mapping this frame. */
+export interface ExtraHeld { keys?: readonly string[]; buttons?: readonly number[] }
+
 /** Build a frame from the held state and this frame's motion; empty parts are left out to keep idle frames tiny. */
-export function buildNativeFrame(held: HeldState, move: readonly [number, number], wheel: readonly [number, number] = [0, 0]): NativeFrame {
+export function buildNativeFrame(held: HeldState, move: readonly [number, number], wheel: readonly [number, number] = [0, 0], extra: ExtraHeld = {}): NativeFrame {
   const f: NativeFrame = { t: 'f' }
-  if (held.keys.size) f.k = [...held.keys].slice(0, MAX_NATIVE_KEYS)
-  if (held.buttons.size) f.b = [...held.buttons]
+  const keys = new Set<string>([...held.keys, ...(extra.keys ?? [])])
+  const buttons = new Set<number>([...held.buttons, ...(extra.buttons ?? [])])
+  if (keys.size) f.k = [...keys].slice(0, MAX_NATIVE_KEYS)
+  if (buttons.size) f.b = [...buttons].sort()
   const m: [number, number] = [int(move[0], MAX_MOVE), int(move[1], MAX_MOVE)]
   if (m[0] || m[1]) f.m = m
   const w: [number, number] = [int(wheel[0], MAX_WHEEL), int(wheel[1], MAX_WHEEL)]
@@ -88,6 +95,9 @@ export function buildNativeFrame(held: HeldState, move: readonly [number, number
 }
 
 export const isIdleFrame = (f: NativeFrame) => !f.k && !f.b && !f.m && !f.w
+
+/** What a frame holds, to tell a change of held state (sent at once: a release must not wait) from a repeat. */
+export const heldSignature = (f: NativeFrame) => `${f.k?.join(',') ?? ''}|${f.b?.join(',') ?? ''}`
 
 /** Validate a frame from the offscreen document before it goes to the helper (every hop validates). */
 export function parseNativeFrame(x: unknown): NativeFrame | null {
@@ -121,6 +131,7 @@ export type HelperRequest =
   | { t: 'allow'; path: string; keyboard: boolean; mouse: boolean }
   | { t: 'scope'; path: string; keyboard: boolean; mouse: boolean }
   | { t: 'forget'; path: string }
+  | { t: 'desktop'; on: boolean; keyboard: boolean; mouse: boolean }
   | { t: 'pause'; on: boolean }
   | { t: 'resume' }
   | { t: 'stats' }
@@ -140,7 +151,12 @@ export interface PcProgram {
   browser: boolean
   allowed: PcScope | null
 }
-export interface PcConfig { paused: boolean; programs: PcProgramEntry[] }
+export interface PcConfig {
+  paused: boolean
+  /** Whole-PC mode's scope while it is on: every window receives input, not only allowed programs. */
+  desktop: PcScope | null
+  programs: PcProgramEntry[]
+}
 export interface PcStatus {
   enabled: boolean
   panic: boolean
@@ -153,7 +169,7 @@ export interface PcStatus {
 export interface PcStats { frames: number; injected: number; refused: Record<string, number> }
 
 export type HelperMessage =
-  | { t: 'hello'; v: number; version: string; os: string; hotkey: string | null; caps: { keyboard: boolean; mouse: boolean; gamepad: boolean } }
+  | { t: 'hello'; v: number; version: string; os: string; hotkey: string | null; caps: { keyboard: boolean; mouse: boolean; gamepad: boolean; desktop: boolean } }
   | ({ t: 'config' } & PcConfig)
   | ({ t: 'status' } & PcStatus)
   | ({ t: 'stats' } & PcStats)
@@ -176,6 +192,9 @@ function parseProgram(x: unknown): PcProgram | null {
 
 export function parsePcConfig(x: unknown): PcConfig | null {
   if (!isObj(x) || !bool(x.paused) || !Array.isArray(x.programs) || x.programs.length > MAX_PROGRAMS) return null
+  // A helper from before whole-PC mode sends no `desktop`: off.
+  const desktop = x.desktop === undefined || x.desktop === null ? null : parseScope(x.desktop)
+  if (desktop === null && x.desktop !== undefined && x.desktop !== null) return null
   const programs: PcProgramEntry[] = []
   for (const p of x.programs) {
     if (!isObj(p) || !str(p.path, MAX_PATH) || !str(p.name, 260)) return null
@@ -183,7 +202,7 @@ export function parsePcConfig(x: unknown): PcConfig | null {
     if (!s) return null
     programs.push({ path: p.path, name: p.name, ...s })
   }
-  return { paused: x.paused, programs }
+  return { paused: x.paused, desktop, programs }
 }
 
 export function parsePcStatus(x: unknown): PcStatus | null {
@@ -201,8 +220,8 @@ export function parseHelperMessage(x: unknown): HelperMessage | null {
       if (!Number.isInteger(x.v) || !str(x.version, 32) || !str(x.os, 16) || !isObj(x.caps)) return null
       if (x.hotkey !== null && !str(x.hotkey, 40)) return null
       const c = x.caps
-      if (!bool(c.keyboard) || !bool(c.mouse) || !bool(c.gamepad)) return null
-      return { t: 'hello', v: x.v as number, version: x.version, os: x.os, hotkey: x.hotkey, caps: { keyboard: c.keyboard, mouse: c.mouse, gamepad: c.gamepad } }
+      if (!bool(c.keyboard) || !bool(c.mouse) || !bool(c.gamepad) || (c.desktop !== undefined && !bool(c.desktop))) return null
+      return { t: 'hello', v: x.v as number, version: x.version, os: x.os, hotkey: x.hotkey, caps: { keyboard: c.keyboard, mouse: c.mouse, gamepad: c.gamepad, desktop: c.desktop === true } }
     }
     case 'config': {
       const c = parsePcConfig(x)
@@ -234,6 +253,8 @@ const PC_LINKS: readonly PcLink[] = ['off', 'permission', 'connecting', 'missing
 export interface PcState {
   link: PcLink
   version: string | null
+  /** The helper can control the whole PC (0.2 and later). */
+  desktopCap: boolean
   hotkey: string | null
   error: string | null
   config: PcConfig | null
@@ -242,7 +263,7 @@ export interface PcState {
   stats: PcStats | null
 }
 
-export const EMPTY_PC: PcState = { link: 'off', version: null, hotkey: null, error: null, config: null, status: null, stats: null }
+export const EMPTY_PC: PcState = { link: 'off', version: null, desktopCap: false, hotkey: null, error: null, config: null, status: null, stats: null }
 
 export function parsePcStats(x: unknown): PcStats | null {
   if (!isObj(x) || !fin(x.frames) || !fin(x.injected) || !isObj(x.refused)) return null
@@ -258,7 +279,7 @@ export function parsePcState(x: unknown): PcState | null {
   const status = x.status === null ? null : parsePcStatus(x.status)
   const stats = x.stats === null || x.stats === undefined ? null : parsePcStats(x.stats)
   if ((config === null && x.config !== null) || (status === null && x.status !== null)) return null
-  return { link: x.link as PcLink, version: x.version as string | null, hotkey: x.hotkey as string | null, error: x.error as string | null, config, status, stats }
+  return { link: x.link as PcLink, version: x.version as string | null, desktopCap: x.desktopCap === true, hotkey: x.hotkey as string | null, error: x.error as string | null, config, status, stats }
 }
 
 /** What the popup's PC card shows. */
@@ -269,11 +290,13 @@ export type PcView =
   | { kind: 'error'; error: string }
   | { kind: 'paused' }
   | { kind: 'panic'; hotkey: string | null }
+  /** Whole-PC mode: every window; `front` is the window in front now, reported when Windows blocks it (elevated). */
+  | { kind: 'desktop'; scope: PcScope; front: PcProgram | null }
   /** No program other than the browser has been in front yet. */
-  | { kind: 'idle' }
-  | { kind: 'allow'; program: PcProgram }
-  | { kind: 'elevated'; program: PcProgram }
-  | { kind: 'active'; program: PcProgram; scope: PcScope; inFront: boolean }
+  | { kind: 'idle'; desktop: boolean }
+  | { kind: 'allow'; program: PcProgram; desktop: boolean }
+  | { kind: 'elevated'; program: PcProgram; desktop: boolean }
+  | { kind: 'active'; program: PcProgram; scope: PcScope; inFront: boolean; desktop: boolean }
 
 export function pcView(s: PcState): PcView {
   switch (s.link) {
@@ -290,12 +313,16 @@ export function pcView(s: PcState): PcView {
   if (s.config?.paused) return { kind: 'paused' }
   if (s.status?.panic) return { kind: 'panic', hotkey: s.hotkey }
   const st = s.status
+  const whole = s.config?.desktop
+  if (whole && (whole.keyboard || whole.mouse)) return { kind: 'desktop', scope: whole, front: st?.front ?? null }
+  // One program at a time. `desktop`: the helper can switch to the whole PC instead.
+  const desktop = s.desktopCap
   // The popup itself puts the browser in front: what matters is the program the person will switch back to.
   const program = st?.front && !st.front.browser ? st.front : st?.program ?? null
-  if (!program) return { kind: 'idle' }
-  if (program.elevated) return { kind: 'elevated', program }
-  if (!program.allowed) return { kind: 'allow', program }
-  return { kind: 'active', program, scope: program.allowed, inFront: st?.front?.pid === program.pid && !st?.front?.browser }
+  if (!program) return { kind: 'idle', desktop }
+  if (program.elevated) return { kind: 'elevated', program, desktop }
+  if (!program.allowed) return { kind: 'allow', program, desktop }
+  return { kind: 'active', program, scope: program.allowed, inFront: st?.front?.pid === program.pid && !st?.front?.browser, desktop }
 }
 
 /** "keyboard + mouse", "keyboard", "mouse", or "nothing". */
@@ -311,11 +338,12 @@ export type PcRequest =
   | { to: 'bg'; type: 'pc-allow'; path: string; keyboard: boolean; mouse: boolean }
   | { to: 'bg'; type: 'pc-scope'; path: string; keyboard: boolean; mouse: boolean }
   | { to: 'bg'; type: 'pc-forget'; path: string }
+  | { to: 'bg'; type: 'pc-desktop'; on: boolean; keyboard: boolean; mouse: boolean }
   | { to: 'bg'; type: 'pc-pause'; on: boolean }
   | { to: 'bg'; type: 'pc-resume' }
   | { to: 'bg'; type: 'pc-stats' }
 export type PcRequestType = PcRequest['type']
-export const PC_REQUEST_TYPES: readonly PcRequestType[] = ['pc-connect', 'pc-allow', 'pc-scope', 'pc-forget', 'pc-pause', 'pc-resume', 'pc-stats']
+export const PC_REQUEST_TYPES: readonly PcRequestType[] = ['pc-connect', 'pc-allow', 'pc-scope', 'pc-forget', 'pc-desktop', 'pc-pause', 'pc-resume', 'pc-stats']
 
 export function parsePcRequest(x: unknown): PcRequest | null {
   if (!isObj(x) || x.to !== 'bg') return null
@@ -329,6 +357,8 @@ export function parsePcRequest(x: unknown): PcRequest | null {
       return str(x.path, MAX_PATH) && x.path !== '' && bool(x.keyboard) && bool(x.mouse) ? { to: 'bg', type: x.type, path: x.path, keyboard: x.keyboard, mouse: x.mouse } : null
     case 'pc-forget':
       return str(x.path, MAX_PATH) && x.path !== '' ? { to: 'bg', type: 'pc-forget', path: x.path } : null
+    case 'pc-desktop':
+      return bool(x.on) && bool(x.keyboard) && bool(x.mouse) ? { to: 'bg', type: 'pc-desktop', on: x.on, keyboard: x.keyboard, mouse: x.mouse } : null
     case 'pc-pause':
       return bool(x.on) ? { to: 'bg', type: 'pc-pause', on: x.on } : null
   }
@@ -344,6 +374,8 @@ export function toHelperRequest(r: PcRequest): HelperRequest | null {
       return { t: 'scope', path: r.path, keyboard: r.keyboard, mouse: r.mouse }
     case 'pc-forget':
       return { t: 'forget', path: r.path }
+    case 'pc-desktop':
+      return { t: 'desktop', on: r.on, keyboard: r.keyboard, mouse: r.mouse }
     case 'pc-pause':
       return { t: 'pause', on: r.on }
     case 'pc-resume':

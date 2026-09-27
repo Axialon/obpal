@@ -15,7 +15,7 @@ const log = (entry) => appendFileSync(LOG, `${JSON.stringify({ at: Date.now(), .
 
 const BROWSER = { name: 'chrome.exe', path: 'C:\\Browsers\\chrome.exe', title: 'ob.Pal Link', pid: 1000, elevated: false, browser: true, allowed: null }
 const GAME = { name: 'stubgame.exe', path: 'C:\\Stub\\stubgame.exe', title: 'Stub game', pid: 2000, elevated: false, browser: false, allowed: null }
-const config = { paused: false, programs: [] }
+const config = { paused: false, desktop: null, programs: [] }
 let enabled = false
 let panic = false
 
@@ -32,13 +32,13 @@ function send(msg) {
   process.stdout.write(Buffer.concat([len, body]))
 }
 const status = () => send({ t: 'status', enabled, panic, held: false, front: info(BROWSER), program: info(GAME) })
-const configReply = () => send({ t: 'config', paused: config.paused, programs: config.programs.map((p) => ({ ...p, gamepad: false })) })
+const configReply = () => send({ t: 'config', paused: config.paused, desktop: config.desktop, programs: config.programs.map((p) => ({ ...p, gamepad: false })) })
 
 function handle(m) {
   log({ in: m })
   switch (m.t) {
     case 'hello':
-      send({ t: 'hello', v: 1, version: 'stub', os: 'stub', hotkey: 'Ctrl+Alt+Backspace', caps: { keyboard: true, mouse: true, gamepad: false } })
+      send({ t: 'hello', v: 1, version: 'stub', os: 'stub', hotkey: 'Ctrl+Alt+Backspace', caps: { keyboard: true, mouse: true, gamepad: false, desktop: true } })
       configReply()
       status()
       break
@@ -66,6 +66,11 @@ function handle(m) {
     }
     case 'forget':
       config.programs = config.programs.filter((p) => p.path !== m.path)
+      configReply()
+      status()
+      break
+    case 'desktop':
+      config.desktop = m.on ? { keyboard: m.keyboard, mouse: m.mouse, gamepad: false } : null
       configReply()
       status()
       break

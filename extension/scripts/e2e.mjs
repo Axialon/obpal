@@ -424,7 +424,7 @@ try {
   }
 
   if (!DESKTOP) {
-    await check('PC (stub helper): starts on the PC target, the popup allows the program in front, frames carry the held keys, leaving disarms', async () => {
+    await check('PC (stub helper): starts on the PC target, the popup allows the program in front, frames carry the held keys and trackpad clicks, whole PC on and off, leaving disarms', async () => {
       await tap('.modes [data-tab=gamepad]')
       await phone.locator('.gp-f[data-k=a]').waitFor({ timeout: 5000 })
       await setTarget(popup, 'pc')
@@ -436,6 +436,27 @@ try {
       await until('popup shows the scope', () => popup.evaluate(() => document.getElementById('pc-sub')?.textContent?.startsWith('keyboard + mouse')))
       await hold('.gp-f[data-k=a]', () => until('a frame holds Space', () => stubLog().some((e) => e.in?.t === 'f' && e.in.k?.includes('Space'))))
       await until('a later frame holds nothing', () => { const f = stubLog().filter((e) => e.in?.t === 'f'); return f.length > 0 && !f[f.length - 1].in.k })
+      // The trackpad clicks: a tap is the left button down then up, a hold then lift the right button.
+      const frames = () => stubLog().filter((e) => e.in?.t === 'f').map((e) => e.in)
+      await tap('.gp-mini[data-act=exit]') // leave the full-screen gamepad
+      await tap('.modes [data-tab=rotate]')
+      await phone.locator('#pad').waitFor({ state: 'visible', timeout: 5000 })
+      let from = frames().length
+      await tap('#pad')
+      await until('a tap presses the left button', () => frames().slice(from).some((f) => f.b?.includes(0)))
+      await until('then lets it go', () => { const f = frames().slice(from); const i = f.findIndex((x) => x.b?.includes(0)); return i >= 0 && f.slice(i + 1).some((x) => !x.b) })
+      from = frames().length
+      await hold('#pad', () => sleep(800))
+      await until('a hold, then lift, presses the right button', () => frames().slice(from).some((f) => f.b?.includes(2)))
+      await until('then lets it go', () => { const f = frames(); return f.length > 0 && !f[f.length - 1].b })
+      // Whole PC: on from the popup, shown with the gesture legend, and off again.
+      const action = (label) => popup.locator('#pc-actions .btn', { hasText: label }).first()
+      await action('Whole PC').click()
+      await until('the helper is asked for the whole PC', () => stubLog().some((e) => e.in?.t === 'desktop' && e.in.on === true && e.in.keyboard === true && e.in.mouse === true))
+      await until('popup shows the whole PC', () => popup.evaluate(() => document.getElementById('pc-title')?.textContent === 'Controlling this PC' && !document.getElementById('pc-legend').hidden))
+      await action('One program').click()
+      await until('back to one program', () => stubLog().some((e) => e.in?.t === 'desktop' && e.in.on === false))
+      await until('popup shows the program again', () => popup.evaluate(() => (document.getElementById('pc-title')?.textContent ?? '').includes('stubgame.exe')))
       await setTarget(popup, 'keys')
       await until('the helper port closed', () => stubLog().some((e) => e.eof))
       const log = stubLog()

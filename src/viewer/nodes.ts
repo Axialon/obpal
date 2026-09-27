@@ -403,11 +403,11 @@ export class Parts {
 
   // ---- manipulation -----------------------------------------------------------------------------------------
 
-  /** Move a hand's selected part in the view plane by screen pixels. */
-  move(dx: number, dy: number, h: Hand = this.host) {
+  /** Move a hand's selected part in the view plane by screen pixels. Returns whether anything changed (a live value snaps to its steps). */
+  move(dx: number, dy: number, h: Hand = this.host): boolean {
     const part = h.selected
-    if (!part?.movable || (!dx && !dy)) return
-    if (this.live_(part)) { this.tradeoffOf(part)!.nudge(part.key!, dx, dy, this.camera); return }
+    if (!part?.movable || (!dx && !dy)) return false
+    if (this.live_(part)) return this.tradeoffOf(part)!.nudge(part.key!, dx, dy, this.camera)
     const o = part.object
     const center = new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3())
     const dist = center.distanceTo(this.camera.position)
@@ -419,6 +419,7 @@ export class Parts {
     const a = parent.worldToLocal(center.clone())
     const b = parent.worldToLocal(target)
     o.position.add(b.sub(a))
+    return true
   }
 
   /** Scale a hand's selected part by 2^log2 (pinch). */

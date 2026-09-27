@@ -4,21 +4,22 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#0a0a0a" />
-    <meta name="description" content="A simulated robot arm you and others control with your phones, one joint each: scan to join, hold the pad to move. Deadman, limits, watchdog, e-stop and approval, as for a real arm." />
-    <title>Robot arm sim · ob.Pal</title>
+    <meta name="description" content="Robot arms you and others control with your phones: take a whole arm and move your phone, or take one joint. Connect a real arm (SO-100/SO-101, Arduino, ROS 2) and the sim becomes its twin. Deadman, limits, watchdog, e-stop and approval." />
+    <title>Robot arms · ob.Pal</title>
     <link rel="icon" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&family=JetBrains+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/src/family/family.css" />
-    <script type="module" src="/src/sim/arm.ts"></script>
+    <script type="module" src="/src/sim/arm/main.ts"></script>
   </head>
   <body class="sim">
-    <canvas id="stage" aria-label="Simulated robot arm"></canvas>
+    <canvas id="stage" aria-label="Robot arms"></canvas>
     <header class="sim-top">
       <div class="sim-left">
-        <a class="logo" href="/" aria-label="ob.Pal"><img class="mark" src="/logo-mark.svg" alt="" /><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span></a>
+        <a class="logo" href="/" aria-label="ob.Pal"><span class="mark-slot" data-mark></span><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span></a>
+        <button class="switch-btn" id="t-switch" type="button" aria-label="Blackboxes apps" title="Blackboxes apps"></button>
         <a class="sim-crumb" href="/sim/">Sims</a>
       </div>
       <div class="chip glass" id="chip" hidden>
@@ -32,10 +33,13 @@
     </header>
 
     <aside class="sim-panel glass" aria-label="Arm">
-      <p class="eyebrow">system.robot-arm · simulated</p>
-      <h1>Robot arm</h1>
-      <p class="sim-lede">Scan the code to join. Pick a joint from your phone's scene list, then hold a finger on the pad and tilt or drag to move it. One person per joint.</p>
-      <ul class="nodes" id="nodes"></ul>
+      <p class="eyebrow">system.robot-arm</p>
+      <h1>Robot arms</h1>
+      <p class="sim-lede">Scan to join, then take a whole arm or one joint. <b>Point</b>: aim at a spot and hold B; A picks up. <b>3D</b>: hold the pad and move your phone, and the gripper follows your hand.</p>
+      <div class="arms" id="arms"></div>
+      <button class="add-arm" id="add-arm" data-icon="plus">Add arm</button>
+      <button class="add-arm glow-cam" id="glow-cam" data-icon="view" aria-pressed="false">Follow glowing phones with this camera</button>
+      <canvas class="glow-view" id="glow-view" width="160" height="120" hidden aria-label="What the camera sees"></canvas>
       <div class="safety">
         <button class="estop" id="estop">Stop<kbd>Space</kbd></button>
         <button class="btn" id="home-all">Home</button>
@@ -51,6 +55,48 @@
     </div>
     <div class="v-pair" id="pair"></div>
     <p class="note" id="note" role="status"></p>
-    <p class="sim-badge">Simulated · no hardware connected</p>
+    <p class="sim-badge" id="sim-badge">Simulated · no hardware connected</p>
+
+    <dialog class="hw glass" id="hw" aria-labelledby="hw-title">
+      <h2 id="hw-title">Connect a real arm</h2>
+      <p class="hw-lede">The sim becomes the arm's twin: it follows the real arm until you put it live.</p>
+      <fieldset class="hw-kinds" id="hw-kinds">
+        <label><input type="radio" name="kind" value="feetech" checked /><span><b>Feetech bus servos</b><small>SO-100, SO-101 · USB</small></span></label>
+        <label><input type="radio" name="kind" value="serial" /><span><b>ob.Pal serial</b><small>A board running the ob.Pal arm sketch · USB</small></span></label>
+        <label><input type="radio" name="kind" value="ros" /><span><b>ROS 2</b><small>Through rosbridge, here or across a network</small></span></label>
+      </fieldset>
+      <p class="hw-note" id="hw-noserial" hidden>USB needs Chrome or Edge on a computer.</p>
+      <div class="hw-ros" id="hw-ros" hidden>
+        <label>rosbridge <input id="ros-url" spellcheck="false" autocomplete="off" /></label>
+        <label>Commands <select id="ros-cmd"><option value="trajectory">JointTrajectory</option><option value="array">Float64MultiArray</option></select></label>
+        <label>Topic <input id="ros-topic" spellcheck="false" autocomplete="off" /></label>
+        <label>Joints <input id="ros-joints" spellcheck="false" autocomplete="off" /></label>
+        <p class="hw-note">From this page, <code>ws://localhost</code> works. A rosbridge on another computer needs <code>wss://</code>.</p>
+      </div>
+      <div class="hw-cal" id="hw-cal" hidden>
+        <p>Pose the real arm like the twin's home, then set home: base straight, upper arm leaning forward a little, forearm level, gripper pointing down and open.</p>
+        <div class="hw-row"><button type="button" class="btn sm" id="cal-home">Set home here</button><button type="button" class="btn sm" id="cal-closed">Set gripper closed</button><button type="button" class="btn sm" id="hw-limp">Let go (limp)</button></div>
+        <p class="hw-sub">Joints that turn the wrong way:</p>
+        <div class="hw-dirs" id="hw-dirs"></div>
+      </div>
+      <p class="hw-note" id="hw-live-note" hidden>This arm is live. Take it off live before changing its hardware.</p>
+      <p class="hw-err" id="hw-err" role="alert"></p>
+      <div class="hw-actions">
+        <button type="button" class="btn sm" id="hw-disconnect" hidden>Disconnect</button>
+        <span class="grow"></span>
+        <button type="button" class="btn sm" id="hw-close">Close</button>
+        <button type="button" class="btn sm primary" id="hw-connect">Connect</button>
+      </div>
+    </dialog>
+
+    <dialog class="hw glass" id="live" aria-labelledby="live-title">
+      <form method="dialog">
+        <h2 id="live-title">Put the arm live?</h2>
+        <p class="hw-lede">The real arm will move as its twin moves. Keep people and things out of its reach, and keep a hand near its power switch. The e-stop holds it where it is.</p>
+        <label class="hw-cap">Speed <select id="live-cap"><option value="0.1">10%</option><option value="0.25" selected>25%</option><option value="0.5">50%</option><option value="1">Full</option></select></label>
+        <div class="hw-actions"><span class="grow"></span><button class="btn sm" value="cancel">Cancel</button><button class="btn sm danger" id="live-go" value="go">Go live</button></div>
+      </form>
+    </dialog>
+    <div class="bb-menu bb-glass switcher" id="switcher" aria-label="Blackboxes apps" hidden></div>
   </body>
 </html>

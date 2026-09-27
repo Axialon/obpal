@@ -12,7 +12,7 @@ import {
   allowedFrom, parseBgRequest, parseLink, senderKind,
   type BgRequest, type BridgeRequest, type LinkState, type OffscreenRequest,
 } from './shared/messages'
-import { NATIVE_PORT_NAME, parseNativeFrame } from './shared/native'
+import { NATIVE_PORT_NAME, parseNativeFrame, PC_PAGE_PORT_NAME } from './shared/native'
 
 const OFFSCREEN_PATH = 'offscreen.html'
 const BRIDGE_JS = 'bridge.js'
@@ -173,7 +173,7 @@ async function handle(msg: BgRequest, sender: chrome.runtime.MessageSender): Pro
       await pushConfig()
       await native.sync(msg.mode)
       return { ok: true }
-    case 'pc-connect': case 'pc-allow': case 'pc-scope': case 'pc-forget': case 'pc-pause': case 'pc-resume': case 'pc-stats':
+    case 'pc-connect': case 'pc-allow': case 'pc-scope': case 'pc-forget': case 'pc-desktop': case 'pc-pause': case 'pc-resume': case 'pc-stats':
       return native.handle(msg)
     case 'unpair':
       await toOffscreen({ to: 'offscreen', type: 'unpair' })
@@ -224,6 +224,14 @@ chrome.runtime.onMessage.addListener((raw: unknown, sender, respond) => {
 // PC target: the offscreen link streams action frames over a port (60 Hz while there is input, a heartbeat
 // otherwise), which also keeps this worker alive while the helper port is open.
 chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === PC_PAGE_PORT_NAME) {
+    // The options page keeps the helper up while it is open, and only then.
+    const s = port.sender
+    if (senderKind({ id: s?.id, url: s?.url, tabId: s?.tab?.id }, SELF) !== 'extension') return port.disconnect()
+    native.pageOpened()
+    port.onDisconnect.addListener(() => native.pageClosed())
+    return
+  }
   if (port.name !== NATIVE_PORT_NAME) return
   const s = port.sender
   if (senderKind({ id: s?.id, url: s?.url, tabId: s?.tab?.id }, SELF) !== 'offscreen') {

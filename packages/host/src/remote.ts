@@ -1,7 +1,7 @@
 import {
   b64url, bindMac, candidatesOf, certFingerprint, DEFAULT_SERVICE, encodeLanPairing, encodePairing, equalBytes,
   fetchIceServers, forgetPair, fromB64url, lanAnswerSdp, lanContext, lanIceCredentials, listPairs, loadCertificate, MAX_NODE_ID, Mode, newSecret, PAD_HEADER,
-  packetType, POINTER_HEADER, PROTO, putPair, randomBytes, readLocalIce, roomIdFor, roomSocketUrl, sdpFingerprint, SignalClient,
+  packetType, POINTER_HEADER, POSE_HEADER, PROTO, putPair, randomBytes, readLocalIce, roomIdFor, roomSocketUrl, sdpFingerprint, SignalClient,
   type Caps, type DeviceMsg, type HostMsg, type Layout, type ModeId, type PadState, type PairGrant, type PointerState, type SceneNode,
   type ScenePerson, type SignalIn, type SignalPayload, type StoredPair,
 } from '@obpal/core'
@@ -336,6 +336,7 @@ export class Remote {
       const type = packetType(e.data)
       if (type === PAD_HEADER) peer.stream.onPad(e.data)
       else if (type === POINTER_HEADER) peer.stream.onPointer(e.data)
+      else if (type === POSE_HEADER) peer.stream.onPose(e.data)
       else peer.stream.onState(e.data)
     }
     return peer
@@ -527,7 +528,7 @@ export class Remote {
    * participant id, `host` for the screen). Every participant receives it.
    */
   setScene(s: { nodes?: SceneNode[]; held: Record<string, string> }) {
-    if (s.nodes) { this.nodes = s.nodes.map((n) => ({ ...n, id: n.id.slice(0, MAX_NODE_ID) })); this.nodesVersion++ }
+    if (s.nodes) { this.nodes = s.nodes.map((n) => ({ ...n, id: n.id.slice(0, MAX_NODE_ID), ...(n.parent ? { parent: n.parent.slice(0, MAX_NODE_ID) } : {}) })); this.nodesVersion++ }
     this.held = { ...s.held }
     this.sceneChanged()
   }

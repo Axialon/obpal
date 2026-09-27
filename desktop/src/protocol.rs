@@ -5,7 +5,7 @@
 //! into a typed request; anything malformed is answered with an `error` and otherwise ignored.
 //!
 //! Extension → helper: `hello`, `enable`, `f` (an action frame), `release`, `allow`, `scope`, `forget`,
-//! `pause`, `resume`, `stats`.  Helper → extension: `hello`, `config`, `status`, `stats`, `error`.
+//! `desktop`, `pause`, `resume`, `stats`.  Helper → extension: `hello`, `config`, `status`, `stats`, `error`.
 //! See spec/PROTOCOL.md § Native messaging frames.
 
 use serde::{Deserialize, Serialize};
@@ -118,6 +118,14 @@ pub enum Request {
     Scope { path: String, keyboard: bool, mouse: bool },
     /// Remove a program from the allowlist.
     Forget { path: String },
+    /// Whole-PC mode on or off: every window receives input, with this scope, not only allowed programs.
+    Desktop {
+        on: bool,
+        #[serde(default = "yes")]
+        keyboard: bool,
+        #[serde(default = "yes")]
+        mouse: bool,
+    },
     /// Pause or resume all injection (persisted).
     Pause { on: bool },
     /// Clear a panic stop (a person clicked Resume in the extension).
@@ -196,6 +204,8 @@ pub struct Caps {
     pub mouse: bool,
     /// A virtual gamepad needs a driver (ViGEmBus is archived); the scope model is ready for it, the helper is not.
     pub gamepad: bool,
+    /// Whole-PC mode (`desktop` requests): an extension shows the choice only when the helper has it.
+    pub desktop: bool,
 }
 
 /// The kinds of input a program may receive. `gamepad` is reserved (see `Caps`).
@@ -266,6 +276,8 @@ pub enum Reply {
     },
     Config {
         paused: bool,
+        /// Whole-PC mode's scope while it is on, else null (only allowed programs receive input).
+        desktop: Option<Scope>,
         programs: Vec<ProgramEntry>,
     },
     Status {
@@ -343,6 +355,11 @@ mod tests {
             Request::Scope { path: "x".into(), keyboard: false, mouse: true }
         );
         assert_eq!(parse_request(br#"{"t":"forget","path":"x"}"#).unwrap(), Request::Forget { path: "x".into() });
+        assert_eq!(parse_request(br#"{"t":"desktop","on":true}"#).unwrap(), Request::Desktop { on: true, keyboard: true, mouse: true });
+        assert_eq!(
+            parse_request(br#"{"t":"desktop","on":true,"keyboard":false,"mouse":true}"#).unwrap(),
+            Request::Desktop { on: true, keyboard: false, mouse: true }
+        );
         assert_eq!(parse_request(br#"{"t":"pause","on":false}"#).unwrap(), Request::Pause { on: false });
         assert_eq!(parse_request(br#"{"t":"resume"}"#).unwrap(), Request::Resume);
         assert_eq!(parse_request(br#"{"t":"stats"}"#).unwrap(), Request::Stats);
@@ -357,6 +374,8 @@ mod tests {
             br#"{"t":"f","m":[1,2,3]}"#,
             br#"{"t":"f","m":[1.5,2]}"#,
             br#"{"t":"scope","path":"x"}"#,
+            br#"{"t":"desktop"}"#,
+            br#"{"t":"desktop","on":"yes"}"#,
             br#"[]"#,
             b"nope",
             b"",
@@ -390,7 +409,9 @@ mod tests {
         assert_eq!(String::from_utf8(e.to_bytes()).unwrap(), r#"{"t":"error","code":"bad-frame","msg":"x"}"#);
         let s = Reply::Stats { frames: 1, injected: 0, refused: Refused { not_allowed: 1, ..Default::default() } };
         assert!(String::from_utf8(s.to_bytes()).unwrap().contains(r#""notAllowed":1"#));
-        let c = Reply::Config { paused: false, programs: vec![ProgramEntry { path: "p".into(), name: "n".into(), scope: Scope { keyboard: true, mouse: false, gamepad: false } }] };
-        assert_eq!(String::from_utf8(c.to_bytes()).unwrap(), r#"{"t":"config","paused":false,"programs":[{"path":"p","name":"n","keyboard":true,"mouse":false,"gamepad":false}]}"#);
+        let c = Reply::Config { paused: false, desktop: None, programs: vec![ProgramEntry { path: "p".into(), name: "n".into(), scope: Scope { keyboard: true, mouse: false, gamepad: false } }] };
+        assert_eq!(String::from_utf8(c.to_bytes()).unwrap(), r#"{"t":"config","paused":false,"desktop":null,"programs":[{"path":"p","name":"n","keyboard":true,"mouse":false,"gamepad":false}]}"#);
+        let d = Reply::Config { paused: false, desktop: Some(Scope { keyboard: true, mouse: true, gamepad: false }), programs: vec![] };
+        assert_eq!(String::from_utf8(d.to_bytes()).unwrap(), r#"{"t":"config","paused":false,"desktop":{"keyboard":true,"mouse":true,"gamepad":false},"programs":[]}"#);
     }
 }

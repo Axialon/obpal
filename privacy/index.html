@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="site">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="theme-color" content="#0a0718" />
     <meta name="description" content="How ob.Pal, its phone controller, viewer and the ob.Pal Link extension handle data: no accounts, no analytics, direct encrypted connections." />
     <title>Privacy · ob.Pal</title>
     <link rel="icon" href="/favicon.svg" />
@@ -13,17 +13,38 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&family=JetBrains+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/src/family/family.css" />
     <link rel="stylesheet" href="/src/styles/base.css" />
+    <link rel="stylesheet" href="/src/styles/site.css" />
     <link rel="stylesheet" href="/src/styles/landing.css" />
     <link rel="stylesheet" href="/src/styles/pages.css" />
-    <script type="module" src="/src/landing/main.ts"></script>
+    <script type="module" src="/src/landing/site.ts"></script>
   </head>
   <body>
+        <header class="top">
+      <div class="top-in">
+        <a class="logo" href="/" aria-label="ob.Pal"><span class="mark-slot" data-mark></span><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span></a>
+        <button class="switch-btn" id="t-switch" type="button" aria-label="Blackboxes apps" title="Blackboxes apps"></button>
+        <nav class="top-nav" aria-label="Site">
+          <a href="/sim/">Sims</a>
+          <a href="/link/">Link</a>
+          <a href="/catalogue/">Catalogue</a>
+          <a href="/#build">Build</a>
+          <a href="/donate/">Donate</a>
+        </nav>
+        <button class="top-menu" id="t-menu" type="button" aria-label="Menu">
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10" /></svg>
+        </button>
+        <a class="btn primary top-go" href="/view/">Open the viewer</a>
+      </div>
+    </header>
+    <div class="bb-menu bb-glass switcher" id="switcher" aria-label="Blackboxes apps" hidden></div>
+    <nav class="bb-menu bb-glass site-menu" id="site-menu" aria-label="Site" hidden>
+      <a class="bb-menu-item" href="/sim/">Sims</a>
+      <a class="bb-menu-item" href="/link/">ob.Pal Link</a>
+      <a class="bb-menu-item" href="/catalogue/">Catalogue</a>
+      <a class="bb-menu-item" href="/#build">Build with it</a>
+      <a class="bb-menu-item" href="/donate/">Donate</a>
+    </nav>
     <main class="land">
-      <header class="page-top">
-        <a class="logo" href="/" aria-label="ob.Pal"><img class="mark" src="/logo-mark.svg" alt=""><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span></a>
-        <nav><a href="/view/">Viewer</a><a href="/link/">Extension</a></nav>
-      </header>
-
       <article class="prose">
         <p class="eyebrow">Privacy policy</p>
         <h1>Your phone talks to your screen, and nothing else is kept.</h1>
