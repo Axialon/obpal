@@ -1,8 +1,10 @@
 /**
- * Popup: the ob.Pal lockup, the pairing QR (or the connected phone), and the controls: control this tab,
- * what the phone drives (Controller / 3D / Keys / PC), the optional "All sites" permission, and for the PC
- * target: the whole PC, or the program in front (allow it, or see what is being controlled).
- * It renders from storage (written by the service worker) and asks the worker to change things.
+ * Popup: the ob.Pal lockup with the link's status, and the controls: what the phone drives (Controller / 3D / Keys /
+ * PC), and where: this tab (with the optional "All sites" permission), or for the PC target, ob.Pal Desktop: the whole
+ * PC, or the program in front (allow it, or see what is being controlled), with the gestures that drive it. While no
+ * phone is connected the pairing QR sits beside the controls; once one is, it is the status in the bar (its name, and
+ * × to disconnect) and the controls have the popup to themselves. The palette button picks the surface and colour
+ * (../ui/look.ts). It renders from storage (written by the service worker) and asks the worker to change things.
  *
  * Two kinds of code: the online one (through the room service) and, for a remembered phone, a direct LAN code
  * that needs no server. The direct code takes over by itself while the service is unreachable; the chips under
@@ -10,26 +12,67 @@
  */
 import { family } from '../../../src/family'
 import '../../../src/styles/base.css'
+import '../ui/link.css'
 import './popup.css'
 import { renderSVG } from 'uqr'
-import { ICONS, logo } from '../../../src/ui/icons'
+import { ICONS, LOGO_WORD } from '../../../src/ui/icons'
 import { DEFAULT_MODE, isTargetMode, TARGET_MODES, type TargetMode } from '../shared/constants'
 import { parseLink, workerStale, type BgRequest, type LinkState, type LinkStatus } from '../shared/messages'
 import { DESKTOP_URL, EMPTY_PC, parsePcState, pcView, scopeLabel, type PcState, type PcView } from '../shared/native'
+import { lightCards, markContext, mountLogo, mountLook, settle, startLook, syncLook } from '../ui/look'
+import { radioGroup } from '../ui/radios'
 import { LINK_ICONS } from './icons'
 
-family.setProduct('obpal') // ob.Pal Link wears ob.Pal's lime on the family surfaces
+markContext()
+startLook()
 
 const ALL_SITES: chrome.permissions.Permissions = { origins: ['<all_urls>'] }
 const NATIVE_PERMISSION: chrome.permissions.Permissions = { permissions: ['nativeMessaging'] }
 
-const MODES: Record<TargetMode, { label: string; icon: string; title: string }> = {
-  gamepad: { label: 'Controller', icon: LINK_ICONS.gamepad, title: 'Controller: a virtual gamepad for Gamepad API games' },
-  viewer: { label: '3D', icon: ICONS.cube, title: '3D viewer: drag to rotate, pan and zoom' },
-  keys: { label: 'Keys', icon: LINK_ICONS.keys, title: 'Keys: WASD, arrows, action keys and mouse' },
-  pc: { label: 'PC', icon: LINK_ICONS.pc, title: 'PC: this computer’s mouse and keyboard, through ob.Pal Desktop' },
+/**
+ * The targets: the label, a few words under it where there is room, what it does (said under the tiles while they
+ * have no room for those words), and the glyph.
+ */
+const MODES: Record<TargetMode, { label: string; sub: string; says: string; icon: string }> = {
+  gamepad: { label: 'Controller', sub: 'Gamepad API', says: 'A virtual gamepad for Gamepad API games', icon: LINK_ICONS.gamepad },
+  viewer: { label: '3D', sub: '3D viewers', says: 'Drag to rotate, pan and zoom a 3D view', icon: ICONS.cube },
+  keys: { label: 'Keys', sub: 'WASD · arrows', says: 'WASD, arrows, action keys and the mouse', icon: LINK_ICONS.keys },
+  pc: { label: 'PC', sub: 'This computer', says: 'This computer’s mouse and keyboard, through ob.Pal Desktop', icon: LINK_ICONS.pc },
 }
 const STATUS: Record<LinkStatus, string> = { starting: 'Starting', ready: 'Ready', connecting: 'Connecting', connected: 'Connected', offline: 'Offline' }
+
+/**
+ * What the phone's gestures do on the PC, shown while it is being controlled: the trackpad's, Point's (a PC gets the
+ * mouse face there: Left, Right and a wheel), and typing with the phone's own keyboard. [glyph, what it does, how,
+ * the whole sentence].
+ */
+const GESTURES: { name: string; items: [string, string, string, string][] }[] = [
+  {
+    name: 'Trackpad',
+    items: [
+      [LINK_ICONS.tap, 'Click', 'tap', 'Tap: click (tap again: double-click)'],
+      [LINK_ICONS.hold, 'Right-click', 'hold', 'Hold: right-click'],
+      [LINK_ICONS.drag, 'Drag', 'hold, move', 'Hold, then move: drag'],
+      [LINK_ICONS.scroll, 'Scroll', 'two fingers', 'Two fingers, or the wheel along the edge: scroll'],
+      [LINK_ICONS.pinch, 'Zoom', 'pinch', 'Pinch: zoom'],
+    ],
+  },
+  {
+    name: 'Point',
+    items: [
+      [ICONS['mouse-left'], 'Click', 'Left', 'Left: click where it went down; hold it and aim away to drag'],
+      [ICONS['mouse-right'], 'Right-click', 'Right', 'Right: right-click'],
+      [ICONS.autoscroll, 'Scroll', 'the wheel', 'The wheel: turn it to scroll, tap it to middle-click, hold it and aim to scroll'],
+      [ICONS['zoom-in'], 'Zoom', '+ −', '+ and −: zoom'],
+    ],
+  },
+  {
+    name: 'Keyboard',
+    items: [
+      [LINK_ICONS.type, 'Type', 'the phone’s keyboard', 'Keyboard in the tray, or Type when a text field has the focus: the phone’s own keyboard types into it, and its key row taps Esc, Tab, the arrows, Backspace and Enter'],
+    ],
+  },
+]
 
 type Code = 'auto' | 'cloud' | 'lan'
 interface Notice { text: string; action?: { label: string; run: () => void } }
@@ -59,65 +102,82 @@ const parseFrames = (x: unknown): State['frames'] => {
 
 const app = document.getElementById('app') as HTMLElement
 app.innerHTML = `
-  <header class="bar">
-    <span class="logo" aria-label="ob.Pal">${logo()}</span>
+  <header class="bar rise">
+    <span class="logo" aria-label="ob.Pal"><span class="mark-slot" data-mark></span>${LOGO_WORD}</span>
     <span class="tag">Link</span>
-    <span class="status" id="status" role="status"><i aria-hidden="true"></i><span id="status-t"></span></span>
+    <span class="conn" id="conn">
+      <span class="status" id="status" role="status"><i aria-hidden="true"></i><span id="status-t"></span><b id="device-name" hidden></b></span>
+      <button class="unpair" id="unpair" type="button" title="Disconnect" aria-label="Disconnect the phone" hidden>${ICONS.close}</button>
+    </span>
+    <button class="icon-btn" id="look" type="button" title="Surface and colour" aria-label="Surface and colour">${ICONS.palette}</button>
   </header>
-  <section class="pair glass" aria-label="Phone">
-    <div class="scan" id="scan">
-      <div class="qr" id="qr" role="img" aria-label="Pairing QR code"></div>
-      <p class="scan-hint" id="scan-hint">${ICONS.phone}<span id="scan-t">Scan with your phone</span></p>
-      <div class="codes" id="codes" role="radiogroup" aria-label="Which code to show" hidden>
-        <button class="code" type="button" role="radio" data-code="cloud" title="Through ob.Pal (needs internet)">${LINK_ICONS.cloud}<span>Online</span></button>
-        <button class="code" type="button" role="radio" data-code="lan" title="Direct over Wi-Fi, no internet needed (remembered phones only)">${LINK_ICONS.lan}<span>Direct</span></button>
+  <div class="bb-menu bb-glass look-menu" id="look-menu" aria-label="Surface and colour" hidden></div>
+  <div class="grid">
+    <section class="card pair rise" id="pair" style="--i:1" aria-label="Phone">
+      <div class="scan" id="scan">
+        <div class="qr" id="qr" role="img" aria-label="Pairing QR code"></div>
+        <p class="scan-hint" id="scan-hint">${ICONS.phone}<span id="scan-t">Scan with your phone</span></p>
+        <div class="codes" id="codes" role="radiogroup" aria-label="Which code to show" hidden>
+          <button class="code" type="button" role="radio" data-code="cloud" title="Through ob.Pal (needs internet)">${LINK_ICONS.cloud}<span>Online</span></button>
+          <button class="code" type="button" role="radio" data-code="lan" title="Direct over Wi-Fi, no internet needed (remembered phones only)">${LINK_ICONS.lan}<span>Direct</span></button>
+        </div>
+        <div class="remembered" id="remembered" aria-label="Remembered phones" hidden></div>
       </div>
-      <div class="remembered" id="remembered" aria-label="Remembered phones" hidden></div>
-    </div>
-    <div class="device" id="device" hidden>
-      <span class="device-ic">${ICONS.phone}</span>
-      <span class="device-t"><b id="device-name"></b><small id="device-how">Connected</small></span>
-      <button class="icon-btn" id="unpair" type="button" title="Disconnect" aria-label="Disconnect the phone">${ICONS.close}</button>
-    </div>
-  </section>
-  <section class="panel glass">
-    <button class="row" id="tab" type="button" role="switch" aria-checked="false" title="Let the phone control this tab">
-      <span class="row-ic">${LINK_ICONS.tab}</span>
-      <span class="row-t"><b>This tab</b><small id="tab-host"></small></span>
-      <span class="sw" aria-hidden="true"><i></i></span>
-    </button>
-    <div class="chips" role="radiogroup" aria-label="What the phone controls">
-      ${TARGET_MODES.map((m) => `<button class="chip" type="button" role="radio" aria-checked="false" data-mode="${m}" title="${MODES[m].title}">${MODES[m].icon}<span>${MODES[m].label}</span></button>`).join('')}
-    </div>
-    <div class="pc" id="pc" hidden>
-      <div class="pc-main">
-        <span class="row-ic" id="pc-ic"></span>
-        <span class="row-t"><b id="pc-title"></b><small id="pc-sub"></small></span>
-        <button class="icon-btn" id="pc-list" type="button" title="Allowed programs" aria-label="Allowed programs">${ICONS.settings}</button>
+    </section>
+    <section class="card controls rise" style="--i:2" aria-label="Controls">
+      <div class="chips" role="radiogroup" aria-label="What the phone controls">
+        ${TARGET_MODES.map((m) => `<button class="chip" type="button" role="radio" aria-checked="false" data-mode="${m}" title="${MODES[m].label}: ${MODES[m].says}">${MODES[m].icon}<span class="chip-t"><b>${MODES[m].label}</b><small>${MODES[m].sub}</small></span></button>`).join('')}
       </div>
-      <div class="kinds" id="pc-kinds" role="group" aria-label="What to allow" hidden>
-        <button class="kind" type="button" data-kind="keyboard" aria-pressed="true">${LINK_ICONS.keys}<span>keys</span></button>
-        <button class="kind" type="button" data-kind="mouse" aria-pressed="true">${LINK_ICONS.mouse}<span>mouse</span></button>
+      <p class="says" id="says"></p>
+      <button class="row swap" id="tab" type="button" role="switch" aria-checked="false" title="Let the phone control this tab">
+        <span class="row-ic">${LINK_ICONS.tab}</span>
+        <span class="row-t"><b>This tab</b><small id="tab-host"></small></span>
+        <span class="sw" aria-hidden="true"><i></i></span>
+      </button>
+      <div class="pc swap" id="pc" hidden>
+        <div class="pc-helper" id="pc-helper" hidden>
+          <span class="pc-ver" id="pc-ver"></span>
+          <span class="pc-panic" id="pc-panic" title="The panic key: it stops everything at once" hidden></span>
+          <button class="icon-btn" id="pc-list" type="button" title="Allowed programs" aria-label="Allowed programs">${ICONS.settings}</button>
+        </div>
+        <div class="pc-state">
+          <div class="pc-main">
+            <span class="pc-ic" id="pc-ic"></span>
+            <span class="row-t"><b id="pc-title"></b><small id="pc-sub"></small></span>
+          </div>
+          <div class="kinds swap" id="pc-kinds" role="group" aria-label="What to allow" hidden>
+            <button class="kind" type="button" data-kind="keyboard" aria-pressed="true">${LINK_ICONS.keys}<span>keys</span></button>
+            <button class="kind" type="button" data-kind="mouse" aria-pressed="true">${LINK_ICONS.mouse}<span>mouse</span></button>
+          </div>
+          <div class="pc-actions" id="pc-actions"></div>
+        </div>
+        <div class="pc-legend swap" id="pc-legend" hidden>
+          ${GESTURES.map((g) => `<div class="lg" role="group" aria-label="${g.name}"><p class="eyebrow">${g.name}</p><div class="lg-row">${g.items.map(([icon, what, how, title]) => `<span class="lg-i" title="${title}">${icon}<b>${what}</b><small>${how}</small></span>`).join('')}</div></div>`).join('')}
+        </div>
       </div>
-      <div class="pc-actions" id="pc-actions"></div>
-      <div class="pc-legend" id="pc-legend" hidden>
-        <p><b>Trackpad</b><span>tap click</span><span>hold right-click</span><span>hold, move drag</span><span>two fingers scroll</span><span>pinch zoom</span></p>
-        <p><b>Point</b><span>A click</span><span>hold A right-click</span><span>hold B, aim scroll</span><span>+ − zoom</span></p>
-      </div>
-    </div>
-    <button class="row" id="all" type="button" role="switch" aria-checked="false" title="Reach game frames hosted on other sites, and keep control across navigation">
-      <span class="row-ic">${LINK_ICONS.globe}</span>
-      <span class="row-t"><b>All sites</b><small>Frames from other sites</small></span>
-      <span class="sw" aria-hidden="true"><i></i></span>
-    </button>
-    <p class="note" id="note" role="alert" hidden></p>
-  </section>`
+      <button class="row swap" id="all" type="button" role="switch" aria-checked="false" title="Reach game frames hosted on other sites, and keep control across navigation">
+        <span class="row-ic">${LINK_ICONS.globe}</span>
+        <span class="row-t"><b>All sites</b><small>Frames from other sites</small></span>
+        <span class="sw" aria-hidden="true"><i></i></span>
+      </button>
+      <p class="note swap" id="note" role="alert" hidden></p>
+    </section>
+  </div>`
+
+mountLogo(app)
+lightCards()
+const lookMenu = document.getElementById('look-menu') as HTMLElement
+mountLook(lookMenu)
+family.popover(document.getElementById('look') as HTMLElement, lookMenu, (m) => syncLook(m))
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement
 const tabBtn = $('tab') as HTMLButtonElement
 const allBtn = $('all') as HTMLButtonElement
 const chips = [...app.querySelectorAll<HTMLButtonElement>('.chip')]
 const codeBtns = [...app.querySelectorAll<HTMLButtonElement>('.code')]
+// The targets and the codes: the arrow keys move through each and choose.
+radioGroup(app.querySelector('.chips') as HTMLElement)
+radioGroup($('codes'))
 let qrFor: string | null = null
 
 const RESTRICTED = /^https:\/\/(chromewebstore\.google\.com|chrome\.google\.com\/webstore|microsoftedge\.microsoft\.com\/addons)/i
@@ -142,20 +202,33 @@ function shownCode(): { kind: 'cloud' | 'lan'; url: string } {
 function render() {
   const link = state.link
   const status = link?.status ?? 'starting'
-  $('status').dataset.s = status
-  $('status-t').textContent = STATUS[status]
-
   const connected = status === 'connected'
-  $('scan').hidden = connected
-  $('device').hidden = !connected
+  // Connected, the phone itself is the status: its name, lit, with × to disconnect; the pairing card steps aside.
+  $('status').dataset.s = status
+  $('conn').dataset.s = status
+  $('status-t').textContent = STATUS[status]
+  $('device-name').hidden = !connected
   $('device-name').textContent = link?.device || 'Phone'
+  $('unpair').hidden = !connected
+  app.classList.toggle('linked', connected)
+  $('pair').hidden = connected
   const code = shownCode()
   const lanPhone = link?.pairs.find((p) => p.id === link.lanFor)
-  if (!connected && code.url !== qrFor) {
-    qrFor = code.url
-    $('qr').innerHTML = code.url ? renderSVG(code.url, { ecc: code.kind === 'lan' ? 'L' : 'M', border: 1, blackColor: '#0a0a0a', whiteColor: '#ffffff' }) : '<span class="qr-wait"></span>'
+  const qr = $('qr')
+  // No code while offline with nobody remembered: say so in its place, rather than seem to be still making one.
+  const qrKey = code.url || (status === 'offline' ? 'offline' : '')
+  if (!connected && qrKey !== qrFor) {
+    qrFor = qrKey
+    qr.innerHTML = code.url ? renderSVG(code.url, { ecc: code.kind === 'lan' ? 'L' : 'M', border: 1, blackColor: '#0a0a0a', whiteColor: '#ffffff' }) : status === 'offline' ? `<span class="qr-off">${LINK_ICONS.cloudOff}</span>` : '<span class="qr-wait"></span>'
+    // A new code: a scan line sweeps down it once.
+    qr.classList.remove('sweep')
+    if (code.url) {
+      void qr.offsetWidth
+      qr.classList.add('sweep')
+    }
   }
-  $('qr').dataset.kind = code.kind
+  qr.classList.toggle('off', !code.url && status === 'offline')
+  qr.dataset.kind = code.kind
   $('scan-hint').replaceChildren()
   $('scan-hint').insertAdjacentHTML('afterbegin', code.kind === 'lan' ? LINK_ICONS.lan : ICONS.phone)
   const hint = document.createElement('span')
@@ -163,6 +236,7 @@ function render() {
   hint.textContent = code.kind === 'lan' ? `Direct link${lanPhone ? ` · ${lanPhone.name}` : ''}` : status === 'offline' ? 'No internet' : 'Scan with your phone'
   $('scan-hint').append(hint)
   $('scan-hint').classList.toggle('warn', code.kind === 'cloud' && status === 'offline')
+  $('scan-hint').classList.toggle('direct', code.kind === 'lan')
 
   const hasLan = !!link?.lan
   $('codes').hidden = !hasLan
@@ -178,6 +252,14 @@ function render() {
   $('tab-host').textContent = can ? hostOf(cur?.url) : 'Not available on this page'
 
   for (const c of chips) c.setAttribute('aria-checked', String(c.dataset.mode === state.mode))
+  const says = $('says')
+  says.hidden = state.mode === 'pc'
+  if (says.textContent !== MODES[state.mode].says) {
+    says.textContent = MODES[state.mode].says
+    says.classList.remove('new')
+    void says.offsetWidth
+    says.classList.add('new')
+  }
   allBtn.setAttribute('aria-checked', String(state.allSites))
   renderPc()
 
@@ -187,13 +269,16 @@ function render() {
   note.replaceChildren()
   if (notice) {
     const { text, action } = notice
-    note.append(text)
+    note.insertAdjacentHTML('afterbegin', LINK_ICONS.info)
+    const t = document.createElement('span')
+    t.textContent = text
+    note.append(t)
     if (action) {
       const b = document.createElement('button')
       b.type = 'button'
       b.textContent = action.label
       b.onclick = action.run
-      note.append(' ', b)
+      note.append(b)
     }
   }
 }
@@ -237,15 +322,15 @@ function offlineHint(): Notice | null {
   return { text: 'ob.Pal can’t be reached. Pair once online and a phone can connect over Wi-Fi without it.' }
 }
 
-/**
- * The controlled page shows a frame from another site (a hosted game, most often) and "All sites" is off: the
- * extension can't reach inside it, so the phone's input would go nowhere. Offer the fix in one click.
- */
 /** New files, old worker: one click restarts the extension from its folder (as the reload button does). */
 function staleHint(): Notice | null {
   return state.stale ? { text: 'ob.Pal Link was updated. Restart it to finish.', action: { label: 'Restart', run: () => chrome.runtime.reload() } } : null
 }
 
+/**
+ * The controlled page shows a frame from another site (a hosted game, most often) and "All sites" is off: the
+ * extension can't reach inside it, so the phone's input would go nowhere. Offer the fix in one click.
+ */
 function framesHint(): Notice | null {
   const f = state.frames
   const here = state.current?.id
@@ -261,6 +346,8 @@ const isOk = (r: unknown) => typeof r === 'object' && r !== null && (r as { ok?:
 // ---- PC target: the program in front, and what the helper is doing -------------------------------------
 
 interface PcAction { label: string; primary?: boolean; run: () => void }
+/** How the PC card's glyph reads: live (input flows), warn (it can't), rest (paused or stopped), or plain. */
+type PcTone = 'live' | 'warn' | 'rest' | 'plain'
 const pcKinds = [...app.querySelectorAll<HTMLButtonElement>('#pc-kinds .kind')]
 const pressed = (b: HTMLButtonElement) => b.getAttribute('aria-pressed') === 'true'
 for (const b of pcKinds) b.addEventListener('click', () => b.setAttribute('aria-pressed', String(!pressed(b))))
@@ -274,15 +361,15 @@ function renderPc() {
   allBtn.hidden = on
   if (!on) return
   const view = state.pcPermission ? pcView(state.pc) : { kind: 'permission' as const }
-  const { icon, title, sub, actions, kinds, live } = describe(view)
+  const { icon, title, sub, actions, kinds, live, tone } = describe(view)
   $('pc-legend').hidden = !live
   const ic = $('pc-ic')
   ic.innerHTML = icon
-  ic.classList.toggle('on', live)
+  ic.dataset.tone = tone
   $('pc-title').textContent = title
   $('pc-sub').textContent = sub
   $('pc-kinds').hidden = !kinds
-  $('pc-list').hidden = state.pc.link !== 'ready'
+  renderHelper()
   const box = $('pc-actions')
   box.replaceChildren()
   for (const a of actions) {
@@ -296,7 +383,32 @@ function renderPc() {
   box.hidden = !actions.length
 }
 
-function describe(v: PcView): { icon: string; title: string; sub: string; actions: PcAction[]; kinds: boolean; live: boolean } {
+/** Above the PC card, once ob.Pal Desktop answers: its version, the panic key that stops everything, and the list. */
+function renderHelper() {
+  const pc = state.pc
+  const ready = state.pcPermission && pc.link === 'ready'
+  $('pc-helper').hidden = !ready
+  $('pc-list').hidden = pc.link !== 'ready'
+  if (!ready) return
+  // "ob.Pal" gives way first where the card is narrow, so the version always shows.
+  const brand = document.createElement('span')
+  brand.className = 'pc-brand'
+  brand.textContent = 'ob.Pal '
+  $('pc-ver').replaceChildren(brand, `Desktop${pc.version ? ` ${pc.version}` : ''}`)
+  const panic = $('pc-panic')
+  panic.hidden = !pc.hotkey
+  panic.replaceChildren()
+  const label = document.createElement('span')
+  label.textContent = 'Panic key'
+  panic.append(label)
+  for (const k of pc.hotkey?.split('+') ?? []) {
+    const key = document.createElement('kbd')
+    key.textContent = k
+    panic.append(key)
+  }
+}
+
+function describe(v: PcView): { icon: string; title: string; sub: string; actions: PcAction[]; kinds: boolean; live: boolean; tone: PcTone } {
   const pc = LINK_ICONS.pc
   const retry: PcAction = { label: 'Retry', run: () => void send({ to: 'bg', type: 'pc-connect' }) }
   const pause: PcAction = { label: 'Pause', run: () => void send({ to: 'bg', type: 'pc-pause', on: true }) }
@@ -307,41 +419,41 @@ function describe(v: PcView): { icon: string; title: string; sub: string; action
       : { label: 'Update for whole PC', run: () => void chrome.tabs.create({ url: DESKTOP_URL }) }
   switch (v.kind) {
     case 'permission':
-      return { icon: pc, title: 'PC', sub: 'This computer’s mouse and keyboard', actions: [{ label: 'Allow PC control', primary: true, run: requestNative }], kinds: false, live: false }
+      return { icon: pc, title: 'PC', sub: 'This computer’s mouse and keyboard', actions: [{ label: 'Allow PC control', primary: true, run: requestNative }], kinds: false, live: false, tone: 'plain' }
     case 'connecting':
-      return { icon: pc, title: 'Starting…', sub: 'ob.Pal Desktop', actions: [], kinds: false, live: false }
+      return { icon: pc, title: 'Starting…', sub: 'ob.Pal Desktop', actions: [], kinds: false, live: false, tone: 'plain' }
     case 'missing':
       return {
-        icon: LINK_ICONS.shield, title: 'ob.Pal Desktop isn’t installed', sub: 'Install it, then retry', kinds: false, live: false,
+        icon: LINK_ICONS.shield, title: 'ob.Pal Desktop isn’t installed', sub: 'Install it, then retry', kinds: false, live: false, tone: 'warn',
         actions: [{ label: 'Install', primary: true, run: () => void chrome.tabs.create({ url: DESKTOP_URL }) }, retry],
       }
     case 'error':
-      return { icon: LINK_ICONS.shield, title: 'Helper stopped', sub: v.error, actions: [retry], kinds: false, live: false }
+      return { icon: LINK_ICONS.shield, title: 'Helper stopped', sub: v.error, actions: [retry], kinds: false, live: false, tone: 'warn' }
     case 'paused':
-      return { icon: LINK_ICONS.pause, title: 'Paused', sub: 'Nothing reaches any program', actions: [{ label: 'Resume', primary: true, run: () => void send({ to: 'bg', type: 'pc-pause', on: false }) }], kinds: false, live: false }
+      return { icon: LINK_ICONS.pause, title: 'Paused', sub: 'Nothing reaches any program', actions: [{ label: 'Resume', primary: true, run: () => void send({ to: 'bg', type: 'pc-pause', on: false }) }], kinds: false, live: false, tone: 'rest' }
     case 'panic':
-      return { icon: LINK_ICONS.pause, title: 'Stopped', sub: v.hotkey ? `Panic key ${v.hotkey}` : 'Panic key', actions: [{ label: 'Resume', primary: true, run: () => void send({ to: 'bg', type: 'pc-resume' }) }], kinds: false, live: false }
+      return { icon: LINK_ICONS.pause, title: 'Stopped', sub: v.hotkey ? `Panic key ${v.hotkey}` : 'Panic key', actions: [{ label: 'Resume', primary: true, run: () => void send({ to: 'bg', type: 'pc-resume' }) }], kinds: false, live: false, tone: 'rest' }
     case 'desktop': {
       const blocked = v.front?.elevated ? `${v.front.name} runs as administrator: Windows keeps it out of reach` : ''
       return {
-        icon: pc, title: 'Controlling this PC', sub: blocked || `${scopeLabel(v.scope)} · every window`, kinds: false, live: true,
+        icon: pc, title: 'Controlling this PC', sub: blocked || `${scopeLabel(v.scope)} · every window`, kinds: false, live: true, tone: blocked ? 'warn' : 'live',
         actions: [pause, { label: 'One program', run: () => setDesktop(false) }],
       }
     }
     case 'idle':
       return v.desktop
-        ? { icon: pc, title: 'This PC', sub: 'Every window, or one program: switch to it, then come back', actions: [whole(true, true)], kinds: true, live: false }
-        : { icon: pc, title: 'Switch to a program', sub: 'Then come back here to allow it', actions: [whole(false)], kinds: false, live: false }
+        ? { icon: pc, title: 'This PC', sub: 'Every window, or one program: switch to it, then come back', actions: [whole(true, true)], kinds: true, live: false, tone: 'plain' }
+        : { icon: pc, title: 'Switch to a program', sub: 'Then come back here to allow it', actions: [whole(false)], kinds: false, live: false, tone: 'plain' }
     case 'elevated':
-      return { icon: LINK_ICONS.shield, title: v.program.name, sub: 'Runs as administrator: can’t be controlled', actions: [whole(v.desktop)], kinds: v.desktop, live: false }
+      return { icon: LINK_ICONS.shield, title: v.program.name, sub: 'Runs as administrator: can’t be controlled', actions: [whole(v.desktop)], kinds: v.desktop, live: false, tone: 'warn' }
     case 'allow':
       return {
-        icon: pc, title: v.program.name, sub: v.program.title || v.program.path, kinds: true, live: false,
+        icon: pc, title: v.program.name, sub: v.program.title || v.program.path, kinds: true, live: false, tone: 'plain',
         actions: [{ label: `Allow ${v.program.name}`, primary: true, run: () => allowProgram(v.program.path) }, whole(v.desktop)],
       }
     case 'active':
       return {
-        icon: pc, title: v.inFront ? `Controlling ${v.program.name}` : v.program.name, live: v.inFront, kinds: false,
+        icon: pc, title: v.inFront ? `Controlling ${v.program.name}` : v.program.name, live: v.inFront, kinds: false, tone: v.inFront ? 'live' : 'plain',
         sub: scopeLabel(v.scope) + (v.inFront ? '' : ' · switch to it'),
         actions: [pause, whole(v.desktop)],
       }
@@ -468,6 +580,7 @@ async function init() {
   state.allSites = allSites
   state.pcPermission = pcPermission
   render()
+  settle()
   // With the PC target on, make sure the helper is up (the worker may have idled out) and reporting.
   if (state.mode === 'pc' && pcPermission) void send({ to: 'bg', type: 'pc-connect' })
   state.stale = workerStale(await send({ to: 'bg', type: 'version' }), chrome.runtime.getManifest().version)

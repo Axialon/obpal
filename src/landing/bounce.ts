@@ -13,6 +13,9 @@
  *   rests; then nothing moves and nothing needs drawing.
  * - It lands on a letter where it comes down over one, bumps off a letter's side where it runs into one, and two
  *   marbles knock into each other.
+ * - A low step (a button, raised less than StepOptions.climb) has a rounded top edge instead of a wall: a marble
+ *   rolling into it fast enough rides up over the edge onto it, a slower one rolls back, and one steered onto it
+ *   (someone pointing at the button) is helped up, as a hand would. Rolling off its edge, it tips over and drops.
  */
 
 export interface Footprint {
@@ -54,6 +57,12 @@ export interface StepOptions {
   hop: number
   /** Field bounds: minX, minZ, maxX, maxZ. */
   bounds: [number, number, number, number]
+  /**
+   * Where the field's sides are, when it narrows toward the viewer (a camera looking down at a slant sees a wedge of
+   * floor, wider far off than near): x of its left and right sides at its far edge (minZ), then at its near edge
+   * (maxZ). They run straight in between. Without it, the sides are the bounds'.
+   */
+  sides?: [number, number, number, number]
   /** Steering spring (rad/s) and damping ratio. */
   omega?: number
   zeta?: number
@@ -61,6 +70,8 @@ export interface StepOptions {
   push?: [number, number]
   /** How much of the steering still acts while it's in the air (0: none, it flies on its momentum; 1: all). */
   air?: number
+  /** Footprints this low or lower are steps with a rounded top edge a marble can roll over (0, the default: none). */
+  climb?: number
 }
 
 /** Gravity, em/s². */
@@ -172,6 +183,23 @@ export function surfaceAt(fps: readonly Footprint[], x: number, z: number): { h:
   return { h, id }
 }
 
+/**
+ * A rounded rectangle's outline (a button's, in screen pixels) as points x0, y0, x1, y1, …, clockwise on screen from
+ * its top-left corner's arc: `n` points on each corner's quarter circle (the radius is held to half the short side).
+ */
+export function roundedRect(x: number, y: number, w: number, h: number, r: number, n = 5): number[] {
+  const k = Math.max(0, Math.min(r, w / 2, h / 2))
+  const corners: [number, number, number][] = [[x + k, y + k, Math.PI], [x + w - k, y + k, Math.PI * 1.5], [x + w - k, y + h - k, 0], [x + k, y + h - k, Math.PI / 2]]
+  const out: number[] = []
+  for (const [cx, cy, a0] of corners) {
+    for (let i = 0; i < n; i++) {
+      const a = a0 + (Math.PI / 2) * (n > 1 ? i / (n - 1) : 0.5)
+      out.push(cx + Math.cos(a) * k, cy + Math.sin(a) * k)
+    }
+  }
+  return out
+}
+
 /** The spot deepest inside a letter (the centre of its widest part), found on a grid over its box. */
 export function landingSpot(rings: Float64Array[], box: [number, number, number, number]): [number, number] {
   const fp: Footprint = { id: 0, height: 1, box, rings, spot: [0, 0] }
@@ -221,7 +249,9 @@ export function step(o: Orb, fps: readonly Footprint[], dt: number, opts: StepOp
 function sub(o: Orb, fps: readonly Footprint[], h: number, opts: StepOptions): StepResult {
   const res: StepResult = { landed: null, bumped: null, impact: 0, moving: false }
   const base = surfaceAt(fps, o.x, o.z)
-  const grounded = o.y - o.r <= base.h + 1e-3 && o.vy <= 0
+  const climb = opts.climb ?? 0
+  // On the ground, or on a low step's edge (rolling up onto it, or off it): steering and rolling friction hold there.
+  const grounded = (o.y - o.r <= base.h + 1e-3 && o.vy <= 0) || (climb > 0 && onEdge(o, fps, climb))
 
   // Sideways: steered (a spring that doesn't overshoot; in the air, only as much as `air`), carried through a precise
   // hop, pushed by a tilt, or rolling to a stop.
@@ -247,20 +277,23 @@ function sub(o: Orb, fps: readonly Footprint[], h: number, opts: StepOptions): S
   o.z += o.vz * h
   o.y += o.vy * h
 
-  // The field's edges.
-  const [x0, z0, x1, z1] = opts.bounds
-  if (o.x < x0 + o.r) { o.x = x0 + o.r; o.vx = Math.abs(o.vx) * BUMP }
-  if (o.x > x1 - o.r) { o.x = x1 - o.r; o.vx = -Math.abs(o.vx) * BUMP }
+  // The field's edges: far and near, then the sides where it is.
+  const [, z0, , z1] = opts.bounds
   if (o.z < z0 + o.r) { o.z = z0 + o.r; o.vz = Math.abs(o.vz) * BUMP }
   if (o.z > z1 - o.r) { o.z = z1 - o.r; o.vz = -Math.abs(o.vz) * BUMP }
+  const [x0, x1] = sidesAt(opts, o.z)
+  if (o.x < x0 + o.r) { o.x = x0 + o.r; o.vx = Math.abs(o.vx) * BUMP }
+  if (o.x > x1 - o.r) { o.x = x1 - o.r; o.vx = -Math.abs(o.vx) * BUMP }
 
   // Letters' sides: an orb lower than a letter's top that touches its outline is pushed back out and bounces off. (A
-  // precise hop on its way up is clear of them: it left from beside one and is over it a moment later.)
+  // precise hop on its way up is clear of them: it left from beside one and is over it a moment later.) A low step
+  // has a rounded edge instead.
   for (const fp of fps) {
     if (o.flying && o.vy > 0) break
-    if (o.y - o.r >= fp.height - 0.01 || wasBottom >= fp.height - 0.01) continue
     const b = fp.box
     if (o.x < b[0] - o.r || o.x > b[2] + o.r || o.z < b[1] - o.r || o.z > b[3] + o.r) continue
+    if (fp.height <= climb) { edge(o, fp, res); continue }
+    if (o.y - o.r >= fp.height - 0.01 || wasBottom >= fp.height - 0.01) continue
     const inLetter = inside(fp, o.x, o.z)
     const e = nearest(fp, o.x, o.z)
     if (!inLetter && e.d >= o.r) continue
@@ -317,6 +350,57 @@ function sub(o: Orb, fps: readonly Footprint[], h: number, opts: StepOptions): S
     }
   } else if (o.vy !== 0 || Math.hypot(o.vx, o.vz) > 0.001) o.resting = false
   return res
+}
+
+/**
+ * A low step's rounded top edge, for a marble beside it (over it, its top is simply the surface). Steered onto the
+ * step, the edge is a ramp: the marble rides up it at the edge's height under it, as a hand would lift it. Otherwise
+ * it rolls on the edge: pushed out along the line from the edge to its centre, and it loses its speed into the edge;
+ * fast enough, what's left carries it up and over, else gravity rolls it back. Off the step's side, it tips over the
+ * edge the same way.
+ */
+function edge(o: Orb, fp: Footprint, res: StepResult) {
+  if (inside(fp, o.x, o.z)) return
+  const e = nearest(fp, o.x, o.z)
+  if (e.d >= o.r) return
+  const up = o.y - fp.height
+  const dist = Math.hypot(e.d, up)
+  if (dist >= o.r) return
+  if (o.target && inside(fp, o.target.x, o.target.z)) {
+    o.y = fp.height + Math.sqrt(o.r * o.r - e.d * e.d)
+    if (o.vy < 0) o.vy = 0
+    return
+  }
+  const nx = dist > 1e-9 ? (e.nx * e.d) / dist : 0, ny = dist > 1e-9 ? up / dist : 1, nz = dist > 1e-9 ? (e.nz * e.d) / dist : 0
+  const push = o.r - dist
+  o.x += nx * push
+  o.y += ny * push
+  o.z += nz * push
+  const vn = o.vx * nx + o.vy * ny + o.vz * nz
+  if (vn < 0) { o.vx -= vn * nx; o.vy -= vn * ny; o.vz -= vn * nz }
+  if (o.flying) { o.flying = false; o.aim = null; o.route = [] }
+  if (vn < -LEAN) { res.bumped = fp.id; res.impact = Math.max(res.impact, -vn) }
+}
+
+/** Is the marble touching a low step's edge (beside the step, resting on or rolling over its rounded top edge)? */
+function onEdge(o: Orb, fps: readonly Footprint[], climb: number): boolean {
+  for (const fp of fps) {
+    if (fp.height > climb) continue
+    const b = fp.box
+    if (o.x < b[0] - o.r || o.x > b[2] + o.r || o.z < b[1] - o.r || o.z > b[3] + o.r || inside(fp, o.x, o.z)) continue
+    const e = nearest(fp, o.x, o.z)
+    if (e.d < o.r && Math.hypot(e.d, o.y - fp.height) <= o.r + 1e-3) return true
+  }
+  return false
+}
+
+/** The field's left and right sides at depth z (StepOptions.sides, else the bounds'). */
+export function sidesAt(opts: Pick<StepOptions, 'bounds' | 'sides'>, z: number): [number, number] {
+  const [x0, z0, x1, z1] = opts.bounds
+  const s = opts.sides
+  if (!s) return [x0, x1]
+  const k = Math.max(0, Math.min(1, (z - z0) / (z1 - z0 || 1)))
+  return [s[0] + (s[2] - s[0]) * k, s[1] + (s[3] - s[1]) * k]
 }
 
 /** How long a hop launched upward at vy from height y0 takes to come down to height y1. */

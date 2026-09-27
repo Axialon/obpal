@@ -56,7 +56,7 @@ After a phone has paired once, the extension and the phone remember each other. 
 What has to be true:
 - The phone paired online at least once with this browser profile, on this phone's browser. That pairing is what the direct code is built on: nobody can use it without it, and it pins both certificates like the online pairing does.
 - Both are on the same local network, and the network passes multicast DNS (`.local` names): most home Wi-Fi does, guest networks with client isolation don't.
-- The phone's browser lets the page set its own ICE credentials. Chromium does today; Google has announced removing it ("SDP munging"), at which point Chrome on Android would show "Not in this browser" for direct codes and need the online path (iOS Safari is not affected). The native PC-control helper, which is being built separately, is the durable answer: as an ICE-lite endpoint it can accept the phone's unmodified credentials (see spec/PROTOCOL.md §2a).
+- The phone's browser lets the page set its own ICE credentials. Chromium does today; Google has announced removing it ("SDP munging"), at which point Chrome on Android would show "Not in this browser" for direct codes and need the online path (iOS Safari is not affected). A native host would be the durable answer: as an ICE-lite endpoint it can accept the phone's unmodified credentials (see spec/PROTOCOL.md §2a). ob.Pal Desktop is not that host: it has no network access at all.
 
 The link starts with the browser, so the code is ready before the popup opens and a remembered phone can connect while the popup is closed.
 
@@ -124,18 +124,27 @@ Real OS input from the phone, delivered by **ob.Pal Desktop** (`desktop/`, a sma
 3. Click **Control the whole PC**: the phone is now the mouse and keyboard of every window, the browser included. The popup shows *Controlling this PC*, with what each gesture does.
 4. Or one program at a time: switch to the program, then back to the popup: it names the program you just left. Choose keys and/or mouse and click **Allow**, then switch back to it.
 
-On the PC, the phone works like a laptop touchpad and a Wii remote:
+On the PC, the phone works like a laptop touchpad and a mouse:
 
 | Phone | PC |
 |---|---|
-| Trackpad (Rotate, Tilt): drag | move the pointer |
+| Trackpad (the Rotate tab): drag | move the pointer |
 | tap · tap again | click · double-click |
 | hold, then lift · hold, then move | right-click · drag |
 | two fingers · pinch | scroll (a flick carries on) · zoom (Ctrl + wheel) |
-| Point: aim | move the pointer |
-| A · hold A · press A and aim away | click where A went down (the pointer holds still while A is down) · right-click · drag |
-| hold B and aim · + / − | scroll · zoom |
-| Gamepad | the Keys mapping (sticks, buttons as keys, triggers as mouse buttons) |
+| the wheel along its edge: turn it | scroll (turned fast, it spins on) |
+| Point (on a PC, its face is the top of a mouse): aim | move the pointer |
+| Left · Right | click · right-click where it went down (the pointer holds still while it is down); aim away to drag, or keep it down to hold it |
+| its wheel: turn · tap · hold and aim | scroll · middle-click · scroll by aiming |
+| + · − | zoom in · out (Ctrl + wheel) |
+| Gamepad, with Whole PC | a desktop controller that types no letters: left stick the pointer, right stick scroll, A or RT click (held, it drags), X or LT right-click, left stick press middle-click, B Esc, Y Enter, D-pad arrows, LB · RB back · forward (Alt + ← · →), Menu the Start menu (Ctrl + Esc), View the last app (Alt + Tab) |
+| Gamepad, one program | the Keys mapping (sticks, buttons as keys, triggers as mouse buttons) |
+| **Keyboard** (tray) or **Type** | type into the field that has the focus, with the phone's own keyboard (autocorrect, predictions, swipe typing) |
+| its key row: esc · tab · ← ↑ ↓ → · ⌫ · ↵ | Esc, Tab, the arrow keys, Backspace, Enter |
+
+On the mouse face the phone's volume keys work too: up is Left, down holds the wheel.
+
+**Typing.** When a text field has the keyboard focus on the PC (ob.Pal Desktop 0.3 or later tells), the phone shows **Type**: one tap opens its keyboard in a dock, right above the phone's own keyboard. A password field gets a password field on the phone too: nothing is suggested, learned or kept, and the dock shows dots of its own. The prompt only shows where typing would go through (Whole PC with keys, or an allowed program with keys, not paused), and the dock it opened closes when the field loses the focus. The **Keyboard** button in the phone's tray opens the same dock at any time. If typing can't get through (keys off for that window, a helper too old to type, or none connected), the phone says so.
 
 | Popup shows | Meaning |
 |---|---|
@@ -147,16 +156,21 @@ On the PC, the phone works like a laptop touchpad and a Wii remote:
 | *Allow &lt;program&gt;* | The program you last used is not on the list. |
 | *&lt;program&gt; runs as administrator* | An elevated window; Windows would drop the input, so the helper refuses it up front (with Whole PC, the popup names it and the pointer can still move off it). |
 | *Controlling &lt;program&gt;* | Input flows. *Pause* stops everything. |
+| *Paused* | Nothing reaches any program until *Resume*. |
 | *Stopped · Panic key* | `Ctrl+Alt+Backspace` was pressed on the PC. *Resume* continues. |
 
-The extension's **options page** (right-click the icon → Options, or the ⚙ in the PC card) turns **Whole PC** on and off, lists every allowed program with its scope, removes them, and has **Pause all**.
+The extension's **options page** (right-click the icon → Options, or the sliders button beside the helper's version in the PC card) turns **Whole PC** on and off, lists every allowed program with its scope, removes them, and has **Pause all**. It also shows the helper's version and panic key.
 
-What goes over to the helper is the whole held state each frame (which keys and buttons are down) plus this frame's mouse motion and wheel, never key names from the phone and never edges: a lost frame cannot leave a key stuck, and the helper injects only keys from its own allowlisted table, only into an allowed program while it is in front (or, with Whole PC, into whatever is in front). Everything is released when the phone disconnects, the target changes or the helper loses the browser, and, one program at a time, when the window changes. Clicks and gestures are turned into held buttons, wheel and Ctrl in `src/shared/pcgestures.ts`; a click is a press held for 30 ms, then a release, so it spans frames the helper can diff.
+Both pages wear the ob.Pal look, with the family's surfaces and colours as the phone's settings offer them: the palette button in the popup, or **Look** on the options page. A choice applies at once, on both pages, and is kept in `chrome.storage`. The family's own keys in the pages' `localStorage` are its cache: the options page's first script puts the last look on before anything is drawn, so a light surface never opens dark. (The popup needs no such script: Chrome shows it only once it has loaded.)
+
+From the keyboard, the targets, the codes and the look's pickers are radio groups: Tab reaches the chosen one, the arrow keys move and choose, and Home and End go to the first and the last.
+
+What goes over to the helper is the whole held state each frame (which keys and buttons are down) plus this frame's mouse motion and wheel, never key names from the phone and never edges: a lost frame cannot leave a key stuck, and the helper injects only keys from its own allowlisted table, only into an allowed program while it is in front (or, with Whole PC, into whatever is in front). Everything is released when the phone disconnects, the target changes or the helper loses the browser, and, one program at a time, when the window changes. Clicks and gestures are turned into held buttons, wheel and Ctrl in `src/shared/pcgestures.ts`; a click is a press held for 30 ms, then a release, so it spans frames the helper can diff. The key row's taps are held and released the same way, and only from its own eight keys. Typing goes to the helper as text requests (delete n, then type), on the same port as the frames and in order with the key taps: each right after a frame that holds no modifier (the helper refuses text under one and doesn't retry), at most 20 a second after a burst of 5 (the helper takes 40), and what has to wait merges into one request wherever that types the same.
 
 ### Changing the mappings
 
 The mappings are typed config objects:
-- Key bindings, thresholds and mouse speed: `DEFAULT_KEYS` in `src/shared/keys.ts`. To make another key bindable, add a row to the `KEYS` table there.
+- Key bindings, thresholds and mouse speed: `DEFAULT_KEYS` in `src/shared/keys.ts`, and `DESKTOP_KEYS` there for the whole PC. To make another key bindable, add a row to the `KEYS` table there.
 - 3D gains, rates and the pan style (`'right'` or `'shift'` drag): `DEFAULT_VIEWER` in `src/shared/viewer.ts`.
 
 ### Motion: Aim, Steer and Point (the control catalogue)
@@ -182,7 +196,7 @@ The controller is visible in every bridged frame, as a real one would be. Keys g
 | Permission | Why |
 |---|---|
 | `offscreen` | An MV3 service worker can't hold a WebRTC connection, so an offscreen document (reason `WEB_RTC`) keeps the link to the phone. |
-| `storage` | Remembers the chosen mode. Session storage, cleared when the browser closes, holds the controlled tab and link status for the popup. (Remembered phones and the link's own certificate live in the offscreen document's IndexedDB, not in `chrome.storage`.) |
+| `storage` | Remembers the chosen mode and the look. Session storage, cleared when the browser closes, holds the controlled tab and link status for the popup. (Remembered phones and the link's own certificate live in the offscreen document's IndexedDB, not in `chrome.storage`.) |
 | `activeTab` | Clicking the toolbar icon grants access to the current tab only (its address for the popup, and script injection), so **This tab** needs no broad host access. |
 | `scripting` | Injects the bridge (isolated world) and the page script (main world) into the controlled tab. |
 | `https://obpal.blackboxes.net/*` | Signaling and TURN credentials for the phone link. |
@@ -233,14 +247,16 @@ bridge.js (isolated world, every permitted frame of the controlled tab)
 page.js (main world): getGamepads shim, pointer/wheel synthesis, key/mouse synthesis
 
 PC target instead:
-offscreen.html: Keys mapping → the held state ──port──▶ background.js ──connectNative──▶ obpal-desktop.exe ──SendInput──▶ the allowed program in front
+offscreen.html: the Keys (or desktop) mapping and the PC gestures → the held state, and the phone's typing ──port──▶ background.js ──connectNative──▶ obpal-desktop.exe ──SendInput──▶ the window in front
+offscreen.html ◀── text-field ── background.js ◀── status.text (a text field has the focus) ── obpal-desktop.exe
+   └─▶ the phone: textField, and its Type prompt
 ```
 
 **Service worker (`background.js`)**
 - Creates the offscreen document, at browser start and whenever it is needed.
 - Injects the bridge when you enable a tab. Each bridge then asks the worker for the page script in its own frame.
 - Stores the mode and the controlled tab.
-- For the PC target, holds the native messaging port to the helper (`src/native.ts`), arms it only while PC is the target, and mirrors what the helper reports into session storage for the popup and options page.
+- For the PC target, holds the native messaging port to the helper (`src/native.ts`), arms it only while PC is the target and only once the link has the gamepad mapping for what the helper's config says (the desktop controller for the whole PC, the game keys for one program), and mirrors what the helper reports into session storage for the popup and options page. A restarted worker picks the helper's config back up from there, and a restarted link document gets the whole config, whole PC included. It tells the link when a text field in front would take typing (the phone's Type prompt), and when typing didn't get through.
 
 **Connecting fast**
 - The phone requests ICE servers and opens its signaling socket at the same time, and builds its offer (gathering host candidates) while the socket connects, so the offer leaves the moment the host is seen. It never waits more than 250 ms for TURN credentials: on a LAN the host candidates carry the connection.
@@ -257,9 +273,11 @@ offscreen.html: Keys mapping → the held state ──port──▶ background.j
 |---|---|
 | `pnpm run build:extension` | Runs the Vite build (see below). |
 | `pnpm run typecheck` | Includes `extension/tsconfig.json`. |
-| `pnpm test` | `tests/extension.test.ts` covers key mapping and hysteresis, the 3D drag and wheel synthesis, message validation and frame routing; `tests/lan.test.ts` the direct code, derived credentials and the controller's service worker routing; `tests/native.test.ts` the PC frames, helper message validation and the popup's PC states; `tests/pcgestures.test.ts` the PC clicks, holds, drags, scrolling, flicks and zoom. |
-| `pnpm run e2e:extension` | Builds the site and the extension, then runs `scripts/e2e.mjs`: the extension in one Chromium, an emulated phone in another, online through the real service, then offline through a direct code (see below). Needs Playwright's Chromium, or `OBPAL_E2E_CHROMIUM=<path to chrome.exe>`. The PC target runs against a stub helper (`e2e/native-stub.mjs`); `node extension/scripts/e2e.mjs --desktop` uses the installed ob.Pal Desktop and its harness window instead. |
+| `pnpm test` | `tests/extension.test.ts` covers key mapping and hysteresis (and the whole PC's desktop mapping), the 3D drag and wheel synthesis, message validation and frame routing; `tests/lan.test.ts` the direct code, derived credentials and the controller's service worker routing; `tests/native.test.ts` the PC frames, typing requests, helper message validation, the popup's PC states and when the phone offers Type; `tests/pcgestures.test.ts` the PC clicks, holds, drags, scrolling, flicks and zoom, the mouse face, and the key row's taps and typing (order, modifiers, pacing, merging); `tests/typing.test.ts` the phone's keyboard diff; `tests/link-pages.test.ts` the stored look and its first-paint cache, and the radio groups' keys. |
+| `pnpm run e2e:extension` | Builds the site and the extension, then runs `scripts/e2e.mjs`: the extension in one Chromium, an emulated phone in another, online through the real service, then offline through a direct code (see below). Needs Playwright's Chromium, or `OBPAL_E2E_CHROMIUM=<path to chrome.exe>`. The PC target runs against a stub helper (`e2e/native-stub.mjs`), and the run can't reach an installed ob.Pal Desktop: the test copy has no manifest key (the helper refuses its ID) and names only the stub's host (the run won't launch otherwise), and it fails if the helper's own log shows a session from the test browser. `node extension/scripts/e2e.mjs --desktop` is the one run meant to reach the installed ob.Pal Desktop: it injects real input into its harness window. |
 | `pnpm run bench:extension` | `scripts/bench.mjs`: time to connected, time to first input, press-to-page latency and data channel RTT over several pairings, with the phone's timeline. |
+| `pnpm run store:extension` | Builds, then `scripts/store.mjs` writes the Chrome Web Store zip, `release/obpal-link-<version>-store.zip`: the release's files with a manifest without its `key`, read back and checked (every file one the extension uses, the manifest parses, no key). With `-- --with-key [<pem>]` (default `~/.obpal-keys/extension-key.pem`) it also writes the item's first-upload zip, with the private key as `key.pem` so the store keeps Link's ID: only next to the key, in `<key folder>/store/`, never inside a git working tree, and only when the key gives the ID ob.Pal Desktop allows. |
+| `pnpm run store:art` | Builds the site and the extension, then `store/src/render.mjs` renders the store's images into `store/`: the promo tiles, the icon, and five 1280 × 800 screenshots made of real renders (the popup, the options page, and the phone paired through the real service). It runs a copy of the extension without its key and with the native host renamed, so no ob.Pal Desktop is started. Needs Chromium, as the end-to-end test does. |
 | `node extension/scripts/icons.mjs [outDir]` | Renders the 16/32/48/128 px icons from `public/favicon.svg` with sharp. |
 | `node extension/scripts/key.mjs` | Prints the manifest `key` and the extension ID for the private key outside the repository (creates one if missing). |
 
@@ -267,8 +285,8 @@ The end-to-end test and the bench run the phone against this checkout's controll
 
 The build does the following:
 - Builds the popup, the options page, the offscreen document and the service worker as ES modules.
-- Builds the two content scripts as self-contained IIFEs.
-- Writes `manifest.json` (with the public `key` that fixes the extension ID) and renders the PNG icons.
+- Builds the two content scripts, and the options page's first-paint script (`first-paint.js`, a plain script in its `<head>`: MV3 allows no inline one), as self-contained IIFEs.
+- Writes `manifest.json` (with the public `key` that fixes the extension ID), renders the PNG icons, and puts the fonts' licences beside them (`assets/OFL-*.txt`).
 - Fails unless the manifest is MV3 and every file it references exists.
 
 | Path | Contents |
@@ -276,9 +294,12 @@ The build does the following:
 | `src/background.ts` | Service worker: routing, per-tab enablement, injection, badge, warm start, the helper port |
 | `src/native.ts` | The native messaging bridge to ob.Pal Desktop (service worker side) |
 | `src/offscreen.ts` | Phone link (remembered phones, direct code) and the sampler (`src/ticker.ts` is its worker clock); PC frames |
-| `src/popup/` | Popup UI: codes, remembered phones, controls (uses `src/ui/icons.ts` and `src/styles/base.css` from the app) |
-| `src/options/` | Options page: Whole PC and the PC allowlist |
+| `src/popup/` | Popup UI: the link's status, codes, remembered phones, controls, the PC card and its gestures |
+| `src/options/` | Options page: Whole PC, Pause all, the PC allowlist, the look |
+| `src/ui/` | What both pages share: the look (surface and colour, applied live, stored, and cached for the first paint), the radio groups' keys, the cards and controls, the light on the cards, the logo. Tokens and icons come from the app (`src/family`, `src/styles/base.css`, `src/ui/icons.ts`) |
+| `src/fonts/` | Inter and Plus Jakarta Sans (SIL Open Font License 1.1, whose text ships with them), bundled so the pages load nothing from the network |
 | `e2e/` | Test page, the local stand-in service (it makes a throwaway test certificate on first run), the stub helper |
+| `store/` | The Chrome Web Store listing: every field to paste (`listing.md`), the upload steps (`UPLOAD.md`), the images, and their sources (`store/src/`) |
 | `src/content/bridge.ts` | Isolated-world bridge |
 | `src/content/page.ts` | Main-world page script |
 | `src/shared/` | Pure logic: constants, messages and validation, routing, key mapping, 3D synthesis, the helper protocol (`native.ts`) |

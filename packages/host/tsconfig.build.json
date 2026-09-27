@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "strict": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "declaration": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "newLine": "lf",
+    "paths": { "@obpal/core": ["../core/dist/index.d.ts"] }
+  },
+  "include": ["src"],
+  "exclude": ["src/embed.ts"]
+}

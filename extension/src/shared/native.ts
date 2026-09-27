@@ -8,9 +8,11 @@
  *                                                   popup, options page
  *
  * Frames carry the whole desired state (which keys and buttons are held) plus this frame's motion, never
- * edges: the helper diffs against what it holds, so a lost frame can never leave a key stuck.
+ * edges: the helper diffs against what it holds, so a lost frame can never leave a key stuck. Typing from the
+ * phone's keyboard goes beside them, in order on the same port, as text requests.
  * See spec/PROTOCOL.md § Native messaging frames.
  */
+import { MAX_TEXT } from '@obpal/core'
 import type { KeyName, KeysOutput, MouseButton } from './keys'
 
 /** Native messaging host name (desktop/src/win/install.rs HOST_NAME). */
@@ -121,12 +123,58 @@ export function parseNativeFrame(x: unknown): NativeFrame | null {
   return f
 }
 
+// ---- typing (extension → helper) ---------------------------------------------------------------
+
+/** Typing from the phone's keyboard: delete `del` characters before the caret (Backspace), then type `s` ('\n' Enter, '\t' Tab). */
+export interface NativeText {
+  t: 'text'
+  s: string
+  del: number
+}
+
+/** Control characters other than tab and newline, and halves of a character: nothing that isn't typing. */
+const NOT_TYPING = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/
+
+/** Validate a text request (from the phone, through the offscreen link) before it goes to the helper: at most MAX_TEXT typed and deleted. */
+export function parseNativeText(x: unknown): NativeText | null {
+  if (!isObj(x) || x.t !== 'text' || typeof x.s !== 'string' || x.s.length > MAX_TEXT || NOT_TYPING.test(x.s)) return null
+  const del = x.del === undefined ? 0 : x.del
+  if (typeof del !== 'number' || !Number.isInteger(del) || del < 0 || del > MAX_TEXT || (!x.s && !del)) return null
+  return { t: 'text', s: x.s, del }
+}
+
+/** What has the keyboard focus on the PC, as the helper sees it (status.text): a text field, or a password field. */
+export type TextField = 'text' | 'secret'
+export const isTextField = (x: unknown): x is TextField => x === 'text' || x === 'secret'
+
+/**
+ * Why typing didn't reach the PC: the helper's refusals (not-typed: not enabled, paused, panicked, or not allowed
+ * keys there; keys-held: a modifier is held; text-rate: too many at once; bad-text), a helper too old to type
+ * (no-text), or no helper armed at all (offline). The phone hears about it.
+ */
+export type TypingRefusal = 'not-typed' | 'keys-held' | 'text-rate' | 'bad-text' | 'no-text' | 'offline'
+export const TYPING_REFUSALS: readonly TypingRefusal[] = ['not-typed', 'keys-held', 'text-rate', 'bad-text', 'no-text', 'offline']
+export const isTypingRefusal = (x: unknown): x is TypingRefusal => typeof x === 'string' && (TYPING_REFUSALS as readonly string[]).includes(x)
+
+/** The word the phone shows for a refusal. */
+export function typingToast(r: TypingRefusal): string {
+  switch (r) {
+    case 'not-typed': return 'Not typed: keys are off for this window'
+    case 'keys-held': return 'Not typed: let go of the keys first'
+    case 'text-rate': return 'Typing faster than the PC takes it'
+    case 'bad-text': return 'That can’t be typed'
+    case 'no-text': return 'Update ob.Pal Desktop to type from the phone'
+    case 'offline': return 'Not typed: ob.Pal Desktop isn’t connected'
+  }
+}
+
 // ---- requests (service worker → helper) --------------------------------------------------------
 
 export type HelperRequest =
   | { t: 'hello'; v: number }
   | { t: 'enable'; on: boolean }
   | NativeFrame
+  | NativeText
   | { t: 'release' }
   | { t: 'allow'; path: string; keyboard: boolean; mouse: boolean }
   | { t: 'scope'; path: string; keyboard: boolean; mouse: boolean }
@@ -165,11 +213,14 @@ export interface PcStatus {
   front: PcProgram | null
   /** The most recent foreground program other than the browser: what "Allow this program" means. */
   program: PcProgram | null
+  /** A text or password field has the keyboard focus in front (0.3 and later; null: none, or it can't be told). */
+  text: TextField | null
 }
 export interface PcStats { frames: number; injected: number; refused: Record<string, number> }
 
 export type HelperMessage =
-  | { t: 'hello'; v: number; version: string; os: string; hotkey: string | null; caps: { keyboard: boolean; mouse: boolean; gamepad: boolean; desktop: boolean } }
+  /** caps.text: the helper types (text requests) and reports the focused field (status.text), 0.3 and later. */
+  | { t: 'hello'; v: number; version: string; os: string; hotkey: string | null; caps: { keyboard: boolean; mouse: boolean; gamepad: boolean; desktop: boolean; text: boolean } }
   | ({ t: 'config' } & PcConfig)
   | ({ t: 'status' } & PcStatus)
   | ({ t: 'stats' } & PcStats)
@@ -210,7 +261,9 @@ export function parsePcStatus(x: unknown): PcStatus | null {
   const front = x.front === null ? null : parseProgram(x.front)
   const program = x.program === null ? null : parseProgram(x.program)
   if ((front === null && x.front !== null) || (program === null && x.program !== null)) return null
-  return { enabled: x.enabled, panic: x.panic, held: x.held, front, program }
+  // A helper from before typing sends no `text`: no field.
+  if (x.text !== undefined && x.text !== null && !isTextField(x.text)) return null
+  return { enabled: x.enabled, panic: x.panic, held: x.held, front, program, text: isTextField(x.text) ? x.text : null }
 }
 
 export function parseHelperMessage(x: unknown): HelperMessage | null {
@@ -220,8 +273,8 @@ export function parseHelperMessage(x: unknown): HelperMessage | null {
       if (!Number.isInteger(x.v) || !str(x.version, 32) || !str(x.os, 16) || !isObj(x.caps)) return null
       if (x.hotkey !== null && !str(x.hotkey, 40)) return null
       const c = x.caps
-      if (!bool(c.keyboard) || !bool(c.mouse) || !bool(c.gamepad) || (c.desktop !== undefined && !bool(c.desktop))) return null
-      return { t: 'hello', v: x.v as number, version: x.version, os: x.os, hotkey: x.hotkey, caps: { keyboard: c.keyboard, mouse: c.mouse, gamepad: c.gamepad, desktop: c.desktop === true } }
+      if (!bool(c.keyboard) || !bool(c.mouse) || !bool(c.gamepad) || (c.desktop !== undefined && !bool(c.desktop)) || (c.text !== undefined && !bool(c.text))) return null
+      return { t: 'hello', v: x.v as number, version: x.version, os: x.os, hotkey: x.hotkey, caps: { keyboard: c.keyboard, mouse: c.mouse, gamepad: c.gamepad, desktop: c.desktop === true, text: c.text === true } }
     }
     case 'config': {
       const c = parsePcConfig(x)
@@ -323,6 +376,22 @@ export function pcView(s: PcState): PcView {
   if (program.elevated) return { kind: 'elevated', program, desktop }
   if (!program.allowed) return { kind: 'allow', program, desktop }
   return { kind: 'active', program, scope: program.allowed, inFront: st?.front?.pid === program.pid && !st?.front?.browser, desktop }
+}
+
+/**
+ * The field the phone offers its keyboard for (the host value `textField`): the helper's status.text, only while
+ * typing there would go through. The helper is armed, not paused or stopped, and the window in front takes keys:
+ * with the whole PC on, when its scope has the keyboard; one program at a time, when that program is allowed keys.
+ * An elevated window never takes them (Windows drops the helper's input to it).
+ */
+export function typingField(s: PcState): TextField | null {
+  const st = s.status
+  if (s.link !== 'ready' || !st?.text || !st.enabled || st.panic || s.config?.paused) return null
+  const front = st.front
+  if (!front || front.elevated) return null
+  const whole = s.config?.desktop
+  const keys = whole && (whole.keyboard || whole.mouse) ? whole.keyboard : front.allowed?.keyboard === true
+  return keys ? st.text : null
 }
 
 /** "keyboard + mouse", "keyboard", "mouse", or "nothing". */

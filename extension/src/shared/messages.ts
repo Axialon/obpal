@@ -17,7 +17,7 @@ import { PAD_BUTTON_COUNT } from '@obpal/core'
 import type { HostStatus } from '@obpal/host'
 import { CHANNEL, isTargetMode, SERVICE, type TargetMode } from './constants'
 import { clamp } from './math'
-import { parsePcRequest, type PcRequest } from './native'
+import { isTextField, isTypingRefusal, parsePcRequest, type PcRequest, type TextField, type TypingRefusal } from './native'
 
 // ---- input frames (offscreen -> page) --------------------------------------------------------
 
@@ -238,27 +238,42 @@ export function parseBgRequest(x: unknown): BgRequest | null {
 
 /** Service worker -> offscreen. */
 export type OffscreenRequest =
-  /** desktop: ob.Pal Desktop controls the whole PC (the gamepad then drives the desktop, never typing letters). */
-  | { to: 'offscreen'; type: 'config'; tabId: number | null; mode: TargetMode; desktop?: boolean }
+  | ({ to: 'offscreen'; type: 'config' } & LinkConfig)
   | { to: 'offscreen'; type: 'unpair' }
   | { to: 'offscreen'; type: 'forget'; id: string }
   | { to: 'offscreen'; type: 'lan'; id: string }
   /** Answered with the link's connection timeline (see LinkDiag in @obpal/host). */
   | { to: 'offscreen'; type: 'diag' }
+  /** PC target: a text or password field has the focus there and would take typing (null: none); the phone offers its keyboard. */
+  | { to: 'offscreen'; type: 'text-field'; field: TextField | null }
+  /** PC target: typing from the phone didn't get through; the phone says why. */
+  | { to: 'offscreen'; type: 'typing'; refused: TypingRefusal }
 
 export function parseOffscreenRequest(x: unknown): OffscreenRequest | null {
   if (!isObj(x) || x.to !== 'offscreen') return null
   if (x.type === 'unpair' || x.type === 'diag') return { to: 'offscreen', type: x.type }
   if (x.type === 'forget' || x.type === 'lan') return isPairId(x.id) ? { to: 'offscreen', type: x.type, id: x.id } : null
+  if (x.type === 'text-field') return x.field === null || isTextField(x.field) ? { to: 'offscreen', type: 'text-field', field: x.field } : null
+  if (x.type === 'typing') return isTypingRefusal(x.refused) ? { to: 'offscreen', type: 'typing', refused: x.refused } : null
   const cfg = parseConfig(x)
-  return x.type === 'config' && cfg ? { to: 'offscreen', type: 'config', ...cfg, ...(x.desktop === true ? { desktop: true } : {}) } : null
+  return x.type === 'config' && cfg ? { to: 'offscreen', type: 'config', ...cfg } : null
 }
 
-/** The routing config the offscreen link needs: which tab is controlled and in which mode. */
-export function parseConfig(x: unknown): { tabId: number | null; mode: TargetMode } | null {
+/**
+ * What the offscreen link runs with: which tab is controlled, in which mode, and whether ob.Pal Desktop controls the
+ * whole PC (the PC target's gamepad then drives the desktop, never typing letters). The worker sends all of it in
+ * every 'config', and in its answer to 'offscreen-ready' (a link document that has just started, or started again).
+ */
+export interface LinkConfig { tabId: number | null; mode: TargetMode; desktop: boolean }
+
+/** The link config from the worker's state: the whole PC counts only while the PC is the target. */
+export const linkConfig = (tabId: number | null, mode: TargetMode, wholePc: boolean): LinkConfig => ({ tabId, mode, desktop: mode === 'pc' && wholePc })
+
+/** A link config as received ('config', or the answer to 'offscreen-ready'): the whole PC only when it says so. */
+export function parseConfig(x: unknown): LinkConfig | null {
   if (!isObj(x) || !isTargetMode(x.mode)) return null
   if (x.tabId !== null && !(Number.isInteger(x.tabId) && within(x.tabId, 0, 2 ** 31))) return null
-  return { tabId: x.tabId, mode: x.mode }
+  return { tabId: x.tabId, mode: x.mode, desktop: x.desktop === true }
 }
 
 /** Service worker -> the bridges of a tab (chrome.tabs.sendMessage). */

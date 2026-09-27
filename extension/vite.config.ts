@@ -1,8 +1,9 @@
 /**
  * ob.Pal Link build (Chromium MV3). `vite build` here produces extension/dist, ready for "Load unpacked":
- *  - popup.html, offscreen.html and the module service worker (background.js) from one multi-entry build,
- *  - the content scripts (bridge.js, page.js) as self-contained classic IIFEs, one build each,
- *  - manifest.json and PNG action icons rendered from public/favicon.svg,
+ *  - popup.html, options.html, offscreen.html and the module service worker (background.js) from one multi-entry build,
+ *  - the classic scripts as self-contained IIFEs, one build each: the content scripts (bridge.js, page.js) and the
+ *    options page's first-paint script (first-paint.js, which puts the last look on before the page is drawn),
+ *  - manifest.json and PNG action icons rendered from public/favicon.svg, and the bundled fonts' licences,
  * then checks that the manifest is MV3 and every file it (or a page) references exists.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
@@ -16,11 +17,18 @@ const outDir = resolve(root, 'dist')
 const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as { version: string }
 const TARGET = 'chrome120'
 
-/** Content scripts cannot be ES modules or share chunks: each is bundled alone as an IIFE. */
-const CONTENT_SCRIPTS = [
+/**
+ * Classic scripts cannot be ES modules or share chunks: each is bundled alone as an IIFE. The content scripts, and the
+ * first-paint script, which the options page's <head> loads as a plain <script> (MV3 allows no inline script) so that
+ * it runs before the first paint; a module script is deferred and may run after it.
+ */
+const CLASSIC_SCRIPTS = [
   { entry: 'src/content/bridge.ts', file: 'bridge.js', name: 'obpalLinkBridge' },
   { entry: 'src/content/page.ts', file: 'page.js', name: 'obpalLinkPage' },
+  { entry: 'src/ui/first-paint.ts', file: 'first-paint.js', name: 'obpalLinkFirstPaint' },
 ]
+/** The bundled fonts' licences (SIL Open Font License 1.1, which travels with the fonts), shipped beside them. */
+const FONT_LICENCES = readdirSync(resolve(root, 'src/fonts')).filter((f) => /^OFL-.+\.txt$/.test(f))
 
 const icons = Object.fromEntries(ICON_SIZES.map((s: number) => [String(s), `icons/icon-${s}.png`]))
 
@@ -37,7 +45,8 @@ const manifest = {
   name: 'ob.Pal Link',
   short_name: 'ob.Pal Link',
   version: pkg.version,
-  description: 'Your phone as a controller for any website: Gamepad API games, 3D viewers and keyboard games. Pair by QR.',
+  // Also the Chrome Web Store summary: 132 characters at most (extension/store/listing.md).
+  description: 'Use your phone as a controller for websites: games, 3D viewers and more. Add ob.Pal Desktop to control your whole PC. Pair by QR.',
   minimum_chrome_version: '120',
   homepage_url: 'https://obpal.blackboxes.net',
   key: EXTENSION_KEY,
@@ -68,7 +77,7 @@ function verifyDist(dir: string) {
   if (m.manifest_version !== 3) problems.push('manifest_version is not 3')
   const refs = new Set<string>([
     m.action.default_popup, m.background.service_worker, m.options_ui.page, ...Object.values(m.icons), ...Object.values(m.action.default_icon),
-    'offscreen.html', ...CONTENT_SCRIPTS.map((c) => c.file),
+    'offscreen.html', ...CLASSIC_SCRIPTS.map((c) => c.file), ...FONT_LICENCES.map((f) => `assets/${f}`),
   ])
   if (!/^[A-Za-z0-9+/]+=*$/.test(m.key) || m.key.length < 300) problems.push('manifest key is not a base64 public key')
   for (const html of ['popup.html', 'offscreen.html', 'options.html']) {
@@ -82,7 +91,7 @@ function verifyDist(dir: string) {
     }
     if (/\beval\(|\bnew Function\(/.test(src)) problems.push(`${relative(dir, file)} uses eval or new Function`)
   }
-  for (const c of CONTENT_SCRIPTS) if (/^\s*(?:import|export)\b/m.test(read(c.file))) problems.push(`${c.file} is not a classic script`)
+  for (const c of CLASSIC_SCRIPTS) if (/^\s*(?:import|export)\b/m.test(read(c.file))) problems.push(`${c.file} is not a classic script`)
   for (const ref of refs) if (!existsSync(join(dir, ref))) problems.push(`missing ${ref}`)
   if (problems.length) throw new Error(`ob.Pal Link: dist check failed\n  ${problems.join('\n  ')}`)
   console.log(`ob.Pal Link: manifest v3 OK, ${refs.size} referenced files present in ${dir}`)
@@ -96,13 +105,14 @@ function extension(): Plugin {
     async generateBundle() {
       this.emitFile({ type: 'asset', fileName: 'manifest.json', source: `${JSON.stringify(manifest, null, 2)}\n` })
       for (const { size, png } of await renderIcons()) this.emitFile({ type: 'asset', fileName: `icons/icon-${size}.png`, source: png })
+      for (const f of FONT_LICENCES) this.emitFile({ type: 'asset', fileName: `assets/${f}`, source: readFileSync(resolve(root, 'src/fonts', f)) })
     },
     writeBundle() {
       wrote = true
     },
     async closeBundle() {
       if (!wrote) return
-      for (const c of CONTENT_SCRIPTS) {
+      for (const c of CLASSIC_SCRIPTS) {
         await build({
           configFile: false,
           root,

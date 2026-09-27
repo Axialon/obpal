@@ -250,7 +250,7 @@ mod platform {
         win::process::launcher_path()
     }
     pub fn backends(browser: Option<String>) -> (impl Injector, impl Foreground) {
-        (win::inject::WinInjector, win::foreground::WinForeground::new(browser))
+        (win::inject::WinInjector, win::foreground::WinForeground::new(browser).watching_focus())
     }
     pub fn inject_report() -> String {
         use std::sync::atomic::Ordering;
@@ -292,6 +292,7 @@ mod platform {
         fn button(&mut self, _: MouseButton, _: bool) {}
         fn mouse_move(&mut self, _: i32, _: i32) {}
         fn wheel(&mut self, _: i32, _: i32) {}
+        fn text(&mut self, _: u32, _: &str) {}
     }
     impl Foreground for Nothing {
         fn front(&mut self) -> Option<FrontWindow> {

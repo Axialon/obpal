@@ -1,10 +1,10 @@
 /**
  * A plain zip writer on node:zlib (deflate + crc32), shared by the release packers (extension/scripts/pack.mjs,
- * desktop/pack.mjs). No dependencies.
+ * extension/scripts/store.mjs, desktop/pack.mjs), and a reader that reads back what they wrote. No dependencies.
  */
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join, relative } from 'node:path'
-import { crc32, deflateRawSync } from 'node:zlib'
+import { crc32, deflateRawSync, inflateRawSync } from 'node:zlib'
 
 /** Every file under `dir`, sorted. */
 export async function files(dir) {
@@ -78,4 +78,39 @@ export async function zip(paths, base, entries = {}) {
   end.writeUInt32LE(dir.length, 12)
   end.writeUInt32LE(offset, 16)
   return Buffer.concat([...locals, dir, end])
+}
+
+/**
+ * The entries of a zip, in central directory order, each inflated and checked against its CRC. Enough for the zips
+ * zip() writes (stored or deflated entries, no zip64, no encryption); anything else throws.
+ * @param {Buffer} buf
+ * @returns {{ name: string, data: Buffer }[]}
+ */
+export function unzip(buf) {
+  const at = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]))
+  if (at < 0 || at + 22 > buf.length) throw new Error('not a zip: no end of central directory')
+  const count = buf.readUInt16LE(at + 10)
+  let p = buf.readUInt32LE(at + 16)
+  const out = []
+  for (let i = 0; i < count; i++) {
+    if (buf.readUInt32LE(p) !== 0x02014b50) throw new Error(`entry ${i}: bad central directory header`)
+    const method = buf.readUInt16LE(p + 10)
+    const crc = buf.readUInt32LE(p + 16)
+    const packed = buf.readUInt32LE(p + 20)
+    const size = buf.readUInt32LE(p + 24)
+    const nameLen = buf.readUInt16LE(p + 28)
+    const extraLen = buf.readUInt16LE(p + 30)
+    const commentLen = buf.readUInt16LE(p + 32)
+    const local = buf.readUInt32LE(p + 42)
+    const name = buf.toString('utf8', p + 46, p + 46 + nameLen)
+    if (buf.readUInt32LE(local) !== 0x04034b50) throw new Error(`${name}: bad local header`)
+    const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28)
+    const raw = buf.subarray(start, start + packed)
+    const data = method === 8 ? inflateRawSync(raw) : method === 0 ? Buffer.from(raw) : null
+    if (!data) throw new Error(`${name}: unsupported compression method ${method}`)
+    if (data.length !== size || crc32(data) !== crc) throw new Error(`${name}: size or CRC mismatch`)
+    out.push({ name, data })
+    p += 46 + nameLen + extraLen + commentLen
+  }
+  return out
 }

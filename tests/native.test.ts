@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { KeyMapper, type KeysInput } from '../extension/src/shared/keys'
 import type { PadInput } from '../extension/src/shared/math'
-import { allowedFrom, parseBgRequest, workerStale } from '../extension/src/shared/messages'
+import { allowedFrom, parseBgRequest, parseOffscreenRequest, workerStale } from '../extension/src/shared/messages'
 import {
-  buildNativeFrame, EMPTY_PC, HeldState, heldSignature, isIdleFrame, parseHelperMessage, parseNativeFrame, parsePcRequest, parsePcState,
-  pcView, scopeLabel, toHelperRequest, type PcProgram, type PcState,
+  buildNativeFrame, EMPTY_PC, HeldState, heldSignature, isIdleFrame, parseHelperMessage, parseNativeFrame, parseNativeText, parsePcRequest, parsePcState,
+  pcView, scopeLabel, toHelperRequest, TYPING_REFUSALS, typingField, typingToast, type PcProgram, type PcState, type PcStatus,
 } from '../extension/src/shared/native'
 import { recipients, type FrameInfo } from '../extension/src/shared/route'
 
@@ -69,9 +69,9 @@ describe('PC target: helper messages are validated', () => {
   const program: PcProgram = { name: 'game.exe', path: 'C:\\Games\\game.exe', title: 'Game', pid: 42, elevated: false, browser: false, allowed: null }
 
   it('accepts hello, config, status, stats and error', () => {
-    // 0.1 has no whole-PC mode; 0.2 says so
+    // 0.1 has no whole-PC mode (0.2 says so) and doesn't type (0.3 says so)
     expect(parseHelperMessage({ t: 'hello', v: 1, version: '0.1.0', os: 'windows', hotkey: 'Ctrl+Alt+Backspace', caps: { keyboard: true, mouse: true, gamepad: false } }))
-      .toEqual({ t: 'hello', v: 1, version: '0.1.0', os: 'windows', hotkey: 'Ctrl+Alt+Backspace', caps: { keyboard: true, mouse: true, gamepad: false, desktop: false } })
+      .toEqual({ t: 'hello', v: 1, version: '0.1.0', os: 'windows', hotkey: 'Ctrl+Alt+Backspace', caps: { keyboard: true, mouse: true, gamepad: false, desktop: false, text: false } })
     expect(parseHelperMessage({ t: 'hello', v: 1, version: '0.2.0', os: 'windows', hotkey: null, caps: { keyboard: true, mouse: true, gamepad: false, desktop: true } }))
       .toMatchObject({ caps: { desktop: true } })
     expect(parseHelperMessage({ t: 'hello', v: 1, version: '0.1.0', os: 'windows', hotkey: null, caps: { keyboard: true, mouse: true, gamepad: false } })?.t).toBe('hello')
@@ -81,7 +81,8 @@ describe('PC target: helper messages are validated', () => {
       .toEqual({ t: 'config', paused: false, desktop: { keyboard: true, mouse: true }, programs: [] })
     expect(parseHelperMessage({ t: 'config', paused: false, desktop: null, programs: [] })).toEqual({ t: 'config', paused: false, desktop: null, programs: [] })
     const status = { t: 'status', enabled: true, panic: false, held: false, front: { ...program, allowed: { keyboard: true, mouse: true } }, program }
-    expect(parseHelperMessage(status)).toEqual({ ...status, front: { ...program, allowed: { keyboard: true, mouse: true } } })
+    // a helper from before typing says nothing about text fields: none
+    expect(parseHelperMessage(status)).toEqual({ ...status, front: { ...program, allowed: { keyboard: true, mouse: true } }, text: null })
     expect(parseHelperMessage({ t: 'stats', frames: 10, injected: 4, refused: { notAllowed: 6, 'bad key!': 1 } })).toEqual({ t: 'stats', frames: 10, injected: 4, refused: { notAllowed: 6 } })
     expect(parseHelperMessage({ t: 'error', code: 'bad-frame', msg: 'x' })).toEqual({ t: 'error', code: 'bad-frame', msg: 'x' })
   })
@@ -101,7 +102,7 @@ describe('PC target: helper messages are validated', () => {
 
   it('re-validates the mirrored state', () => {
     expect(parsePcState(EMPTY_PC)).toEqual(EMPTY_PC)
-    const s: PcState = { link: 'ready', version: '0.2.0', desktopCap: true, hotkey: null, error: null, config: { paused: false, desktop: { keyboard: true, mouse: false }, programs: [] }, status: { enabled: true, panic: false, held: false, front: null, program }, stats: null }
+    const s: PcState = { link: 'ready', version: '0.2.0', desktopCap: true, hotkey: null, error: null, config: { paused: false, desktop: { keyboard: true, mouse: false }, programs: [] }, status: { enabled: true, panic: false, held: false, front: null, program, text: null }, stats: null }
     expect(parsePcState(JSON.parse(JSON.stringify(s)))).toEqual(s)
     expect(parsePcState({ ...s, link: 'sideways' })).toBeNull()
     expect(parsePcState({ ...s, status: { enabled: true } })).toBeNull()
@@ -116,7 +117,7 @@ describe('PC target: what the popup shows', () => {
   const program: PcProgram = { name: 'notepad.exe', path: 'C:\\Windows\\notepad.exe', title: 'Untitled', pid: 7, elevated: false, browser: false, allowed: null }
   const browser: PcProgram = { name: 'chrome.exe', path: 'C:\\chrome.exe', title: 'ob.Pal', pid: 1, elevated: false, browser: true, allowed: null }
   const ready = (over: Partial<PcState>): PcState => ({ ...EMPTY_PC, link: 'ready', hotkey: 'Ctrl+Alt+Backspace', config: { paused: false, desktop: null, programs: [] }, ...over })
-  const status = (front: PcProgram | null, prog: PcProgram | null, over = {}) => ({ enabled: true, panic: false, held: false, front, program: prog, ...over })
+  const status = (front: PcProgram | null, prog: PcProgram | null, over = {}) => ({ enabled: true, panic: false, held: false, front, program: prog, text: null, ...over })
 
   it('walks the states: permission, starting, missing, error, paused, panic', () => {
     expect(pcView({ ...EMPTY_PC, link: 'permission' })).toEqual({ kind: 'permission' })
@@ -158,6 +159,77 @@ describe('PC target: what the popup shows', () => {
     expect(pcView(ready({ config, status: status(program, program, { panic: true }) })).kind).toBe('panic')
     expect(scopeLabel({ keyboard: false, mouse: true })).toBe('mouse')
     expect(scopeLabel({ keyboard: false, mouse: false })).toBe('nothing')
+  })
+})
+
+describe('PC target: typing from the phone', () => {
+  const program: PcProgram = { name: 'notepad.exe', path: 'C:\\Windows\\notepad.exe', title: 'Untitled', pid: 7, elevated: false, browser: false, allowed: { keyboard: true, mouse: true } }
+  const status = (over: Partial<PcStatus> = {}): PcStatus => ({ enabled: true, panic: false, held: false, front: program, program, text: 'text', ...over })
+  const ready = (over: Partial<PcState> = {}): PcState => ({ ...EMPTY_PC, link: 'ready', config: { paused: false, desktop: null, programs: [] }, status: status(), ...over })
+
+  it('takes text requests to type and delete, and nothing that isn’t typing', () => {
+    expect(parseNativeText({ t: 'text', s: 'hi', del: 0 })).toEqual({ t: 'text', s: 'hi', del: 0 })
+    expect(parseNativeText({ t: 'text', s: 'the ', del: 2 })).toEqual({ t: 'text', s: 'the ', del: 2 })
+    // del may be left out; newline is Enter, tab is Tab; emoji and accents are typing
+    expect(parseNativeText({ t: 'text', s: 'ok\n' })).toEqual({ t: 'text', s: 'ok\n', del: 0 })
+    expect(parseNativeText({ t: 'text', s: 'a\tb 😀 é', del: 0, extra: 1 })).toEqual({ t: 'text', s: 'a\tb 😀 é', del: 0 })
+    expect(parseNativeText({ t: 'text', s: '', del: 256 })).toEqual({ t: 'text', s: '', del: 256 })
+    expect(parseNativeText({ t: 'text', s: 'x'.repeat(256) })?.s.length).toBe(256)
+    for (const bad of [
+      { t: 'text', s: '', del: 0 }, { t: 'text', s: '' }, { t: 'text', s: 'x'.repeat(257) }, { t: 'text', s: 'a', del: 257 }, { t: 'text', s: 'a', del: -1 },
+      { t: 'text', s: 'a', del: 1.5 }, { t: 'text', s: 'a', del: '1' }, { t: 'text', s: 5 }, { t: 'text' },
+      { t: 'text', s: 'bell\u0007' }, { t: 'text', s: 'cr\r' }, { t: 'text', s: 'nul\u0000' }, { t: 'text', s: 'c1\u0085' }, { t: 'text', s: 'del\u007f' },
+      { t: 'text', s: 'half \ud83d' }, { t: 'text', s: '\ude00 half' }, { t: 'f', s: 'a' }, null, 'text',
+    ]) expect(parseNativeText(bad), JSON.stringify(bad)).toBeNull()
+  })
+
+  it('reads the helper saying it types, and which field has the focus', () => {
+    const hello = { t: 'hello', v: 1, version: '0.3.0', os: 'windows', hotkey: null, caps: { keyboard: true, mouse: true, gamepad: false, desktop: true, text: true } }
+    expect(parseHelperMessage(hello)).toMatchObject({ caps: { desktop: true, text: true } })
+    const { text: _, ...old } = hello.caps
+    expect(parseHelperMessage({ ...hello, caps: old })).toMatchObject({ caps: { text: false } })
+    expect(parseHelperMessage({ ...hello, caps: { ...hello.caps, text: 'yes' } })).toBeNull()
+    const st = { t: 'status', enabled: true, panic: false, held: false, front: null, program: null }
+    expect(parseHelperMessage({ ...st, text: 'text' })).toMatchObject({ text: 'text' })
+    expect(parseHelperMessage({ ...st, text: 'secret' })).toMatchObject({ text: 'secret' })
+    expect(parseHelperMessage({ ...st, text: null })).toMatchObject({ text: null })
+    for (const text of ['password', true, 1, {}]) expect(parseHelperMessage({ ...st, text }), JSON.stringify(text)).toBeNull()
+    // the mirrored state keeps it
+    const s = ready()
+    expect(parsePcState(JSON.parse(JSON.stringify(s)))?.status?.text).toBe('text')
+  })
+
+  it('offers the phone’s keyboard only where typing would go through', () => {
+    expect(typingField(ready())).toBe('text')
+    expect(typingField(ready({ status: status({ text: 'secret' }) }))).toBe('secret')
+    expect(typingField(ready({ status: status({ text: null }) }))).toBeNull()
+    // not armed, stopped, paused, or no helper
+    expect(typingField(ready({ status: status({ enabled: false }) }))).toBeNull()
+    expect(typingField(ready({ status: status({ panic: true }) }))).toBeNull()
+    expect(typingField(ready({ config: { paused: true, desktop: null, programs: [] } }))).toBeNull()
+    expect(typingField({ ...ready(), link: 'error' })).toBeNull()
+    // one program at a time: the program in front must be allowed keys
+    expect(typingField(ready({ status: status({ front: { ...program, allowed: { keyboard: false, mouse: true } } }) }))).toBeNull()
+    expect(typingField(ready({ status: status({ front: { ...program, allowed: null } }) }))).toBeNull()
+    expect(typingField(ready({ status: status({ front: null }) }))).toBeNull()
+    // the whole PC: any window, if the whole PC takes keys; never an elevated one
+    const browser: PcProgram = { ...program, name: 'chrome.exe', browser: true, allowed: null }
+    const whole = (keyboard: boolean) => ({ paused: false, desktop: { keyboard, mouse: true }, programs: [] })
+    expect(typingField(ready({ config: whole(true), status: status({ front: browser }) }))).toBe('text')
+    expect(typingField(ready({ config: whole(false), status: status({ front: browser }) }))).toBeNull()
+    expect(typingField(ready({ config: whole(true), status: status({ front: { ...browser, elevated: true } }) }))).toBeNull()
+  })
+
+  it('tells the offscreen link about the field and about typing that didn’t get through, strictly', () => {
+    expect(parseOffscreenRequest({ to: 'offscreen', type: 'text-field', field: 'secret' })).toEqual({ to: 'offscreen', type: 'text-field', field: 'secret' })
+    expect(parseOffscreenRequest({ to: 'offscreen', type: 'text-field', field: null })).toEqual({ to: 'offscreen', type: 'text-field', field: null })
+    expect(parseOffscreenRequest({ to: 'offscreen', type: 'typing', refused: 'not-typed' })).toEqual({ to: 'offscreen', type: 'typing', refused: 'not-typed' })
+    for (const bad of [
+      { to: 'offscreen', type: 'text-field' }, { to: 'offscreen', type: 'text-field', field: 'password' }, { to: 'offscreen', type: 'text-field', field: false },
+      { to: 'offscreen', type: 'typing', refused: 'nope' }, { to: 'offscreen', type: 'typing' }, { to: 'bg', type: 'text-field', field: 'text' },
+    ]) expect(parseOffscreenRequest(bad), JSON.stringify(bad)).toBeNull()
+    // every refusal has a word for the phone
+    for (const r of TYPING_REFUSALS) expect(typingToast(r).length).toBeGreaterThan(8)
   })
 })
 

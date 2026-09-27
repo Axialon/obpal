@@ -1,0 +1,76 @@
+<!doctype html>
+<!-- The Chrome Web Store's marquee promo tile, 1400 × 560: the name and one line on the left; on the right, a glass
+     phone whose orbit reaches the mark on a glass screen. Brand art, not a screenshot. Rendered by render.mjs. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ob.Pal Link · marquee promo tile</title>
+    <link rel="stylesheet" href="look.css" />
+    <style>
+      body { width: 1400px; height: 560px; }
+      .a1 { left: 760px; top: 250px; width: 620px; height: 420px; background: rgb(var(--lime-rgb) / 0.26); --blur: 110px; }
+      .a2 { left: -160px; top: -220px; width: 720px; height: 460px; background: rgb(214 230 255 / 0.07); --blur: 90px; }
+      .a3 { left: 880px; top: 120px; width: 300px; height: 240px; background: rgb(var(--lime-rgb) / 0.22); --blur: 70px; }
+      .grid { -webkit-mask-image: radial-gradient(ellipse at 72% 50%, #000 0%, transparent 62%); mask-image: radial-gradient(ellipse at 72% 50%, #000 0%, transparent 62%); }
+
+      .copy { position: absolute; left: 96px; top: 0; bottom: 0; width: 600px; display: flex; flex-direction: column; justify-content: center; }
+      .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 34px; }
+      .brand img { width: 60px; height: 60px; }
+      .brand .word { font-size: 38px; }
+      .brand .tag { height: 30px; padding: 0 13px 0 15px; font-size: 14px; }
+      h1 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 62px; line-height: 1.04; letter-spacing: -0.04em; white-space: nowrap; }
+      h1 em { font-style: normal; color: var(--lime); }
+
+      /* A screen: a glass window with the mark as the thing on it. */
+      .screen { position: absolute; left: 740px; top: 64px; width: 470px; height: 318px; border-radius: 26px; }
+      .screen .bar { position: absolute; left: 18px; right: 18px; top: 16px; display: flex; gap: 8px; }
+      .screen .bar i { height: 10px; border-radius: 99px; background: rgb(255 255 255 / 0.1); }
+      .screen .bar i:first-child { width: 10px; background: rgb(var(--lime-rgb) / 0.8); }
+      .screen .bar i:nth-child(2) { width: 120px; }
+      .screen .bar i:last-child { width: 44px; margin-left: auto; }
+      .screen img { position: absolute; left: 50%; top: 54%; width: 230px; height: 230px; transform: translate(-50%, -50%) rotate(-6deg); filter: drop-shadow(0 20px 30px rgb(0 0 0 / 0.6)); }
+
+      /* A phone: glass with a stick, four face buttons and a lit pad, all drawn, no screenshot. */
+      .phone { position: absolute; left: 1128px; top: 150px; width: 196px; height: 382px; border-radius: 42px; transform: rotate(8deg); }
+      .phone::before { content: ''; position: absolute; left: 50%; top: 13px; width: 54px; height: 7px; border-radius: 9px; transform: translateX(-50%); background: rgb(255 255 255 / 0.12); }
+      .phone .pad { position: absolute; left: 18px; right: 18px; top: 42px; height: 176px; border-radius: 26px; background: radial-gradient(circle at 50% 40%, rgb(var(--lime-rgb) / 0.2), rgb(var(--lime-rgb) / 0.02) 70%); border: 1px solid rgb(var(--lime-rgb) / 0.3); }
+      .phone .pad::after { content: ''; position: absolute; left: 50%; top: 42%; width: 22px; height: 22px; border-radius: 50%; transform: translate(-50%, -50%); background: var(--lime); box-shadow: 0 0 24px 6px rgb(var(--lime-rgb) / 0.55); }
+      .phone .stick { position: absolute; left: 24px; bottom: 34px; width: 70px; height: 70px; border-radius: 50%; border: 1.5px solid rgb(255 255 255 / 0.22); }
+      .phone .stick::after { content: ''; position: absolute; inset: 20px; border-radius: 50%; background: rgb(255 255 255 / 0.16); }
+      .phone .face { position: absolute; right: 22px; bottom: 30px; width: 76px; height: 76px; }
+      .phone .face i { position: absolute; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid rgb(255 255 255 / 0.28); }
+      .phone .face i:nth-child(1) { left: 27px; top: 0; }
+      .phone .face i:nth-child(2) { left: 0; top: 27px; }
+      .phone .face i:nth-child(3) { right: 0; top: 27px; }
+      .phone .face i:nth-child(4) { left: 27px; bottom: 0; border-color: var(--lime); background: rgb(var(--lime-rgb) / 0.25); }
+
+      .orbit { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div class="aura a1"></div>
+    <div class="aura a2"></div>
+    <div class="grid"></div>
+    <div class="aura a3"></div>
+    <div class="screen glass"><div class="bar"><i></i><i></i><i></i></div><img src="/public/logo-mark.svg" alt="" /></div>
+    <svg class="orbit" viewBox="0 0 1400 560" aria-hidden="true">
+      <defs>
+        <linearGradient id="o" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#c6ff34" stop-opacity="0" />
+          <stop offset=".35" stop-color="#c6ff34" stop-opacity=".9" />
+          <stop offset="1" stop-color="#c6ff34" stop-opacity=".9" />
+        </linearGradient>
+        <filter id="g" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="5" /></filter>
+      </defs>
+      <path d="M700 380 C 820 520, 1100 520, 1200 330" fill="none" stroke="url(#o)" stroke-width="10" opacity=".35" filter="url(#g)" />
+      <path d="M700 380 C 820 520, 1100 520, 1200 330" fill="none" stroke="url(#o)" stroke-width="3" stroke-linecap="round" />
+      <circle cx="1200" cy="330" r="7" fill="#c6ff34" />
+      <circle cx="1200" cy="330" r="2.6" fill="#fff" />
+    </svg>
+    <div class="phone glass"><div class="pad"></div><div class="stick"></div><div class="face"><i></i><i></i><i></i><i></i></div></div>
+    <div class="copy">
+      <div class="brand"><img src="/public/logo-mark.svg" alt="" /><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span><span class="tag">LINK</span></div>
+      <h1>Your phone controls<br /><em>any website</em></h1>
+    </div>
+  </body>
+</html>

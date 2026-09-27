@@ -38,7 +38,8 @@ async function check(name, fn) {
   }
 }
 
-const local = await startLocal()
+// OBPAL_E2E_PORT runs the stand-in elsewhere than its usual 5176, beside another run.
+const local = await startLocal({ port: Number(process.env.OBPAL_E2E_PORT) || undefined })
 const closers = []
 let dir = ''
 let exitCode = 0

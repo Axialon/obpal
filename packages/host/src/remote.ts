@@ -1,7 +1,8 @@
 import {
-  b64url, bindMac, candidatesOf, certFingerprint, DEFAULT_SERVICE, encodeLanPairing, encodePairing, equalBytes,
-  fetchIceServers, forgetPair, fromB64url, lanAnswerSdp, lanContext, lanIceCredentials, listPairs, loadCertificate, MAX_NODE_ID, MAX_TEXT, MAX_TOSS, Mode, newSecret, PAD_HEADER,
-  packetType, POINTER_HEADER, POSE_HEADER, PROTO, putPair, randomBytes, readLocalIce, roomIdFor, roomSocketUrl, sdpFingerprint, SignalClient,
+  b64url, bindMac, candidatesOf, certFingerprint, controllerOf, CONTROLLERS, DEFAULT_SERVICE, encodeLanPairing, encodePairing, equalBytes,
+  fetchIceServers, forgetPair, fromB64url, isControllerId, lanAnswerSdp, lanContext, lanIceCredentials, listPairs, loadCertificate, MAX_NODE_ID, MAX_TEXT, MAX_TOSS, Mode, newSecret, PAD_HEADER,
+  packetType, POINTER_HEADER, POSE_HEADER, PROTO, putPair, randomBytes, readLocalIce, readMode, roomIdFor, roomSocketUrl, sdpFingerprint, SignalClient,
+  withControllers,
   type Caps, type DeviceMsg, type HostMsg, type Layout, type ModeId, type PadState, type PairGrant, type PointerState, type SceneNode,
   type ScenePerson, type SignalIn, type SignalPayload, type StoredPair,
 } from '@obpal/core'
@@ -16,7 +17,10 @@ export interface RemoteOptions {
   appName: string
   /** Room service origin. Defaults to this origin on ob-pal hosts, else the public service. */
   service?: string
-  /** Tray buttons and modes offered to the phone. */
+  /**
+   * Tray buttons and modes offered to the phone. `controllers` names catalogue controllers (`face.wii`, …) instead of or
+   * beside `modes`; phones that predate them get the matching modes (withControllers in @obpal/core).
+   */
   layout?: Layout
   /** 'smooth' interpolates motion one sensor period behind (default); 'direct' uses the newest sample. */
   latency?: 'smooth' | 'direct'
@@ -32,8 +36,15 @@ export interface RemoteOptions {
   seats?: number
 }
 
-/** A device in the scene (CATALOGUE §5). The lead is the oldest; while it holds nothing it drives the shared view. */
-export interface Participant { id: string; name: string; color: string; lead: boolean; since: number; caps: Caps | null }
+/**
+ * A device in the scene (CATALOGUE §5). The lead is the oldest; while it holds nothing it drives the shared view.
+ * `controller`: the catalogue controller it uses now (CATALOGUE §9.1), as it says in `mode{c}` or, from a device that
+ * doesn't say, as its mode implies; `profile`: the profile it applies, where it says (`mode{p}`).
+ */
+export interface Participant {
+  id: string; name: string; color: string; lead: boolean; since: number; caps: Caps | null
+  controller?: string; profile?: string
+}
 
 /** A remembered phone, as shown to people (no key material). */
 export interface PairSummary { id: string; name: string; at: number }
@@ -87,6 +98,10 @@ interface Peer {
   lost: ReturnType<typeof setTimeout> | null
   /** The node list version this peer last received. */
   nodesSent: number
+  /** What it uses (Participant.controller and .profile); `says` once it has named its controller itself. */
+  controller?: string
+  profile?: string
+  says: boolean
 }
 
 const isObpalOrigin = () =>
@@ -146,7 +161,7 @@ export class Remote {
 
   private constructor(private opts: RemoteOptions) {
     this.service = (opts.service ?? (isObpalOrigin() ? location.origin : DEFAULT_SERVICE)).replace(/\/$/, '')
-    this.layout = opts.layout ?? DEFAULT_LAYOUT
+    this.layout = withControllers(opts.layout ?? DEFAULT_LAYOUT)
   }
 
   static async create(opts: RemoteOptions): Promise<Remote> {
@@ -319,9 +334,15 @@ export class Remote {
     const st = pc.createDataChannel('st', { negotiated: true, id: 1, ordered: false, maxRetransmits: 0 })
     st.binaryType = 'arraybuffer'
     const peer: Peer = {
-      id, pc, ctl, st, fp, bound: false, name: 'Phone', cands: [], color: this.host.color, since: 0, caps: null, lost: null, nodesSent: -1,
+      id, pc, ctl, st, fp, bound: false, name: 'Phone', cands: [], color: this.host.color, since: 0, caps: null, lost: null, nodesSent: -1, says: false,
       stream: new Stream({
-        mode: (m) => this.emit('mode', m, this.participant(peer)),
+        mode: (m) => {
+          // The packets can bring a new mode before the mode message naming the controller: until it comes, the
+          // controller that mode stands for (a device that never names one keeps being read that way).
+          const said = peer.says && peer.controller && isControllerId(peer.controller) ? CONTROLLERS[peer.controller] : null
+          if (!said?.modes.includes(m)) peer.controller = controllerOf(m, this.layout) ?? undefined
+          this.emit('mode', m, this.participant(peer))
+        },
         pad: (on) => this.emit('pad', on, this.participant(peer)),
         input: () => { if (!this.firstInputAt) this.firstInputAt = Date.now(); this.emit('input', this.participant(peer)) },
       }, this.opts.latency),
@@ -441,7 +462,15 @@ export class Remote {
         if (typeof m.v === 'number' && m.v > 0 && m.v <= MAX_TOSS) this.emit('toss', { v: m.v }, who)
         break
       case 'value': this.emit('value', { id: m.id, v: m.v, add: m.add === true }, who); break
-      case 'mode': this.emit('mode', m.m, who); break
+      case 'mode': {
+        // What it uses (mode{c, p}); a device that doesn't say is taken to use the controller its mode stands for.
+        const said = readMode(m, this.layout)
+        if (said.controller === m.c) peer.says = true
+        peer.controller = said.controller
+        peer.profile = said.profile
+        this.emit('mode', m.m, this.participant(peer))
+        break
+      }
       case 'recenter': this.emit('recenter', who); break
       case 'claim':
         if (this.shared && (m.node === null || (typeof m.node === 'string' && m.node.length <= MAX_NODE_ID))) this.emit('claim', { node: m.node }, who)
@@ -464,7 +493,10 @@ export class Remote {
   }
 
   private participant(p: Peer): Participant {
-    return { id: p.id, name: p.name, color: p.color, lead: p === this.active, since: p.since, caps: p.caps }
+    return {
+      id: p.id, name: p.name, color: p.color, lead: p === this.active, since: p.since, caps: p.caps,
+      ...(p.controller ? { controller: p.controller } : {}), ...(p.profile ? { profile: p.profile } : {}),
+    }
   }
 
   /** Everyone controlling the scene, oldest (the lead) first. */
@@ -509,10 +541,11 @@ export class Remote {
     if (p?.bound) this.send(p, { t: 'rumble', strong, weak, ms })
   }
 
-  /** The tray and modes: for `who`, else for everyone. */
+  /** The tray and modes (or controllers, filled in as withControllers does): for `who`, else for everyone. */
   setLayout(layout: Layout, who?: string) {
-    if (!who) this.layout = layout
-    for (const p of this.targets(who)) this.send(p, { t: 'layout', layout })
+    const full = withControllers(layout)
+    if (!who) this.layout = full
+    for (const p of this.targets(who)) this.send(p, { t: 'layout', layout: full })
   }
 
   /** Sync toggle/label state shown on devices: for `who`, else for everyone. */

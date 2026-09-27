@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="description" content="ob.Pal on any page with one tag: a plain three.js scene where your phone takes over a shape. Copy the snippet: one script, one element." />
+    <title>Embed · ob.Pal</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&family=JetBrains+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/family/family.css" />
+    <!-- The site around the demo (theme, top bar, the snippet's copy button). -->
+    <script type="module" src="/src/embed/page.ts"></script>
+    <!-- The demo itself: plain three.js and the element, as any page would have them. -->
+    <script type="module" src="/embed.js" vite-ignore></script>
+    <script type="module" src="/src/embed/demo.ts"></script>
+  </head>
+  <body class="sim embed-demo">
+    <canvas id="stage" aria-label="Three shapes a phone can take over"></canvas>
+    <div class="embed-labels" id="labels" aria-hidden="true"></div>
+    <header class="sim-top">
+      <div class="sim-left">
+        <a class="logo" href="/" aria-label="ob.Pal"><span class="mark-slot" data-mark></span><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span></a>
+        <button class="switch-btn" id="t-switch" type="button" aria-label="Blackboxes apps" title="Blackboxes apps"></button>
+        <a class="sim-crumb" href="/catalogue/">Embed</a>
+      </div>
+    </header>
+
+    <aside class="sim-panel glass embed-panel" aria-label="The embed">
+      <p class="eyebrow">&lt;obpal-remote&gt;</p>
+      <h1>One tag, any page.</h1>
+      <p class="sim-lede">Scan the code and take a shape. Drag, pinch or twist it; turn the gyro on and it turns with your phone. This page is plain three.js and one element.</p>
+      <ul class="embed-people" id="people" aria-label="Who is here"></ul>
+      <div class="embed-code">
+        <div class="embed-code-head"><span>Your page</span><button class="btn sm" id="copy" type="button">Copy</button></div>
+        <pre id="snippet" tabindex="0" aria-label="The snippet">&lt;script type="module"
+  src="https://obpal.blackboxes.net/embed.js"&gt;&lt;/script&gt;
+&lt;obpal-remote app="My scene" seats="4"
+  modes="face.trackpad face.wii"&gt;&lt;/obpal-remote&gt;
+&lt;script type="module"&gt;
+  const pal = document.querySelector('obpal-remote')
+  pal.setScene({ nodes: [
+    { id: 'cube', name: 'Cube', kind: 'object' },
+  ] })
+  requestAnimationFrame(function loop(now) {
+    for (const p of pal.participants) {
+      const f = pal.frame(now, p.id)
+      if (pal.holding(p.id) === 'cube')
+        cube.position.x += f.pad1[0] * 0.01
+    }
+    requestAnimationFrame(loop)
+  })
+&lt;/script&gt;</pre>
+      </div>
+      <nav class="embed-links" aria-label="More">
+        <a href="/llms.txt">llms.txt</a>
+        <a href="/catalogue.json">catalogue.json</a>
+        <a href="https://github.com/Axialon/obpal/tree/main/packages/host#readme">@obpal/host</a>
+      </nav>
+      <p class="embed-note" id="note" role="status" hidden></p>
+    </aside>
+
+    <obpal-remote app="Embed demo" seats="4" modes="hold face.wii face.hand" scheme="dark" test-link></obpal-remote>
+    <div class="bb-menu bb-glass switcher" id="switcher" aria-label="Blackboxes apps" hidden></div>
+  </body>
+</html>

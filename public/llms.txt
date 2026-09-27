@@ -2,9 +2,48 @@
 
 > ob.Pal turns any phone into a controller for web pages: 3D scenes, browser games, robot arms and the computer in front of you. A page shows a QR code, a phone scans it, and the phone's browser becomes the controller: no app, no account. Phone and page talk peer to peer over WebRTC. Open source (MIT): https://github.com/Axialon/obpal
 
+## Put it on any page: one tag
+
+Copy this into a page. The element shows a "Scan to control" chip in a corner; a phone that scans its code controls the page. It draws only in its shadow root, needs no inline scripts or styles, and several can share a page.
+
+```html
+<script type="module" src="https://obpal.blackboxes.net/embed.js"></script>
+<obpal-remote app="My scene" seats="4" modes="face.trackpad face.wii"></obpal-remote>
+<script type="module">
+  await customElements.whenDefined('obpal-remote')
+  const pal = document.querySelector('obpal-remote')
+  // What phones may take over: each phone holds one node at a time, picked from its scene list.
+  pal.setScene({ nodes: [{ id: 'cube', name: 'Cube', kind: 'object' }] })
+  pal.addEventListener('obpal-join', (e) => console.log(e.detail.participant.name, 'joined'))
+  pal.addEventListener('obpal-button', (e) => console.log(e.detail.id, e.detail.ev))
+  requestAnimationFrame(function loop(now) {
+    for (const p of pal.participants) {
+      const f = pal.frame(now, p.id) // this frame's input from that phone
+      if (pal.holding(p.id) === 'cube') cube.position.x += f.pad1[0] * 0.01 // a drag, in CSS px on the phone
+    }
+    requestAnimationFrame(loop)
+  })
+</script>
+```
+
+- Attributes:
+  - `app`: the name the phone shows;
+  - `modes`: what the phone offers, in order, the first opening on it: mode names (`point`, `hold`, `tilt`, `pad`, `gamepad`, `track`) and catalogue controller ids (`face.gamepad`, `face.wheel`, `face.wii`, `face.mouse`, `face.trackpad`, `face.hand`, `face.keyboard`; `controllers` in /catalogue.json);
+  - `seats`: 1 (a new phone takes over, the default) to 8 (a shared scene);
+  - `profile`: a catalogue profile to suggest;
+  - the chip: `corner` (`bottom-right`, `bottom-left`, `top-right`, `top-left` or `inline`), `accent`, `open`, `label`, `scheme` (`auto`, `light`, `dark`), `code` (`false` hides the short code), `test-link`.
+- Events (they bubble): `obpal-connect`, `obpal-join`, `obpal-leave`, `obpal-button` (tray buttons, trackpad taps as `pad`, the Wii face as `wii-a`, `wii-b`, …), `obpal-disconnect`, `obpal-status`, `obpal-mode` (the controller a phone switched to), `obpal-claim` (cancel it to decide claims yourself), `obpal-text`, `obpal-value`, `obpal-toss`, `obpal-recenter`, `obpal-pad`. Each has `detail.participant`: `{ id, name, color, lead, caps, controller, profile }`.
+- Each frame, `pal.frame(now, who?)` returns the input of the lead, or of one participant: `qRel` (1:1 rotation while `clutch`), `tilt`, `pad1`, `pad2`, `zoom`, `twist`, `aim`, `pose`. Call it once per rendered frame for each.
+- `pal.setScene({ nodes, held? })` lists what can be taken over; `held` (node id → participant id) sets who holds what. `pal.holder(node)`, `pal.holding(who)` and `pal.held` read it back.
+- `pal.layout = { tray: [{ id: 'reset', label: 'Reset', icon: 'reset' }] }` adds tray buttons (and any other layout field: `keys`, `toss`, `point`, `wheel`).
+- `await pal.ready` gives the `Remote` (the host SDK below), or null where the browser can't host a phone (no WebRTC, or not https): the element then draws nothing and `pal.status` is `unsupported`.
+- Without the element: `const remote = await window.obpal.remote({ appName: 'My scene' })`.
+- Content Security Policy: `script-src https://obpal.blackboxes.net; connect-src https://obpal.blackboxes.net wss://obpal.blackboxes.net`.
+- See it working: https://obpal.blackboxes.net/embed/ (a plain three.js scene using the element).
+
 ## Use it in a page: the host SDK
 
-The SDK is `@obpal/host`, in the repo at packages/host. It isn't on npm yet.
+The SDK is `@obpal/host`, in the repo at packages/host (its README has typed examples, the element included). It isn't on npm yet; its package.json is ready for it.
 
 - `const remote = await Remote.create({ appName, layout })`, then `remote.mountPairing(element)` shows the QR code and link.
 - Each frame, `remote.consume(now)` returns what the phone does:
@@ -14,12 +53,15 @@ The SDK is `@obpal/host`, in the repo at packages/host. It isn't on npm yet.
   - `aim`: Wii-style pointing;
   - `pose`: where the phone is, in metres, while a thumb is on its pad (mode 6, from its own sensors).
 - `remote.padOf(id)` gives a standard gamepad, and `remote.on('button', …)` gives tray and hardware buttons.
+- `remote.on('text', ({ s, del }) => …)` gives typing from the phone's own keyboard (a `keyboard` tray control): delete `del` characters, then type `s` (`\n` is Enter). Its key row comes as buttons `key-Escape`, `key-Tab`, `key-ArrowLeft` and so on. While one of your text fields has the focus, `remote.setValues({ textField: 'text' })` (or `'secret'` for a password, `false` after) makes the phone offer Type.
 - Shared scenes: `Remote.create({ …, seats: 8 })`, then `remote.setScene({ nodes, held })`. `Claims` keeps one person per node, and nodes can nest (an arm and its joints).
 - The layout says:
-  - `tray`: buttons (`tone: 'stop'` makes a safety stop);
+  - `tray`: buttons (`tone: 'stop'` makes a safety stop), toggles, pickers, and the phone's keyboard (`type: 'keyboard'`);
+  - `controllers`: the catalogue controllers the page suggests, in order (`face.wii`, `face.gamepad`, …); the first opens on the phone, and the SDK fills in `modes` for older phones;
   - `modes`: which modes the page takes;
   - `profile`: a suggested controller profile;
   - `keys`: what the phone's volume and headset buttons press.
+- `remote.on('mode', (m, who) => …)`: `who.controller` is the controller a phone uses (it says so in `mode{m, c, p}`), and `who.profile` its profile.
 
 ## Specs
 
@@ -28,7 +70,7 @@ The SDK is `@obpal/host`, in the repo at packages/host. It isn't on npm yet.
 
 ## The catalogue, machine-readable
 
-- [/catalogue.json](https://obpal.blackboxes.net/catalogue.json): every utility, route, built-in and community profile, control system and bridge, plus the limits a profile must keep.
+- [/catalogue.json](https://obpal.blackboxes.net/catalogue.json): every utility, controller, route, built-in and community profile, control system and bridge, the limits a profile must keep, and the embed (`embed`: its script, attributes, events and API).
 - [/profile.schema.json](https://obpal.blackboxes.net/profile.schema.json): JSON Schema for a controller profile.
 
 ## Add a controller profile
@@ -41,6 +83,7 @@ The SDK is `@obpal/host`, in the repo at packages/host. It isn't on npm yet.
 ## Try it
 
 - [Viewer](https://obpal.blackboxes.net/view/): open it on a screen and scan the code with a phone.
+- [Embed demo](https://obpal.blackboxes.net/embed/): a plain three.js page with `<obpal-remote>`; each phone takes over a shape.
 - [Sims](https://obpal.blackboxes.net/sim/): robot arms and a four-player arena, for several phones at once.
 - [ob.Pal Link](https://obpal.blackboxes.net/link/): a browser extension that lets the phone control any website, and the computer through ob.Pal Desktop.
 

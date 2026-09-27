@@ -1,4 +1,5 @@
-//! Windows integration test: a window created by the test process receives what `WinInjector` sends.
+//! Windows integration test: a window created by the test process receives what `WinInjector` sends (keys, and
+//! typed text as characters).
 //! It needs the interactive desktop: when the window cannot take the foreground (a UAC prompt is up, or
 //! the session is not interactive) the test reports that and passes without checking.
 
@@ -24,7 +25,8 @@ use crate::session::Injector;
 enum Got {
     Down { vk: u32, scan: u32, ext: bool },
     Up { vk: u32 },
-    Char(char),
+    /// A WM_CHAR: one UTF-16 code unit.
+    Char(u32),
 }
 
 thread_local! {
@@ -36,7 +38,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -
     match msg {
         WM_KEYDOWN => GOT.with(|g| g.borrow_mut().push(Got::Down { vk: w.0 as u32, scan: (lp >> 16) & 0xFF, ext: (lp >> 24) & 1 == 1 })),
         WM_KEYUP => GOT.with(|g| g.borrow_mut().push(Got::Up { vk: w.0 as u32 })),
-        WM_CHAR => GOT.with(|g| g.borrow_mut().push(Got::Char(char::from_u32(w.0 as u32).unwrap_or('?')))),
+        WM_CHAR => GOT.with(|g| g.borrow_mut().push(Got::Char(w.0 as u32))),
         WM_SYSCOMMAND if (w.0 & 0xFFF0) as u32 == SC_KEYMENU => return LRESULT(0), // never enter menu mode
         _ => {}
     }
@@ -103,7 +105,7 @@ fn injected_keys_arrive_in_a_foreground_window() {
         let _ = DestroyWindow(hwnd);
 
         assert!(got.iter().any(|x| matches!(x, Got::Down { vk: 0x57, scan: 0x11, ext: false })), "WM_KEYDOWN for W with scan 0x11: {got:?}");
-        assert!(got.iter().any(|x| matches!(x, Got::Char('w') | Got::Char('W'))), "WM_CHAR w: {got:?}");
+        assert!(got.iter().any(|x| matches!(x, Got::Char(0x77 | 0x57))), "WM_CHAR w: {got:?}");
         assert!(got.iter().any(|x| matches!(x, Got::Up { vk: 0x57 })), "WM_KEYUP for W: {got:?}");
     }
 }
@@ -135,5 +137,35 @@ fn extended_keys_carry_the_extended_bit() {
         let _ = DestroyWindow(hwnd);
         assert!(got.iter().any(|x| matches!(x, Got::Down { vk: 0x25, scan: 0x4B, ext: true })), "VK_LEFT with the extended bit: {got:?}");
         assert!(!got.iter().any(|x| matches!(x, Got::Char(_))), "arrows produce no character: {got:?}");
+    }
+}
+
+#[test]
+#[ignore = "takes the foreground and types: cargo test -- --include-ignored"]
+fn typed_text_arrives_as_characters() {
+    unsafe {
+        let hinst = GetModuleHandleW(None).unwrap();
+        let class = w!("ObPalInjectTestText");
+        let wc = WNDCLASSW { lpfnWndProc: Some(wnd_proc), hInstance: hinst.into(), lpszClassName: class, ..Default::default() };
+        RegisterClassW(&wc);
+        let hwnd = CreateWindowExW(WINDOW_EX_STYLE(0), class, w!("ob.Pal inject test (text)"), WS_OVERLAPPEDWINDOW, 40, 40, 300, 200, None, None, Some(hinst.into()), None).unwrap();
+        let _ = ShowWindow(hwnd, SW_SHOW);
+        pump_until(hwnd, Duration::from_millis(100), |_| false);
+        let front = take_foreground(hwnd);
+        pump_until(hwnd, Duration::from_millis(100), |_| false);
+        if !front || GetForegroundWindow() != hwnd {
+            eprintln!("skipped: the test window could not take the foreground");
+            let _ = DestroyWindow(hwnd);
+            return;
+        }
+        GOT.with(|g| g.borrow_mut().clear());
+        let mut inj = WinInjector;
+        inj.text(1, "a€😀\n\t");
+        // Backspace, a, €, 😀 as its two surrogates, then Enter and Tab as the characters their keys make.
+        let want = [0x08, 0x61, 0x20AC, 0xD83D, 0xDE00, 0x0D, 0x09];
+        let chars = |g: &[Got]| g.iter().filter_map(|x| if let Got::Char(c) = x { Some(*c) } else { None }).collect::<Vec<u32>>();
+        let got = pump_until(hwnd, Duration::from_secs(2), |g| chars(g).len() >= want.len());
+        let _ = DestroyWindow(hwnd);
+        assert_eq!(chars(&got), want, "{got:?}");
     }
 }

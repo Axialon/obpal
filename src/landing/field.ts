@@ -7,16 +7,22 @@
  * floor of dots, which part around it as it passes and brighten in its light (a depth field), and passes through the
  * letters, which light up from within as it nears; every bounce sends a ring of light out through both. A letter a
  * marble lands on turns lime and stays so; light them all and the headline celebrates.
+ *
+ * Edges stay clean at any size: the canvas's pixels are exactly the screen's (or, on a GPU with room, twice as many,
+ * which the browser averages down), the letters are multisampled, the marble's outline and rim are worked out per
+ * pixel from the true sphere (not its mesh), and the picture of the scene inside it is filtered as the glass shrinks
+ * it (mipmaps), so it never sparkles. How finely it draws is a step of ./governor.ts's ladder, set by the hero.
  * Loaded on demand (it brings three.js), and it draws only when asked to (the hero calls render() while anything moves).
  */
 import {
   AdditiveBlending, BufferAttribute, BufferGeometry, CanvasTexture, CircleGeometry, Color, DirectionalLight, ExtrudeGeometry, Group,
-  HemisphereLight, Matrix3, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, PerspectiveCamera, Plane, PMREMGenerator, Points,
-  Quaternion, Raycaster, Scene, ShaderMaterial, SphereGeometry, Sprite, SpriteMaterial, SRGBColorSpace, Vector2, Vector3, Vector4,
-  WebGLRenderer, WebGLRenderTarget, type Material, type Texture,
+  HemisphereLight, LinearFilter, LinearMipmapLinearFilter, Matrix3, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, PerspectiveCamera,
+  Plane, PMREMGenerator, Points, Quaternion, Raycaster, Scene, ShaderMaterial, SphereGeometry, Sprite, SpriteMaterial, SRGBColorSpace, Vector2,
+  Vector3, Vector4, WebGLRenderer, WebGLRenderTarget, type Material, type Texture,
 } from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
-import { collide, inside, nearest, newOrb, step, surfaceAt, toss, type Footprint, type Orb } from './bounce'
+import { collide, inside, nearest, newOrb, roundedRect, sidesAt, step, surfaceAt, toss, type Footprint, type Orb } from './bounce'
+import { glassScale, type GpuSample, type Step } from './governor'
 import { BEVEL, LETTER_H, layoutLetters, TOP, tourStops } from './letters'
 
 /** A marble's size, in em. */
@@ -40,15 +46,24 @@ const HIT_MIN = 0.7
 const HIT_MAX = 7
 /** The rounded edge a letter's top has (em). */
 const EDGE = 0.016
+/** Buttons are steps this high (em), and footprints up to CLIMB high can be rolled onto (./bounce.ts). */
+const PAD_H = 0.05
+const CLIMB = 0.1
+/** A button's footprint id is this plus its index (letters count from 0). At most MAX_PADS keep the dots off them. */
+const PAD_ID = 1000
+const MAX_PADS = 6
 
 const LAVENDER = new Color('#b3a4ff')
 const UV = new Color('#5c3ef5')
 const INK = new Color('#f1edff')
 const LIME = new Color('#c6ff34')
 
-export type HitKind = 'letter' | 'floor' | 'marble'
-/** A marble hit something: what, how hard (0…1), and where. */
-export interface Hit { orb: string; other?: string; kind: HitKind; strength: number; x: number; y: number; z: number }
+export type HitKind = 'letter' | 'floor' | 'marble' | 'button'
+/** A marble hit something: what (a button: which), how hard (0…1), and where. */
+export interface Hit { orb: string; other?: string; kind: HitKind; pad?: number; strength: number; x: number; y: number; z: number }
+
+/** A button in the hero, as the marbles' world sees it: its box on the canvas (CSS px) and its corners' radius. */
+export interface PadRect { x: number; y: number; w: number; h: number; r: number }
 
 export interface FieldOrb {
   id: string
@@ -70,6 +85,8 @@ export interface FieldOrb {
   omega: Vector3
   /** When it last made itself heard (s, the field's clock), so rolling along a letter doesn't rattle. */
   heardAt: number
+  /** What it last rested or rolled on (a surface id: bounce.ts), so arriving on a button is noticed. */
+  on: number
 }
 
 interface Letter {
@@ -84,6 +101,21 @@ interface Letter {
   /** Its dip when landed on (a damped spring). */
   dip: number
   dipV: number
+}
+
+export interface Gfx {
+  /** The canvas's size in CSS pixels, its drawing buffer's, and drawing-buffer pixels per CSS pixel. */
+  css: [number, number]
+  buffer: [number, number]
+  pr: number
+  /** The canvas in device pixels as the browser reported them (null: not reported, or not matching its CSS size). */
+  device: [number, number] | null
+  /** Multisamples on the canvas, and the picture of the scene the glass bends (size, mipmapped), 0 wide when off. */
+  samples: number
+  behind: [number, number]
+  glass: number
+  /** The last GPU time measured (ms), null where the browser can't time it. */
+  gpuMs: number | null
 }
 
 export interface Field {
@@ -107,6 +139,13 @@ export interface Field {
   tour(): { x: number; z: number }[]
   /** Which letter is at a floor point (-1: none). */
   under(x: number, z: number): number
+  /** What's under a floor point: a letter (its index), a button (PAD_ID + its index) or the floor (-1), and its top. */
+  surface(x: number, z: number): { id: number; h: number }
+  /**
+   * The page's buttons in the hero (canvas px), as low steps the marbles roll up onto and off: the marbles draw above
+   * them (the canvas is over the page there) and the dots stay under them. Call when they move.
+   */
+  pads(rects: PadRect[]): void
   /** Toss a marble up at `vy` (em/s): now if it's on something, else as soon as it touches down. */
   toss(o: FieldOrb, vy: number): void
   /** A marble, created on first use, in a colour. */
@@ -118,8 +157,14 @@ export interface Field {
   /** Advance everything by dt; returns whether anything still moves. */
   step(dt: number): boolean
   render(): void
-  /** How finely to draw: 2 best, 1 fewer pixels, 0 plainest (no glass), for a device that can't keep up. */
-  quality(level: number): void
+  /** How finely to draw (a step of ./governor.ts's ladder); `level` tags the GPU times measured at it. */
+  quality(step: Step, level: number): void
+  /** The canvas's exact size in device pixels, where the browser tells it (so the native step matches them 1:1). */
+  pixels(w: number, h: number): void
+  /** The GPU's time for a frame drawn earlier, when one has come back since the last call (browsers that can time it). */
+  gpu(): GpuSample | null
+  /** What it's drawing with, for the ?debug=gfx readout and tests. */
+  gfx(): Gfx
   /** Called with a letter's index when a marble lands on it. */
   onLand: ((letter: number, orbId: string) => void) | null
   /** A marble hit something hard enough to hear. */
@@ -180,11 +225,28 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
   const pmrem = new PMREMGenerator(renderer)
   const env: Texture = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
   pmrem.dispose()
-  let level = 2
-  let refract = true
-  /** What's behind the marbles (the letters and the dots), for their glass to bend. */
-  const behind = new WebGLRenderTarget(1, 1)
+  let quality: Step = { pr: Math.min(devicePixelRatio || 1, 2), glass: 2 }
+  let qualityLevel = 0
+  /** The canvas in device pixels, exactly, where the browser says (else worked out from its CSS size). */
+  let device: [number, number] | null = null
+  let exact: [number, number] | null = null
+  /**
+   * What's behind the marbles (the letters and the dots), for their glass to bend. The glass shows it shrunk three to
+   * ten times, so it's drawn at half the screen's pixels or less, and mipmapped: each pixel of the marble shows the
+   * average of what it covers, not one sample of it (which sparkles as the marble moves).
+   */
+  const behind = new WebGLRenderTarget(1, 1, { generateMipmaps: true, minFilter: LinearMipmapLinearFilter, magFilter: LinearFilter })
   const buf = new Vector2(1, 1)
+  // The GPU's time per frame, where the browser can measure it (Chrome, Edge): the governor's best guide.
+  const gl = renderer.getContext() as WebGL2RenderingContext
+  const timer = gl.getExtension('EXT_disjoint_timer_query_webgl2')
+  const timing: { q: WebGLQuery; level: number }[] = []
+  let gpuLast: GpuSample | null = null
+  let gpuFresh = false
+  let samples = 0
+  const behindView = new Vector2(1, 1)
+  /** No buttons (the picture the glass bends is the scene alone). */
+  const noPads = Array.from({ length: MAX_PADS }, () => new Vector4(0, 0, 0, 0))
 
   // Shared by the dots, the letters and the marbles: where the marbles are, and the rings of light.
   const glow = {
@@ -216,7 +278,13 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
   scene.add(letterGroup)
   let letters: Letter[] = []
   let footprints: Footprint[] = []
+  /** The buttons as steps (their footprints), and everything a marble can stand on: letters, then buttons. */
+  let padRects: PadRect[] = []
+  let pads: Footprint[] = []
+  let solid: Footprint[] = []
   let bounds: [number, number, number, number] = [-10, -10, 10, 10]
+  /** The field's sides, far and near: the floor on screen narrows toward its bottom edge (bounce.ts StepOptions). */
+  let sides: [number, number, number, number] | undefined
   let W = 1, H = 1
   let celebrateAt = -1
   let clock = 0
@@ -229,6 +297,9 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
     uHaze: { value: new Color(LAVENDER) },
     uFar: { value: new Vector2(0, 1) },
     uView: { value: buf },
+    // The buttons over the dots (drawing-buffer px from the bottom left: x0, y0, x1, y1, and their corners' radius).
+    uPads: { value: Array.from({ length: MAX_PADS }, () => new Vector4(0, 0, 0, 0)) },
+    uPadR: { value: new Array<number>(MAX_PADS).fill(0) },
   }
   const dots = new Points(new BufferGeometry(), new ShaderMaterial({
     uniforms: dotUniforms,
@@ -276,9 +347,23 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
     fragmentShader: `
       uniform vec3 uHaze;
       uniform vec2 uView;
+      uniform vec4 uPads[${MAX_PADS}];
+      uniform float uPadR[${MAX_PADS}];
       varying vec3 vColor;
       varying float vGlow;
       varying float vFade;
+      // 0 under a button, 1 clear of them (the floor's dots are under the page's buttons, as they're under the page).
+      float clear(vec2 p) {
+        float m = 1.0;
+        for (int i = 0; i < ${MAX_PADS}; i++) {
+          vec4 b = uPads[i];
+          if (b.z <= b.x) continue;
+          vec2 q = abs(p - (b.xy + b.zw) * 0.5) - (b.zw - b.xy) * 0.5 + uPadR[i];
+          float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - uPadR[i];
+          m = min(m, clamp(d + 0.5, 0.0, 1.0));
+        }
+        return m;
+      }
       void main() {
         vec2 c = gl_PointCoord - 0.5;
         float r = dot(c, c);
@@ -288,7 +373,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
         vec2 sp = gl_FragCoord.xy / uView;
         float field = 1.0 - smoothstep(0.25, 0.8, length((sp - vec2(0.5, 0.55)) / vec2(0.75, 0.65)));
         vec3 col = mix(uHaze, vColor, vGlow);
-        float a = soft * (0.2 * field + 0.8 * vGlow) * (1.0 - 0.6 * vFade);
+        float a = soft * (0.2 * field + 0.8 * vGlow) * (1.0 - 0.6 * vFade) * clear(gl_FragCoord.xy);
         gl_FragColor = vec4(col * a, a);
       }`,
   }))
@@ -306,6 +391,9 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
    * Clear glass. Behind it, the scene seen through a ball lens: upside down and drawn in from all around, less of it at
    * the rim where the glass mostly reflects. Inside, a thin twisted ribbon of colour, found by following the bent ray
    * through the ball: it turns as the marble rolls. On it, the key light's highlight and the sky's sheen.
+   * The mesh only covers the marble (a little larger than it): each pixel finds the true sphere along its view ray, so
+   * the outline is shaded by how much of the pixel it covers, and the rim, whose brightness changes within a pixel at
+   * the very edge, is averaged across the pixel rather than sampled at its middle. No stairs or sparkle at any size.
    */
   const marbleMaterial = (tint: Color) => new ShaderMaterial({
     transparent: true,
@@ -313,16 +401,14 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
     premultipliedAlpha: true,
     uniforms: {
       uTint: { value: tint }, uLife: { value: 0 }, uKey: { value: keyDir },
-      uScene: { value: behind.texture }, uRefract: { value: 1 }, uView: { value: buf },
+      uScene: { value: behind.texture }, uRefract: { value: 1 }, uView: { value: buf }, uSteps: { value: 12 },
       uCenter: { value: new Vector2() }, uRad: { value: 1 }, uC: { value: new Vector3() }, uR: { value: ORB_R }, uSpin: { value: new Matrix3() },
     },
     vertexShader: `
       varying vec3 vWorld;
-      varying vec3 vN;
       void main() {
         vec4 w = modelMatrix * vec4(position, 1.0);
         vWorld = w.xyz;
-        vN = normalize(mat3(modelMatrix) * normal);
         gl_Position = projectionMatrix * viewMatrix * w;
       }`,
     fragmentShader: `
@@ -332,13 +418,13 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
       uniform sampler2D uScene;
       uniform float uRefract;
       uniform vec2 uView;
+      uniform int uSteps;
       uniform vec2 uCenter;
       uniform float uRad;
       uniform vec3 uC;
       uniform float uR;
       uniform mat3 uSpin;
       varying vec3 vWorld;
-      varying vec3 vN;
       float vanes(vec3 q) {
         float l = length(q);
         float r = length(q.xz);
@@ -347,22 +433,45 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
         float blade = pow(abs(cos(a)), 26.0);
         return blade * smoothstep(0.84, 0.45, l) * smoothstep(0.0, 0.1, r);
       }
+      // The rim's reflection where the view passes q from the centre: faint face-on, all of it at the very edge.
+      float fresnel(float q) {
+        float ndv = sqrt(max(1.0 - q * q / (uR * uR), 0.0));
+        return 0.04 + 0.96 * pow(1.0 - ndv, 5.0);
+      }
       void main() {
-        vec3 n = normalize(vN);
-        vec3 v = normalize(cameraPosition - vWorld);
+        // The sphere along this pixel's view ray: how near the ray passes its centre, and one pixel in the same units.
+        vec3 rd0 = normalize(vWorld - cameraPosition);
+        vec3 oc = uC - cameraPosition;
+        float along = dot(oc, rd0);
+        float q = sqrt(max(dot(oc, oc) - along * along, 0.0));
+        float px = max(length(vec2(dFdx(q), dFdy(q))), 1e-6);
+        float cover = clamp((uR - q) / px + 0.5, 0.0, 1.0);
+        float qi = min(q, uR);
+        vec3 hit = cameraPosition + rd0 * (along - sqrt(uR * uR - qi * qi));
+        vec3 n = normalize(hit - uC);
+        vec3 v = -rd0;
         float ndv = clamp(dot(n, v), 0.0, 1.0);
-        float fres = 0.04 + 0.96 * pow(1.0 - ndv, 5.0);
+        float fres = 0.0;
+        float taps = 0.0;
+        for (int k = 0; k < 4; k++) {
+          float qk = q + px * (float(k) - 1.5) * 0.25;
+          if (qk <= uR) { fres += fresnel(qk); taps += 1.0; }
+        }
+        fres = taps > 0.0 ? fres / taps : 1.0;
         vec2 d = (gl_FragCoord.xy - uCenter) / uRad;
+        d /= max(1.0, length(d));
         vec2 s = uCenter - d * uRad * (3.0 + 2.2 * dot(d, d));
         vec4 back = uRefract > 0.5 ? texture2D(uScene, clamp(s / uView, 0.0, 1.0)) : vec4(0.0);
-        vec3 rd = refract(-v, n, 1.0 / 1.5);
-        float chord = max(0.0, -2.0 * dot(vWorld - uC, rd));
+        vec3 rd = refract(rd0, n, 1.0 / 1.5);
+        float chord = max(0.0, -2.0 * dot(hit - uC, rd));
         float dens = 0.0;
+        float steps = float(uSteps);
         for (int i = 1; i <= 12; i++) {
-          vec3 p = vWorld + rd * chord * (float(i) / 13.0);
+          if (i > uSteps) break;
+          vec3 p = hit + rd * chord * (float(i) / (steps + 1.0));
           dens += vanes(uSpin * ((p - uC) / uR));
         }
-        dens = clamp(dens / 3.0, 0.0, 1.0);
+        dens = clamp(dens / (steps * 0.25), 0.0, 1.0);
         vec3 r = reflect(-v, n);
         float spec = pow(max(dot(r, uKey), 0.0), 70.0) * 1.8;
         float sheen = smoothstep(0.5, 1.0, dot(r, normalize(vec3(-0.25, 1.0, 0.3)))) * 0.22;
@@ -375,6 +484,8 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
         float a = clamp(back.a * see * 0.8 + dens * 0.4 + core + fres * 0.85 + sheen + spec + 0.04, 0.0, 1.0);
         gl_FragColor = vec4(col, a);
         #include <colorspace_fragment>
+        // Coverage after the colour's encoding, so an edge pixel half covered is half as bright on screen.
+        gl_FragColor *= cover;
       }`,
   })
 
@@ -397,7 +508,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
     scene.add(marble, halo)
     const start = letters.length ? letters[letters.length - 1].fp.spot : [0, 0]
     const orb = newOrb(start[0], start[1], ORB_R, surfaceAt(footprints, start[0], start[1]).h)
-    const fo: FieldOrb = { id, orb, color: c, life: 0, live: false, push: null, marble, halo, shadow, caustic, pool, spin: new Quaternion(), omega: new Vector3(), heardAt: -1 }
+    const fo: FieldOrb = { id, orb, color: c, life: 0, live: false, push: null, marble, halo, shadow, caustic, pool, spin: new Quaternion(), omega: new Vector3(), heardAt: -1, on: -1 }
     orbMap.set(id, fo)
     return fo
   }
@@ -455,9 +566,11 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
     camera.setViewOffset(W, H, W / 2 - (box.x + box.w / 2), H / 2 - (box.y + box.h / 2), W, H)
     camera.updateProjectionMatrix()
     camera.updateMatrixWorld()
-    // The field is what the camera sees of the floor.
+    // The field is what the camera sees of the floor: a wedge, narrower along the screen's bottom edge than its top,
+    // so a marble rolling into a bottom corner stays on screen.
     const pts = [[0, 0], [W, 0], [0, H], [W, H]].map(([sx, sy]) => rawFloorAt(sx, sy))
     bounds = [Math.min(...pts.map((p) => p.x)), Math.min(...pts.map((p) => p.z)), Math.max(...pts.map((p) => p.x)), Math.max(...pts.map((p) => p.z))]
+    sides = [pts[0].x, pts[1].x, pts[2].x, pts[3].x]
     // The dots cover the field (a little wider apart on a phone).
     const gap = opts.coarse ? 0.26 : 0.2
     const verts: number[] = []
@@ -468,8 +581,9 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
     dots.geometry = new BufferGeometry()
     dots.geometry.setAttribute('position', new BufferAttribute(new Float32Array(verts), 3))
     dotUniforms.uFar.value.set(bounds[1], bounds[3])
-    dotUniforms.uSize.value = 2.6 * Math.min(2, renderer.getPixelRatio())
+    dotUniforms.uSize.value = 2.6 * (buf.x / W)
     dotUniforms.uDist.value = dist
+    buildPads()
   }
 
   function rawFloorAt(sx: number, sy: number, plane = floor) {
@@ -478,11 +592,48 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
     return ray.ray.intersectPlane(plane, hit) ? { x: hit.x, z: hit.z } : { x: 0, z: 0 }
   }
 
+  // ---- the page's buttons, as low steps: each one's top is its box on screen, found on the plane at its height ----
+  const padTops = new Plane(new Vector3(0, 1, 0), -PAD_H)
+  function buildPads() {
+    // An empty box is a button that isn't there now (its number stays its own).
+    pads = padRects.flatMap((b, i): Footprint[] => {
+      if (b.w <= 0 || b.h <= 0) return []
+      const pts = roundedRect(b.x, b.y, b.w, b.h, b.r, 4)
+      const ring = new Float64Array(pts.length)
+      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity
+      for (let k = 0; k < pts.length; k += 2) {
+        const p = rawFloorAt(pts[k], pts[k + 1], padTops)
+        ring[k] = p.x
+        ring[k + 1] = p.z
+        x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z)
+      }
+      const c = rawFloorAt(b.x + b.w / 2, b.y + b.h / 2, padTops)
+      return [{ id: PAD_ID + i, height: PAD_H, box: [x0, z0, x1, z1], rings: [ring], spot: [c.x, c.z] }]
+    })
+    solid = [...footprints, ...pads]
+    // The dots keep off them: their boxes in drawing-buffer pixels, from the bottom left.
+    const kx = buf.x / W, ky = buf.y / H
+    dotUniforms.uPads.value.forEach((v, i) => {
+      const b = padRects[i]
+      if (b && b.w > 0) v.set(b.x * kx, buf.y - (b.y + b.h) * ky, (b.x + b.w) * kx, buf.y - b.y * ky)
+      else v.set(0, 0, 0, 0)
+      dotUniforms.uPadR.value[i] = b ? Math.min(b.r, b.w / 2, b.h / 2) * kx : 0
+    })
+  }
+
   function size() {
-    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, level >= 2 ? 2 : level === 1 ? 1.5 : 1))
-    renderer.setSize(W, H, false)
+    // The drawing buffer at the step's density, counted from the screen's own pixels so that at its density it
+    // matches them exactly: a buffer even half a pixel off is stretched by the browser, softening every edge.
+    const dpr = devicePixelRatio || 1
+    // The browser's own count where it agrees with the CSS size (an emulated screen reports CSS pixels there).
+    exact = device && Math.abs(device[0] - W * dpr) < 1.5 && Math.abs(device[1] - H * dpr) < 1.5 ? device : null
+    const [dw, dh] = exact ?? [Math.round(W * dpr), Math.round(H * dpr)]
+    const k = quality.pr / dpr
+    renderer.setPixelRatio(1)
+    renderer.setSize(Math.max(1, Math.round(dw * k)), Math.max(1, Math.round(dh * k)), false)
     renderer.getDrawingBufferSize(buf)
-    behind.setSize(Math.max(1, Math.round(buf.x / 2)), Math.max(1, Math.round(buf.y / 2)))
+    const g = glassScale(quality, dpr)
+    behind.setSize(Math.max(1, Math.round(W * g)), Math.max(1, Math.round(H * g)))
   }
 
   const strength = (v: number) => Math.min(1, Math.max(0, (v - HIT_MIN) / (HIT_MAX - HIT_MIN)))
@@ -512,12 +663,17 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
     },
     floorAt(sx, sy) {
       const p = rawFloorAt(sx, sy)
-      return { x: Math.max(bounds[0] + ORB_R, Math.min(bounds[2] - ORB_R, p.x)), z: Math.max(bounds[1] + ORB_R, Math.min(bounds[3] - ORB_R, p.z)) }
+      const z = Math.max(bounds[1] + ORB_R, Math.min(bounds[3] - ORB_R, p.z))
+      const [x0, x1] = sidesAt({ bounds, sides }, z)
+      return { x: Math.max(x0 + ORB_R, Math.min(x1 - ORB_R, p.x)), z }
     },
     pointAt(sx, sy) {
       const t = rawFloorAt(sx, sy, tops)
       const s = surfaceAt(footprints, t.x, t.z)
-      return s.id >= 0 ? { x: t.x, z: t.z, letter: s.id } : { ...field.floorAt(sx, sy), letter: -1 }
+      if (s.id >= 0) return { x: t.x, z: t.z, letter: s.id }
+      // A button's top, where it's over one.
+      const p = rawFloorAt(sx, sy, padTops)
+      return surfaceAt(pads, p.x, p.z).id >= 0 ? { x: p.x, z: p.z, letter: -1 } : { ...field.floorAt(sx, sy), letter: -1 }
     },
     spotAt(sx, sy) {
       const p = field.pointAt(sx, sy)
@@ -539,7 +695,19 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
     letters: () => letters.map((l) => ({ ch: l.ch, spot: l.fp.spot, word: l.word })),
     tour: () => tourStops(field.letters()),
     under: (x, z) => surfaceAt(footprints, x, z).id,
-    toss: (o, vy) => { toss(o.orb, vy, footprints) },
+    surface: (x, z) => surfaceAt(solid, x, z),
+    pads(rects) {
+      const same = rects.length === padRects.length && rects.every((r, i) => {
+        const q = padRects[i]
+        return Math.abs(r.x - q.x) + Math.abs(r.y - q.y) + Math.abs(r.w - q.w) + Math.abs(r.h - q.h) + Math.abs(r.r - q.r) < 0.5
+      })
+      if (same) return
+      padRects = rects.map((r) => ({ ...r }))
+      buildPads()
+      // A marble on a button that moved (or went) is free to roll, or fall, again.
+      for (const o of orbMap.values()) if (o.on >= PAD_ID || surfaceAt(solid, o.orb.x, o.orb.z).id >= PAD_ID) o.orb.resting = false
+    },
+    toss: (o, vy) => { toss(o.orb, vy, solid) },
     orb: (id, color) => orbMap.get(id) ?? makeOrb(id, color),
     recolor(id, color) {
       const o = orbMap.get(id)
@@ -559,14 +727,29 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
       orbMap.delete(id)
     },
     orbs: () => [...orbMap.values()],
-    quality(q) {
-      const next = Math.max(0, Math.min(2, Math.round(q)))
-      if (next === level) return
-      level = next
-      refract = level > 0
+    quality(q, lv) {
+      qualityLevel = lv
+      if (q.pr === quality.pr && q.glass === quality.glass) return
+      quality = q
       size()
       fit(lastBox)
     },
+    pixels(w, h) {
+      if (device && device[0] === w && device[1] === h) return
+      device = [w, h]
+      size()
+      fit(lastBox)
+    },
+    gpu() {
+      pollTiming()
+      if (!gpuFresh) return null
+      gpuFresh = false
+      return gpuLast
+    },
+    gfx: () => ({
+      css: [W, H], buffer: [buf.x, buf.y], pr: Math.round((buf.x / W) * 1000) / 1000, device: exact, samples,
+      behind: quality.glass ? [behind.width, behind.height] : [0, 0], glass: quality.glass, gpuMs: gpuLast?.ms ?? null,
+    }),
     step(dt) {
       clock += dt
       glow.uTime.value = clock
@@ -577,7 +760,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
         // Real time whatever the frame rate: a long frame (a slow phone, a busy page) is caught up in 60 Hz steps.
         const r = { landed: null as number | null, bumped: null as number | null, impact: 0, moving: false }
         for (let left = Math.min(dt, 0.12); left > 1e-6; left -= 1 / 60) {
-          const q = step(o.orb, footprints, Math.min(left, 1 / 60), { hop: HOP, bounds, push: o.push ?? undefined, ...STEER })
+          const q = step(o.orb, solid, Math.min(left, 1 / 60), { hop: HOP, bounds, sides, push: o.push ?? undefined, climb: CLIMB, ...STEER })
           if (q.landed !== null) r.landed = q.landed
           if (q.bumped !== null) r.bumped = q.bumped
           r.impact = Math.max(r.impact, q.impact)
@@ -589,7 +772,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
           const impact = Math.min(1, r.impact / 5)
           if (impact > 0.12) ripple(b.x, b.z, 0.25 + 0.75 * impact, o.color)
         }
-        if (r.landed !== null && r.landed >= 0) {
+        if (r.landed !== null && r.landed >= 0 && r.landed < PAD_ID) {
           const l = letters[r.landed]
           l.dipV -= 0.9
           l.lit = 1
@@ -597,15 +780,28 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
           field.onLand?.(r.landed, o.id)
           if (celebrateAt < 0 && letters.every((x) => x.kept > 0)) celebrateAt = clock
         }
-        if (r.bumped !== null) {
+        if (r.bumped !== null && r.bumped < PAD_ID) {
           // A knock on a letter's side: it flashes, but only a landing keeps it lit.
           const l = letters[r.bumped]
           l.lit = Math.max(l.lit, 0.35 + 0.65 * strength(r.impact))
           l.dipV -= 0.25 * strength(r.impact)
         }
+        const struck = r.bumped ?? r.landed ?? -1
+        const heard = hits.length
         if (r.impact > HIT_MIN && clock - o.heardAt > 0.06) {
           o.heardAt = clock
-          hits.push({ orb: o.id, kind: r.bumped !== null || (r.landed ?? -1) >= 0 ? 'letter' : 'floor', strength: strength(r.impact), x: b.x, y: b.y - b.r, z: b.z })
+          const kind: HitKind = struck >= PAD_ID ? 'button' : struck >= 0 ? 'letter' : 'floor'
+          hits.push({ orb: o.id, kind, ...(kind === 'button' ? { pad: struck - PAD_ID } : {}), strength: strength(r.impact), x: b.x, y: b.y - b.r, z: b.z })
+        }
+        // Arriving on a button without a landing to hear (rolled up onto it, or set down softly): it takes the
+        // marble's weight with a soft tap.
+        const s = surfaceAt(solid, b.x, b.z)
+        if (b.y - b.r - s.h < 0.01) {
+          if (s.id >= PAD_ID && o.on !== s.id && hits.length === heard) {
+            hits.push({ orb: o.id, kind: 'button', pad: s.id - PAD_ID, strength: 0.12 + 0.3 * strength(Math.hypot(b.vx, b.vz) * 2), x: b.x, y: b.y - b.r, z: b.z })
+            o.heardAt = clock
+          }
+          o.on = s.id
         }
         busy = busy || r.moving
       }
@@ -625,7 +821,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
       for (const o of all) {
         const b = o.orb
         // It rolls on whatever it's on (turning with its speed); in the air it keeps turning as it was.
-        const onSurface = b.y - b.r - surfaceAt(footprints, b.x, b.z).h < 0.01
+        const onSurface = b.y - b.r - surfaceAt(solid, b.x, b.z).h < 0.01
         if (onSurface) o.omega.set(b.vz, 0, -b.vx).divideScalar(b.r)
         else o.omega.multiplyScalar(Math.exp(-dt * 0.4))
         const w = o.omega.length()
@@ -661,16 +857,16 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
     },
     render() {
       let i = 0
+      const refract = quality.glass > 0
       right.setFromMatrixColumn(camera.matrixWorld, 0)
       for (const o of orbMap.values()) {
         const b = o.orb
         // Nearer the eye the higher it is: a little bigger (the physics keeps its true size).
         const scale = 1 + DEPTH * Math.max(0, b.y - b.r)
-        o.marble.position.set(b.x, b.y, b.z)
-        o.marble.scale.setScalar(scale)
         const u = (o.marble.material as ShaderMaterial).uniforms
         u.uLife.value = o.life
         u.uRefract.value = refract ? 1 : 0
+        u.uSteps.value = quality.glass === 2 ? 12 : 6
         u.uC.value.set(b.x, b.y, b.z)
         u.uR.value = ORB_R * scale
         ;(u.uSpin.value as Matrix3).setFromMatrix4(m4.makeRotationFromQuaternion(tmpQ.copy(o.spin).invert()))
@@ -678,13 +874,17 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
         pc.set(b.x, b.y, b.z).project(camera)
         pe.set(b.x, b.y, b.z).addScaledVector(right, ORB_R * scale).project(camera)
         ;(u.uCenter.value as Vector2).set(((pc.x + 1) / 2) * buf.x, ((pc.y + 1) / 2) * buf.y)
-        u.uRad.value = Math.max(1, Math.hypot(((pe.x - pc.x) / 2) * buf.x, ((pe.y - pc.y) / 2) * buf.y))
+        const rad = Math.max(1, Math.hypot(((pe.x - pc.x) / 2) * buf.x, ((pe.y - pc.y) / 2) * buf.y))
+        u.uRad.value = rad
+        // The mesh reaches a couple of pixels past the glass, for its shaded edge.
+        o.marble.position.set(b.x, b.y, b.z)
+        o.marble.scale.setScalar(scale * (1 + 2.5 / rad))
         o.halo.position.set(b.x, b.y, b.z)
         o.halo.scale.setScalar(ORB_R * 4.2 * scale)
         o.halo.material.opacity = 0.05 + 0.12 * o.life
         // On whatever is under the marble: its shadow (bigger and fainter the higher it is), the caustic its glass
         // focuses there (tight and bright when low, spreading as it rises), and the soft pool of its light.
-        const s = surfaceAt(footprints, b.x, b.z)
+        const s = surfaceAt(solid, b.x, b.z)
         const hgt = Math.max(0, b.y - b.r - s.h)
         // Both fall away from the key light (behind and to the right of the marble, as seen), the caustic inside the shadow.
         o.shadow.position.set(b.x + 0.05 + hgt * 0.3, s.h + 0.004, b.z - 0.08 - hgt * 0.5)
@@ -700,18 +900,43 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean }
         i++
       }
       for (; i < MAX_ORBS; i++) glow.uOrbs.value[i].set(0, -99, 0)
-      // What's behind the marbles, for their glass: the scene without them.
+      pollTiming()
+      const q = timer && timing.length < 4 ? gl.createQuery() : null
+      if (q) gl.beginQuery(timer!.TIME_ELAPSED_EXT, q)
+      // What's behind the marbles, for their glass: the scene without them (its dots sized for its pixels).
       if (refract && orbMap.size) {
         const hide = (on: boolean) => { for (const o of orbMap.values()) for (const m of [o.marble, o.halo, o.shadow, o.caustic, o.pool]) m.visible = on }
         hide(false)
+        const dotSize = dotUniforms.uSize.value, padBoxes = dotUniforms.uPads.value
+        dotUniforms.uSize.value = dotSize * (behind.width / buf.x)
+        dotUniforms.uView.value = behindView.set(behind.width, behind.height)
+        dotUniforms.uPads.value = noPads
         renderer.setRenderTarget(behind)
         renderer.clear()
         renderer.render(scene, camera)
         renderer.setRenderTarget(null)
+        dotUniforms.uSize.value = dotSize
+        dotUniforms.uView.value = buf
+        dotUniforms.uPads.value = padBoxes
         hide(true)
       }
       renderer.render(scene, camera)
+      if (q) { gl.endQuery(timer!.TIME_ELAPSED_EXT); timing.push({ q, level: qualityLevel }) }
+      if (!samples) samples = gl.getParameter(gl.SAMPLES) as number
     },
+  }
+
+  /** Collect the GPU times that have come back (a frame or two late), unless the GPU was interrupted meanwhile. */
+  function pollTiming() {
+    if (!timer) return
+    while (timing.length) {
+      const t = timing[0]
+      if (!gl.getQueryParameter(t.q, gl.QUERY_RESULT_AVAILABLE)) break
+      const ns = gl.getQueryParameter(t.q, gl.QUERY_RESULT) as number
+      if (!gl.getParameter(timer.GPU_DISJOINT_EXT)) { gpuLast = { ms: ns / 1e6, level: t.level }; gpuFresh = true }
+      gl.deleteQuery(t.q)
+      timing.shift()
+    }
   }
   return field
 }

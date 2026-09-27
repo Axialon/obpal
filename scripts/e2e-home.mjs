@@ -8,6 +8,10 @@
  *     trackpad) tosses its marble, and on a phone, a flick tosses the page's own marble once motion is on.
  *   - A phone held as a tray (its gyro on) rolls its marble with its tilt, as the phone's own page does.
  *   - When the phone leaves, the page lets its marble go.
+ *   - Sound waits for the first click (Chrome's own rule, read without a user gesture: Playwright's evaluate runs as
+ *     one and would let it start), then the marble's landing reaches the output (a meter at the end of the chain).
+ *   - The marble rolls up onto a button in the hero, lights and presses it, and rolls off it again; the button never
+ *     does its own thing.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch.
  */
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -100,6 +104,28 @@ try {
     return seen.join(', ')
   })
 
+  await check('sound waits for the first click (the browser\'s rule), then the marble\'s landing reaches the output', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true })
+    const page = await ctx.newPage()
+    // Read over CDP without a user gesture: Playwright's evaluate runs as one, and would let sound start by itself.
+    const cdp = await ctx.newCDPSession(page)
+    const read = async (expression) => (await cdp.send('Runtime.evaluate', { expression, userGesture: false, returnByValue: true, awaitPromise: true })).result.value
+    await page.goto(`${local.origin}/?debug=audio`)
+    await until('the 3D field', () => read(`document.documentElement.classList.contains('field3d')`), 15000)
+    // (Silence is -Infinity dBFS, which JSON can't carry: read as -999.)
+    const audio = () => read(`(() => { const a = window.__home.audio(); const b = document.querySelector('[data-sound]'); return { ...a, peakDb: Number.isFinite(a.peakDb) ? a.peakDb : -999, pill: b.hidden ? 'hidden' : b.dataset.state, label: b.textContent.trim() } })()`)
+    // The opening's landings come before anyone has clicked: not heard, and the sound button says it waits for a click.
+    const before = await until('a landing before any click', async () => { const a = await audio(); return a.skipped > 0 ? a : null }, 25000, 200)
+    if (before.state !== 'blocked' || before.played !== 0 || before.pill !== 'blocked') throw new Error(`before a click: ${JSON.stringify(before)}`)
+    // A click on the headline hops the marble onto a letter: its landing is heard.
+    const r = await read(`(() => { const g = document.createRange(); g.selectNodeContents(document.getElementById('hero-h')); const b = g.getClientRects()[0]; return { x: b.left + b.width * 0.3, y: b.top + b.height * 0.55 } })()`)
+    await page.mouse.click(r.x, r.y)
+    const after = await until('sound at the output', async () => { const a = await audio(); return a.played > 0 && a.peakDb > -40 ? a : null }, 10000, 100)
+    if (after.state !== 'on' || after.pill !== 'on') throw new Error(`after a click: ${JSON.stringify(after)}`)
+    await ctx.close()
+    return `before: "${before.label}", ${before.skipped} landing(s) not heard; after one click: ${after.played} heard, peak ${after.peakDb} dBFS at the output`
+  })
+
   await check('on a phone, one tap switches the tilt on: it rolls the marble like a tray (after the opening), and moves the scene on screen', async () => {
     const ctx = await browser.newContext({ ...devices['Pixel 7'], ignoreHTTPSErrors: true, permissions: ['accelerometer', 'gyroscope', 'magnetometer'] })
     const page = await ctx.newPage()
@@ -119,12 +145,15 @@ try {
     await sleep(400)
     const after = await tip()
     if (Math.hypot(after.x - still.x, after.y - still.y) > 2) throw new Error('a steady hand kept the marble moving')
-    // Tip it left and settle; then right and toward you: it glides over, and down.
+    // Tip it left and settle; then right and toward you: it glides over, and down. (Over as far as the screen's edge,
+    // which it doesn't roll past: from the full stop that's under 60px.)
     for (let i = 1; i <= 8; i++) { await tilt(60, -i * 2); await sleep(40) }
     await sleep(900)
     const left = await tip()
     for (let i = 1; i <= 16; i++) { await tilt(60 + i, -16 + i * 2.5); await sleep(40) }
-    const moved = await until('the marble rolled with the tilt', async () => { const t = await tip(); return t.x - left.x > 60 && t.y - left.y > 20 ? t : null }, 4000)
+    const width = await page.evaluate(() => innerWidth)
+    const moved = await until('the marble rolled with the tilt', async () => { const t = await tip(); return t.x - left.x > 30 && t.y - left.y > 20 ? t : null }, 4000)
+    if (moved.x > width) throw new Error(`the marble rolled off the screen: x ${moved.x.toFixed(0)} on a ${width}px screen`)
     // Flicked upward, screen level: the marble jumps (it never bounces by itself).
     const flick = await page.evaluate(async () => {
       const top = () => window.__home.tips().find((t) => t.id === 'me').h
@@ -242,6 +271,33 @@ try {
     return `on letter ${on.on}, ${Math.hypot(later.x - x, later.y - y).toFixed(0)}px from the click`
   })
 
+  await check('the marble rolls up onto a button, lights and presses it, and rolls off it again; the button does nothing', async () => {
+    await screen.evaluate(() => { window.__acted = 0; document.addEventListener('click', (e) => { if (e.target.closest?.('a, button')) window.__acted++ }, true); addEventListener('hashchange', () => window.__acted++) })
+    const url = screen.url()
+    const pads = await screen.evaluate(() => window.__home.pads())
+    const i = pads.findIndex((p) => /see what it does/i.test(p))
+    if (i < 0) throw new Error(`no "See what it does" among the buttons: ${pads.join(', ')}`)
+    const b = await screen.locator('.cta-alt').boundingBox()
+    const tip = () => screen.evaluate(() => window.__home.tips().find((t) => t.id === 'me'))
+    // From the open floor beside it (a click hops the marble there: rolling, it can't get past the headline's letters)...
+    const beside = { x: b.x + b.width + 130, y: b.y + b.height / 2 }
+    await screen.mouse.click(beside.x, beside.y)
+    await until('the marble beside the button', async () => { const t = await tip(); return t.on === -1 && Math.hypot(t.x - beside.x, t.y - beside.y) < 40 ? t : null }, 10000, 200)
+    // ...pointing at the button (not clicking): the marble rolls over and is helped up onto it.
+    const at = { x: b.x + b.width * 0.6, y: b.y + b.height / 2 }
+    await screen.mouse.move(at.x, at.y, { steps: 10 })
+    const on = await until('the marble on the button', async () => { await screen.mouse.move(at.x + Math.random(), at.y); const t = await tip(); return t.on === 1000 + i ? t : null }, 12000, 200)
+    const lit = await until('the button lit under it', () => screen.evaluate(() => { const s = document.querySelector('.cta-alt').style; const g = parseFloat(s.getPropertyValue('--orb-glow') || '0'); return g > 0.5 ? { glow: g, press: s.translate } : null }), 4000)
+    if (on.x < b.x || on.x > b.x + b.width || on.y < b.y - 25 || on.y > b.y + b.height) throw new Error(`the marble is at ${on.x.toFixed(0)},${on.y.toFixed(0)}, not over the button`)
+    // Pointing below it: the marble rolls off its edge and drops to the floor.
+    const below = b.y + b.height + 110
+    await screen.mouse.move(at.x, below, { steps: 6 })
+    const off = await until('the marble back on the floor', async () => { await screen.mouse.move(at.x + Math.random(), below); const t = await tip(); return t.on === -1 && t.y > b.y + b.height ? t : null }, 12000, 200)
+    const acted = await screen.evaluate(() => window.__acted)
+    if (acted || screen.url() !== url) throw new Error(`the button acted: ${acted} clicks, now at ${screen.url()}`)
+    return `on "${pads[i]}" at ${on.x.toFixed(0)},${on.y.toFixed(0)} (lit ${lit.glow}, pressed ${lit.press || 'none'}), then off to ${off.x.toFixed(0)},${off.y.toFixed(0)}; no click, no navigation`
+  })
+
   const dir = await mkdtemp(join(tmpdir(), 'obpal-home-'))
   profile = dir
   const phoneCtx = await chromium.launchPersistentContext(dir, { ...devices['Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS })
@@ -255,7 +311,7 @@ try {
     await until('the hero live', () => screen.evaluate(() => document.querySelector('.hero').hasAttribute('data-live')), 5000)
     const hint = await screen.locator('[data-hint-text]').textContent()
     if (!/tilt your phone/i.test(hint ?? '')) throw new Error(`hint says "${hint}"`)
-    // Playing with a phone brings the sound button (sound itself waits for a click on the page).
+    // The sound button is there to switch the marbles' sound (it starts with a click on the page).
     await until('the sound button', () => screen.evaluate(() => !document.querySelector('[data-sound]').hidden), 5000)
     return hint
   })
@@ -279,9 +335,17 @@ try {
   await check("the phone flicked upward tosses its marble, and so does a tap on its trackpad", async () => {
     const tip = () => screen.evaluate(() => window.__home.tips().find((t) => t.id !== 'me'))
     const high = async (what, go) => {
-      await until(`${what}: the marble settled`, async () => (await tip()).h < 0.25, 8000)
+      // Settled: low and staying there (a marble still bouncing dips under 0.25 em too, and a toss that comes while
+      // it's in the air only waits a moment for it to land).
+      await until(`${what}: the marble settled`, async () => { const a = await tip(); await sleep(150); const b = await tip(); return a.h < 0.25 && Math.abs(a.h - b.h) < 0.01 }, 8000)
       await go()
-      return until(what, async () => { const t = await tip(); return t.h > 0.3 ? t.h : null }, 5000)
+      // (What it did instead, if it doesn't: the highest it went, and where it was.)
+      let seen = null
+      try {
+        return await until(what, async () => { const t = await tip(); if (!seen || t.h > seen.h) seen = t; return t.h > 0.3 ? t.h : null }, 5000)
+      } catch (e) {
+        throw new Error(`${e.message} (at most ${seen?.h.toFixed(2)} em up, on ${seen?.on} at ${seen?.x.toFixed(0)},${seen?.y.toFixed(0)})`)
+      }
     }
     // A phone lying flat that jerks upward and stops: the controller sees a toss and sends it.
     const flick = await high('the flick tossed it', () => phone.evaluate(async () => {

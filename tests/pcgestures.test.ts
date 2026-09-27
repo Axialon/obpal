@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { A_DRAG_PX, CLICK_MS, GRAB_PER_PX, HOLD_MS, PcGestures, SCROLL_PER_PX, type GestureOut, type GestureTick } from '../extension/src/shared/pcgestures'
+import {
+  A_DRAG_PX, CLICK_MS, GRAB_PER_PX, HOLD_MS, KEY_TAPS, PcGestures, SCROLL_PER_PX, TEXT_BURST, TEXT_RATE, type GestureOut, type GestureTick,
+} from '../extension/src/shared/pcgestures'
 
 /** A tick at `now` ms: linked, no touch, no motion unless given. */
 const at = (now: number, over: Partial<GestureTick> = {}): GestureTick => ({ now, connected: true, touching: false, move: [0, 0], pan: [0, 0], pinch: 0, ...over })
@@ -22,6 +24,22 @@ function edges(outs: GestureOut[]): string[] {
   }
   return out
 }
+/** The key edges and typing a run produces, in the order the helper sees them ('Enter+', 'Enter-', 'hi', '-1x'): each frame, then its typing. */
+function keyEvents(outs: GestureOut[]): string[] {
+  const out: string[] = []
+  let held = new Set<string>()
+  for (const o of outs) {
+    const now = new Set(o.keys)
+    for (const k of held) if (!now.has(k)) out.push(`${k}-`)
+    for (const k of now) if (!held.has(k)) out.push(`${k}+`)
+    held = now
+    for (const t of o.text) out.push(`${t.del ? `-${t.del}` : ''}${t.s}`)
+  }
+  return out
+}
+/** What typing leaves in a field, Backspace deleting a character (code point) at a time. */
+const typeInto = (field: string, texts: { s: string; del: number }[]) =>
+  texts.reduce((f, t) => { const cs = Array.from(f); return cs.slice(0, Math.max(0, cs.length - t.del)).join('') + t.s }, field)
 const wheelOf = (outs: GestureOut[]) => outs.reduce((w, o) => [w[0] + o.wheel[0], w[1] + o.wheel[1]], [0, 0])
 const moveOf = (outs: GestureOut[]) => outs.reduce((w, o) => [w[0] + o.move[0], w[1] + o.move[1]], [0, 0])
 
@@ -174,9 +192,144 @@ describe('PC gestures: the Point face', () => {
     run(g, 0, 32, () => ({ touching: true, move: [20, 0] }))
     expect(g.busy).toBe(true)
     const gone = g.tick(at(48, { connected: false, touching: true, move: [9, 9] }))
-    expect(gone).toEqual({ buttons: [], ctrl: false, move: [0, 0], wheel: [0, 0], buzz: false })
+    expect(gone).toEqual({ buttons: [], ctrl: false, move: [0, 0], wheel: [0, 0], buzz: false, keys: [], text: [] })
     expect(g.busy).toBe(false)
     expect(run(g, 64, 96, () => ({ move: [1, 0] })).every((o) => o.buttons.length === 0)).toBe(true)
+  })
+})
+
+describe('PC gestures: the keyboard (the key row, and typing)', () => {
+  it('taps a key from the row: down for CLICK_MS, then up; only the row’s own keys', () => {
+    const g = new PcGestures()
+    g.button('key-Enter', 'tap', 0)
+    const outs = run(g, 0, 96)
+    expect(keyEvents(outs)).toEqual(['Enter+', 'Enter-'])
+    const down = outs.filter((o) => o.keys.includes('Enter')).length * 16
+    expect(down).toBeGreaterThanOrEqual(CLICK_MS)
+    expect(down).toBeLessThanOrEqual(CLICK_MS + 32)
+    // the same key twice: two taps, apart
+    g.button('key-ArrowLeft', 'tap', 200)
+    g.button('key-ArrowLeft', 'tap', 201)
+    expect(keyEvents(run(g, 200, 400))).toEqual(['ArrowLeft+', 'ArrowLeft-', 'ArrowLeft+', 'ArrowLeft-'])
+    // every key on the row, and nothing else: no letters, no modifiers, no F-keys, only taps
+    for (const code of KEY_TAPS) g.button(`key-${code}`, 'tap', 500)
+    for (const id of ['key-KeyA', 'key-MetaLeft', 'key-ControlLeft', 'key-F4', 'key-', 'key-enter']) g.button(id, 'tap', 500)
+    g.button('key-Enter', 'down', 500)
+    const all = keyEvents(run(g, 500, 1200)).filter((e) => e.endsWith('+')).map((e) => e.slice(0, -1))
+    expect(all).toEqual([...KEY_TAPS])
+    expect(g.busy).toBe(false)
+  })
+
+  it('sends typing in order with the key taps, each right after a frame: never ahead of a key tapped before it', () => {
+    const g = new PcGestures()
+    g.text('hello', 0)
+    g.button('key-Enter', 'tap', 0)
+    g.text('x', 0)
+    const outs = run(g, 0, 300)
+    expect(keyEvents(outs)).toEqual(['hello', 'Enter+', 'Enter-', 'x'])
+    // the key goes down in the frame after the typing, never in the frame the typing follows
+    const typed = outs.findIndex((o) => o.text.length)
+    expect(outs[typed].keys).toEqual([])
+    // typing that comes while a key is down waits for it to come up
+    g.button('key-ArrowLeft', 'tap', 400)
+    const down = g.tick(at(400))
+    g.text('a', 0)
+    expect(keyEvents([down, ...run(g, 416, 600)])).toEqual(['ArrowLeft+', 'ArrowLeft-', 'a'])
+  })
+
+  it('holds typing back while the frame holds a modifier (a zoom’s Ctrl, or the Keys mapping’s Shift), and sends it after one without', () => {
+    const g = new PcGestures()
+    g.text('hi', 0)
+    const held = run(g, 0, 160, () => ({ mods: true }))
+    expect(held.every((o) => o.text.length === 0)).toBe(true)
+    // more typing while it waits merges with it
+    g.text('!', 0)
+    const free = run(g, 176, 176)
+    expect(free[0].text).toEqual([{ t: 'text', s: 'hi!', del: 0 }])
+    // a pinch holds Ctrl for a zoom: typing waits for the zoom to end
+    const z = new PcGestures()
+    const pinch = () => ({ touching: true, pinch: 0.05 })
+    run(z, 0, 32, pinch)
+    z.text('a', 0)
+    const zoom = run(z, 48, 160, pinch)
+    expect(zoom.every((o) => o.ctrl && !o.text.length)).toBe(true)
+    const after = run(z, 176, 240)
+    expect(after.flatMap((o) => o.text).map((t) => t.s)).toEqual(['a'])
+    expect(after.find((o) => o.text.length)?.ctrl).toBe(false)
+  })
+
+  it('merges typing that waits wherever it types the same, but never deletes across Enter or Tab', () => {
+    const g = new PcGestures()
+    const waits = { mods: true }
+    g.text('teh', 0)
+    g.text('he ', 2) // autocorrect: "teh" → "the "
+    g.text('', 1)
+    g.text('', 4) // past what was typed: deletes one more
+    g.text('ok', 0)
+    run(g, 0, 32, () => waits)
+    const [merged] = run(g, 48, 48)
+    expect(merged.text).toEqual([{ t: 'text', s: 'ok', del: 1 }])
+    expect(typeInto('xy', merged.text)).toBe(typeInto('xy', [{ s: 'teh', del: 0 }, { s: 'he ', del: 2 }, { s: '', del: 1 }, { s: '', del: 4 }, { s: 'ok', del: 0 }]))
+    // typed and deleted again while waiting: nothing goes at all
+    g.text('abc', 0)
+    g.text('', 3)
+    expect(g.busy).toBe(false)
+    // Enter or Tab typed can't be taken back by merging a Backspace into it; typing after it still joins
+    g.text('sent\n', 0)
+    g.text('', 1)
+    g.text('next', 0)
+    g.text('\tcell', 0)
+    run(g, 64, 96, () => waits)
+    const later = run(g, 112, 400).flatMap((o) => o.text)
+    expect(later).toEqual([{ t: 'text', s: 'sent\n', del: 0 }, { t: 'text', s: 'next\tcell', del: 1 }])
+  })
+
+  it('keeps well under the helper’s 40 requests a second, typing everything, in order', () => {
+    const g = new PcGestures()
+    // requests that can't merge: a line, then a Backspace into it, over and over
+    const sent: { s: string; del: number }[] = []
+    for (let i = 0; i < 60; i++) { sent.push({ s: `${i}\n`, del: 0 }, { s: '', del: 1 }) }
+    for (const t of sent) g.text(t.s, t.del)
+    const outs = run(g, 0, 4000)
+    const texts = outs.flatMap((o) => o.text)
+    for (let second = 0; second < 4; second++) {
+      const n = outs.slice(Math.round((second * 1000) / 16), Math.round(((second + 1) * 1000) / 16)).reduce((c, o) => c + o.text.length, 0)
+      expect(n).toBeLessThanOrEqual(TEXT_BURST + TEXT_RATE)
+    }
+    expect(Math.max(...outs.map((o) => o.text.length))).toBeLessThanOrEqual(TEXT_BURST)
+    expect(typeInto('', texts)).toBe(typeInto('', sent))
+    expect(g.busy).toBe(false)
+  })
+
+  it('merges only what types the same (a random walk of typing, deleting and Enter)', () => {
+    let seed = 7
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31)
+    for (let trial = 0; trial < 200; trial++) {
+      const g = new PcGestures()
+      const sent: { s: string; del: number }[] = []
+      for (let i = 0; i < 12; i++) {
+        const s = ['', 'a', 'bc', 'é', '😀', '\n', 'x\ty'][Math.floor(rnd() * 7)]
+        const del = Math.floor(rnd() * 4)
+        if (!s && !del) continue
+        sent.push({ s, del })
+        g.text(s, del)
+      }
+      run(g, 0, 48, () => ({ mods: true }))
+      const texts = run(g, 64, 2000).flatMap((o) => o.text)
+      expect(typeInto('start', texts), JSON.stringify(sent)).toBe(typeInto('start', sent))
+      expect(texts.every((t) => t.s || t.del)).toBe(true)
+    }
+  })
+
+  it('lets go of waiting keys and typing when the phone goes away', () => {
+    const g = new PcGestures()
+    g.button('key-Enter', 'tap', 0)
+    g.text('lost', 0)
+    g.tick(at(0))
+    expect(g.busy).toBe(true)
+    expect(g.tick(at(16, { connected: false }))).toMatchObject({ keys: [], text: [] })
+    expect(g.busy).toBe(false)
+    expect(run(g, 32, 200).every((o) => !o.keys.length && !o.text.length)).toBe(true)
   })
 })
 

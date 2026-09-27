@@ -33,19 +33,25 @@ const settleHint = () => {
   if (hintAway) return
   hintAway = window.setTimeout(() => hint.classList.add('gone'), 1400)
 }
-const hero = mountHero(heroEl, $<HTMLCanvasElement>('.hero-stage'), $('#hero-h'), { still, onInput: settleHint })
-// Playing with a phone brings sound: a button in the corner switches it on (browsers want a click for that) or off.
+/** ?debug=audio,gfx: a small readout of the sound and the drawing, for checking a real device. */
+const debug = new Set((new URLSearchParams(location.search).get('debug') ?? '').split(',').filter(Boolean))
+const hero = mountHero(heroEl, $<HTMLCanvasElement>('.hero-stage'), $('#hero-h'), { still, onInput: settleHint, meter: debug.has('audio') })
+// The marbles' sound: a button in the corner says whether it's on, off, or waiting for a click (browsers start sound
+// only from one), and switches it.
 const soundBtn = $<HTMLButtonElement>('[data-sound]')
 const soundLabel = soundBtn.querySelector('[data-sound-label]')!
-const showSound = () => {
-  soundBtn.setAttribute('aria-pressed', String(hero.soundOn))
-  soundBtn.setAttribute('aria-label', hero.soundOn ? 'Sound on' : 'Sound off')
-  soundLabel.textContent = hero.soundOn ? 'Sound on' : 'Turn on sound'
+const ask = matchMedia('(pointer: coarse)').matches ? 'Tap for sound' : 'Click for sound'
+hero.onSound = (s) => {
+  soundBtn.hidden = s === 'none'
+  soundBtn.dataset.state = s
+  soundBtn.setAttribute('aria-pressed', String(s === 'on'))
+  soundLabel.textContent = s === 'on' ? 'Sound on' : s === 'off' ? 'Sound off' : ask
+  soundBtn.title = s === 'on' ? 'Sound on' : s === 'off' ? 'Sound off' : 'Your browser starts sound after a click or a tap'
 }
-hero.onExperience = (on) => { soundBtn.hidden = !on; showSound() }
-soundBtn.addEventListener('click', async () => { await hero.sound(!hero.soundOn); showSound() })
+soundBtn.addEventListener('click', () => hero.toggleSound())
 // For the end-to-end test (scripts/e2e-home.mjs), as the viewer exposes its own.
-Object.assign(window, { __home: { tips: () => hero.tips(), dot: () => hero.dot() } })
+Object.assign(window, { __home: { tips: () => hero.tips(), dot: () => hero.dot(), pads: () => hero.pads(), gfx: () => hero.gfx(), audio: () => hero.audio() } })
+if (debug.size) void import('./debug').then(({ mountDebug }) => mountDebug(debug, { audio: () => hero.audio(), gfx: () => hero.gfx() }))
 
 if (desk) {
   // A real code, made on the first sign that someone's here; each phone that scans it gets an orb.

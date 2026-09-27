@@ -1,6 +1,6 @@
 [package]
 name = "obpal-desktop"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 description = "ob.Pal Desktop: the native helper that turns phone input into keyboard and mouse input for allowed programs, reached only through the ob.Pal Link browser extension (Chrome Native Messaging)."
@@ -21,7 +21,7 @@ path = "src/bin/harness.rs"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-windows = { version = "0.62.2", default-features = false, features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_Security", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Registry", "Win32_System_LibraryLoader", "Win32_Graphics_Gdi"] }
+windows = { version = "0.62.2", default-features = false, features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_Security", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Registry", "Win32_System_LibraryLoader", "Win32_Graphics_Gdi", "Win32_UI_Accessibility", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant"] }
 
 [profile.release]
 opt-level = "s"

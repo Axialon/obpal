@@ -8,8 +8,8 @@
  * and comes to rest on its full stop. Every letter a marble lands on lights up; light them all and the headline
  * celebrates.
  *
- * Playing with a phone is the experience: the marbles sound like glass (./glass.ts), and the phone in hand feels
- * every knock its marble takes.
+ * The marbles sound like glass (./glass.ts), from the first click or tap on the page (browsers allow no sooner), and
+ * a phone in hand feels every knock its marble takes.
  *
  * three.js loads only once the hero is on screen. Until then, and where WebGL isn't available, the headline is the
  * page's own text. Nothing draws while nothing moves.
@@ -17,10 +17,11 @@
 import { addActor, wake } from './ticker'
 import { onTilt, onToss, recentre, startTilt, tiltOn } from './tilt'
 import { hopTo } from './bounce'
-import { createGlass } from './glass'
+import { createGlass, type GlassStats, type SoundState } from './glass'
+import { Governor, ladder, pick, type Step } from './governor'
 import type { Participant, Remote } from '@obpal/host'
 import type { ScreenPointer } from '../viewer/pointer'
-import type { Field, Hit } from './field'
+import type { Field, FieldOrb, Gfx, Hit, PadRect } from './field'
 import { family } from '../family'
 
 const LIME = '#c6ff34'
@@ -42,30 +43,51 @@ const TOSS_MAX = 9.2
 const A_TOSS = 5.2
 /** The opening: the marble falls in from this high (em) and hops a word at a time. */
 const DROP = 2.4
-/** A letter's top and the marble's radius (field.ts TOP and ORB_R, repeated so the page's first script needn't load three.js). */
+/**
+ * A letter's top, the marble's radius, and the id of the first button's footprint (field.ts TOP, ORB_R and PAD_ID,
+ * repeated so the page's first script needn't load three.js).
+ */
 const TOP = 0.182
 const R = 0.2
+const PAD_ID = 1000
 /** A phone feels at most one knock this often (ms). */
 const BUZZ_GAP = 70
+/** The page's buttons in the hero that marbles roll onto, and how far a marble's weight presses one (px). */
+const PADS = '.cta .btn, [data-hint], [data-sound]'
+const PRESS_PX = 1.5
+
+/** The step ?quality= holds the field at, if any. */
+function pinnedStep(steps: readonly Step[]): number | null {
+  const q = new URLSearchParams(location.search).get('quality')
+  const at = q === null ? -1 : pick(steps, q)
+  return at < 0 ? null : at
+}
 
 export interface Hero {
   /** Phones join through this remote (a computer's pairing card), each with its own marble. */
   attach(remote: Remote, pointer: typeof ScreenPointer): void
-  /** Start following the phone's tilt and tosses (on a phone; iOS asks first, from a tap), with sound. */
+  /** Start following the phone's tilt and tosses (on a phone; iOS asks first, from a tap). */
   tilt(): Promise<boolean>
   readonly tilting: boolean
-  /** Sound on or off (on needs a click or a tap, or one earlier on the page). Resolves whether it's on. */
-  sound(on: boolean): Promise<boolean>
-  readonly soundOn: boolean
-  /** Called when playing with a phone starts (sound and feel come with it) or stops. */
-  onExperience: ((on: boolean) => void) | null
+  /** The marbles' sound (./glass.ts): on, blocked (waiting for a click or a tap), off, or none. */
+  readonly sound: SoundState
+  /** The sound button was pressed (a click: the sound can start right there). */
+  toggleSound(): void
+  /** Called when the sound's state changes, and once the field is up (before it, there's nothing to hear). */
+  onSound: ((s: SoundState) => void) | null
+  /** The sound's state, hits and output level (the ?debug=audio readout, tests). */
+  audio(): GlassStats
   /** Where each marble is on screen, how lit, how high it is (em, above the floor) and what it's on (for tests). */
   tips(): { id: string; x: number; y: number; life: number; h: number; on: number }[]
   /** Where the full stop's landing spot is on screen (for tests), once the field is up. */
   dot(): { x: number; y: number } | null
+  /** The buttons marbles can roll onto now, in the order tips() counts them (on: 1000 + index): their text (tests). */
+  pads(): string[]
+  /** How the field draws (the ?debug=gfx readout, tests): its canvas and buffer, and the governor's step. */
+  gfx(): (Gfx & { level: number; steps: Step[]; pinned: boolean }) | null
 }
 
-export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HTMLElement, opts: { still: boolean; onInput?: () => void }): Hero {
+export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HTMLElement, opts: { still: boolean; onInput?: () => void; meter?: boolean }): Hero {
   const still = opts.still
   const coarse = matchMedia('(pointer: coarse)').matches
   let field: Field | null = null
@@ -79,8 +101,19 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   let tossAt = -1e9
   /** The opening is playing (the marble's route runs it; this is whether it's still going). */
   let tour = false
-  const glass = createGlass()
-  let experience = false
+  const glass = createGlass({ meter: opts.meter })
+  glass.onState = (s) => { if (field) heroApi.onSound?.(s) }
+  // A click, tap or key press is the moment a browser lets sound start: offered to the sound right there, inside the
+  // event (Safari allows it nowhere else). On a computer, any on the page; on a phone, only playing in the hero (not
+  // browsing, or following a link: starting sound there could pause the person's own music). The sound button decides
+  // for itself.
+  const unlock = (e: Event) => {
+    const t = e.target as Element | null
+    if (t?.closest?.('[data-sound]')) return
+    if (coarse && (!t || !hero.contains(t) || t.closest('a, [data-send]'))) return
+    glass.gesture()
+  }
+  for (const type of ['pointerdown', 'pointerup', 'touchend', 'keydown', 'click']) addEventListener(type, unlock, { capture: true, passive: true })
 
   /** The headline as the page wraps it: its lines of text, and the box its letters fill (hero px). */
   function measure() {
@@ -117,6 +150,8 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     if (!field) return
     const m = measure()
     W = m.W; H = m.H
+    // The ladder for this size first, so the canvas is never drawn past its pixel budget, not even for a frame.
+    rescale()
     field.layout(m.lines, W, H, m.box)
     field.render()
   }
@@ -194,7 +229,6 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   function join(p: Participant) {
     phones.set(p.id, { at: performance.now(), gone: false, buzzAt: 0, pointing: false })
     if (!pointers.has(p.id)) pointers.set(p.id, new Pointer!())
-    setExperience()
     wake()
   }
   function readPhones(now: number) {
@@ -227,20 +261,94 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     wake()
   }
 
-  // ---- the experience: sound, and the knocks felt in the hand ----
+  // ---- the page's buttons: steps the marbles roll up onto and off (./field.ts), which answer them ----
 
-  function setExperience() {
-    const on = (remote?.participants.length ?? 0) > 0 || tiltOn()
-    if (on === experience) return
-    experience = on
-    // Sound comes with it where the page may already make it (someone clicked here before) and wasn't switched off.
-    const active = (navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation?.hasBeenActive
-    if (on && active && !glass.muted) void glass.set(true).then(() => heroApi.onExperience?.(true))
-    else heroApi.onExperience?.(on)
+  // Each button in the hero is a low step in the marbles' world, where it is on the page (measured every frame, so a
+  // button that moves takes its marble with it). The marbles draw above it and its dots stay under it. It answers a
+  // marble with a light where the marble is (brighter the nearer, in its colour), a small press under its weight, a
+  // little dip when one lands, and a glass tap. It never does its own thing for a marble: only a click or a tap does.
+  const padEls = [...hero.querySelectorAll<HTMLElement>(PADS)]
+  const padState = new Map(padEls.map((el) => [el, { press: 0, pressV: 0, glow: 0, flash: 0, radius: NaN, shown: '' }]))
+  /** Each button's box (hero px), in the order the field counts them; empty while one isn't there to stand on. */
+  let padRects: PadRect[] = []
+  function measurePads(): PadRect[] {
+    const hr = hero.getBoundingClientRect()
+    padRects = padEls.map((el) => {
+      // Hidden, or on its way out (the hint, once played with): nothing to stand on.
+      if (el.hidden || el.classList.contains('gone') || !el.getClientRects().length) return { x: 0, y: 0, w: 0, h: 0, r: 0 }
+      const st = padState.get(el)!
+      if (Number.isNaN(st.radius)) st.radius = parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0
+      const r = el.getBoundingClientRect()
+      // Where it is at rest (a press moves it down a touch).
+      return { x: r.left - hr.left, y: r.top - hr.top - st.press * PRESS_PX, w: r.width, h: r.height, r: Math.min(st.radius, r.height / 2) }
+    })
+    return padRects
   }
+  function padHit(h: Hit) {
+    const st = h.pad === undefined ? undefined : padState.get(padEls[h.pad])
+    if (!st) return
+    st.pressV += 2 + 7 * h.strength
+    st.flash = Math.max(st.flash, 0.55 + 0.45 * h.strength)
+  }
+  /** Each button's light and press, from the marbles on it and near it. Returns whether any is still settling. */
+  function answerPads(dt: number): boolean {
+    if (!field) return false
+    const f = field
+    let busy = false
+    const orbs = f.orbs().map((o) => {
+      const p = f.project(o.orb.x, o.orb.y, o.orb.z)
+      const e = f.project(o.orb.x + o.orb.r, o.orb.y, o.orb.z)
+      return { o, p, rad: Math.max(4, Math.hypot(e.x - p.x, e.y - p.y)), s: f.surface(o.orb.x, o.orb.z) }
+    })
+    padEls.forEach((el, i) => {
+      const st = padState.get(el)!
+      const b = padRects[i]
+      if (!b) return
+      let near: { o: FieldOrb; x: number; y: number; k: number } | null = null
+      let weight = 0
+      for (const { o, p, rad, s } of b.w > 0 ? orbs : []) {
+        const on = s.id === PAD_ID + i && o.orb.y - o.orb.r - s.h < 0.02
+        if (on) weight++
+        // How near it is: 1 on it or over it, fading out a few radii away.
+        const d = Math.hypot(Math.max(b.x - p.x, 0, p.x - b.x - b.w), Math.max(b.y - p.y, 0, p.y - b.y - b.h))
+        const k = on ? 1 : Math.max(0, 1 - d / (rad * 3)) * (0.35 + 0.65 * o.life)
+        if (!near || k > near.k) near = { o, x: p.x - b.x, y: p.y - b.y, k }
+      }
+      const goal = near ? near.k : 0
+      st.glow += (goal - st.glow) * (1 - Math.exp(-dt * 10))
+      st.flash *= Math.exp(-dt * 5)
+      // Under a marble's weight it gives a little; a landing dips it, and it springs back.
+      const rest = weight ? 0.4 : 0
+      st.pressV += (-(st.press - rest) * 380 - st.pressV * 26) * dt
+      st.press = Math.max(-0.4, Math.min(1.4, st.press + st.pressV * dt))
+      const lit = Math.min(1, Math.max(st.glow, st.flash))
+      const c = near?.o.color
+      const shown = `${near ? `${near.x.toFixed(0)},${near.y.toFixed(0)}` : ''}|${lit.toFixed(2)}|${st.press.toFixed(2)}|${c ? c.getHexString() : ''}`
+      if (shown !== st.shown) {
+        st.shown = shown
+        const s = el.style
+        if (near) { s.setProperty('--orb-x', `${near.x.toFixed(0)}px`); s.setProperty('--orb-y', `${near.y.toFixed(0)}px`) }
+        if (c) s.setProperty('--orb-rgb', `${Math.round(c.r * 255)} ${Math.round(c.g * 255)} ${Math.round(c.b * 255)}`)
+        s.setProperty('--orb-glow', lit.toFixed(2))
+        s.translate = Math.abs(st.press) < 0.005 ? '' : `0 ${(st.press * PRESS_PX).toFixed(2)}px`
+      }
+      if (Math.abs(st.press - rest) > 0.005 || Math.abs(st.pressV) > 0.02 || st.flash > 0.01 || Math.abs(st.glow - goal) > 0.01) busy = true
+    })
+    return busy
+  }
+  // A button that changes (it goes, it appears, its words change, the words above it reflow) while nothing moves wakes
+  // the marbles, which find it where it is now.
+  const padWatch = new MutationObserver(() => wake())
+  const padSize = new ResizeObserver(() => wake())
+  for (const el of padEls) { padWatch.observe(el, { attributes: true, attributeFilter: ['class', 'hidden', 'data-state'] }); padSize.observe(el) }
+  const copy = hero.querySelector('.hero-copy')
+  if (copy) padSize.observe(copy)
+
+  // ---- what a hit sounds like, and the knock felt in the hand ----
 
   function onHit(h: Hit) {
     if (!field) return
+    if (h.kind === 'button') padHit(h)
     const p = field.project(h.x, h.y, h.z)
     glass.hit(h.kind, h.strength, (p.x / Math.max(1, W)) * 2 - 1)
     // Long enough to feel: many phones' motors don't answer pulses much under 20 ms.
@@ -272,16 +380,39 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
 
   // ---- the loop ----
 
-  // A device that can't keep up draws less finely: judged on the frames while something moves.
-  const frames: number[] = []
-  let quality = 2
+  // How finely the field draws (./governor.ts): the finest the device keeps up with, judged on the frames while
+  // something moves. It starts at the screen's own pixels and goes finer where the GPU shows it has room (so a slow
+  // GPU's first second isn't a stutter). ?quality=super|native|lite|plain|low (or a step's number) holds it at one
+  // step, for screenshots and for trying a device's steps by hand.
+  let steps = ladder(devicePixelRatio || 1, coarse)
+  let governor = new Governor(steps, { level: pick(steps, 'native') })
+  let pinned = pinnedStep(steps)
+  function setQuality() {
+    if (!field) return
+    const level = pinned ?? governor.level
+    field.quality(steps[level], level)
+  }
   function pace(dt: number) {
-    if (!field || quality === 0) return
-    frames.push(dt)
-    if (frames.length < 90) return
-    const slow = frames.sort((a, b) => a - b)[45] > 1 / 40
-    frames.length = 0
-    if (slow) field.quality(--quality)
+    if (!field || pinned !== null) return
+    const before = governor.level
+    if (governor.frame(dt, field.gpu()) !== before) setQuality()
+  }
+  /**
+   * The screen changed (the canvas's size, or its pixels per CSS pixel): a ladder for it (the steps above the screen's
+   * own pixels within their budget), and the governor starts learning it again.
+   */
+  function rescale() {
+    const dpr = devicePixelRatio || 1
+    const next = ladder(dpr, coarse, { w: W, h: H })
+    if (JSON.stringify(next) !== JSON.stringify(steps)) {
+      // The same kind of step on the new ladder (as fine as before, or the nearest coarser).
+      const was = steps[governor.level]
+      steps = next
+      const at = steps.findIndex((s) => s.pr <= was.pr && s.glass <= was.glass)
+      governor = new Governor(steps, { level: at < 0 ? steps.length - 1 : at })
+      pinned = pinnedStep(steps)
+    } else governor.reset()
+    setQuality()
   }
 
   addActor((now, dt) => {
@@ -298,10 +429,12 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     o.push = tilting ? tiltPush : null
     if (tilting) o.orb.resting = false
     for (const [id, ph] of phones) if (ph.gone) { f.removeOrb(id); phones.delete(id) }
+    f.pads(measurePads())
     const busy = f.step(dt)
+    const padsBusy = answerPads(dt)
     f.render()
     if (busy) pace(dt)
-    return busy || mine || tilting || tour
+    return busy || padsBusy || mine || tilting || tour
   })
 
   // Only on screen does anything draw (and three.js loads only then).
@@ -324,6 +457,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       ])
       field = createField(stage, { coarse })
       field.onHit = onHit
+      setQuality()
       document.documentElement.classList.add('field3d')
       layout()
       // At rest on the full stop, unless the opening is about to bring it there.
@@ -334,6 +468,18 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       field.render()
       opening()
       new ResizeObserver(() => { layout(); wake() }).observe(hero)
+      // The canvas's size in device pixels, exactly, where the browser says (moving to another screen changes it too).
+      const exact = new ResizeObserver(([e]) => {
+        const d = e.devicePixelContentBoxSize?.[0]
+        if (!d || !field) return
+        field.pixels(d.inlineSize, d.blockSize)
+        rescale()
+        field.render()
+        wake()
+      })
+      try { exact.observe(stage, { box: 'device-pixel-content-box' }) } catch { /* Safari: worked out from the CSS size */ }
+      // Now there's something to hear.
+      heroApi.onSound?.(glass.state)
       wake()
     } catch (e) {
       // No WebGL (or it failed): the headline stays the page's own text.
@@ -344,12 +490,12 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   }
 
   const heroApi: Hero = {
-    onExperience: null,
+    onSound: null,
     attach(r, P) {
       remote = r
       Pointer = P
       r.on('join', join)
-      r.on('leave', (p) => { const ph = phones.get(p.id); if (ph) ph.gone = true; pointers.delete(p.id); colors.delete(p.id); setExperience(); wake() })
+      r.on('leave', (p) => { const ph = phones.get(p.id); if (ph) ph.gone = true; pointers.delete(p.id); colors.delete(p.id); wake() })
       r.on('recenter', (p) => pointers.get(p.id)?.recenter())
       r.on('input', () => wake())
       r.on('toss', (e, who) => phoneToss(who, tossSpeed(e.v)))
@@ -366,34 +512,31 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
         wake()
       })
     },
-    async tilt() {
-      // From the same tap: motion (iOS asks), and sound.
-      const sound = glass.muted ? Promise.resolve(false) : glass.set(true)
-      const ok = await startTilt()
-      await sound
-      setExperience()
-      return ok
-    },
+    // From a tap: motion (iOS asks). The same tap has already started the sound.
+    tilt: () => startTilt(),
     get tilting() { return tiltOn() },
-    sound: (on) => glass.set(on),
-    get soundOn() { return glass.on },
+    get sound() { return glass.state },
+    toggleSound: () => glass.toggle(),
+    audio: () => glass.stats(),
     tips: () => {
       if (!field) return []
       const f = field
       return f.orbs().map((o) => {
         const p = f.project(o.orb.x, o.orb.y, o.orb.z)
-        const under = f.under(o.orb.x, o.orb.z)
-        // What it's on: a letter, the floor (-1), or nothing yet (in the air, -2).
-        const on = Math.abs(o.orb.y - o.orb.r - (under >= 0 ? TOP : 0)) < 0.01 && Math.abs(o.orb.vy) < 0.5 ? under : -2
+        const s = f.surface(o.orb.x, o.orb.z)
+        // What it's on: a letter, a button (1000 + its number: pads()), the floor (-1), or nothing yet (in the air, -2).
+        const on = Math.abs(o.orb.y - o.orb.r - s.h) < 0.01 && Math.abs(o.orb.vy) < 0.5 ? s.id : -2
         return { id: o.id, x: p.x, y: p.y, life: o.life, h: o.orb.y - o.orb.r, on }
       })
     },
+    pads: () => padEls.map((el) => el.textContent?.trim() ?? ''),
     dot: () => {
       if (!field) return null
       const l = field.letters()
       const d = l[l.length - 1]
       return d ? field.project(d.spot[0], TOP + R, d.spot[1]) : null
     },
+    gfx: () => field && { ...field.gfx(), level: pinned ?? governor.level, steps, pinned: pinned !== null },
   }
   return heroApi
 }

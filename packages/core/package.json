@@ -3,8 +3,28 @@
   "version": "0.1.0",
   "type": "module",
   "license": "MIT",
-  "description": "ob-pal protocol core: state codec, pairing, signaling and the device-side link.",
+  "description": "ob.Pal protocol core: the state codec, pairing, signaling, the control catalogue and the device-side link.",
+  "keywords": ["obpal", "webrtc", "controller", "gamepad", "gyro", "phone", "remote", "protocol"],
+  "homepage": "https://obpal.blackboxes.net",
+  "repository": { "type": "git", "url": "git+https://github.com/Axialon/obpal.git", "directory": "packages/core" },
+  "bugs": "https://github.com/Axialon/obpal/issues",
+  "sideEffects": false,
   "main": "src/index.ts",
   "types": "src/index.ts",
-  "exports": { ".": "./src/index.ts", "./toss": "./src/toss.ts" }
+  "exports": { ".": "./src/index.ts", "./toss": "./src/toss.ts" },
+  "files": ["dist"],
+  "scripts": {
+    "build": "node ../../scripts/build-packages.mjs core",
+    "prepack": "node ../../scripts/build-packages.mjs core"
+  },
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+      "./toss": { "types": "./dist/toss.d.ts", "import": "./dist/toss.js" },
+      "./package.json": "./package.json"
+    }
+  }
 }

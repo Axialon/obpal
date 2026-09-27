@@ -4,6 +4,8 @@
  * phone. SVG with gradients only: no filters, and nothing draws unless main.ts asks for a frame (on screen, lately
  * looked at), so a phone stays cool.
  */
+import { aim, BLOCK, FINGER, follow, HOLD, JOINT_R, LINK_W, PADS, PLATE, pose, RIM, story, TABLE, type Arm } from './arm'
+
 const NS = 'http://www.w3.org/2000/svg'
 type Attrs = Record<string, string | number>
 function el<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Attrs = {}, parent?: Element): SVGElementTagNameMap[K] {
@@ -224,79 +226,60 @@ export function pointScene(): Scene {
 
 export function armScene(): Scene {
   const { svg, u } = frame('A robot arm that picks and places, following a phone moved through the air')
-  const bx = 204, by = 212, L1 = 86, L2 = 76
-  el('ellipse', { cx: 210, cy: 222, rx: 170, ry: 14, fill: u('floor') }, svg)
-  el('line', { x1: 24, y1: 222, x2: 376, y2: 222, stroke: HAZE, 'stroke-opacity': 0.22, 'stroke-width': 1.2 }, svg)
+  el('ellipse', { cx: 210, cy: TABLE, rx: 170, ry: 14, fill: u('floor') }, svg)
+  el('line', { x1: 24, y1: TABLE, x2: 376, y2: TABLE, stroke: HAZE, 'stroke-opacity': 0.22, 'stroke-width': 1.2 }, svg)
   // Two pads the block goes between.
-  const pads = [{ x: 318, y: 222 }, { x: 96, y: 222 }]
-  for (const pd of pads) el('rect', { x: pd.x - 24, y: pd.y - 5, width: 48, height: 5, rx: 2.5, fill: HAZE, 'fill-opacity': 0.22 }, svg)
+  for (const pd of PADS) el('rect', { x: pd.x - 24, y: TABLE - 5, width: 48, height: 5, rx: 2.5, fill: HAZE, 'fill-opacity': 0.22 }, svg)
   const handPath = el('path', { fill: 'none', stroke: LIME, 'stroke-opacity': 0.3, 'stroke-width': 1.2, 'stroke-dasharray': '1.5 4.5', 'stroke-linecap': 'round' }, svg)
-  const block = el('rect', { width: 20, height: 20, rx: 4, fill: LIME, stroke: DEEP, 'stroke-width': 1 }, svg)
-  el('rect', { x: bx - 28, y: by - 2, width: 56, height: 12, rx: 5, fill: u('glass'), stroke: HAZE, 'stroke-opacity': 0.4 }, svg)
-  const upper = el('line', { stroke: u('metal'), 'stroke-width': 13, 'stroke-linecap': 'round' }, svg)
-  const fore = el('line', { stroke: u('metal'), 'stroke-width': 10, 'stroke-linecap': 'round' }, svg)
-  const joints = [9, 7.5, 6].map((r) => el('circle', { r, fill: DEEP, stroke: LIME, 'stroke-width': 2.2 }, svg))
-  const f1 = el('line', { stroke: '#e9e4ff', 'stroke-width': 4, 'stroke-linecap': 'round' }, svg)
-  const f2 = el('line', { stroke: '#e9e4ff', 'stroke-width': 4, 'stroke-linecap': 'round' }, svg)
+  const block = el('rect', { width: BLOCK, height: BLOCK, rx: 4, fill: LIME, stroke: DEEP, 'stroke-width': 1 }, svg)
+  // The turntable on the table, with a mark on its rim where the arm faces: it crosses the middle as the base turns.
+  el('rect', { x: PLATE.x, y: PLATE.y, width: PLATE.w, height: PLATE.h, rx: 5, fill: u('glass'), stroke: HAZE, 'stroke-opacity': 0.4 }, svg)
+  const mark = el('line', { y1: PLATE.y + 5, y2: PLATE.y + 9, stroke: LIME, 'stroke-opacity': 0.8, 'stroke-width': 2, 'stroke-linecap': 'round' }, svg)
+  const upper = el('line', { stroke: u('metal'), 'stroke-width': LINK_W[0], 'stroke-linecap': 'round' }, svg)
+  const fore = el('line', { stroke: u('metal'), 'stroke-width': LINK_W[1], 'stroke-linecap': 'round' }, svg)
+  const joints = JOINT_R.map((r) => el('circle', { r, fill: DEEP, stroke: LIME, 'stroke-width': RIM }, svg))
+  const f1 = el('line', { stroke: '#e9e4ff', 'stroke-width': FINGER.w, 'stroke-linecap': 'round' }, svg)
+  const f2 = el('line', { stroke: '#e9e4ff', 'stroke-width': FINGER.w, 'stroke-linecap': 'round' }, svg)
   const { g: ph, screen } = phone(svg, u, 0.9)
   el('path', { d: 'M-5 4 L-5 -4 Q-5 -7 -2 -7 L2 -7 Q5 -7 5 -4 L5 6', fill: 'none', stroke: LIME, 'stroke-width': 1.6, 'stroke-linecap': 'round' }, screen)
-  // The story: over the block, down, grip, up, across, down, let go, up; then back the other way.
-  const hover = 150
-  const legs = (from: Point, to: Point): [number, number, number, number][] => [
-    [from.x, hover, 0, 1.1], [from.x, from.y - 16, 0, 0.6], [from.x, from.y - 16, 1, 0.3], [from.x, hover - 10, 1, 0.6],
-    [to.x, hover - 10, 1, 1.3], [to.x, to.y - 16, 1, 0.6], [to.x, to.y - 16, 0, 0.3], [to.x, hover, 0, 0.6],
-  ]
-  const story = [...legs(pads[0], pads[1]), ...legs(pads[1], pads[0])]
-  const total = story.reduce((s, l) => s + l[3], 0)
-  let a1 = -1.9, a2 = 1.2, grip = 0, held = false
-  let bxy = { x: pads[0].x, y: pads[0].y - 10 }
+  // It plays a pick and place by itself (./arm.ts), or reaches for your pointer; either way, its elbow up and every
+  // part above the table, turning its base to reach the other side.
+  let arm: Arm = story(0).arm, grip = 0, held = false, wantGrip = 0, lean = 0
+  let lastX = pose(arm).wrist.x
+  let bxy = { x: PADS[0].x, y: TABLE - BLOCK / 2 }
   const hand: Point[] = []
-  const tipAt = (t: number): [number, number, number] => {
-    let tt = t % total
-    let prev = story[story.length - 1]
-    for (const l of story) {
-      if (tt <= l[3]) { const k = smooth(tt / l[3]); return [prev[0] + (l[0] - prev[0]) * k, prev[1] + (l[1] - prev[1]) * k, prev[2] + (l[2] - prev[2]) * k] }
-      tt -= l[3]; prev = l
-    }
-    return [story[0][0], story[0][1], 0]
-  }
-  let wantGrip = 0
   return {
     svg,
     press() { wantGrip = wantGrip ? 0 : 1 },
     step(dt, p, t) {
-      let tx: number, ty: number, tg: number
-      if (p) { tx = p.x; ty = Math.min(p.y, 206); tg = wantGrip } else { [tx, ty, tg] = tipAt(t); wantGrip = 0 }
-      // Two-link reach, elbow up, toward the hand.
-      let dx = tx - bx, dy = ty - by
-      const d = clamp(Math.hypot(dx, dy), 30, L1 + L2 - 1)
-      const k = d / (Math.hypot(dx, dy) || 1)
-      dx *= k; dy *= k
-      const c2 = (dx * dx + dy * dy - L1 * L1 - L2 * L2) / (2 * L1 * L2)
-      const t2 = -Math.acos(clamp(c2, -1, 1))
-      const t1 = Math.atan2(dy, dx) - Math.atan2(L2 * Math.sin(t2), L1 + L2 * Math.cos(t2))
-      a1 = ease(a1, t1, dt, 10); a2 = ease(a2, t2, dt, 10)
+      let to: Arm, tg: number
+      if (p) { to = aim(p, arm.turn); tg = wantGrip } else { ({ arm: to, grip: tg } = story(t)); wantGrip = 0 }
+      arm = follow(arm, to, dt)
       grip = ease(grip, tg, dt, 14)
-      const ex = bx + L1 * Math.cos(a1), ey = by + L1 * Math.sin(a1)
-      const wx = ex + L2 * Math.cos(a1 + a2), wy = ey + L2 * Math.sin(a1 + a2)
-      set(upper, { x1: bx, y1: by, x2: ex, y2: ey })
-      set(fore, { x1: ex, y1: ey, x2: wx, y2: wy })
-      set(joints[0], { cx: bx, cy: by }); set(joints[1], { cx: ex, cy: ey }); set(joints[2], { cx: wx, cy: wy })
-      // The gripper hangs straight down, its fingers closing on the block.
-      const gap = 12 - grip * 7
-      set(f1, { x1: wx - gap, y1: wy + 2, x2: wx - gap, y2: wy + 16 })
-      set(f2, { x1: wx + gap, y1: wy + 2, x2: wx + gap, y2: wy + 16 })
-      const near = Math.abs(wx - bxy.x) < 14 && Math.abs(wy + 11 - bxy.y) < 16
+      const { shoulder: s, elbow: e, wrist: w, facing } = pose(arm)
+      set(upper, { x1: s.x, y1: s.y, x2: e.x, y2: e.y })
+      set(fore, { x1: e.x, y1: e.y, x2: w.x, y2: w.y })
+      set(joints[0], { cx: s.x, cy: s.y }); set(joints[1], { cx: e.x, cy: e.y }); set(joints[2], { cx: w.x, cy: w.y })
+      set(mark, { x1: s.x + facing * (PLATE.w / 2 - 7), x2: s.x + facing * (PLATE.w / 2 - 7) })
+      // The gripper hangs straight down, its fingers closing on the block (or all the way, on nothing); edge on as the
+      // base turns.
+      const near = Math.abs(w.x - bxy.x) < 14 && Math.abs(w.y + HOLD - bxy.y) < 16
+      const gap = Math.max(held || near ? BLOCK / 2 + FINGER.w / 2 : 3, 17 - grip * 14) * Math.abs(facing)
+      set(f1, { x1: w.x - gap, y1: w.y + FINGER.from, x2: w.x - gap, y2: w.y + FINGER.to })
+      set(f2, { x1: w.x + gap, y1: w.y + FINGER.from, x2: w.x + gap, y2: w.y + FINGER.to })
       if (!held && grip > 0.8 && near) held = true
       if (held && grip < 0.4) held = false
-      if (held) bxy = { x: wx, y: wy + 11 }
-      else { const floor = pads.find((pd) => Math.abs(pd.x - bxy.x) < 30)?.y ?? 222; bxy.y = Math.min(floor - 10, bxy.y + dt * 260) }
-      set(block, { x: bxy.x - 10, y: bxy.y - 10 })
-      // The phone, up in the air, making the same moves at a smaller scale: the arm follows the hand.
-      const hx = 64 + (wx - bx) * 0.3, hy = 74 + (wy - 150) * 0.3
+      if (held) bxy = { x: w.x, y: w.y + HOLD }
+      else bxy.y = Math.min(TABLE - BLOCK / 2, bxy.y + dt * 260)
+      set(block, { x: bxy.x - BLOCK / 2, y: bxy.y - BLOCK / 2 })
+      // The phone, up in the air, making the same moves at a smaller scale and leaning the way it goes: the arm
+      // follows the hand.
+      const hx = 64 + (w.x - s.x) * 0.3, hy = 74 + (w.y - 150) * 0.3
+      lean = ease(lean, clamp(((w.x - lastX) / Math.max(dt, 1e-3)) * 0.06, -16, 16), dt, 6)
+      lastX = w.x
       hand.unshift({ x: hx, y: hy + 30 })
       hand.length = Math.min(hand.length, 36)
-      set(ph, { transform: `translate(${hx} ${hy}) rotate(${(a1 + a2 + Math.PI / 2) * 8})` })
+      set(ph, { transform: `translate(${hx} ${hy}) rotate(${lean})` })
       handPath.setAttribute('d', hand.length > 1 ? `M${hand.map((q) => `${q.x.toFixed(1)} ${q.y.toFixed(1)}`).join(' L')}` : '')
       return true
     },
@@ -312,7 +295,7 @@ export function playScene(): Scene {
   el('circle', { cx: W / 2, cy: H / 2, r: 30, fill: 'none', stroke: HAZE, 'stroke-opacity': 0.16, 'stroke-width': 1.2 }, svg)
   el('ellipse', { cx: W / 2, cy: H / 2, rx: 120, ry: 80, fill: u('haze'), opacity: 0.25 }, svg)
   const colors = [LIME, SKY, ROSE, AMBER]
-  // Each player guards a side: bottom (you), top, left, right.
+  // Each player guards a side: bottom (you), top, left, right. Playing, yours goes anywhere on the field.
   const home = [{ x: W / 2, y: B - 22 }, { x: W / 2, y: T + 22 }, { x: L + 22, y: H / 2 }, { x: R - 22, y: H / 2 }]
   const pucks = colors.map((c, i) => ({ ...home[i], vx: 0, vy: 0, rot: 0, c: el('circle', { r: 12, fill: c, stroke: DEEP, 'stroke-width': 1.5 }, svg), i }))
   const phones = colors.map((c, i) => {
@@ -331,14 +314,24 @@ export function playScene(): Scene {
       if (x < L + 8) { x = L + 8; vx = Math.abs(vx) } else if (x > R - 8) { x = R - 8; vx = -Math.abs(vx) }
       if (y < T + 8) { y = T + 8; vy = Math.abs(vy) } else if (y > B - 8) { y = B - 8; vy = -Math.abs(vy) }
       for (const pk of pucks) {
-        // Guard your side: follow the ball along it, lean in when it's close.
+        // Guard your side: follow the ball along it, lean in when it's close. Your own puck, played, goes where you
+        // point, anywhere on the field.
         let gx: number, gy: number
-        if (pk.i === 0 && p) { gx = clamp(p.x, L + 14, R - 14); gy = clamp(p.y, H / 2 + 20, B - 14) }
+        if (pk.i === 0 && p) { gx = clamp(p.x, L + 14, R - 14); gy = clamp(p.y, T + 14, B - 14) }
         else if (pk.i < 2) { gx = clamp(x, L + 30, R - 30); gy = home[pk.i].y + (Math.abs(y - home[pk.i].y) < 70 ? (y - home[pk.i].y) * 0.4 : 0) }
         else { gy = clamp(y, T + 30, B - 30); gx = home[pk.i].x + (Math.abs(x - home[pk.i].x) < 70 ? (x - home[pk.i].x) * 0.4 : 0) }
         const ox = pk.x, oy = pk.y
         pk.x = ease(pk.x, gx, dt, pk.i === 0 && p ? 14 : 5)
         pk.y = ease(pk.y, gy, dt, pk.i === 0 && p ? 14 : 5)
+        // Pucks don't pass through each other: yours, going anywhere, nudges the others aside.
+        for (const o of pucks) {
+          if (o === pk) continue
+          const dx = pk.x - o.x, dy = pk.y - o.y, d = Math.hypot(dx, dy)
+          if (d >= 24 || d < 1e-6) continue
+          const push = (24 - d) / 2
+          pk.x = clamp(pk.x + (dx / d) * push, L + 14, R - 14); pk.y = clamp(pk.y + (dy / d) * push, T + 14, B - 14)
+          o.x = clamp(o.x - (dx / d) * push, L + 14, R - 14); o.y = clamp(o.y - (dy / d) * push, T + 14, B - 14)
+        }
         pk.vx = (pk.x - ox) / Math.max(dt, 1e-3); pk.vy = (pk.y - oy) / Math.max(dt, 1e-3)
         const dx = x - pk.x, dy = y - pk.y, d = Math.hypot(dx, dy)
         if (d < 18.5 && d > 0) {

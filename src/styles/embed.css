@@ -1,0 +1,30 @@
+/* The embed demo (/embed/): the sims' stage and panel, with the snippet, who is here, and a label under each shape. */
+body.embed-demo { background: radial-gradient(120% 90% at 60% 35%, #141a26 0%, #07090d 62%) fixed; }
+.embed-demo .embed-panel { bottom: auto; max-height: calc(100vh - 108px); width: 380px; }
+.embed-people { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.embed-people:empty { display: none; }
+.embed-people li { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px 0 3px; border-radius: 999px; background: rgb(var(--hl-rgb) / 0.06); font-size: 12.5px; font-weight: 650; }
+.embed-people li small { color: var(--muted); font-weight: 600; }
+.embed-people .person { width: 26px; height: 26px; }
+.embed-code { flex: none; overflow: hidden; border-radius: 16px; background: rgb(0 0 0 / 0.34); border: 1px solid rgb(var(--hl-rgb) / 0.08); }
+.embed-code-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 6px 6px 14px; border-bottom: 1px solid rgb(var(--hl-rgb) / 0.07); color: var(--muted); font: 650 11.5px var(--font); }
+.embed-code-head .btn { min-height: 0; height: 28px; padding: 0 12px; border-radius: 9px; font-size: 12px; }
+.embed-code pre { margin: 0; padding: 12px 14px 14px; max-height: 350px; overflow: auto; color: #d8e1ee; font: 500 11px/1.65 var(--font-data, ui-monospace, monospace); white-space: pre; scrollbar-width: thin; scrollbar-color: rgb(var(--hl-rgb) / 0.2) transparent; }
+.embed-code pre:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.embed-links { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; font-weight: 650; }
+.embed-links a { color: var(--muted); text-decoration: none; }
+.embed-links a:hover { color: var(--ink); }
+.embed-note { margin: 0; padding: 10px 12px; border-radius: 12px; background: rgb(252 211 77 / 0.12); color: #fde68a; font-size: 12.5px; line-height: 1.45; }
+
+/* A label under each shape: its name, and who holds it in their colour. */
+.embed-labels { position: fixed; inset: 0; z-index: 2; pointer-events: none; }
+.embed-labels span { position: absolute; left: 0; top: 0; display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 11px 0 9px; border-radius: 999px; background: rgb(8 10 16 / 0.58); border: 1px solid rgb(var(--hl-rgb) / 0.1); color: var(--ink); font: 650 12px var(--font); white-space: nowrap; backdrop-filter: blur(10px); will-change: transform; }
+.embed-labels span i { width: 8px; height: 8px; border-radius: 50%; background: rgb(var(--hl-rgb) / 0.35); }
+.embed-labels span.held { border-color: color-mix(in srgb, var(--c) 55%, transparent); }
+.embed-labels span.held i { background: var(--c); box-shadow: 0 0 10px var(--c); }
+.embed-labels span small { color: var(--muted); font-weight: 600; }
+
+@media (max-width: 860px) {
+  .embed-demo .embed-panel { top: auto; bottom: 10px; max-height: 42vh; width: auto; }
+  .embed-code pre { max-height: 150px; }
+}

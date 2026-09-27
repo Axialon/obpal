@@ -9,10 +9,19 @@
  *   3D:         a one-finger trackpad drag = left-button pointer drag on the largest canvas; a pinch = wheel.
  *   PC:         the native helper. By default a stub host (extension/e2e/native-stub.mjs) stands in for
  *               ob.Pal Desktop and records what the extension sends: the permission, the allow request from
- *               the popup, frames carrying the held keys, and the disarm on leaving the target.
+ *               the popup, frames carrying the held keys, the phone's typing (a text field takes the focus, the
+ *               phone offers Type, "hi" arrives as text requests and ↵ as Enter in the frames), and the disarm on
+ *               leaving the target.
  *               With --desktop the installed helper (desktop/, `obpal-desktop.exe install`) is used instead
  *               and a harness window (obpal-harness.exe) proves that keys are refused until the program is
- *               allowed, then typed into it, then refused again once it is forgotten.
+ *               allowed, then typed into it, then refused again once it is forgotten. That is the one run meant
+ *               to reach an installed ob.Pal Desktop, and it injects real input: a developer's own, deliberately.
+ *
+ * Every other run must never reach an installed ob.Pal Desktop (the owner's may control the whole PC). The test
+ * copy has no manifest key, so it gets an ID of its own, which an installed helper's allowed_origins refuse (Chrome
+ * won't even start it); it names only the stub's host, and the run refuses to launch while any file of the copy
+ * still names the real one. Afterwards, ob.Pal Desktop's own log (read only) must show no session from this
+ * run's browser, or the run fails.
  *
  * Online (production signaling):
  *   Controller: the Gamepad API shows "ob.Pal Controller", A held on the phone = button 0 pressed.
@@ -91,6 +100,10 @@ const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
 manifest.host_permissions = [...manifest.host_permissions, 'http://127.0.0.1/*']
 manifest.permissions = [...manifest.permissions, 'nativeMessaging']
 manifest.optional_permissions = (manifest.optional_permissions ?? []).filter((p) => p !== 'nativeMessaging')
+// No key: the copy gets an ID of its own, which an installed ob.Pal Desktop refuses (its allowed_origins name only
+// the fixed ID). Nothing here needs the fixed ID: the stub is registered for the ID the copy gets, and the service
+// and the test pages don't look at it. --desktop keeps the key, to reach the installed helper.
+if (!DESKTOP) delete manifest.key
 await writeFile(manifestPath, JSON.stringify(manifest, null, 2))
 
 // ---- the native helper: the stub, registered under a test-only host name -------------------------------------
@@ -101,6 +114,7 @@ const REAL_HOST = 'net.blackboxes.obpal'
 const STUB_KEYS = ['HKCU\\Software\\Chromium\\NativeMessagingHosts', 'HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts'].map((k) => `${k}\\${STUB_HOST}`)
 const stubDir = await mkdtemp(join(tmpdir(), 'obpal-link-stub-'))
 const stubLogPath = join(stubDir, 'stub.log')
+const stubCtlPath = join(stubDir, 'stub.ctl.json')
 const registered = []
 if (!DESKTOP) {
   for (const f of await readdir(ext, { recursive: true })) {
@@ -109,9 +123,50 @@ if (!DESKTOP) {
     const src = await readFile(p, 'utf8')
     if (src.includes(REAL_HOST)) await writeFile(p, src.split(REAL_HOST).join(STUB_HOST))
   }
-  process.env.OBPAL_STUB_LOG = stubLogPath // Playwright hands the environment on to Chromium, and Chromium to the host
+  // Not launching while the copy could still reach the real host: any file that names it (the scripts, the manifest,
+  // the pages, whatever else the build holds), or a manifest that kept the key.
+  const realName = new RegExp(`${REAL_HOST.replace(/\./g, '\\.')}(?![\\w.-])`)
+  const unsafe = []
+  for (const f of await readdir(ext, { recursive: true })) {
+    const p = join(ext, f)
+    if (statSync(p).isFile() && realName.test(await readFile(p, 'latin1'))) unsafe.push(`${f} names ${REAL_HOST}`)
+  }
+  if ('key' in JSON.parse(await readFile(manifestPath, 'utf8'))) unsafe.push('the manifest kept its key')
+  if (unsafe.length) {
+    console.error(`ob.Pal Link e2e: NOT LAUNCHING. The test copy could reach an installed ob.Pal Desktop: ${unsafe.join('; ')}.`)
+    await Promise.allSettled([rm(ext, { recursive: true, force: true }), rm(stubDir, { recursive: true, force: true })])
+    process.exit(1)
+  }
+  // Playwright hands the environment on to Chromium, and Chromium to the host.
+  process.env.OBPAL_STUB_LOG = stubLogPath
+  process.env.OBPAL_STUB_CTL = stubCtlPath
+}
+
+/**
+ * ob.Pal Desktop's own lifecycle log (desktop/src/main.rs), read only: each session it serves logs
+ * `<unix secs> [<pid>] serving <origin> …` (or `refused origin <origin>`), then `… browser: <the browser that
+ * started it>`. Where it stands before anything is launched, so the run can prove afterwards that it added no session.
+ */
+const DESKTOP_LOG = process.env.APPDATA ? join(process.env.APPDATA, 'obpal', 'desktop.log') : ''
+const desktopLogAt = (() => { try { return statSync(DESKTOP_LOG).size } catch { return 0 } })()
+/** The test copy's IDs (one per launch; the same, as the copy's folder is): a line naming one is a session of ours. */
+const copyIds = new Set()
+
+/** Lines the helper logged since the run began that name this run's browser, or the test copy. */
+function desktopLogReached() {
+  let log
+  try { log = readFileSync(DESKTOP_LOG) } catch { return [] }
+  // Past 1 MB the helper starts its log afresh: then all of it is new.
+  const fresh = (log.length >= desktopLogAt ? log.subarray(desktopLogAt) : log).toString('utf8')
+  const browser = (executablePath ?? chromium.executablePath()).toLowerCase()
+  return fresh.split(/\r?\n/).filter((line) => {
+    const l = line.toLowerCase()
+    return (/\bbrowser: /.test(l) && (l.includes('ms-playwright') || l.includes(browser))) || [...copyIds].some((id) => l.includes(`chrome-extension://${id}/`))
+  })
 }
 const stubLog = () => (existsSync(stubLogPath) ? readFileSync(stubLogPath, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [])
+/** What the stub reports as focused on the PC (a text or password field, and which window is in front). */
+const stubFocus = (focus) => writeFile(stubCtlPath, JSON.stringify(focus))
 
 async function registerStub(extensionId) {
   const bat = join(stubDir, 'native-stub.bat')
@@ -197,6 +252,7 @@ let desk = await launchDesk()
 async function openPopup(ctx) {
   const worker = ctx.serviceWorkers()[0] ?? (await ctx.waitForEvent('serviceworker'))
   const id = new URL(worker.url()).host
+  copyIds.add(id)
   const popup = await ctx.newPage()
   await popup.goto(`chrome-extension://${id}/popup.html`)
   return { id, popup }
@@ -219,6 +275,7 @@ async function touchOn(ctx, phone) {
 let exitCode = 0
 try {
   console.log('ob.Pal Link e2e')
+  if (DESKTOP) console.log('  --desktop: this run reaches the installed ob.Pal Desktop and injects real input (into its harness window)')
   let { id, popup } = await openPopup(desk)
   console.log(`  extension ${id} · ${manifest.name} ${manifest.version} · phone via ${local.origin}`)
   if (!DESKTOP) await registerStub(id)
@@ -424,7 +481,7 @@ try {
   }
 
   if (!DESKTOP) {
-    await check('PC (stub helper): starts on the PC target, the popup allows the program in front, frames carry the held keys, trackpad clicks and its scroll strip, the mouse face, whole PC on and off, leaving disarms', async () => {
+    await check('PC (stub helper): starts on the PC target, the popup allows the program in front, frames carry the held keys, trackpad clicks and its scroll strip, the mouse face, whole PC on and off, the keyboard (Type, typing, ↵), leaving disarms', async () => {
       await tap('.modes [data-tab=gamepad]')
       await phone.locator('.gp-f[data-k=a]').waitFor({ timeout: 5000 })
       await setTarget(popup, 'pc')
@@ -478,6 +535,27 @@ try {
       await action('One program').click()
       await until('back to one program', () => stubLog().some((e) => e.in?.t === 'desktop' && e.in.on === false))
       await until('popup shows the program again', () => popup.evaluate(() => (document.getElementById('pc-title')?.textContent ?? '').includes('stubgame.exe')))
+      // The keyboard: a text field takes the focus in the allowed program, and the phone offers Type. One tap opens the
+      // dock with its field focused; "hi" reaches the helper as text requests, and the key row's ↵ as Enter in the frames.
+      await stubFocus({ text: 'text', front: 'game' })
+      await phone.locator('#type-prompt').waitFor({ state: 'visible', timeout: 8000 })
+      if (SHOTS) { await mkdir(SHOTS, { recursive: true }); await clearHints(); await sleep(500); await phone.screenshot({ path: join(SHOTS, 'phone-type-prompt.png') }) }
+      await tap('#type-prompt')
+      await phone.locator('#kbd').waitFor({ state: 'visible', timeout: 5000 })
+      const focused = await phone.evaluate(() => document.activeElement?.id)
+      if (focused !== 'kbd-text') throw new Error(`the dock's field did not take the focus (${focused})`)
+      const typed = () => stubLog().filter((e) => e.in?.t === 'text').map((e) => e.in)
+      await phone.keyboard.type('hi')
+      await until('the helper is asked to type "hi"', () => typed().map((t) => t.s).join('') === 'hi')
+      if (typed().some((t) => t.del)) throw new Error(`typing deleted: ${JSON.stringify(typed())}`)
+      if (SHOTS) await phone.screenshot({ path: join(SHOTS, 'phone-keyboard.png') })
+      from = frames().length
+      await tap('.kbd-key[data-code=Enter]')
+      await until('↵ is Enter in the frames', () => frames().slice(from).some((f) => f.k?.includes('Enter')))
+      await until('then lets it go', () => { const f = frames(); return f.length > 0 && !f[f.length - 1].k })
+      // The field loses the focus: the prompt goes, and the dock it opened goes with it.
+      await stubFocus({ text: null, front: 'game' })
+      await until('the dock closes with the field', () => phone.evaluate(() => document.getElementById('kbd')?.hidden === true && document.getElementById('type-prompt')?.hidden === true))
       await setTarget(popup, 'keys')
       await until('the helper port closed', () => stubLog().some((e) => e.eof))
       const log = stubLog()
@@ -487,7 +565,7 @@ try {
       if (!log.some((e) => e.in?.t === 'hello' && e.in.v === 1)) throw new Error('no hello')
       if (!log.some((e) => e.in?.t === 'allow' && e.in.path === 'C:\\Stub\\stubgame.exe' && e.in.keyboard === true && e.in.mouse === true)) throw new Error('no allow request')
       if (!log[0]?.start?.[0]?.startsWith(`chrome-extension://${id}/`)) throw new Error(`host launched with ${JSON.stringify(log[0]?.start)}`)
-      return `helper ${ready.version}, ${log.filter((e) => e.in?.t === 'f').length} frames`
+      return `helper ${ready.version}, ${log.filter((e) => e.in?.t === 'f').length} frames, typed ${JSON.stringify(typed().map((t) => t.s).join(''))} in ${typed().length} requests`
     })
   } else {
     await check('PC (ob.Pal Desktop): keys are refused until the program is allowed, then typed into it, then refused once forgotten', async () => {
@@ -659,6 +737,18 @@ try {
   await local.close()
   unregisterStub()
   await Promise.allSettled([rm(ext, { recursive: true, force: true }), rm(profile, { recursive: true, force: true }), rm(phoneProfile, { recursive: true, force: true }), rm(stubDir, { recursive: true, force: true })])
+}
+
+// Last, whatever happened above: an installed ob.Pal Desktop's own log shows no session from this run.
+if (!DESKTOP) {
+  await check('no session of this run reached an installed ob.Pal Desktop (its log, read only)', async () => {
+    const reached = desktopLogReached()
+    if (reached.length) {
+      console.error(`\n  !!! ob.Pal Desktop was reached by this run: ${reached.length} new line(s) in ${DESKTOP_LOG}:\n${reached.map((l) => `  !!!   ${l}`).join('\n')}\n`)
+      throw new Error(`the installed helper logged ${reached.length} line(s) from this run's browser`)
+    }
+    return existsSync(DESKTOP_LOG) ? 'nothing new from this run in its log' : 'no ob.Pal Desktop log on this machine'
+  })
 }
 
 const failed = results.filter((r) => !r.ok)

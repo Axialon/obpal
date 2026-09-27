@@ -48,12 +48,12 @@
       <article class="prose">
         <p class="eyebrow">Privacy policy</p>
         <h1>Your phone talks to your screen, and nothing else is kept.</h1>
-        <p class="updated">Last updated 26 September 2026</p>
+        <p class="updated">Last updated 27 September 2026</p>
 
         <ul class="summary">
           <li><b>No accounts.</b> Nothing to sign up for, on either device.</li>
           <li><b>No analytics or tracking.</b> No ad or analytics scripts, and no tracking cookies.</li>
-          <li><b>Direct and encrypted.</b> Controller input goes from your phone to your screen over an encrypted connection and is never stored.</li>
+          <li><b>Direct and encrypted.</b> Controller input and typing go from your phone to your screen over an encrypted connection and are never stored.</li>
           <li><b>Your files stay yours.</b> Models you open are read in your browser and never uploaded.</li>
         </ul>
 
@@ -63,27 +63,32 @@
         <p>The QR code holds a one-time pairing secret. It sits in the part of the link that browsers never send to a server, so it stays on your two devices. The ob.Pal signaling service only sees a room identifier derived from it.</p>
         <p>To connect, both devices briefly join that room on the signaling service, which runs on Cloudflare. They swap the technical details a WebRTC connection needs, including network addresses. The service passes these messages between the two devices in memory and doesn't store or log them.</p>
         <p>After that, your phone and your screen talk directly over an encrypted WebRTC connection. On networks that block direct connections, the traffic is relayed through Cloudflare's TURN service. It stays encrypted end to end and isn't stored.</p>
+        <p>Like any website, the hosting keeps short-lived request logs (what was requested and when, with network details such as the IP address) to run and secure the service. They don't hold what your devices send each other.</p>
 
         <h2>The ob.Pal Link extension</h2>
         <ul>
           <li><b>Only the tab you switch on.</b> It sends your phone's input into the tab you turned on with <b>This tab</b>, and nowhere else. With <b>All sites</b> turned on, a small bridge also loads in other tabs so control can follow the page as it navigates, but it stays idle there.</li>
-          <li><b>Doesn't read your browsing.</b> It doesn't read page content, your browsing history or what you type. Its only job is to create input events from your phone in the controlled page.</li>
-          <li><b>Local storage only.</b> It remembers the mode you picked (Controller, 3D, Keys or PC). Until the browser closes, it also keeps which tab is controlled and whether your phone is connected. All of this stays in the browser.</li>
-          <li><b>Remembered phones stay on your devices.</b> After you pair a phone online, the extension and the phone each keep a pairing key and the other device's connection certificate fingerprint, so the phone can connect directly over your local network when the internet is down. Neither leaves the device, and you can forget a phone in the popup or in the phone's settings.</li>
-          <li><b>Talks only to ob.Pal and your phone.</b> Its only network use is the ob.Pal service (for pairing and relay credentials) and the direct connection to your phone. It loads no remote code and has no analytics.</li>
+          <li><b>Doesn't read your browsing.</b> It doesn't read page content, your browsing history or what you type on the computer. Its only job is to turn your phone's input into input on the controlled page or, with ob.Pal Desktop, on your PC.</li>
+          <li><b>Addresses stay in the browser.</b> The popup shows which site the current tab is on. The extension also checks the sites in the controlled tab against a built-in list, to suggest control settings to your phone (flight controls for a flight game, say). The phone gets the suggestion, never the address.</li>
+          <li><b>Local storage only.</b> It remembers the mode you picked (Controller, 3D, Keys or PC) and the look of its pages. Until the browser closes, it also keeps which tab is controlled, whether your phone is connected and, for PC, what ob.Pal Desktop reports (the program in front and your allowed programs). All of this stays in the browser.</li>
+          <li><b>Typing passes straight through.</b> What you type on the phone's keyboard goes over the encrypted connection to the extension and on to ob.Pal Desktop, which types it. Neither keeps it. For a password field, the phone uses a password field too, so nothing is suggested, learned or kept.</li>
+          <li><b>Remembered phones stay on your devices.</b> After you pair a phone online, the extension and the phone each keep a pairing key and the other device's connection certificate fingerprint (the extension also keeps the phone's name and when you paired it), so the phone can connect directly over your local network when the internet is down. None of it leaves the device, and you can forget a phone in the popup or in the phone's settings.</li>
+          <li><b>Talks only to ob.Pal and your phone.</b> Its only network use is the ob.Pal service (for pairing and relay credentials) and the connection to your phone. For PC, it also talks to ob.Pal Desktop, on the same computer. It loads no remote code and has no analytics.</li>
         </ul>
         <table class="perms">
           <tr><th>Permission</th><th>Why</th></tr>
           <tr><td>Offscreen document</td><td>Keeps the connection to your phone open (extension service workers can't hold one).</td></tr>
-          <tr><td>Storage</td><td>Remembers your chosen mode and, until the browser closes, the controlled tab.</td></tr>
+          <tr><td>Storage</td><td>Remembers your chosen mode and, until the browser closes, the controlled tab and the connection status.</td></tr>
           <tr><td>Active tab, scripting</td><td>When you click the extension on a page, it can control that page, and only that page.</td></tr>
           <tr><td>obpal.blackboxes.net</td><td>Pairing and relay credentials.</td></tr>
           <tr><td>All sites (optional, off by default)</td><td>Only if you turn it on: reaches game frames served from other domains and keeps control across navigation. You can turn it off again in the popup.</td></tr>
-          <tr><td>Native messaging (optional, off by default)</td><td>Only if you pick the PC target: talks to ob.Pal Desktop on your computer.</td></tr>
+          <tr><td>Native messaging (optional, off by default)</td><td>Only if you pick the PC target, or turn on PC control in its options: talks to ob.Pal Desktop on your computer.</td></tr>
         </table>
 
         <h2>The ob.Pal Desktop helper</h2>
-        <p>ob.Pal Desktop is an optional Windows program that lets your phone type and move the mouse in desktop programs. The extension talks to it on your computer only; it has no network access of its own. It does nothing until you pick <b>PC</b>, and it sends input only to programs you have allowed, one by one, while they are in front. It never sends input to the browser itself or to programs running as administrator, and <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Backspace</kbd> stops it at once. The list of allowed programs and a short activity log (start and stop times and counts, never what was typed) are kept in your Windows profile (<code>%APPDATA%\obpal</code>), and you can remove programs in the extension's options.</p>
+        <p>ob.Pal Desktop is an optional Windows program that lets your phone move the mouse, click, scroll and type on your PC. The extension talks to it on your computer only; it has no network access of its own. It does nothing until you pick <b>PC</b>. With <b>Whole PC</b> on, your phone's input goes to whichever window is in front, the browser included; otherwise only to the programs you have allowed, one by one, while they are in front. It can't reach programs running as administrator, and <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Backspace</kbd> stops it at once.</p>
+        <p>So that your phone can offer its keyboard when you click into a text field, the helper checks about four times a second whether the control with the keyboard focus is a text or password field. It reads only what kind of control it is, never what's in it. Text you type on the phone is typed, not kept.</p>
+        <p>Your allowed programs, the Whole PC setting and a short activity log (start and stop times and counts, never what was typed) are kept in your Windows profile (<code>%APPDATA%\obpal</code>). You can remove programs in the extension's options, and its <code>uninstall.cmd</code> removes all of it.</p>
 
         <h2>The viewer and your files</h2>
         <p>Models you open, drop in or add from a connected folder are read and displayed in your browser and never uploaded. When you connect a folder, the browser remembers your permission on this device until you disconnect the folder.</p>

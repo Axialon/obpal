@@ -3,15 +3,37 @@
   "version": "0.1.0",
   "type": "module",
   "license": "MIT",
-  "description": "ob-pal host SDK: pair a phone controller with any web page and read its input each frame.",
+  "description": "ob.Pal host SDK and <obpal-remote>: pair a phone controller with any web page and read its input each frame.",
+  "keywords": ["obpal", "webrtc", "controller", "gamepad", "gyro", "phone", "remote", "three.js", "web-component", "custom-element"],
+  "homepage": "https://obpal.blackboxes.net/embed/",
+  "repository": { "type": "git", "url": "git+https://github.com/Axialon/obpal.git", "directory": "packages/host" },
+  "bugs": "https://github.com/Axialon/obpal/issues",
+  "sideEffects": false,
   "main": "src/index.ts",
   "types": "src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./gamepad": "./src/gamepad.ts"
+    "./gamepad": "./src/gamepad.ts",
+    "./element": "./src/element.ts"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "node ../../scripts/build-packages.mjs",
+    "prepack": "node ../../scripts/build-packages.mjs"
   },
   "dependencies": {
     "@obpal/core": "workspace:*",
     "uqr": "^0.1.3"
+  },
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+      "./gamepad": { "types": "./dist/gamepad.d.ts", "import": "./dist/gamepad.js" },
+      "./element": { "types": "./dist/element.d.ts", "import": "./dist/element.js" },
+      "./package.json": "./package.json"
+    }
   }
 }

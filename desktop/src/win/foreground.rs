@@ -4,6 +4,9 @@
 //! Elevation: the process token's integrity level compared with ours. UIPI drops input sent from a lower
 //! integrity level to a higher one without any error, so the helper refuses up front and reports it. A
 //! process whose token cannot be opened is treated as higher (it usually is).
+//!
+//! Whether a text field has the keyboard focus comes from the UI Automation watcher (`focus.rs`), which a
+//! serving helper starts with `watching_focus`.
 
 use windows::core::PWSTR;
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
@@ -11,6 +14,8 @@ use windows::Win32::Security::{GetSidSubAuthority, GetSidSubAuthorityCount, GetT
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcess, OpenProcessToken, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
 use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId};
 
+use super::focus::FocusWatcher;
+use crate::protocol::TextFocus;
 use crate::scope::{base_name, normalize};
 use crate::session::{Foreground, FrontWindow};
 
@@ -23,13 +28,21 @@ pub struct WinForeground {
     browser: Option<String>,
     /// The last lookup, by window and process: asked every frame, only a new window costs a process query.
     last: Option<(isize, u32, FrontWindow)>,
+    /// What has the keyboard focus, while serving (`watching_focus`).
+    focus: Option<FocusWatcher>,
 }
 
 impl WinForeground {
     /// `browser` is the image path of the browser that launched us: its windows are reported, never injected.
     pub fn new(browser: Option<String>) -> WinForeground {
         let my_il = integrity_level(unsafe { GetCurrentProcess() }).unwrap_or(MEDIUM_IL);
-        WinForeground { my_il, browser: browser.map(|b| normalize(&b)), last: None }
+        WinForeground { my_il, browser: browser.map(|b| normalize(&b)), last: None, focus: None }
+    }
+
+    /// Also tell when a text field has the keyboard focus: starts the UI Automation watcher, which stops when this is dropped.
+    pub fn watching_focus(mut self) -> WinForeground {
+        self.focus = FocusWatcher::start();
+        self
     }
 }
 
@@ -88,6 +101,16 @@ impl Foreground for WinForeground {
         let front = self.lookup(hwnd, pid);
         self.last = front.clone().map(|w| (hwnd.0 as isize, pid, w));
         front
+    }
+
+    fn text_focus(&mut self) -> Option<TextFocus> {
+        let watcher = self.focus.as_ref()?;
+        // Only in the window `front` has just looked up, and never in an elevated one: typing can't reach it.
+        let hwnd = unsafe { GetForegroundWindow() };
+        match &self.last {
+            Some((h, _, w)) if *h == hwnd.0 as isize && !w.elevated => watcher.kind_in(hwnd),
+            _ => None,
+        }
     }
 }
 

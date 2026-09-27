@@ -21,6 +21,15 @@ See [PLAN.md](PLAN.md) for the architecture, compatibility matrix and roadmap, a
 
 ## Use it in your own page
 
+One tag, no build step ([demo](https://obpal.blackboxes.net/embed/); attributes, events and a typed example in [packages/host/README.md](packages/host/README.md)):
+
+```html
+<script type="module" src="https://obpal.blackboxes.net/embed.js"></script>
+<obpal-remote app="My scene" seats="4" modes="face.trackpad face.wii"></obpal-remote>
+```
+
+Or the SDK itself:
+
 ```js
 import { Remote, Mode } from '@obpal/host'
 
@@ -53,12 +62,16 @@ Phones need HTTPS to get motion sensors. To test on a real phone, deploy, or run
 
 Optional TURN relay, for guest Wi-Fi, cellular and corporate networks: set the `TURN_KEY_ID` and `TURN_KEY_API_TOKEN` secrets using a Cloudflare Realtime TURN key.
 
+The embed: `pnpm build` writes `/embed.js` and its lazy part (`/assets/embed/`) beside the site; `pnpm e2e:embed` tests it end to end (the /embed/ demo, another site under a strict CSP, no WebRTC).
+
+npm: `pnpm build:packages` builds `packages/core/dist` and `packages/host/dist` (ES modules, type declarations and the licence; `pnpm pack` does it first). Publishing needs the `@obpal` scope on npm: `pnpm --filter @obpal/core publish`, then `pnpm --filter @obpal/host publish` (host depends on core's version).
+
 ## Layout
 
 | Path | What |
 |---|---|
 | `packages/core` | Protocol: quaternion math, state codec, pairing, signaling, device-side link |
-| `packages/host` | Host SDK for any web page |
+| `packages/host` | Host SDK for any web page, and the `<obpal-remote>` element (`/embed.js`) |
 | `src/controller` | Phone controller app |
 | `src/viewer` | Hosted 3D viewer (three.js + camera-controls) |
 | `worker` | Cloudflare Worker: static assets, `/r/:room` signaling, `/api/ice` |

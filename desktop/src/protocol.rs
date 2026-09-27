@@ -4,8 +4,8 @@
 //! The extension is the only peer (Chrome launches the helper and owns both pipes). Every message is parsed
 //! into a typed request; anything malformed is answered with an `error` and otherwise ignored.
 //!
-//! Extension → helper: `hello`, `enable`, `f` (an action frame), `release`, `allow`, `scope`, `forget`,
-//! `desktop`, `pause`, `resume`, `stats`.  Helper → extension: `hello`, `config`, `status`, `stats`, `error`.
+//! Extension → helper: `hello`, `enable`, `f` (an action frame), `text` (typing), `release`, `allow`, `scope`,
+//! `forget`, `desktop`, `pause`, `resume`, `stats`.  Helper → extension: `hello`, `config`, `status`, `stats`, `error`.
 //! See spec/PROTOCOL.md § Native messaging frames.
 
 use serde::{Deserialize, Serialize};
@@ -29,6 +29,8 @@ pub const MAX_BUTTON: u8 = 4;
 pub const MAX_MOVE: i32 = 2000;
 /// Wheel per frame, in 1/120 notch units (20 notches).
 pub const MAX_WHEEL: i32 = 20 * 120;
+/// Characters one `text` request may type, and the most it may delete first (the phone sends as it types).
+pub const MAX_TEXT: usize = 256;
 
 // ---- codec ---------------------------------------------------------------------------------------
 
@@ -104,6 +106,13 @@ pub enum Request {
     Enable { on: bool },
     #[serde(rename = "f")]
     Frame(Frame),
+    /// Typing from the phone's keyboard: delete `del` characters before the caret (Backspace), then type `s`
+    /// (Unicode; '\n' is Enter, '\t' is Tab) into whatever has the keyboard focus.
+    Text {
+        s: String,
+        #[serde(default)]
+        del: u32,
+    },
     /// Release every held key and button now.
     Release,
     /// Allow a program the helper has seen in the foreground, with a scope.
@@ -141,6 +150,25 @@ fn yes() -> bool {
 /// extension could legitimately send that this helper does not know.
 pub fn parse_request(bytes: &[u8]) -> Result<Request, String> {
     serde_json::from_slice::<Request>(bytes).map_err(|e| e.to_string())
+}
+
+/// Validate a `text` request: at most MAX_TEXT characters typed and deleted, and no control characters but
+/// newline and tab (nothing that isn't typing).
+pub fn validate_text(s: &str, del: u32) -> Result<(), String> {
+    let n = s.chars().count();
+    if n > MAX_TEXT {
+        return Err(format!("{n} characters, at most {MAX_TEXT}"));
+    }
+    if del as usize > MAX_TEXT {
+        return Err(format!("{del} to delete, at most {MAX_TEXT}"));
+    }
+    if let Some(c) = s.chars().find(|c| c.is_control() && *c != '\n' && *c != '\t') {
+        return Err(format!("control character U+{:04X}", c as u32));
+    }
+    if n == 0 && del == 0 {
+        return Err("nothing to type".into());
+    }
+    Ok(())
 }
 
 /// A frame after validation against the key table and the per-frame limits.
@@ -206,6 +234,17 @@ pub struct Caps {
     pub gamepad: bool,
     /// Whole-PC mode (`desktop` requests): an extension shows the choice only when the helper has it.
     pub desktop: bool,
+    /// Typing (`text` requests) and telling when a text field has the focus (`status.text`).
+    pub text: bool,
+}
+
+/// What has the keyboard focus in front, as the OS's accessibility layer sees it: a text field, or a password
+/// field. Only the kind of control is read, never what it holds.
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TextFocus {
+    Text,
+    Secret,
 }
 
 /// The kinds of input a program may receive. `gamepad` is reserved (see `Caps`).
@@ -289,6 +328,8 @@ pub enum Reply {
         front: Option<ProgramInfo>,
         /// The most recent foreground program that is not the browser: what "Allow this program" refers to.
         program: Option<ProgramInfo>,
+        /// A text field has the keyboard focus (null: none, or it can't be told).
+        text: Option<TextFocus>,
     },
     Stats {
         frames: u64,
@@ -366,6 +407,8 @@ mod tests {
         let f = parse_request(br#"{"t":"f","k":["KeyW"],"b":[0],"m":[3,-2],"w":[0,120]}"#).unwrap();
         assert_eq!(f, Request::Frame(Frame { k: vec!["KeyW".into()], b: vec![0], m: Some([3, -2]), w: Some([0, 120]) }));
         assert_eq!(parse_request(br#"{"t":"f"}"#).unwrap(), Request::Frame(Frame::default()));
+        assert_eq!(parse_request(r#"{"t":"text","s":"hé 👋\n","del":2}"#.as_bytes()).unwrap(), Request::Text { s: "hé 👋\n".into(), del: 2 });
+        assert_eq!(parse_request(br#"{"t":"text","s":"x"}"#).unwrap(), Request::Text { s: "x".into(), del: 0 });
         for bad in [
             &br#"{"t":"exec","cmd":"calc"}"#[..],
             br#"{"t":"f","keys":["KeyW"]}"#,
@@ -376,6 +419,9 @@ mod tests {
             br#"{"t":"scope","path":"x"}"#,
             br#"{"t":"desktop"}"#,
             br#"{"t":"desktop","on":"yes"}"#,
+            br#"{"t":"text"}"#,
+            br#"{"t":"text","s":5}"#,
+            br#"{"t":"text","s":"x","del":-1}"#,
             br#"[]"#,
             b"nope",
             b"",
@@ -402,9 +448,27 @@ mod tests {
     }
 
     #[test]
+    fn validates_text_against_its_limits() {
+        assert!(validate_text("héllo 👋\n\tworld", 3).is_ok());
+        assert!(validate_text("", 1).is_ok(), "deleting alone is typing too");
+        assert!(validate_text(&"é".repeat(MAX_TEXT), MAX_TEXT as u32).is_ok(), "the limit counts characters, not bytes");
+        assert!(validate_text(&"x".repeat(MAX_TEXT + 1), 0).is_err());
+        assert!(validate_text("x", MAX_TEXT as u32 + 1).is_err());
+        assert!(validate_text("", 0).is_err());
+        // Only newline and tab: never Escape, Backspace, carriage return, NUL or C1 controls.
+        for bad in ["\u{1b}", "a\u{8}", "a\rb", "\0", "\u{7f}", "\u{9b}"] {
+            assert!(validate_text(bad, 0).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
     fn replies_serialize_with_tags() {
-        let r = Reply::Status { enabled: true, panic: false, held: false, front: None, program: None };
-        assert_eq!(String::from_utf8(r.to_bytes()).unwrap(), r#"{"t":"status","enabled":true,"panic":false,"held":false,"front":null,"program":null}"#);
+        let r = Reply::Status { enabled: true, panic: false, held: false, front: None, program: None, text: None };
+        assert_eq!(String::from_utf8(r.to_bytes()).unwrap(), r#"{"t":"status","enabled":true,"panic":false,"held":false,"front":null,"program":null,"text":null}"#);
+        let r = Reply::Status { enabled: true, panic: false, held: false, front: None, program: None, text: Some(TextFocus::Secret) };
+        assert!(String::from_utf8(r.to_bytes()).unwrap().ends_with(r#""text":"secret"}"#));
+        let h = Reply::Hello { v: 1, version: "0", os: "windows", hotkey: None, caps: Caps { keyboard: true, mouse: true, gamepad: false, desktop: true, text: true } };
+        assert!(String::from_utf8(h.to_bytes()).unwrap().ends_with(r#""caps":{"keyboard":true,"mouse":true,"gamepad":false,"desktop":true,"text":true}}"#));
         let e = Reply::error("bad-frame", "x");
         assert_eq!(String::from_utf8(e.to_bytes()).unwrap(), r#"{"t":"error","code":"bad-frame","msg":"x"}"#);
         let s = Reply::Stats { frames: 1, injected: 0, refused: Refused { not_allowed: 1, ..Default::default() } };

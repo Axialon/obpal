@@ -63,6 +63,15 @@ export const ICONS: Record<string, string> = {
   stickL: s('<circle cx="12" cy="7.8" r="3.8"/><path d="M12 11.6v4.6M5.5 19.5h13M8.2 16.2h7.6"/><path d="M3.5 4.5v6h3.6" stroke-width="2"/>'),
   stickR: s('<circle cx="12" cy="7.8" r="3.8"/><path d="M12 11.6v4.6M5.5 19.5h13M8.2 16.2h7.6"/><path d="M17.2 10.5v-6h2.2a1.6 1.6 0 0 1 0 3.2h-2.2l2.8 2.8" stroke-width="2"/>'),
   fly: s('<path d="M4 15.5c2.2-1.6 5-2.5 8-2.5s5.8.9 8 2.5"/><path d="M12 13V7.5M9.5 9.2 12 6.5l2.5 2.7"/><path d="M4.5 19h15"/>'),
+  // the keyboard dock (typing on the screen) and its key row
+  keyboard: s('<rect x="2.6" y="5.6" width="18.8" height="12.8" rx="2.8"/><path d="M6.2 9.4h.01M9.1 9.4h.01M12 9.4h.01M14.9 9.4h.01M17.8 9.4h.01M7.65 12.2h.01M10.55 12.2h.01M13.45 12.2h.01M16.35 12.2h.01" stroke-width="2.2"/><path d="M8.4 15.2h7.2"/>'),
+  'kb-hide': s('<rect x="3" y="3.2" width="18" height="11.4" rx="2.6"/><path d="M7 6.9h.01M10.3 6.9h.01M13.7 6.9h.01M17 6.9h.01" stroke-width="2.2"/><path d="M8.6 10.7h6.8"/><path d="M8.6 17.9 12 21l3.4-3.1"/>'),
+  backspace: s('<path d="M9.3 5.8h9.5a2 2 0 0 1 2 2v8.4a2 2 0 0 1-2 2H9.3L3.4 12Z"/><path d="M11.8 9.7l4.6 4.6M16.4 9.7l-4.6 4.6"/>'),
+  enter: s('<path d="M19.4 5.2v6a2.6 2.6 0 0 1-2.6 2.6H5.4"/><path d="M9.4 9.8 5.4 13.8l4 4"/>'),
+  'arrow-left': s('<path d="M19 12H5.4M11 6.4 5.4 12l5.6 5.6"/>'),
+  'arrow-right': s('<path d="M5 12h13.6M13 6.4l5.6 5.6-5.6 5.6"/>'),
+  'arrow-up': s('<path d="M12 19V5.4M6.4 11 12 5.4l5.6 5.6"/>'),
+  'arrow-down': s('<path d="M12 5v13.6M6.4 13l5.6 5.6 5.6-5.6"/>'),
 }
 
 export const icon = (name: string | undefined) => (name && ICONS[name]) || ''

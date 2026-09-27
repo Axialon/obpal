@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { G, collide, flightTime, hopTo, inside, landingSpot, nearest, newOrb, step, surfaceAt, toss, type Footprint, type Orb } from '../src/landing/bounce'
+import { G, collide, flightTime, hopTo, inside, landingSpot, nearest, newOrb, roundedRect, sidesAt, step, surfaceAt, toss, type Footprint, type Orb } from '../src/landing/bounce'
 
 const ring = (...pts: number[]) => Float64Array.from(pts)
 /** An "o": a square 2 wide with a square hole 1 wide, standing `height` tall at (cx, cz). */
@@ -133,6 +133,30 @@ describe('an orb', () => {
     expect(beyond).toBeLessThan(0.15)
     expect(b.y).toBeCloseTo(0.1, 6)
   })
+  it('stays inside a field that narrows toward the viewer, pushed into its near corners or its far ones', () => {
+    // Seen at a slant, the floor on screen is 20 wide far off (z = -5) and 12 near (z = 5).
+    const opts = { hop: 0.8, bounds: [-10, -5, 10, 5] as [number, number, number, number], sides: [-10, 10, -6, 6] as [number, number, number, number] }
+    expect(sidesAt(opts, 0)).toEqual([-8, 8])
+    const pushed = (px: number, pz: number) => {
+      const b = newOrb(0, 0, 0.2)
+      let widest = 0
+      for (let t = 0; t < 4; t += 1 / 120) {
+        step(b, [], 1 / 120, { ...opts, push: [px, pz] })
+        const [x0, x1] = sidesAt(opts, b.z)
+        widest = Math.max(widest, x0 + b.r - b.x, b.x - (x1 - b.r))
+      }
+      expect(widest).toBeLessThan(1e-9)
+      return b
+    }
+    const near = pushed(12, 12), far = pushed(-12, -12)
+    // Into each corner, as far as the sides there let it: much nearer the middle at the near edge than at the far one.
+    expect(near.z).toBeCloseTo(5 - 0.2, 2)
+    expect(near.x).toBeCloseTo(sidesAt(opts, near.z)[1] - 0.2, 2)
+    expect(near.x).toBeLessThan(6)
+    expect(far.z).toBeCloseTo(-5 + 0.2, 2)
+    expect(far.x).toBeCloseTo(sidesAt(opts, far.z)[0] + 0.2, 2)
+    expect(far.x).toBeLessThan(-9.5)
+  })
   it('in the air it keeps its momentum, only a little steered', () => {
     const fly = (air: number) => {
       const b = newOrb(0, 0, 0.1)
@@ -194,5 +218,112 @@ describe('a precise hop', () => {
     }
     expect(landed).toBe(4)
     expect(Math.hypot(b.x - 3.75, b.z - 0.75)).toBeLessThan(0.03)
+  })
+})
+
+describe('a low step (a button)', () => {
+  /** A button 3 wide and 1 deep, raised 0.06 (well under a marble's radius), its near edge at z = 1. */
+  const pad = (id = 1000, height = 0.06): Footprint => {
+    const r = ring(-1.5, 0, 1.5, 0, 1.5, 1, -1.5, 1)
+    return { id, height, box: [-1.5, 0, 1.5, 1], rings: [r], spot: [0, 0.5] }
+  }
+  const R = 0.2
+  const opts = (extra: { push?: [number, number] } = {}) => ({ hop: 0.8, bounds: BOUNDS, climb: 0.1, omega: 4.6, zeta: 0.78, air: 0.3, ...extra })
+  /** Roll it at the button's near edge (from +z, toward -z) at `speed`; where does it end up, and what happened? */
+  const rollInto = (speed: number, from = 2.2) => {
+    const b = newOrb(0, from, R)
+    b.resting = false
+    b.vz = -speed
+    let maxJump = 0, lastY = b.y, bumped = false
+    for (let t = 0; t < 3; t += 1 / 120) {
+      const r = step(b, [pad()], 1 / 120, opts())
+      if (r.bumped === 1000) bumped = true
+      maxJump = Math.max(maxJump, Math.abs(b.y - lastY))
+      lastY = b.y
+    }
+    return { b, on: surfaceAt([pad()], b.x, b.z).id, maxJump, bumped }
+  }
+  it('fast enough, a marble rolls up over the edge onto it, without a jump', () => {
+    // It slows as it rolls: about 3 em/s when it reaches the edge.
+    const { b, on, maxJump } = rollInto(6)
+    expect(on).toBe(1000)
+    expect(b.y).toBeCloseTo(0.06 + R, 3)
+    // It rode up the rounded edge: no frame lifted it more than a sliver of the step.
+    expect(maxJump).toBeLessThan(0.03)
+  })
+  it('too slow, it rolls up against the edge and back off it', () => {
+    // About 1 em/s at the edge.
+    const { b, on, bumped } = rollInto(1.5, 1.4)
+    expect(on).toBe(-1)
+    expect(b.y).toBeCloseTo(R, 3)
+    expect(b.z).toBeGreaterThan(1)
+    expect(bumped).toBe(true)
+  })
+  it('steered onto it (someone pointing at the button), it is helped up the edge, from a standstill beside it', () => {
+    const b = newOrb(0, 1.15, R)
+    b.target = { x: 0, z: 0.6 }
+    b.resting = false
+    run(b, [pad()], 3, 0.8, opts())
+    expect(surfaceAt([pad()], b.x, b.z).id).toBe(1000)
+    expect(b.y).toBeCloseTo(0.06 + R, 3)
+    expect(Math.hypot(b.x, b.z - 0.6)).toBeLessThan(0.05)
+  })
+  it('rolled off its edge, it tips over and drops to the floor, a small landing, and rests there', () => {
+    const b = newOrb(0, 0.5, R, 0.06)
+    b.resting = false
+    b.vz = 1.6
+    const floor: number[] = []
+    let tipping = 0
+    for (let t = 0; t < 3; t += 1 / 120) {
+      const r = step(b, [pad()], 1 / 120, opts())
+      if (r.landed === -1) floor.push(r.impact)
+      // Over the edge, part way down: it's rolling on the edge, not falling past it.
+      if (b.z > 1 && b.y > R + 0.005 && b.y < R + 0.055) tipping++
+    }
+    expect(surfaceAt([pad()], b.x, b.z).id).toBe(-1)
+    expect(b.z).toBeGreaterThan(1 + R * 0.5)
+    expect(b.y).toBeCloseTo(R, 3)
+    expect(tipping).toBeGreaterThan(1)
+    expect(floor.length).toBeGreaterThan(0)
+    expect(floor[0]).toBeLessThan(Math.sqrt(2 * G * 0.06) * 1.2)
+    expect(b.resting).toBe(true)
+  })
+  it('a hop lands on it like on a letter', () => {
+    const b = newOrb(0, 3, R)
+    hopTo(b, { x: 0, z: 0.5 })
+    const { events } = run(b, [pad()], 2, 0.8, opts())
+    expect(events.some((e) => e.landed === 1000)).toBe(true)
+    expect(b.y).toBeCloseTo(0.06 + R, 3)
+  })
+  it('a letter is no step: rolled into hard, the marble still bumps off its side', () => {
+    const b = newOrb(0, 2.2, R)
+    b.resting = false
+    b.vz = -6
+    const letter = { ...pad(7, 0.182) }
+    run(b, [letter], 2, 0.8, opts())
+    expect(surfaceAt([letter], b.x, b.z).id).toBe(-1)
+    expect(b.z).toBeGreaterThan(1)
+  })
+})
+
+describe("a button's outline", () => {
+  it('runs round its rounded corners, inside its box, with the radius held to half its short side', () => {
+    const pts = roundedRect(10, 20, 100, 40, 999, 5)
+    expect(pts.length).toBe(4 * 5 * 2)
+    for (let i = 0; i < pts.length; i += 2) {
+      expect(pts[i]).toBeGreaterThanOrEqual(10 - 1e-9)
+      expect(pts[i]).toBeLessThanOrEqual(110 + 1e-9)
+      expect(pts[i + 1]).toBeGreaterThanOrEqual(20 - 1e-9)
+      expect(pts[i + 1]).toBeLessThanOrEqual(60 + 1e-9)
+    }
+    // A pill: its left end is a half circle through (10, 40).
+    expect(Math.min(...pts.filter((_, i) => i % 2 === 0))).toBeCloseTo(10, 9)
+    // As a footprint, its middle is inside and a point past its rounded corner is not.
+    const fp: Footprint = { id: 0, height: 0.05, box: [10, 20, 110, 60], rings: [Float64Array.from(pts)], spot: [60, 40] }
+    expect(inside(fp, 60, 40)).toBe(true)
+    expect(inside(fp, 12, 22)).toBe(false)
+    // Square corners: the box itself.
+    const sq = roundedRect(0, 0, 10, 10, 0, 1)
+    expect(sq).toEqual([0, 0, 10, 0, 10, 10, 0, 10])
   })
 })

@@ -8,8 +8,9 @@
  *
  * Each arm is a digital twin. Connect a real one (./drivers.ts) and the twin follows it; once the screen puts it
  * live, the twin's joints drive the hardware at a capped speed. The safety envelope runs here, in the bridge: a
- * deadman, joint limits with speed and acceleration caps, a 200 ms watchdog, an e-stop on every device and the screen
- * that holds position, approval before a first claim, a check that a real arm keeps up, and a record of who held what.
+ * deadman, joint limits with speed and acceleration caps, the floor (no part of the arm goes below it, whatever it's
+ * asked), a 200 ms watchdog, an e-stop on every device and the screen that holds position, approval before a first
+ * claim, a check that a real arm keeps up, and a record of who held what.
  */
 import '../../styles/base.css'
 import '../../styles/sim.css'
@@ -26,7 +27,9 @@ import {
   calibrateHome, defaultCalibration, FeetechDriver, fromRaw, hasSerial, RosDriver, ROS_DEFAULTS, SerialTextDriver, toRaw,
   type ArmDriver, type Calibration, type DriverKind,
 } from './drivers'
-import { forward, inverse, type ArmPose, type ToolTarget } from './kinematics'
+import { armParts, eject, restOf, settle as settleBlocks, stepAmong, type Blk, type Stand } from './blocks'
+import { holding, type GripBox, type V3 } from './grasp'
+import { forward, inverse, stepAboveFloor, toolFloor, type ArmPose, type ToolTarget } from './kinematics'
 import { buildArm, JOINTS, type ArmModel, type JointSpec } from './model'
 import { reachDown, solveNear } from './reach'
 import { GlowFollower, handMove, handTurn, headingOf } from '@obpal/host'
@@ -91,7 +94,7 @@ interface Joint {
   vel: number
   /** Where the joint is headed when it follows a target (the whole arm, 1:1, home, the gripper), else null. */
   target: number | null
-  /** Why it isn't moving, for the screen: '', 'deadman', 'watchdog', 'limit', 'edge', 'mirror', 'stopped'. */
+  /** Why it isn't moving, for the screen: '', 'deadman', 'watchdog', 'limit', 'floor', 'edge', 'mirror', 'stopped'. */
   state: string
   flash: number
 }
@@ -132,12 +135,24 @@ interface Arm {
   scale: number
   /** The tool target a 3D drive last asked for (for the record and tests). */
   goal: ToolTarget | null
+  /** A block stopped some of its joints this frame (the claw takes that as having come down on something). */
+  blocked: boolean
 }
 
 interface Track3 { gen: number; p0: [number, number, number]; q0: [number, number, number, number]; heading: number; tool: THREE.Vector3; pitch: number; roll: number }
 
 /** A claw move (A in Point): down to the floor, close or open, back up to the hover height. */
-interface Claw { phase: 'down' | 'grip' | 'up'; pick: boolean; yaw: number; reach: number; since: number }
+interface Claw {
+  phase: 'down' | 'grip' | 'up'
+  pick: boolean
+  yaw: number
+  reach: number
+  since: number
+  /** Where the gripper is headed, and how far it's been sent so far (the sim's own arm goes straight up or down). */
+  goal: number
+  h: number
+  at: number
+}
 
 /** Arms stand around the middle, facing it: left, right, back, front. */
 const SLOTS: [number, number][] = [[-1, 0], [1, 0], [0, -1], [0, 1]]
@@ -177,7 +192,7 @@ function addArm(): Arm | null {
   const id = `a${n}`
   const joints: Joint[] = JOINTS.map((spec) => ({ spec, node: `${id}.${spec.key}`, angle: spec.home, vel: 0, target: null, state: '', flash: 0 }))
   joints.forEach((j, i) => model.apply[i](j.angle))
-  const arm: Arm = { n, id, name: `Arm ${n}`, model, joints, profile: 'both', drive: null, edge: false, state: '', homing: false, flash: 0, hw: null, hover: 0.2, claw: null, track: null, scale: 1.5, goal: null }
+  const arm: Arm = { n, id, name: `Arm ${n}`, model, joints, profile: 'both', drive: null, edge: false, state: '', homing: false, flash: 0, hw: null, hover: 0.2, claw: null, track: null, scale: 1.5, goal: null, blocked: false }
   arms.push(arm)
   arms.sort((a, b) => a.n - b.n)
   refreshNodes()
@@ -224,7 +239,9 @@ function settle(a: Arm) {
 }
 function toggleGrip(a: Arm) {
   const g = a.joints[5]
-  g.target = (g.target ?? g.angle) > 0.5 ? 0 : 1
+  // Closed on a block, it's shut, however wide the block keeps it.
+  const shut = blocks.some((b) => b.by === a) || (g.target ?? g.angle) <= 0.5
+  g.target = shut ? 1 : 0
 }
 function homeArm(a: Arm, by: string) {
   a.drive = null
@@ -234,50 +251,158 @@ function homeArm(a: Arm, by: string) {
   sim?.log(`${sim.nameOf(by)} sent ${a.name} home`, sim.colorOf(by))
 }
 
-// ---- blocks on the shared floor: a gripper closing on one picks it up; opening drops it ----
+// ---- blocks on the shared floor: pushed along it, stopping what they can't give way to, held (./blocks.ts) ----
 
-interface Block { mesh: THREE.Mesh; by: Arm | null; vy: number }
+const BLOCK = 0.06
+const BLOCK_HALF: V3 = [BLOCK / 2, BLOCK / 2, BLOCK / 2]
+interface Block {
+  mesh: THREE.Mesh
+  by: Arm | null
+  vy: number
+  /** The opening its holder's fingers stopped at on it. */
+  grip: number
+}
 const blocks: Block[] = ['#38bdf8', '#fb7185', '#fcd34d', '#a78bfa', '#34d399', '#f472b6'].map((c, i) => {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.06), new THREE.MeshStandardMaterial({ color: c, metalness: 0.1, roughness: 0.35, emissive: c, emissiveIntensity: 0.12 }))
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(BLOCK, BLOCK, BLOCK), new THREE.MeshStandardMaterial({ color: c, metalness: 0.1, roughness: 0.35, emissive: c, emissiveIntensity: 0.12 }))
   const a = (i / 6) * Math.PI * 2 + 0.5
   const r = i % 2 ? 0.34 : 0.22
-  mesh.position.set(Math.cos(a) * r, 0.03, Math.sin(a) * r)
+  mesh.position.set(Math.cos(a) * r, BLOCK / 2, Math.sin(a) * r)
   scene.add(mesh)
-  return { mesh, by: null, vy: 0 }
+  return { mesh, by: null, vy: 0, grip: 0 }
 })
-const tmp = new THREE.Vector3()
+const bq = new THREE.Quaternion()
+const bm = new THREE.Matrix4()
+const level = new THREE.Quaternion()
+const levelTurn = new THREE.Euler()
 function drop(b: Block) {
   scene.attach(b.mesh)
   b.by = null
   b.vy = 0
 }
+/** How far a block reaches above (and below) its middle, as it's turned. */
+function halfHeight(b: Block) {
+  const e = bm.makeRotationFromQuaternion(b.mesh.getWorldQuaternion(bq)).elements
+  return (BLOCK / 2) * (Math.abs(e[1]) + Math.abs(e[5]) + Math.abs(e[9]))
+}
+const bx = new THREE.Vector3()
+const bz = new THREE.Vector3()
+const yq = new THREE.Quaternion()
+/** How a block is turned about the vertical: whichever of its sides lies flatter says. */
+function yawOf(q: THREE.Quaternion) {
+  bx.set(1, 0, 0).applyQuaternion(q)
+  bz.set(0, 0, 1).applyQuaternion(q)
+  return Math.abs(bx.y) <= Math.abs(bz.y) ? Math.atan2(-bx.z, bx.x) : Math.atan2(bz.x, bz.z)
+}
+/** A free block as ./blocks.ts has it. */
+const blkOf = (b: Block): Blk => ({ x: b.mesh.position.x, y: b.mesh.position.y, z: b.mesh.position.z, yaw: yawOf(b.mesh.quaternion), half: BLOCK_HALF })
+/** Move a free block to where ./blocks.ts put it, turning it about the vertical as far as it turned it. */
+function setBlk(b: Block, t: Blk) {
+  b.mesh.position.set(t.x, t.y, t.z)
+  const turn = t.yaw - yawOf(b.mesh.quaternion)
+  if (Math.abs(turn) > 1e-9) b.mesh.quaternion.premultiply(yq.setFromAxisAngle(UP, turn))
+}
+/** Where an arm stands, its parts (and what it holds) as boxes, and every arm's base, for ./blocks.ts. */
+const standOf = (a: Arm): Stand => ({ x: a.model.root.position.x, z: a.model.root.position.z, turn: a.model.root.rotation.y })
+const partsOf = (a: Arm) => armParts(standOf(a), poseOf(a), a.joints[5].angle, heldBox(a))
+const bases = () => arms.map((a) => ({ x: a.model.root.position.x, z: a.model.root.position.z }))
+
 function updateBlocks(dt: number) {
-  for (const b of blocks) {
-    if (b.by) {
-      if (b.by.joints[5].angle > 0.55) drop(b)
-      continue
-    }
-    for (const a of arms) {
-      if (a.joints[5].angle >= 0.35 || blocks.some((o) => o.by === a)) continue
-      a.model.grasp.getWorldPosition(tmp)
-      if (b.mesh.position.distanceTo(tmp) < 0.06) {
-        a.model.grasp.attach(b.mesh)
-        b.mesh.position.set(0, 0, 0)
-        b.by = a
-        const who = sim?.claims.controller(a.joints[5].node)
-        if (who && who !== 'host') sim?.remote.feedback({ haptic: 'tick' }, who)
-        break
-      }
-    }
-    if (b.by) continue
-    // Fall to the floor (or onto another block).
-    const rest = 0.03 + (blocks.some((o) => o !== b && !o.by && Math.hypot(o.mesh.position.x - b.mesh.position.x, o.mesh.position.z - b.mesh.position.z) < 0.055 && o.mesh.position.y < b.mesh.position.y) ? 0.06 : 0)
-    if (b.mesh.position.y > rest + 1e-4) {
+  const free = blocks.filter((b) => !b.by)
+  const all = free.map(blkOf)
+  free.forEach((b, i) => {
+    // Down to the floor, or onto a block under it (one whose middle it's over: past an edge, it slides off), levelling
+    // as it goes: it rests on its lowest corner or face, never in what's under it.
+    const rest = restOf(all[i], all.filter((_, j) => j !== i))
+    const p = b.mesh.position
+    p.x = rest.x
+    p.z = rest.z
+    level.setFromEuler(levelTurn.set(0, yawOf(b.mesh.quaternion), 0))
+    if (b.mesh.quaternion.angleTo(level) > 1e-4) b.mesh.quaternion.slerp(level, Math.min(1, dt * 6))
+    const y = rest.y - BLOCK / 2 + halfHeight(b)
+    if (p.y > y + 1e-4) {
       b.vy -= 9.8 * dt
-      b.mesh.position.y = Math.max(rest, b.mesh.position.y + b.vy * dt)
-      b.mesh.quaternion.slerp(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, b.mesh.rotation.y, 0)), Math.min(1, dt * 6))
-    } else b.vy = 0
+      p.y = Math.max(y, p.y + b.vy * dt)
+    } else {
+      b.vy = 0
+      p.y = y
+    }
+    all[i] = blkOf(b)
+  })
+  // Nothing in anything: a block that fell against an arm, or that another arm's push left in one, is pushed out of it,
+  // and out of the other blocks and the bases; one pinned among them goes where there's room.
+  const parts = arms.flatMap(partsOf)
+  if (settleBlocks(all, [], parts, bases()) !== 'ok') eject(all, parts, bases())
+  free.forEach((b, i) => setBlk(b, all[i]))
+}
+
+// ---- an arm among the blocks: what it holds, what it pushes, and what stops it (./blocks.ts) ----
+
+const m4 = new THREE.Matrix4()
+
+/** The block an arm holds, in its gripper's frame, where it sits fixed while held; or null. */
+function heldBox(a: Arm): GripBox | null {
+  const b = blocks.find((o) => o.by === a)
+  if (!b) return null
+  const e = bm.makeRotationFromQuaternion(b.mesh.quaternion).elements
+  const p = b.mesh.position
+  return { c: [p.x, p.y, p.z], axes: [[e[0], e[1], e[2]], [e[4], e[5], e[6]], [e[8], e[9], e[10]]], half: BLOCK_HALF }
+}
+
+/**
+ * Holding a block, the gripper closes no further than it, and opening lets it go. A real arm holds none of these
+ * blocks, which aren't really there: one its twin held when it was connected is let go.
+ */
+function holdStep(a: Arm) {
+  const b = blocks.find((o) => o.by === a)
+  if (!b) return
+  const g = a.joints[5]
+  const h = holding(b.grip, g.angle)
+  if (h.release || a.hw) { drop(b); return }
+  if (h.open === g.angle) return
+  g.angle = h.open
+  g.vel = 0
+  // On the block, the gripper is as closed as it goes: done.
+  if (g.target !== null && g.target < h.open) g.target = null
+  a.model.apply[5](g.angle)
+}
+
+/**
+ * The blocks, as an arm makes this frame's move from `was` (./blocks.ts): what it runs into is pushed along the floor,
+ * what can't give way (under a part coming down on it, or pinned) stops the joints that would take it in, and a block
+ * the fingers close on, turned square, is held. A real arm is stopped by none of it: it pushes them out of its way.
+ */
+function blockStep(a: Arm, was: ArmPose, gripWas: number, following: boolean) {
+  const free = blocks.filter((b) => !b.by)
+  const g = a.joints[5]
+  const r = stepAmong(standOf(a), { pose: was, open: gripWas }, { pose: poseOf(a), open: g.angle }, heldBox(a),
+    { blocks: free.map(blkOf), still: arms.filter((o) => o !== a).flatMap(partsOf), bases: bases() },
+    { real: !!a.hw, following, minShoulder: JOINTS[1].min })
+  free.forEach((b, i) => { if (i !== r.took?.i) setBlk(b, r.blocks[i]) })
+  a.blocked = r.stopped.some((k) => k !== 'grip')
+  if (a.hw) return
+  POSE_KEYS.forEach((k, i) => {
+    if (a.joints[i].angle === r.pose[k]) return
+    a.joints[i].angle = r.pose[k]
+    a.model.apply[i](r.pose[k])
+  })
+  if (g.angle !== r.open) { g.angle = r.open; a.model.apply[5](g.angle) }
+  for (const k of r.stopped) {
+    const j = a.joints[k === 'grip' ? 5 : POSE_KEYS.indexOf(k)]
+    j.vel = 0
+    j.state ||= 'block'
   }
+  // Stopped on a block, the gripper is as closed as it goes: done.
+  if (r.stopped.includes('grip') && g.target !== null && g.target < g.angle) g.target = null
+  if (!r.took) return
+  const b = free[r.took.i], box = r.took.box
+  a.model.grasp.add(b.mesh)
+  b.mesh.position.set(...box.c)
+  b.mesh.quaternion.setFromRotationMatrix(m4.makeBasis(new THREE.Vector3(...box.axes[0]), new THREE.Vector3(...box.axes[1]), new THREE.Vector3(...box.axes[2])))
+  b.by = a
+  b.grip = r.open
+  b.vy = 0
+  const who = sim?.claims.controller(g.node)
+  if (who && who !== 'host') sim?.remote.feedback({ haptic: 'tick' }, who)
 }
 
 // ---- the shared scene ----
@@ -473,16 +598,19 @@ function driveWhole(a: Arm, who: string, now: number, dt: number): string {
   const d = a.drive
   for (const k of ['yaw', 'reach', 'height', 'pitch', 'roll'] as const) d.acc[k] += inc[k]
   const ph = d.q0 ? phoneTurn(d.q0, f.qRel) : { yaw: 0, pitch: 0, roll: 0 }
+  const pitch = clamp(d.ref.pitch + d.acc.pitch, 20, 200)
+  const roll = clamp(d.ref.roll + d.acc.roll - ph.roll, JOINTS[4].min, JOINTS[4].max)
   const goal: ToolTarget = {
     yaw: clamp(d.ref.yaw + d.acc.yaw + ph.yaw, JOINTS[0].min, JOINTS[0].max),
     reach: clamp(d.ref.reach + d.acc.reach, 0.25, 1.2),
-    height: clamp(d.ref.height + d.acc.height + ph.pitch * D2R * LIFT, 0.06, 1.45),
-    pitch: clamp(d.ref.pitch + d.acc.pitch, 20, 200),
-    roll: clamp(d.ref.roll + d.acc.roll - ph.roll, JOINTS[4].min, JOINTS[4].max),
+    // No lower than the gripper can go at its angle: pushed down, it stops on the floor.
+    height: clamp(d.ref.height + d.acc.height + ph.pitch * D2R * LIFT, Math.max(0.06, toolFloor(pitch, roll, heldBox(a))), 1.45),
+    pitch,
+    roll,
   }
   // No winding up past the clamps: pushing further out and back again answers at once.
   d.acc = { yaw: goal.yaw - d.ref.yaw - ph.yaw, reach: goal.reach - d.ref.reach, height: goal.height - d.ref.height - ph.pitch * D2R * LIFT, pitch: goal.pitch - d.ref.pitch, roll: goal.roll - d.ref.roll + ph.roll }
-  const { pose, reached } = inverse(goal)
+  const { pose, reached } = inverse(goal, heldBox(a))
   const ok = reached && within(pose)
   // Past the arm's reach or a joint's limit, the arm holds the last pose it could reach.
   if (ok) setPose(a, pose)
@@ -611,7 +739,7 @@ function drivePoint(a: Arm, who: string, now: number): string {
   if (!aim?.b || !aim.hit) { settle(a); return 'deadman' }
   a.homing = false
   const local = a.model.root.worldToLocal(tv.copy(aim.hit))
-  const r = reachDown(Math.atan2(local.z, -local.x) * R2D, Math.hypot(local.x, local.z), a.hover, a.joints[4].angle)
+  const r = reachDown(Math.atan2(local.z, -local.x) * R2D, Math.hypot(local.x, local.z), a.hover, a.joints[4].angle, heldBox(a))
   if (r) setPose(a, r.pose)
   const ok = !!r?.exact
   if (!ok && !a.edge) sim?.remote.feedback({ haptic: 'bump' }, who)
@@ -670,7 +798,7 @@ function driveTrack(a: Arm, who: string, f: Frame): string {
   }
   a.goal = goal
   // Where the gripper goes comes first: tip it if that's what it takes to get there.
-  const r = solveNear(goal)
+  const r = solveNear(goal, 60, heldBox(a))
   if (r) setPose(a, r.pose)
   if (!r && !a.edge) sim?.remote.feedback({ haptic: 'bump' }, who)
   a.edge = !r
@@ -680,9 +808,25 @@ function driveTrack(a: Arm, who: string, f: Frame): string {
 /** The gripper this close above the floor grasps a block lying there. */
 const CLAW_LOW = 0.035
 
-function clawTo(a: Arm, c: Claw, height: number) {
-  const r = reachDown(c.yaw, c.reach, height, a.joints[4].angle)
+/** How fast the sim's own arm takes the gripper straight down or up for the claw (m/s). */
+const CLAW_SPEED = 0.3
+
+/** Send the gripper to a height over the claw's spot. */
+function clawAt(a: Arm, c: Claw, height: number) {
+  const r = reachDown(c.yaw, c.reach, height, a.joints[4].angle, heldBox(a))
   if (r) setPose(a, r.pose)
+}
+
+/**
+ * Send the claw's gripper to a height over its spot. The sim's own arm takes it there straight down (or up), a little
+ * further each frame, so that its fingers come down around a block rather than on it: each joint heading straight for
+ * its end would swing the gripper a few centimetres to the side on the way. A real arm goes as it always has.
+ */
+function clawTo(a: Arm, c: Claw, height: number) {
+  c.goal = height
+  c.h = a.hw ? height : forward(poseOf(a)).height
+  c.at = performance.now()
+  if (a.hw) clawAt(a, c, height)
 }
 
 /** A (Point): pick up what's under the gripper, or put down what it holds. */
@@ -690,16 +834,26 @@ function startClaw(a: Arm) {
   if (a.claw || stopped || (a.hw && !a.hw.live)) return
   const t = forward(poseOf(a))
   a.homing = false
-  a.claw = { phase: 'down', pick: (a.joints[5].target ?? a.joints[5].angle) > 0.5, yaw: t.yaw, reach: t.reach, since: performance.now() }
+  // Holding a block, it puts it down; else it picks one up, opening on the way down.
+  const pick = !blocks.some((b) => b.by === a)
+  if (pick) a.joints[5].target = 1
+  a.claw = { phase: 'down', pick, yaw: t.yaw, reach: t.reach, since: performance.now(), goal: CLAW_LOW, h: t.height, at: performance.now() }
   clawTo(a, a.claw, CLAW_LOW)
 }
 
 function clawStep(a: Arm, now: number): string {
   const c = a.claw!
-  const still = a.joints.slice(0, 5).every((j) => j.target === null && Math.abs(j.vel) < 2)
+  if (c.h !== c.goal) {
+    const d = (CLAW_SPEED * Math.min(50, now - c.at)) / 1000
+    c.h = c.goal < c.h ? Math.max(c.goal, c.h - d) : Math.min(c.goal, c.h + d)
+    clawAt(a, c, c.h)
+  }
+  c.at = now
+  const still = c.h === c.goal && a.joints.slice(0, 5).every((j) => j.target === null && Math.abs(j.vel) < 2)
   const g = a.joints[5]
   if (now - c.since > 8000) { a.claw = null; return '' }
-  if (c.phase === 'down' && still) { c.phase = 'grip'; g.target = c.pick ? 0 : 1 } else if (c.phase === 'grip' && g.target === null) {
+  // Down (or down on a block that stops it): close or open.
+  if (c.phase === 'down' && (still || a.blocked)) { c.phase = 'grip'; g.target = c.pick ? 0 : 1 } else if (c.phase === 'grip' && g.target === null) {
     c.phase = 'up'
     clawTo(a, c, a.hover)
   } else if (c.phase === 'up' && still) a.claw = null
@@ -720,6 +874,10 @@ function stepArm(a: Arm, now: number, dt: number) {
   const got = mirror ? hw.driver.read() : null
   const angles = got ? fromRaw(hw!.cal, got.raw.map((v) => v ?? NaN)) : null
   const cap = hw?.live ? hw.cap : 1
+  // Where the arm and the gripper were, and whether it's headed for a pose, for the floor and the grip (below).
+  const was = poseOf(a)
+  const gripWas = a.joints[5].angle
+  const following = !stopped && a.joints.slice(1, 5).some((j) => j.target !== null)
   a.joints.forEach((j, i) => {
     const who = s?.claims.holder(j.node)
     let v = 0
@@ -755,6 +913,22 @@ function stepArm(a: Arm, now: number, dt: number) {
     j.angle = next
     a.model.apply[i](j.angle)
   })
+  // The floor: no step takes any part of the arm below it. Headed for a pose, the arm rides along it while its joints
+  // catch up; turned by hand, a joint stops there as at a limit.
+  if (!mirror) {
+    const { pose, floored } = stepAboveFloor(was, poseOf(a), following, JOINTS[1].min, heldBox(a))
+    for (const k of floored) {
+      const i = POSE_KEYS.indexOf(k)
+      const j = a.joints[i]
+      j.angle = pose[k]
+      j.vel = 0
+      j.state ||= 'floor'
+      a.model.apply[i](j.angle)
+    }
+  }
+  // The blocks: a held one keeps the gripper from closing further; the rest are pushed, stop the arm, or are taken.
+  holdStep(a)
+  blockStep(a, was, gripWas, following)
   if (a.homing && a.joints.every((j) => j.target === null)) a.homing = false
   // Rings wear their controller's colour, and flash when control changes.
   a.joints.forEach((j, i) => paint(a.model.rings[i], s?.claims.controller(j.node), j, dt, Math.abs(j.vel) > 1e-3))
@@ -1108,6 +1282,17 @@ Object.assign(window, {
       tool: forward(poseOf(a)), joints: a.joints.map((j) => ({ node: j.node, angle: j.angle, target: j.target, state: j.state })),
     })),
     blocks: () => blocks.map((b) => b.by?.id ?? null),
+    /** A block: where it is, how it's turned, how low it reaches, who holds it and the opening they hold it at. */
+    block: (i: number) => {
+      const b = blocks[i], p = b.mesh.getWorldPosition(new THREE.Vector3())
+      return { x: p.x, y: p.y, z: p.z, yaw: yawOf(b.mesh.getWorldQuaternion(new THREE.Quaternion())), bottom: p.y - halfHeight(b), by: b.by?.id ?? null, grip: b.by ? b.grip : null }
+    },
+    /** Send an arm to a pose (degrees; the gripper 0 closed … 1 open), as Home does (tests and screenshots). */
+    goTo: (id: string, pose: ArmPose, open?: number) => { const a = armOf(id); if (!a) return; a.homing = false; setPose(a, pose); if (open !== undefined) a.joints[5].target = open },
+    /** Put a block down on the floor at (x, z), turned `yaw` degrees (tests and screenshots). */
+    placeBlock: (i: number, x: number, z: number, yaw = 0) => { const b = blocks[i]; if (b.by) drop(b); b.mesh.position.set(x, BLOCK / 2, z); b.mesh.quaternion.setFromAxisAngle(UP, yaw * D2R); b.vy = 0 },
+    /** Look from `at` toward `to` (metres; tests and screenshots). The camera keeps its limits. */
+    view: (at: [number, number, number], to: [number, number, number]) => { camera.position.set(...at); controls.target.set(...to); controls.update() },
     aims: () => [...aims.entries()].map(([id, a]) => ({ id, on: a.on, b: a.b, hit: a.hit ? { x: a.hit.x, z: a.hit.z } : null })),
     stopped: () => stopped,
     addArm: () => addArm()?.id ?? null,

@@ -1,164 +1,235 @@
-/* ob.Pal Link popup. Tokens (Lime on Carbon, glass, blur) come from src/styles/base.css. */
-html,
-body {
-  width: 332px;
-  overflow: hidden;
-}
-body {
-  background:
-    radial-gradient(110% 70% at 50% -14%, rgb(var(--accent-rgb) / 0.16), transparent 62%),
-    radial-gradient(80% 60% at 110% 112%, rgb(var(--aurora-1-rgb) / 0.55), transparent 70%),
-    var(--page);
-}
-.pop { display: grid; gap: 10px; padding: 14px; }
-.glass { border-radius: 22px; }
+/*
+ * ob.Pal Link popup. While pairing: the code to scan beside the controls; once connected, the phone is the status in
+ * the bar and the controls have the popup to themselves. Chrome sizes a popup to its content, up to 800 × 600: the
+ * width is set here and the height follows. Opened in a tab (html.in-tab), it flows, and stacks when narrow.
+ * The shared look is ../ui/link.css.
+ */
+html { overflow-x: hidden; }
+.pop { container: pop / inline-size; display: grid; gap: 12px; width: 640px; padding: 12px 14px 14px; }
+html.in-tab body { min-height: 100vh; }
+html.in-tab .pop { width: auto; max-width: 720px; margin: 0 auto; padding: 16px; }
 
-/* header: lockup, product tag, live status */
-.bar { display: flex; align-items: center; gap: 8px; min-height: 36px; }
-.bar .logo { gap: 8px; }
-.bar .logo .mark { width: 30px; height: 30px; }
-.bar .logo .word { font-size: 18px; }
-.tag {
-  padding: 2px 7px; border-radius: 999px; background: var(--glass-light); color: var(--accent-ink);
-  font-size: 10.5px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
-}
-.status {
-  margin-left: auto; display: inline-flex; align-items: center; gap: 7px; padding: 5px 10px; border-radius: 999px;
-  border: 1px solid var(--glass-edge); background: rgb(255 255 255 / 0.05);
-  color: var(--secondary); font-size: 12px; font-weight: 650; white-space: nowrap;
-}
-.status i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
-.status[data-s='ready'] i { background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
-.status[data-s='connecting'] i { background: var(--warn); }
-.status[data-s='connected'] i { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
-.status[data-s='offline'] i { background: var(--bad); }
+/* ---- the bar: lockup, the link (or the phone on it), the look ---------------------------------------------- */
 
-/* pairing: QR on a white tile, or the connected phone */
-.pair { padding: 14px; }
-.scan { display: grid; justify-items: center; gap: 10px; }
+.bar { display: flex; align-items: center; gap: 10px; min-height: 40px; padding-left: 4px; }
+.bar > * { flex: none; }
+.bar > .conn { flex: 0 1 auto; }
+@container pop (width < 440px) { .bar .tag { display: none; } }
+.conn {
+  position: relative; display: inline-flex; align-items: center; min-width: 0; height: 34px; margin-left: auto; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--fill); transition: border-color 0.35s var(--ease), background 0.35s var(--ease), box-shadow 0.35s var(--ease);
+}
+.status { display: inline-flex; align-items: center; gap: 8px; min-width: 0; height: 100%; padding: 0 14px 0 12px; color: var(--secondary); font: 650 12.5px/1 var(--font); white-space: nowrap; transition: color 0.3s; }
+.status i { position: relative; width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--muted); transition: background 0.3s, box-shadow 0.3s; }
+.conn[data-s='ready'] .status i { background: var(--accent); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.16), 0 0 12px rgb(var(--accent-rgb) / 0.7); animation: breathe 2s ease-in-out infinite; }
+.conn[data-s='connecting'] .status i { background: var(--warn); box-shadow: 0 0 0 3px rgb(252 211 77 / 0.16); animation: breathe 1s ease-in-out infinite; }
+.conn[data-s='offline'] .status { color: var(--bad-text); }
+.conn[data-s='offline'] .status i { background: var(--bad); box-shadow: 0 0 0 3px rgb(251 113 133 / 0.16); }
+/* Connected: the phone's name, lit, and × to let it go. The word stays for screen readers. */
+.conn[data-s='connected'] { border-color: rgb(var(--accent-rgb) / 0.45); background: rgb(var(--accent-rgb) / 0.11); box-shadow: 0 8px 24px -14px rgb(var(--accent-rgb) / 0.8); }
+.conn[data-s='connected'] .status { padding-right: 4px; color: var(--ink); }
+.conn[data-s='connected'] .status i { background: var(--accent); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.22), 0 0 14px rgb(var(--accent-rgb) / 0.9); }
+.conn[data-s='connected'] .status i::after { content: ''; position: absolute; inset: -3px; border-radius: 50%; border: 2px solid rgb(var(--accent-rgb) / 0.8); opacity: 0; animation: ring-out 1.3s var(--ease) 0.1s 2; }
+.conn[data-s='connected'] #status-t { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+#device-name { min-width: 0; max-width: 190px; overflow: hidden; font-weight: 700; letter-spacing: -0.01em; text-overflow: ellipsis; }
+.unpair { display: grid; place-items: center; width: 26px; height: 26px; flex: none; margin-right: 3px; padding: 0; border: 0; border-radius: 50%; background: rgb(var(--hl-rgb) / 0.08); color: var(--secondary); transition: background 0.2s, color 0.2s, transform 0.12s var(--ease); }
+.unpair:hover { background: rgb(251 113 133 / 0.18); color: var(--bad-text); }
+.unpair:active { transform: scale(0.9); }
+.unpair .ic { width: 13px; height: 13px; }
+@keyframes ring-out { 0% { opacity: 0.9; transform: scale(1); } 100% { opacity: 0; transform: scale(2.6); } }
+
+/* The look: every surface in one row, the colours under them. */
+.look-menu { width: 372px; min-width: 0; max-width: calc(100vw - 24px); padding: 14px 14px 12px; }
+.look-menu .looks { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+.look-menu .look { gap: 6px; padding: 8px 0 7px; border-radius: 12px; font-size: 10.5px; letter-spacing: -0.01em; }
+.look-menu .look i { width: 38px; height: 27px; border-radius: 8px; }
+.look-menu .look i::before { left: 5px; right: 5px; top: 5px; height: 7px; }
+.look-menu .look i::after { left: 5px; bottom: 5px; width: 12px; height: 4px; }
+
+/* ---- the cards --------------------------------------------------------------------------------------------- */
+
+.grid { display: grid; grid-template-columns: 252px minmax(0, 1fr); gap: 12px; align-items: stretch; }
+.pop.linked .grid { grid-template-columns: minmax(0, 1fr); }
+@container pop (width < 560px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* The code to scan. */
+.pair { display: grid; align-content: center; padding: 20px 14px 18px; }
+.scan { display: grid; justify-items: center; gap: 12px; }
 .qr {
-  width: 184px; height: 184px; padding: 9px; border-radius: 18px; background: #fff;
-  box-shadow: 0 14px 36px rgb(0 0 0 / 0.42), 0 0 0 1px rgb(var(--accent-rgb) / 0.35), 0 0 32px rgb(var(--accent-rgb) / 0.14);
+  position: relative; width: 196px; aspect-ratio: 1; padding: 11px; border-radius: 22px; background: #fff; overflow: hidden;
+  box-shadow: 0 0 0 1px rgb(var(--accent-rgb) / 0.42), 0 22px 44px -22px rgb(var(--accent-rgb) / 0.6), 0 18px 34px -20px rgb(0 0 0 / 0.75);
+  transition: box-shadow 0.4s var(--ease);
 }
 .qr svg { display: block; width: 100%; height: 100%; }
-.qr-wait {
-  display: block; width: 100%; height: 100%; border-radius: 10px;
-  background: linear-gradient(100deg, #ececec 35%, #fafafa 50%, #ececec 65%) 0 0 / 300% 100%;
-  animation: shimmer 1.3s linear infinite;
+/* The direct code wears the lavender haze, so the two codes never look alike. */
+.qr[data-kind='lan'] { box-shadow: 0 0 0 1px rgb(var(--haze-rgb) / 0.7), 0 22px 44px -20px rgb(var(--haze-rgb) / 0.65), 0 18px 34px -20px rgb(0 0 0 / 0.75); }
+[data-bb-theme='light'] .qr { box-shadow: 0 0 0 1px rgb(15 23 42 / 0.1), 0 0 0 5px rgb(var(--accent-rgb) / 0.22), 0 22px 40px -22px rgb(15 23 42 / 0.45); }
+[data-bb-theme='light'] .qr[data-kind='lan'] { box-shadow: 0 0 0 1px rgb(15 23 42 / 0.1), 0 0 0 5px rgb(var(--haze-rgb) / 0.35), 0 22px 40px -22px rgb(15 23 42 / 0.45); }
+/* A new code: one scan line sweeps down it (and again under the mouse). */
+.qr::after {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 30px; pointer-events: none; opacity: 0;
+  background: linear-gradient(180deg, transparent, rgb(var(--accent-rgb) / 0.3) 72%, rgb(var(--accent-rgb) / 0.95) 96%, transparent);
 }
-.scan-hint { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--muted); font-size: 12.5px; font-weight: 600; }
-.scan-hint .ic { width: 16px; height: 16px; }
-.scan-hint.warn { color: var(--warn); }
-.qr[data-kind='lan'] { box-shadow: 0 14px 36px rgb(0 0 0 / 0.42), 0 0 0 1px rgb(var(--accent-rgb) / 0.55), 0 0 40px rgb(var(--accent-rgb) / 0.22); }
+.qr[data-kind='lan']::after { background: linear-gradient(180deg, transparent, rgb(var(--haze-rgb) / 0.3) 72%, rgb(var(--haze-rgb) / 0.95) 96%, transparent); }
+.qr.sweep::after { animation: qr-sweep 1.6s var(--ease) 0.2s 1; }
+@media (hover: hover) and (pointer: fine) { .qr:hover::after { animation: qr-sweep 1.6s var(--ease) 1; } }
+@keyframes qr-sweep { 0% { opacity: 0; transform: translate3d(0, -30px, 0); } 14% { opacity: 1; } 84% { opacity: 1; } 100% { opacity: 0; transform: translate3d(0, 196px, 0); } }
+/* Offline with no code to show: a quiet tile in its place. */
+.qr.off { background: rgb(var(--hl-rgb) / 0.04); box-shadow: inset 0 0 0 1px var(--line); }
+.qr.off::after { display: none; }
+.qr-off { display: grid; place-items: center; width: 100%; height: 100%; border-radius: 14px; border: 1px dashed var(--line-strong); color: var(--muted); }
+.qr-off .ic { width: 44px; height: 44px; stroke-width: 1.4; }
+.qr-wait { display: block; width: 100%; height: 100%; border-radius: 12px; background: linear-gradient(100deg, #ececec 35%, #fafafa 50%, #ececec 65%) 0 0 / 300% 100%; animation: shimmer 1.3s linear infinite; }
+@keyframes shimmer { to { background-position: -300% 0; } }
 
-/* which code: online through ob.Pal, or direct over the local network (remembered phones) */
-.codes { display: inline-flex; gap: 3px; padding: 3px; border-radius: 999px; border: 1px solid var(--glass-edge); background: rgb(255 255 255 / 0.04); }
+.scan-hint { display: flex; align-items: center; gap: 7px; margin: 2px 0 0; color: var(--secondary); font: 600 13px/1.2 var(--font); }
+.scan-hint .ic { width: 16px; height: 16px; color: var(--accent-text); }
+.scan-hint.direct .ic { color: rgb(var(--haze-rgb)); }
+[data-bb-theme='light'] .scan-hint.direct .ic { color: #6d4fc7; }
+.scan-hint.warn, .scan-hint.warn .ic { color: var(--warn-text); }
+
+/* Which code: online through ob.Pal, or direct over the local network. The lit half slides to the one shown. */
+.codes { position: relative; display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border-radius: 999px; border: 1px solid var(--line); background: var(--fill); }
+.codes::before {
+  content: ''; position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 2); border-radius: 999px;
+  background: var(--glass-light); box-shadow: 0 8px 18px -10px rgb(var(--accent-rgb) / 0.9), inset 0 1px 0 rgb(255 255 255 / 0.45);
+  transition: transform 0.4s var(--spring), background 0.3s var(--ease), box-shadow 0.3s var(--ease);
+}
+.codes:has(.code[data-code='lan'][aria-checked='true'])::before { transform: translate3d(100%, 0, 0); background: linear-gradient(150deg, rgb(var(--haze-rgb) / 0.98), rgb(var(--haze-rgb) / 0.8)); box-shadow: 0 8px 18px -10px rgb(var(--haze-rgb) / 0.9), inset 0 1px 0 rgb(255 255 255 / 0.45); }
 .code {
-  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px 0 8px; border: 0; border-radius: 999px;
-  background: transparent; color: var(--muted); font-size: 11.5px; font-weight: 700; transition: background 0.15s, color 0.15s;
+  position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 12px 0 10px;
+  border: 0; border-radius: 999px; background: transparent; color: var(--muted); font: 700 12px/1 var(--font); transition: color 0.25s var(--ease);
 }
 .code .ic { width: 15px; height: 15px; }
 .code:hover { color: var(--ink); }
-.code[aria-checked='true'] { background: var(--glass-light); color: var(--accent-ink); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.4); }
+.code[aria-checked='true'] { color: var(--accent-ink); }
+.code[data-code='lan'][aria-checked='true'] { color: #20153b; }
 
-/* remembered phones: tap to make the direct code for one, × to forget it */
+/* Remembered phones: tap one to make the direct code for it, × to forget it. */
 .remembered { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: 100%; }
 .phone {
-  display: inline-flex; align-items: center; height: 28px; padding-left: 2px; border-radius: 999px;
-  border: 1px solid var(--glass-edge); background: rgb(255 255 255 / 0.04); color: var(--secondary); font-size: 11.5px; font-weight: 650;
+  display: inline-flex; align-items: center; min-width: 0; max-width: 100%; height: 28px; padding-left: 2px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--fill); color: var(--secondary); font: 650 11px/1 var(--font); transition: border-color 0.25s, background 0.25s, color 0.25s;
 }
-.phone[aria-current='true'] { border-color: rgb(var(--accent-rgb) / 0.55); color: var(--ink); }
-.phone-pick { display: inline-flex; align-items: center; gap: 5px; height: 100%; max-width: 150px; padding: 0 4px 0 6px; border: 0; background: none; color: inherit; font: inherit; }
-.phone-pick .ic { width: 14px; height: 14px; }
+.phone:hover { border-color: var(--line-strong); color: var(--ink); }
+.phone[aria-current='true'] { border-color: rgb(var(--haze-rgb) / 0.6); background: rgb(var(--haze-rgb) / 0.1); color: var(--ink); }
+.phone-pick { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 150px; height: 100%; padding: 0 1px 0 6px; border: 0; background: none; color: inherit; font: inherit; }
+.phone-pick .ic { width: 12px; height: 12px; }
+.phone[aria-current='true'] .phone-pick .ic { color: rgb(var(--haze-rgb)); }
+[data-bb-theme='light'] .phone[aria-current='true'] .phone-pick .ic { color: #6d4fc7; }
 .phone-pick span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.phone-x { display: grid; place-items: center; width: 24px; height: 24px; margin-right: 1px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--muted); }
-.phone-x:hover { background: rgb(255 255 255 / 0.1); color: var(--ink); }
-.phone-x .ic { width: 13px; height: 13px; }
+.phone-x { display: grid; place-items: center; width: 20px; height: 20px; flex: none; margin-right: 2px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--muted); transition: background 0.2s, color 0.2s; }
+.phone-x:hover { background: rgb(251 113 133 / 0.16); color: var(--bad-text); }
+.phone-x .ic { width: 12px; height: 12px; }
 
-.device { display: flex; align-items: center; gap: 12px; }
-.device-ic {
-  display: grid; place-items: center; width: 42px; height: 42px; flex: none; border-radius: 14px;
-  background: var(--glass-light); color: var(--accent-ink);
-  box-shadow: 0 10px 24px rgb(var(--accent-rgb) / 0.25), inset 0 1px 0 rgb(255 255 255 / 0.45);
-}
-.device-t { flex: 1; min-width: 0; display: grid; line-height: 1.3; }
-.device-t b { overflow: hidden; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
-.device-t small { color: var(--ok); font-size: 12px; font-weight: 600; }
-.icon-btn {
-  display: grid; place-items: center; width: 34px; height: 34px; flex: none; padding: 0; border-radius: 11px;
-  border: 1px solid var(--glass-edge); background: rgb(255 255 255 / 0.06); color: var(--secondary);
-  transition: background 0.15s, color 0.15s;
-}
-.icon-btn:hover { background: rgb(255 255 255 / 0.12); color: var(--ink); }
-.icon-btn .ic { width: 16px; height: 16px; }
+/* ---- the controls ------------------------------------------------------------------------------------------ */
 
-/* controls */
-.panel { display: grid; gap: 4px; padding: 6px; }
-.row {
-  display: flex; align-items: center; gap: 11px; width: 100%; padding: 8px; border: 0; border-radius: 16px;
-  background: transparent; text-align: left; transition: background 0.15s;
-}
-.row:hover:not(:disabled) { background: rgb(255 255 255 / 0.05); }
-.row:disabled { cursor: default; opacity: 0.5; }
-.row-ic {
-  display: grid; place-items: center; width: 36px; height: 36px; flex: none; border-radius: 12px;
-  background: rgb(255 255 255 / 0.06); color: var(--secondary); transition: color 0.2s, background 0.2s;
-}
-.row[aria-checked='true'] .row-ic { background: rgb(var(--accent-rgb) / 0.12); color: var(--accent); }
-.row-t { flex: 1; min-width: 0; display: grid; line-height: 1.3; }
-.row-t b { font-size: 14px; font-weight: 650; }
-.row-t small { overflow: hidden; color: var(--muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
-.sw {
-  position: relative; width: 40px; height: 24px; flex: none; border-radius: 999px;
-  background: rgb(255 255 255 / 0.12); box-shadow: inset 0 0 0 1px var(--glass-edge); transition: background 0.2s var(--ease);
-}
-.sw i {
-  position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%;
-  background: var(--secondary); transition: transform 0.2s var(--ease), background 0.2s;
-}
-.row[aria-checked='true'] .sw { background: var(--accent); box-shadow: 0 0 16px rgb(var(--accent-rgb) / 0.35); }
-.row[aria-checked='true'] .sw i { transform: translateX(16px); background: var(--accent-ink); }
-.row[aria-busy='true'] .sw i { animation: pulse 0.9s ease-in-out infinite; }
+.controls { container: controls / inline-size; display: flex; flex-direction: column; gap: 8px; padding: 10px; }
+.controls > * { min-width: 0; }
+/* What the chosen target does, in a line, while the tiles have no room to say it; beside the code it takes the
+   space between the tiles and the switches, which sit level with the foot of the code. */
+.says { margin: auto 0; padding: 4px 12px 8px; color: var(--muted); font: 550 12.5px/1.45 var(--font); text-align: center; text-wrap: balance; }
+.says.new { animation: says-in 0.45s var(--ease) both; }
+@keyframes says-in { from { opacity: 0; transform: translate3d(0, 4px, 0); } }
+.pop.linked .says { margin: 0; }
 
-.chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 4px 2px 6px; }
+/* What the phone drives: four tiles, the lit one sliding to the choice. */
+.chips { position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin-bottom: 4px; padding: 4px; border-radius: 19px; border: 1px solid var(--line); background: rgb(var(--base-rgb) / 0.4); }
+[data-bb-theme='light'] .chips { background: rgb(15 23 42 / 0.035); }
+.chips::before {
+  content: ''; position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc((100% - 20px) / 4); border-radius: 15px;
+  background: var(--glass-light); box-shadow: 0 12px 26px -12px rgb(var(--accent-rgb) / 0.85), inset 0 1px 0 rgb(255 255 255 / 0.5);
+  transform: translate3d(calc(var(--at, 0) * (100% + 4px)), 0, 0); transition: transform 0.45s var(--spring);
+}
+.chips:has(.chip[data-mode='viewer'][aria-checked='true']) { --at: 1; }
+.chips:has(.chip[data-mode='keys'][aria-checked='true']) { --at: 2; }
+.chips:has(.chip[data-mode='pc'][aria-checked='true']) { --at: 3; }
 .chip {
-  display: grid; justify-items: center; gap: 5px; padding: 10px 4px 9px; border-radius: 16px;
-  border: 1px solid var(--glass-edge); background: rgb(255 255 255 / 0.04); color: var(--secondary);
-  font-size: 12px; font-weight: 650; transition: background 0.15s, color 0.15s, transform 0.12s var(--ease);
+  position: relative; z-index: 1; display: grid; justify-items: center; gap: 7px; min-width: 0; padding: 12px 2px 10px; border: 0; border-radius: 15px;
+  background: transparent; color: var(--secondary); text-align: center; transition: color 0.3s var(--ease), background 0.2s, transform 0.12s var(--ease);
 }
-.chip:hover { background: rgb(255 255 255 / 0.08); color: var(--ink); }
-.chip:active { transform: scale(0.97); }
-.chip .ic { width: 22px; height: 22px; }
-.chip[aria-checked='true'] {
-  border-color: rgb(255 255 255 / 0.3); background: var(--glass-light); color: var(--accent-ink);
-  box-shadow: 0 10px 24px rgb(var(--accent-rgb) / 0.22), inset 0 1px 0 rgb(255 255 255 / 0.45);
+.chip .ic { width: 22px; height: 22px; transition: transform 0.35s var(--spring); }
+.chip-t { display: grid; gap: 3px; min-width: 0; }
+.chip-t b { font: 650 12.5px/1.1 var(--font); letter-spacing: -0.01em; }
+.chip-t small { display: none; overflow: hidden; color: var(--muted); font: 550 11px/1.2 var(--font); text-overflow: ellipsis; white-space: nowrap; transition: color 0.3s var(--ease); }
+.chip:hover { background: var(--fill); color: var(--ink); }
+.chip:hover .ic { transform: translate3d(0, -2px, 0); }
+.chip:active { transform: scale(0.95); }
+.chip[aria-checked='true'], .chip[aria-checked='true']:hover { background: transparent; color: var(--accent-ink); }
+.chip[aria-checked='true'] small { color: rgb(0 0 0 / 0.55); }
+/* With room (the popup to themselves): the glyph beside the name, and a few words under it. */
+@container controls (width >= 480px) {
+  .chip { grid-auto-flow: column; justify-content: start; align-items: center; gap: 11px; padding: 12px 10px 12px 14px; text-align: left; }
+  .chip:hover .ic { transform: scale(1.08); }
+  .chip-t small { display: block; }
+  .says { display: none; }
 }
 
-/* PC target: the program in front (allow it), or what is being controlled */
-.pc { display: grid; gap: 8px; padding: 4px 4px 6px; }
-.pc-main { display: flex; align-items: center; gap: 11px; padding: 4px; }
-.pc .row-ic.on { background: rgb(var(--accent-rgb) / 0.14); color: var(--accent); box-shadow: 0 0 18px rgb(var(--accent-rgb) / 0.35); }
-.pc .row-t small { white-space: normal; line-height: 1.35; }
-.kinds { display: flex; gap: 6px; padding: 0 4px; }
-.kind {
-  display: inline-flex; align-items: center; gap: 5px; padding: 6px 11px; border-radius: 999px;
-  border: 1px solid var(--glass-edge); background: rgb(255 255 255 / 0.04); color: var(--muted);
-  font-size: 12px; font-weight: 650; transition: background 0.15s, color 0.15s;
+/* The PC through ob.Pal Desktop: the helper, what is controlled and what to do about it, and the gestures. */
+.pc { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.pc-helper { display: flex; align-items: center; gap: 8px; min-height: 36px; padding-left: 6px; color: var(--muted); font: 600 12px/1.2 var(--font); }
+.pc-ver { position: relative; min-width: 0; padding-left: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-ver::before { content: ''; position: absolute; left: 3px; top: 50%; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px rgb(110 231 183 / 0.15); }
+[data-bb-theme='light'] .pc-ver::before { background: #059669; }
+.pc-panic { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; }
+.pc-panic > span { display: none; margin-right: 6px; }
+@container controls (width >= 480px) { .pc-panic > span { display: inline; } }
+@container controls (width < 400px) { .pc-brand { display: none; } }
+.pc-helper .icon-btn { margin-left: 4px; }
+.pc-panic[hidden] + .icon-btn { margin-left: auto; }
+.pc-state { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 13px; border-radius: 18px; border: 1px solid var(--line); background: rgb(var(--base-rgb) / 0.4); }
+[data-bb-theme='light'] .pc-state { background: rgb(15 23 42 / 0.03); }
+.pc-main { display: flex; align-items: center; gap: 13px; flex: 1 1 100%; min-width: 0; }
+.pc-main .row-t { gap: 3px; }
+.pc-main .row-t b { font: 750 15px/1.25 var(--font-display); letter-spacing: -0.02em; white-space: normal; overflow-wrap: anywhere; }
+.pc-main .row-t small { font-size: 12.5px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
+.pc-ic {
+  display: grid; place-items: center; width: 46px; height: 46px; flex: none; border-radius: 15px; border: 1px solid var(--line); background: var(--fill); color: var(--secondary);
+  transition: background 0.35s var(--ease), color 0.35s, border-color 0.35s, box-shadow 0.4s var(--ease);
 }
-.kind .ic { width: 15px; height: 15px; }
-.kind:hover { background: rgb(255 255 255 / 0.08); color: var(--ink); }
-.kind[aria-pressed='true'] { background: var(--glass-light); border-color: rgb(255 255 255 / 0.3); color: var(--accent-ink); }
-.pc-actions { display: flex; gap: 6px; padding: 0 4px; }
-.pc-actions .btn { flex: 1; min-height: 38px; padding: 0 12px; font-size: 13px; }
+.pc-ic .ic { width: 22px; height: 22px; }
+.pc-ic[data-tone='live'] { border-color: rgb(255 255 255 / 0.3); background: var(--glass-light); color: var(--accent-ink); box-shadow: 0 14px 28px -12px rgb(var(--accent-rgb) / 0.85), inset 0 1px 0 rgb(255 255 255 / 0.5); }
+.pc-ic[data-tone='warn'] { border-color: rgb(252 211 77 / 0.35); background: rgb(252 211 77 / 0.12); color: var(--warn-text); }
+.pc-ic[data-tone='rest'] { border-color: var(--line-strong); color: var(--ink); }
+.pc-state .kinds { flex: 1 1 auto; }
+.pc-actions { display: flex; flex: 1 1 100%; gap: 8px; }
+.pc-actions .btn { flex: 1 1 0; min-width: max-content; }
+/* With room, what to do sits beside what is controlled. */
+@container controls (width >= 480px) {
+  .pc-main { flex-basis: 0; flex-grow: 1; }
+  .pc-actions { flex: 0 0 auto; }
+  .pc-actions .btn { flex: none; }
+  .pc-state:has(.kinds:not([hidden])) .pc-main { flex-basis: 100%; }
+}
 
-.note { margin: 2px 10px 6px; color: var(--warn); font-size: 12px; font-weight: 600; }
-.note button { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; }
+/* The gestures, as pictograms: the trackpad's, Point's (the mouse face a PC gets), and typing. */
+.pc-legend { display: grid; gap: 12px; padding: 12px 10px 10px; border-radius: 18px; border: 1px solid var(--line); background: rgb(var(--base-rgb) / 0.3); }
+[data-bb-theme='light'] .pc-legend { background: rgb(15 23 42 / 0.025); }
+.lg { display: grid; gap: 8px; }
+.lg .eyebrow { padding-left: 4px; }
+.lg-row { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; }
+.lg-i { display: grid; justify-items: center; align-content: start; gap: 3px; min-width: 0; padding: 6px 0 4px; border-radius: 12px; text-align: center; transition: background 0.2s; }
+.lg-i:hover { background: var(--fill); }
+.lg-i .ic { width: 21px; height: 21px; margin-bottom: 3px; color: var(--accent-text); }
+.lg-i b { max-width: 100%; color: var(--ink); font: 650 11px/1.15 var(--font); white-space: nowrap; }
+/* How to do it, where there is room for it (the glyph shows it, and its tooltip says it). */
+.lg-i small { display: none; max-width: 100%; color: var(--muted); font: 500 10.5px/1.2 var(--font); }
+/* A group of one (typing): its item on a line from the start of the row, rather than alone in the middle of it;
+   beside the code, its heading shares that line (the popup stays under Chrome's 600 px). */
+.lg-i:only-child { justify-self: start; grid-auto-flow: column; align-items: center; column-gap: 8px; padding: 5px 12px 5px 8px; text-align: left; }
+.lg-i:only-child .ic { margin-bottom: 0; }
+@container controls (width < 480px) { .lg:has(.lg-i:only-child) { grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: 6px; } }
+@container controls (width >= 480px) {
+  .lg-i small { display: block; }
+  .lg-i b { font-size: 11.5px; }
+  .pc-legend { gap: 6px; padding: 8px 10px; }
+  .lg { grid-template-columns: 76px minmax(0, 1fr); align-items: center; gap: 4px; }
+  .lg + .lg { padding-top: 6px; border-top: 1px solid var(--line); }
+  .lg .eyebrow { padding-left: 6px; }
+}
 
-@keyframes pulse { 50% { opacity: 0.35; } }
-@keyframes shimmer { to { background-position: -300% 0; } }
+.controls .note { margin-top: 2px; }
 
-/* What the phone's gestures do on the PC, while it is being controlled. */
-.pc-legend { display: grid; gap: 4px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--glass-edge); }
-.pc-legend p { margin: 0; display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 11px; line-height: 1.45; color: var(--muted); }
-.pc-legend b { color: var(--ink); font-weight: 600; min-width: 56px; }
-.pc-legend span { white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) {
+  .qr.sweep::after, .qr:hover::after, .conn[data-s='connected'] .status i::after, .says.new { animation: none; }
+}

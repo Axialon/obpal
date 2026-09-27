@@ -5,7 +5,9 @@
 import { applyTheme, initialTheme } from '../ui/themes'
 import { calmMarks, mountMarks } from '../ui/icons'
 import { mountTopBar } from '../landing/topbar'
-import { checkProfile, MOTION_UTILITIES, PROFILE_IDS, PROFILE_LIMITS, PROFILES, ROUTES, utilityKey, type MotionUtility, type ProfileSpec } from '@obpal/core'
+import {
+  checkProfile, CONTROLLER_IDS, CONTROLLERS, MOTION_UTILITIES, PROFILE_IDS, PROFILE_LIMITS, PROFILES, ROUTES, utilityKey, type MotionUtility, type ProfileSpec,
+} from '@obpal/core'
 import { BRIDGE_ROWS, proposeUrl, SYSTEM_ROWS, UTILITY_ROWS, type CatalogueRow } from './data'
 
 applyTheme(initialTheme())
@@ -29,6 +31,14 @@ function rows(id: string, list: CatalogueRow[]) {
       ${r.link ? `<a href="${r.link}">Try it →</a>` : ''}
     </article>`).join('')
 }
+// Controllers: what a person picks on the phone, each built from utilities (CATALOGUE §9.1).
+$('controllers').innerHTML = CONTROLLER_IDS.map((id) => CONTROLLERS[id]).map((c) => `
+    <article class="cat-card">
+      <header><b>${esc(c.name)}</b><span class="st">${c.category}</span></header>
+      <code>${esc(c.id)}</code>
+      <p>${esc(c.for)}</p>
+      ${c.utilities.length ? `<div class="routes">${c.utilities.map((u) => `<span>${esc(u)}</span>`).join('')}</div>` : ''}
+    </article>`).join('')
 rows('utilities', UTILITY_ROWS)
 rows('systems', SYSTEM_ROWS)
 rows('bridges', BRIDGE_ROWS)

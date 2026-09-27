@@ -7,3 +7,9 @@
 # The controller's service worker: browsers check it on every visit, so it must never be served from a stale cache.
 /p/sw.js
   Cache-Control: no-cache
+
+# The embed: other sites load it as a module script, and it loads its lazy parts from beside it, so both need CORS.
+/embed.js
+  Access-Control-Allow-Origin: *
+/assets/embed/*
+  Access-Control-Allow-Origin: *

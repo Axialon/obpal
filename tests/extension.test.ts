@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { MIN_VIEW_AREA } from '../extension/src/shared/constants'
-import { DEFAULT_KEYS, DESKTOP_KEYS, KEYS, KeyMapper, keyInit, pressCharCode, type KeysInput } from '../extension/src/shared/keys'
+import { DEFAULT_KEYS, DESKTOP_KEYS, KEYS, KeyMapper, keyInit, pcKeys, pressCharCode, type KeysInput } from '../extension/src/shared/keys'
 import { hysteresis, stickCurve, type PadInput } from '../extension/src/shared/math'
 import {
-  allowedFrom, envelope, parseBgRequest, parseBridgeRequest, parseFromPage, parseInputFrame, parseLink,
+  allowedFrom, envelope, linkConfig, parseBgRequest, parseBridgeRequest, parseConfig, parseFromPage, parseInputFrame, parseLink,
   parseOffscreenRequest, parseToPage, readDown, readUp, sanitizeRumble, senderKind,
 } from '../extension/src/shared/messages'
 import { buildFrame, deltaTuple, electFrame, isActive, padTuple, recipients, tiltTuple, type FrameInfo } from '../extension/src/shared/route'
@@ -295,7 +295,7 @@ describe('messages: validation', () => {
     expect(allowedFrom('forget', 'page')).toBe(false)
     expect(allowedFrom('forget', 'extension')).toBe(true)
     expect(allowedFrom('diag', 'page')).toBe(false)
-    expect(parseOffscreenRequest({ to: 'offscreen', type: 'config', tabId: null, mode: 'viewer' })).toEqual({ to: 'offscreen', type: 'config', tabId: null, mode: 'viewer' })
+    expect(parseOffscreenRequest({ to: 'offscreen', type: 'config', tabId: null, mode: 'viewer' })).toEqual({ to: 'offscreen', type: 'config', tabId: null, mode: 'viewer', desktop: false })
     expect(parseOffscreenRequest({ to: 'offscreen', type: 'config', tabId: 1.5, mode: 'viewer' })).toBeNull()
     expect(parseBridgeRequest({ to: 'bridge', type: 'deactivate' })).toEqual({ to: 'bridge', type: 'deactivate' })
     expect(parseBridgeRequest({ to: 'bridge', type: 'exec' })).toBeNull()
@@ -384,5 +384,34 @@ describe('keys: the whole PC (a desktop controller that types no letters)', () =
     expect(edges(m.update(input({ pad: pad({ buttons: bit(4) }) })))).toEqual(['AltLeft+', 'ArrowLeft+'])
     expect(edges(m.update(input({ pad: pad() })))).toEqual(['ArrowLeft-', 'AltLeft-'])
     expect(edges(m.update(input({ pad: pad({ buttons: bit(9) }) })))).toEqual(['ControlLeft+', 'Escape+'])
+  })
+
+  /** The worker's answer to 'offscreen-ready', as the new link document receives it (a structured clone). */
+  const answer = (tabId: number | null, mode: 'gamepad' | 'viewer' | 'keys' | 'pc', wholePc: boolean) =>
+    parseConfig(JSON.parse(JSON.stringify(linkConfig(tabId, mode, wholePc))))
+
+  it('a link document started again while the whole PC is controlled gets the desktop controller, not the game keys', () => {
+    const cfg = answer(7, 'pc', true)
+    expect(cfg).toEqual({ tabId: 7, mode: 'pc', desktop: true })
+    expect(pcKeys(cfg!.desktop)).toBe(DESKTOP_KEYS)
+    // The symptom it had: the left stick held up typed W into whatever had the focus. Now it moves the pointer.
+    const out = new KeyMapper(pcKeys(cfg!.desktop)).update(input({ pad: pad({ axes: [0, -1, 0, 0] }), dtMs: 50 }))
+    expect(out.keys).toEqual([])
+    expect(out.move[1]).toBeLessThan(0)
+  })
+
+  it('one program at a time, or whole PC with another target: the game keys, as before', () => {
+    expect(pcKeys(answer(7, 'pc', false)!.desktop)).toBe(DEFAULT_KEYS)
+    expect(answer(7, 'keys', true)).toEqual({ tabId: 7, mode: 'keys', desktop: false })
+    expect(pcKeys(answer(null, 'gamepad', true)!.desktop)).toBe(DEFAULT_KEYS)
+    // An answer without it (a worker from before 1.5), or with something else in it, never turns the whole PC on.
+    expect(parseConfig({ tabId: 7, mode: 'pc' })).toEqual({ tabId: 7, mode: 'pc', desktop: false })
+    expect(parseConfig({ tabId: 7, mode: 'pc', desktop: 'yes' })?.desktop).toBe(false)
+  })
+
+  it('every config the worker pushes carries the whole PC the same way', () => {
+    const push = { to: 'offscreen', type: 'config', ...linkConfig(3, 'pc', true) }
+    expect(parseOffscreenRequest(JSON.parse(JSON.stringify(push)))).toEqual({ to: 'offscreen', type: 'config', tabId: 3, mode: 'pc', desktop: true })
+    expect(parseOffscreenRequest({ ...push, ...linkConfig(3, 'pc', false) })).toMatchObject({ desktop: false })
   })
 })

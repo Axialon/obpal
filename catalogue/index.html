@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#0a0718" />
-    <meta name="description" content="The ob.Pal control catalogue: every utility, profile, control system and bridge a phone can drive, and a builder to make and propose your own controller profile. Machine-readable as catalogue.json." />
+    <meta name="description" content="The ob.Pal control catalogue: every controller, utility, profile, control system and bridge a phone can drive, and a builder to make and propose your own controller profile. Machine-readable as catalogue.json." />
     <title>Control catalogue · ob.Pal</title>
     <link rel="icon" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -50,13 +50,19 @@
       <section class="hero">
         <p class="eyebrow">The control catalogue</p>
         <h1>Everything a phone can drive.</h1>
-        <p class="lede">Utilities, profiles, control systems and bridges, and a builder for your own controller profile.</p>
+        <p class="lede">Controllers, utilities, profiles, control systems and bridges, and a builder for your own controller profile.</p>
         <div class="cta">
           <a class="btn primary" href="#build">Build a profile</a>
+          <a class="btn" href="/embed/">Embed it</a>
           <a class="btn" href="/catalogue.json">catalogue.json</a>
         </div>
       </section>
 
+      <section class="cat-sec" aria-labelledby="h-c">
+        <h2 id="h-c">Controllers</h2>
+        <p class="sub">What a person picks on the phone. A page names them to suggest them: <code>&lt;obpal-remote modes="face.wii face.trackpad"&gt;</code>.</p>
+        <div class="cat-grid" id="controllers"></div>
+      </section>
       <section class="cat-sec" aria-labelledby="h-u">
         <h2 id="h-u">Utilities</h2>
         <p class="sub">What a phone offers a host.</p>

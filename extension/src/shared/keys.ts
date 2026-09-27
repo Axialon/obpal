@@ -88,6 +88,9 @@ export const DESKTOP_KEYS: KeysConfig = {
   tiltMoves: false,
 }
 
+/** The PC target's mapping: the desktop controller for the whole PC, the game keys for one program at a time. */
+export const pcKeys = (desktop: boolean): KeysConfig => (desktop ? DESKTOP_KEYS : DEFAULT_KEYS)
+
 export interface Mods { shift: boolean; ctrl: boolean; alt: boolean }
 /** A key transition, with the modifier state after it (so Shift's own keydown reports shiftKey). */
 export interface KeyEdge { key: KeyName; down: boolean; mods: Mods }

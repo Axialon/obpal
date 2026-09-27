@@ -1,6 +1,8 @@
-//! Windows implementation: SendInput injection, foreground process lookup, the panic hotkey, the parent
-//! browser process, and the native messaging host registration (HKCU, no admin).
+//! Windows implementation: SendInput injection, foreground process lookup, the text-field focus watcher (UI
+//! Automation), the panic hotkey, the parent browser process, and the native messaging host registration (HKCU,
+//! no admin).
 
+pub mod focus;
 pub mod foreground;
 pub mod hotkey;
 pub mod inject;

@@ -6,15 +6,18 @@
  * About 60 times a second, and immediately when a packet arrives, it samples the phone (remote.pad and
  * remote.consume()) and streams compact input frames to the page bridges of the controlled tab over runtime
  * ports: the controller to every frame, keys to the focused frame, 3D drags to the frame with the largest canvas.
+ * For the PC target the frames (and the phone's typing, in order with them) go to the service worker instead.
  */
 import { Mode, PointerFlag, pointerDelta, Remote, type Frame, type Layout, type PointerState, type ProfileId } from '@obpal/host'
 import type { PadState } from '@obpal/core'
-import { APP_NAME, DEFAULT_MODE, PORT_NAME, SERVICE, isTargetMode, type TargetMode } from './shared/constants'
-import { DEFAULT_KEYS, DESKTOP_KEYS, KeyMapper } from './shared/keys'
+import { APP_NAME, DEFAULT_MODE, PORT_NAME, SERVICE, isTargetMode } from './shared/constants'
+import { KeyMapper, pcKeys } from './shared/keys'
 import type { PadInput } from './shared/math'
-import { parseConfig, parseFromPage, parseOffscreenRequest, type BgRequest, type LinkState, type PadTuple, type ToPage } from './shared/messages'
-import { buildNativeFrame, HeldState, heldSignature, isIdleFrame, NATIVE_HEARTBEAT_MS, NATIVE_PORT_NAME } from './shared/native'
-import { PcGestures } from './shared/pcgestures'
+import { parseConfig, parseFromPage, parseOffscreenRequest, type BgRequest, type LinkConfig, type LinkState, type PadTuple, type ToPage } from './shared/messages'
+import {
+  buildNativeFrame, HeldState, heldSignature, isIdleFrame, NATIVE_HEARTBEAT_MS, NATIVE_PORT_NAME, parseNativeText, typingToast, type TextField,
+} from './shared/native'
+import { isModifier, PcGestures } from './shared/pcgestures'
 import {
   buildFrame, deltaTuple, electFrame, frameSignature, isActive, padTuple, pointerTuple, recipients, tiltTuple, withoutClickButtons, withRelativeAim,
   type FrameInfo,
@@ -38,34 +41,70 @@ const TICK_MIN_GAP_MS = 6
 const HEARTBEAT_MS = 250
 const RUMBLE_GAP_MS = 50
 
-/** What the phone offers: gamepad, tilt and point modes, plus a tray picker for what it drives in the browser. */
-const layout: Layout = {
-  v: 1,
-  modes: [Mode.gamepad, Mode.tilt, Mode.point],
-  tray: [
-    {
-      id: 'target', label: 'Target', type: 'select', icon: 'settings',
-      options: [
-        { value: 'gamepad', label: 'Controller', glyph: '✚', detail: 'Gamepad API games' },
-        { value: 'viewer', label: '3D', glyph: '◆', detail: 'Rotate, pan and zoom 3D views' },
-        { value: 'keys', label: 'Keys', glyph: '⌨', detail: 'Keyboard and mouse games' },
-        { value: 'pc', label: 'PC', glyph: '▭', detail: 'Keyboard and mouse for programs you allow' },
-      ],
-    },
-  ],
-}
 /**
- * The layout with the site's suggested catalogue profile (CATALOGUE §3), when the table has one. The PC target gets
- * the mouse face in Point (Left, Right and a wheel instead of A and B) and a scroll wheel on the trackpad.
+ * The PC option's line in the target picker: the whole PC while the config says so. That flag counts only while the
+ * PC is the target, so from another target the line has to hold whichever way the whole PC is set.
  */
-const layoutFor = (profile: ProfileId | null): Layout => ({ ...layout, ...(profile ? { profile } : {}), ...(config.mode === 'pc' ? { point: 'mouse' as const, wheel: true } : {}) })
+const PC_WHOLE = 'Your whole PC: mouse, keyboard and typing'
+const PC_OTHERWISE = 'Mouse and keyboard for programs you allow, or your whole PC'
+
+/** The tray picker for what the phone drives. */
+const targetPicker = (wholePc: boolean): Layout['tray'][number] => ({
+  id: 'target', label: 'Target', type: 'select', icon: 'settings',
+  options: [
+    { value: 'gamepad', label: 'Controller', glyph: '✚', detail: 'Gamepad API games' },
+    { value: 'viewer', label: '3D', glyph: '◆', detail: 'Rotate, pan and zoom 3D views' },
+    { value: 'keys', label: 'Keys', glyph: '⌨', detail: 'Keyboard and mouse games' },
+    { value: 'pc', label: 'PC', glyph: '▭', detail: wholePc ? PC_WHOLE : PC_OTHERWISE },
+  ],
+})
+/** The phone's own keyboard, for the PC: typing arrives as text, its key row (Esc, Tab, arrows, ⌫, ↵) as key-<code> taps. */
+const KEYBOARD: Layout['tray'][number] = { id: 'keyboard', label: 'Keyboard', type: 'keyboard', icon: 'keyboard' }
+
+/**
+ * What the phone offers: gamepad, tilt and point modes, the target picker, and the site's suggested catalogue profile
+ * (CATALOGUE §3) when the table has one. The PC target gets the mouse face in Point (Left, Right and a wheel instead
+ * of A and B), a scroll wheel on the trackpad, and the keyboard.
+ */
+const layoutFor = (profile: ProfileId | null): Layout => {
+  const onPc = config.mode === 'pc'
+  const picker = targetPicker(config.desktop)
+  return {
+    v: 1,
+    modes: [Mode.gamepad, Mode.tilt, Mode.point],
+    tray: onPc ? [picker, KEYBOARD] : [picker],
+    ...(profile ? { profile } : {}),
+    ...(onPc ? { point: 'mouse' as const, wheel: true } : {}),
+  }
+}
 
 let remote: Remote | null = null
-let config: { tabId: number | null; mode: TargetMode } = { tabId: null, mode: DEFAULT_MODE }
+let config: LinkConfig = { tabId: null, mode: DEFAULT_MODE, desktop: false }
 let configured = false
 const links = new Set<Link>()
 let lastTargets = new Set<Link>()
 let suggested: ProfileId | null = null
+/** A text or password field on the PC would take typing (the service worker says so, from ob.Pal Desktop). */
+let textField: TextField | null = null
+let fieldShown: TextField | false | null = null
+
+/** The phone's `textField` value: the field while the PC is the target, else false. Sent when it changes, and to every phone that connects. */
+function publishField(always = false) {
+  const v = config.mode === 'pc' && textField ? textField : false
+  if (v === fieldShown && !always) return
+  fieldShown = v
+  remote?.setValues({ textField: v })
+}
+
+// Typing that didn't get through: the phone says why, at most every TYPING_TOAST_MS.
+const TYPING_TOAST_MS = 2500
+let typingToastAt = -Infinity
+function typingRefused(toast: string) {
+  const now = performance.now()
+  if (now - typingToastAt < TYPING_TOAST_MS) return
+  typingToastAt = now
+  remote?.feedback({ toast })
+}
 
 const hostOf = (url: string | undefined) => { try { return url ? new URL(url).hostname : '' } catch { return '' } }
 
@@ -84,11 +123,14 @@ chrome.runtime.onMessage.addListener((raw: unknown, sender: chrome.runtime.Messa
   const req = parseOffscreenRequest(raw)
   if (!req) return
   switch (req.type) {
-    case 'config': applyConfig(req.tabId, req.mode, req.desktop === true); break
+    // Answered once applied: the worker arms ob.Pal Desktop only after this has the mapping for it (NativeBridge).
+    case 'config': applyConfig(req); respond(true); break
     case 'unpair': remote?.disconnect(); break
     case 'forget': void remote?.forget(req.id); break
     case 'lan': remote?.selectLan(req.id); break
     case 'diag': respond(remote?.diag() ?? null); return true
+    case 'text-field': textField = req.field; publishField(); break
+    case 'typing': if (config.mode === 'pc') typingRefused(typingToast(req.refused)); break
   }
 })
 
@@ -110,12 +152,13 @@ chrome.runtime.onConnect.addListener((port) => {
   syncSuggestion()
 })
 
-function applyConfig(tabId: number | null, mode: TargetMode, desktop = false) {
+function applyConfig({ tabId, mode, desktop }: LinkConfig) {
   const modeChanged = mode !== config.mode
-  config = { tabId, mode }
+  const wholeChanged = desktop !== config.desktop
+  config = { tabId, mode, desktop }
   configured = true
   // The whole PC gets a desktop controller (no letters typed into whatever has focus); a program, the game keys.
-  const keys = desktop ? DESKTOP_KEYS : DEFAULT_KEYS
+  const keys = pcKeys(desktop)
   if (pc.mapper.cfg !== keys) { pc.held.apply(pc.mapper.releaseAll()); pc.mapper.cfg = keys }
   for (const l of [...links]) {
     if (l.tabId === tabId) continue
@@ -126,7 +169,11 @@ function applyConfig(tabId: number | null, mode: TargetMode, desktop = false) {
     for (const l of links) l.sig = ''
     if (mode !== 'pc') pcLetGo()
     remote?.setValues({ target: mode })
-    // Into or out of the PC: Point's face changes with it.
+    // Into or out of the PC: Point's face changes with it, the keyboard comes or goes, and so does a focused field.
+    remote?.setLayout(layoutFor(suggested))
+    publishField()
+  } else if (wholeChanged) {
+    // Whole PC on or off: the target picker's PC line says which.
     remote?.setLayout(layoutFor(suggested))
   }
   syncSuggestion()
@@ -189,17 +236,23 @@ function pcTick(f: Frame, pad: PadState | null, ptr: PointerState | null, now: n
   const tilt = f.connected && !pad && f.mode === Mode.tilt ? f.tilt : null
   const out = pc.mapper.update({ pad: padIn, tilt, aim: f.aim, pad1: f.pad1, dtMs: dt })
   pc.held.apply(out)
-  const g = pc.gestures.tick({ now, connected: f.connected, touching: f.touching, move: out.move, pan: f.pad2, pinch: f.zoom })
+  const mods = [...pc.held.keys].some(isModifier)
+  const g = pc.gestures.tick({ now, connected: f.connected, touching: f.touching, move: out.move, pan: f.pad2, pinch: f.zoom, mods })
   if (g.buzz) remote?.rumble(BUZZ.strong, BUZZ.weak, BUZZ.ms)
-  const frame = buildNativeFrame(pc.held, g.move, [g.wheel[0] + out.wheel[0], g.wheel[1] + out.wheel[1]], { buttons: g.buttons, keys: g.ctrl ? CTRL : [] })
+  const frame = buildNativeFrame(pc.held, g.move, [g.wheel[0] + out.wheel[0], g.wheel[1] + out.wheel[1]], { buttons: g.buttons, keys: [...(g.ctrl ? CTRL : []), ...g.keys] })
   const sig = heldSignature(frame)
-  if (isIdleFrame(frame) && sig === pc.lastSig && now - pc.lastSent < NATIVE_HEARTBEAT_MS) return
+  const repeat = isIdleFrame(frame) && sig === pc.lastSig && now - pc.lastSent < NATIVE_HEARTBEAT_MS
+  if (repeat && !g.text.length) return
   const port = pcPort()
   if (!port) return
   try {
-    port.postMessage(frame)
-    pc.lastSent = now
-    pc.lastSig = sig
+    if (!repeat) {
+      port.postMessage(frame)
+      pc.lastSent = now
+      pc.lastSig = sig
+    }
+    // Typing right after a frame that holds no modifier and no key from the row (PcGestures waits for one).
+    for (const t of g.text) port.postMessage(t)
   } catch {
     pc.port = null
   }
@@ -365,15 +418,25 @@ async function boot() {
   r.on('connect', () => {
     report()
     r.setValues({ target: config.mode })
+    publishField(true)
   })
   r.on('disconnect', () => {
     pc.gestures.reset()
     report()
   })
   // Taps, holds and the Point face's buttons: clicks and more on the PC, at once rather than on the next clock tick.
+  // The keyboard's key row too: allowlisted key taps.
   r.on('button', ({ id, ev }) => {
     if (config.mode !== 'pc') return
     pc.gestures.button(id, ev, performance.now())
+    tick()
+  })
+  // Typing on the phone's keyboard, for the PC: in order with the key taps, on the same port as the frames.
+  r.on('text', ({ s, del }) => {
+    if (config.mode !== 'pc') return
+    const t = parseNativeText({ t: 'text', s, del })
+    if (!t) return typingRefused(typingToast('bad-text'))
+    pc.gestures.text(t.s, t.del)
     tick()
   })
   r.on('input', tick)
@@ -384,8 +447,10 @@ async function boot() {
     else if (id === 'mouse-wheel' && typeof v === 'number' && config.mode === 'pc') { pc.gestures.wheel(v); tick() }
   })
   report()
+  // The whole config, whole PC included: a link document started again while the whole PC is controlled keeps the
+  // desktop controller rather than the game keys.
   const cfg = parseConfig(await toBg({ to: 'bg', type: 'offscreen-ready' }))
-  if (cfg && !configured) applyConfig(cfg.tabId, cfg.mode)
+  if (cfg && !configured) applyConfig(cfg)
   startClock()
 }
 

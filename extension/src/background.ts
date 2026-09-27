@@ -9,10 +9,10 @@
 import { NativeBridge } from './native'
 import { DEFAULT_MODE, isTargetMode, type TargetMode } from './shared/constants'
 import {
-  allowedFrom, parseBgRequest, parseLink, senderKind,
-  type BgRequest, type BridgeRequest, type LinkState, type OffscreenRequest,
+  allowedFrom, linkConfig, parseBgRequest, parseLink, senderKind,
+  type BgRequest, type BridgeRequest, type LinkConfig, type LinkState, type OffscreenRequest,
 } from './shared/messages'
-import { NATIVE_PORT_NAME, parseNativeFrame, PC_PAGE_PORT_NAME } from './shared/native'
+import { NATIVE_PORT_NAME, parseNativeFrame, parseNativeText, PC_PAGE_PORT_NAME } from './shared/native'
 
 const OFFSCREEN_PATH = 'offscreen.html'
 const BRIDGE_JS = 'bridge.js'
@@ -22,8 +22,13 @@ const ALL_SITES: chrome.permissions.Permissions = { origins: ['<all_urls>'] }
 const SELF = { id: chrome.runtime.id, origin: chrome.runtime.getURL('').replace(/\/$/, '') }
 /** The PC target: the native messaging port to ob.Pal Desktop, connected while the target is PC. */
 const native = new NativeBridge()
-// Whole PC on or off: the offscreen link switches the gamepad between the desktop and the game keys.
-native.onDesktop = () => void pushConfig()
+// Whole PC on or off: the offscreen link switches the gamepad between the desktop and the game keys (the helper is
+// armed once it has: NativeBridge waits for this).
+native.onDesktop = () => pushConfig()
+// A text field in front would take typing (or no longer would): the phone offers its keyboard. Typing that didn't
+// get through: the phone says why.
+native.onTextField = (field) => void toOffscreen({ to: 'offscreen', type: 'text-field', field })
+native.onTyping = (refused) => void toOffscreen({ to: 'offscreen', type: 'typing', refused })
 
 // ---- state -------------------------------------------------------------------------------------
 
@@ -73,9 +78,18 @@ async function ensureOffscreen() {
 
 const toOffscreen = (m: OffscreenRequest) => chrome.runtime.sendMessage(m).catch(() => undefined)
 
+/**
+ * What the link document runs with: the controlled tab, the target, and whether the PC target is the whole PC (as
+ * ob.Pal Desktop last said, from before this worker started if it hasn't said since). Pushed on every change, and the
+ * answer to a link document that has just started, so a new one never falls back to the game keys on a whole PC.
+ */
+async function currentConfig(): Promise<LinkConfig> {
+  const [tabId, mode, wholePc] = await Promise.all([controlledTab(), targetMode(), native.wholePc()])
+  return linkConfig(tabId, mode, wholePc)
+}
+
 async function pushConfig() {
-  const [tabId, mode] = await Promise.all([controlledTab(), targetMode()])
-  await toOffscreen({ to: 'offscreen', type: 'config', tabId, mode, desktop: mode === 'pc' && native.desktop })
+  await toOffscreen({ to: 'offscreen', type: 'config', ...(await currentConfig()) })
 }
 
 // ---- injection ---------------------------------------------------------------------------------
@@ -194,10 +208,12 @@ async function handle(msg: BgRequest, sender: chrome.runtime.MessageSender): Pro
       await refreshBadge()
       return { ok: true }
     case 'offscreen-ready': {
-      const [tabId, mode] = await Promise.all([controlledTab(), targetMode()])
-      // A fresh link document: bridges of the controlled tab reconnect their ports to it.
-      if (tabId !== null) void tellTab(tabId, { to: 'bridge', type: 'reconnect' })
-      return { tabId, mode }
+      const config = await currentConfig()
+      // A fresh link document: it runs with the whole config (whole PC included), bridges of the controlled tab
+      // reconnect their ports to it, and it hears about a text field that already has the focus.
+      if (config.tabId !== null) void tellTab(config.tabId, { to: 'bridge', type: 'reconnect' })
+      if (native.textField) void toOffscreen({ to: 'offscreen', type: 'text-field', field: native.textField })
+      return config
     }
     case 'hello':
       return bridgeHello(sender)
@@ -226,7 +242,8 @@ chrome.runtime.onMessage.addListener((raw: unknown, sender, respond) => {
 })
 
 // PC target: the offscreen link streams action frames over a port (60 Hz while there is input, a heartbeat
-// otherwise), which also keeps this worker alive while the helper port is open.
+// otherwise), which also keeps this worker alive while the helper port is open. Typing comes on the same port, in
+// order with the frames.
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === PC_PAGE_PORT_NAME) {
     // The options page keeps the helper up while it is open, and only then.
@@ -245,7 +262,9 @@ chrome.runtime.onConnect.addListener((port) => {
   void targetMode().then((mode) => native.sync(mode))
   port.onMessage.addListener((raw: unknown) => {
     const f = parseNativeFrame(raw)
-    if (f) native.frame(f)
+    if (f) return native.frame(f)
+    const t = parseNativeText(raw)
+    if (t) native.text(t)
   })
 })
 

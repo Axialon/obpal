@@ -2,10 +2,10 @@ import { family } from '../family'
 import '../styles/base.css'
 import '../styles/controller.css'
 import {
-  b64url, DeviceLink, emptyState, PadButton, encodeState, Flag, forgetAllPairs, getPair, listPairs, loadCertificate, Mode, OneEuro,
-  parsePairingCode, qIdentity, qScale, relativeInView, STATE_BYTES, Tier, TossDetector, viewFrameAt,
-  type Caps, type HostMsg, type Layout, type LinkStatus, type ModeId, type PairingCode, type Quat, type SceneNode, type ScenePerson, type TierId,
-  type TrayControl,
+  b64url, Controller, CONTROLLERS, DeviceLink, emptyState, PadButton, encodeState, Flag, forgetAllPairs, getPair, isControllerId, listPairs,
+  loadCertificate, Mode, OneEuro, parsePairingCode, qIdentity, qScale, relativeInView, STATE_BYTES, Tier, TossDetector, viewFrameAt,
+  type Caps, type ControllerId, type HostMsg, type Layout, type LinkStatus, type ModeId, type PairingCode, type Quat, type SceneNode,
+  type ScenePerson, type TierId, type TrayControl,
 } from '@obpal/core'
 import { Motion, motionSupported, requestMotionPermission, screenAngle } from './motion'
 import { Trackpad } from './trackpad'
@@ -15,6 +15,7 @@ import { GamepadMode } from './gamepad'
 import { WiiPointer } from './pointing'
 import { MouseFace } from './mouseface'
 import { ScrollWheel } from './wheel'
+import { KeyboardDock } from './keyboard'
 import { sheetExits } from './sheet'
 import { calmMarks, icon, ICONS, logo, logoMark } from '../ui/icons'
 import { dismissHint, hint, repositionHints, setHintFrame } from '../ui/hints'
@@ -23,7 +24,7 @@ import { Tracker } from './track'
 import { EARTH_TO_POSE, ImuTracker, toPoseFrame } from './imu3d'
 import { encodePose, POSE_BYTES, PoseFlag, qMul } from '@obpal/core'
 import { OrientationLock } from './lock'
-import { uiRect, uiSize } from './uiframe'
+import { uiRect, uiRotation, uiSize } from './uiframe'
 import { applyTheme, initialTheme, swatch, THEMES, themeById } from '../ui/themes'
 
 const app = document.getElementById('app')!
@@ -119,6 +120,12 @@ function syncThemeRows() {
 
 type Tab = 'rotate' | 'point' | 'gamepad' | 'track'
 type Style = 'game' | 'match'
+
+/** The tab each catalogue controller is today (CATALOGUE §9.1); the keyboard is the tray's, beside any tab. */
+const TAB_OF: Partial<Record<ControllerId, Tab>> = {
+  [Controller.gamepad]: 'gamepad', [Controller.wheel]: 'gamepad', [Controller.wii]: 'point', [Controller.mouse]: 'point',
+  [Controller.trackpad]: 'rotate', [Controller.hand]: 'track',
+}
 
 async function boot(code: PairingCode) {
   // This phone's own DTLS identity, kept across sessions so a screen can pin it and reconnect over the LAN.
@@ -224,6 +231,20 @@ async function boot(code: PairingCode) {
     recenter: () => { recenterPointer(); dismissHint('point') },
   })
   const mouseOn = () => layout.point === 'mouse'
+  /** Typing on the screen: the phone's own keyboard in a dock, from a `keyboard` tray control or the Type prompt. */
+  const keyboard = new KeyboardDock({
+    send: (m) => link.sendCtl(m),
+    feel: () => tick(),
+    changed: (open) => {
+      // Typing holds the phone still: the gyro stops (a tilt would steer, or press keys on a PC), and a UI turned
+      // against the screen turns back, so the dock and the phone's keyboard meet.
+      if (open && gyroOn) setGyro(false)
+      if (open && lock.kind === 'virtual' && uiRotation()) void setLock(false)
+      renderTray()
+      render()
+    },
+  })
+  addEventListener('resize', () => requestAnimationFrame(placeTyping))
   let padWheel: ScrollWheel | null = null
   /** Set when the surface is built: the Wii face's A and B, held or released. */
   let wiiA: (down: boolean) => void = () => {}
@@ -335,6 +356,26 @@ async function boot(code: PairingCode) {
     return Mode.hold
   }
   let mode: ModeId = currentMode()
+  /**
+   * The catalogue controller this phone uses now (CATALOGUE §9.1), which `mode{c}` tells the screen. The gamepad with
+   * the Driving profile is the steering wheel.
+   */
+  const controllerNow = (): ControllerId => {
+    if (tab === 'gamepad') return gamepad.profileInUse === 'driving' ? Controller.wheel : Controller.gamepad
+    if (tab === 'point') return mouseOn() ? Controller.mouse : Controller.wii
+    return tab === 'track' ? Controller.hand : Controller.trackpad
+  }
+  /** The screen's first suggested controller opens once, on the first welcome; after that the person's choice stands. */
+  let suggestionTaken = false
+  /** The tab of the first controller the screen suggests (layout.controllers) that its modes let this phone show. */
+  function suggestedTab(): Tab | null {
+    const hm = hostModes()
+    for (const c of Array.isArray(layout.controllers) ? layout.controllers : []) {
+      const t = isControllerId(c) ? TAB_OF[c] : undefined
+      if (t && CONTROLLERS[c as ControllerId].modes.some((m) => hm.includes(m))) return t
+    }
+    return null
+  }
 
   const applySmooth = () => {
     // Quaternion filter for 1:1 match: light by default (the OS already fuses orientation).
@@ -350,7 +391,11 @@ async function boot(code: PairingCode) {
     ? new DeviceLink({ lan: code.lan, pair: pair!, cert: own, caps, name })
     : new DeviceLink({ service: location.origin, pairing: code.pairing, remember: true, cert: own, caps, name })
   // Gamepad mode: Xbox-style controller streaming PAD packets (./gamepad.ts).
-  const gamepad = new GamepadMode({ motion, settings, t0, send: (b) => link.sendState(b), toast, openSettings, fullscreen: goFullscreen, exit: () => { tab = lastTab; setMode() } })
+  const gamepad = new GamepadMode({
+    motion, settings, t0, send: (b) => link.sendState(b), toast, openSettings, fullscreen: goFullscreen, exit: () => { tab = lastTab; setMode() },
+    // A new profile on the gamepad tells the screen, as mode{p}.
+    profile: () => { if (surface && mode === Mode.gamepad) sendMode() },
+  })
 
   screenMessage({ title: 'Connecting', body: code.v === 2 ? 'Reaching your screen over Wi-Fi…' : 'Finding your screen…', spinner: true })
   link.on('status', onStatus)
@@ -451,7 +496,8 @@ async function boot(code: PairingCode) {
     })
     // Any touch counts as use, and wakes a resting screen.
     addEventListener('pointerdown', () => { lastTouch = performance.now(); if (resting) rest(false) }, { capture: true })
-    setInterval(() => { if (!resting && !busy() && performance.now() - lastTouch > 120_000) rest(true) }, 5000)
+    // Typing on the phone's keyboard touches nothing here: an open keyboard dock keeps the screen awake.
+    setInterval(() => { if (!resting && !busy() && !keyboard.open && performance.now() - lastTouch > 120_000) rest(true) }, 5000)
     // Sensors can start late (slow devices, permission granted later), so keep checking until the gyro shows up.
     const tierTimer = setInterval(() => {
       detectTier()
@@ -476,6 +522,9 @@ async function boot(code: PairingCode) {
       if (started) showSurface()
       return
     }
+    // Whatever had the focus on the screen, it says so again once it's back.
+    values.textField = false
+    keyboard.setField(false)
     if (s === 'taken-over') {
       surface = null
       return screenMessage({ title: 'Another phone took over', art: ICONS.phone, body: 'One phone controls a screen at a time.', action: { label: 'Take back control', run: () => location.reload() } })
@@ -511,12 +560,24 @@ async function boot(code: PairingCode) {
 
   function onHost(m: HostMsg) {
     if (m.t === 'rumble') return gamepad.rumble(m.strong, m.weak, m.ms)
-    if (m.t === 'welcome') { hostName = m.name; layout = m.layout; syncMotion() }
+    if (m.t === 'welcome') {
+      hostName = m.name
+      layout = m.layout
+      // The first controller the screen suggests opens (CATALOGUE §9.2), once: a reconnect keeps what the person chose.
+      const first = suggestionTaken ? null : suggestedTab()
+      suggestionTaken = true
+      if (first) { tab = first; if (first !== 'gamepad') lastTab = first }
+      syncMotion()
+    }
     else if (m.t === 'layout') { layout = m.layout; syncMotion() }
     // The catalogue side of the layout: which motion utilities the host takes, and the profile it suggests for what it controls.
-    if (m.t === 'welcome' || m.t === 'layout') gamepad.setHost({ name: hostName, profile: layout.profile, utilities: layout.utilities })
-    else if (m.t === 'state') {
+    if (m.t === 'welcome' || m.t === 'layout') {
+      gamepad.setHost({ name: hostName, profile: layout.profile, utilities: layout.utilities })
+      keyboard.offered(layout.tray.some((c) => c.type === 'keyboard'))
+    } else if (m.t === 'state') {
       Object.assign(values, m.values)
+      // A text or password field has the focus on the screen (textField 'text' or 'secret'): the Type prompt.
+      if ('textField' in m.values) keyboard.setField(m.values.textField)
       if (typeof m.values.theme === 'string') { applyTheme(themeById(m.values.theme)); syncThemeRows() }
       // A shared scene gives this device a colour of its own: wear it as the accent for this session, not as a preference.
       if (typeof m.values.color === 'string' && /^#[0-9a-f]{6}$/i.test(m.values.color)) {
@@ -583,7 +644,7 @@ async function boot(code: PairingCode) {
     const woke = syncMotion()
     if (gyroOn && (mode === Mode.hold || mode === Mode.tilt)) { if (woke) anchorOnSample = true; else anchor() }
     smoother.reset()
-    link.sendCtl({ t: 'mode', m: mode })
+    sendMode()
     if (mode === Mode.track && trackWay() === 'motion') hint('track', () => document.getElementById('pad'), 'Hold here and move your phone: what you hold follows', { place: 'top', delay: 400 })
     if (mode === Mode.point) {
       if (woke) recenterOnSample = true
@@ -592,6 +653,11 @@ async function boot(code: PairingCode) {
       else hint('point', () => document.getElementById('wii-home'), 'Point the top of your phone at the screen · press ⌂ to centre', { place: 'top', delay: 400 })
     }
     render()
+  }
+
+  /** Tell the screen the mode, with the controller in use and, on the gamepad, the profile it applies (mode{m, c, p}). */
+  function sendMode() {
+    link.sendCtl({ t: 'mode', m: mode, c: controllerNow(), ...(mode === Mode.gamepad ? { p: gamepad.profileInUse } : {}) })
   }
 
   /** Aim here = the centre of the screen: resets the phone's pointing reference and the host's cursor. */
@@ -651,6 +717,7 @@ async function boot(code: PairingCode) {
           <button class="icon-btn square glass" id="center" aria-label="Recenter">${ICONS.center}</button>
         </div>
       </div>
+      ${keyboard.html()}
       <div class="toast glass" id="toast" role="status" aria-live="polite"></div>
       <div class="rest" id="rest" aria-hidden="true"><span>Resting to keep your phone cool · touch to wake</span></div>`
     surface = document.getElementById('surface')!
@@ -658,6 +725,7 @@ async function boot(code: PairingCode) {
     calmMarks(surface)
     gamepad.mount(surface)
     mouseFace.bind(document.getElementById('mouse')!)
+    keyboard.bind(app)
     // The trackpad's scroll wheel along its edge, for a screen that drives a mouse pointer (Layout.wheel).
     padWheel = new ScrollWheel(document.getElementById('pad-wheel')!, {
       turn: (v) => link.sendCtl({ t: 'value', id: 'mouse-wheel', v }),
@@ -753,8 +821,9 @@ async function boot(code: PairingCode) {
     ppx.addEventListener('pointerdown', (e) => e.stopPropagation())
     ppx.addEventListener('click', (e) => { e.stopPropagation(); tick(); link.sendCtl({ t: 'btn', id: 'part-release', ev: 'tap' }) })
     renderTray()
-    render()
-    link.sendCtl({ t: 'mode', m: mode })
+    // The screen's suggestion may have picked another controller before there was a surface: switch to it now.
+    if (currentMode() !== mode) setMode()
+    else { render(); sendMode() }
     hint('models', () => document.querySelector('.tray-btn.select'), 'Browse the catalogue', { place: 'top', delay: 9000 })
   }
 
@@ -868,6 +937,46 @@ async function boot(code: PairingCode) {
       ? (gyroOn ? g('point', 'aim') : g('drag', 'move')) + g('tap', 'focus') + g('pan', 'pan') + g('pinch', 'zoom')
       : g('drag', 'orbit') + g('pan', 'pan') + g('pinch', 'zoom') + g('twist', 'roll')
     gamepad.sync({ active: mode === Mode.gamepad, offered: hostModes().includes(Mode.gamepad) })
+    placeTyping()
+  }
+
+  /**
+   * The Type prompt floats over the work area, in reach of the thumb and clear of every control: low on the trackpad
+   * (its legend steps back) or on the mouse; on the Wii face, between its row and B, or beside A when they sit tight.
+   * The gamepad fills the screen: there it takes the gap in the middle, or the cue to turn the phone sideways.
+   */
+  function placeTyping() {
+    if (!surface || glowing) return keyboard.place(null)
+    if (!keyboard.prompting) return
+    const { w, h } = uiSize()
+    const shown = (el: Element | null): el is HTMLElement => !!el && (el as HTMLElement).offsetHeight > 0
+    const PROMPT_H = 54
+    const PROMPT_W = 170
+    const around = (x: number, y: number) => keyboard.place({ x, bottom: h - y - PROMPT_H / 2 })
+    if (mode === Mode.gamepad) {
+      const cue = surface.querySelector('.gp-cue')
+      const above = surface.querySelector('.gp-center')
+      const below = surface.querySelector('.gp-motion')
+      if (shown(cue)) { const r = uiRect(cue); return around(r.left + r.width / 2, r.top + r.height / 2) }
+      if (shown(above) && shown(below)) { const a = uiRect(above); return around(w / 2, (a.top + a.height + uiRect(below).top) / 2) }
+      return around(w / 2, h / 2)
+    }
+    const pad = document.getElementById('pad')
+    const shell = surface.querySelector('#mouse .mouse-shell')
+    const wii = document.getElementById('wii')
+    if (shown(pad)) { const r = uiRect(pad); return keyboard.place({ x: r.left + r.width / 2, bottom: h - (r.top + r.height) + 16 }) }
+    if (shown(shell)) { const r = uiRect(shell); return keyboard.place({ x: r.left + r.width / 2, bottom: Math.max(0, h - (r.top + r.height)) + 20 }) }
+    if (shown(wii)) {
+      const face = uiRect(wii)
+      const row = uiRect(wii.querySelector('.wii-row')!)
+      const b = uiRect(wii.querySelector('.wii-b')!)
+      const a = uiRect(wii.querySelector('.wii-a')!)
+      const rowEnd = row.top + row.height
+      if (b.top - rowEnd >= PROMPT_H + 12) return around(face.left + face.width / 2, (rowEnd + b.top) / 2)
+      const right = face.left + face.width
+      if (right - (a.left + a.width) >= PROMPT_W + 16) return around((a.left + a.width + right) / 2, a.top + a.height / 2)
+    }
+    keyboard.place({ x: w / 2, bottom: 120 })
   }
 
   function thumb(o: { image?: string; glyph?: string; color?: string; label: string }) {
@@ -939,15 +1048,20 @@ async function boot(code: PairingCode) {
         b.innerHTML = '<span class="tray-label"></span>'
         b.querySelector('.tray-label')!.textContent = c.label
       } else {
-        b.innerHTML = `${icon(c.icon)}<span class="tray-label"></span>`
+        // A keyboard control without an icon of its own gets the keyboard.
+        const ic = icon(c.icon ?? (c.type === 'keyboard' ? 'keyboard' : undefined))
+        b.innerHTML = `${ic}<span class="tray-label"></span>`
         b.querySelector('.tray-label')!.textContent = c.label
-        if (!icon(c.icon)) b.classList.add('text')
+        if (!ic) b.classList.add('text')
         else b.title = c.label
       }
       if (c.type === 'toggle') b.setAttribute('aria-pressed', String(!!values[c.id]))
+      if (c.type === 'keyboard') b.setAttribute('aria-expanded', String(keyboard.open))
       b.addEventListener('pointerdown', () => tick())
       b.onclick = () => {
         if (c.type === 'select') { dismissHint('models'); openPicker(c); return }
+        // The dock's field takes the focus inside this tap: that is what brings up the phone's keyboard (iOS needs the tap).
+        if (c.type === 'keyboard') { keyboard.show('tray'); return }
         if (c.type === 'toggle') {
           values[c.id] = !values[c.id]
           b.setAttribute('aria-pressed', String(values[c.id]))

@@ -1,0 +1,211 @@
+/*
+ * ob.Pal Link's pages (the popup and the options page) in the ob.Pal family look: the visitor's Blackboxes surface
+ * and accent (src/family, picked in ./look.ts), glass cards with a fine edge that catch a light following the mouse,
+ * lime for anything you can touch and the site's lavender haze around it (src/styles/site.css). Tokens come from
+ * src/styles/base.css; this adds the page backdrop, the shared controls and the motion.
+ */
+
+/* The family's type, bundled (the pages load nothing from the network): Inter and Plus Jakarta Sans, both SIL Open
+   Font License 1.1 (src/fonts/OFL-*.txt), the latin subsets from @fontsource-variable 5.3. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: block;
+  src: url('../fonts/inter-latin-opsz-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: block;
+  src: url('../fonts/plus-jakarta-sans-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  --bb-font-ui: 'Inter', 'Segoe UI Variable Text', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --bb-font-display: 'Plus Jakarta Sans', 'Inter', 'Segoe UI Variable Display', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* The site's lavender haze, and the glow in the top corner: the surface's own aurora, ultraviolet on Carbon. */
+  --haze-rgb: 179 164 255;
+  --glow-rgb: var(--bb-aurora);
+  --glow-a: 0.5;
+  --line-strong: var(--bb-line-strong);
+  /* Resting fills for controls on a card, and their hover. */
+  --fill: rgb(var(--hl-rgb) / 0.045);
+  --fill-hover: rgb(var(--hl-rgb) / 0.085);
+  --card-bg: linear-gradient(165deg, rgb(var(--surface-rgb) / 0.58), rgb(var(--base-rgb) / 0.46));
+  --card-shadow: 0 30px 60px -40px rgb(0 0 0 / 0.9), inset 0 1px 0 rgb(var(--hl-rgb) / 0.08);
+  --rim-rgb: var(--accent-rgb);
+  --warn-text: var(--warn);
+  --bad-text: var(--bad);
+  --r-card: 24px;
+  --spring: cubic-bezier(0.3, 1.35, 0.5, 1);
+}
+[data-bb-theme='carbon'] { --glow-rgb: 92 62 245; --glow-a: 0.2; }
+[data-bb-theme='violet'] { --glow-a: 0.42; }
+[data-bb-theme='light'] {
+  --glow-rgb: 179 164 255;
+  --glow-a: 0.34;
+  --card-bg: linear-gradient(165deg, rgb(255 255 255 / 0.86), rgb(246 248 251 / 0.72));
+  --card-shadow: 0 26px 50px -34px rgb(15 23 42 / 0.4), inset 0 1px 0 rgb(255 255 255 / 0.9);
+  --rim-rgb: 132 204 22;
+  --warn-text: #a16207;
+  --bad-text: #be123c;
+}
+
+/* ---- the page ---------------------------------------------------------------------------------------------- */
+
+html { background: var(--page); }
+body {
+  font-feature-settings: 'cv11', 'ss01';
+  letter-spacing: -0.006em;
+  background:
+    radial-gradient(70% 60% at 100% -12%, rgb(var(--glow-rgb) / var(--glow-a)), transparent 70%),
+    radial-gradient(55% 50% at -6% -12%, rgb(var(--accent-rgb) / 0.08), transparent 65%),
+    radial-gradient(60% 55% at 0% 112%, rgb(var(--haze-rgb) / 0.07), transparent 70%),
+    var(--page);
+}
+::selection { background: rgb(var(--accent-rgb) / 0.35); color: var(--ink); }
+:focus-visible { outline: 2px solid rgb(var(--accent-rgb) / 0.9); outline-offset: 2px; }
+[data-bb-theme='light'] :focus-visible { outline-color: var(--accent-text); }
+
+/* Thin scrollbars in the surface's own ink: a slim pill on a clear track, lit by the accent while dragged. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-button { display: none; }
+::-webkit-scrollbar-thumb { min-height: 36px; border: 3px solid transparent; border-radius: 999px; background: rgb(var(--hl-rgb) / 0.16) padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: rgb(var(--hl-rgb) / 0.3); }
+::-webkit-scrollbar-thumb:active { background-color: rgb(var(--accent-rgb) / 0.65); }
+
+/* ---- the logo ---------------------------------------------------------------------------------------------- */
+
+.logo { gap: 9px; }
+.logo .mark-slot, .logo .mark { width: 34px; height: 34px; }
+.logo .word { font-size: 19px; }
+.tag { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; border: 1px solid rgb(var(--accent-rgb) / 0.28); background: rgb(var(--accent-rgb) / 0.12); color: var(--accent-text); font: 750 10.5px/1 var(--font); letter-spacing: 0.12em; text-transform: uppercase; }
+
+/* ---- cards: glass with a fine edge; a light follows the mouse over them and the edge catches it -------------- */
+
+.card {
+  position: relative; isolation: isolate; min-width: 0; border-radius: var(--r-card); border: 1px solid var(--line);
+  background: var(--card-bg); box-shadow: var(--card-shadow);
+  -webkit-backdrop-filter: blur(22px) saturate(150%); backdrop-filter: blur(22px) saturate(150%);
+}
+.card::before, .card::after { content: ''; position: absolute; border-radius: inherit; pointer-events: none; opacity: 0; transition: opacity 0.45s var(--ease); }
+/* The light, under the card's content. */
+.card::after { inset: 0; z-index: -1; background: radial-gradient(360px circle at var(--mx, 50%) var(--my, 50%), rgb(var(--accent-rgb) / 0.075), transparent 65%); }
+/* The edge that catches it. */
+.card::before { inset: -1px; z-index: 3; padding: 1px; background: radial-gradient(220px circle at var(--mx, 50%) var(--my, 50%), rgb(var(--rim-rgb) / 0.8), transparent 72%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+@media (hover: hover) and (pointer: fine) { .card:hover::before, .card:hover::after { opacity: 1; } }
+
+/* A small uppercase heading inside a card. */
+.eyebrow { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted); font: 700 10.5px/1.2 var(--font); letter-spacing: 0.14em; text-transform: uppercase; }
+
+/* ---- controls ---------------------------------------------------------------------------------------------- */
+
+.icon-btn {
+  display: grid; place-items: center; width: 36px; height: 36px; flex: none; padding: 0; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--fill); color: var(--secondary);
+  transition: background 0.2s var(--ease), color 0.2s, border-color 0.2s, transform 0.12s var(--ease);
+}
+.icon-btn:hover { background: var(--fill-hover); border-color: var(--line-strong); color: var(--ink); }
+.icon-btn:active { transform: scale(0.93); }
+.icon-btn[aria-expanded='true'] { border-color: rgb(var(--accent-rgb) / 0.45); background: rgb(var(--accent-rgb) / 0.12); color: var(--accent-text); }
+.icon-btn .ic { width: 17px; height: 17px; }
+
+/* Buttons on a card: the one thing to do in lime glass, the others quiet. */
+.card .btn { min-height: 40px; padding: 0 16px; border-radius: 13px; border-color: var(--line); background: var(--fill); font-size: 13.5px; transition: background 0.2s var(--ease), border-color 0.2s, filter 0.15s, transform 0.12s var(--ease), box-shadow 0.25s var(--ease); }
+.card .btn:hover { background: var(--fill-hover); border-color: var(--line-strong); }
+.card .btn.primary { border-color: rgb(255 255 255 / 0.28); background: var(--glass-light); color: var(--accent-ink); box-shadow: 0 12px 26px -14px rgb(var(--accent-rgb) / 0.8), inset 0 1px 0 rgb(255 255 255 / 0.45); }
+.card .btn.primary:hover { filter: brightness(1.05); box-shadow: 0 14px 30px -12px rgb(var(--accent-rgb) / 0.85), inset 0 1px 0 rgb(255 255 255 / 0.5); }
+.card .btn:active { transform: scale(0.97); }
+
+/* A setting in a row: its glyph, its name and state, and a switch. */
+.row {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-width: 0; padding: 9px 10px; border: 0; border-radius: 16px;
+  background: transparent; color: inherit; text-align: left; transition: background 0.2s var(--ease), transform 0.12s var(--ease), opacity 0.2s;
+}
+button.row:hover:not(:disabled) { background: var(--fill); }
+button.row:active:not(:disabled) { transform: scale(0.985); }
+.row:disabled { cursor: default; opacity: 0.5; }
+.row-ic {
+  display: grid; place-items: center; width: 38px; height: 38px; flex: none; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--fill); color: var(--secondary); transition: color 0.25s, background 0.25s, border-color 0.25s, box-shadow 0.3s var(--ease);
+}
+.row-ic .ic { width: 19px; height: 19px; }
+.row[aria-checked='true'] .row-ic { border-color: rgb(var(--accent-rgb) / 0.35); background: rgb(var(--accent-rgb) / 0.13); color: var(--accent-text); }
+.row-t { flex: 1; min-width: 0; display: grid; gap: 1px; line-height: 1.3; }
+.row-t b { overflow: hidden; font-size: 14px; font-weight: 650; letter-spacing: -0.012em; text-overflow: ellipsis; white-space: nowrap; }
+.row-t small { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The switch: a knob that springs across a track that fills with lime. */
+.sw { position: relative; width: 44px; height: 26px; flex: none; border-radius: 999px; background: rgb(var(--hl-rgb) / 0.13); box-shadow: inset 0 0 0 1px var(--line); transition: background 0.25s var(--ease), box-shadow 0.3s var(--ease); }
+.sw i { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--secondary); box-shadow: 0 2px 6px rgb(0 0 0 / 0.3); transition: transform 0.34s var(--spring), background 0.25s; }
+[data-bb-theme='light'] .sw i { background: #fff; }
+.row[aria-checked='true'] .sw { background: var(--glass-light); box-shadow: 0 0 18px rgb(var(--accent-rgb) / 0.32), inset 0 1px 0 rgb(255 255 255 / 0.4); }
+.row[aria-checked='true'] .sw i { transform: translateX(18px); background: var(--accent-ink); }
+.row[aria-busy='true'] .sw i { animation: breathe 0.9s ease-in-out infinite; }
+
+/* Toggles for what a program (or the whole PC) may receive: keyboard, mouse. */
+.kinds { display: flex; flex-wrap: wrap; gap: 6px; }
+.kind {
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px 0 10px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--fill); color: var(--muted); font: 650 12.5px/1 var(--font); transition: background 0.2s var(--ease), color 0.2s, border-color 0.2s, transform 0.12s var(--ease);
+}
+.kind .ic { width: 16px; height: 16px; }
+.kind:hover { background: var(--fill-hover); color: var(--ink); }
+.kind:active { transform: scale(0.95); }
+.kind[aria-pressed='true'] { border-color: rgb(var(--accent-rgb) / 0.5); background: rgb(var(--accent-rgb) / 0.15); color: var(--accent-text); }
+
+/* Something to know, with the way out beside it. */
+.note { display: flex; align-items: center; gap: 10px; margin: 0; padding: 9px 9px 9px 12px; border-radius: 14px; border: 1px solid rgb(252 211 77 / 0.28); background: rgb(252 211 77 / 0.08); color: var(--warn-text); font-size: 12.5px; font-weight: 600; line-height: 1.4; }
+.note > .ic { width: 17px; height: 17px; }
+.note > span { flex: 1; min-width: 0; }
+.note button { flex: none; height: 28px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--glass-light); color: var(--accent-ink); font: 700 12px/1 var(--font); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.4); transition: filter 0.15s, transform 0.12s var(--ease); }
+.note button:hover { filter: brightness(1.05); }
+.note button:active { transform: scale(0.95); }
+
+kbd { display: inline-grid; place-items: center; min-width: 22px; height: 20px; padding: 0 6px; border-radius: 6px; border: 1px solid var(--line-strong); border-bottom-width: 2px; background: var(--fill); color: var(--secondary); font: 650 11px/1 var(--font); }
+
+/* ---- look: the surface and the accent, as the phone's settings offer them ---------------------------------- */
+
+.look-k { margin: 2px 2px 8px; color: var(--muted); font: 700 10.5px/1.2 var(--font); letter-spacing: 0.14em; text-transform: uppercase; }
+.look-k + .looks, .look-k + .accents { margin-bottom: 12px; }
+.looks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.look {
+  display: grid; justify-items: center; gap: 7px; min-width: 0; padding: 10px 6px 9px; border-radius: 14px; border: 1px solid var(--line);
+  background: var(--fill); color: var(--secondary); font: 650 11.5px/1.1 var(--font); transition: background 0.2s var(--ease), border-color 0.2s, color 0.2s, transform 0.12s var(--ease);
+}
+.look:hover { background: var(--fill-hover); color: var(--ink); }
+.look:active { transform: scale(0.96); }
+.look span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A small window of the surface with the accent lit in it. */
+.look i { position: relative; width: 50px; height: 34px; border-radius: 9px; border: 1px solid rgb(255 255 255 / 0.16); background: linear-gradient(140deg, var(--pv-surface), var(--pv-page) 80%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 6px 14px -8px rgb(0 0 0 / 0.6); }
+.look i::before { content: ''; position: absolute; left: 6px; right: 6px; top: 6px; height: 9px; border-radius: 4px; background: rgb(255 255 255 / 0.1); }
+.look i::after { content: ''; position: absolute; left: 6px; bottom: 6px; width: 16px; height: 5px; border-radius: 3px; background: var(--accent); box-shadow: 0 0 8px rgb(var(--accent-rgb) / 0.6); }
+.look[data-theme='light'] i { border-color: rgb(15 23 42 / 0.14); }
+.look[data-theme='light'] i::before { background: rgb(15 23 42 / 0.07); }
+.look[aria-checked='true'] { border-color: rgb(var(--accent-rgb) / 0.75); background: rgb(var(--accent-rgb) / 0.11); color: var(--ink); }
+[data-bb-theme='light'] .look[aria-checked='true'] { border-color: var(--accent-text); }
+/* The colours share the row evenly, however wide the picker is. */
+.accents { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); justify-items: center; gap: 4px; }
+.accents .bb-accent { width: 100%; max-width: 30px; height: auto; aspect-ratio: 1; }
+.accents .bb-accent:active { transform: scale(0.92); }
+
+/* ---- motion: cards rise in; parts that come and go ease in as they appear ---------------------------------- */
+
+@keyframes rise-in { from { opacity: 0; transform: translate3d(0, 12px, 0); } }
+@keyframes breathe { 50% { opacity: 0.4; } }
+.rise { animation: rise-in 0.55s var(--ease) both; animation-delay: calc(var(--i, 0) * 70ms); }
+.swap { transition: opacity 0.32s var(--ease), transform 0.38s var(--ease); }
+@starting-style { .swap { opacity: 0; transform: translate3d(0, 6px, 0); } }
+/* Until a page shows its first real state (./look.ts settle), it shows it at once instead of animating into it. */
+html:not(.settled) *, html:not(.settled) *::before, html:not(.settled) *::after { transition: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rise { animation: none; }
+  .swap { transition: none; }
+}

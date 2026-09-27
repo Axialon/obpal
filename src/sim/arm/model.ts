@@ -4,6 +4,7 @@
  * local −x, turned by the base.
  */
 import * as THREE from 'three'
+import { FINGER_IN, FINGER_TRAVEL, FINGER_W } from './grasp'
 import { ARM } from './kinematics'
 
 const D2R = Math.PI / 180
@@ -129,7 +130,8 @@ export function buildArm(n: number, mats: ArmMaterials): ArmModel {
   const palm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.035, 0.07), dark)
   palm.position.y = 0.03
   roll.add(palm)
-  const fingerGeo = new THREE.BoxGeometry(0.018, 0.1, 0.055)
+  // The fingers as ./grasp.ts has them: 0.1 long, their tips 0.035 past the point between them (the grasp, below).
+  const fingerGeo = new THREE.BoxGeometry(FINGER_W, 0.1, 0.055)
   const fingers = [new THREE.Mesh(fingerGeo, metal), new THREE.Mesh(fingerGeo, metal)]
   for (const f of fingers) { f.position.y = 0.095; roll.add(f) }
   const gripRing = ringAt(0.03, 0.008)
@@ -146,7 +148,7 @@ export function buildArm(n: number, mats: ArmMaterials): ArmModel {
     (v: number) => { elbow.rotation.z = v * D2R },
     (v: number) => { wrist.rotation.z = v * D2R },
     (v: number) => { roll.rotation.y = v * D2R },
-    (v: number) => { fingers[0].position.x = -0.012 - 0.042 * v; fingers[1].position.x = 0.012 + 0.042 * v },
+    (v: number) => { const x = FINGER_IN + FINGER_W / 2 + FINGER_TRAVEL * v; fingers[0].position.x = -x; fingers[1].position.x = x },
   ]
   return {
     root, apply, rings: [yawRing, shoulderRing, elbowRing, wristRing, rollRing, gripRing], plate, grasp,

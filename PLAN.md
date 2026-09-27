@@ -307,13 +307,16 @@ r.on('button', e => ...); r.sample(frameTime); r.setLayout(json);
 | Any | Any | Phone on cellular | STUN, else TURN | Yes |
 | Any | Corporate laptop, UDP blocked | Corp | TURN TLS 443 | Partial (TCP judder) |
 | Any | macOS Chrome host, Local Network denied | Home | TURN | Yes (+latency) |
-| Any | Quest / Vision Pro browser | Home | Short code → P2P | Yes |
-| Any | Tizen 2025+ TV | Home | P2P | Yes |
-| Any | Older Tizen/webOS, no WebRTC | Home | WSS relay build (v1) | v1 |
+| Any | Quest / Galaxy XR / Vision Pro browser | Home | Short code → P2P (a phone can't scan a code shown inside a headset) | Once the short code is built (§4, step 8b) |
+| Any | Samsung TV, Tizen 10 (2026) or 9 (2025) | Home | P2P: Samsung lists WebRTC on 2026 sets, and as partial on 2025 sets | Test on a set (step 8b) |
+| Any | Older Tizen; LG webOS (WebRTC only for LG's partner apps) | Home | WSS relay build (v1) | v1 |
+| Any | Google TV / Chromecast | Home | A Cast receiver page: P2P if it gets DataChannels, else the WSS relay | Research (step 8b) |
 | Any | Blender/CAD on Win/mac/Linux | Home | Bridge (v1) | v1 |
 | Any | Google TV / locked-down PC | – | Android Direct mode (v2) | v2, Android only |
 | Any | Air-gapped LAN | – | Offline WebTransport mode (v2) | No until v2 |
 | Any | Mainland China | – | No Cloudflare TURN there | Out of scope |
+
+TVs, headsets, AR glasses and watches, as hosts and as controllers: [spec/RESEARCH-DEVICES.md](spec/RESEARCH-DEVICES.md) (a quick scan with sources, 2026-09-27).
 
 **Fallback ladders:**
 - **Transport:** LAN host → STUN → TURN UDP (3478/443) → TURN TCP → TURN TLS 443. In v1, a WSS relay through the DO is added as the last resort. The phone offers with host + STUN candidates at once and waits at most 250 ms for TURN credentials; a failed attempt rebuilds with TURN.
@@ -383,6 +386,8 @@ r.on('button', e => ...); r.sample(frameTime); r.setLayout(json);
 | D | `system.robot-arm`: a reference bridge (ROS 2 through rosbridge, against a simulated arm first), with host approval, deadman, limits in the bridge, a 200 ms watchdog, e-stop on every device, and a claim log |
 
 Public sims (2026-09-26): [/sim/](https://obpal.blackboxes.net/sim/) hosts the robot arm (phase D's envelope, simulated) and the faction arena (phase B's slots), so the public can try both before the bridges ship.
+
+Scheduled 2026-09-27: phase B lands with step 5b (the controller hub, below), and phase C after step 8b's research.
 
 **Robot arms: status (2026-09-26).**
 - **Shipped in `/sim/arm/`:**
@@ -500,21 +505,51 @@ Public sims (2026-09-26): [/sim/](https://obpal.blackboxes.net/sim/) hosts the r
 - The home page's first script no longer preloads three.js (the detector comes from `@obpal/core/toss`).
 - Tests: 245 unit tests; home e2e 12/12, including click-to-letter, a phone's flick and A, and a flick on the phone page. Phone e2e 4/4, on full Chromium; the headless shell can't lock the screen's orientation.
 
+**Done 2026-09-27, evening (step 1, in part, and the owner's feedback on the hero and the phone UI):**
+- **Link 1.4.0 (released, v1.4.0; Desktop still 0.2.1):**
+  - Point on a PC is a mouse face (commit b2dfb15): Left and Right with a wheel. The wheel turns with notch ticks, spins free when flicked, taps for a middle click, and held with aiming scrolls (B). Zoom and centre sit above. `Layout.point 'mouse'`, `btn mouse-left/right/middle`, `value{mouse-wheel}`.
+  - The trackpad has a scroll wheel along its edge (`Layout.wheel`).
+  - Whole PC gets a desktop gamepad (commit db92888): left stick pointer, right stick scroll, A/RT click, X/LT right-click, B Esc, Y Enter, D-pad arrows, LB/RB Alt+Left/Right, Menu Ctrl+Esc, View Alt+Tab. It no longer types W/A/S/D; one program keeps the game keys.
+- **Owner's feedback (commit 4b94d59, deployed):**
+  - The paired phone is a tray: it opens in Tilt, and with its gyro on, tilt rolls its marble as on the phone page. A flick or a trackpad tap tosses it.
+  - Knocks last 18–60 ms. The sound button reads "Turn on sound" and pulses while a phone plays, because browsers need a click. On iPhone the audio session is set to `playback`, so the silent switch doesn't mute it.
+  - All colours are offered in shared scenes. On the home page a phone's colour becomes its marble's.
+  - Sheets fit the dvh with pinned actions. They close by tapping above, swiping down, Back, Esc or ×.
+  - Disconnect asks once, then shows Disconnected with Reconnect. The link's closing status used to replace that screen with "Connecting…".
+- **iPhone limits (web platform):** no vibration outside a tap, so collision knocks buzz only on Android; iOS shows a border pulse instead.
+- **Step 1, then still to do (all of it shipped since, in Link 1.5.0 and Desktop 0.3.0: see "Done 2026-09-27, late"):** the phone keyboard (typing into PC text fields: `keyboard` tray control + `text{s, del}` and `src/controller/typing.ts`, helper `Request::Text` via KEYEVENTF_UNICODE, a UI Automation focus watcher for an automatic "Type" prompt), then the helper's branded exe icon. That makes Desktop 0.3 and Link 1.5.
+
+**Done 2026-09-27, late (step 1 finished, step 2, the store package, the hero, the arms, and step 3's contract and embed):**
+- **Link 1.5.0 with ob.Pal Desktop 0.3.0 (released, v1.5.0):**
+  - Typing from the phone: a `keyboard` tray control, `text{s, del}` (src/controller/typing.ts), and a **Type** prompt while a text field on the PC has the focus (the helper's UI Automation focus watcher, `status.text`: text or secret; a password field types from a password field on the phone). The helper types with KEYEVENTF_UNICODE, refuses while Shift, Ctrl or Alt is held, and limits the rate.
+  - The helper has ob.Pal's icon and version information.
+  - The popup and options are redesigned to the home page's standard: a look (surface and colour) shared by both, bundled fonts (OFL), radios on the keyboard.
+  - The whole PC survives a restarted background. The Target picker's PC line names the whole PC.
+  - Link's e2e can no longer reach an installed ob.Pal Desktop: no key in the test copy, a guarded host rename, a check of the helper's log.
+- **Chrome Web Store package ready** (extension/store/: listing, art, screenshots, UPLOAD.md; the privacy page at /privacy/). The owner uploads it; the first upload carries key.pem so the ID stays the one ob.Pal Desktop allows.
+- **Home hero:** clean edges at any size (a quality governor that climbs to 2x where the GPU has room, within 3840x2160 device pixels), sound from the first click or tap (a hero tap on phones), and marbles that roll onto the buttons and off them.
+- **Home cards and the arms sim:** the Play card's puck roams the whole field; the card arm is a turntable with two links; in the sim the arm never goes through the floor or the blocks. Its links and fingers push blocks, blocks carry blocks, and a turned block squares up in the grip.
+- **Step 3, first half:** the controller contract (`face.*` ids, `layout.controllers`, `mode{m,c,p}`) and the embed (`<obpal-remote>` from /embed.js, the /embed/ demo, docs, npm-ready packages). The pairing chip, branded QR and short code (lane P) are next.
+- **Still open from the owner's tests:** a sound when a marble hits the screen's edge; the play area matching the phone's screen exactly; marbles climbing the buttons by tilt; a marble resting calmly in a letter's counter; theme-aware thin sliders and scrollbars with glass tracks; mapping the phone's physical buttons (research first: spec/RESEARCH-BUTTONS.md).
+
 **Next, owner's list of 2026-09-27 (after whole PC):**
-1. PC controls on the phone, the current step:
+1. PC controls on the phone. **DONE (Link 1.4.0 and 1.5.0, Desktop 0.3.0).**
    - a mouse face for Point (Left and Right click either side of B as the middle scroll bar). Owner, later: study the best remote-mouse UX first, "needs better than A and B, needs dedicated icon/design implementation";
    - a trackpad scroll strip along the edge;
    - the gamepad's desktop mapping (no stray letters in text fields);
    - the phone keyboard (a `keyboard` tray control and the `text` message are in `packages/core`/`host`, uncommitted; `src/controller/typing.ts` is written);
    - an automatic "Type" prompt when a text field is focused on the PC (the helper finds focus through UI Automation);
    - branded icons on everything we ship (the helper exe icon).
-2. Link popup and options redesign to the home page's standard: themes, adaptive layout, thin themed scrollbars, glass, live interactions.
-3. Embed + branded QR + host-branded pairing (below).
+2. Link popup and options redesign to the home page's standard: themes, adaptive layout, thin themed scrollbars, glass, live interactions. **DONE (Link 1.5.0).**
+3. Embed + branded QR + host-branded pairing (below). The embed names controllers by their catalogue ids (CATALOGUE §9), so its public API stays put when the picker lands in 5b.
 4. Trackpad depth field.
-5. Shared view: scenes and robot cameras visible to every phone.
-6. Arms.
-7. Bluetooth research.
-8. Chrome Web Store, once the owner has the developer account.
+5. Shared view: scenes and robot cameras visible to every phone. Owner, 2026-09-27: "the scene can be shared across connected easily for viewing whats happening and able to use the connected device for control as now".
+5b. **The controller catalogue in the phone, and the controller hub** (owner, 2026-09-27; added here, see below): pick any controller the screen takes, with its profiles, and use several at once, a Bluetooth pad through the phone included.
+6. Music room sim, after the shared view. Owner, 2026-09-27: "a sim for music room with the gyro action for playing them, mainly different kinds of drums and tone generating with contacts etc to showcase responsiveness with multiple people in the same scene". Research first (latency budget, instrument UX, audio synthesis) to do both "tastefully and keeping high quality of experience". Its drum pads and tone keys arrive as catalogue controllers in 5b's picker (CATALOGUE §9.1).
+7. Arms.
+8. Bluetooth research.
+8b. **Research: TVs, headsets, AR glasses and watches, with controller profiles** (owner, 2026-09-27; added here, see below). The quick scan is [spec/RESEARCH-DEVICES.md](spec/RESEARCH-DEVICES.md).
+9. Chrome Web Store: **the package is ready** (extension/store/UPLOAD.md); the owner uploads it.
 
 **Next, in this order (owner OK'd 2026-09-27: "go ahead in that order"):**
 
@@ -522,6 +557,7 @@ Public sims (2026-09-26): [/sim/](https://obpal.blackboxes.net/sim/) hosts the r
    - **Embed.**
      - A hosted `https://obpal.blackboxes.net/embed.js` (ES module, built by Vite as its own entry) defines `<obpal-remote>`.
      - Attributes: `app`, `modes` (point, hold, tilt, pad, gamepad, track), `seats`, `profile`, `corner` (default: bottom-right), `accent`, `open` (start expanded).
+     - `modes` also takes catalogue controller ids (`face.wii`, `face.gamepad`, …; CATALOGUE §9), passed on as `layout.controllers`. The attribute then doesn't change when the picker lands (step 5b).
      - It makes a `Remote`, shows the pairing (below), fires DOM events (`obpal-connect`, `obpal-join`, `obpal-leave`, `obpal-button`), and exposes `.remote` plus `.frame(now)` for a page's own rAF loop.
      - A tiny `window.obpal.remote(opts)` works without the element.
      - A page decides what's controllable: `setScene({ nodes })` passes through, so any listed model can be taken over by QR or link.
@@ -537,8 +573,110 @@ Public sims (2026-09-26): [/sim/](https://obpal.blackboxes.net/sim/) hosts the r
      - It takes the host's look: its accent (the `--accent` / `--primary` custom properties, or the `accent` attribute), font (body font-family), colour scheme and corner radius.
      - Keyboard and screen-reader friendly, with reduced motion respected.
      - The viewer, sims and home hero move onto it too.
+   - **Short code** (decided 2026-09-27; the design is in §4 "Short code"). Every pairing also shows a short code, to type on the phone's start page at obpal.blackboxes.net. It serves TVs, headsets and a phone across the room.
+     - It is short-lived, uses an unambiguous alphabet, is rate-limited in the worker, and reaches the same session as the QR link.
+     - The chip shows the QR and the code together from the embed's first release.
 2. **Trackpad depth field.** The phone trackpad's dot matrix answers a swipe with a 3D depth-of-field ripple: dots near the finger rise and sharpen, far ones soften. Canvas, and it's cool on a phone.
 3. **Arms.** Per-model geometry (SO-101 first), a serial bridge in ob.Pal Desktop, arm-to-arm collision in the sim, and a camera view of a remote arm.
+
+**The controller catalogue in the phone, and the controller hub (owner, 2026-09-27; step 5b).**
+
+The owner: "still not clear about the in controller UI with various controllers connection possible and controller catalogue available to use through the platform connection as we discussed earlier. if its in the pipeline, update as relevant and needed to achieve the vision." It completes earlier asks:
+- "needs addition to gamepad so that utility is categorized and available, as we will be building more into the catalogue should be standardised as planned" (2026-09-25);
+- "connect various controllers for eg vr controllers, switch, wii etc through the phone or pC then to the connected scene" (2026-09-26);
+- "a clean way to add your own controller profiles into the catalogue" (2026-09-26).
+
+**The vision:** whatever a person holds reaches any host through one connection, and the catalogue and its profiles make the two fit.
+
+```mermaid
+flowchart LR
+  subgraph Hold["What people hold"]
+    PH["Phone faces<br/>gamepad · Wii remote · mouse · trackpad · 3D hand · keyboard"]
+    BT["Bluetooth pad, Joy-Con"]
+    WA["Watch app"]
+    XR["Headset hands and controllers"]
+  end
+  BT -->|"through the phone, as a seat"| PH
+  WA -.->|"or over Bluetooth to the phone"| PH
+  PH --> NET
+  WA --> NET
+  XR --> NET
+  NET["Platform connection<br/>QR · link · short code · LAN code<br/>a participant per device or seat"] --> CAT
+  CAT["Catalogue<br/>controllers and utilities<br/>profiles (device side) · mappings (host side)"] --> HOSTS
+  HOSTS["Hosts<br/>pages and embeds · Link and Desktop (the PC) · TVs · headsets · robot arms"]
+  HOSTS -.->|"layout: what it takes and suggests"| PH
+```
+
+**Where it stands:**
+- **Built:**
+  - the catalogue as data (`packages/core/src/catalogue.ts`), the /catalogue/ page with its profile builder, and `/catalogue.json` and `/profile.schema.json`;
+  - profiles on the phone, but only in the Gamepad tab: the five built-ins, and one suggested per site;
+  - shared scenes of up to 8 devices (4 on the home page), with colours, claims, and a People panel on the screen (the Viewer, the sims).
+- **Missing for the picker:**
+  - The phone's four tabs are fixed, so a new controller would mean a new tab.
+  - `layout.utilities` (what a host takes) exists, but only the Gamepad's chips read it and no host sends it.
+  - Community and personal profiles can't be used on a phone: it knows only the built-ins, and it ignores a suggestion it doesn't know. The builder can't send a profile to a phone.
+  - The host learns a mode id, not the controller or the profile.
+  - Host mappings (Link's key tables) are code, not catalogue data.
+- **Missing for the hub:**
+  - The phone shows how many people are in a scene, not who.
+  - ob.Pal Link takes one phone at a time.
+  - One person's second device counts as a second person.
+  - Nothing is relayed. The phone never reads a Bluetooth pad (the Gamepad API is used only to show the phone to games), `seat` is a planned line in PROTOCOL §8, and the four bridges are catalogue rows without code. Only Bluetooth keyboards, remotes, clickers and headset buttons reach the phone, as four hardware actions.
+
+**The plan** (the design is CATALOGUE §9):
+1. **The contract, with step 3 (the embed).** Controller ids in the catalogue (`face.gamepad`, `face.wii`, …), `layout.controllers`, and `mode{m, c, p}`, in `packages/core` and the specs. The embed names controllers by these ids from its first release.
+2. **5b.1: the picker.**
+   - The tabs become a bar of up to four controllers plus More, which opens the catalogue as a sheet. What the screen takes is live; the rest says why not.
+   - Switching is live: no reconnect, and nothing left held.
+   - Profiles sit under it: the host's suggestion, the built-ins, the host's own, community profiles from /catalogue.json, and the person's own (the builder's "Use on my phone").
+   - Every host sends `utilities` and `controllers`.
+   - The first new entry is the steering wheel.
+3. **5b.2: the hub.** This is phase B of "Shared scenes, bridges and control systems" above.
+   - People here, on the phone.
+   - A Bluetooth or USB pad through the phone, with no install (the Gamepad API in Android's and iOS's browsers): as the phone's own gamepad, or as a player of its own (`seat`, `bridge.gamepad`).
+   - Add a device: one person's phone and tablet (later a watch) group as one person.
+   - The People panel grouped by person.
+   - Gamepad slots in ob.Pal Link (Players 1–4, `system.gamepad-slots`).
+4. **After step 8b:** `bridge.joycon` and `bridge.wiimote` (WebHID on a PC, for the gyro and the IR camera), `bridge.xr`, watches, and TVs and headsets as hosts. That is phase C and the research below.
+
+**Why 5b comes before the music room:**
+- The music room's drums and tone keys are new controls. Without the picker they would become more fixed tabs. The catalogue rules that out ("It does not become a one-off mode"), and the owner asked for it to "be standardised as planned".
+- The shared view comes first because it reworks the same phone screen.
+- The cost: the music room, the arms and the Bluetooth research move back by 5b. 5b.1 and 5b.2 can run as two lanes side by side.
+
+**Research: TVs, headsets, AR glasses and watches (owner, 2026-09-27; step 8b).**
+
+The owner: "also note for research integration with various TV and VR, AR systems with watches as control devices on top of existing, with various controller profiles to function seamlessly."
+
+The quick scan, with sources, is [spec/RESEARCH-DEVICES.md](spec/RESEARCH-DEVICES.md). In short:
+- **Headsets are the nearest.**
+  - Quest's and Galaxy XR's browsers have full WebXR input, so `bridge.xr` can start there. Pico needs testing.
+  - Vision Pro is VR only. Its hands arrive as gaze-and-pinch pointers, and developers report that PS VR2 controllers reach Safari only as gamepads, without pose.
+  - Headsets need the short code (§4, not built) both ways: a phone can't scan a code shown inside a headset, and a headset can't scan the code on a screen.
+- **TVs as hosts.**
+  - Samsung (WebRTC on 2026 sets, partial on 2025) and a Google Cast receiver are the cheapest to try.
+  - LG (WebRTC only for its partners) and older Samsung sets need the WSS relay (§7a, v1).
+  - Android TV and Fire OS need native apps, and Apple TV a native tvOS app. Roku can't host.
+- **TVs as control systems.** ob.Pal Desktop can drive a TV's own menus through its LAN remote: a `system.tv` candidate. Roku's ECP is official. Samsung's, LG's and Android TV's are reverse-engineered, each with a one-time pairing.
+- **Watches need a native watch app.**
+  - One Wear OS app covers Pixel and Galaxy watches. It joins directly (through the phone's Bluetooth proxy or Wi-Fi), or links to the phone's page over Bluetooth (Chrome on Android).
+  - An Apple Watch can't reach the room service in real time. It needs a native iPhone app, which ob.Pal doesn't have.
+- **AR glasses** are mostly displays for a phone or PC, which stays the host. Android XR wired glasses (XREAL's Aura, due in fall 2026) should get Chrome's WebXR. Meta's Neural Band reaches Web Apps as a few fixed gestures, in a developer preview.
+- **Profiles.** Reuse the Gamepad API's standard mapping for pads, the WebXR Input Profiles registry's ids and models for headset controllers, and SDL's mapping format and button names for raw pads. Borrow OpenXR's and Steam Input's split between actions and bindings for host mappings (CATALOGUE §9.6).
+
+**Order within 8b:**
+1. The short code. It can move earlier if headsets matter sooner.
+2. Headsets: first as hosts, then `bridge.xr`.
+3. A TV host: Tizen, a Cast receiver, and the relay.
+4. A Wear OS app.
+5. `system.tv`.
+6. Apple devices, only with a native Apple app (§13).
+
+**Why 8b sits beside the Bluetooth research:**
+- The two share a question: how a watch reaches the phone's page over Bluetooth on Android.
+- Every item needs a native app, the relay or the short code first, which is heavier than 5b's phone-side work.
+- 5b gives extra devices a place to appear.
 
 **Queued (owner, 2026-09-26; after the usage reset):**
 - **Top-left dropdowns across the ecosystem (first).** The Blackboxes engines' top-left dropdowns aren't standardised. Make them match ob.Pal's everywhere, in look and behaviour.
@@ -592,6 +730,10 @@ addons/blender      OSC add-on (v1)
 5. **Name and domain.** Must be fixed before beta.
 6. **Bridge stack.** Go + pion (recommended; its TURN-over-TLS support was checked) or Electron reusing the TS SDK.
 7. **Telemetry default.** Recommended: anonymous, no input data, on with opt-out, because the v1/v2 gates depend on it.
+8. **The controller catalogue's place (step 5b, 2026-09-27).** DECIDED 2026-09-27, owner: "approve 5b before music room". Between the shared view and the music room (§10).
+9. **Native apps for watches and Apple devices.** Every watch needs a native watch app. An Apple Watch also needs a native iPhone app, and an Apple TV a tvOS app, each with Apple Developer enrollment and App Store review. DECIDED 2026-09-27 (the owner left the rest to Claude's judgement, "for the end UX as we envision for the project"): a Wear OS app first, in step 8b, which covers Pixel and Galaxy watches; Apple only on demand.
+10. **Which TVs first.** DECIDED 2026-09-27 (Claude's judgement, as above): Samsung (a Tizen web app) and a Google Cast receiver, then LG through the relay. WebRTC on LG needs an LG partnership.
+11. **The short code sooner?** Headsets as hosts, and watches, wait for it. DECIDED 2026-09-27 (Claude's judgement, as above): in step 3, with the branded QR and host-branded pairing. Pairing is designed once: the embed shows the QR and the code from its first release, and TVs, headsets and a phone across the room get a code to type from the start.
 
 ## 14. Verified facts (checked 2026-09-25) and corrections applied
 

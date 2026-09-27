@@ -1,6 +1,6 @@
 # ob.Pal control catalogue (v1)
 
-Every controller surface is built from **utilities** in one catalogue. Every host maps utilities to **outputs** through **profiles**. Several devices can share one scene, each controlling its own node (§5). Other controllers join through a phone or PC as **bridges** (§6), and what a scene controls, down to real machines, is a **control system** (§7). A new kind of control (a wheel, a keyboard page, a pedal) becomes a new catalogue entry with:
+Every controller surface is built from **utilities** in one catalogue. Every host maps utilities to **outputs** through **profiles**. Several devices can share one scene, each controlling its own node (§5). Other controllers join through a phone or PC as **bridges** (§6), and what a scene controls, down to real machines, is a **control system** (§7). On the device, the catalogue becomes a picker: a person uses any controller the host takes, on one device or several (§9, planned). A new kind of control (a wheel, a keyboard page, a pedal) becomes a new catalogue entry with:
 - a stable id;
 - a category;
 - a wire encoding;
@@ -136,6 +136,9 @@ A bridge forwards a controller connected to a phone, PC or headset into the scen
 | `bridge.joycon` | Joy-Con and Switch Pro, with motion | Chromium on a PC (WebHID) | HID reports: buttons, sticks, 6-axis IMU | `pad`, plus Aim and Steer from its gyro | Planned |
 | `bridge.wiimote` | Wii Remote and Nunchuk | Chromium on a PC (WebHID) | HID reports: buttons, IR camera, accelerometer | `pad`, plus absolute Point from the IR camera | Planned |
 | `bridge.xr` | VR controllers and tracked hands (Quest, Vision Pro, Pico) | The headset's browser (WebXR) | Each hand's 6DoF pose, trigger, grip, stick, buttons | `motion.hold` (1:1 pose) and `pad`, one participant per hand | Planned |
+| `bridge.watch` | A watch: Wear OS and Galaxy Watch; an Apple Watch only beside a native iPhone app | A native watch app, joined as a device of its own or linked to the phone's page over Bluetooth (Chrome on Android) | Wrist motion, taps, the crown or bezel | The Motion utilities and buttons, as a second device of its person (§9.5) | Research first ([RESEARCH-DEVICES.md](RESEARCH-DEVICES.md)) |
+
+The controllers themselves are described with the standards' ids rather than new ones: the Gamepad API's standard mapping for pads, and the WebXR Input Profiles registry's ids for headset controllers ([RESEARCH-DEVICES.md](RESEARCH-DEVICES.md), "Controller profiles").
 
 ## 7. Control systems: what a scene controls
 
@@ -192,3 +195,129 @@ A new utility, bridge or control system needs all of the following:
 4. Host semantics, and for anything physical its safety envelope.
 5. Its place in the built-in profiles.
 6. Tests: a codec round trip, the route maths, and one end-to-end case (`extension/scripts/e2e.mjs`, or the viewer's shared-scene test).
+
+## 9. The catalogue on the device
+
+**Status: the contract is built; the rest is design.**
+- **Built:** the controller ids (§9.1), `layout.controllers` (§9.2) and `mode{m, c?, p?}` (§9.4), in `@obpal/core` (`CONTROLLERS`, `withControllers`, `layoutControllers`, `readMode`) and `@obpal/host`, and in PROTOCOL §3. The phone names its controller and profile in `mode`, and opens the first controller the host suggests. The embed (`<obpal-remote modes="face.wii face.trackpad">`) names controllers by these ids, so its attribute stays put when the picker lands.
+- **Design, not built:** the picker (§9.3), several devices per person (§9.5), and profiles beyond the built-ins (§9.6).
+
+Today the phone shows four fixed tabs: Rotate, Point, 3D and Gamepad. The host's `layout.modes` decides which of them appear. The catalogue's routes and profiles (§2–3) reach only the Gamepad tab's motion chips. This section makes the catalogue itself what a person picks from while connected: any controller the host takes, tuned by a profile, on one device or several. PLAN §10 places the work (step 5b).
+
+**Words:**
+- **Controller:** what a person uses, as the picker shows it. It is either a **face** drawn on the device's screen (the gamepad, the Wii remote, the mouse, the trackpad), or a physical controller bridged through the device (§6). Each is built from utilities (§1).
+- **Seat:** one more participant on a device's own connection, for a bridged controller (§6).
+- **Person:** the devices and seats one human uses in a scene, shown and managed together.
+
+### 9.1 Controllers
+
+The first faces are today's tabs and tray controls, so nothing is lost. New ones are rows here, never new tabs: the music room's drum pads and tone keys arrive as `face.drums` and `face.keys`. Adding one follows §8.
+
+The rows are data in `@obpal/core` (`Controller` and `CONTROLLERS`: each one's name, category, utilities and modes) and in [/catalogue.json](https://obpal.blackboxes.net/catalogue.json) (`controllers`). An id is a kind, a dot and a name (`CONTROLLER_ID`).
+
+| id | Controller | Built from | Sends (mode · wire) | Today |
+|---|---|---|---|---|
+| `face.gamepad` | Gamepad | `pad`, with `motion.aim`, `motion.steer` and `motion.point` as chips | gamepad · PAD, POINTER | The Gamepad tab |
+| `face.trackpad` | Trackpad | `touch.trackpad`, with the gyro as 1:1 (`motion.hold`) or Tilt (`motion.tilt`) | hold or tilt · STATE | The Rotate tab |
+| `face.wii` | Wii remote | `motion.point`: A, B, − ⌂ + | point · POINTER, `btn` | The Point tab (`point: 'wii'`) |
+| `face.mouse` | Air mouse | `motion.point`: Left, Right and the wheel | point · POINTER, `btn`, `value` | The Point tab on a PC (`point: 'mouse'`) |
+| `face.hand` | 3D hand | `motion.track` | track · POSE | The 3D tab |
+| `face.keyboard` | Keyboard | Typing and a key row | `text`, `btn{key-…}` | The tray's Keyboard |
+| `face.wheel` | Steering wheel (new) | `pad`, with Steer on `stick.wheel` and the triggers as pedals | gamepad · PAD | Gamepad with the Driving profile |
+| `bridge.*` | A physical controller | §6 | As its bridge | Planned (§6) |
+
+### 9.2 What a host takes
+
+**A controller works on a host when everything it sends, after its profile's routes (§2), is something the host takes.** A steering wheel works in any gamepad game, because its tilt is routed into the pad's left stick. The air mouse needs a host that takes `motion.point`.
+- **Takes:** `layout.utilities` lists the utilities the host takes; absent means all of them, as today. Today only the Gamepad's chips read it, and no host sends it. With the picker, every host should.
+- **Suggests:** `layout.controllers` lists the controllers the host suggests, in order, and the first opens by default (the phone opens it once, on the first `welcome`; after that the person's choice stands).
+  - A host that sends only `modes` (every host before controllers) gets the faces whose modes it lists (`layoutControllers`): Rotate is `face.trackpad`, Point `face.wii` (or `face.mouse` with `point: 'mouse'`), 3D `face.hand`, Gamepad `face.gamepad`, and a keyboard in the tray `face.keyboard`.
+  - The SDK fills in the fields older phones read (`withControllers`, which `Remote` applies to every layout it sends): absent `modes` become the controllers' modes, in order; `face.mouse` ahead of `face.wii` sets `point: 'mouse'`; `face.keyboard` adds a keyboard control to the tray; `face.wheel` ahead of `face.gamepad` suggests the Driving profile. Whatever the layout sets itself is kept.
+  - Unknown ids are skipped, so a host may already name controllers a later phone will have.
+- **The device:** its own abilities count too. Without motion sensors or permission, the motion chips, the Wii remote and the 3D hand wait for motion. The 3D hand's camera ways stay settings, as today.
+
+In the picker, each controller is in one of four states:
+
+| State | Shown |
+|---|---|
+| Suggested | First, lit, with the host's dot |
+| Ready | Lit |
+| Needs motion | Lit, with "Tap to allow motion" (the Start gate) |
+| Not on this screen | Dimmed, and it can't be picked. A long press says why ("This screen takes a gamepad only"). |
+
+Planned catalogue entries don't show on a device; the /catalogue/ page lists them.
+
+### 9.3 The picker
+
+- **The bar.** The mode tabs become a bar of up to four controllers: the host's suggestions first, then the ones this person uses most with this host. The last slot is **More** (a grid), which opens the picker. On a host that suggests one controller, the bar holds that controller and More.
+- **The picker** is a glass sheet like the tray's pickers. Controller cards sit in a grid, grouped by the catalogue's categories: Controller, Pointer, Touch, 3D, Keys, and Music once it exists. A card is a large glyph and a name. The line on what it's for shows on a long press, or as the tooltip on a computer.
+- **Connected** (§9.5): controllers bridged through this device sit in a row at the top, each with Use and Stop.
+- **Profiles** (§9.6): a row of chips under the grid, for the chosen controller.
+- **Pin:** a long press on a card offers "Keep in the bar".
+- **Hint:** the first time, a hint points at More. Closing it hides it for the session, like the other hints.
+- **Access:** the cards are a radiogroup of buttons, the bar stays a tablist, and reduced motion is respected.
+
+### 9.4 Switching live
+
+- Picking a controller switches at once, with no reconnect.
+- The device first lets go of everything the old controller held: buttons up, sticks centred, the clutch released, in one neutral packet. Then it sends `mode{m}` as today, with two new optional fields: `c`, the controller's id, and `p`, the profile's. Hosts that don't know them ignore them (PROTOCOL §3).
+  - Built: the phone sends `c` with every `mode`, and `p` while on the gamepad (again whenever its profile changes). Until the picker, the gamepad with the Driving profile says `face.wheel`.
+  - `@obpal/host` reads them into `Participant.controller` and `Participant.profile` (`readMode`). A device that doesn't say is taken to use the controller its mode stands for (`controllerOf`), so hosts see a controller for every phone, old or new.
+  - Ids are checked for shape only (a kind, a dot and a name; a profile id as in §3), so a newer device can name a controller or a community profile the host doesn't know.
+- A claim (§5) survives a switch: the node follows whatever the participant uses next. For a system that moves real things (§7), letting go is the deadman, so the node stops until the new controller takes hold.
+- The host may answer with a new layout: another suggestion, or `utilities` that rule the controller out. The device then moves to the first controller it can use, and a toast says why.
+- The device remembers the last controller per host, the way it remembers profiles (§3).
+
+### 9.5 Several devices per person
+
+Today (§5) each device is a participant of its own, with its own colour, up to 8 in a scene. A second device from the same person is someone else.
+
+Planned:
+- **Person.** One or more participants that belong together: devices (a phone and a tablet, later a watch) and seats. They share a name and a colour, and each extra device or seat gets a numbered shade of it. The host shows them together and can remove one or all.
+- **Use a pad here.** The phone's browser sees controllers connected over Bluetooth or USB through the Gamepad API (Xbox, DualSense, Switch Pro, Joy-Con pairs, 8BitDo). The simplest use makes one the phone's own gamepad: its buttons and sticks go out in the phone's PAD packets, and the phone's gyro can still aim. It needs no seat and nothing new on the wire.
+- **Add a pad as a player.** Or the pad becomes a participant of its own, as a seat on the phone's connection: `seat{op: 'open', seat, name, kind: 'bridge.gamepad', profile}` (PROTOCOL §8), with the seat index in its packets.
+  - The host sees one more participant ("Alex · Xbox pad") that claims its own node. So one person can drive two things at once, while one node per participant stays the rule.
+  - A seat can be named for someone else, for couch play on one phone.
+  - Stop closes it.
+- **Add a device.** The person's first device shows a QR code and a link: the scene's invite plus a short-lived token the host minted for this person, handed over inside the DTLS channel. The second device joins as usual and presents the token in `hello`, and the host groups it with the person. A device that can't scan (a watch) uses the short code instead (PLAN §4), approved on the person's phone.
+- **On the phone.** The header gains a small stack of dots: this device and the person's other devices and seats, each in its colour with its controller's glyph. Tapping it opens **Controllers**:
+  - This phone: its controller, and the picker.
+  - Connected: bridged pads, with Use here, Add as a player and Stop.
+  - Your other devices: their controller and link, and Remove.
+  - Add a device.
+  - People here: everyone in the scene and what they hold. Today the scene list only counts them.
+- **On the host.** The People panel (the Viewer, the sims) groups its rows by person: the person first, then each device and seat with its controller's glyph and what it holds. Remove works per row and per person. Approval (§7) stays per participant, so a seat added to a robot arm scene waits for approval like a new device.
+- **Limits.** Seats count toward the scene's participants (8 today). A device opens at most 4 seats.
+- **ob.Pal Link.** `system.gamepad-slots` (§7) uses the same seats: each phone or seat claims one of Players 1–4, and the game sees up to four pads.
+
+### 9.6 Profiles, on the device and on the host
+
+- **On the device (§3).** The profile chips list, for the chosen controller:
+  - the host's suggestion, marked;
+  - the built-ins;
+  - the host's own profiles (`layout.profiles`, planned), for a host tuned to one site or program;
+  - community profiles from /catalogue.json, kept for offline use;
+  - **Mine**, the person's own.
+
+  Today the device knows only the five built-ins, and it ignores a suggestion it doesn't know. Planned, it takes any profile that passes `checkProfile()`.
+- **Mine.** The /catalogue/ builder gains **Use on my phone**.
+  - On a phone, it saves to the phone's own profiles. The controller page shares them, because both pages are on obpal.blackboxes.net.
+  - On a computer, it shows a QR code that carries the profile to the phone in the URL fragment, so the profile never reaches a server.
+  - Changes made on the phone (a long press on a chip) are saved per profile, as today.
+- **Wider profiles.** Today a profile tunes the Gamepad's three motion utilities. Profiles will name the controller they tune (`controller: 'face.wii'`) and grow with it: the Wii remote's gain and edge turn, the trackpad's speed, button remaps. `checkProfile()` and /profile.schema.json stay the one check.
+- **On the host: mappings.** What a control finally does belongs to the host (§3). Some hosts already carry that as data: ob.Pal Link's Keys and whole-PC tables (`DEFAULT_KEYS` and `DESKTOP_KEYS` in `extension/src/shared/keys.ts`), and its per-site suggestions (`sites.ts`).
+  - Planned, mappings become catalogue entries too, as `catalogue/mappings/<id>.json`, checked at build like profiles. A mapping says what each catalogue control does for one site or program: a key, the mouse, a gamepad button.
+  - A host offers its mappings as an ordinary `select` in the tray, so switching one needs no new wire.
+  - People share mappings the way Steam Input configurations are shared ([RESEARCH-DEVICES.md](RESEARCH-DEVICES.md)).
+
+### 9.7 On the wire
+
+All of it is optional, and a host that ignores it keeps today's behaviour.
+- Layout: `controllers?: string[]` (built) and `profiles?: ProfileSpec[]` (planned).
+- `mode{m, c?, p?}` (built).
+
+Planned:
+- `welcome{…, person?: {id, token}}`, and `hello{…, with?: token}`, for Add a device.
+- `seat{op, seat, name, kind, profile?}`, and a seat index in the PAD, POINTER, STATE and POSE packets. PAD has two reserved bytes.
+- In `scene.people`: `person?` (who a participant belongs with) and `controller?` (what it uses now).
+- In `Caps`: `form?` (phone, tablet, watch, headset or computer), for the People views and the picker.

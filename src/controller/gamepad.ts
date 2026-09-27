@@ -357,6 +357,8 @@ export interface GamepadDeps {
   exit: () => void
   /** Enter fullscreen where the platform allows it; called from a pointerup. */
   fullscreen?: () => void
+  /** The profile in effect changed: the host suggested another, or the person picked one. */
+  profile?: (id: ProfileId) => void
 }
 
 /** What the host declared about itself: its name, and the catalogue fields of its layout. */
@@ -643,6 +645,9 @@ export class GamepadMode {
     try { return (JSON.parse(store.get(`obpal.motion.${id}`) ?? '{}') as ProfileOverrides) ?? {} } catch { return {} }
   }
 
+  /** The profile in effect (CATALOGUE §3), which the phone names in mode{p}. */
+  get profileInUse(): ProfileId { return this.profileId }
+
   /** Make a profile current. Its `on` utilities switch on (when the phone can drive them); the rest stay as they were. */
   private applyProfile(id: ProfileId) {
     const changed = id !== this.profileId
@@ -650,6 +655,7 @@ export class GamepadMode {
     this.profile = resolveProfile(id, this.overrides(id))
     if (changed) for (const u of this.profile.on) if (this.offered.includes(u) && this.deps.motion.q) this.toggle(u, true)
     this.paintChips()
+    if (changed) this.deps.profile?.(id)
   }
 
   /** The user picked a profile: remembered for this host and suggestion; picking the suggestion itself forgets the choice. */

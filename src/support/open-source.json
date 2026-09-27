@@ -5,7 +5,7 @@
     { "name": "uqr", "by": "Anthony Fu", "what": "Every pairing QR code", "license": "MIT", "share": 14, "url": "https://github.com/unjs/uqr", "give": "https://github.com/sponsors/antfu", "packages": ["uqr"] },
     { "name": "Vite", "by": "The Vite team", "what": "Builds every page", "license": "MIT", "share": 12, "url": "https://vite.dev", "give": "https://opencollective.com/vite", "packages": ["vite"] },
     { "name": "camera-controls", "by": "Yomotsu", "what": "The Viewer's camera", "license": "MIT", "share": 10, "url": "https://github.com/yomotsu/camera-controls", "give": "https://github.com/sponsors/yomotsu", "packages": ["camera-controls"] },
-    { "name": "Inter", "by": "Rasmus Andersson", "what": "The typeface across ob.Pal", "license": "OFL-1.1", "share": 8, "url": "https://rsms.me/inter/", "give": "https://github.com/sponsors/rsms", "fonts": ["Inter"] },
+    { "name": "Inter", "by": "Rasmus Andersson", "what": "The typeface across ob.Pal, bundled in ob.Pal Link", "license": "OFL-1.1", "share": 8, "url": "https://rsms.me/inter/", "give": "https://github.com/sponsors/rsms", "fonts": ["Inter"] },
     { "name": "Vitest", "by": "The Vitest team", "what": "Runs the tests", "license": "MIT", "share": 6, "url": "https://vitest.dev", "give": "https://opencollective.com/vitest", "packages": ["vitest"] },
     { "name": "sharp and libvips", "by": "Lovell Fuller and the libvips team", "what": "Makes the icons", "license": "Apache-2.0 and LGPL-2.1", "share": 5, "url": "https://sharp.pixelplumbing.com", "give": "https://opencollective.com/libvips", "packages": ["sharp"] },
     { "name": "serde", "by": "David Tolnay and contributors", "what": "ob.Pal Desktop's messages", "license": "MIT or Apache-2.0", "share": 5, "url": "https://serde.rs", "give": "https://github.com/sponsors/dtolnay", "crates": ["serde", "serde_json"] },
@@ -17,7 +17,9 @@
     { "name": "Wrangler and Workers", "by": "Cloudflare", "what": "Where ob.Pal runs", "packages": ["wrangler", "@cloudflare/vite-plugin", "@cloudflare/workers-types"] },
     { "name": "DefinitelyTyped", "by": "Its contributors", "what": "Types for the browser extension", "packages": ["@types/chrome"] },
     { "name": "JetBrains Mono", "by": "JetBrains", "what": "Numbers and code", "fonts": ["JetBrains Mono"] },
-    { "name": "Plus Jakarta Sans", "by": "Tokotype", "what": "Headings", "fonts": ["Plus Jakarta Sans"] },
+    { "name": "Plus Jakarta Sans", "by": "Tokotype", "what": "Headings, bundled in ob.Pal Link, and the home page's 3D letters", "fonts": ["Plus Jakarta Sans"] },
+    { "name": "opentype.js", "by": "Frederik De Bleser and contributors", "what": "Reads the display typeface's outlines for the home page's 3D letters", "packages": ["opentype.js"] },
+    { "name": "Clipper", "by": "Angus Johnson, and Timo's JavaScript port", "what": "Merges the 3D letters' outlines into shapes three.js can fill", "packages": ["clipper-lib"] },
     { "name": "QR Code generator", "by": "Project Nayuki", "what": "What uqr is built on", "packages": [] }
   ]
 }

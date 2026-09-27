@@ -28,6 +28,12 @@ export interface Layout {
   tray: TrayControl[]
   /** Modes the host supports, in display order. */
   modes?: ModeId[]
+  /**
+   * Catalogue controllers the host suggests (CATALOGUE §9.2: `face.wii`, `face.gamepad`, …), in order: the first opens
+   * by default. Devices that predate controllers go by `modes`, which the host SDK fills in from these when the layout
+   * leaves it out (withControllers).
+   */
+  controllers?: string[]
   /** Catalogue utilities the host accepts (CATALOGUE §1); absent means all of them. */
   utilities?: string[]
   /** A catalogue profile the host suggests for what it controls right now (CATALOGUE §3). */
@@ -95,7 +101,11 @@ export type DeviceMsg =
   /** The device was flicked upward (the layout asked for `toss`): how fast it went up, m/s, at most MAX_TOSS. */
   | { t: 'toss'; v: number }
   | { t: 'value'; id: string; v: number | boolean | string; add?: boolean }
-  | { t: 'mode'; m: ModeId }
+  /**
+   * The device's mode, and what it uses in it (CATALOGUE §9.4): `c` the catalogue controller (`face.wii`, …) and `p` the
+   * profile it applies. Both optional; hosts that don't know them ignore them.
+   */
+  | { t: 'mode'; m: ModeId; c?: string; p?: string }
   | { t: 'recenter' }
   /** Claim a node listed in `scene` (null releases what this device holds). */
   | { t: 'claim'; node: string | null }

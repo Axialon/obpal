@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use crate::keys::KeyDef;
-use crate::protocol::{validate, Caps, Frame, MouseButton, ProgramInfo, Refused, Reply, Request, Scope, Validated, PROTO};
+use crate::protocol::{validate, validate_text, Caps, Frame, MouseButton, ProgramInfo, Refused, Reply, Request, Scope, TextFocus, Validated, PROTO};
 use crate::scope::{normalize, Config};
 
 /// How long a foreground lookup stays valid: none, so a switch to another window stops input on the next frame
@@ -32,6 +32,8 @@ pub const FRONT_TTL: Duration = Duration::ZERO;
 pub const WATCHDOG: Duration = Duration::from_millis(500);
 /// Frames per second accepted; the rest are dropped (the next accepted frame re-syncs the state).
 pub const MAX_FRAMES_PER_SEC: u32 = 250;
+/// Text requests per second accepted (a phone sends one per keystroke, or per word from a swipe).
+pub const MAX_TEXTS_PER_SEC: u32 = 40;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const OS: &str = std::env::consts::OS;
@@ -43,6 +45,8 @@ pub trait Injector {
     fn mouse_move(&mut self, dx: i32, dy: i32);
     /// Wheel in 1/120 notch units, DOM convention (+y scrolls down).
     fn wheel(&mut self, dx: i32, dy: i32);
+    /// Delete `del` characters before the caret, then type `s` ('\n' Enter, '\t' Tab).
+    fn text(&mut self, del: u32, s: &str);
 }
 
 /// The window in front and the process behind it.
@@ -61,6 +65,10 @@ pub struct FrontWindow {
 
 pub trait Foreground {
     fn front(&mut self) -> Option<FrontWindow>;
+    /// Whether a text field has the keyboard focus (None where the OS can't tell).
+    fn text_focus(&mut self) -> Option<TextFocus> {
+        None
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,6 +107,10 @@ pub struct Session<I: Injector, F: Foreground> {
     last_frame: Option<Instant>,
     window_start: Option<Instant>,
     window_count: u32,
+    text_window: Option<Instant>,
+    text_count: u32,
+    /// A text field has the focus, as of the last foreground check.
+    text: Option<TextFocus>,
     stats: Stats,
     last_status: Option<Reply>,
 }
@@ -122,6 +134,9 @@ impl<I: Injector, F: Foreground> Session<I, F> {
             last_frame: None,
             window_start: None,
             window_count: 0,
+            text_window: None,
+            text_count: 0,
+            text: None,
             stats: Stats::default(),
             last_status: None,
         }
@@ -155,7 +170,7 @@ impl<I: Injector, F: Foreground> Session<I, F> {
                     version: VERSION,
                     os: OS,
                     hotkey: self.hotkey.clone(),
-                    caps: Caps { keyboard: true, mouse: true, gamepad: false, desktop: true },
+                    caps: Caps { keyboard: true, mouse: true, gamepad: false, desktop: true, text: cfg!(windows) },
                 });
                 out.push(self.config_reply());
                 self.refresh_front(now, true);
@@ -169,6 +184,11 @@ impl<I: Injector, F: Foreground> Session<I, F> {
             }
             Request::Frame(f) => {
                 if let Some(err) = self.on_frame(&f, now) {
+                    out.push(err);
+                }
+            }
+            Request::Text { s, del } => {
+                if let Some(err) = self.on_text(&s, del, now) {
                     out.push(err);
                 }
             }
@@ -275,20 +295,69 @@ impl<I: Injector, F: Foreground> Session<I, F> {
                 self.stats.injected += 1;
             }
             Err(why) => {
-                let r = &mut self.stats.refused;
-                match why {
-                    Refusal::NotEnabled => r.not_enabled += 1,
-                    Refusal::Paused => r.paused += 1,
-                    Refusal::Panic => r.panic += 1,
-                    Refusal::NotAllowed => r.not_allowed += 1,
-                    Refusal::Elevated => r.elevated += 1,
-                    Refusal::NoWindow => r.no_window += 1,
-                }
+                self.count(why);
                 // Whatever was held belonged to a window that is no longer a valid target.
                 self.release_all();
             }
         }
         None
+    }
+
+    /// Typing from the phone: gated like a frame, and only where the keyboard may go. Never while a modifier is
+    /// held (Ctrl held for a zoom would turn "a" into Select All).
+    fn on_text(&mut self, s: &str, del: u32, now: Instant) -> Option<Reply> {
+        if let Err(e) = validate_text(s, del) {
+            self.stats.refused.invalid += 1;
+            return Some(Reply::error("bad-text", e));
+        }
+        if !self.text_rate_ok(now) {
+            self.stats.refused.rate += 1;
+            return Some(Reply::error("text-rate", "typing too fast"));
+        }
+        match self.gate(now) {
+            Ok(scope) if scope.keyboard => {
+                if self.held_keys.iter().any(|k| k.modifier) {
+                    return Some(Reply::error("keys-held", "a modifier is held: typing now would make shortcuts"));
+                }
+                self.inj.text(del, s);
+                self.stats.injected += 1;
+                None
+            }
+            Ok(_) => {
+                self.stats.refused.not_allowed += 1;
+                Some(Reply::error("not-typed", "this window may not receive the keyboard"))
+            }
+            Err(why) => {
+                self.count(why);
+                Some(Reply::error("not-typed", format!("{why:?}")))
+            }
+        }
+    }
+
+    fn text_rate_ok(&mut self, now: Instant) -> bool {
+        match self.text_window {
+            Some(t) if now.duration_since(t) < Duration::from_secs(1) => {
+                self.text_count += 1;
+                self.text_count <= MAX_TEXTS_PER_SEC
+            }
+            _ => {
+                self.text_window = Some(now);
+                self.text_count = 1;
+                true
+            }
+        }
+    }
+
+    fn count(&mut self, why: Refusal) {
+        let r = &mut self.stats.refused;
+        match why {
+            Refusal::NotEnabled => r.not_enabled += 1,
+            Refusal::Paused => r.paused += 1,
+            Refusal::Panic => r.panic += 1,
+            Refusal::NotAllowed => r.not_allowed += 1,
+            Refusal::Elevated => r.elevated += 1,
+            Refusal::NoWindow => r.no_window += 1,
+        }
     }
 
     /// May this frame be injected, and with which scope?
@@ -385,6 +454,7 @@ impl<I: Injector, F: Foreground> Session<I, F> {
         }
         self.front_at = Some(now);
         let next = self.fg.front();
+        self.text = self.fg.text_focus();
         let same = match (&self.front, &next) {
             (Some(a), Some(b)) => a.pid == b.pid && normalize(&a.path) == normalize(&b.path),
             (None, None) => true,
@@ -426,6 +496,7 @@ impl<I: Injector, F: Foreground> Session<I, F> {
             held: self.is_holding(),
             front: self.front.as_ref().map(|w| self.info(w)),
             program: self.program.as_ref().map(|w| self.info(w)),
+            text: self.text,
         }
     }
 
@@ -474,12 +545,18 @@ mod tests {
         fn wheel(&mut self, dx: i32, dy: i32) {
             self.log.borrow_mut().push(format!("w{dx},{dy}"));
         }
+        fn text(&mut self, del: u32, s: &str) {
+            self.log.borrow_mut().push(format!("t{del}:{s}"));
+        }
     }
 
-    struct Fg(Rc<RefCell<Option<FrontWindow>>>);
+    struct Fg(Rc<RefCell<Option<FrontWindow>>>, Rc<RefCell<Option<TextFocus>>>);
     impl Foreground for Fg {
         fn front(&mut self) -> Option<FrontWindow> {
             self.0.borrow().clone()
+        }
+        fn text_focus(&mut self) -> Option<TextFocus> {
+            *self.1.borrow()
         }
     }
 
@@ -500,14 +577,16 @@ mod tests {
         s: Session<Mock, Fg>,
         log: Rc<RefCell<Vec<String>>>,
         fg: Rc<RefCell<Option<FrontWindow>>>,
+        focus: Rc<RefCell<Option<TextFocus>>>,
         t0: Instant,
     }
     impl T {
         fn new() -> T {
             let log = Rc::new(RefCell::new(Vec::new()));
             let fg = Rc::new(RefCell::new(None));
-            let s = Session::new(Mock { log: log.clone() }, Fg(fg.clone()), Config::new(), None, Some("Ctrl+Alt+Backspace".into()));
-            T { s, log, fg, t0: Instant::now() }
+            let focus = Rc::new(RefCell::new(None));
+            let s = Session::new(Mock { log: log.clone() }, Fg(fg.clone(), focus.clone()), Config::new(), None, Some("Ctrl+Alt+Backspace".into()));
+            T { s, log, fg, focus, t0: Instant::now() }
         }
         fn at(&self, ms: u64) -> Instant {
             self.t0 + Duration::from_millis(ms)
@@ -554,9 +633,9 @@ mod tests {
     fn hello_answers_with_hello_config_and_status() {
         let mut t = T::new();
         let out = t.s.handle(Request::Hello { v: 1 }, t.at(0));
-        assert!(matches!(out[0], Reply::Hello { v: PROTO, caps: Caps { keyboard: true, mouse: true, gamepad: false, desktop: true }, .. }));
+        assert!(matches!(&out[0], Reply::Hello { v: PROTO, caps, .. } if *caps == Caps { keyboard: true, mouse: true, gamepad: false, desktop: true, text: cfg!(windows) }));
         assert!(matches!(out[1], Reply::Config { paused: false, .. }));
-        assert!(matches!(out[2], Reply::Status { enabled: false, panic: false, held: false, front: None, program: None }));
+        assert!(matches!(out[2], Reply::Status { enabled: false, panic: false, held: false, front: None, program: None, text: None }));
         assert_eq!(out.len(), 3);
         let out = t.s.handle(Request::Hello { v: 2 }, t.at(0));
         assert!(matches!(out[0], Reply::Error { code: "proto", .. }));
@@ -896,5 +975,75 @@ mod tests {
         desktop(&mut t, true, false, false, 710);
         t.s.handle(frame(&["KeyW"]), t.at(720));
         assert_eq!(refused(&t).not_allowed, 1);
+    }
+
+    fn text(t: &mut T, s: &str, del: u32, ms: u64) -> Vec<Reply> {
+        t.s.handle(Request::Text { s: s.into(), del }, t.at(ms))
+    }
+    fn code(out: &[Reply]) -> Option<&'static str> {
+        out.iter().find_map(|r| if let Reply::Error { code, .. } = r { Some(*code) } else { None })
+    }
+
+    #[test]
+    fn typing_goes_where_the_keyboard_may_go() {
+        let mut t = T::new();
+        t.s.handle(Request::Hello { v: 1 }, t.at(0));
+        t.front(Some(win(&abs("notepad.exe"))));
+        assert_eq!(code(&text(&mut t, "hi", 0, 5)), Some("not-typed"), "not enabled yet");
+        t.s.handle(Request::Enable { on: true }, t.at(10));
+        assert_eq!(code(&text(&mut t, "hi", 0, 20)), Some("not-typed"), "not allowed");
+        desktop(&mut t, true, true, true, 30);
+        assert!(code(&text(&mut t, "héllo 👋\n", 2, 40)).is_none());
+        assert_eq!(t.take(), ["t2:héllo 👋\n"]);
+        // a mouse-only whole PC doesn't type
+        desktop(&mut t, true, false, true, 50);
+        assert_eq!(code(&text(&mut t, "x", 0, 60)), Some("not-typed"));
+        t.s.handle(Request::Pause { on: true }, t.at(70));
+        assert_eq!(code(&text(&mut t, "x", 0, 80)), Some("not-typed"));
+        assert!(t.take().is_empty());
+    }
+
+    #[test]
+    fn typing_is_refused_over_a_held_modifier_and_when_malformed_or_too_fast() {
+        let mut t = T::new();
+        t.s.handle(Request::Hello { v: 1 }, t.at(0));
+        t.s.handle(Request::Enable { on: true }, t.at(0));
+        t.front(Some(win(&abs("notepad.exe"))));
+        desktop(&mut t, true, true, true, 0);
+        t.s.handle(frame(&["ControlLeft"]), t.at(10));
+        t.take();
+        assert_eq!(code(&text(&mut t, "a", 0, 20)), Some("keys-held"));
+        t.s.handle(frame(&[]), t.at(30));
+        t.take();
+        assert_eq!(code(&text(&mut t, "a\u{1b}b", 0, 40)), Some("bad-text"), "Escape is a key, not text");
+        assert_eq!(code(&text(&mut t, &"x".repeat(257), 0, 50)), Some("bad-text"));
+        assert_eq!(code(&text(&mut t, "", 300, 60)), Some("bad-text"));
+        assert_eq!(code(&text(&mut t, "", 0, 70)), Some("bad-text"));
+        assert!(t.take().is_empty());
+        // A burst inside one rate window (the refused "a" above opened the previous one, at 20 ms).
+        let mut too_fast = 0;
+        for i in 0..60 {
+            if code(&text(&mut t, "k", 0, 2000 + i)) == Some("text-rate") {
+                too_fast += 1;
+            }
+        }
+        assert_eq!(too_fast, 60 - MAX_TEXTS_PER_SEC as usize);
+        assert_eq!(t.take().len(), MAX_TEXTS_PER_SEC as usize);
+        assert_eq!(refused(&t).rate, 60 - MAX_TEXTS_PER_SEC as u64);
+    }
+
+    #[test]
+    fn the_status_says_when_a_text_field_has_the_focus() {
+        let mut t = T::new();
+        t.s.handle(Request::Hello { v: 1 }, t.at(0));
+        t.front(Some(win(&abs("notepad.exe"))));
+        *t.focus.borrow_mut() = Some(TextFocus::Text);
+        let out = t.s.poll(t.at(60));
+        assert!(out.iter().any(|r| matches!(r, Reply::Status { text: Some(TextFocus::Text), .. })), "{out:?}");
+        *t.focus.borrow_mut() = Some(TextFocus::Secret);
+        let out = t.s.poll(t.at(120));
+        assert!(out.iter().any(|r| matches!(r, Reply::Status { text: Some(TextFocus::Secret), .. })), "{out:?}");
+        *t.focus.borrow_mut() = None;
+        assert!(t.s.poll(t.at(180)).iter().any(|r| matches!(r, Reply::Status { text: None, .. })));
     }
 }

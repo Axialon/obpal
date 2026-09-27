@@ -1,14 +1,18 @@
 /**
- * The control catalogue (spec/CATALOGUE.md): utilities, the routes a motion utility can take, and the built-in
- * profiles. Data only; the phone offers what a host's layout allows and hosts finish each route.
+ * The control catalogue (spec/CATALOGUE.md): utilities, the routes a motion utility can take, the built-in profiles,
+ * and the controllers built from them. Data only; the phone offers what a host's layout allows and hosts finish each
+ * route.
  */
+import type { Layout, TrayControl } from './messages'
 import type { Response } from './response'
+import { Mode, type ModeId } from './state'
 
 export const Utility = {
   pad: 'pad',
   aim: 'motion.aim',
   steer: 'motion.steer',
   point: 'motion.point',
+  track: 'motion.track',
   trackpad: 'touch.trackpad',
   hold: 'motion.hold',
   tilt: 'motion.tilt',
@@ -148,4 +152,139 @@ export function checkProfile(x: unknown): { profile: ProfileSpec | null; errors:
   }
   if (errors.length) return { profile: null, errors }
   return { profile: { id, name: (o.name as string).trim(), for: (o.for as string).trim(), on: on as MotionUtility[], ...settings }, errors }
+}
+
+// ---- controllers (CATALOGUE §9) -------------------------------------------------------------------------------------
+
+/**
+ * The controllers a person picks from on the device (CATALOGUE §9.1): faces drawn on its screen, each built from
+ * utilities. A host names the ones it suggests in `layout.controllers`, the first to open; a device says which one it
+ * uses in `mode{c}`. The ids are stable, so pages (the embed's `modes`) and profiles can name them.
+ */
+export const Controller = {
+  gamepad: 'face.gamepad',
+  wheel: 'face.wheel',
+  wii: 'face.wii',
+  mouse: 'face.mouse',
+  trackpad: 'face.trackpad',
+  hand: 'face.hand',
+  keyboard: 'face.keyboard',
+} as const
+export type ControllerId = (typeof Controller)[keyof typeof Controller]
+
+export interface ControllerSpec {
+  id: ControllerId
+  name: string
+  /** Where the picker groups it (CATALOGUE §9.3). */
+  category: 'Controller' | 'Pointer' | 'Touch' | '3D' | 'Keys'
+  /** What it is for, one line. */
+  for: string
+  /** The utilities it is built from (§1); the keyboard types (`text`) instead. */
+  utilities: readonly UtilityId[]
+  /** The modes it sends in (`mode{m}`), the one it opens in first; none for the keyboard, which types beside any of them. */
+  modes: readonly ModeId[]
+}
+
+/** The controllers, in the picker's order: Controller, Pointer, Touch, 3D, Keys (CATALOGUE §9.1). */
+export const CONTROLLERS: Record<ControllerId, ControllerSpec> = {
+  'face.gamepad': {
+    id: 'face.gamepad', name: 'Gamepad', category: 'Controller', for: 'Sticks, D-pad, face buttons and triggers, with gyro aim, tilt steering and pointing',
+    utilities: [Utility.pad, Utility.aim, Utility.steer, Utility.point], modes: [Mode.gamepad],
+  },
+  'face.wheel': {
+    id: 'face.wheel', name: 'Steering wheel', category: 'Controller', for: 'Tilt to steer, the triggers as pedals: the gamepad with the Driving profile',
+    utilities: [Utility.pad, Utility.steer], modes: [Mode.gamepad],
+  },
+  'face.wii': {
+    id: 'face.wii', name: 'Wii remote', category: 'Pointer', for: 'Point at the screen: A selects, hold B to grab, − and + zoom',
+    utilities: [Utility.point], modes: [Mode.point],
+  },
+  'face.mouse': {
+    id: 'face.mouse', name: 'Air mouse', category: 'Pointer', for: 'Point at the screen: Left and Right click, and a wheel scrolls',
+    utilities: [Utility.point], modes: [Mode.point],
+  },
+  'face.trackpad': {
+    id: 'face.trackpad', name: 'Trackpad', category: 'Touch', for: 'Drag, pan, pinch and twist; with the gyro on, turn things 1:1 or tilt them',
+    utilities: [Utility.trackpad, Utility.hold, Utility.tilt], modes: [Mode.tilt, Mode.hold],
+  },
+  'face.hand': {
+    id: 'face.hand', name: '3D hand', category: '3D', for: 'Hold the pad and move the phone: what you hold follows your hand',
+    utilities: [Utility.track], modes: [Mode.track],
+  },
+  'face.keyboard': {
+    id: 'face.keyboard', name: 'Keyboard', category: 'Keys', for: 'The phone’s own keyboard types on the screen, with Esc, Tab, the arrows and Enter',
+    utilities: [], modes: [],
+  },
+}
+export const CONTROLLER_IDS = Object.keys(CONTROLLERS) as ControllerId[]
+export const isControllerId = (x: unknown): x is ControllerId => typeof x === 'string' && Object.prototype.hasOwnProperty.call(CONTROLLERS, x)
+
+/**
+ * The shape of any controller id on the wire: a kind, a dot and a name (`face.wii`, `bridge.gamepad`). Devices and hosts
+ * pass on well-formed ids they don't know, since a newer one may name a controller this version hasn't met.
+ */
+export const CONTROLLER_ID = /^[a-z]{2,12}\.[a-z0-9-]{1,32}$/
+
+/** The tray control that opens the device's keyboard: `face.keyboard` for devices that predate controllers. */
+export const KEYBOARD_CONTROL: TrayControl = { id: 'keyboard', label: 'Keyboard', type: 'keyboard', icon: 'keyboard' }
+
+/** Whether controller `a` is listed, and ahead of `b` if both are. */
+const ahead = (ids: readonly string[], a: ControllerId, b: ControllerId) => {
+  const i = ids.indexOf(a)
+  const j = ids.indexOf(b)
+  return i >= 0 && (j < 0 || i < j)
+}
+
+/**
+ * A layout as every device reads it (CATALOGUE §9.2): what its `controllers` mean in the fields devices knew before
+ * them. Absent `modes` become the modes of the controllers, in order; `face.mouse` ahead of `face.wii` makes the Point
+ * face a mouse; `face.keyboard` adds the keyboard to the tray; `face.wheel` ahead of `face.gamepad` suggests the
+ * Driving profile. Whatever the layout sets itself is kept, and a layout that names no controllers comes back as it is.
+ */
+export function withControllers<L extends Layout>(layout: L): L {
+  const ids = Array.isArray(layout.controllers) ? layout.controllers.filter(isControllerId) : []
+  if (!ids.length) return layout
+  const out: L = { ...layout }
+  if (!out.modes) out.modes = [...new Set(ids.flatMap((c) => CONTROLLERS[c].modes))]
+  if (!out.point && ahead(ids, Controller.mouse, Controller.wii)) out.point = 'mouse'
+  if (!out.profile && ahead(ids, Controller.wheel, Controller.gamepad)) out.profile = 'driving'
+  if (ids.includes(Controller.keyboard) && !out.tray.some((c) => c.type === 'keyboard')) out.tray = [...out.tray, KEYBOARD_CONTROL]
+  return out
+}
+
+/** The controller a mode stands for on a host with this layout: what a device that says only `mode{m}` (no `c`) uses. */
+export function controllerOf(m: ModeId, layout: Pick<Layout, 'point'> = {}): ControllerId | null {
+  switch (m) {
+    case Mode.gamepad: return Controller.gamepad
+    case Mode.point: return layout.point === 'mouse' ? Controller.mouse : Controller.wii
+    case Mode.track: return Controller.hand
+    case Mode.hold: case Mode.tilt: case Mode.orbit: case Mode.pad: return Controller.trackpad
+    default: return null
+  }
+}
+
+/**
+ * The controllers a layout offers, in its order (CATALOGUE §9.2): the known ones it names in `controllers`, else, from a
+ * host that names none (every host before them), the faces of its modes, and the keyboard where its tray has one. No
+ * modes at all is what devices show without them: the trackpad and the Wii remote.
+ */
+export function layoutControllers(layout: Pick<Layout, 'modes' | 'controllers' | 'point' | 'tray'>): ControllerId[] {
+  const named = Array.isArray(layout.controllers) ? layout.controllers.filter(isControllerId) : []
+  if (named.length) return [...new Set(named)]
+  const out = new Set<ControllerId>()
+  for (const m of layout.modes ?? [Mode.hold, Mode.point]) { const c = controllerOf(m, layout); if (c) out.add(c) }
+  if (layout.tray?.some((c) => c.type === 'keyboard')) out.add(Controller.keyboard)
+  return [...out]
+}
+
+/**
+ * What a device's `mode{m, c?, p?}` says it uses (CATALOGUE §9.4): its controller (`c`, else the one its mode stands for
+ * on this host) and its profile (`p`). Each is kept only when well formed; a well-formed id this version doesn't know
+ * passes, since a newer device may name a controller or a community profile.
+ */
+export function readMode(msg: { m?: unknown; c?: unknown; p?: unknown }, layout: Pick<Layout, 'point'> = {}): { controller?: string; profile?: string } {
+  const said = typeof msg.c === 'string' && CONTROLLER_ID.test(msg.c) ? msg.c : undefined
+  const controller = said ?? (typeof msg.m === 'number' ? controllerOf(msg.m as ModeId, layout) ?? undefined : undefined)
+  const profile = typeof msg.p === 'string' && PROFILE_LIMITS.id.test(msg.p) ? msg.p : undefined
+  return { ...(controller ? { controller } : {}), ...(profile ? { profile } : {}) }
 }
