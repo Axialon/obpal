@@ -4,8 +4,9 @@
  * restart. Against stand-ins for WebSocket and RTCPeerConnection; the test plays the phones.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { b64url, bindMac, DeviceLink, fingerprintHex, fromB64url, listPairs, parsePairing, roomIdFor, type LinkStatus } from '@obpal/core'
+import { b64url, bindMac, DeviceLink, emptyPad, emptyState, encodePad, encodePose, encodeState, fingerprintHex, Flag, fromB64url, listPairs, Mode, parsePairing, PoseFlag, roomIdFor, type LinkStatus } from '@obpal/core'
 import { Remote } from '../packages/host/src/remote'
+import { Stream } from '../packages/host/src/stream'
 
 const FP_HOST = new Uint8Array(32).fill(0x22)
 const FP_A = new Uint8Array(32).fill(0x11)
@@ -103,7 +104,7 @@ beforeEach(() => {
   vi.stubGlobal('RTCPeerConnection', FakePC)
   vi.stubGlobal('fetch', async () => Response.json({ iceServers: [{ urls: 'stun:stun.example:3478' }] }))
 })
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
 /** A screen that moves its invite on, its room socket open, and what its pairing link says. */
 async function screen() {
@@ -123,17 +124,72 @@ async function invite(r: Remote) {
  * A phone with fingerprint `fp` offers through room socket `ws` as `from`, in its connection's session `session`,
  * then proves `secret` for `room` once the channel opens. Returns the host's connection and what it sent back.
  */
-async function pair(ws: FakeWS, o: { from: string; fp: Uint8Array; session: string; secret: Uint8Array; room: string; name?: string }) {
+async function offer(ws: FakeWS, o: { from: string; fp: Uint8Array; session: string }) {
   ws.receive({ t: 'sig', from: o.from, d: { offer: { type: 'offer', sdp: desc({ fp: o.fp, setup: 'actpass', ufrag: 'p0', session: o.session }) } } })
   await until(`the answer to ${o.from}`, () => ws.messages().find((m) => m.to === o.from && m.d?.answer))
   // The screen's connection for this offer (its direct code has one of its own, with a made-up answer).
   const pc = FakePC.all.find((p) => p.remoteDescription?.type === 'offer' && p.remoteDescription.sdp?.includes(`o=- ${o.session} `))!
   pc.connectionState = 'connected'
   pc.channels.ctl.open()
+  pc.channels.st.open()
+  return pc
+}
+
+async function pair(ws: FakeWS, o: { from: string; fp: Uint8Array; session: string; secret: Uint8Array; room: string; name?: string }) {
+  const pc = await offer(ws, o)
   pc.channels.ctl.receive({ t: 'hello', proto: 1, caps: CAPS, name: o.name ?? 'Phone', mac: await bindMac(o.secret, o.fp, FP_HOST, o.room) })
   const welcome = await until('the welcome', () => pc.channels.ctl.messages().find((m) => m.t === 'welcome'))
   return { pc, welcome }
 }
+
+describe('input must bind to the invite first', () => {
+  it('rejects a hello with a wrong MAC without welcoming or binding the phone', async () => {
+    const { r, ws } = await screen()
+    try {
+      const p = await invite(r)
+      const pc = await offer(ws, { from: 'bad', fp: FP_A, session: '11' })
+      const mac = await bindMac(p.secret, FP_A, FP_HOST, p.room)
+      pc.channels.ctl.receive({ t: 'hello', proto: 1, caps: CAPS, mac: (mac[0] === 'A' ? 'B' : 'A') + mac.slice(1) })
+      expect(await until('rejected', () => pc.channels.ctl.messages().find((m) => m.t === 'lock'))).toEqual({ t: 'lock', reason: 'rejected' })
+      expect(pc.channels.ctl.messages().some((m) => m.t === 'welcome')).toBe(false)
+      expect(r.participants).toEqual([])
+      expect(r.consume().connected).toBe(false)
+      expect(r.padOf('bad')).toBeNull()
+    } finally { r.destroy() }
+  })
+
+  it.each(['STATE', 'PAD', 'POSE'] as const)('%s before binding never enters the stream or reaches consumers', async (kind) => {
+    const { r, ws } = await screen()
+    try {
+      const p = await invite(r)
+      const pc = await offer(ws, { from: 'early', fp: FP_A, session: '12' })
+      const state = encodeState({ ...emptyState(), seq: 1, mode: Mode.tilt, flags: Flag.touching, tilt: [1, -1] })
+      const pad = encodePad({ ...emptyPad(), seq: 1, buttons: 1 })
+      const pose = encodePose({ seq: 1, t: 0, flags: PoseFlag.tracked | PoseFlag.touching, p: [1, 2, 3], q: [0, 0, 0, 1], gen: 1 })
+      const packet = { STATE: state, PAD: pad, POSE: pose }[kind]
+      const received = vi.spyOn(Stream.prototype, { STATE: 'onState', PAD: 'onPad', POSE: 'onPose' }[kind] as 'onState' | 'onPad' | 'onPose')
+      const input = vi.fn()
+      r.on('input', input)
+      pc.channels.st.onmessage?.({ data: packet })
+      expect(received).not.toHaveBeenCalled()
+      expect(input).not.toHaveBeenCalled()
+      expect(r.consume()).toMatchObject({ connected: false, touching: false, tilt: [0, 0], pose: null })
+      expect(r.consumeOf('early')).toMatchObject({ connected: false, touching: false, pose: null })
+      expect(r.pad).toBeNull()
+      expect(r.padOf('early')).toBeNull()
+      pc.channels.ctl.receive({ t: 'hello', proto: 1, caps: CAPS, mac: await bindMac(p.secret, FP_A, FP_HOST, p.room) })
+      await until('welcome', () => pc.channels.ctl.messages().find((m) => m.t === 'welcome'))
+      expect(r.consume()).toMatchObject({ touching: false, tilt: [0, 0], pose: null })
+      expect(r.padOf('early')).toBeNull()
+      pc.channels.st.onmessage?.({ data: packet })
+      expect(received).toHaveBeenCalledTimes(1)
+      expect(input).toHaveBeenCalledTimes(1)
+      if (kind === 'STATE') expect(r.consume()).toMatchObject({ touching: true, tilt: [1, -1] })
+      if (kind === 'PAD') expect(r.padOf('early')?.buttons).toBe(1)
+      if (kind === 'POSE') expect(r.consume().pose).toMatchObject({ p: [1, 2, 3], tracked: true, touching: true })
+    } finally { r.destroy() }
+  })
+})
 
 describe('the invite moves on once a phone pairs', () => {
   it('the host sends completion on its answering socket and receives an empty candidate', async () => {

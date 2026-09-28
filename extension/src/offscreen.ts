@@ -42,6 +42,8 @@ interface Link extends FrameInfo {
 const TICK_MS = 1000 / 60
 /** A clock tick this soon after a packet-driven one is skipped: packets set the pace while input flows. */
 const TICK_MIN_GAP_MS = 6
+/** Stop native frames before the helper's 500 ms watchdog if the phone stops sending input. */
+const PC_INPUT_STALE_MS = 300
 const HEARTBEAT_MS = 250
 const RUMBLE_GAP_MS = 50
 
@@ -279,6 +281,7 @@ const pc = {
   held: new HeldState(),
   gestures: new PcGestures(),
   port: null as chrome.runtime.Port | null,
+  inputAt: -Infinity,
   lastTick: 0,
   lastSent: 0,
   /** What the last frame sent held: a change goes out at once, so a release never waits for the heartbeat. */
@@ -316,6 +319,7 @@ function pcPort(): chrome.runtime.Port | null {
 const tupleToPad = (p: PadTuple | null): PadInput | null => (p ? { buttons: p[0], axes: [p[1], p[2], p[3], p[4]], triggers: [p[5], p[6]] } : null)
 
 function pcTick(f: Frame, pad: PadState | null, ptr: PointerState | null, now: number) {
+  if (!f.connected || now - pc.inputAt >= PC_INPUT_STALE_MS) { pcLetGo(); return }
   const dt = pc.lastTick ? Math.min(50, now - pc.lastTick) : TICK_MS
   pc.lastTick = now
   // Aim routed to the mouse (a relative pointer, CATALOGUE §2) lands on the right stick here, as it does on a page
@@ -347,11 +351,12 @@ function pcTick(f: Frame, pad: PadState | null, ptr: PointerState | null, now: n
   }
 }
 
-/** Leaving the PC target: nothing stays held, and the worker closes the helper port (which releases too). */
+/** Leaving the PC target or losing input: release once and stop resending, so the helper's watchdog can fire. */
 function pcLetGo() {
   pc.mapper.releaseAll()
   pc.held.clear()
   pc.gestures.reset()
+  pc.inputAt = -Infinity
   pc.lastTick = 0
   pc.lastSig = ''
   const port = pc.port
@@ -518,7 +523,7 @@ async function boot() {
     publishNotice(true)
   })
   r.on('disconnect', () => {
-    pc.gestures.reset()
+    pcLetGo()
     report()
   })
   // Who is in control changes with each phone that connects (one takes over from the one before) or leaves.
@@ -541,7 +546,7 @@ async function boot() {
     pc.gestures.text(t.s, t.del)
     tick()
   })
-  r.on('input', tick)
+  r.on('input', (who) => { if (who.lead) pc.inputAt = performance.now(); tick() })
   // The phone's tray picker switches the target mode; the service worker stores it and pushes it back as config. It
   // turns the PC down for a phone this PC said no to: the phone's picker goes back to the target there is.
   r.on('value', ({ id, v }) => {

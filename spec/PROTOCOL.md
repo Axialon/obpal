@@ -290,6 +290,8 @@ PAD carries positions, not accumulators: each packet is the whole controller. De
 
 **Hand-off:** on entering gamepad mode the device keeps sending STATE (mode 5) for 250 ms, then only PAD. Hosts MUST treat a PAD packet newer than the latest STATE as mode 5 with neutral motion, so a held tilt or gyro grab from the previous mode never keeps driving the view. On leaving, the device sends a few neutral PADs; hosts drop the pad 1.5 s after the last one.
 
+After 300 ms without an accepted PAD packet, hosts MUST read the pad as neutral (no buttons, stick deflection or trigger pressure) until a fresh packet arrives, retaining the 1.5 s disconnect timeout.
+
 Hosts MAY expose PAD to web content as a standard `Gamepad` (`mapping: "standard"`, 17 buttons, 4 axes); `@obpal/host` ships `installGamepadShim` for this.
 
 ## 6. POINTER packet (`st`, 16 bytes, little-endian)

@@ -1,5 +1,5 @@
 import {
-  accumDelta, decodePad, decodePointer, decodePose, decodeState, Flag, Mode, PadFlag, PointerFlag, PoseFlag, qIdentity, qSlerp, seqNewer, Tier,
+  accumDelta, decodePad, decodePointer, decodePose, decodeState, emptyPad, Flag, Mode, PadFlag, PointerFlag, PoseFlag, qIdentity, qSlerp, seqNewer, Tier,
   type ModeId, type PadState, type PointerState, type Quat, type TierId, type Vec3, type WireState,
 } from '@obpal/core'
 
@@ -29,6 +29,8 @@ export interface Frame {
 
 /** A pointer stream that stops (the utility was switched off, the phone went away) is gone after this long. */
 const POINTER_STALE_MS = 300
+/** A silent pad releases its controls before its connection expires. */
+const PAD_STALE_MS = 300
 /** A pose stream that stops is gone after this long. */
 const POSE_STALE_MS = 250
 
@@ -148,9 +150,10 @@ export class Stream {
 
   private get padLive() { return !!this.padState && performance.now() - this.padAt < 1500 }
 
-  /** Latest controller state while the device is in gamepad mode (null otherwise). */
+  /** Latest controller state, neutral after a short silence, null once the pad expires. */
   get pad(): PadState | null {
     if (this.padState && !this.padLive) { this.padState = null; this.hooks.pad(false) }
+    if (this.padState && performance.now() - this.padAt >= PAD_STALE_MS) return { ...emptyPad(), seq: this.padState.seq, t: this.padState.t }
     return this.padState
   }
 

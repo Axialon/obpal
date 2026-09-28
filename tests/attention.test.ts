@@ -1,7 +1,53 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { emptyPad, emptyState, encodePad, encodeState, Flag, Mode, PadButton } from '@obpal/core'
 import { Remote } from '../packages/host/src/remote'
 import { Stream } from '../packages/host/src/stream'
+
+afterEach(() => vi.useRealTimers())
+
+describe('a silent gamepad', () => {
+  it('is neutral at 300 ms, disconnects at 1.5 s, and returns on the next packet', () => {
+    vi.useFakeTimers({ toFake: ['performance'] })
+    const changed = vi.fn()
+    const stream = new Stream({ mode: () => {}, pad: changed, input: () => {} })
+    const held = { ...emptyPad(), seq: 7, buttons: 1 << PadButton.A, axes: [1, -1, 1, -1] as [number, number, number, number], triggers: [1, 1] as [number, number] }
+    stream.onPad(encodePad(held))
+    vi.advanceTimersByTime(299)
+    expect(stream.pad).toEqual(held)
+    vi.advanceTimersByTime(1)
+    expect.soft(stream.pad).toMatchObject({ buttons: 0, axes: [0, 0, 0, 0], triggers: [0, 0] })
+    expect(changed.mock.calls).toEqual([[true]])
+    vi.advanceTimersByTime(1199)
+    expect.soft(stream.pad).toMatchObject({ buttons: 0, axes: [0, 0, 0, 0], triggers: [0, 0] })
+    vi.advanceTimersByTime(1)
+    expect(stream.pad).toBeNull()
+    expect(stream.pad).toBeNull()
+    expect(changed.mock.calls).toEqual([[true], [false]])
+    stream.onPad(encodePad({ ...held, seq: 8 }))
+    expect(stream.pad).toEqual({ ...held, seq: 8 })
+    expect(changed.mock.calls).toEqual([[true], [false], [true]])
+  })
+
+  it('resumes during the grace period, but duplicate and older packets do not prolong a hold', () => {
+    vi.useFakeTimers({ toFake: ['performance'] })
+    const changed = vi.fn()
+    const stream = new Stream({ mode: () => {}, pad: changed, input: () => {} })
+    const held = { ...emptyPad(), seq: 7, buttons: 1 << PadButton.A }
+    stream.onPad(encodePad(held))
+    vi.advanceTimersByTime(250)
+    stream.onPad(encodePad(held))
+    stream.onPad(encodePad({ ...held, seq: 6 }))
+    vi.advanceTimersByTime(50)
+    expect.soft(stream.pad?.buttons).toBe(0)
+    stream.onPad(encodePad({ ...held, seq: 8 }))
+    expect(stream.pad?.buttons).toBe(held.buttons)
+    vi.advanceTimersByTime(299)
+    expect(stream.pad?.buttons).toBe(held.buttons)
+    vi.advanceTimersByTime(1)
+    expect.soft(stream.pad?.buttons).toBe(0)
+    expect(changed.mock.calls).toEqual([[true]])
+  })
+})
 
 describe('a screen’s paused phone', () => {
   it('accepts the first gamepad packet without a STATE, including after an attention reset', () => {
