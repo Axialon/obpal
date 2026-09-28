@@ -31,13 +31,14 @@ export class ConnectionSheet {
   private body: HTMLElement | null = null
   private scanner: Scanner | null = null
   private exits = () => {}
-  private view: 'list' | 'scan' | 'code' = 'list'
+  private view: 'list' | 'scan' | 'code' | 'rename' = 'list'
   private busy = false
   private until = 0
   private generation = 0
   private signature = ''
   private returnFocus: HTMLElement | null = null
   private say: HTMLElement | null = null
+  private background: { el: HTMLElement; hidden: string | null; inert: boolean } | null = null
 
   constructor(private hub: Connections) {
     hub.changed = () => { if (this.dialog && this.view === 'list') this.list() }
@@ -66,6 +67,12 @@ export class ConnectionSheet {
       dialog.setAttribute('aria-label', 'Connections')
       dialog.addEventListener('cancel', (e) => { e.preventDefault(); this.close() })
       dialog.showModal()
+      const app = document.getElementById('app')
+      if (app) {
+        this.background = { el: app, hidden: app.getAttribute('aria-hidden'), inert: app.inert }
+        app.inert = true
+        app.setAttribute('aria-hidden', 'true')
+      }
       this.hub.suspend(true)
       this.exits = sheetExits(dialog, () => this.close())
     }
@@ -85,6 +92,13 @@ export class ConnectionSheet {
     this.dialog.remove()
     this.dialog = null
     this.body = null
+    if (this.background) {
+      const { el, hidden, inert } = this.background
+      el.inert = inert
+      if (hidden === null) el.removeAttribute('aria-hidden')
+      else el.setAttribute('aria-hidden', hidden)
+      this.background = null
+    }
     this.hub.suspend(false)
     if (this.returnFocus?.isConnected) this.returnFocus.focus()
   }
@@ -97,15 +111,18 @@ export class ConnectionSheet {
     const all = new Map(this.hub.rows)
     for (const c of this.hub.live.values()) if (!all.has(c.row.id)) all.set(c.row.id, c.row)
     const rows = [...all.values()].sort((a, b) => (Number(b.id === this.hub.current) - Number(a.id === this.hub.current)) || Number(!!this.hub.live.get(b.id)?.link.ready) - Number(!!this.hub.live.get(a.id)?.link.ready) || b.at - a.at)
-    const signature = JSON.stringify([this.hub.current, this.hub.maxLive, rows.map((r) => [r.id, r.name, r.at, this.hub.live.get(r.id)?.link.status, this.hub.live.get(r.id)?.stats?.path])])
+    const signature = JSON.stringify([this.hub.loading, this.hub.saving, this.hub.current, this.hub.maxLive, rows.map((r) => [r.id, r.name, r.at, this.hub.live.get(r.id)?.link.status, this.hub.live.get(r.id)?.stats?.path])])
     if (signature === this.signature) return
     this.signature = signature
     const list = h('div', 'connection-list')
     list.setAttribute('role', 'list')
+    list.setAttribute('aria-label', 'Saved screens')
+    list.setAttribute('aria-busy', String(this.hub.loading || this.hub.saving))
     for (const row of rows) list.append(this.entry(row))
-    if (!rows.length) list.append(h('p', 'connection-empty', 'Your screens will appear here.'))
+    if (!rows.length) list.append(h('p', 'connection-empty', this.hub.loading ? 'Loading screens…' : 'Your screens will appear here.'))
+    if (this.hub.saving) list.append(h('p', 'connection-saving', 'Saving…'))
     const tools = h('div', 'connection-actions')
-    tools.append(button('Scan a code', () => this.scan(), 'btn primary'), button('Enter a code', () => this.code()))
+    tools.append(button('Scan another code', () => this.scan(), 'btn primary'), button('Enter a code', () => this.code()))
     const limit = h('label', 'connection-limit', 'Keep connected')
     const select = h('select')
     select.setAttribute('aria-label', 'Maximum live connections')
@@ -144,23 +161,46 @@ export class ConnectionSheet {
     detail.append(h('small', '', ago(row.at)), badge)
     use.append(mark, label, detail)
     const manage = h('div', 'connection-manage')
-    manage.append(button('Rename', () => {
-      const form = h('form', 'connection-rename')
-      const input = h('input')
-      input.value = row.name
-      input.maxLength = 80
-      input.setAttribute('aria-label', 'Screen name')
-      const save = button('Save', () => {})
-      save.type = 'submit'
-      form.append(input, save, button('Cancel', () => { this.signature = ''; this.list() }))
-      form.onsubmit = (e) => { e.preventDefault(); if (input.value.trim()) { this.signature = ''; this.hub.rename(row.id, input.value) } }
-      manage.replaceChildren(form)
-      input.focus(); input.select()
-    }, 'connection-option'), button('Forget', () => {
+    const rename = button('Rename', () => this.rename(row), 'connection-option')
+    rename.setAttribute('aria-label', `Rename ${row.name}`)
+    const forget = button('Forget', () => {
+      forget.disabled = true
       void this.hub.forget(row.id).then(() => { this.signature = ''; this.list(); this.tell('Forgotten. Scan again to reconnect.') })
-    }, 'connection-option'))
+    }, 'connection-option')
+    forget.setAttribute('aria-label', `Forget ${row.name}`)
+    manage.append(rename, forget)
     el.append(use, manage)
     return el
+  }
+
+  private rename(row: StoredConnection) {
+    if (!this.body) return
+    this.view = 'rename'
+    this.dialog!.querySelector('h2')!.textContent = 'Rename screen'
+    this.tell('')
+    const form = h('form', 'connection-rename')
+    const input = h('input')
+    input.value = row.name
+    input.maxLength = 80
+    input.setAttribute('aria-label', 'Screen name')
+    const save = button('Save', () => {})
+    save.type = 'submit'
+    const back = () => { this.view = 'list'; this.signature = ''; this.list() }
+    form.append(input, save, button('Cancel', back))
+    form.onsubmit = (e) => {
+      e.preventDefault()
+      if (!input.value.trim() || save.disabled) return
+      save.disabled = true
+      form.setAttribute('aria-busy', 'true')
+      this.tell('Saving…')
+      void this.hub.rename(row.id, input.value).then(() => {
+        if (!form.isConnected) return
+        back()
+        this.tell('Saved')
+      })
+    }
+    this.body.replaceChildren(form)
+    input.focus(); input.select()
   }
 
   private scan() {

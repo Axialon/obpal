@@ -24,8 +24,8 @@ function cameraFrames() {
     const ctx = canvas.getContext('2d')
     ctx.fillStyle = '#1b2025'; ctx.fillRect(0, 0, 720, 720)
     ctx.drawImage(image, 100, 100, 520, 520)
-    // The synthetic camera changes only when the harness draws; deliver that frame even after a viewport resize.
-    window.__cameras.at(-1)?.getVideoTracks()[0]?.requestFrame?.()
+    // A canvas changes only once here; explicitly deliver that frame even inside captureStream's rate limit.
+    window.__cameras.at(-1).getVideoTracks()[0].requestFrame()
   }
   navigator.mediaDevices.getUserMedia = async () => {
     canvas = document.createElement('canvas')
@@ -53,25 +53,51 @@ function cameraFrames() {
   }
 }
 
+/** Hold a real write transaction open until the test releases it, as a busy storage process can do. */
+function delayedStorage() {
+  const transaction = IDBDatabase.prototype.transaction
+  IDBDatabase.prototype.transaction = function (...args) {
+    const tx = transaction.apply(this, args)
+    if (args[1] === 'readwrite' && tx.objectStoreNames.contains('connections') && window.__holdConnectionWrites) {
+      const end = performance.now() + 10000
+      const keep = () => {
+        if (window.__holdConnectionWrites && performance.now() < end) tx.objectStore('connections').count().onsuccess = keep
+      }
+      keep()
+    }
+    return tx
+  }
+}
+
 export async function phoneConnections({ browser, origin, check, shots }) {
   const screens = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true })
   const ctx = await browser.newContext({ ...devices['Pixel 7'], viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, ignoreHTTPSErrors: true })
   await ctx.addInitScript(cameraFrames)
+  await ctx.addInitScript(delayedStorage)
   const errors = []
   ctx.on('page', (p) => p.on('pageerror', (e) => errors.push(e.message)))
+  screens.on('page', (p) => p.on('pageerror', (e) => errors.push(`screen: ${e.message}`)))
   let phone = await ctx.newPage()
   const cdp = await ctx.newCDPSession(phone)
   await cdp.send('DeviceOrientation.setDeviceOrientationOverride', { alpha: 10, beta: 70, gamma: 0 })
   const shot = async (name) => { if (shots) await phone.screenshot({ path: join(shots, `${name}.png`), animations: 'disabled' }) }
   const clear = () => phone.evaluate(() => document.querySelectorAll('.hint, .bt-notice').forEach((h) => h.remove()))
   const stopped = () => phone.evaluate(() => window.__cameras.every((s) => s.getTracks().every((t) => t.readyState === 'ended')))
-  const open = async () => { await clear(); await phone.getByRole('button', { name: 'Connections', exact: true }).click() }
+  const saved = (page = phone) => page.locator('.connection-list[aria-busy="false"]').waitFor()
+  const open = async () => { await clear(); await phone.getByRole('button', { name: 'Connections', exact: true }).click(); await saved() }
   const close = () => phone.getByRole('button', { name: 'Close connections' }).click()
   const row = (name) => phone.locator('.connection-row').filter({ has: phone.getByText(name, { exact: true }) })
   const rename = async (from, to) => {
-    await row(from).getByRole('button', { name: 'Rename', exact: true }).click()
+    await row(from).getByRole('button', { name: `Rename ${from}`, exact: true }).click()
     await phone.getByRole('textbox', { name: 'Screen name' }).fill(to)
+    await phone.evaluate(() => { window.__holdConnectionWrites = true })
     await phone.getByRole('button', { name: 'Save', exact: true }).click()
+    try {
+      await phone.getByRole('status').filter({ hasText: /^Saving…$/ }).waitFor()
+      if (!(await phone.getByRole('button', { name: 'Save', exact: true }).isDisabled())) throw new Error('rename confirmed before storage committed')
+    } finally { await phone.evaluate(() => { window.__holdConnectionWrites = false }) }
+    await phone.getByRole('status').filter({ hasText: /^Saved$/ }).waitFor()
+    await saved()
   }
   try {
     const a = await screens.newPage(), b = await screens.newPage()
@@ -84,11 +110,16 @@ export async function phoneConnections({ browser, origin, check, shots }) {
       window.__obpal.on('input', () => window.__inputs++)
     })
     await phone.goto(inviteA)
-    await phone.locator('.modes').waitFor({ timeout: 25000 })
+    await phone.locator('.modes').waitFor({ timeout: 25000 }).catch(async error => {
+      const state = await phone.evaluate(() => ({ text: document.body.innerText.slice(0, 800), visibility: document.visibilityState,
+        marks: performance.getEntriesByType('mark').filter(m => m.name.startsWith('obpal:')).map(m => m.name) }))
+      const host = await a.evaluate(() => ({ status: window.__obpal?.status, peers: window.__obpal?.participants.length ?? 0 }))
+      throw new Error(`${error.message}; phone: ${JSON.stringify(state)}; screen: ${JSON.stringify(host)}; page errors: ${errors.join(' | ') || 'none'}`)
+    })
     await open(); await rename('ob.Pal Viewer', 'Desk viewer'); await close()
 
     await check('the in-app scanner rejects foreign QR codes, offers a torch, and stops its camera on close', async () => {
-      await open(); await phone.getByRole('button', { name: 'Scan a code', exact: true }).click()
+      await open(); await phone.getByRole('button', { name: 'Scan another code', exact: true }).click()
       await phone.getByRole('button', { name: 'Toggle torch' }).waitFor()
       await phone.getByRole('button', { name: 'Toggle torch' }).click()
       await until('torch', () => phone.evaluate(() => window.__torch))
@@ -105,7 +136,7 @@ export async function phoneConnections({ browser, origin, check, shots }) {
       const fallbackBefore = await phone.evaluate(() => performance.getEntriesByType('resource').filter((r) => /jsQR|jsqr/.test(r.name)).length)
       if (fallbackBefore) throw new Error('fallback was loaded before it was needed')
       await phone.evaluate(() => { window.BarcodeDetector = undefined; window.__nativeQr = '' })
-      await open(); await phone.getByRole('button', { name: 'Scan a code', exact: true }).click()
+      await open(); await phone.getByRole('button', { name: 'Scan another code', exact: true }).click()
       await phone.getByRole('button', { name: 'Toggle torch' }).waitFor()
       await shot('scanner-390x844')
       await phone.setViewportSize({ width: 844, height: 390 })
@@ -152,13 +183,14 @@ export async function phoneConnections({ browser, origin, check, shots }) {
     })
 
     await check('names and keys persist across a reload; forgetting removes the entry and it stays forgotten', async () => {
+      await open(); await close()
       await phone.reload()
       await phone.locator('.modes').waitFor({ timeout: 25000 })
       await open()
       if (await phone.locator('.connection-row').count() !== 2) throw new Error('list did not persist')
       await row('Living room').locator('.connection-use').click()
       await until('remembered screen reconnected', async () => (await phone.locator('.host-name').textContent()) === 'Living room')
-      await open(); await row('Desk viewer').getByRole('button', { name: 'Forget', exact: true }).click()
+      await open(); await row('Desk viewer').getByRole('button', { name: 'Forget Desk viewer', exact: true }).click()
       await until('forgotten', async () => await phone.locator('.connection-row').count() === 1)
       await close(); await phone.reload()
       await phone.locator('.modes').waitFor({ timeout: 25000 }); await open()
@@ -181,8 +213,9 @@ export async function phoneConnections({ browser, origin, check, shots }) {
       phone = await ctx.newPage()
       await phone.goto(`${origin}/p/`)
       await phone.getByRole('button', { name: 'Connections', exact: true }).click()
+      await saved()
       if (await row('Living room').count() !== 1) throw new Error('a new tab lost the list')
-      await phone.locator('dialog').getByRole('button', { name: 'Scan a code', exact: true }).click()
+      await phone.locator('dialog').getByRole('button', { name: 'Scan another code', exact: true }).click()
       await phone.getByRole('button', { name: 'Toggle torch' }).waitFor()
       await phone.getByRole('button', { name: 'Enter a code', exact: true }).click()
       if (!(await stopped())) throw new Error('code entry left camera running')
@@ -240,14 +273,16 @@ export async function phoneConnections({ browser, origin, check, shots }) {
           }
         }))
         if (!keyKept) throw new Error('migration lost the original key')
-        await page.getByRole('button', { name: 'Rename', exact: true }).click()
+        await page.getByRole('button', { name: 'Rename Desk PC', exact: true }).click()
         await page.getByRole('textbox', { name: 'Screen name' }).fill('Studio PC')
         await page.getByRole('button', { name: 'Save', exact: true }).click()
+        await page.getByRole('status').filter({ hasText: /^Saved$/ }).waitFor()
+        await saved(page)
         await page.getByRole('button', { name: 'Close connections' }).click()
         await page.reload()
         await page.getByRole('button', { name: 'Connections', exact: true }).click()
         await page.locator('.connection-row').getByText('Studio PC', { exact: true }).waitFor()
-        await page.getByRole('button', { name: 'Forget', exact: true }).click()
+        await page.getByRole('button', { name: 'Forget Studio PC', exact: true }).click()
         await until('old PC forgotten', async () => await page.locator('.connection-row').count() === 0)
         await page.reload()
         await page.getByRole('button', { name: 'Connections', exact: true }).click()

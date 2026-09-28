@@ -42,16 +42,24 @@ export class Connections {
   private limit = 3
   private loaded: Promise<void>
   private writes: Promise<void> = Promise.resolve()
+  private pending = 0
+  loading = true
 
   constructor(private deps: ConnectionDeps) {
-    this.loaded = listConnections().then((rows) => { for (const r of rows) this.rows.set(r.id, r); this.changed() })
+    this.loaded = listConnections().then((rows) => { for (const r of rows) this.rows.set(r.id, r); this.loading = false; this.changed() })
   }
 
   get ready() { return !this.suspended && !!this.active?.welcome && this.active.link.ready }
   get status(): LinkStatus { return this.active?.link.status ?? 'closed' }
   get maxLive() { return this.limit }
   get current() { return this.active?.row.id ?? '' }
-  async settled() { await this.loaded; await this.writes }
+  get saving() { return this.pending > 0 }
+  async settled() {
+    await this.loaded
+    // Imports and the transactions they produce belong to the same queue. Include writes added while waiting.
+    let last: Promise<void>
+    do { last = this.writes; await last } while (last !== this.writes)
+  }
 
   setLimit(n: number) {
     this.limit = Number.isInteger(n) ? Math.max(1, Math.min(4, n)) : 3
@@ -120,9 +128,7 @@ export class Connections {
         c.welcome = { t: 'welcome', proto: m.proto, name: String(m.name).slice(0, 80), layout: m.layout, attention: m.attention, kind: m.kind }
         c.row = { ...c.row, name: c.row.renamed ? c.row.name : c.welcome.name, kind: m.kind && ['pc', 'sim', 'viewer', 'site'].includes(m.kind) ? m.kind : c.row.kind,
           ...(m.pair && /^[A-Za-z0-9_-]{22}$/.test(m.pair.id) ? { pairId: m.pair.id } : {}) }
-        if (join.v === 1) void saveInvite(join.pairing).then((invite) => {
-          if (this.live.get(id) === c) { c.row = { ...c.row, invite }; this.save(c.row) }
-        })
+        if (join.v === 1) this.rememberInvite(c, join.pairing)
         this.save(c.row)
         if (this.wanted === id || this.active === c) { this.activate(id, true); return }
         link.sendCtl({ t: 'attention', active: false })
@@ -135,9 +141,7 @@ export class Connections {
     link.on('invite', (fragment) => {
       const parsed = parsePairingCode(fragment)
       if (parsed?.v !== 1) return
-      void saveInvite(parsed.pairing).then((invite) => {
-        if (this.live.get(id) === c) { c.row = { ...c.row, invite }; this.save(c.row) }
-      })
+      this.rememberInvite(c, parsed.pairing)
     })
     link.on('pair', (p) => {
       if (this.live.get(id) !== c) return
@@ -189,7 +193,7 @@ export class Connections {
     else if (row) await this.connect({ v: 'saved', row })
   }
 
-  rename(id: string, name: string) {
+  async rename(id: string, name: string) {
     const row = this.rows.get(id)
     const clean = name.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim().slice(0, 80)
     if (!row || !clean || this.forgetting.has(id)) return
@@ -197,6 +201,7 @@ export class Connections {
     const c = this.live.get(id)
     if (c) c.row = next
     this.save(next)
+    await this.settled()
   }
 
   async forget(id: string) {
@@ -228,6 +233,28 @@ export class Connections {
     const idle = [...this.live.values()].filter((c) => c !== this.active && c.row.id !== pending).sort((a, b) => a.row.at - b.row.at)
     while (this.live.size > Math.max(this.limit, pending && this.active ? 2 : 1) && idle.length) this.drop(idle.shift()!.row.id)
   }
-  private write(fn: () => Promise<void>) { this.writes = this.writes.then(fn).catch(() => { /* memory remains usable */ }) }
-  private save(row: StoredConnection) { this.rows.set(row.id, row); this.write(() => putConnection(row)); this.changed() }
+  private rememberInvite(c: Connection, pairing: Parameters<typeof saveInvite>[0]) {
+    this.write(async () => {
+      const invite = await saveInvite(pairing)
+      const id = c.row.id
+      if (this.live.get(id) !== c || this.forgetting.has(id)) return
+      c.row = { ...c.row, invite }
+      this.rows.set(id, c.row)
+      await putConnection(c.row)
+    })
+  }
+
+  private write(fn: () => Promise<void>) {
+    ++this.pending
+    this.writes = this.writes.then(fn).catch(() => { /* memory remains usable */ }).finally(() => {
+      --this.pending
+      this.changed()
+    })
+    this.changed()
+  }
+  private save(row: StoredConnection) {
+    this.rows.set(row.id, row)
+    // An invite import or a rename can finish before this job starts; never overwrite it with an older snapshot.
+    this.write(async () => { const current = this.rows.get(row.id); if (current) await putConnection(current) })
+  }
 }

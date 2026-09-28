@@ -414,6 +414,13 @@ try {
       return `hovering at ${(await drone()).y.toFixed(2)} m`
     })
     await check('drone, gamepad: Flight switches Steer on, and tipping the phone forward flies it forward', async () => {
+      // Opening the hub clears the host's input stream. Resume the same gamepad without a mode change.
+      await p.page.locator('.gp [data-act=settings]').click()
+      await p.page.locator('#connections-open').click()
+      await p.page.getByRole('button', { name: 'Close connections' }).waitFor()
+      await until('phone paused', () => s.page.evaluate(() => window.__obpal.participants[0]?.paused))
+      await p.page.getByRole('button', { name: 'Close connections' }).click()
+      await until('phone resumed', () => s.page.evaluate(() => !window.__obpal.participants[0]?.paused))
       const lit = await p.page.getAttribute('.gp-chip[data-chip="motion.steer"]', 'aria-pressed')
       if (lit !== 'true') throw new Error(`the Steer chip reads ${lit}`)
       const before = await drone()

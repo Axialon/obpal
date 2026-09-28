@@ -153,12 +153,15 @@ export async function runAudio(local, check) {
       await page.screenshot({ path: join(out, 'after-rover.png') })
       measurements.push({ sim: 'rover', players: 4, motionPeak: Math.max(...moving.map(s => s.peak)), samples })
       // Stress the production event path, checking send timing independently of network jitter.
-      await page.evaluate(async () => {
+      const stressMs = await page.evaluate(async () => {
         const who = window.__sim.claims.holder('rover1'); window.__sentRumble = []
+        const start = performance.now()
         for (let i = 0; i < 100; i++) { window.__simAudio.bus.emit({ kind: 'contact', source: 'stress', at: [0, 0, 0], strength: 0.8, who }); await new Promise(r => setTimeout(r, 5)) }
+        return performance.now() - start
       })
       const sent = await page.evaluate(() => window.__sentRumble.filter(m => m.who === window.__sim.claims.holder('rover1')))
-      assert.ok(sent.length > 0 && sent.length <= 8)
+      // At most one rumble per 100 ms for the participant, however long the loop took on a loaded machine.
+      assert.ok(sent.length > 0 && sent.length <= Math.ceil(stressMs / 100) + 1, `${sent.length} rumbles in ${Math.round(stressMs)} ms`)
       for (let i = 1; i < sent.length; i++) assert.ok(sent[i].at - sent[i - 1].at >= 99, '100 ms participant rate limit')
       await p.page.evaluate(() => { localStorage.setItem('obpal.feedback', '0'); window.__vibration = []; window.__padFeedback = []; window.__rumble = [] })
       await sleep(150)

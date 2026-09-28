@@ -176,10 +176,11 @@ export class Stream {
       aim: [0, 0], tilt: [0, 0], pad1: [0, 0], pad2: [0, 0], zoom: 0, twist: 0,
       pose: this.pose && now - this.poseAt < POSE_STALE_MS ? { p: this.pose.p, q: this.pose.q, tracked: (this.pose.flags & PoseFlag.tracked) !== 0, touching: (this.pose.flags & PoseFlag.touching) !== 0, gen: this.pose.gen } : null,
     }
-    if (!s || !this.buf.length) return frame
     // Gamepad mode: PAD packets replace STATE, so the last STATE (a held tilt, a gyro grab) must not keep driving
-    // the view even if every hand-off STATE was lost on the unreliable channel.
+    // the view even if every hand-off STATE was lost on the unreliable channel. A first PAD also stands alone,
+    // including after attention resumes and the previous stream was cleared.
     if (this.padLive && this.padAt > this.stateAt) { frame.mode = Mode.gamepad; return frame }
+    if (!s || !this.buf.length) return frame
 
     // Sample everything one sensor period behind and interpolate, so motion is even from frame to frame
     // regardless of network jitter. 'direct' uses the newest packet instead.

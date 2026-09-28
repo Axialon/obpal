@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import * as core from '@obpal/core'
 import {
   bindMac, DeviceLink, forgetConnection, getPair, importPairKey, isConnection, listConnections, migrateConnections,
   putConnection, putPair, saveInvite, type DeviceMsg, type HostMsg, type LinkStatus, type StoredConnection,
@@ -9,7 +10,7 @@ const secret = (n: number) => new Uint8Array(16).fill(n)
 const fp = new Uint8Array(32).fill(2)
 const join = (n: number) => ({ v: 1 as const, pairing: { secret: secret(n), fp } })
 
-afterEach(async () => { for (const row of await listConnections()) await forgetConnection(row); vi.unstubAllGlobals() })
+afterEach(async () => { vi.restoreAllMocks(); for (const row of await listConnections()) await forgetConnection(row); vi.unstubAllGlobals() })
 
 describe('the connection store', () => {
   it('migrates remembered PCs once and preserves renames and the original non-extractable key', async () => {
@@ -73,6 +74,38 @@ function hub() {
 }
 
 describe('switching connections', () => {
+  it('sends input as soon as welcome arrives while a key import and its storage commit are still pending', async () => {
+    const invite = await saveInvite(join(30).pairing)
+    let importDone!: (v: typeof invite) => void, commitDone!: () => void
+    vi.spyOn(core, 'saveInvite').mockImplementation(() => new Promise((r) => { importDone = r }))
+    const put = core.putConnection
+    const committing = vi.spyOn(core, 'putConnection').mockImplementationOnce(async (row) => {
+      await new Promise<void>((r) => { commitDone = r })
+      await put(row)
+    })
+    const h = hub()
+    await h.current.connect(join(30)); h.links[0].welcome('A')
+    expect(h.current.ready).toBe(true)
+    expect(h.current.saving).toBe(true)
+    h.current.sendCtl({ t: 'btn', id: 'a', ev: 'tap' })
+    h.current.sendState(new ArrayBuffer(1))
+    expect(h.links[0].sent.at(-1)).toEqual({ t: 'btn', id: 'a', ev: 'tap' })
+    expect(h.links[0].frames).toHaveLength(1)
+    let confirmed = false
+    const renamed = h.current.rename(h.current.current, 'Desk').then(() => { confirmed = true })
+    await vi.waitFor(() => expect(importDone).toBeTypeOf('function'))
+    expect(confirmed).toBe(false)
+    importDone(invite)
+    await vi.waitFor(() => expect(committing).toHaveBeenCalledOnce())
+    expect(confirmed).toBe(false)
+    expect(h.current.saving).toBe(true)
+    commitDone()
+    await renamed
+    expect(confirmed).toBe(true)
+    expect(h.current.saving).toBe(false)
+    expect(await listConnections()).toEqual([expect.objectContaining({ name: 'Desk', renamed: true, invite })])
+    h.current.destroy(); await h.current.settled()
+  })
   it('releases before switching, routes input only to the active screen, and keeps background state private', async () => {
     const h = hub()
     await h.current.connect(join(10)); h.links[0].welcome('A', { attention: true })

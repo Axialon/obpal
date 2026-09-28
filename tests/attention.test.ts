@@ -1,9 +1,33 @@
 import { describe, expect, it, vi } from 'vitest'
-import { emptyState, encodeState, Flag } from '@obpal/core'
+import { emptyPad, emptyState, encodePad, encodeState, Flag, Mode, PadButton } from '@obpal/core'
 import { Remote } from '../packages/host/src/remote'
 import { Stream } from '../packages/host/src/stream'
 
 describe('a screen’s paused phone', () => {
+  it('accepts the first gamepad packet without a STATE, including after an attention reset', () => {
+    const stream = new Stream({ mode: () => {}, pad: () => {}, input: () => {} }, 'direct')
+    const pad = emptyPad()
+    pad.buttons = 1 << PadButton.A
+    pad.axes = [0, 0, 0.25, -0.8]
+    for (let n = 0; n < 2; n++) {
+      stream.onPad(encodePad(pad))
+      expect(stream.consume(performance.now(), true)).toMatchObject({ connected: true, mode: Mode.gamepad })
+      expect(stream.pad).toMatchObject({ buttons: 1 << PadButton.A })
+      expect(stream.pad!.axes[3]).toBeCloseTo(-0.8, 3)
+      stream.reset()
+      expect(stream.pad).toBeNull()
+    }
+    // Returning to a touch or motion face still replaces a previously live pad.
+    stream.onPad(encodePad(pad))
+    const state = emptyState()
+    state.mode = Mode.tilt
+    state.flags = Flag.touching | Flag.clutch
+    state.tilt = [0.25, -1]
+    stream.onState(encodeState(state))
+    const frame = stream.consume(performance.now(), true)
+    expect(frame).toMatchObject({ mode: Mode.tilt, touching: true, clutch: true })
+    expect(frame.tilt[1]).toBe(-1)
+  })
   it('resets held input, ignores paused controls, still answers pings, and resumes without changing identity', async () => {
     const events: unknown[] = [], sent: string[] = []
     const stream = new Stream({ mode: () => {}, pad: () => {}, input: () => {} }, 'direct')

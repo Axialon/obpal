@@ -167,6 +167,11 @@ Older hosts ignore the optional message and fields; they receive the releases an
 input watchdog goes idle. They cannot show the explicit paused label. A new host treats a phone that sends no
 `attention` as active, as before. There is no protocol version change.
 
+On joining or resuming, the phone sends a STATE with its current mode as soon as the state channel accepts it,
+including in gamepad mode for older hosts. A host also accepts PAD as gamepad input without a preceding STATE;
+the unreliable channel may lose that initial STATE. Clearing a paused stream must not make resumed PAD depend
+on a controller change or another handshake.
+
 The phone's in-app camera accepts only canonical `/p/#1.…` or `/p/#2.…` links at its own deployment's origin, or a
 complete ten-digit short code. A scan is never opened as a URL. All paths use the same fingerprint pin, HMAC or
 CPace exchange and existing invite single-use rules. After successful authentication a phone MAY keep the online

@@ -435,6 +435,7 @@ async function boot(code?: Join) {
   const qf = [0, 1, 2, 3].map(() => new OneEuro())
   const st = emptyState()
   const buf = new ArrayBuffer(STATE_BYTES)
+  let stateSent = false
   const t0 = performance.now()
   const aim: [number, number] = [0, 0]
   // Point mode is Wii-style: absolute pointing from the phone's orientation (./pointing.ts).
@@ -581,9 +582,11 @@ async function boot(code?: Join) {
     if (tracker.active) void tracker.stop()
     glowing = false
     const neutral = emptyState()
-    neutral.seq = (st.seq + 1) & 0xffff
+    st.seq = (st.seq + 1) & 0xffff
+    neutral.seq = st.seq
     neutral.t = Math.round((performance.now() - t0) * 1000) >>> 0
     link.sendState(encodeState(neutral))
+    stateSent = false
   }
 
   function switchSurface(next: Connection | null) {
@@ -847,6 +850,7 @@ async function boot(code?: Join) {
       if (m.haptic && hapticsKind() === 'vibrate') navigator.vibrate(m.haptic === 'bump' ? 20 : 9)
     }
     if (surface && m.t !== 'pong' && m.t !== 'feedback') { renderTray(); setMode() }
+    if (surface && m.t === 'welcome') pump(16.7)
     if (m.t === 'welcome' || m.t === 'layout') buttons.changed()
   }
 
@@ -1102,6 +1106,7 @@ async function boot(code?: Join) {
     // The screen's suggestion may have picked another controller before there was a surface: switch to it now.
     if (currentMode() !== mode) setMode()
     else { render(); sendMode() }
+    pump(16.7)
     hint('models', () => document.querySelector('.tray-btn.select'), 'Browse the catalogue', { place: 'top', delay: 9000 })
   }
 
@@ -1590,7 +1595,7 @@ async function boot(code?: Join) {
   // ---- state pump ----------------------------------------------------------
 
   function pump(dt: number) {
-    if (!link.ready) return
+    if (!surface || !link.ready) return
     if (control.sim && performance.now() - controlSent >= 33) {
       const state = control.sample(dt / 1000)
       const active = state.active && !document.hidden && (gyroOn || mode === Mode.point || mode === Mode.track && trackWay() === 'motion' || drums.aiming || keys.aiming || mode === Mode.gamepad && gamepad.spatialActive)
@@ -1599,11 +1604,13 @@ async function boot(code?: Join) {
       }) })
       controlActive = active; controlSent = performance.now()
     }
-    if (mode === Mode.gamepad && gamepad.pump(dt)) return // gamepad mode sends PAD (and POINTER) packets instead of STATE
+    // Older screens need a STATE to establish the mode after joining or resuming. Retry until the channel takes it,
+    // even if the gamepad's usual hand-off window elapsed while the page or data channel was starting.
+    if (mode === Mode.gamepad && gamepad.pump(dt) && stateSent) return
     const now = performance.now()
     const touches = pad?.touches ?? 0
     const pointing = mode === Mode.point && !!motion.q // Wii-style pointing is always live
-    if (!gyroOn && !pointing && touches === 0 && now - lastSend < 66) return // 15 Hz when idle
+    if (stateSent && !gyroOn && !pointing && touches === 0 && now - lastSend < 66) return // 15 Hz when idle
     const q = motion.q
     const s = dt / 1000
     st.seq = (st.seq + 1) & 0xffff
@@ -1672,6 +1679,6 @@ async function boot(code?: Join) {
       } else if (imuHeld) imu.release()
       imuHeld = held
     }
-    if (link.sendState(encodeState(st, buf))) lastSend = now
+    if (link.sendState(encodeState(st, buf))) { lastSend = now; stateSent = true }
   }
 }
