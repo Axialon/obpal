@@ -11,6 +11,8 @@
  *     a phone's volume and side keys can't reach a browser page; Reset brings Enter back to A.
  *   - The buttons diagnostic (/buttons/, no screen needed): every key is logged, the volume keys are held, and the
  *     page asks whether the volume moved and sums it all up in one line.
+ *   - The controller bar and catalogue (./phone-controllers.mjs): ratings for the Viewer and a sim, switching in one
+ *     tap, and the layout rules (the edge and the touch size) at three phone sizes.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch. OBPAL_SHOTS=<dir> saves screens.
  */
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -21,6 +23,7 @@ import { checkFrost, setSurface } from './lib/frost.mjs'
 import { cspCheck } from './csp-watch.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
 import { phoneConnections } from './phone-connections.mjs'
+import { phoneControllers } from './phone-controllers.mjs'
 
 const HEADED = process.argv.includes('--headed')
 const SHOTS = process.env.OBPAL_SHOTS || ''
@@ -307,6 +310,7 @@ try {
     return `Done at ${fit.bottom.toFixed(0)} of ${fit.vh}px; swipe, Back and × close it; Disconnect asks, then says so`
   })
   await phoneConnections({ browser: sb, origin: local.origin, check, shots: SHOTS })
+  await phoneControllers({ browser: sb, origin: local.origin, check, shots: SHOTS })
   await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {
   console.error(e)

@@ -2,6 +2,19 @@ html, body { height: 100%; overflow: hidden; overscroll-behavior: none; touch-ac
 body { letter-spacing: -0.006em; background: var(--page); }
 #app { position: fixed; inset: 0; z-index: 1; }
 
+/* ---- the controller's layout system: one spacing scale, one edge, one touch size, for every face ----
+   --edge: the nearest any control comes to the screen's edge, beyond its safe area. --tap: the smallest a touch target
+   gets; --tap-lg the comfortable size most take. Radii nest: an inner corner is its outer corner less the padding. */
+:root {
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-7: 32px;
+  --edge: 16px;
+  --tap: 44px; --tap-lg: 48px;
+  --safe-t: env(safe-area-inset-top, 0px); --safe-r: env(safe-area-inset-right, 0px); --safe-b: env(safe-area-inset-bottom, 0px); --safe-l: env(safe-area-inset-left, 0px);
+  /* How far in from each screen edge the controls start: the edge, or clear of a notch or home bar by a little more. */
+  --inset-t: max(var(--edge), calc(var(--safe-t) + var(--sp-2))); --inset-r: max(var(--edge), calc(var(--safe-r) + var(--sp-2)));
+  --inset-b: max(var(--edge), calc(var(--safe-b) + var(--sp-2))); --inset-l: max(var(--edge), calc(var(--safe-l) + var(--sp-2)));
+}
+
 /* ---- living backdrop for the glass to refract ---- */
 .aurora { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; background: radial-gradient(130% 90% at 50% -10%, rgb(var(--surface-rgb)) 0%, var(--page) 62%); }
 .aurora i { position: absolute; width: 90vmax; height: 90vmax; border-radius: 50%; will-change: transform; animation: drift 20s ease-in-out infinite alternate; }
@@ -49,23 +62,50 @@ body.live .aurora i { animation-play-state: paused; }
 .gate-card h1 { font-family: var(--font-display); margin: 18px 0 6px; font-size: 26px; letter-spacing: -0.03em; font-weight: 750; }
 .gate-card p { margin: 0 0 22px; color: var(--secondary); font-size: 14.5px; }
 
-/* ---- control surface ---- */
-.surface { position: fixed; inset: 0; display: flex; flex-direction: column; gap: 12px; padding: calc(8px + env(safe-area-inset-top)) 16px calc(14px + env(safe-area-inset-bottom)); animation: fade 0.35s var(--ease); }
-.bar { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 44px; border-radius: 14px; background: var(--frost); border: 1px solid var(--frost-edge); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); box-shadow: var(--frost-shadow); }
+/* ---- control surface ----
+   One column in portrait: the top bar, the controller bar, the face in use, the screen's tray and the dock. Every
+   control keeps --edge from the screen's edges (beyond its safe area) and is at least --tap across. */
+.surface { position: fixed; inset: 0; display: flex; flex-direction: column; gap: var(--sp-3);
+  padding: var(--inset-t) var(--inset-r) var(--inset-b) var(--inset-l);
+  animation: fade 0.35s var(--ease); }
+
+/* The top bar: the ob.Pal mark, the screen's name (its connections), the link, the rotation lock and settings. The
+   radii nest: the bar's corner is its buttons' corner plus its padding. */
+.bar { flex: none; display: flex; align-items: center; gap: var(--sp-1); min-width: 0; min-height: 60px; padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3); container: bar / inline-size;
+  border-radius: 22px; background: var(--frost); border: 1px solid var(--frost-edge); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); box-shadow: var(--frost-shadow); }
 /* The ob.Pal mark (the family cube in ob.Pal's light, with its orbit) beside the screen's name. */
-.host-ic { width: 34px; height: 34px; display: grid; place-items: center; flex: none; }
+.host-ic { width: 36px; height: 36px; display: grid; place-items: center; flex: none; }
 .host-ic .mark { width: 34px; height: 34px; filter: drop-shadow(0 4px 10px rgb(var(--accent-rgb) / 0.25)); }
-.host-name { flex: 1; min-width: 0; font-size: 15px; font-weight: 700; letter-spacing: -0.015em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar .host-name { flex: 1; min-width: 0; min-height: var(--tap); display: flex; align-items: center; gap: 6px; margin: 0 0 0 var(--sp-1); padding: 0 var(--sp-2); border: 0; border-radius: 14px;
+  background: transparent; color: var(--ink); font: 750 16px/1.2 var(--font-display); letter-spacing: -0.02em; text-align: left; touch-action: manipulation; transition: background 0.15s var(--ease); }
+.bar .host-name:active { background: rgb(var(--hl-rgb) / 0.07); }
+.host-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.host-name > .ic { width: 16px; height: 16px; flex: none; color: var(--muted); stroke-width: 2.2; }
+.bar-btn { flex: none; width: var(--tap); height: var(--tap); display: grid; place-items: center; padding: 0; border: 0; border-radius: 14px; background: transparent; color: var(--secondary);
+  touch-action: manipulation; transition: transform 0.12s var(--ease), background 0.15s, color 0.15s; }
+.bar-btn:active { transform: scale(0.94); background: rgb(var(--hl-rgb) / 0.08); }
+.bar-btn .ic { width: 21px; height: 21px; }
 /* The connection badge (./linkbadge.ts): a lock, the path's colour (mint direct, amber relayed) and the round trip. */
 .link-badge, .link-sheet { --lb-ok: var(--ok); --lb-warn: var(--warn); }
 [data-bb-theme='light'] :is(.link-badge, .link-sheet) { --lb-ok: #0b8a60; --lb-warn: #b45309; }
-.link-badge { display: inline-flex; align-items: center; gap: 6px; flex: none; height: 32px; padding: 0 11px 0 9px; border-radius: 999px; color: var(--secondary);
+.link-badge { display: inline-flex; align-items: center; gap: 6px; flex: none; height: var(--tap); padding: 0 12px 0 10px; border-radius: 14px; color: var(--secondary);
   font: 650 12px/1 var(--font-data, var(--font)); font-variant-numeric: tabular-nums; touch-action: manipulation; transition: transform 0.12s var(--ease), opacity 0.2s var(--ease); }
+/* In the bar the badge is a quiet well, not a second pane of glass. */
+.bar .link-badge.glass { background: rgb(var(--hl-rgb) / 0.05); border-color: var(--line); box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
 .link-badge:active { transform: scale(0.95); }
 .link-badge .ic { width: 15px; height: 15px; stroke-width: 2; color: var(--lb-ok); }
 .link-badge i { width: 6px; height: 6px; border-radius: 50%; background: var(--lb-ok); box-shadow: 0 0 8px rgb(110 231 183 / 0.55); }
 .link-badge[data-path='relay'] i { background: var(--lb-warn); box-shadow: 0 0 8px rgb(252 211 77 / 0.55); }
 .link-badge .lb-ms:empty { display: none; }
+/* A narrow bar keeps the screen's name whole: the badge is the lock with the path's dot on it, and its sheet has the
+   round trip. */
+@container bar (max-width: 440px) {
+  .link-badge { position: relative; width: var(--tap); padding: 0; justify-content: center; }
+  .link-badge .lb-ms { display: none; }
+  .link-badge i { position: absolute; top: 11px; right: 10px; box-shadow: 0 0 0 2px rgb(var(--base-rgb)), 0 0 8px rgb(110 231 183 / 0.55); }
+  .link-badge .ic { width: 18px; height: 18px; }
+  .bar .host-name { font-size: 15px; }
+}
 .link-badge[data-state='down'] { opacity: 0.55; }
 .link-badge[data-state='down'] .ic { color: var(--muted); }
 .link-badge[data-state='down'] i { background: var(--muted); box-shadow: none; }
@@ -78,37 +118,82 @@ body.live .aurora i { animation-play-state: paused; }
 .link-row b { display: block; font-size: 14.5px; font-weight: 700; letter-spacing: -0.01em; }
 .link-row small { display: block; margin-top: 2px; color: var(--muted); font-size: 12.5px; line-height: 1.4; overflow-wrap: anywhere; }
 .link-foot { margin: 0 2px; color: var(--muted); font-size: 12px; line-height: 1.5; }
-.icon-btn { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 14px; color: var(--secondary); touch-action: manipulation; transition: transform 0.12s var(--ease), background 0.15s; }
+.icon-btn { width: var(--tap); height: var(--tap); display: grid; place-items: center; border-radius: 14px; color: var(--secondary); touch-action: manipulation; transition: transform 0.12s var(--ease), background 0.15s; }
 .icon-btn:active { transform: scale(0.94); }
-.banner { padding: 9px 14px; border-radius: 14px; color: #f6dfae; font-size: 13px; font-weight: 650; border-color: rgba(252, 211, 77, 0.35) !important; animation: rise 0.3s var(--ease); }
+.banner { flex: none; padding: 10px 16px; border-radius: 16px; color: #f6dfae; font-size: 13px; font-weight: 650; border-color: rgba(252, 211, 77, 0.35) !important; animation: rise 0.3s var(--ease); }
 
-.modes { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 18px; }
-.modes button { height: 42px; display: flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 14px; background: transparent; color: var(--muted); font-size: 14px; font-weight: 700; letter-spacing: -0.01em; touch-action: manipulation; transition: background 0.25s var(--ease), color 0.2s, box-shadow 0.25s; }
-.modes button .ic { width: 18px; height: 18px; }
-.modes button[aria-selected='true'] { color: var(--accent-soft); background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.4), rgb(var(--accent2-rgb) / 0.14)); box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / 0.4), 0 6px 18px rgb(var(--accent-rgb) / 0.2); }
+/* ---- the controller bar (./switcher.ts): one slot per face the screen takes, and the catalogue ----
+   Icons, and the name only on the one in use (or on every slot, where each has the room). Switching slides the lit
+   slot across as it grows. The best slot for this screen carries the catalogue's spark as a dot. */
+.ctl-bar { flex: none; display: flex; align-items: center; gap: var(--sp-1); min-width: 0; padding: 6px; border-radius: 24px; container: ctl-bar / inline-size; }
+.ctl-tabs { flex: 1; min-width: 0; display: flex; gap: var(--sp-1); }
+.ctl-tab { position: relative; flex: 1 1 0; min-width: var(--tap); height: var(--tap-lg); display: flex; align-items: center; justify-content: center; gap: 0; padding: 0 12px; border: 0; border-radius: 18px;
+  background: transparent; color: var(--muted); touch-action: manipulation;
+  transition: flex-grow 0.34s var(--ease), background 0.28s var(--ease), color 0.2s, box-shadow 0.28s, gap 0.34s var(--ease); }
+.ctl-tab:active { background: rgb(var(--hl-rgb) / 0.07); }
+/* The slot in use sizes to its icon and name (its name opens out as it lights); the others share what's left. */
+.ctl-tab[aria-selected='true'] { flex: 0 1 auto; gap: 8px; padding: 0 16px 0 14px; background: var(--glass-light); color: var(--accent-ink);
+  box-shadow: 0 10px 26px -10px rgb(var(--accent-rgb) / 0.6), inset 0 1px 0 rgb(255 255 255 / 0.45); }
+.ctl-tab-ic { position: relative; display: grid; place-items: center; flex: none; }
+.ctl-tab .ic { width: 22px; height: 22px; }
+.ctl-tab-t { min-width: 0; max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0; font: 750 14px/1 var(--font); letter-spacing: -0.012em;
+  transition: max-width 0.34s var(--ease), opacity 0.2s var(--ease); }
+.ctl-tab[aria-selected='true'] .ctl-tab-t { max-width: 132px; opacity: 1; }
+/* A 360 px phone: the name a size smaller and the lit slot a little tighter, so every name fits. */
+@container ctl-bar (max-width: 330px) {
+  .ctl-tab[aria-selected='true'] { gap: 6px; padding: 0 12px 0 10px; }
+  .ctl-tab-t { font-size: 13px; }
+}
+/* A bar too narrow for a name (a small phone on its side): icons alone, the lit one still lit. */
+@container ctl-bar (max-width: 300px) {
+  .ctl-tab[aria-selected='true'] { flex: 1 1 0; gap: 0; padding: 0 12px; }
+  .ctl-tab[aria-selected='true'] .ctl-tab-t { max-width: 0; opacity: 0; }
+}
+/* Two slots or fewer: there's room for every name. */
+.ctl-bar:is([data-slots='1'], [data-slots='2']) .ctl-tab { flex: 1 1 0; gap: 8px; }
+.ctl-bar:is([data-slots='1'], [data-slots='2']) .ctl-tab-t { max-width: 132px; opacity: 1; }
+.ctl-tab-best { position: absolute; top: -3px; right: -5px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px rgb(var(--base-rgb)), 0 0 8px rgb(var(--accent-rgb) / 0.8); }
+.ctl-tab[aria-selected='true'] .ctl-tab-best { background: var(--accent-ink); box-shadow: 0 0 0 2px rgb(var(--accent-rgb)); }
+.ctl-sep { flex: none; width: 1px; height: 24px; margin: 0 2px; background: var(--line); }
+.ctl-more { flex: none; width: var(--tap); height: var(--tap-lg); display: grid; place-items: center; padding: 0; border: 0; border-radius: 18px; background: transparent; color: var(--secondary);
+  touch-action: manipulation; transition: transform 0.12s var(--ease), background 0.15s; }
+.ctl-more:active { transform: scale(0.94); background: rgb(var(--hl-rgb) / 0.08); }
+.ctl-more .ic { width: 22px; height: 22px; }
+/* A face coming up: it rises in as its slot lights. */
+.face-in { animation: face-in 0.3s var(--ease); }
+@keyframes face-in { from { opacity: 0; transform: translateY(10px) scale(0.985); } }
 
-.styles { display: flex; gap: 8px; animation: fade 0.25s var(--ease); }
-.styles button { flex: 1; height: 36px; display: flex; align-items: center; justify-content: center; gap: 7px; border-radius: 999px; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.03); color: var(--muted); font-size: 13px; font-weight: 700; touch-action: manipulation; transition: all 0.22s var(--ease); }
-.styles button .ic { width: 16px; height: 16px; }
-.styles button[aria-checked='true'] { color: var(--accent-soft); border-color: rgb(var(--accent-rgb) / 0.55); background: rgb(var(--accent-rgb) / 0.16); }
-
-.pad { position: relative; flex: 1; min-height: 150px; border-radius: 30px; touch-action: none; overflow: hidden; transition: border-color 0.2s, box-shadow 0.25s; }
+/* ---- the trackpad ---- */
+.pad { position: relative; flex: 1; min-height: 150px; border-radius: 28px; touch-action: none; overflow: hidden; transition: border-color 0.2s, box-shadow 0.25s; }
 .pad::before { content: ''; position: absolute; inset: 0; background: radial-gradient(rgb(var(--hl-rgb) / 0.13) 1px, transparent 1.4px) 0 0 / 22px 22px; -webkit-mask-image: radial-gradient(circle at 50% 45%, #000 20%, transparent 75%); mask-image: radial-gradient(circle at 50% 45%, #000 20%, transparent 75%); pointer-events: none; }
 .pad.active { border-color: rgb(var(--accent-rgb) / 0.6) !important; box-shadow: var(--glass-shadow), 0 0 40px rgb(var(--accent-rgb) / 0.2), inset 0 0 60px rgb(var(--accent-rgb) / 0.08); }
-.gestures { position: absolute; left: 0; right: 0; bottom: 14px; display: flex; justify-content: center; gap: 22px; color: var(--secondary); opacity: 0.6; pointer-events: none; transition: opacity 0.25s; }
-.gestures span { display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.gestures .ic { width: 20px; height: 20px; }
-.gestures b { font-size: 10.5px; font-weight: 650; letter-spacing: 0.02em; color: var(--muted); }
+/* The gesture legend: what a finger does here, as icons with a word each. */
+.gestures { position: absolute; left: 0; right: 0; bottom: var(--sp-4); display: flex; justify-content: center; gap: var(--sp-2); color: var(--secondary); pointer-events: none; transition: opacity 0.25s; }
+.gestures span { min-width: 52px; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 6px 7px; border-radius: 14px; background: rgb(var(--hl-rgb) / 0.04); }
+.gestures .ic { width: 20px; height: 20px; opacity: 0.85; }
+.gestures b { font-size: 10.5px; font-weight: 650; letter-spacing: 0.03em; color: var(--muted); }
 .pad.active .gestures { opacity: 0.15; }
 .level { position: absolute; left: 50%; top: 44%; width: 0; height: 0; pointer-events: none; animation: fade 0.3s var(--ease); }
 .level-ring { position: absolute; left: -62px; top: -62px; width: 124px; height: 124px; border-radius: 50%; border: 1px solid rgb(var(--accent-rgb) / 0.35); background: radial-gradient(circle, rgb(var(--accent-rgb) / 0.18) 0 14px, rgb(var(--accent-rgb) / 0.04) 15px, transparent 70%); box-shadow: inset 0 0 24px rgb(var(--accent-rgb) / 0.12); }
 .level-dot { position: absolute; left: -13px; top: -13px; width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, var(--accent-soft), var(--accent) 60%); box-shadow: 0 0 22px rgb(var(--accent-rgb) / 0.8); will-change: transform; transition: transform 0.06s linear; }
+/* The 3D hand: a spot for the thumb that lights while it holds, and the phone moves what it holds. */
+.hold-spot { position: absolute; left: 50%; top: 44%; width: 136px; height: 136px; transform: translate(-50%, -50%); display: grid; place-items: center; border-radius: 50%; pointer-events: none;
+  border: 1.5px dashed rgb(var(--accent-rgb) / 0.45); background: radial-gradient(circle, rgb(var(--accent-rgb) / 0.12), transparent 70%); animation: fade 0.3s var(--ease); }
+.hold-spot i { width: 68px; height: 68px; display: grid; place-items: center; border-radius: 50%; background: rgb(var(--base-rgb) / 0.6); border: 1px solid var(--line); color: var(--accent-text); }
+.hold-spot .ic { width: 32px; height: 32px; }
+.pad.active .hold-spot { border-style: solid; border-color: rgb(var(--accent-rgb) / 0.85); animation: hold-on 1.6s var(--ease) infinite; }
+.pad.active .hold-spot i { background: var(--glass-light); color: var(--accent-ink); border-color: transparent; }
+@keyframes hold-on { 50% { box-shadow: 0 0 0 12px rgb(var(--accent-rgb) / 0.08), 0 0 34px rgb(var(--accent-rgb) / 0.35); } }
 
-.tray { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; touch-action: pan-x; padding: 2px 20px 2px 0; margin-right: -16px; -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 26px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 26px), transparent); }
+/* ---- the screen's tray: its buttons, toggles and pickers, one row that scrolls sideways ---- */
+.tray { flex: none; display: flex; gap: var(--sp-2); overflow-x: auto; scrollbar-width: none; touch-action: pan-x; }
+.tray.more { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 44px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 44px), transparent); }
 .tray::-webkit-scrollbar { display: none; }
-.tray-btn { flex: none; min-width: 62px; height: 60px; padding: 0 10px; border-radius: 18px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: var(--secondary); touch-action: manipulation; transition: transform 0.12s var(--ease), background 0.2s, color 0.2s, border-color 0.2s; }
+.tray-btn { flex: none; min-width: 64px; height: 60px; padding: 0 12px; border-radius: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; color: var(--secondary); touch-action: manipulation; transition: transform 0.12s var(--ease), background 0.2s, color 0.2s, border-color 0.2s; }
 .tray-btn:active { transform: scale(0.95); }
-.tray-label { font-size: 10.5px; font-weight: 650; letter-spacing: 0.01em; color: var(--muted); }
+.tray-btn > .ic { width: 22px; height: 22px; }
+.tray-label { font-size: 11px; font-weight: 650; letter-spacing: 0.01em; color: var(--muted); white-space: nowrap; }
+.tray-btn.text { padding: 0 16px; }
 .tray-btn.text .tray-label { font-size: 13.5px; color: var(--ink); }
 /* 3D tracking: a start button on the pad, then the controls float over the camera view. */
 .track-start { position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%); display: grid; justify-items: center; gap: 6px; width: min(260px, 80%); padding: 18px 16px; border-radius: 22px; color: var(--ink); text-align: center; cursor: pointer; }
@@ -121,9 +206,9 @@ body.live .aurora i { animation-play-state: paused; }
 .surface.glow > :not(.pad) { visibility: hidden; }
 .surface.glow .pad { position: fixed; inset: 0; z-index: 30; border: 0; border-radius: 0; background: var(--glow); box-shadow: none; backdrop-filter: none; }
 .surface.glow .pad > :not(.glow-end, .glow-stop) { display: none; }
-.glow-stop { position: absolute; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom)); transform: translateX(-50%); height: 52px; padding: 0 30px; border: 2px solid rgb(255 255 255 / 0.7); border-radius: 999px; background: #e11d48; color: #fff; font: 800 15px var(--font); letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; }
+.glow-stop { position: absolute; left: 50%; bottom: calc(var(--safe-b) + 20px); transform: translateX(-50%); height: 52px; padding: 0 30px; border: 2px solid rgb(255 255 255 / 0.7); border-radius: 999px; background: #e11d48; color: #fff; font: 800 15px var(--font); letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; }
 .glow-stop[hidden] { display: none; }
-.glow-end { position: absolute; top: calc(14px + env(safe-area-inset-top)); left: 14px; width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 50%; background: rgb(0 0 0 / 0.28); color: #fff; cursor: pointer; }
+.glow-end { position: absolute; top: calc(var(--safe-t) + var(--edge)); left: var(--edge); width: var(--tap-lg); height: var(--tap-lg); display: grid; place-items: center; border: 0; border-radius: 50%; background: rgb(0 0 0 / 0.28); color: #fff; cursor: pointer; }
 .glow-end .ic { width: 20px; height: 20px; }
 .glow-end[hidden] { display: none; }
 /* A safety stop (TrayControl tone 'stop'): red, in words, and never scrolled away behind the others. */
@@ -131,51 +216,72 @@ body.live .aurora i { animation-play-state: paused; }
 .tray-btn.stop .tray-label { color: #fff; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; font-size: 13px; }
 .tray-btn[aria-pressed='true'] { color: var(--accent-soft); background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.36), rgb(var(--accent2-rgb) / 0.12)); border-color: rgb(var(--accent-rgb) / 0.5); }
 .tray-btn[aria-pressed='true'] .tray-label { color: var(--accent-soft); }
-.tray-btn.select { flex-direction: row; gap: 10px; padding: 0 10px 0 8px; min-width: 0; max-width: calc(var(--ui-vw, 1vw) * 62); border-color: rgb(var(--accent-rgb) / 0.45); background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.26), rgb(var(--hl-rgb) / 0.04)); color: var(--ink); }
-.sel-thumb { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 13px; background: rgb(var(--base-rgb) / 0.55); border: 1px solid rgb(var(--hl-rgb) / 0.1); font-size: 18px; font-weight: 800; overflow: hidden; }
+.tray-btn.select { flex-direction: row; gap: 10px; padding: 0 12px 0 8px; min-width: 0; max-width: calc(var(--ui-vw, 1vw) * 62); border-color: rgb(var(--accent-rgb) / 0.45); background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.26), rgb(var(--hl-rgb) / 0.04)); color: var(--ink); }
+.sel-thumb { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 14px; background: rgb(var(--base-rgb) / 0.55); border: 1px solid rgb(var(--hl-rgb) / 0.1); font-size: 18px; font-weight: 800; overflow: hidden; }
 .sel-thumb img { width: 36px; height: 36px; object-fit: contain; }
 /* Shared scene: this device's colour (its accent), the same as its cursor and halo on the screen. */
 .seat-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.22), 0 0 14px rgb(var(--accent-rgb) / 0.6); }
 .sel-v { font-size: 14px; font-weight: 700; letter-spacing: -0.012em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tray-btn.select > .ic { width: 16px; height: 16px; color: var(--accent-soft); }
 
-.dock { display: flex; gap: 10px; }
-.gyro { flex: 1; min-height: 74px; border-radius: 26px; display: flex; align-items: center; gap: 14px; padding: 0 18px 0 16px; text-align: left; touch-action: manipulation; transition: background 0.3s var(--ease), border-color 0.3s, transform 0.12s var(--ease), box-shadow 0.3s; }
+/* ---- the dock: motion for the trackpad (on or off, then Tilt or 1:1) and the level or recentre ---- */
+.dock { flex: none; display: flex; align-items: stretch; gap: var(--sp-2); }
+.gyro { flex: 1; min-width: 0; min-height: 64px; border-radius: 22px; display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-4) 0 10px; text-align: left; container: gyro / inline-size;
+  touch-action: manipulation; transition: background 0.3s var(--ease), border-color 0.3s, transform 0.12s var(--ease), box-shadow 0.3s; }
 .gyro:active { transform: scale(0.985); }
-.gyro-ic { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 15px; background: rgb(var(--hl-rgb) / 0.06); color: var(--secondary); transition: background 0.3s, color 0.3s; }
-.gyro-ic .ic { width: 26px; height: 26px; }
-.gyro-label { flex: 1; font-size: 18px; font-weight: 750; letter-spacing: -0.02em; }
-.gyro-state { height: 28px; display: inline-flex; align-items: center; padding: 0 12px; border-radius: 999px; font-size: 12px; font-weight: 750; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); background: rgb(var(--hl-rgb) / 0.06); }
-.gyro.on { border-color: transparent !important; background: linear-gradient(135deg, var(--accent-soft), var(--accent) 55%, var(--accent2)); color: var(--accent-ink); box-shadow: 0 16px 38px rgb(var(--accent-rgb) / 0.4), inset 0 1px 0 rgb(255 255 255 / 0.4); }
-.gyro.on .gyro-ic { background: rgb(0 0 0 / 0.14); color: var(--accent-ink); }
+.gyro-ic { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 15px; background: rgb(var(--hl-rgb) / 0.06); color: var(--secondary); transition: background 0.3s, color 0.3s; }
+.gyro-ic .ic { width: 24px; height: 24px; }
+.gyro-label { flex: 1; min-width: 0; font-size: 16px; font-weight: 750; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@container gyro (max-width: 150px) { .gyro-label { visibility: hidden; } }
+/* The kit's switch drawn inside the button (styles/kit.css input.kit-switch): a track and a knob that slides across
+   when motion is on. On the lit button the track darkens instead of taking the accent it sits on. */
+.gyro-sw { position: relative; flex: none; width: 50px; height: 30px; border-radius: 999px; background: rgb(var(--hl-rgb) / 0.16);
+  box-shadow: inset 0 0 0 1px var(--line), inset 0 1px 3px rgb(0 0 0 / 0.3); transition: background 0.2s var(--ease); }
+.gyro-sw i { position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / 0.4); transition: transform 0.32s var(--bb-ease-out, var(--ease)); }
+.gyro.on .gyro-sw { background: rgb(0 0 0 / 0.24); box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.3); }
+.gyro.on .gyro-sw i { transform: translateX(20px); }
 .gyro.on .gyro-ic .ic { animation: gyro-spin 1.2s var(--ease) 1; }
-.gyro.on .gyro-state { background: rgb(0 0 0 / 0.16); color: var(--accent-ink); }
 @keyframes gyro-spin { to { transform: rotate(360deg); } }
-.icon-btn.square { width: 74px; height: auto; min-height: 74px; border-radius: 26px; }
-.icon-btn.square .ic { width: 26px; height: 26px; }
 .surface.no-motion .gyro { opacity: 0.45; }
+/* Tilt or 1:1: the kit's segmented control (../ui/kit/segmented.ts) as a glass pair beside the switch, each an icon
+   over its name, at the dock's height. */
+.dock > .styles.kit-seg { flex: none; display: flex; gap: var(--sp-1); padding: 6px; border-radius: 22px; background: var(--frost); border: 1px solid var(--frost-edge);
+  box-shadow: var(--frost-shadow); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); }
+.dock > .styles.kit-seg[hidden] { display: none; }
+.dock > .styles button.kit-seg-item[role='radio'] { flex: none; min-width: var(--tap-lg); height: 50px; flex-direction: column; gap: 4px; padding: 0 10px; border-radius: 16px;
+  font: 750 10.5px/1 var(--font); letter-spacing: 0.02em; touch-action: manipulation; }
+.dock > .styles .kit-seg-ic .ic { width: 22px; height: 22px; }
+.icon-btn.square { width: 64px; height: auto; min-height: 64px; border-radius: 22px; }
+.icon-btn.square .ic { width: 26px; height: 26px; }
+/* Alone in the dock (the 3D hand has no motion switch), the button takes the row and says what it does. */
+.center-t { display: none; font-size: 15px; font-weight: 750; letter-spacing: -0.015em; color: var(--ink); }
+.dock:not(:has(> .gyro:not([hidden]))) > #center { flex: 1; width: auto; display: flex; align-items: center; justify-content: center; gap: 10px; }
+.dock:not(:has(> .gyro:not([hidden]))) > #center .center-t { display: inline; }
 
-/* ---- landscape: controls on the thumb side ---- */
+/* ---- landscape: the face on the thumb-free side, the controller bar, tray and dock on the other ---- */
 /* Compact landscape layout: set by the controller from the UI's own shape (it stays put while rotation is locked). */
-:root.land .surface { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 38%); grid-template-rows: auto auto auto minmax(0, 1fr) auto; column-gap: 14px; row-gap: 10px; padding-left: calc(16px + env(safe-area-inset-left)); padding-right: calc(16px + env(safe-area-inset-right)); }
-:root.land .bar, :root.land .banner { grid-column: 1 / -1; }
+:root.land .surface { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 42%); grid-template-rows: auto minmax(0, 1fr) auto; column-gap: var(--sp-4); row-gap: var(--sp-3); }
+/* The top row: the bar over the work area, the controller bar over the side column. */
+:root.land .bar { grid-column: 1; grid-row: 1; }
+/* The link's trouble floats under the bar rather than taking a row of its own. */
+:root.land .banner { position: fixed; z-index: 12; top: calc(var(--safe-t) + 84px); left: 0; right: 0; width: fit-content; max-width: 70%; margin: 0 auto; }
 /* The work area (the trackpad, or Point's face) fills the thumb-free side. */
-:root.land .pad, :root.land .wii, :root.land .mouse { grid-column: 1; grid-row: 2 / 6; }
-:root.land .wii { gap: 8px; padding: 4px 6px; }
+:root.land .pad, :root.land .wii, :root.land .mouse { grid-column: 1; grid-row: 2 / 4; min-height: 0; }
+:root.land .wii { gap: var(--sp-3); padding: var(--sp-1) var(--sp-2); }
 :root.land .wii-a { width: min(26dvh, 110px); flex-shrink: 0; }
-:root.land .wii-b { min-height: 52px; }
-:root.land .modes { grid-column: 2; grid-row: 2; }
-:root.land .styles { grid-column: 2; grid-row: 3; }
-:root.land .tray { grid-column: 2; grid-row: 4; flex-wrap: wrap; align-content: start; min-height: 0; overflow-y: auto; touch-action: pan-y; -webkit-mask-image: none; mask-image: none; margin-right: 0; padding-right: 0; }
-:root.land .dock { grid-column: 2; grid-row: 5; }
-:root.land .gyro, :root.land .icon-btn.square { min-height: 62px; }
-:root.land .surface.left { grid-template-columns: minmax(240px, 38%) minmax(0, 1fr); }
-:root.land .surface.left .pad, :root.land .surface.left .wii, :root.land .surface.left .mouse { grid-column: 2; }
-:root.land .surface.left .modes, :root.land .surface.left .styles, :root.land .surface.left .tray, :root.land .surface.left .dock { grid-column: 1; }
+:root.land .wii-b { min-height: 56px; }
+:root.land .modes { grid-column: 2; grid-row: 1; }
+:root.land .tray { grid-column: 2; grid-row: 2; flex-wrap: wrap; align-content: start; min-height: 0; overflow-y: auto; touch-action: pan-y; }
+:root.land .tray.more { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent); }
+:root.land .dock { grid-column: 2; grid-row: 3; }
+:root.land .gyro, :root.land .icon-btn.square { min-height: 60px; }
+:root.land .surface.left { grid-template-columns: minmax(300px, 42%) minmax(0, 1fr); }
+:root.land .surface.left .bar, :root.land .surface.left .pad, :root.land .surface.left .wii, :root.land .surface.left .mouse { grid-column: 2; }
+:root.land .surface.left .modes, :root.land .surface.left .tray, :root.land .surface.left .dock { grid-column: 1; }
 
 /* ---- toast ---- */
 /* Above the keyboard dock while it is open (--kbd-lift: from the bottom to the dock's top). */
-.toast { position: fixed; left: 50%; bottom: max(calc(112px + env(safe-area-inset-bottom)), var(--kbd-lift, 0px)); transform: translate(-50%, 10px); opacity: 0; padding: 10px 16px; border-radius: 16px; font-weight: 650; font-size: 14px; pointer-events: none; transition: opacity 0.2s var(--ease), transform 0.25s var(--ease); max-width: 86vw; text-align: center; z-index: 40; }
+.toast { position: fixed; left: 50%; bottom: max(calc(112px + var(--safe-b)), var(--kbd-lift, 0px)); transform: translate(-50%, 10px); opacity: 0; padding: 12px 18px; border-radius: 18px; font-weight: 650; font-size: 14px; line-height: 1.4; pointer-events: none; transition: opacity 0.2s var(--ease), transform 0.25s var(--ease); width: max-content; max-width: min(360px, calc(100% - 2 * var(--edge))); text-align: center; text-wrap: balance; z-index: 40; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
 /* ---- sheets (settings, buttons, picker, the gamepad's) ---- */
@@ -184,7 +290,7 @@ body.live .aurora i { animation-play-state: paused; }
    It's heavy frosted glass: the controls behind read as colour and shape, never as text. The scrim that dims and
    softens the rest fades on a layer of its own (::before), and the sheet slides rather than fades: anything fading
    around or on the sheet would let the controls behind show through sharp while it opens and closes. */
-.sheet-wrap { position: fixed; inset: 0; z-index: 30; display: grid; place-items: end center; padding: max(56px, calc(env(safe-area-inset-top) + 40px)) 10px calc(10px + env(safe-area-inset-bottom)); }
+.sheet-wrap { position: fixed; inset: 0; z-index: 30; display: grid; place-items: end center; padding: max(56px, calc(var(--safe-t) + 40px)) var(--inset-r) var(--inset-b) var(--inset-l); }
 .sheet-wrap::before { content: ''; position: absolute; inset: 0; z-index: -1; background: rgb(var(--base-rgb) / 0.42);
   -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); animation: fade 0.2s var(--ease); }
 @supports (height: 100dvh) { .sheet-wrap { bottom: auto; height: 100dvh; } }
@@ -201,9 +307,14 @@ body:has(.sheet-wrap) .hint { visibility: hidden; }
 .sheet-head { position: sticky; top: -10px; z-index: 2; display: grid; grid-template-columns: 40px 1fr 40px; align-items: center; margin: -10px -20px -6px; padding: 10px 12px 6px;
   background: var(--frost-solid); border-bottom: 1px solid var(--frost-edge); border-radius: 30px 30px 0 0; }
 .sheet-head .grip { grid-column: 2; }
-.sheet-x { grid-column: 3; width: 40px; height: 40px; border-radius: 50%; }
+.sheet-head { grid-template-columns: var(--tap) 1fr var(--tap); }
+.sheet-x { grid-column: 3; width: var(--tap); height: var(--tap); border-radius: 50%; }
+.sheet-x:not(.glass) { padding: 0; border: 1px solid var(--line); background: rgb(var(--hl-rgb) / 0.06); color: var(--secondary); }
 .sheet-x .ic { width: 18px; height: 18px; }
-.sheet-k { margin: 2px 2px -8px; font-size: 11px; font-weight: 750; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); }
+.sheet-k { display: flex; align-items: center; gap: 10px; margin: 6px 2px -6px; font-size: 11px; font-weight: 750; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); }
+/* Numbered small-caps sections, as the catalogue's: the number in the data face, a hairline running out after. */
+.sheet-k b { font: 600 11px/1 var(--font-data); letter-spacing: 0; color: var(--accent-text); }
+.sheet-k::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 .sheet-k small { font-size: inherit; font-weight: 650; letter-spacing: 0.04em; text-transform: none; }
 /* The sheet's answer buttons stay in view however far it scrolls. */
 .sheet .actions { position: sticky; bottom: -20px; z-index: 2; display: flex; justify-content: flex-end; gap: 10px; margin: 0 -20px -20px; padding: 14px 20px 20px;
@@ -221,6 +332,9 @@ body:has(.sheet-wrap) .hint { visibility: hidden; }
 .sheet .bb-range { touch-action: pan-x; }
 .sheet .row { display: flex; align-items: center; gap: 10px; }
 .sheet .row input { width: 20px; height: 20px; accent-color: var(--accent); }
+/* A setting that's on or off: its words, and the kit's switch (styles/kit.css) at the end of the row. */
+.sheet .row.sw-row { justify-content: space-between; gap: var(--sp-4); min-height: var(--tap); font-size: 14px; font-weight: 650; }
+.sheet .row input.kit-switch { width: 50px; height: 30px; }
 .sheet .gap { justify-content: flex-end; }
 .sheet .meta { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 
@@ -239,25 +353,93 @@ body:has(.sheet-wrap) .hint { visibility: hidden; }
 .pick[aria-selected='true'] .pick-name { color: var(--accent-soft); }
 .mono { font-variant-numeric: tabular-nums; font-family: var(--font-data); }
 
+/* ---- the controller catalogue (./switcher.ts): every controller, rated for this screen ----
+   Each card is a controller's glyph in the kit's dot gauge, lit a third, two thirds or all the way round by how well it
+   fits the screen (works, suits, best), a spark on the best, dimmed and dashed where the screen doesn't take it.
+   Numbered small-caps headings keep the two groups apart; the legend under them says what the marks mean. */
+.ctl-sheet { position: relative; width: min(520px, 100%); gap: var(--sp-4); }
+.ctl-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin: -4px 2px 0; min-width: 0; }
+.ctl-head h2 { margin: 0; font: 750 22px/1.2 var(--font-display); letter-spacing: -0.03em; }
+.ctl-for { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 58%; height: 30px; margin: 0; padding: 0 12px; border-radius: 999px;
+  border: 1px solid rgb(var(--accent-rgb) / 0.32); background: rgb(var(--accent-rgb) / 0.1); color: var(--accent-text); font: 750 11px/1 var(--font); letter-spacing: 0.1em; text-transform: uppercase; }
+.ctl-for i { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px rgb(var(--accent-rgb) / 0.8); }
+.ctl-for span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctl-list { display: grid; gap: var(--sp-3); }
+.ctl-k { display: flex; align-items: center; gap: 10px; margin: var(--sp-1) 2px 0; font: 750 11px/1 var(--font); letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); }
+.ctl-k b { font: 600 11px/1 var(--font-data); letter-spacing: 0; color: var(--accent-text); }
+.ctl-k::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.ctl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 10px; }
+.ctl-card { position: relative; min-width: 0; min-height: 128px; display: grid; justify-items: center; align-content: center; gap: 10px; padding: 14px 6px 12px; border-radius: 22px;
+  border: 1px solid rgb(var(--hl-rgb) / 0.08); background: linear-gradient(160deg, rgb(var(--hl-rgb) / 0.07), rgb(var(--hl-rgb) / 0.015)); color: var(--ink);
+  touch-action: manipulation; -webkit-touch-callout: none; transition: transform 0.14s var(--ease), border-color 0.2s, background 0.2s, box-shadow 0.25s, opacity 0.2s; }
+.ctl-card:active { transform: scale(0.96); }
+.ctl-card[aria-checked='true'] { border-color: rgb(var(--accent-rgb) / 0.7); background: linear-gradient(160deg, rgb(var(--accent-rgb) / 0.2), rgb(var(--accent-rgb) / 0.04));
+  box-shadow: 0 14px 32px -14px rgb(var(--accent-rgb) / 0.55), inset 0 1px 0 rgb(255 255 255 / 0.06); }
+.ctl-card[aria-disabled='true'] { border-style: dashed; background: transparent; }
+.ctl-card[aria-disabled='true'] > * { opacity: 0.42; }
+.ctl-card[aria-disabled='true'] .ctl-no { opacity: 0.9; }
+.ctl-gauge { position: relative; width: 76px; height: 76px; display: grid; place-items: center; flex: none; }
+.ctl-gauge > .kit-ring { position: absolute; inset: 0; }
+.ctl-gauge .kit-ring-mid { display: none; }
+/* The best glows; on the light surface the lit dots take the accent's strong shade, to read on white. */
+.ctl-card[data-fit='3'] .kit-ring-dot.on { filter: drop-shadow(0 0 2px rgb(var(--accent-rgb) / 0.85)); }
+[data-bb-theme='light'] :is(.ctl-gauge, .ctl-legend) .kit-ring-dot.on { fill: var(--accent-text); filter: none; }
+.ctl-disc { position: relative; width: 48px; height: 48px; display: grid; place-items: center; border-radius: 50%; background: rgb(var(--base-rgb) / 0.72); border: 1px solid var(--line); color: var(--ink);
+  transition: background 0.25s var(--ease), color 0.2s; }
+.ctl-disc .ic { width: 24px; height: 24px; }
+.ctl-card[aria-checked='true'] .ctl-disc { background: var(--glass-light); color: var(--accent-ink); border-color: transparent; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.45); }
+.ctl-mark { position: absolute; top: -2px; right: -2px; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; }
+.ctl-mark .ic { width: 13px; height: 13px; }
+.ctl-best { background: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 3px rgb(var(--surface-rgb)), 0 0 16px rgb(var(--accent-rgb) / 0.65); }
+.ctl-no { background: rgb(var(--surface-rgb)); color: var(--muted); box-shadow: 0 0 0 1px var(--line); }
+.ctl-need { top: auto; bottom: -2px; background: rgb(var(--surface-rgb)); color: var(--secondary); box-shadow: 0 0 0 1px var(--line); }
+.ctl-name { max-width: 100%; font: 650 13px/1.25 var(--font); letter-spacing: -0.01em; text-align: center; color: var(--secondary); }
+.ctl-card[aria-checked='true'] .ctl-name { color: var(--ink); font-weight: 750; }
+.ctl-card.nope { animation: ctl-nope 0.34s var(--ease); }
+@keyframes ctl-nope { 20%, 60% { transform: translateX(-4px); } 40%, 80% { transform: translateX(4px); } }
+.ctl-card.chosen .ctl-disc { animation: ctl-chosen 0.3s var(--ease); }
+@keyframes ctl-chosen { 50% { transform: scale(1.12); } }
+.ctl-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 18px; margin: 0 -4px; padding-top: var(--sp-3); border-top: 1px solid var(--line);
+  color: var(--muted); font: 650 11.5px/1 var(--font); }
+.ctl-legend span { display: inline-flex; align-items: center; gap: 7px; }
+.ctl-legend .ctl-mark { position: static; width: 18px; height: 18px; box-shadow: none; }
+.ctl-legend .ctl-mark .ic { width: 11px; height: 11px; }
+.ctl-legend .kit-ring-mid { display: none; }
+/* A long press: what it's for, or why it's out, over the card. */
+.ctl-tip { position: absolute; z-index: 4; margin: 0; padding: 10px 14px 11px; border-radius: 16px; background: var(--frost-solid); border: 1px solid var(--frost-edge);
+  box-shadow: 0 18px 40px -12px rgb(0 0 0 / 0.55); color: var(--secondary); font: 500 13px/1.4 var(--font); pointer-events: none;
+  opacity: 0; transform: translateY(6px); transition: opacity 0.18s var(--ease), transform 0.2s var(--ease); }
+.ctl-tip.in { opacity: 1; transform: none; }
+.ctl-tip b { display: block; margin-bottom: 2px; color: var(--ink); font-weight: 750; }
+.ctl-tip::after { content: ''; position: absolute; bottom: -6px; left: calc(var(--arrow, 50%) - 6px); width: 12px; height: 12px; background: var(--frost-solid);
+  border: solid var(--frost-edge); border-width: 0 1px 1px 0; transform: rotate(45deg); }
+@media (prefers-reduced-motion: reduce) { .ctl-card.nope, .ctl-card.chosen .ctl-disc, .face-in { animation: none; } }
+:root.land .ctl-sheet { width: min(720px, 100%); }
+:root.land .ctl-grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
+
 /* ---- active controls: light frosted accent with dark ink (reference-card style) ---- */
-.modes button[aria-selected='true'], .styles button[aria-checked='true'], .tray-btn[aria-pressed='true'], .gyro.on {
+.tray-btn[aria-pressed='true'], .gyro.on {
   background: var(--glass-light) !important; color: var(--accent-ink) !important; border-color: rgb(255 255 255 / 0.32) !important;
   box-shadow: 0 12px 30px rgb(var(--accent-rgb) / 0.22), inset 0 1px 0 rgb(255 255 255 / 0.5) !important; }
-.tray-btn[aria-pressed='true'] .tray-label, .gyro.on .gyro-state, .gyro.on .gyro-ic { color: var(--accent-ink) !important; }
-.gyro.on .gyro-state, .gyro.on .gyro-ic { background: rgb(0 0 0 / 0.08) !important; }
+.tray-btn[aria-pressed='true'] .tray-label, .gyro.on .gyro-ic { color: var(--accent-ink) !important; }
+.gyro.on .gyro-ic { background: rgb(0 0 0 / 0.08) !important; }
 .tray-btn.select { background: linear-gradient(150deg, rgb(var(--accent-rgb) / 0.2), rgb(var(--surface-rgb) / 0.5)) !important; border-color: rgb(var(--accent-rgb) / 0.4) !important; }
 .tray-btn.select > .ic { color: var(--accent-text); }
 .pick[aria-selected='true'] { background: linear-gradient(150deg, rgb(var(--accent-rgb) / 0.3), rgb(var(--surface-rgb) / 0.4)) !important; border-color: rgb(var(--accent-rgb) / 0.7) !important; }
 .theme-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.accent-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; }
-.accent-row .bb-accent { width: 30px; height: 30px; }
+.accent-row { display: grid; grid-template-columns: repeat(5, 1fr); justify-items: center; gap: 10px 0; }
+.accent-row .bb-accent { width: 36px; height: 36px; }
+/* Each swatch (the family's: its colour on the surface in effect) answers a finger a little beyond its disc. */
+.accent-row .bb-accent::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; }
 .theme-opt { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 4px 8px; border-radius: 16px; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.03); font-size: 11px; font-weight: 650; color: var(--secondary); touch-action: manipulation; }
 .theme-opt[aria-checked='true'] { border-color: rgb(var(--accent-rgb) / 0.75); background: rgb(var(--accent-rgb) / 0.12); color: var(--ink); }
-/* What 3D follows: three choices in a row, as the surface choices are. */
-.track3d { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; align-items: stretch; }
-.track3d > span { grid-column: 1 / -1; color: var(--muted); font-size: 12.5px; font-weight: 650; }
-.way-opt { display: grid; place-items: center; padding: 10px 6px; border-radius: 14px; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.03); color: var(--secondary); font: 650 11.5px/1.3 var(--font); text-align: center; touch-action: manipulation; }
+/* What the 3D hand follows: its words over three choices in a row, as the surface choices are. */
+.sheet .row.track3d, .track3d { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; align-items: stretch; }
+.track3d > span { grid-column: 1 / -1; color: var(--ink); font-size: 14px; font-weight: 650; }
+.way-opt { display: grid; justify-items: center; align-content: center; gap: 6px; min-height: 64px; padding: 10px 6px; border-radius: 16px; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.03); color: var(--secondary); font: 650 12px/1.2 var(--font); text-align: center; touch-action: manipulation; }
+.way-opt .ic { width: 22px; height: 22px; }
 .way-opt[aria-checked='true'] { border-color: rgb(var(--accent-rgb) / 0.75); background: rgb(var(--accent-rgb) / 0.12); color: var(--ink); }
+.way-opt[aria-checked='true'] .ic { color: var(--accent-text); }
 
 /* ---- part chip: what the pointer is on / what is selected ---- */
 .pad-part { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; max-width: calc(100% - 24px); height: 36px; padding: 0 6px 0 12px; border-radius: 999px; font-size: 13px; font-weight: 700; letter-spacing: -0.01em; animation: fade 0.2s var(--ease); z-index: 2; }
@@ -265,7 +447,10 @@ body:has(.sheet-wrap) .hint { visibility: hidden; }
 .pad-part .pp-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pad-part .pp-tag { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding-right: 6px; }
 .pad-part .pp-tag:empty { display: none; }
-.pad-part .pp-x { display: none; width: 26px; height: 26px; place-items: center; border: 0; border-radius: 50%; background: rgb(0 0 0 / 0.12); color: inherit; }
+.pad-part .pp-x { position: relative; display: none; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 50%; background: rgb(0 0 0 / 0.12); color: inherit; }
+/* Small drawn, large to a finger: the release reaches past its disc to a full touch target. */
+.pad-part .pp-x::before, .pick-add::before, .bt-n-x::before, .hint-x::before { content: ''; position: absolute; inset: -8px; }
+.hint-x { position: relative; }
 .pad-part .pp-x .ic { width: 14px; height: 14px; }
 .pad-part.sel { background: var(--glass-light) !important; color: var(--accent-ink); border-color: rgb(255 255 255 / 0.3) !important; }
 /* The held value reads in the chip's own ink on any accent. */
@@ -297,25 +482,28 @@ body:has(.sheet-wrap) .hint { visibility: hidden; }
 .support-link .ic { width: 18px; height: 18px; color: var(--accent-text); }
 
 /* ---- Point mode: a Wii-style remote face (A selects, hold B to grab, - / + zoom, home centres) ---- */
-.wii { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: space-evenly; gap: 14px; padding: 12px 6px 4px; }
+/* A and the − ⌂ + row sit together in the middle; B, held under the thumb, along the bottom. */
+.wii { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: var(--sp-6); padding: var(--sp-2) 0 0; }
+.wii > .wii-a { margin-top: auto; }
+.wii > .wii-row { margin-bottom: auto; }
 .wii-part { display: flex; align-items: center; gap: 8px; max-width: 100%; height: 34px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--glass-edge); background: rgb(var(--base-rgb) / 0.6); font-size: 13px; font-weight: 700; color: var(--ink); }
 .wii-part.sel { background: var(--glass-light); color: var(--accent-ink); border-color: transparent; }
 .wii-part .pp-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
 .wii-part-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wii-part-value { font-family: var(--font-data); font-variant-numeric: tabular-nums; opacity: 0.85; }
 .wii-a {
-  width: min(calc(var(--ui-vw, 1vw) * 42), 150px); aspect-ratio: 1; border-radius: 50%; border: 1px solid rgb(var(--hl-rgb) / 0.3);
+  width: min(calc(var(--ui-vw, 1vw) * 44), 164px); aspect-ratio: 1; border-radius: 50%; border: 1px solid rgb(var(--hl-rgb) / 0.3);
   background: var(--glass-light); color: var(--accent-ink); font: 800 44px/1 var(--font-display); letter-spacing: -0.02em;
   box-shadow: 0 18px 44px -14px rgb(var(--accent-rgb) / 0.7), inset 0 2px 0 rgb(255 255 255 / 0.45), inset 0 -6px 14px rgb(0 0 0 / 0.12);
   touch-action: manipulation; transition: transform 0.1s var(--ease), box-shadow 0.2s var(--ease);
 }
 .wii-a:active { transform: scale(0.95); }
-.wii-row { display: flex; align-items: center; gap: 26px; }
-.wii-round { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.06); color: var(--ink); font: 700 26px/1 var(--font); touch-action: manipulation; transition: transform 0.1s var(--ease), background 0.2s; }
+.wii-row { display: flex; align-items: center; gap: 28px; }
+.wii-round { width: 60px; height: 60px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.06); color: var(--ink); font: 700 26px/1 var(--font); touch-action: manipulation; transition: transform 0.1s var(--ease), background 0.2s; }
 .wii-round:active { transform: scale(0.92); background: rgb(var(--hl-rgb) / 0.14); }
 .wii-round.home .ic { width: 24px; height: 24px; color: var(--accent-text); }
 .wii-b {
-  width: 100%; min-height: 84px; border-radius: 26px; display: flex; align-items: center; justify-content: center; gap: 12px;
+  width: 100%; min-height: 76px; border-radius: 24px; display: flex; align-items: center; justify-content: center; gap: 12px;
   border: 1px solid rgb(var(--accent-rgb) / 0.45); background: rgb(var(--accent-rgb) / 0.1); color: var(--accent-text);
   touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; transition: background 0.15s, transform 0.1s var(--ease);
 }
@@ -325,9 +513,9 @@ body:has(.sheet-wrap) .hint { visibility: hidden; }
 
 /* ---- Point on a PC: the top of a mouse, held like a remote (Left and Right either side of a wheel; zoom and centre
    above). The shell's nose points at the screen, as the phone does. ---- */
-.mouse { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 10px 2px 4px; }
-.mouse-top { display: flex; align-items: center; gap: 22px; }
-.mouse-round { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.06); color: var(--ink); touch-action: manipulation; transition: transform 0.1s var(--ease), background 0.2s; }
+.mouse { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: var(--sp-4); padding: var(--sp-2) 0 0; }
+.mouse-top { display: flex; align-items: center; gap: 24px; }
+.mouse-round { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.06); color: var(--ink); touch-action: manipulation; transition: transform 0.1s var(--ease), background 0.2s; }
 .mouse-round .ic { width: 22px; height: 22px; }
 .mouse-round.home .ic { color: var(--accent-text); }
 .mouse-round:active { transform: scale(0.92); background: rgb(var(--hl-rgb) / 0.14); }
@@ -370,6 +558,8 @@ body:has(.sheet-wrap) .hint { visibility: hidden; }
     linear-gradient(180deg, rgb(0 0 0 / 0.5), transparent 24%, transparent 76%, rgb(0 0 0 / 0.5)),
     repeating-linear-gradient(180deg, rgb(var(--accent-rgb) / 0.75) 0 2px, rgb(var(--accent-rgb) / 0.1) 2px 10px);
   background-position: 0 0, 0 var(--turn); }
+/* The wheel is slim to the eye, wider to a thumb: it takes touches a little either side, within the seam. */
+.mouse-wheel::before { content: ''; position: absolute; inset: 0 -8px; }
 .mouse-wheel.grab { box-shadow: 0 0 0 2px rgb(var(--accent-rgb) / 0.75), 0 0 26px rgb(var(--accent-rgb) / 0.45), inset 0 1px 0 rgb(255 255 255 / 0.12); }
 /* Holding the wheel: aim to scroll, said where the eye already is. */
 .mouse-auto { position: absolute; left: 50%; bottom: 18px; display: flex; align-items: center; gap: 8px; padding: 8px 14px 8px 10px; border-radius: 999px;
@@ -406,27 +596,23 @@ body:has(.sheet-wrap) .hint { visibility: hidden; }
 .pick-add .ic { width: 16px; height: 16px; }
 .pick-add:active { background: var(--accent); color: var(--accent-ink); transform: scale(0.94); }
 
-/* ---- tight viewports: icons only ----
-   Mode tabs drop their labels when a tab would be narrower than its icon and label (about 104px),
-   and landscape's tray shows icon-only buttons so the column never runs off the bottom. */
-.modes { container: modes / inline-size; }
-@container modes (max-width: 330px) {
-  .modes:has(> button:nth-of-type(3):not([hidden])) button > span { display: none; }
-}
-@container modes (max-width: 216px) {
-  .modes button > span { display: none; }
-}
+/* ---- landscape's side column: icons only, so its tray wraps into neat rows and never runs off the bottom ---- */
 /* Compact landscape layout: set by the controller from the UI's own shape (it stays put while rotation is locked). */
-:root.land .tray-btn:not(.select):not(.text) { min-width: 50px; width: 50px; height: 50px; padding: 0; }
+:root.land .tray-btn:not(.select):not(.text) { min-width: 52px; width: 52px; height: 52px; padding: 0; border-radius: 18px; }
 :root.land .tray-btn:not(.select):not(.text) .tray-label { display: none; }
-:root.land .tray-btn.select { height: 50px; max-width: 100%; gap: 4px; padding: 0 6px 0 7px; }
-:root.land .tray-btn.select .sel-thumb { width: 36px; height: 36px; }
+:root.land .tray-btn.text { height: 52px; border-radius: 18px; }
+:root.land .tray-btn.select { height: 52px; max-width: 100%; gap: 4px; padding: 0 8px 0 6px; border-radius: 18px; }
+:root.land .tray-btn.select .sel-thumb { width: 40px; height: 40px; border-radius: 13px; }
 :root.land .tray-btn.select .sel-v { display: none; }
-:root.land .gyro, :root.land .icon-btn.square { min-height: 50px; }
-:root.land .gyro { border-radius: 20px; gap: 10px; padding: 0 12px; }
-:root.land .gyro-ic { width: 34px; height: 34px; border-radius: 12px; }
+:root.land .gyro, :root.land .icon-btn.square { min-height: 56px; }
+:root.land .icon-btn.square { width: 56px; border-radius: 20px; }
+:root.land .gyro { border-radius: 20px; gap: 10px; padding: 0 12px 0 8px; }
+:root.land .gyro-ic { width: 40px; height: 40px; border-radius: 14px; }
 :root.land .gyro-ic .ic { width: 22px; height: 22px; }
 :root.land .gyro-label { font-size: 15px; }
+:root.land .dock > .styles.kit-seg { padding: 4px; border-radius: 20px; }
+:root.land .dock > .styles button.kit-seg-item[role='radio'] { height: 46px; min-width: var(--tap); }
+:root.land .mouse-shell { min-height: 0; }
 
 /* Rotation lock (./lock.ts). Without a native lock the page turns back against the screen, so the controls stay put. */
 html.vlock { --ui-vw: calc(var(--ui-w) / 100); --ui-vh: calc(var(--ui-h) / 100); overflow: hidden; }
@@ -442,7 +628,7 @@ body.resting .rest { display: grid; }
 
 /* ---- the keyboard dock (./keyboard.ts): a field right above the phone's keyboard, and the keys it lacks ---- */
 /* --kb: how far the phone's keyboard reaches up (visualViewport); the dock rides on it. */
-.kbd { position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 22; max-width: 720px; margin: 0 auto;
+.kbd { position: fixed; left: var(--inset-l); right: var(--inset-r); bottom: var(--inset-b); z-index: 22; max-width: 720px; margin: 0 auto;
   display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'field hide' 'keys keys'; gap: 8px; padding: 8px; border-radius: 24px;
   background: var(--frost);
   -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur);
@@ -471,7 +657,10 @@ body.resting .rest { display: grid; }
 .kbd.secret .kbd-dots { display: flex; }
 .kbd.secret .kbd-in:focus-within .kbd-dots::after { content: ''; width: 2px; height: 22px; margin-left: 1px; border-radius: 1px; background: var(--accent); animation: kbd-caret 1.1s steps(1) infinite; }
 @keyframes kbd-caret { 50% { opacity: 0; } }
-.kbd-keys { grid-area: keys; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; }
+.kbd-keys { grid-area: keys; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; }
+/* Eight keys to a row on a phone: each answers a finger across half the gap either side, as a keyboard's keys do. */
+.kbd-key { position: relative; }
+.kbd-key::before { content: ''; position: absolute; inset: 0 -3px; }
 .kbd-key, .kbd-hide { height: 44px; display: grid; place-items: center; padding: 0; border-radius: 14px; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.06); color: var(--ink);
   touch-action: none; -webkit-user-select: none; user-select: none; transition: transform 0.1s var(--ease), background 0.15s, color 0.15s; }
 .kbd-key span { font: 750 12.5px/1 var(--font); letter-spacing: 0.05em; color: var(--secondary); }
@@ -536,7 +725,7 @@ body.resting .rest { display: grid; }
 .bt-n-picks { order: 5; flex: 1 1 100%; display: flex; gap: 6px; padding: 0 0 1px 46px; overflow-x: auto; scrollbar-width: none; }
 .bt-n-picks::-webkit-scrollbar { display: none; }
 .bt-n-picks .bt-n-go { margin-left: auto; }
-.bt-n-x { order: 4; flex: none; width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 10px; background: transparent; color: var(--muted); }
+.bt-n-x { position: relative; order: 4; flex: none; width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 10px; background: transparent; color: var(--muted); }
 .bt-n-x .ic { width: 16px; height: 16px; }
 
 /* Settings → Buttons: the sources that have worked here, and the way in. */

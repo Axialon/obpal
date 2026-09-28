@@ -1,9 +1,6 @@
 /* Gamepad mode (src/controller/gamepad.ts): an Xbox-style controller over the whole phone screen, landscape first.
    Theme tokens only; the one exception is the functional face-button colours (A green, B red, X blue, Y yellow). */
 
-/* the mode tabs make room for a third tab */
-.surface .modes { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
-
 /* while the controller is up: the rest of the surface doesn't render, the backdrop holds still, coach marks wait */
 .surface.gp-on > :not(.gp):not(.banner) { display: none !important; }
 .surface.gp-on > .banner { position: fixed; z-index: 12; top: calc(env(safe-area-inset-top) + 86px); left: 0; right: 0; width: fit-content; max-width: 70vw; margin: 0 auto; pointer-events: none; }
@@ -17,8 +14,8 @@ html.gp-mode .hint { display: none !important; }
   --gp-knob: clamp(42px, 13vmin, 60px);
   --gp-trig-w: clamp(54px, 17vmin, 76px);
   --gp-trig-h: clamp(52px, 16vmin, 72px);
-  --gp-bump-w: clamp(70px, 24vmin, 112px);
-  --gp-bump-h: clamp(36px, 11vmin, 48px);
+  --gp-bump-w: clamp(76px, 24vmin, 112px);
+  --gp-bump-h: clamp(44px, 12vmin, 52px);
   /* functional face-button colours (r g b), shown as tinted glass */
   --gp-a: 110 214 118;
   --gp-b: 255 110 110;
@@ -27,11 +24,12 @@ html.gp-mode .hint { display: none !important; }
   --gp-rumble: 0;
   position: fixed; inset: 0; z-index: 10;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(172px, 26%) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(248px, 29%) minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
   grid-template-areas: 'ls top rs' 'lp mid rp';
-  gap: 10px 12px;
-  padding: calc(10px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left));
+  gap: var(--sp-3) var(--sp-4);
+  /* The controller's edge (controller.css): no control nearer the screen's edge than --edge, beyond its safe area. */
+  padding: var(--inset-t) var(--inset-r) var(--inset-b) var(--inset-l);
   background:
     radial-gradient(80% 60% at 50% 0%, rgb(var(--accent-rgb) / 0.08), transparent 70%),
     var(--frost);
@@ -59,7 +57,7 @@ html.gp-mode .hint { display: none !important; }
 }
 
 /* ---- shoulders: analog triggers in the corners, bumpers beside them ---- */
-.gp-sh { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.gp-sh { display: flex; align-items: flex-start; gap: var(--sp-3); min-width: 0; }
 .gp-sh.l { grid-area: ls; }
 .gp-sh.r { grid-area: rs; justify-content: flex-end; }
 .gp .gp-bump { width: var(--gp-bump-w); height: var(--gp-bump-h); border-radius: 14px 14px 22px 22px; font-size: 13px; }
@@ -69,20 +67,35 @@ html.gp-mode .hint { display: none !important; }
 .gp-fill { position: absolute; inset: 0; transform: scaleY(0); transform-origin: 50% 0; background: var(--glass-light); }
 .gp .gp-trig.on { transform: none; background: linear-gradient(150deg, rgb(var(--accent-rgb) / 0.3), rgb(var(--accent-rgb) / 0.12)); }
 
-/* ---- centre top: leave, Guide, settings ---- */
-.gp-top { grid-area: top; display: flex; align-items: flex-start; justify-content: center; gap: 14px; }
-.gp .gp-mini { width: 40px; height: 40px; margin-top: 7px; border-radius: 14px; color: var(--muted); }
-.gp-mini .ic { width: 19px; height: 19px; }
+/* ---- centre top: the way back and every controller, the Guide, settings ----
+   The phone's own buttons sit in quiet wells either side of the Guide, apart from the controller's own. The way back is
+   drawn as the controller it goes back to. */
+.gp-top { grid-area: top; display: flex; align-items: center; justify-content: center; gap: var(--sp-2); }
+.gp-top > * { flex: none; }
+.gp-sys { display: flex; gap: var(--sp-1); padding: 4px; border-radius: 18px; background: rgb(var(--hl-rgb) / 0.04); border: 1px solid var(--glass-edge); }
+.gp .gp-mini { width: var(--tap); height: var(--tap); border-radius: 14px; color: var(--secondary); }
+.gp .gp-sys .gp-mini { background: transparent; border-color: transparent; box-shadow: none; }
+.gp .gp-sys .gp-mini:active { background: rgb(var(--hl-rgb) / 0.08); }
+.gp-mini .ic { width: 20px; height: 20px; }
 .gp .gp-guide { width: calc(var(--gp-face) * 0.95); height: calc(var(--gp-face) * 0.95); border-radius: 50%; color: var(--accent-text); border-color: rgb(var(--accent-rgb) / 0.4); box-shadow: 0 0 26px rgb(var(--accent-rgb) / 0.2), inset 0 1px 0 var(--glass-edge); }
 .gp-guide .ic { width: 24px; height: 24px; }
 .gp .gp-guide.on { color: var(--accent-ink); }
 
 /* ---- centre: View / Menu, then the Motion category: Aim / Steer / Point chips, the profile and the centre button ---- */
 .gp-mid { grid-area: mid; display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 12px; min-height: 0; container: gpmid / inline-size; }
-.gp-center { display: flex; gap: clamp(16px, 5vmin, 28px); margin-top: 8%; }
+.gp-center { display: flex; align-items: center; gap: clamp(16px, 5vmin, 28px); margin-top: 8%; }
+/* The steering wheel is this gamepad on Driving: a wheel in the middle turns with the phone as it steers. */
+.gp-wheel { display: none; flex: none; place-items: center; width: 68px; height: 68px; border-radius: 50%; color: var(--accent-text); pointer-events: none;
+  background: radial-gradient(circle, rgb(var(--accent-rgb) / 0.14), transparent 70%); border: 1px solid rgb(var(--accent-rgb) / 0.3); }
+.gp-wheel i { display: grid; place-items: center; will-change: transform; transition: transform 0.08s linear; }
+.gp-wheel .ic { width: 50px; height: 50px; stroke-width: 1.5; }
+.gp.as-wheel .gp-wheel { display: grid; }
+.gp.as-wheel.no-motion .gp-wheel { opacity: 0.4; }
 .gp .gp-sm { width: 46px; height: 46px; border-radius: 50%; }
-.gp .gp-scope { width: 100%; min-height: 44px; padding: 8px; gap: 4px; border-radius: 14px; font-size: 12px; line-height: 1.2; }
-.gp-scope small { font-size: 10px; font-weight: 600; color: var(--muted); }
+.gp .gp-scope { width: auto; max-width: 100%; min-height: var(--tap); padding: 6px 18px 6px 14px; grid-template-columns: auto auto; column-gap: 8px; row-gap: 2px; border-radius: 999px; font-size: 13px; line-height: 1.2; }
+.gp-scope-ic { display: grid; width: 20px; height: 20px; }
+.gp-scope-ic .ic { width: 20px; height: 20px; }
+.gp-scope small { grid-column: 1 / -1; font-size: 10.5px; font-weight: 650; color: var(--muted); }
 .gp .gp-scope[aria-pressed='true'] { border-color: var(--accent-text); color: var(--accent-text); }
 .gp-sm .ic { width: 19px; height: 19px; }
 /* chips on one line, the profile and centre button on the next; the centre button keeps its slot while hidden, so nothing
@@ -90,7 +103,7 @@ html.gp-mode .hint { display: none !important; }
 .gp-motion { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; }
 .gp-chips, .gp-tools { display: flex; flex-wrap: nowrap; justify-content: center; gap: 6px; }
 .gp .gp-centre[hidden] { display: inline-flex; visibility: hidden; pointer-events: none; }
-.gp .gp-chip { display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 13px 0 10px; border-radius: 999px; font-size: 12px; font-weight: 750; letter-spacing: 0; color: var(--muted); }
+.gp .gp-chip { display: inline-flex; align-items: center; gap: 6px; height: var(--tap); padding: 0 14px 0 11px; border-radius: 999px; font-size: 12.5px; font-weight: 750; letter-spacing: 0; color: var(--muted); }
 .gp-chip .ic, .gp-chip-ic { width: 18px; height: 18px; display: block; flex: none; }
 .gp-chip-ic .ic { width: 100%; height: 100%; }
 .gp .gp-chip[aria-pressed='true'] { background: var(--glass-light); color: var(--accent-ink); border-color: rgb(var(--accent-rgb) / 0.7); box-shadow: 0 8px 24px rgb(var(--accent-rgb) / 0.28), inset 0 1px 0 var(--glass-edge); }
@@ -98,14 +111,16 @@ html.gp-mode .hint { display: none !important; }
 .gp-chip[data-chip='motion.aim'][aria-pressed='true'] .ic { animation: gp-spin 3.5s linear infinite; }
 .gp-chip[data-chip='motion.point'][aria-pressed='true'] .ic { animation: gp-pulse 1.8s var(--ease) infinite; }
 .gp .gp-prof { color: var(--accent-text); border-color: rgb(var(--accent-rgb) / 0.35); }
-.gp .gp-centre { width: 38px; padding: 0; justify-content: center; }
+.gp .gp-centre { width: var(--tap); padding: 0; justify-content: center; }
 .gp.no-motion .gp-chip:not(.gp-prof) { opacity: 0.45; }
 @keyframes gp-spin { to { transform: rotate(360deg); } }
 @keyframes gp-pulse { 50% { transform: scale(1.18); } }
 /* tight middle column (landscape): chips keep their icon only, like the mode tabs */
 @container gpmid (max-width: 340px) {
   .gp-chip > span { display: none; }
-  .gp .gp-chip { width: 40px; padding: 0; justify-content: center; }
+  .gp .gp-chip { width: var(--tap); padding: 0; justify-content: center; }
+  /* The chips, the profile and the centre button on one row, so the middle fits a phone held sideways. */
+  .gp-motion { flex-direction: row; gap: 6px; }
 }
 
 /* ---- sheets: a chip's options (route, sensitivity, deadzone jump, invert) and the profile picker ---- */
@@ -227,7 +242,7 @@ html.gp-mode .hint { display: none !important; }
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     grid-template-rows: auto auto minmax(0, 1fr) auto minmax(240px, 48%);
     grid-template-areas: 'ls rs' 'top top' 'cue cue' 'mid mid' 'lp rp';
-    row-gap: 12px;
+    row-gap: var(--sp-4);
   }
   .gp-cue { display: grid; }
   .gp-mid { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 10px 18px; }
@@ -239,6 +254,6 @@ html.gp-mode .hint { display: none !important; }
 }
 
 @media (orientation: landscape) and (max-height: 340px) {
-  .gp { row-gap: 6px; padding-top: calc(6px + env(safe-area-inset-top)); }
+  .gp { row-gap: var(--sp-2); }
   .gp-center { margin-top: 2%; }
 }

@@ -1,6 +1,5 @@
 .connection-title { min-height: 44px; padding: 0; border: 0; border-radius: 8px; text-align: left; background: none; color: inherit; cursor: pointer; }
-.connection-title::after { content: '⌄'; margin-left: 8px; color: var(--muted); }
-.connection-wrap { width: 100%; max-width: none; height: 100%; max-height: none; margin: 0; padding: max(20px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom)); border: 0; color: var(--ink); background: transparent; }
+.connection-wrap { width: 100%; max-width: none; height: 100%; max-height: none; margin: 0; padding: max(20px, env(safe-area-inset-top)) var(--inset-r, 16px) var(--inset-b, 16px) var(--inset-l, 16px); border: 0; color: var(--ink); background: transparent; }
 .connection-wrap:not([open]) { display: none; }
 .connection-wrap::backdrop { background: rgb(0 0 0 / .5); }
 .connection-sheet { --accent: #c6ff34; --accent-rgb: 198 255 52; --accent-soft: #ddff88; --accent-ink: #171b0b; --focus: var(--accent); --glass-light: linear-gradient(150deg, rgb(var(--accent-rgb) / .95), rgb(var(--accent-rgb) / .78)); width: min(100%, 540px); background: var(--frost, rgb(var(--surface-rgb, 18 20 22) / .94)) !important; padding: 16px 18px max(18px, env(safe-area-inset-bottom)); gap: 12px; }

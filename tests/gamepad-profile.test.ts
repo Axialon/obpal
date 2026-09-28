@@ -32,7 +32,7 @@ describe('a profile’s utilities switch on as it applies (CATALOGUE §3)', () =
       const p = phone()
       p.motion.q = [0, 0, 0, 1]
       p.gp.setHost({ name: 'Rover', profile })
-      p.gp.sync({ active: true, offered: true })
+      p.gp.sync({ active: true })
       p.gp.pump()
       expect((p.flags() & PadFlag.tiltSteer) !== 0, profile).toBe(steer)
     }
@@ -41,7 +41,7 @@ describe('a profile’s utilities switch on as it applies (CATALOGUE §3)', () =
   it('before the phone has motion (sensors late, or waiting for Start), Steer comes on with the first sample', () => {
     const p = phone()
     p.gp.setHost({ name: 'Rover', profile: 'driving' })
-    p.gp.sync({ active: true, offered: true })
+    p.gp.sync({ active: true })
     p.gp.pump()
     expect(p.flags() & PadFlag.tiltSteer).toBe(0)
     p.motion.q = [0, 0, 0, 1]
@@ -53,7 +53,7 @@ describe('a profile’s utilities switch on as it applies (CATALOGUE §3)', () =
     const p = phone()
     p.gp.setHost({ name: 'Game', profile: 'flight', utilities: ['pad', 'motion.aim'] })
     p.motion.q = [0, 0, 0, 1]
-    p.gp.sync({ active: true, offered: true })
+    p.gp.sync({ active: true })
     p.gp.pump()
     expect(p.flags() & PadFlag.tiltSteer).toBe(0)
   })
@@ -62,7 +62,7 @@ describe('a profile’s utilities switch on as it applies (CATALOGUE §3)', () =
     const p = phone()
     p.motion.q = [0, 0, 0, 1]
     p.gp.setHost({ name: 'Rover', profile: 'driving' })
-    p.gp.sync({ active: true, offered: true })
+    p.gp.sync({ active: true })
     p.gp.pump()
     const pad = decodePad(p.sent[p.sent.length - 1])!
     expect(Math.abs(pad.axes[0])).toBeLessThan(1e-3)
@@ -90,5 +90,27 @@ describe('the screen turning takes the level again', () => {
     w.reset()
     expect(w.step(270, 800)).toBe(false)
     expect(w.step(270, 5000)).toBe(false)
+  })
+})
+
+describe('the steering wheel is the gamepad with the Driving profile (CATALOGUE §9.1)', () => {
+  it('picking the wheel applies Driving and steers; picking the gamepad goes back to the screen’s suggestion, or Default', () => {
+    const p = phone()
+    p.motion.q = [0, 0, 0, 1]
+    p.gp.setHost({ name: 'Arcade', profile: 'shooter' })
+    p.gp.sync({ active: true })
+    expect(p.gp.profileInUse).toBe('shooter')
+    p.gp.setWheel(true)
+    expect(p.gp.profileInUse).toBe('driving')
+    p.gp.pump()
+    expect(p.flags() & PadFlag.tiltSteer).toBe(PadFlag.tiltSteer)
+    p.gp.setWheel(false)
+    expect(p.gp.profileInUse).toBe('shooter')
+    // A screen that suggests Driving itself: the gamepad picked from its wheel is the Default one.
+    const k = phone()
+    k.gp.setHost({ name: 'Kart', profile: 'driving' })
+    expect(k.gp.profileInUse).toBe('driving')
+    k.gp.setWheel(false, false)
+    expect(k.gp.profileInUse).toBe('default')
   })
 })

@@ -189,9 +189,9 @@ function layerHtml(): Content {
     <div class="gp" hidden role="application" aria-label="Gamepad">
       <div class="gp-sh l">${trig(0)}${bump(B.LB, 'Left')}</div>
       <div class="gp-top">
-        <button class="gp-mini" data-act="exit" aria-label="Leave gamepad">${ICONS.left}</button>
+        <div class="gp-sys l"><button class="gp-mini" data-act="exit" aria-label="Back">${ICONS.left}</button><button class="gp-mini" data-act="controllers" aria-haspopup="dialog" aria-label="All controllers">${ICONS.models}</button></div>
         ${round('gp-guide', B.Guide, 'Guide', ICONS.guide)}
-        <button class="gp-mini" data-act="settings" aria-label="Settings">${ICONS.settings}</button>
+        <div class="gp-sys r"><button class="gp-mini" data-act="settings" aria-label="Settings">${ICONS.settings}</button></div>
       </div>
       <div class="gp-sh r">${bump(B.RB, 'Right')}${trig(1)}</div>
       <div class="gp-cue" role="img" aria-label="Turn your phone sideways for the full controller">${ICONS.phone}</div>
@@ -200,8 +200,8 @@ function layerHtml(): Content {
         <div class="gp-dpad" role="group" aria-label="D-pad">${arm('up', B.Up)}${arm('right', B.Right)}${arm('down', B.Down)}${arm('left', B.Left)}</div>
       </div>
       <div class="gp-mid">
-        <div class="gp-center">${round('gp-sm', B.View, 'View', ICONS.view)}${round('gp-sm', B.Menu, 'Menu', ICONS.menu)}</div>
-        <button class="gp-scope" data-act="scope" type="button" hidden><span>Object scope</span><small hidden></small></button>
+        <div class="gp-center">${round('gp-sm', B.View, 'View', ICONS.view)}<div class="gp-wheel" aria-hidden="true"><i>${ICONS.wheel}</i></div>${round('gp-sm', B.Menu, 'Menu', ICONS.menu)}</div>
+        <button class="gp-scope" data-act="scope" type="button" aria-label="Scene scope" hidden><i class="gp-scope-ic">${ICONS.cube}</i><span>Object</span><small hidden></small></button>
         <div class="gp-motion" role="group" aria-label="Motion">
           <div class="gp-chips"></div>
           <div class="gp-tools">
@@ -356,8 +356,10 @@ export interface GamepadDeps {
   send: (packet: ArrayBuffer) => boolean
   toast: (text: string) => void
   openSettings: () => void
-  /** Leave gamepad mode (back to another tab). */
+  /** Leave gamepad mode (back to the controller it came from). */
   exit: () => void
+  /** Open the controller catalogue, to switch to any controller. */
+  controllers?: () => void
   /** Enter fullscreen where the platform allows it; called from a pointerup. */
   fullscreen?: () => void
   /** The profile in effect changed: the host suggested another, or the person picked one. */
@@ -409,10 +411,14 @@ export class GamepadMode {
     if (!button) return
     button.hidden = !this.controlReach
     button.setAttribute('aria-pressed', String(scope === 'scene'))
-    button.querySelector('span')!.textContent = scope === 'scene' ? 'Scene scope' : 'Object scope'
+    // Drawn as what it reaches: the object held, or the whole scene (and then what A would take).
+    const wide = scope === 'scene'
+    if (button.dataset.scope !== scope) { button.dataset.scope = scope; setMarkup(button.querySelector('.gp-scope-ic')!, wide ? ICONS.scene : ICONS.cube) }
+    button.querySelector('span')!.textContent = wide ? 'Scene' : 'Object'
     const hint = button.querySelector('small')!
-    hint.hidden = scope !== 'scene' || !target
+    hint.hidden = !wide || !target
     hint.textContent = `A: take ${target}`
+    button.setAttribute('aria-label', wide && target ? `Scene scope, A takes ${target}` : 'Scene scope')
     this.paintChips()
   }
   setPosition() { this.relevel() }
@@ -478,6 +484,8 @@ export class GamepadMode {
     this.sticks = [...el.querySelectorAll<HTMLElement>('.gp-stick')].map((z, i) => new Stick(z, () => this.click(i ? PadButton.R3 : PadButton.L3)))
     for (const s of this.sticks) { this.resets.push(() => s.reset()); this.remeasures.push(() => s.remeasure()) }
     el.querySelector<HTMLElement>('[data-act="exit"]')!.onclick = () => { tick(); this.deps.exit() }
+    el.querySelector<HTMLElement>('[data-act="controllers"]')!.onclick = () => { tick(); this.deps.controllers?.() }
+    this.back = ''
     el.querySelector<HTMLElement>('[data-act="settings"]')!.onclick = () => { tick(); this.deps.openSettings() }
     el.querySelector<HTMLElement>('[data-act="profile"]')!.onclick = () => { tick(); this.openProfiles() }
     el.querySelector<HTMLElement>('[data-act="centre"]')!.onclick = () => {
@@ -492,12 +500,36 @@ export class GamepadMode {
     document.documentElement.classList.toggle('gp-mode', this.active)
   }
 
-  /** Called on every surface render: offer the Gamepad tab only when the host lists the mode, and show or hide the layer. */
-  sync(o: { active: boolean; offered: boolean }) {
-    const tab = this.el?.parentElement?.querySelector<HTMLElement>('[data-tab="gamepad"]')
-    if (tab) tab.hidden = !o.offered
+  /** Called on every surface render: show or hide the layer. */
+  sync(o: { active: boolean }) {
     this.el?.classList.toggle('no-motion', !this.deps.motion.q)
     this.setActive(o.active)
+  }
+
+  private back: string | null = ''
+  /** The way back: drawn as the controller it returns to (an icon's markup), and named for it; null, none. */
+  setBack(icon: string | null, name: string | null) {
+    const b = this.el?.querySelector<HTMLElement>('[data-act="exit"]')
+    if (!b || this.back === name) return
+    this.back = name
+    b.hidden = !icon || !name
+    if (!icon || !name) return
+    setMarkup(b, icon)
+    b.setAttribute('aria-label', `Back to ${name}`)
+    b.title = `Back to ${name}`
+  }
+
+  /**
+   * The steering wheel is this gamepad with the Driving profile (CATALOGUE §9.1): picking it applies Driving, and picking
+   * the gamepad from it goes back to the screen's own suggestion (or Default). `remember`: keep it as this person's
+   * choice for this screen, as a pick in the profile sheet is; a switch the phone makes by itself isn't.
+   */
+  setWheel(on: boolean, remember = true) {
+    if (on === (this.profileId === 'driving')) return
+    const suggested = isProfileId(this.host.profile) ? this.host.profile : null
+    const id: ProfileId = on ? 'driving' : suggested && suggested !== 'driving' ? suggested : 'default'
+    if (remember) this.chooseProfile(id)
+    else { this.applyProfile(id); this.changed() }
   }
 
   /**
@@ -529,6 +561,7 @@ export class GamepadMode {
     const L = this.contributes('stick.left') || (this.on.has(Utility.steer) && this.profile.steer.route === 'stick.wheel')
     const R = this.contributes('stick.right') || (this.on.has(Utility.steer) && this.profile.steer.route === 'stick.fly')
     this.sticks[0]?.show(L ? [lx, ly] : null)
+    this.turnWheel()
     this.sticks[1]?.show(R ? [rx, ry] : null)
     const gap = now - this.lastSend
     if (gap >= MIN_GAP_MS && (gap >= IDLE_MS || this.busy(now))) this.sendPad(now)
@@ -818,9 +851,21 @@ export class GamepadMode {
     listen(el, down, null, up)
   }
 
+  private wheelTurn = NaN
+  /** The steering wheel's own face (CATALOGUE §9.1): a wheel in the middle that turns as the phone is tilted to steer. */
+  private turnWheel() {
+    const w = this.el?.querySelector<HTMLElement>('.gp-wheel i')
+    if (!w) return
+    const deg = this.profileId === 'driving' && this.inputs.tilt ? Math.round(clamp(this.inputs.tilt[0], -1, 1) * 900) / 10 : 0
+    if (deg === this.wheelTurn) return
+    this.wheelTurn = deg
+    w.style.transform = `rotate(${deg}deg)`
+  }
+
   private paintChips() {
     const el = this.el
     if (!el) return
+    el.classList.toggle('as-wheel', this.profileId === 'driving')
     const route = (u: MotionUtility) => this.profile[utilityKey(u)].route
     el.querySelectorAll<HTMLElement>('[data-chip]').forEach((c) => {
       const u = c.dataset.chip as MotionUtility

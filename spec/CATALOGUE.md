@@ -284,11 +284,12 @@ A new utility, bridge or control system needs all of the following:
 
 ## 9. The catalogue on the device
 
-**Status: the contract is built; the rest is design.**
-- **Built:** the controller ids (§9.1), `layout.controllers` (§9.2) and `mode{m, c?, p?}` (§9.4), in `@obpal/core` (`CONTROLLERS`, `withControllers`, `layoutControllers`, `readMode`) and `@obpal/host`, and in PROTOCOL §3. The phone names its controller and profile in `mode`, and opens the first controller the host suggests. The embed (`<obpal-remote modes="face.wii face.trackpad">`) names controllers by these ids, so its attribute stays put when the picker lands.
-- **Design, not built:** the picker (§9.3), several devices per person (§9.5), and profiles beyond the built-ins (§9.6).
+**Status: the contract and the picker are built; the rest is design.**
+- **Built:** the controller ids (§9.1), `layout.controllers` (§9.2) and `mode{m, c?, p?}` (§9.4), in `@obpal/core` (`CONTROLLERS`, `withControllers`, `layoutControllers`, `readMode`) and `@obpal/host`, and in PROTOCOL §3. The phone names its controller and profile in `mode`, and opens the first controller the host suggests. The embed (`<obpal-remote modes="face.wii face.trackpad">`) names controllers by these ids.
+- **Built (2026-09-28):** the picker (§9.3): the controller bar and the catalogue sheet, with each controller rated for the screen (`src/controller/ratings.ts`, `switcher.ts`).
+- **Design, not built:** several devices per person (§9.5), profiles beyond the built-ins (§9.6), and the picker's pins, profile chips and bridged row.
 
-Today the phone shows four fixed tabs: Rotate, Point, 3D and Gamepad. The host's `layout.modes` decides which of them appear. The catalogue's routes and profiles (§2–3) reach only the Gamepad tab's motion chips. This section makes the catalogue itself what a person picks from while connected: any controller the host takes, tuned by a profile, on one device or several. PLAN §10 places the work (step 5b).
+The phone's bar shows the controllers themselves (the old tabs Rotate, Point, 3D and Gamepad are the Trackpad, the Wii remote or the air mouse, the 3D hand and the gamepad or the steering wheel). The catalogue's routes and profiles (§2–3) reach the gamepad's motion chips, and the steering wheel is the gamepad on the Driving profile. This section makes the catalogue itself what a person picks from while connected: any controller the host takes, tuned by a profile, on one device or several. PLAN §10 places the work (step 5b).
 
 **Words:**
 - **Controller:** what a person uses, as the picker shows it. It is either a **face** drawn on the device's screen (the gamepad, the Wii remote, the mouse, the trackpad), or a physical controller bridged through the device (§6). Each is built from utilities (§1).
@@ -333,21 +334,23 @@ motion profile is implied. On a switch, notes and sustain release before mode.
   - Unknown ids are skipped, so a host may already name controllers a later phone will have.
 - **The device:** its own abilities count too. Without motion sensors or permission, the motion chips, the Wii remote and the 3D hand wait for motion. The 3D hand's camera ways stay settings, as today.
 
-In the picker, each controller is in one of four states:
+In the picker, each controller is rated for the screen (`rateControllers`), from what the screen sent and what the device can do:
 
-| State | Shown |
-|---|---|
-| Suggested | First, lit, with the host's dot |
-| Ready | Lit |
-| Needs motion | Lit, with "Tap to allow motion" (the Start gate) |
-| Not on this screen | Dimmed, and it can't be picked. A long press says why ("This screen takes a gamepad only"). |
+| Fit | When | Shown |
+|---|---|---|
+| 3, best | The host's first suggestion (`layout.controllers[0]`); from a host that names none, the controller its suggested profile tunes (Driving is the steering wheel, the other profiles tune the gamepad) | All three arcs of its dotted gauge lit, and a spark; the bar's slot carries a dot |
+| 2, suits | The host names it, or it is a face of the modes it lists (`layoutControllers`) | Two arcs lit |
+| 1, works | The host takes everything it sends, but doesn't name it (the air mouse where the pointing face is the Wii remote; the wheel in any gamepad game) | One arc lit |
+| 0, not on this screen | The host doesn't take what it sends (its modes, or its utilities: the wheel needs `motion.steer`); music faces only where named | Dimmed and dashed; a tap or a long press says why ("Rover doesn't take 3D motion") |
+
+A controller that steers with motion (the Wii remote, the air mouse, the wheel) on a device without motion sensors wears a motion mark. The cards sort by fit, then in the order the host put them forward.
 
 Planned catalogue entries don't show on a device; the /catalogue/ page lists them.
 
 ### 9.3 The picker
 
-- **The bar.** The mode tabs become a bar of up to four controllers: the host's suggestions first, then the ones this person uses most with this host. The last slot is **More** (a grid), which opens the picker. On a host that suggests one controller, the bar holds that controller and More.
-- **The picker** is a glass sheet like the tray's pickers. Controller cards sit in a grid, grouped by the catalogue's categories: Controller, Pointer, Touch, 3D, Keys, and Music once it exists. A card is a large glyph and a name. The line on what it's for shows on a long press, or as the tooltip on a computer.
+- **The bar.** One slot per face the host takes, in the order of its best controller, each an icon, and the one in use named: the Wii remote and the air mouse share the pointing slot, the gamepad and the wheel the gamepad's, so the bar never holds two of one face and keeps its order when a variant is picked. The last slot is **More** (a grid), which opens the picker. The keyboard opens from the tray, beside any controller. Built.
+- **The picker** is a glass sheet like the tray's pickers. Controller cards sit in a grid, those the screen takes first (best first), then the ones it doesn't, dimmed. A card is a large glyph in its fit gauge and a name. What it's for, or why it's out, shows on a long press. One tap switches, and the face rises in. The gamepad, which fills the screen, has its own button for the picker, and a way back drawn as the controller it came from. Built, without pins and profile chips.
 - **Connected** (§9.5): controllers bridged through this device sit in a row at the top, each with Use and Stop.
 - **Profiles** (§9.6): a row of chips under the grid, for the chosen controller.
 - **Pin:** a long press on a card offers "Keep in the bar".

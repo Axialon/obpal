@@ -1,43 +1,66 @@
-﻿.surface.music-on { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; }
-.surface.music-on > .bar, .surface.music-on > .tray { min-width: 0; }
-.surface.music-on > .dock, .surface.music-on > #pad, .surface.music-on > .styles { display: none; }
-.music-face { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
-.music-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.music-heading b { font: 750 25px var(--font-display); letter-spacing: -0.04em; }
-.music-part { font-size: 12px; color: var(--muted); text-align: right; }
-.music-options { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
-.music-options label { flex: 1; min-width: 0; color: var(--muted); font-size: 11px; display: grid; gap: 4px; }
-/* Its selects are the kit's glass ones (../ui/kit/select.ts), at the phone's touch size. */
-.music-options { --kit-select-h: 44px; --kit-select-size: 14px; }
+/* The music faces (./controller/drums.ts, keys.ts): drum pads and tone keys in the controller's column, with the same
+   spacing, touch sizes and glass as every face. A small-caps kicker names what's playing, a chip the instrument held. */
+.surface.music-on > .dock, .surface.music-on > #pad { display: none; }
+.music-face { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+.music-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); min-height: 30px; padding: 0 2px; }
+.music-heading b { font: 750 11px/1 var(--font); letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); }
+.music-part { min-width: 0; max-width: 64%; display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 999px;
+  border: 1px solid rgb(var(--accent-rgb) / 0.32); background: rgb(var(--accent-rgb) / 0.1); color: var(--accent-text); font-size: 12px; font-weight: 700;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-part::before { content: ''; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px rgb(var(--accent-rgb) / 0.8); }
+.music-options { display: flex; flex-wrap: wrap; align-items: end; gap: var(--sp-2); }
+.music-options label { flex: 1; min-width: 0; display: grid; gap: 6px; color: var(--muted); font-size: 10.5px; font-weight: 750; letter-spacing: 0.1em; text-transform: uppercase; }
+/* Its selects are the kit's glass ones (../ui/kit/select.ts) at the controller's touch size; its buttons pills to match. */
+.music-options { --kit-select-h: var(--tap-lg); --kit-select-size: 14px; --kit-select-r: 16px; }
 .music-options .kit-select { width: 100%; }
-.music-toggle, .music-options > button, .sustain { min-height: 44px; border: 1px solid var(--glass-edge); border-radius: 12px; background: var(--glass); color: var(--ink); padding: 8px 12px; font: inherit; }
-.music-toggle[aria-pressed=true], .sustain.playing { color: var(--accent); border-color: var(--accent); }
-.drum-pads { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, minmax(58px, 1fr)); gap: 9px; }
+.music-toggle, .music-options > button:not(.kit-select), .sustain { min-height: var(--tap-lg); padding: 0 16px; border: 1px solid var(--glass-edge); border-radius: 16px; background: rgb(var(--hl-rgb) / 0.05); color: var(--ink);
+  font: 650 13.5px/1 var(--font); letter-spacing: -0.01em; touch-action: manipulation; transition: background 0.2s, border-color 0.2s, color 0.2s, transform 0.1s var(--ease); }
+.music-options button[aria-label^='Octave'] { min-width: var(--tap-lg); padding: 0; font-size: 20px; }
+.music-options output { min-width: 28px; min-height: var(--tap-lg); display: grid; place-items: center; align-self: end; padding: 0; font: 700 16px/1 var(--font-data); color: var(--ink); }
+.music-toggle[aria-pressed=true], .sustain.playing { background: var(--glass-light); color: var(--accent-ink); border-color: rgb(255 255 255 / 0.3); }
+.music-face button:active { transform: scale(0.97); }
+.drum-pads { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, minmax(58px, 1fr)); gap: 10px; }
 .drum-pads.hand-drums { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); }
-.music-pad { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 58px; border-radius: 22px; border: 1px solid var(--glass-edge); background: linear-gradient(150deg, rgb(var(--hl-rgb) / .09), rgb(var(--hl-rgb) / .025)); color: var(--ink); touch-action: none; user-select: none; transition: background 90ms, transform 90ms; }
-.music-pad i { width: 28px; height: 28px; border: 2px solid var(--muted); border-radius: 50%; box-shadow: inset 0 0 0 4px rgb(var(--hl-rgb) / .05); }
-.music-pad span { font-size: 12px; font-weight: 650; }
+.music-pad { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 58px; border-radius: 22px;
+  border: 1px solid var(--glass-edge); background: radial-gradient(120% 90% at 50% 40%, rgb(var(--hl-rgb) / 0.09), rgb(var(--hl-rgb) / 0.02)); color: var(--ink);
+  touch-action: none; user-select: none; transition: background 90ms, transform 90ms, border-color 90ms; }
+/* Each pad's drum head: a ring, lit for the kick and the snare that open a kit. */
+.music-pad i { width: 30px; height: 30px; border: 2px solid rgb(var(--hl-rgb) / 0.35); border-radius: 50%; box-shadow: inset 0 0 0 5px rgb(var(--hl-rgb) / 0.05); }
+.music-pad span { font-size: 12.5px; font-weight: 700; letter-spacing: -0.01em; color: var(--secondary); }
 .music-pad[data-drum="0"] i, .music-pad[data-drum="1"] i { border-color: var(--accent); }
-.music-pad.playing { transform: scale(.965); background: rgb(var(--accent-rgb) / .27); border-color: var(--accent); }
-.music-hint { margin: 0; min-height: 17px; text-align: center; color: var(--muted); font-size: 11px; }
-.strike-pad { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: radial-gradient(circle, rgb(var(--accent-rgb) / .13), transparent 65%); border: 1px solid var(--glass-edge); border-radius: 28px; color: var(--ink); touch-action: none; }
-.strike-pad b { font-size: 26px; }.strike-pad span, .strike-pad small { color: var(--muted); }.strike-pad.playing { border-color: var(--accent); }
+.music-pad.playing { transform: scale(0.965); background: rgb(var(--accent-rgb) / 0.27); border-color: var(--accent); }
+.music-hint { margin: 0; min-height: 17px; text-align: center; color: var(--muted); font-size: 11.5px; }
+.strike-pad { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: radial-gradient(circle, rgb(var(--accent-rgb) / 0.13), transparent 65%); border: 1px solid var(--glass-edge); border-radius: 28px; color: var(--ink); touch-action: none; }
+.strike-pad b { font-size: 24px; font-family: var(--font-display); letter-spacing: -0.02em; }
+.strike-pad span, .strike-pad small { color: var(--muted); }
+.strike-pad.playing { border-color: var(--accent); }
 .strike-map { width: min(100%, 260px); height: min(24vh, 190px); flex-shrink: 1; min-height: 60px; overflow: visible; pointer-events: none; }
-.strike-map circle { fill: var(--muted); opacity: .45; }.strike-map circle.aimed { fill: #c6ff34; opacity: 1; stroke: #c6ff34; stroke-width: 2; }
+.strike-map circle { fill: var(--muted); opacity: 0.45; }
+.strike-map circle.aimed { fill: var(--accent); opacity: 1; stroke: var(--accent); stroke-width: 2; }
 .strike-map text { fill: var(--muted); font-size: 7px; text-anchor: middle; }
 .music-face button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .tone-keys { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(2, 1fr); gap: 8px; }
-.tone-key { display: flex; flex-direction: column; justify-content: space-between; align-items: center; padding: 16px 8px; border-radius: 10px 10px 24px 24px; background: linear-gradient(#e7ece2, #adb4a4); color: #182012; border: 1px solid #eef4e8; touch-action: none; user-select: none; }
-.tone-key small { opacity: .45; }.tone-key span { font-size: 22px; font-weight: 750; }.tone-key.playing { background: var(--accent); }
-.keys-expression { display: flex; gap: 8px; }.keys-expression > button { flex: 1; min-height: 48px; font-size: 12px; }
-.air-pad { color: var(--accent); border: 1px solid var(--glass-edge); border-radius: 12px; background: rgb(var(--accent-rgb) / .08); touch-action: none; }
-.air-pad.playing { border-color: var(--accent); }.sustain { touch-action: none; }.music-options output { padding-bottom: 12px; }
-@media (orientation: landscape) {
-  :root .surface.music-on { max-width: none; padding: 8px 16px; gap: 6px; grid-template-columns: 170px 1fr; grid-template-rows: auto 1fr auto; }
-  .surface.music-on > .bar { grid-column: 1 / -1; grid-row: 1; }.surface.music-on > .modes { grid-column: 1; grid-row: 2; align-self: start; }
-  .surface.music-on > .music-face { grid-column: 2; grid-row: 2 / 4; }.surface.music-on > .tray { grid-column: 1; grid-row: 3; }
-  .music-face { gap: 6px; }.music-heading b { font-size: 20px; }.music-pad { flex-direction: row; border-radius: 15px; }.music-pad i { width: 19px; height: 19px; }
-  .tone-keys { grid-template-columns: repeat(8, 1fr); grid-template-rows: 1fr; }
-}
-@media (prefers-reduced-motion: reduce) { .music-pad { transition: none; }.music-pad.playing { transform: none; } }
-
+.tone-key { display: flex; flex-direction: column; justify-content: space-between; align-items: center; padding: 14px 6px 16px; border-radius: 12px 12px 24px 24px;
+  background: linear-gradient(#eef2e8, #b4bbab); color: #182012; border: 1px solid #f3f7ee; box-shadow: inset 0 -6px 12px rgb(0 0 0 / 0.12), 0 10px 22px -12px rgb(0 0 0 / 0.7);
+  touch-action: none; user-select: none; transition: background 90ms, transform 90ms; }
+.tone-key small { font: 600 11px/1 var(--font-data); opacity: 0.5; }
+.tone-key span { font: 750 22px/1 var(--font-display); }
+.tone-key.playing { background: var(--accent); transform: translateY(2px); }
+.keys-expression { display: flex; gap: var(--sp-2); }
+.keys-expression > button { flex: 1; min-width: 0; min-height: 52px; padding: 0 10px; font-size: 12.5px; }
+.air-pad { color: var(--accent-text); border: 1px solid rgb(var(--accent-rgb) / 0.4) !important; border-radius: 16px; background: rgb(var(--accent-rgb) / 0.08) !important; touch-action: none; }
+.air-pad.playing { border-color: var(--accent) !important; background: rgb(var(--accent-rgb) / 0.22) !important; }
+.sustain { touch-action: none; }
+/* Landscape: the face takes the work side, the tray the side column (the controller bar sits above it). */
+:root.land .surface.music-on .music-face { grid-column: 1; grid-row: 2 / 4; gap: var(--sp-2); }
+/* Sideways the height is the pads' and the keys': the instrument's chip (in the tray's scene button too), the option
+   labels and the hint step aside. */
+:root.land .music-heading, :root.land .music-hint { display: none; }
+:root.land .music-options label { gap: 0; font-size: 0; letter-spacing: 0; }
+:root.land .surface.left.music-on .music-face { grid-column: 2; }
+:root.land .music-pad { flex-direction: row; border-radius: 16px; }
+:root.land .music-pad i { width: 20px; height: 20px; }
+:root.land .tone-keys { grid-template-columns: repeat(8, 1fr); grid-template-rows: 1fr; }
+:root.land .music-options { --kit-select-h: var(--tap); }
+:root.land .music-toggle, :root.land .music-options > button:not(.kit-select), :root.land .keys-expression > button { min-height: var(--tap); }
+@media (prefers-reduced-motion: reduce) { .music-pad, .tone-key { transition: none; } .music-pad.playing, .tone-key.playing { transform: none; } }

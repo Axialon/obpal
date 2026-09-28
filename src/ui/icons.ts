@@ -1,4 +1,5 @@
-/** Stroke icon set shared by the phone controller and the viewer. Names double as the protocol's standard tray icon vocabulary. */import { type Content, html, setMarkup } from './markup'
+/** Stroke icon set shared by the phone controller and the viewer. Names double as the protocol's standard tray icon vocabulary. */
+import { type Content, html, setMarkup } from './markup'
 
 const s = (d: string) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`
 
@@ -86,6 +87,18 @@ export const ICONS: Record<string, string> = {
   note: s('<path d="M9 17.4V6l10-2.2v11.6"/><path d="M9 9.3l10-2.2"/><circle cx="6.8" cy="17.4" r="2.3"/><circle cx="16.8" cy="15.4" r="2.3"/>'),
   piano: s('<rect x="3.5" y="5" width="17" height="14" rx="2.4"/><path d="M12 5v14M8.1 12.6V19M15.9 12.6V19"/><path d="M7 5h2.2v7.6H7ZM14.8 5H17v7.6h-2.2Z" fill="currentColor"/>'),
   drum: s('<ellipse cx="12" cy="10.2" rx="7.6" ry="2.9"/><path d="M4.4 10.2v5.6c0 1.6 3.4 2.9 7.6 2.9s7.6-1.3 7.6-2.9v-5.6"/><path d="M7.6 12.7v5.1M12 13.1v5.6M16.4 12.7v5.1"/><path d="m9.2 3.6 3.2 4.9M18.4 4.2l-4.9 4.4"/>'),
+  // the controllers (CATALOGUE §9.1), one glyph each, and the catalogue's marks
+  trackpad: s('<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M3.5 15.3h17M12 15.3v4.2"/><circle cx="11.4" cy="9.7" r="1.7" fill="currentColor"/>'),
+  remote: s('<rect x="8.4" y="5.2" width="7.2" height="16.3" rx="2.6"/><path d="M12 8.2v3.2M10.4 9.8h3.2"/><circle cx="12" cy="15.4" r="1.4"/><path d="M12 1.6v1.5M8.5 2.6l.9 1M15.5 2.6l-.9 1"/>'),
+  hand: s('<path d="M8 12.6V6.3a1.4 1.4 0 0 1 2.8 0v5"/><path d="M10.8 11V4.9a1.4 1.4 0 0 1 2.8 0V11"/><path d="M13.6 11.2V6.1a1.4 1.4 0 0 1 2.8 0v6"/><path d="M16.4 9.5a1.4 1.4 0 0 1 2.8 0v5.2c0 3.6-2.6 6.3-6.2 6.3h-1.3c-2.3 0-3.7-1-5-2.6l-3-3.9a1.45 1.45 0 0 1 2.2-1.9L8 14.3"/>'),
+  best: s('<path d="M12 3.2l2.2 6.6 6.6 2.2-6.6 2.2L12 20.8l-2.2-6.6L3.2 12l6.6-2.2Z" fill="currentColor"/>'),
+  ban: s('<circle cx="12" cy="12" r="8.5"/><path d="M6 18 18 6"/>'),
+  scan: s('<path d="M4 8.5v-3A1.5 1.5 0 0 1 5.5 4h3M15.5 4h3A1.5 1.5 0 0 1 20 5.5v3M20 15.5v3a1.5 1.5 0 0 1-1.5 1.5h-3M8.5 20h-3A1.5 1.5 0 0 1 4 18.5v-3"/><path d="M7.5 12h9"/>'),
+  scene: s('<path d="M3.5 17.5 12 21l8.5-3.5M3.5 13 12 16.5l8.5-3.5"/><path d="M12 3 3.5 6.5 12 10l8.5-3.5Z"/>'),
+  // the screen's rotation, locked or free: a padlock inside the turn, so it never reads as the link's own lock
+  'rotation-lock': s('<path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 3.8v4.4h-4.4"/><rect x="8.9" y="11.4" width="6.2" height="4.9" rx="1.3"/><path d="M10.3 11.4V10a1.7 1.7 0 0 1 3.4 0v1.4"/>'),
+  'rotation-free': s('<path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 3.8v4.4h-4.4"/><rect x="8.9" y="11.4" width="6.2" height="4.9" rx="1.3"/><path d="M10.3 11.4V10a1.7 1.7 0 0 1 3.3-.6"/>'),
+  take: s('<path d="M12 3.5v7M8.8 7.3 12 10.5l3.2-3.2"/><path d="M5 13.5h14l-1.4 5.3a1.6 1.6 0 0 1-1.5 1.2H7.9a1.6 1.6 0 0 1-1.5-1.2Z"/>'),
 }
 
 export const icon = (name: string | undefined) => (name && ICONS[name]) || ''

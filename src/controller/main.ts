@@ -31,6 +31,7 @@ import '../styles/connections.css'
 import { calmMarks, icon, ICONS, logo, logoMark } from '../ui/icons'
 import { dismissHint, hint, repositionHints, setHintFrame } from '../ui/hints'
 import { enhanceSelects } from '../ui/kit/select'
+import { Segmented } from '../ui/kit/segmented'
 import { setPopoverFrame } from '../ui/kit/place'
 import { PhysicalInputs } from './inputs'
 import { Buttons, BUTTONS_GLYPH, sourceStack } from './buttons'
@@ -40,6 +41,8 @@ import { encodePose, POSE_BYTES, PoseFlag, qAxisAngle, qMul } from '@obpal/core'
 import { OrientationLock } from './lock'
 import { uiRect, uiRotation, uiSize } from './uiframe'
 import { applyTheme, initialTheme, swatch, THEMES, themeById } from '../ui/themes'
+import { barSlots, byFit, choiceFor, CONTROLLER_ICON, controllerOn, FACE_OF, fallback, rateControllers, type Face, type Rating } from './ratings'
+import { Switcher } from './switcher'
 
 const app = document.getElementById('app')!
 const isApple = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
@@ -216,16 +219,9 @@ function syncThemeRows() {
   document.querySelectorAll<HTMLElement>('.accent-row .bb-accent').forEach((o) => o.setAttribute('aria-checked', String(o.dataset.accent === family.getAccent())))
 }
 
-type Tab = 'rotate' | 'point' | 'gamepad' | 'track' | 'drums' | 'keys'
+/** The face on screen (./ratings.ts): each catalogue controller is drawn on one; the keyboard types beside any. */
+type Tab = Face
 type Style = 'game' | 'match'
-
-/** The tab each catalogue controller is today (CATALOGUE §9.1); the keyboard is the tray's, beside any tab. */
-const TAB_OF: Partial<Record<ControllerId, Tab>> = {
-  [Controller.drums]: 'drums',
-  [Controller.keys]: 'keys',
-  [Controller.gamepad]: 'gamepad', [Controller.wheel]: 'gamepad', [Controller.wii]: 'point', [Controller.mouse]: 'point',
-  [Controller.trackpad]: 'rotate', [Controller.hand]: 'track',
-}
 
 async function boot(code?: Join) {
   // This phone's own DTLS identity, kept across sessions so a screen can pin it and reconnect over the LAN.
@@ -282,7 +278,7 @@ async function boot(code?: Join) {
     if (!b) return
     b.setAttribute('aria-pressed', String(lock.locked))
     b.setAttribute('aria-label', lock.locked ? 'Unlock screen rotation' : 'Lock screen rotation')
-    setMarkup(b, lock.locked ? ICONS.lock : ICONS.unlock)
+    setMarkup(b, lock.locked ? ICONS['rotation-lock'] : ICONS['rotation-free'])
   }
   // ---- 3D tracking (mode 6): WebXR follows the phone through space; each pose goes out in a POSE packet ----
   const tracker = new Tracker()
@@ -319,7 +315,8 @@ async function boot(code?: Join) {
     },
     recenter: () => { recenterPointer(); dismissHint('point') },
   })
-  const mouseOn = () => layout.point === 'mouse'
+  /** Point's face is the air mouse: the person picked it, or the screen drives a mouse pointer (Layout.point 'mouse'). */
+  const mouseOn = () => (pointFace ?? (layout.point === 'mouse' ? 'mouse' : 'wii')) === 'mouse'
   /** Typing on the screen: the phone's own keyboard in a dock, from a `keyboard` tray control or the Type prompt. */
   const keyboard = new KeyboardDock({
     send: (m) => link.sendCtl(m),
@@ -349,7 +346,7 @@ async function boot(code?: Join) {
     profile: () => (tab === 'gamepad' ? gamepad.profileInUse : 'default'),
     layout: () => layout,
     press: (target, down, tap) => press(target, down, tap),
-    canSwitch: () => shownTabs().length > 1,
+    canSwitch: () => shownSlots().length > 1,
     typing: () => keyboard.open,
     hostName: () => hostName,
     feel: () => tick(),
@@ -423,16 +420,16 @@ async function boot(code?: Join) {
     else if (a === 'recentre') recenterHere()
     else if (a === 'keyboard') { if (layout.tray.some((c) => c.type === 'keyboard')) keyboard.show('tray') }
     else if (a === 'next' || a === 'prev') {
-      const tabs = shownTabs()
-      const next = tabs[(tabs.indexOf(tab) + (a === 'next' ? 1 : tabs.length - 1)) % tabs.length]
-      if (!next || next === tab) return
-      if (tab !== 'gamepad') lastTab = tab
-      tab = next
-      setMode()
+      // The controller bar's next or previous slot, round and round.
+      const slots = shownSlots()
+      const i = slots.findIndex((b) => b.dataset.tab === tab)
+      const next = slots[(i + (a === 'next' ? 1 : slots.length - 1)) % slots.length]
+      if (!next || next.dataset.tab === tab) return
+      pick(next.dataset.c as ControllerId)
     }
   }
-  /** The tabs the bar shows now, in its order. */
-  const shownTabs = (): Tab[] => [...(surface?.querySelectorAll<HTMLElement>('.modes [data-tab]') ?? [])].filter((b) => !b.hidden).map((b) => b.dataset.tab as Tab)
+  /** The controller bar's slots now, in its order. */
+  const shownSlots = () => [...(surface?.querySelectorAll<HTMLElement>('.modes [data-tab]') ?? [])].filter((b) => !b.hidden)
   const motion = new Motion()
   const control = new CalibratedControl(motion)
   let controlSent = 0
@@ -456,6 +453,11 @@ async function boot(code?: Join) {
   let tier: TierId = Tier.touch
   let tab: Tab = 'rotate'
   let lastTab: Exclude<Tab, 'gamepad'> = 'rotate' // where Leave returns from gamepad mode
+  /** The pointing face the person picked (the Wii remote or the air mouse); null: the screen's (`layout.point`). */
+  let pointFace: 'wii' | 'mouse' | null = null
+  /** The screen's ratings of every controller, best first (./ratings.ts), and what they were worked out from. */
+  let ratings: Rating[] = []
+  let ratedFrom = ''
   let gyroOn = false
   // Keeping the phone cool (see keepAwake below): the screen's wake lock, whether the sensors run, and resting.
   let wake: { release(): Promise<void> } | null = null
@@ -484,6 +486,10 @@ async function boot(code?: Join) {
   let chipTimer: ReturnType<typeof setTimeout> | undefined
   let heldShown = ''
   let scene: { you: string; people: ScenePerson[]; nodes: SceneNode[]; held: Record<string, string> } | null = null
+  /** The face last shown, so a switch animates the new one in. */
+  let faceShown = ''
+  /** Tilt or 1:1, in the dock (the glass kit's segmented control), once the surface is up. */
+  let styleSeg: Segmented | null = null
   let lastSend = 0
   let wasLevel = true
   let tilted = false
@@ -503,23 +509,43 @@ async function boot(code?: Join) {
    * The catalogue controller this phone uses now (CATALOGUE §9.1), which `mode{c}` tells the screen. The gamepad with
    * the Driving profile is the steering wheel.
    */
-  const controllerNow = (): ControllerId => {
-    if (tab === 'drums') return Controller.drums
-    if (tab === 'keys') return Controller.keys
-    if (tab === 'gamepad') return gamepad.profileInUse === 'driving' ? Controller.wheel : Controller.gamepad
-    if (tab === 'point') return mouseOn() ? Controller.mouse : Controller.wii
-    return tab === 'track' ? Controller.hand : Controller.trackpad
-  }
+  const controllerNow = (): ControllerId => controllerOn(tab, { point: mouseOn() ? 'mouse' : 'wii', wheel: gamepad.profileInUse === 'driving' })
   /** The screen's first suggested controller opens once, on the first welcome; after that the person's choice stands. */
   let suggestionTaken = false
-  /** The tab of the first controller the screen suggests (layout.controllers) that its modes let this phone show. */
+  /** The face of the first controller the screen suggests (layout.controllers) that its modes let this phone show. */
   function suggestedTab(): Tab | null {
     const hm = hostModes()
     for (const c of Array.isArray(layout.controllers) ? layout.controllers : []) {
-      const t = isControllerId(c) ? TAB_OF[c] : undefined
+      const t = isControllerId(c) ? FACE_OF[c] : null
       if (t && CONTROLLERS[c as ControllerId].modes.some((m) => hm.includes(m))) return t
     }
     return null
+  }
+  /** The name the screen goes by here: what this phone calls it, else what it calls itself. */
+  const screenName = () => link.active?.row.name ?? hostName
+  /** Every controller rated for this screen and this phone, best first; worked out again only when either changes. */
+  function rated(): Rating[] {
+    const motion = tier !== Tier.touch
+    const from = JSON.stringify([layout.modes, layout.controllers, layout.utilities, layout.point, layout.profile, layout.tray.some((c) => c.type === 'keyboard'), motion, screenName()])
+    if (from !== ratedFrom) { ratedFrom = from; ratings = byFit(rateControllers(layout, { motion }, screenName()), layout) }
+    return ratings
+  }
+  /**
+   * Switch to a controller: one tap on the bar or in the catalogue (CATALOGUE §9.4). Its face comes up and, on a shared
+   * face, its variant: the Wii remote or the air mouse, the gamepad or the steering wheel (the Driving profile, kept for
+   * this screen as a profile pick is). The keyboard opens its dock beside whatever is in use.
+   */
+  function pick(id: ControllerId) {
+    if (id === Controller.keyboard) {
+      if (layout.tray.some((c) => c.type === 'keyboard')) keyboard.show('tray')
+      return
+    }
+    const c = choiceFor(id)
+    if (!c) return
+    if (c.point) pointFace = c.point
+    if (c.wheel !== undefined) gamepad.setWheel(c.wheel)
+    if (c.face !== tab) { if (tab !== 'gamepad') lastTab = tab; tab = c.face }
+    setMode()
   }
 
   const applySmooth = () => {
@@ -546,7 +572,10 @@ async function boot(code?: Join) {
     profile: () => { if (surface && mode === Mode.gamepad) sendMode() },
     position: () => control.recenter(),
     recenter: recenterHere, scope: toggleControlScope,
+    controllers: () => switcher.open(),
   })
+  /** The controller bar and the catalogue (./switcher.ts). */
+  const switcher = new Switcher({ pick, feel: (strong) => tick(strong), toast: (text) => toast(text) })
 
   // The top bar's connection badge: encrypted, how the screen was verified, the path and the round trip (./linkbadge.ts).
   const linkBadge = new LinkBadge()
@@ -609,6 +638,8 @@ async function boot(code?: Join) {
     suggestionTaken = false
     sentController = ''
     tab = 'rotate'; lastTab = 'rotate'; mode = Mode.hold
+    pointFace = null; ratedFrom = ''; faceShown = ''
+    switcher.close()
     linkBadge.down()
     keyboard.setField(false)
     if (!next?.welcome) { syncMotion(); startPage(); return }
@@ -951,27 +982,19 @@ async function boot(code?: Join) {
       <div class="surface${settings.left ? ' left' : ''}" id="surface">
         <header class="bar">
           <span class="host-ic">${logoMark()}</span>
-          <button class="host-name connection-title" aria-label="Connections"></button>
+          <button class="host-name connection-title" aria-label="Connections"><span class="host-t"></span>${ICONS.chevron}</button>
           <span id="link-badge"></span>
-          <button class="icon-btn glass lock-btn" id="lock" aria-label="Lock screen rotation" aria-pressed="false">${ICONS.unlock}</button>
-          <button class="icon-btn glass" id="gear" aria-label="Settings">${ICONS.settings}</button>
+          <button class="bar-btn lock-btn" id="lock" aria-label="Lock screen rotation" aria-pressed="false">${ICONS['rotation-free']}</button>
+          <button class="bar-btn" id="gear" aria-label="Settings">${ICONS.settings}</button>
         </header>
         <div class="banner glass" id="banner" hidden></div>
-        <div class="modes glass" role="tablist" aria-label="Control mode">
-          <button role="tab" data-tab="rotate" aria-label="Rotate" title="Rotate">${ICONS.rotate}<span>Rotate</span></button>
-          <button role="tab" data-tab="point" aria-label="Point" title="Point">${ICONS.point}<span>Point</span></button>
-          <button role="tab" data-tab="track" aria-label="3D: the phone's movement in space" title="3D" hidden>${ICONS.cube}<span>3D</span></button>
-          <button role="tab" data-tab="gamepad" aria-label="Gamepad" title="Gamepad" hidden>${ICONS.gamepad}<span>Gamepad</span></button>
-        </div>
-        <div class="styles" id="styles" role="radiogroup" aria-label="Rotation style">
-          <button role="radio" data-style="game">${ICONS.tilt}<span>Tilt</span></button>
-          <button role="radio" data-style="match">${ICONS.match}<span>1:1</span></button>
-        </div>
+        ${switcher.html()}
         <div class="pad glass" id="pad" aria-label="Trackpad">
           <div class="pad-part glass" id="pad-part" hidden><span class="pp-dot"></span><span class="pp-name"></span><span class="pp-tag"></span><button class="pp-x" aria-label="Release part">${ICONS.close}</button></div>
           <div class="gestures" id="gestures" aria-hidden="true"></div>
           <div class="pad-wheel" id="pad-wheel" role="button" aria-label="Scroll wheel · turn it to scroll" hidden></div>
           <div class="level" id="level" aria-hidden="true"><div class="level-ring"></div><div class="level-dot" id="level-dot"></div></div>
+          <div class="hold-spot" id="hold-spot" aria-hidden="true" hidden><i>${ICONS.hand}</i></div>
           <button class="track-start glass" id="track-start" hidden>${ICONS.cube}<b>Start 3D</b><small></small></button>
           <button class="glow-end" id="glow-end" hidden aria-label="Stop glowing">${ICONS.close}</button>
           <button class="glow-stop" id="glow-stop" hidden>Stop</button>
@@ -989,14 +1012,16 @@ async function boot(code?: Join) {
         <div class="mouse" id="mouse" hidden>${mouseFace.html()}</div>
         <div class="tray" id="tray"></div>
         <div class="dock">
-          <button class="gyro glass" id="gyro" aria-pressed="false"><span class="gyro-ic">${ICONS.gyro}</span><span class="gyro-label">Gyro</span><span class="gyro-state"></span></button>
-          <button class="icon-btn square glass" id="center" aria-label="Recenter">${ICONS.center}</button>
+          <button class="gyro glass" id="gyro" aria-pressed="false"><span class="gyro-ic">${ICONS.gyro}</span><span class="gyro-label">Motion</span><span class="gyro-sw" aria-hidden="true"><i></i></span></button>
+          <span id="styles-slot"></span>
+          <button class="icon-btn square glass" id="center" aria-label="Recenter">${ICONS.center}<span class="center-t">Set position</span></button>
         </div>
       </div>
       ${keyboard.html()}
       <div class="toast glass" id="toast" role="status" aria-live="polite"></div>
       <div class="rest" id="rest" aria-hidden="true"><span>Resting to keep your phone cool · touch to wake</span></div>`)
     surface = document.getElementById('surface')!
+    switcher.mount(surface)
     linkBadge.mount(document.getElementById('link-badge')!)
     document.querySelector<HTMLButtonElement>('.connection-title')!.onclick = () => openConnections()
     document.body.classList.add('live')
@@ -1004,13 +1029,6 @@ async function boot(code?: Join) {
     gamepad.mount(surface)
     drums.mount(surface)
     keys.mount(surface)
-    // Music faces are catalogue entries: create their bar button only when the screen offers them.
-    for (const [id, label, glyph] of [['drums', 'Drums', 'tap'], ['keys', 'Keys', 'keyboard']]) {
-      const musicTab = document.createElement('button')
-      musicTab.type = 'button'; musicTab.dataset.tab = id; musicTab.setAttribute('role', 'tab'); musicTab.setAttribute('aria-label', label)
-      setMarkup(musicTab, html`${ICONS[glyph]}<span>${label}</span>`); musicTab.hidden = true
-      surface.querySelector('.modes')!.append(musicTab)
-    }
     mouseFace.bind(document.getElementById('mouse')!)
     keyboard.bind(app)
     // The trackpad's scroll wheel along its edge, for a screen that drives a mouse pointer (Layout.wheel).
@@ -1059,12 +1077,16 @@ async function boot(code?: Join) {
     })
     document.getElementById('lock')!.addEventListener('click', () => { tick(); dismissHint('lock'); void setLock(!lock.locked) })
     renderLock()
-    surface.querySelectorAll<HTMLButtonElement>('.modes button').forEach((b) => {
-      b.onclick = () => { tick(); if (tab !== 'gamepad') lastTab = tab; tab = b.dataset.tab as Tab; setMode() }
+    // What motion steers by, Tilt or 1:1: the kit's segmented control, in the dock beside the motion switch.
+    styleSeg = new Segmented({
+      label: 'Motion steers by', value: settings.style, className: 'styles',
+      items: [{ value: 'game', label: 'Tilt', icon: ICONS.tilt }, { value: 'match', label: '1:1', icon: ICONS.match }],
+      onChange: (v) => { tick(); settings.style = v as Style; store.set('obpal.style', settings.style); setMode() },
     })
-    surface.querySelectorAll<HTMLButtonElement>('.styles button').forEach((b) => {
-      b.onclick = () => { tick(); settings.style = b.dataset.style as Style; store.set('obpal.style', settings.style); setMode() }
-    })
+    styleSeg.el.id = 'styles'
+    // Pages, tests and hints name the two by their style (game, match).
+    styleSeg.el.querySelectorAll<HTMLElement>('[data-value]').forEach((b) => { b.dataset.style = b.dataset.value })
+    document.getElementById('styles-slot')!.replaceWith(styleSeg.el)
     document.getElementById('gear')!.onclick = openSettings
     const tapBtn = (el: string, id: string) => {
       document.getElementById(el)!.addEventListener('click', () => { tick(); link.sendCtl({ t: 'btn', id, ev: 'tap' }); dismissHint('point') })
@@ -1113,15 +1135,25 @@ async function boot(code?: Join) {
     else { render(); sendMode() }
     pump(16.7)
     hint('models', () => document.querySelector('.tray-btn.select'), 'Browse the catalogue', { place: 'top', delay: 9000 })
+    hint('more', () => document.getElementById('ctl-more'), 'Every controller, rated for this screen', { place: 'bottom', delay: 12000 })
   }
 
   function render() {
     if (!surface) return
-    for (const id of ['drums', 'keys'] as const) {
-      const offered = layout.controllers?.includes(Controller[id]) ?? false
-      surface.querySelector<HTMLElement>(`[data-tab=${id}]`)!.hidden = !offered
-      if (tab === id && !offered) { tab = suggestedTab() ?? 'rotate'; queueMicrotask(setMode) }
+    // Only what this screen takes (./ratings.ts): a controller it stops taking gives way to the best one it does take.
+    const sorted = rated()
+    const was = controllerNow()
+    const next = fallback(sorted, was)
+    if (next && next !== was) {
+      const c = choiceFor(next)!
+      if (c.point) pointFace = c.point
+      if (c.wheel !== undefined && c.wheel !== (gamepad.profileInUse === 'driving')) gamepad.setWheel(c.wheel, false)
+      if (c.face !== tab) { if (tab !== 'gamepad') lastTab = tab; tab = c.face }
+      // Said when the screen changed what it takes under a controller it had been told about, not on first joining.
+      if (sentController === was) toast(`${CONTROLLERS[was].name} isn’t on ${screenName()} now`)
+      queueMicrotask(setMode)
     }
+    switcher.render(sorted, controllerNow(), screenName(), keyboard.open)
     const isMusic = tab === 'drums' || tab === 'keys'
     if (isMusic !== musicActive) { musicActive = isMusic; musicWire.use(isMusic) }
     surface.classList.toggle('music-on', isMusic)
@@ -1130,11 +1162,11 @@ async function boot(code?: Join) {
     surface.dataset.mode = String(mode)
     surface.classList.toggle('no-motion', tier === Tier.touch)
     surface.classList.toggle('gyro-on', gyroOn)
-    surface.querySelector('.host-name')!.textContent = link.active?.row.name ?? hostName
-    surface.querySelectorAll<HTMLButtonElement>('.modes button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === tab)))
-    const styles = document.getElementById('styles')!
-    styles.hidden = tab !== 'rotate' || !(styleAvailable('game') && styleAvailable('match'))
-    styles.querySelectorAll<HTMLButtonElement>('button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.style === settings.style)))
+    surface.querySelector('.host-t')!.textContent = screenName()
+    if (styleSeg) {
+      styleSeg.el.hidden = tab !== 'rotate' || !(styleAvailable('game') && styleAvailable('match'))
+      styleSeg.value = settings.style
+    }
     const pointing = mode === Mode.point && tier !== Tier.touch
     const mouseFaceEl = document.getElementById('mouse')!
     if (!mouseFaceEl.hidden && !(pointing && mouseOn())) mouseFace.reset()
@@ -1146,20 +1178,6 @@ async function boot(code?: Join) {
     wheelEl.hidden = !wheelOn
     document.getElementById('pad')!.hidden = pointing
     document.getElementById('gyro')!.hidden = pointing || mode === Mode.track
-    // 3D: offered where the host takes it and this phone can track itself.
-    const trackTab = surface.querySelector<HTMLElement>('.modes [data-tab=track]')!
-    trackTab.hidden = !hostModes().includes(Mode.track)
-    if (tab === 'track' && trackTab.hidden) { tab = 'rotate'; queueMicrotask(setMode) }
-    // Only the modes this screen takes: a screen that only takes pointing (the home page's try-out) opens in Point.
-    const rotateTab = surface.querySelector<HTMLElement>('.modes [data-tab=rotate]')!
-    const pointTab = surface.querySelector<HTMLElement>('.modes [data-tab=point]')!
-    const hm = hostModes()
-    rotateTab.hidden = !(hm.includes(Mode.hold) || hm.includes(Mode.tilt))
-    pointTab.hidden = !hm.includes(Mode.point)
-    if ((tab === 'rotate' && rotateTab.hidden) || (tab === 'point' && pointTab.hidden) || (tab === 'track' && trackTab.hidden)) {
-      const next: Tab = !pointTab.hidden ? 'point' : !rotateTab.hidden ? 'rotate' : tab
-      if (next !== tab) { tab = next; queueMicrotask(setMode) }
-    }
     if (mode !== Mode.track) glowing = false
     const start = document.getElementById('track-start')!
     // The phone's own sensors need no start: hold the pad and move. The camera ways start from a tap.
@@ -1181,8 +1199,19 @@ async function boot(code?: Join) {
     const gyro = document.getElementById('gyro')!
     const noMotion = tier === Tier.touch
     gyro.setAttribute('aria-pressed', String(gyroOn))
+    gyro.setAttribute('aria-disabled', String(noMotion))
+    gyro.title = noMotion ? 'Motion is off on this phone' : ''
     gyro.classList.toggle('on', gyroOn)
-    gyro.querySelector('.gyro-state')!.textContent = noMotion ? 'Unavailable' : gyroOn ? 'On' : 'Off'
+    // The 3D hand from the phone's own sensors: a spot to hold while the phone moves.
+    document.getElementById('hold-spot')!.hidden = !(mode === Mode.track && trackWay() === 'motion' && !glowing)
+    // The face in use came up: it rises in (the controller bar's switch is one tap and one movement).
+    const face = mode === Mode.gamepad ? 'gp' : isMusic ? tab : pointing ? (mouseOn() ? 'mouse' : 'wii') : `pad:${tab}`
+    if (face !== faceShown) {
+      const first = !faceShown
+      faceShown = face
+      const el = mode === Mode.gamepad ? null : isMusic ? surface.querySelector<HTMLElement>(`.${tab}-face`) : document.getElementById(pointing ? (mouseOn() ? 'mouse' : 'wii') : 'pad')
+      if (el && !first) { el.classList.remove('face-in'); void el.offsetWidth; el.classList.add('face-in') }
+    }
 
     // Part under the pointer / selected part (sent by the host as state values).
     const part = String(values.part ?? '')
@@ -1233,8 +1262,19 @@ async function boot(code?: Join) {
       ? [g('drag', 'move'), g('pinch', 'scale'), g('twist', 'turn'), g('tap', '2? reset')]
       : mode === Mode.point
       ? [gyroOn ? g('point', 'aim') : g('drag', 'move'), g('tap', 'focus'), g('pan', 'pan'), g('pinch', 'zoom')]
+      : mode === Mode.track
+      ? [g('tap', 'hold'), g('phone', 'move'), g('hand', 'follows')]
       : [g('drag', 'orbit'), g('pan', 'pan'), g('pinch', 'zoom'), g('twist', 'roll')])
-    gamepad.sync({ active: mode === Mode.gamepad, offered: hostModes().includes(Mode.gamepad) })
+    gamepad.sync({ active: mode === Mode.gamepad })
+    // The gamepad's way back, drawn as where it goes: the controller it came from, else the best other one this screen
+    // takes (a screen that opened on the gamepad); a screen with nothing else has no way back.
+    let back: ControllerId | null = controllerOn(lastTab, { point: mouseOn() ? 'mouse' : 'wii', wheel: false })
+    if (!sorted.some((r) => r.id === back && r.fit > 0)) {
+      const other = barSlots(sorted, controllerNow()).find((s) => s.face !== 'gamepad')
+      if (other) lastTab = other.face as Exclude<Tab, 'gamepad'>
+      back = other?.id ?? null
+    }
+    gamepad.setBack(back && ICONS[CONTROLLER_ICON[back]], back && CONTROLLERS[back].name)
     gamepad.setControlScope(control.scope, String(values['control.target'] ?? ''))
     placeTyping()
     // The controller may have changed: Back's arming follows its bindings, and the badges go on what's shown.
@@ -1327,18 +1367,25 @@ async function boot(code?: Join) {
     if (!tray) return
     tray.replaceChildren()
     if (control.sim) {
-      const position = document.createElement('button'), scope = document.createElement('button')
-      position.className = scope.className = 'tray-btn glass text'
-      position.type = scope.type = 'button'
-      position.textContent = 'Set position'; position.dataset.id = 'control.position'
+      /** A tool of the calibrated sim space: an icon and a word, with its full name for the ear. */
+      const tool = (id: string, label: string, glyph: string, word: string) => {
+        const b = document.createElement('button')
+        b.type = 'button'; b.className = 'tray-btn glass'; b.dataset.id = id
+        b.setAttribute('aria-label', label); b.title = label
+        setMarkup(b, html`${icon(glyph)}<span class="tray-label"></span>`)
+        b.querySelector('.tray-label')!.textContent = word
+        return b
+      }
+      const position = tool('control.position', 'Set position', 'center', 'Position')
       position.onclick = () => { void requestMotionPermission(); tick(); recenterHere() }
-      scope.textContent = control.scope === 'object' ? 'Object scope' : 'Scene scope'
-      scope.dataset.id = 'control.scope'; scope.setAttribute('aria-pressed', String(control.scope === 'scene'))
+      // Object or scene scope: one toggle, lit for the scene, drawn as what it reaches.
+      const wide = control.scope === 'scene'
+      const scope = tool('control.scope', 'Scene scope', wide ? 'scene' : 'cube', wide ? 'Scene' : 'Object')
+      scope.setAttribute('aria-pressed', String(wide))
       scope.onclick = toggleControlScope
       tray.append(position, scope)
-      if (control.scope === 'scene' && !['studio', 'airhockey', 'football', 'pinball', 'slotcars', 'arena'].includes(control.sim)) {
-        const take = document.createElement('button'); take.type = 'button'; take.className = 'tray-btn glass text'
-        take.textContent = `Take ${values['control.target'] || 'aimed object'}`; take.dataset.id = 'control.take'
+      if (wide && !['studio', 'airhockey', 'football', 'pinball', 'slotcars', 'arena'].includes(control.sim)) {
+        const take = tool('control.take', `Take ${values['control.target'] || 'aimed object'}`, 'take', 'Take')
         take.onclick = () => link.sendCtl({ t: 'btn', id: 'control.take', ev: 'tap' })
         tray.append(take)
       }
@@ -1397,7 +1444,18 @@ async function boot(code?: Join) {
       tray.appendChild(b)
     }
     tray.hidden = !control.sim && layout.tray.length === 0 && !(scene && scene.nodes.length)
+    tray.onscroll = trayEdge
+    requestAnimationFrame(trayEdge)
   }
+
+  /** The tray fades out at its far edge while there's more of it to scroll to (sideways, or down in landscape). */
+  function trayEdge() {
+    const t = document.getElementById('tray')
+    if (!t) return
+    const more = document.documentElement.classList.contains('land') ? t.scrollHeight - t.clientHeight - t.scrollTop > 2 : t.scrollWidth - t.clientWidth - t.scrollLeft > 2
+    t.classList.toggle('more', more)
+  }
+  addEventListener('resize', () => requestAnimationFrame(trayEdge))
 
   /**
    * Bottom sheet for 'select' tray controls: thumbnails grouped by collection. `onPick` replaces sending the value
@@ -1497,21 +1555,24 @@ async function boot(code?: Join) {
     setMarkup(sheet, html`
       <div class="sheet settings glass" role="dialog" aria-label="Settings">
         <div class="sheet-head"><div class="grip" aria-hidden="true"></div><button class="icon-btn glass sheet-x" id="set-close" aria-label="Close">${ICONS.close}</button></div>
+        <p class="sheet-k"><b>01</b>Feel</p>
         <label class="bb-field"><span>Sensitivity</span><output id="gv"></output><input class="bb-range" type="range" id="gain" min="0.5" max="3" step="0.1"></label>
         <label class="bb-field"><span>Steadiness</span><output id="sv"></output><input class="bb-range" type="range" id="smooth" min="0" max="1" step="0.05"></label>
-        <p class="sheet-k">These adjust tilt and aiming. 1:1 turn follows your phone exactly.</p>
-        <p class="sheet-k">Surface</p>
+        <p class="meta">These adjust tilt and aiming. 1:1 turn follows your phone exactly.</p>
+        <label class="row sw-row"><span>Feedback on phone and gamepad</span><input type="checkbox" class="kit-switch" role="switch" id="feedback"></label>
+        <p class="sheet-k"><b>02</b>Surface</p>
         <div class="theme-row" role="radiogroup" aria-label="Surface">${THEMES.map((t) => html`<button class="theme-opt" role="radio" data-theme="${t.id}" aria-checked="${document.documentElement.dataset.theme === t.id}">${swatch(t)}<span>${t.name}</span></button>`)}</div>
-        <p class="sheet-k">Colour${seatColor ? html`<small> · yours in this scene</small>` : ''}</p>
+        <p class="sheet-k"><b>03</b>Colour${seatColor ? html`<small> · yours in this scene</small>` : ''}</p>
         <div class="accent-row" role="radiogroup" aria-label="Colour">${family.ACCENTS.map((a) => html`<button class="bb-accent${a.id === 'product' ? ' product' : ''}" role="radio" data-accent="${a.id}" aria-checked="${family.getAccent() === a.id}" aria-label="${a.id === 'product' ? 'ob.Pal lime (default)' : a.name}" style="--sw:${a.color ?? '#c6ff34'}">${family.icons.check}</button>`)}</div>
-        <label class="row"><input type="checkbox" id="left"> Left-handed</label>
-        <label class="row"><input type="checkbox" id="feedback"> Feedback on phone and gamepad</label>
-        <label class="row"><input type="checkbox" id="lockgyro"> Lock rotation while the gyro is on</label>
-        <div class="row track3d" role="radiogroup" aria-label="3D follows"><span>3D follows</span>${(['motion', 'xr', 'glow'] as const).map((w) => html`<button class="way-opt" role="radio" data-way="${w}" aria-checked="${settings.track3d === w}"><span>${{ motion: 'The phone’s motion', xr: 'Its camera (Android)', glow: 'A glow for the screen’s camera' }[w]}</span></button>`)}</div>
+        <p class="sheet-k"><b>04</b>Holding it</p>
+        <label class="row sw-row"><span>Left-handed</span><input type="checkbox" class="kit-switch" role="switch" id="left"></label>
+        <label class="row sw-row"><span>Lock rotation while motion steers</span><input type="checkbox" class="kit-switch" role="switch" id="lockgyro"></label>
+        <div class="row track3d" role="radiogroup" aria-label="3D follows"><span>The 3D hand follows</span>${(['motion', 'xr', 'glow'] as const).map((w) => html`<button class="way-opt" role="radio" data-way="${w}" aria-checked="${settings.track3d === w}" title="${{ motion: 'The phone’s own motion sensors', xr: 'Its camera, through space (Android)', glow: 'A glow for the screen’s camera' }[w]}">${ICONS[{ motion: 'gyro', xr: 'camera', glow: 'glow' }[w]]}<span>${{ motion: 'Motion', xr: 'Camera', glow: 'Glow' }[w]}</span></button>`)}</div>
+        <p class="sheet-k"><b>05</b>More</p>
         <button class="set-row glass" id="buttons-open">${BUTTONS_GLYPH}<span>Buttons<small>Headset, remote, clicker, pad</small></span><span class="set-srcs">${sourceStack(inputs)}</span>${ICONS.right}</button>
-        <a class="support-link" href="/sponsor/" target="_blank" rel="noopener">${ICONS.heart}<span>Support ob.Pal</span></a>
         <button class="set-row glass" id="connections-open">${ICONS.phone}<span>Connections<small>Switch, rename or forget a screen</small></span>${ICONS.right}</button>
-        <button class="set-row glass" id="scan-open">${ICONS.phone}<span>Scan a code<small>Connect another screen</small></span>${ICONS.right}</button>
+        <button class="set-row glass" id="scan-open">${ICONS.scan}<span>Scan a code<small>Connect another screen</small></span>${ICONS.right}</button>
+        <a class="support-link" href="/sponsor/" target="_blank" rel="noopener">${ICONS.heart}<span>Support ob.Pal</span></a>
         <div class="actions"><button class="btn" id="disc">Disconnect</button><button class="btn primary" id="done">Done</button></div>
       </div>`)
     document.body.appendChild(sheet)
