@@ -279,3 +279,8 @@ html.phone .top-menu { margin-left: auto; }
 /* Keep the hero's drawn block sides while sharing the frosted edge. */
 .cta-alt, .qi, .pair, .hero-hint, .hero-sound, .scene-modes { border-color: var(--frost-edge); }
 .pair, .scene-modes { box-shadow: var(--frost-shadow); }
+.home-faq { max-width: 960px; margin: 72px auto; padding: 0 24px; }
+.home-faq h2 { margin-bottom: 28px; }
+.home-faq article { border-top: 1px solid var(--frost-edge); padding: 20px 0; }
+.home-faq h3 { margin: 0 0 8px; font-size: 18px; }
+.home-faq p { margin: 0; line-height: 1.6; color: var(--muted); }

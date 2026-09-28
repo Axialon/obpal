@@ -271,3 +271,4 @@ Object.assign(window, {
     side: () => ({ mode: side.mode, expanded: side.expanded }),
   },
 })
+document.getElementById('seo-list')?.remove()

@@ -45,6 +45,14 @@ export default {
     if (url.pathname === '/api/ice') return iceServers(req, url, env)
     if (url.pathname === '/api/code') return lookupCode(req, env)
     if (PAYMENT_ROUTES.includes(url.pathname)) return (await handlePayment(req, env)) ?? new Response('Not found', { status: 404 })
+    if (url.pathname === '/sim/device/' && url.searchParams.has('d')) {
+      const id = url.searchParams.get('d') ?? ''
+      if (/^[a-z0-9-]+$/.test(id)) {
+        const canonical = new URL(`/sim/${id}/`, url)
+        const page = await env.ASSETS.fetch(new Request(canonical, req))
+        if (page.ok) return page
+      }
+    }
     return env.ASSETS.fetch(req)
   },
 } satisfies ExportedHandler<Env>

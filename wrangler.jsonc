@@ -5,7 +5,7 @@
   "name": "obpal",
   "main": "./worker/index.ts",
   "compatibility_date": "2026-07-29",
-  "assets": { "binding": "ASSETS", "not_found_handling": "404-page" },
+  "assets": { "binding": "ASSETS", "not_found_handling": "404-page", "run_worker_first": ["/api/*", "/r/*", "/sim/device/*"] },
   "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "Room" }, { "name": "CODES", "class_name": "Codes" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }, { "tag": "v2", "new_sqlite_classes": ["Codes"] }],
   "routes": [{ "pattern": "obpal.blackboxes.net", "custom_domain": true }],

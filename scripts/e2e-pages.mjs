@@ -36,6 +36,44 @@ try {
   worker = await startWorker({ port: PORT })
   console.log(`ob.Pal pages e2e (${worker.origin})`)
   browser = await chromium.launch({ executablePath, headless: !HEADED })
+  await check('robots, sitemap and agent digest are served', async () => {
+    const [robots, sitemap, llms, full] = await Promise.all(['/robots.txt', '/sitemap.xml', '/llms.txt', '/llms-full.txt'].map(p => fetch(worker.origin + p)))
+    for (const r of [robots, sitemap, llms, full]) if (!r.ok) throw new Error(`${r.url}: ${r.status}`)
+    const rules = await robots.text()
+    if (!rules.includes('search=yes, ai-input=yes, ai-train=yes') || !rules.includes('Sitemap: https://obpal.blackboxes.net/sitemap.xml') || rules.includes('Disallow:')) throw new Error('robots rules')
+    if (!(await llms.text()).includes('ob.Pal Link') || !(await full.text()).includes('WebRTC')) throw new Error('agent digest')
+    const xml = await sitemap.text()
+    const urls = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1])
+    if (urls.length < 40 || urls.some(u => u.includes('/sim/device/'))) throw new Error(`${urls.length} sitemap URLs`)
+    for (const canonical of urls) {
+      const response = await fetch(worker.origin + new URL(canonical).pathname)
+      if (!response.ok) throw new Error(`${canonical}: ${response.status}`)
+      const html = await response.text()
+      if (!html.includes(`<link rel="canonical" href="${canonical}"`)) throw new Error(`${canonical}: canonical`)
+      const scripts = [...html.matchAll(/<script type="application\/ld\+json">([^<]+)<\/script>/g)]
+      if (!scripts.length) throw new Error(`${canonical}: JSON-LD missing`)
+      for (const script of scripts) JSON.parse(script[1])
+    }
+    return `${urls.length} canonical pages with JSON-LD`
+  })
+  await check('controller is noindexed and old device URLs name the clean canonical', async () => {
+    const phone = await (await fetch(worker.origin + '/p/')).text()
+    if (!phone.includes('name="robots" content="noindex, follow"')) throw new Error('/p/ indexable')
+    const old = await fetch(worker.origin + '/sim/device/?d=rover')
+    if (!old.ok || !(await old.text()).includes('href="https://obpal.blackboxes.net/sim/rover/"')) throw new Error('old device URL')
+  })
+  await check('catalogue and device descriptions show without JavaScript', async () => {
+    const ctx = await browser.newContext({ javaScriptEnabled: false })
+    try {
+      const page = await ctx.newPage()
+      await page.goto(worker.origin + '/sim/')
+      if (await page.locator('#seo-list li').count() < 41 || !await page.getByRole('link', { name: 'Rover', exact: true }).count()) throw new Error('catalogue text')
+      await page.goto(worker.origin + '/sim/rover/')
+      if (!await page.getByRole('heading', { name: 'Rover' }).count() || !await page.locator('#seo-device').getByText('Steering wheel').count()) throw new Error('device text and controls')
+      await page.goto(worker.origin + '/')
+      if (!await page.getByRole('heading', { name: /Your phone is the controller/ }).count() || !await page.getByText('Robot arms follow your hand', { exact: false }).count()) throw new Error('home text')
+    } finally { await ctx.close() }
+  })
   for (const path of PAGES) {
     await check(`${path} keeps to its policy, and its fonts come from here`, async () => {
       const ctx = await browser.newContext(path === '/p/' ? { ...devices['Pixel 7'] } : { viewport: { width: 1280, height: 800 } })

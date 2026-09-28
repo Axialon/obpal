@@ -184,7 +184,7 @@ try {
         const card = page.locator(`.dcard[data-id="${id}"]`)
         await card.scrollIntoViewIfNeeded()
         await until(`${id} preview`, () => card.locator('.dcard-stage.live').count(), 15000)
-        if (await card.locator('.dcard-go').getAttribute('href') !== `/sim/device/?d=${id}`) throw new Error(`${id} link`)
+        if (await card.locator('.dcard-go').getAttribute('href') !== `/sim/${id}/`) throw new Error(`${id} link`)
       }
     })
     await check('catalogue: a controller filters the cards, and the address keeps it', async () => {
@@ -338,7 +338,7 @@ try {
     })
     await check('catalogue: Try it opens the sim, its pairing chip waiting for a phone', async () => {
       await page.locator('.dcard[data-id="rover"] .dcard-go').click()
-      await page.waitForURL(/\/sim\/device\/\?d=rover/)
+      await page.waitForURL(/\/sim\/rover\//)
       await until('pairing', () => page.evaluate(() => window.__obpal?.pairingUrl || ''), 20000)
       return page.url().replace(ORIGIN, '')
     })

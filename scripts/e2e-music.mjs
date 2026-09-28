@@ -33,7 +33,7 @@ export async function runMusic(local, check) {
       assert((await screen.evaluate(() => window.__sims.cards())).join() === 'studio', 'Drums filter')
       await chooseFace(screen, 'face.keys')
       assert((await screen.evaluate(() => window.__sims.cards())).join() === 'studio', 'Keys filter')
-      assert(await screen.locator('.dcard[data-id="studio"] .dcard-go').getAttribute('href') === '/sim/device/?d=studio', 'Studio card route')
+      assert(await screen.locator('.dcard[data-id="studio"] .dcard-go').getAttribute('href') === '/sim/studio/', 'Studio card route')
       assert(!contextId, 'The preview started audio')
       await screen.screenshot({ path: join(dir, 'catalogue-1280x800.png') })
     })

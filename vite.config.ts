@@ -1,10 +1,13 @@
 import { createHash } from 'node:crypto'
-import { readdirSync, readFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build, defineConfig, type Plugin } from 'vite'
 import { markupBuild } from './scripts/markup-build.mjs'
 import { pageWords, previewTags } from './scripts/lib/preview.mjs'
+import { catalogueMarkup, deviceMarkup, faqMarkup, INDEXABLE_PAGES, jsonLd, robotsTxt, sitemapXml, structuredData } from './scripts/lib/seo.mjs'
+import { loadSims } from './scripts/lib/load-sims.mjs'
 import { cloudflare } from '@cloudflare/vite-plugin'
 import { checkProfile, CONTROLLER_ID, CONTROLLER_IDS, CONTROLLERS, MOTION_UTILITIES, PROFILE_IDS, PROFILE_LIMITS, PROFILES, ROUTES, utilityKey } from './packages/core/src/catalogue'
 import { APP_ACTIONS, BUTTON_TARGET, DEFAULT_BUTTONS, INPUT_ID, INPUT_OPTIONS, KEY_TARGETS, SMART_BUTTONS } from './packages/core/src/buttons'
@@ -12,6 +15,7 @@ import { Mode } from './packages/core/src/state'
 import { BRIDGE_ROWS, EMBED, REPO, SYSTEM_ROWS, UTILITY_ROWS } from './src/catalogue/data'
 
 const root = fileURLToPath(new URL('.', import.meta.url))
+const { SIMS, DEVICE_IDS } = await loadSims(root, build)
 
 /**
  * Files the phone needs to open the controller with no internet, besides the page's own build assets: the icons, and
@@ -280,8 +284,49 @@ function pagePreviews(): Plugin {
   return { name: 'obpal-page-previews', transformIndexHtml: (html, ctx) => ({ html, tags: previewTags(html, ctx.path, { fallback: fallback(), origin: PUBLIC_ORIGIN }) }) }
 }
 
+/** Crawlable page text and metadata, built from the same sim catalogue the browser uses. */
+function searchPages(): Plugin {
+  const controllerName = (id: string) => CONTROLLERS[id as keyof typeof CONTROLLERS].name
+  const gitDate = (path: string) => {
+    const source = path === '/' ? 'index.html' : path.startsWith('/sim/') ? 'src/sim' : `${path.slice(1)}index.html`
+    try { return execFileSync('git', ['log', '-1', '--format=%cs', '--', source], { cwd: root, encoding: 'utf8' }).trim() || '2026-09-28' }
+    catch { return '2026-09-28' }
+  }
+  return {
+    name: 'obpal-search-pages',
+    apply: 'build',
+    transformIndexHtml: {
+      order: 'post',
+      handler(html, ctx) {
+        const path = ctx.path.replace(/index\.html$/, '')
+        const indexable = INDEXABLE_PAGES.includes(path)
+        const canonical = `<link rel="canonical" href="${new URL(path, PUBLIC_ORIGIN)}" />`
+        const noindex = indexable ? '' : '<meta name="robots" content="noindex, follow" />'
+        const schema = indexable ? `<script type="application/ld+json">${jsonLd(structuredData(path, SIMS))}</script>` : ''
+        let out = html.replace('</head>', `    ${canonical}\n    ${noindex}\n    ${schema}\n  </head>`)
+        if (path === '/sim/') out = out.replace('<section class="sims-grid"', `${catalogueMarkup(SIMS, controllerName)}\n      <section class="sims-grid"`)
+        if (path === '/') out = out.replace('<section class="closer"', `${faqMarkup()}\n      <section class="closer"`)
+        return out
+      },
+    },
+    writeBundle(options, bundle) {
+      if (this.environment?.name !== 'client' || !options.dir) return
+      const template = bundle['sim/device/index.html']
+      if (!template || template.type !== 'asset') throw new Error('The device page was not built')
+      const deviceIds = new Set(DEVICE_IDS)
+      for (const card of SIMS.filter(c => deviceIds.has(c.id))) {
+        const target = join(options.dir, 'sim', card.id, 'index.html')
+        mkdirSync(join(options.dir, 'sim', card.id), { recursive: true })
+        writeFileSync(target, deviceMarkup(String(template.source), card, controllerName))
+      }
+      writeFileSync(join(options.dir, 'robots.txt'), robotsTxt())
+      writeFileSync(join(options.dir, 'sitemap.xml'), sitemapXml(SIMS, gitDate))
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [markupBuild(root), cloudflare(), controllerServiceWorker(), embedScript(), catalogueFiles(), linkVersion(), pagePreviews(), pagePolicy()],
+  plugins: [markupBuild(root), cloudflare(), controllerServiceWorker(), embedScript(), catalogueFiles(), linkVersion(), pagePreviews(), searchPages(), pagePolicy()],
   server: { port: 5175, strictPort: true },
   environments: {
     client: {

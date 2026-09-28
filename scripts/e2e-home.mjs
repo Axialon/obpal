@@ -48,6 +48,8 @@ import { startLocal } from '../extension/e2e/local.mjs'
 import { trayReading } from './lib/orientation.mjs'
 
 const HEADED = process.argv.includes('--headed')
+const ONLY = process.argv.find((arg) => arg.startsWith('--only='))?.slice(7) || ''
+const ONLY_DONE = Symbol('only test finished')
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
 // Software WebGL for the hero's 3D field in headless runs.
 const RTC_ARGS = ['--disable-features=WebRtcHideLocalIpsWithMdns', '--ignore-certificate-errors', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']
@@ -151,6 +153,7 @@ async function rimAt(page, wall, at, a) {
   return best
 }
 async function check(name, fn) {
+  if (ONLY && !name.includes(ONLY)) return
   try {
     const detail = await fn()
     results.push({ name, ok: true })
@@ -159,6 +162,7 @@ async function check(name, fn) {
     results.push({ name, ok: false })
     console.log(`  ✗ ${name}: ${e?.message ?? e}`)
   }
+  if (ONLY) throw ONLY_DONE
 }
 
 // OBPAL_E2E_PORT runs the stand-in elsewhere than its usual 5176, beside another run.
@@ -1191,6 +1195,8 @@ try {
 
   await check('no page errors on the computer', async () => { if (screenErrors.length) throw new Error(screenErrors.join(' | ')) })
   await check('no Content Security Policy violations on any page', cspCheck)
+} catch (e) {
+  if (e !== ONLY_DONE) throw e
 } finally {
   for (const b of browsers.reverse()) await b.close().catch(() => {})
   if (profile) await rm(profile, { recursive: true, force: true }).catch(() => {})

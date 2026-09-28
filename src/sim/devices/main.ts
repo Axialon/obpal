@@ -29,7 +29,7 @@ import { restInput } from './types'
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 const params = new URLSearchParams(location.search)
-const entry = deviceById(params.get('d')) ?? DEVICES[0]
+const entry = deviceById(params.get('d') ?? location.pathname.split('/')[2]) ?? DEVICES[0]
 const spec = entry.spec
 
 applyTheme(initialTheme())
@@ -42,6 +42,7 @@ document.title = `${spec.name} · ob.Pal`
 $('dev-kind').textContent = spec.kind
 $('dev-name').textContent = spec.name
 $('dev-blurb').textContent = spec.blurb
+document.getElementById('seo-device')?.remove()
 $('stage').setAttribute('aria-label', spec.name)
 
 const stage = createStage($<HTMLCanvasElement>('stage'), themeById(family.getTheme()))

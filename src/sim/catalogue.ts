@@ -40,9 +40,10 @@ const deviceCards: SimCard[] = DEVICES.map((d) => ({
   teaches: d.spec.teaches,
   controllers: d.spec.controllers,
   how: d.spec.how,
-  href: `/sim/device/?d=${d.spec.id}`,
+  href: `/sim/${d.spec.id}/`,
   preview: () => d.view().then((m) => m.preview()),
 }))
+export const DEVICE_IDS = deviceCards.map(c => c.id)
 
 /** The sims that aren't devices: the arena and the Viewer (the arms come from ./arms.ts). */
 const SCENES: SimCard[] = [

@@ -1,0 +1,101 @@
+# ob.Pal
+
+> ob.Pal makes any phone the controller for what's on a screen: 3D scenes, browser games, over 40 sims (robot arms, drones, vehicles, a music studio) and the computer itself. A page shows a QR code and a short code; the phone that scans or types it opens the controller that suits the page (gamepad, wheel, pointer, 3D hand, keyboard, drums) in its browser: no app, no account. Up to eight phones share a scene, peer to peer over encrypted WebRTC. Open source (MIT): https://github.com/Axialon/obpal
+
+## Put it on any page: one tag
+
+Copy this into a page. The element shows a "Scan to control" chip in a corner; a phone that scans its QR code, or types its short code at obpal.blackboxes.net/p (for a TV, a headset or a phone across the room), controls the page. It draws only in its shadow root, needs no inline scripts or styles, and several can share a page.
+
+```html
+<script type="module" src="https://obpal.blackboxes.net/embed.js"></script>
+<obpal-remote app="My scene" seats="4" modes="face.trackpad face.wii"></obpal-remote>
+<script type="module">
+  await customElements.whenDefined('obpal-remote')
+  const pal = document.querySelector('obpal-remote')
+  // What phones may take over: each phone holds one node at a time, picked from its scene list.
+  pal.setScene({ nodes: [{ id: 'cube', name: 'Cube', kind: 'object' }] })
+  pal.addEventListener('obpal-join', (e) => console.log(e.detail.participant.name, 'joined'))
+  pal.addEventListener('obpal-button', (e) => console.log(e.detail.id, e.detail.ev))
+  requestAnimationFrame(function loop(now) {
+    for (const p of pal.participants) {
+      const f = pal.frame(now, p.id) // this frame's input from that phone
+      if (pal.holding(p.id) === 'cube') cube.position.x += f.pad1[0] * 0.01 // a drag, in CSS px on the phone
+    }
+    requestAnimationFrame(loop)
+  })
+</script>
+```
+
+- Attributes:
+  - `app`: the name the phone shows;
+  - `modes`: what the phone offers, in order, the first opening on it: mode names (`point`, `hold`, `tilt`, `pad`, `gamepad`, `track`) and catalogue controller ids (`face.gamepad`, `face.wheel`, `face.wii`, `face.mouse`, `face.trackpad`, `face.hand`, `face.keyboard`, `face.drums`, `face.keys`; `controllers` in /catalogue.json);
+  - `seats`: 1 (a new phone takes over, the default) to 8 (a shared scene);
+  - `profile`: a catalogue profile to suggest;
+  - the chip: `corner` (`bottom-right`, `bottom-left`, `top-right`, `top-left` or `inline`), `accent`, `open`, `label`, `scheme` (`auto`, `light`, `dark`), `code` (`false` hides the short code), `test-link`.
+- Events (they bubble): `obpal-connect`, `obpal-join`, `obpal-leave`, `obpal-button` (tray buttons, trackpad taps as `pad`, the Wii face as `wii-a`, `wii-b`, …), `obpal-disconnect`, `obpal-status`, `obpal-mode` (the controller a phone switched to), `obpal-claim` (cancel it to decide claims yourself), `obpal-text`, `obpal-value`, `obpal-toss`, `obpal-recenter`, `obpal-pad`. Each has `detail.participant`: `{ id, name, color, lead, caps, controller, profile }`.
+- Each frame, `pal.frame(now, who?)` returns the input of the lead, or of one participant: `qRel` (1:1 rotation while `clutch`), `tilt`, `pad1`, `pad2`, `zoom`, `twist`, `aim`, `pose`. Call it once per rendered frame for each.
+- `pal.setScene({ nodes, held? })` lists what can be taken over; `held` (node id → participant id) sets who holds what. `pal.holder(node)`, `pal.holding(who)` and `pal.held` read it back.
+- `pal.layout = { tray: [{ id: 'reset', label: 'Reset', icon: 'reset' }] }` adds tray buttons (and any other layout field: `keys`, `toss`, `point`, `wheel`).
+- `await pal.ready` gives the `Remote` (the host SDK below), or null where the browser can't host a phone (no WebRTC, or not https): the element then draws nothing and `pal.status` is `unsupported`.
+- Without the element: `const remote = await window.obpal.remote({ appName: 'My scene' })`.
+- Content Security Policy: `script-src https://obpal.blackboxes.net; connect-src https://obpal.blackboxes.net wss://obpal.blackboxes.net`. It also works where the page enforces Trusted Types (`require-trusted-types-for 'script'`): it parses no markup.
+- See it working: https://obpal.blackboxes.net/embed/ (a plain three.js scene using the element).
+
+## Use it in a page: the host SDK
+
+The SDK is `@obpal/host`, in the repo at packages/host (its README has typed examples, the element included). It isn't on npm yet; its package.json is ready for it.
+
+- `const remote = await Remote.create({ appName, layout })`, then `new PairingChip({ remote })` shows the pairing chip: the QR code and the short code, in a corner, in the page's own accent and font (options: `corner`, `accent`, `open`, `variant: 'panel'` for a place of your own, and more in the README).
+- Each frame, `remote.consume(now)` returns what the phone does:
+  - `qRel`: its rotation while held (1:1);
+  - `tilt`: a stick from tilting;
+  - `pad1`, `pad2`, `zoom`, `twist`: trackpad gestures;
+  - `aim`: Wii-style pointing;
+  - `pose`: where the phone is, in metres, while a thumb is on its pad (mode 6, from its own sensors).
+- `remote.padOf(id)` gives a standard gamepad, and `remote.on('button', …)` gives tray and hardware buttons.
+- `remote.on('text', ({ s, del }) => …)` gives typing from the phone's own keyboard (a `keyboard` tray control): delete `del` characters, then type `s` (`\n` is Enter). Its key row comes as buttons `key-Escape`, `key-Tab`, `key-ArrowLeft` and so on. While one of your text fields has the focus, `remote.setValues({ textField: 'text' })` (or `'secret'` for a password, `false` after) makes the phone offer Type.
+- Shared scenes: `Remote.create({ …, seats: 8 })`, then `remote.setScene({ nodes, held })`. `Claims` keeps one person per node, and nodes can nest (an arm and its joints).
+- The layout says:
+  - `tray`: buttons (`tone: 'stop'` makes a safety stop), toggles, pickers, and the phone's keyboard (`type: 'keyboard'`);
+  - `controllers`: the catalogue controllers the page suggests, in order (`face.wii`, `face.gamepad`, …); the first opens on the phone, and the SDK fills in `modes` for older phones;
+  - `modes`: which modes the page takes;
+  - `profile`: a suggested controller profile;
+  - `keys`: what the phone's volume and headset buttons press.
+- `remote.on('mode', (m, who) => …)`: `who.controller` is the controller a phone uses (it says so in `mode{m, c, p}`), and `who.profile` its profile.
+
+## Specs
+
+- [PROTOCOL.md](https://github.com/Axialon/obpal/blob/main/spec/PROTOCOL.md): pairing, the control messages, and the STATE, PAD, POINTER and POSE packets.
+- [CATALOGUE.md](https://github.com/Axialon/obpal/blob/main/spec/CATALOGUE.md): utilities, the routes motion takes, profiles, shared scenes, bridges, and control systems. For robot arms it covers the safety envelope: deadman, limits, watchdog, e-stop and approval.
+
+## The catalogue, machine-readable
+
+- [/catalogue.json](https://obpal.blackboxes.net/catalogue.json): every utility, controller, route, built-in and community profile, control system and bridge, the limits a profile must keep, and the embed (`embed`: its script, attributes, events and API).
+- [/profile.schema.json](https://obpal.blackboxes.net/profile.schema.json): JSON Schema for a controller profile.
+
+## Add a controller profile
+
+1. Read /profile.schema.json, or the `limits` and `routes` in /catalogue.json.
+2. Write the profile: a new lowercase `id`, `name`, `for` (one line), `on` (utilities it switches on), and `aim`, `steer` and `point` settings. Each setting has `route`, `gain`, `curve`, `deadzone`, `invertY` and `edgeTurn`. Optionally `controller` (a controller id) and `buttons`: physical inputs (`key:PageDown`, `media:nexttrack`, `pad:b4`, `back`) bound to that controller's `controls`, `key-<code>`, `tray:<id>`, `app:<action>` or `none` (the `buttons` part of /catalogue.json lists them all, with the defaults).
+3. Check it with the schema, or with `checkProfile()` from `@obpal/core` (it says what's wrong).
+4. Add it as `catalogue/profiles/<id>.json` to https://github.com/Axialon/obpal in a pull request; the build checks it again. Or open an issue with the JSON. The builder at https://obpal.blackboxes.net/catalogue/#build does both for people.
+
+## Try it
+
+- [Viewer](https://obpal.blackboxes.net/view/): open it on a screen and scan the code with a phone.
+- [Embed demo](https://obpal.blackboxes.net/embed/): a plain three.js page with `<obpal-remote>`; each phone takes over a shape.
+- [Sims](https://obpal.blackboxes.net/sim/): over 40 for several phones at once, from robot arms and drones to a music studio for eight. Each lists the controllers that suit it; `?category=`, `?face=` and `?q=` filter them (`/sim/?category=vehicles&face=wheel`).
+- [ob.Pal Link](https://obpal.blackboxes.net/link/): a browser extension that makes the phone a gamepad, 3D mouse or keys for any website; with ob.Pal Desktop (Windows), the whole PC's mouse and keyboard, typing included.
+
+## Optional
+
+- [Privacy](https://obpal.blackboxes.net/privacy/)
+- [Donate](https://obpal.blackboxes.net/donate/)
+
+## Pairing and protocol basics (from spec/PROTOCOL.md)
+
+ob.Pal protocol v1 is a draft implemented by `packages/core` and `packages/host`. A host is the screen or page that receives input, a device is the phone that sends it, and the room service forwards signaling messages so they can establish a peer connection. The QR pairing URL places its random secret and the host's DTLS fingerprint in the URL fragment, which is not sent to the server. A typed short code uses a one-use handle and a secret known to the devices. After binding, the two devices exchange control data over encrypted WebRTC.
+
+The peer connection has a reliable ordered `ctl` channel for JSON messages such as buttons, typing, mode and layout, plus an unordered `st` channel for current motion state. The host SDK exposes decoded movement, orientation, pads, aim and pose through `Remote.consume(now)` or the embed element's `frame(now, participantId)`. A scene can expose named nodes; phones claim them so several people can control distinct parts. See [PROTOCOL.md](https://github.com/Axialon/obpal/blob/main/spec/PROTOCOL.md), [CATALOGUE.md](https://github.com/Axialon/obpal/blob/main/spec/CATALOGUE.md) and [CONTROL-SPACE.md](https://github.com/Axialon/obpal/blob/main/spec/CONTROL-SPACE.md) for the precise wire and control-space contracts.
+
+The service introduces devices and can provide STUN or short-lived TURN credentials. It does not carry the peer-to-peer control stream. After an online pairing, remembered devices can also reconnect on a local network by scanning a direct LAN code when supported. The [privacy page](https://obpal.blackboxes.net/privacy/) explains what the service and browser store.
