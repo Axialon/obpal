@@ -26,6 +26,8 @@ import { mountSound } from '../audio/session'
 import { DeviceSound } from '../audio/devices'
 import { deviceTarget, sceneSelects } from './control-space'
 import { restInput } from './types'
+import { routeParts, sceneParts } from './focus'
+import { PartHalos } from './halo'
 import { mountSimPanels, numberSections } from '../ui/panels'
 import { Telemetry } from '../../ui/kit/telemetry'
 import { ICONS } from '../../ui/icons'
@@ -77,6 +79,8 @@ const deviceSound = sound ? new DeviceSound(logic, sound, n => sim?.claims.holde
 let following = true
 let followedUnit = 0
 const presence = devicePresence(logic, stage, () => view, () => sim)
+/** The parts each unit's holder drives on its own, ringed on the model (./halo.ts). */
+const halos = new PartHalos((n, part) => view?.partAt?.(n, part) ?? null)
 numberSections(document.querySelector('.dev-panel')!)
 
 addEventListener('bb-theme', (e) => {
@@ -132,6 +136,10 @@ function renderUnits() {
     const small = li.querySelector('small')!
     if (p?.controller) small.insertAdjacentHTML('afterbegin', faceGlyph(p.controller))
     small.append(who ? sim!.nameOf(who) : 'Free')
+    // What their trackpad drives on its own, when it isn't the whole unit.
+    const chosen = who && who !== 'host' ? sim!.focus.of(who).part : ''
+    const named = chosen && (spec.sets?.find((x) => x.id === chosen) ?? spec.parts?.find((x) => x.id === chosen))
+    if (named) small.append(` · ${named.name}`)
     const readout = new Telemetry(logic.readout(n))
     readouts.set(li, readout)
     li.querySelector('.nv')!.append(readout.el)
@@ -299,10 +307,12 @@ void entry.view().then((m) => {
 if (!presence.shared.guest) void startSimScene({
   appName: `ob.Pal ${spec.name.toLowerCase()}`,
   layout,
-  nodes: units.map((u) => ({ id: u.id, name: u.name, kind: spec.id, group: `${spec.name}s` })),
+  // Each unit offers its parts and sets to the phone that holds it (PROTOCOL §3a).
+  nodes: units.map((u) => ({ id: u.id, name: u.name, kind: spec.id, group: `${spec.name}s`, ...sceneParts(spec) })),
   approval: false,
   howTo,
   changed: () => { renderUnits(); renderFaces() },
+  focused: () => { renderUnits(); stage.view.invalidate() },
   // A phone that joins drives a free unit straight away.
   joined: (p: Participant) => {
     if (p.caps?.platform === 'scene') return
@@ -321,7 +331,12 @@ if (!presence.shared.guest) void startSimScene({
   s.remote.on('mode', () => { renderFaces(); renderUnits() })
   // For tests: the device, and what each participant's input looked like last frame.
   const seen: Record<string, { face: string; mode: number; touching: boolean; touchFrames: number; frames: number; drag: [number, number]; tilt: [number, number]; point: boolean; spot: [number, number] | null; presses: string[] }> = {}
-  Object.assign(window, { __device: { spec, logic, units, seats, stage, seen, anchorOnScreen: (n: number) => (view?.anchor ? stage.toScreen(view.anchor(n)) : null) } })
+  Object.assign(window, { __device: { spec, logic, units, seats, stage, seen, anchorOnScreen: (n: number) => (view?.anchor ? stage.toScreen(view.anchor(n)) : null),
+    /** What unit n's holder drives on its own (tests): the choice, the parts it drives and those that hold. */
+    focus: (n: number) => { const who = s.claims.holder(units[n].id); if (!who) return null; const f = s.focus.of(who); return { part: f.part, parts: [...f.parts], locks: [...f.locks] } },
+    /** The rings on the model (tests): which parts show live. */
+    halos: () => { const out: string[] = []; stage.scene.traverse((o) => { if (o.name.startsWith('part-halo-')) out.push(o.name.slice(10)) }); return out },
+  } })
   if (params.get('test') === 'vr') Object.assign((window as unknown as { __device: object }).__device, { mapInput: presence.mapInput })
   renderUnits()
   stage.onFrame = (t, dt) => {
@@ -372,6 +387,9 @@ if (!presence.shared.guest) void startSimScene({
         s.log(`${s.nameOf(who)} sent ${units[n].name} home`, s.colorOf(who))
       }
     })
+    // What each holder's node strip chose: the one finger drives those parts, and the rest hold (./focus.ts).
+    const focus = units.map((u) => { const who = s.claims.holder(u.id); return who && who !== 'host' ? s.focus.of(who) : null })
+    perUnit.forEach((inp, n) => { if (inp && focus[n]) perUnit[n] = routeParts(spec, inp, focus[n]!, dt) })
     logic.step(perUnit, dt)
     presence.afterStep()
     const events = logic.drain()
@@ -386,6 +404,13 @@ if (!presence.shared.guest) void startSimScene({
       if (e.text && (e.kind === 'score' || e.kind === 'fall')) s.log(`${who ? s.nameOf(who) : units[e.unit]?.name}: ${e.text}`, who ? s.colorOf(who) : undefined)
     }
     view?.update(units.map((u, n) => { const who = s.claims.holder(u.id); return aimed.has(n) ? '#c6ff34' : who ? s.colorOf(who) : null }), t, dt)
+    // While a holder's trackpad drives parts on their own, they breathe in its colour on the model (the stage keeps
+    // drawing while they do); on another controller the whole unit is driven, and nothing rings.
+    const ringed = focus.map((f, n) => {
+      const who = s.claims.holder(units[n].id)
+      return f && who && inputs.get(who)?.face === 'face.trackpad' ? { parts: f.parts, locks: f.locks, color: s.colorOf(who) || null } : { parts: [], locks: new Set<string>(), color: null }
+    })
+    if (halos.update(ringed, t, dt)) stage.view.invalidate()
     if (following && view?.follow) {
       const active = perUnit.findIndex((i) => i && !i.quiet && (i.touching || i.held.size || i.presses.length || i.pose?.touching || i.pad && [...i.pad.axes, ...i.pad.triggers].some((v) => Math.abs(v) > 0.04)))
       if (active >= 0) followedUnit = active

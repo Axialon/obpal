@@ -12,7 +12,9 @@
  *   - The buttons diagnostic (/buttons/, no screen needed): every key is logged, the volume keys are held, and the
  *     page asks whether the volume moved and sums it all up in one line.
  *   - The controller bar and catalogue (./phone-controllers.mjs): ratings for the Viewer and a sim, switching in one
- *     tap, and the layout rules (the edge and the touch size) at three phone sizes.
+ *     tap, and the layout rules (the edge and the touch size) at three phone sizes, the node strip's at 360 px too.
+ *   - The camera in settings (./phone-camera.mjs): the scanner first, one tap away, its camera started inside the tap
+ *     and no dead Back step left behind; the 3D hand's camera says what it needs, and a failed start can be retried.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch. OBPAL_SHOTS=<dir> saves screens.
  */
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -24,6 +26,7 @@ import { cspCheck } from './csp-watch.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
 import { phoneConnections } from './phone-connections.mjs'
 import { phoneControllers } from './phone-controllers.mjs'
+import { phoneCamera } from './phone-camera.mjs'
 
 const HEADED = process.argv.includes('--headed')
 const SHOTS = process.env.OBPAL_SHOTS || ''
@@ -310,6 +313,7 @@ try {
     return `Done at ${fit.bottom.toFixed(0)} of ${fit.vh}px; swipe, Back and × close it; Disconnect asks, then says so`
   })
   await phoneConnections({ browser: sb, origin: local.origin, check, shots: SHOTS })
+  await phoneCamera({ browser: sb, origin: local.origin, check, shots: SHOTS })
   await phoneControllers({ browser: sb, origin: local.origin, check, shots: SHOTS })
   await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {

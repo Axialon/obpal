@@ -101,6 +101,27 @@ export const ICONS: Record<string, string> = {
   'rotation-lock': s('<path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 3.8v4.4h-4.4"/><rect x="8.9" y="11.4" width="6.2" height="4.9" rx="1.3"/><path d="M10.3 11.4V10a1.7 1.7 0 0 1 3.4 0v1.4"/>'),
   'rotation-free': s('<path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 3.8v4.4h-4.4"/><rect x="8.9" y="11.4" width="6.2" height="4.9" rx="1.3"/><path d="M10.3 11.4V10a1.7 1.7 0 0 1 3.3-.6"/>'),
   take: s('<path d="M12 3.5v7M8.8 7.3 12 10.5l3.2-3.2"/><path d="M5 13.5h14l-1.4 5.3a1.6 1.6 0 0 1-1.5 1.2H7.9a1.6 1.6 0 0 1-1.5-1.2Z"/>'),
+  // parts of a node (PROTOCOL §3a), by how they move: turning about an upright axis, lifting on a hinge, bending at a
+  // joint, nodding, rolling about their own axis, sliding; then the sets, and the whole of a node
+  turn: s('<path d="M12 3v11.5"/><circle cx="12" cy="14.5" r="1" fill="currentColor"/><path d="M17.46 11.28a8.5 4.2 0 1 1-10.92 0"/><path d="M4.87 14.04 6.54 11.28l-3.13-.76"/>'),
+  lift: s('<circle cx="5.5" cy="18" r="2.2"/><path d="M7.1 16.5 15 9.2"/><path d="M21 13.9A16 16 0 0 0 15.8 5.7"/><path d="M18.8 5.9 15.8 5.7l.7 2.9"/>'),
+  bend: s('<path d="M4 20 10.6 12"/><circle cx="12" cy="10.5" r="2"/><path d="M13.9 11.2 20.5 13.6"/><path d="M14.4 4.9a6 6 0 0 1 4.2 4.4"/><path d="M19.9 6.8l-1.3 2.5-2.6-1"/>'),
+  nod: s('<circle cx="7.5" cy="12" r="2.3"/><path d="M9.8 12h5.7"/><path d="M19 5.5v13M16.8 7.7 19 5.5l2.2 2.2M16.8 16.3l2.2 2.2 2.2-2.2"/>'),
+  roll: s('<circle cx="12" cy="12" r="3.2"/><path d="M12 8.8v3.2"/><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/>'),
+  slide: s('<path d="M12 3v18"/><rect x="8.3" y="9" width="7.4" height="6" rx="1.6"/><path d="M9.2 5.8 12 3l2.8 2.8M9.2 18.2 12 21l2.8-2.8"/>'),
+  bucket: s('<path d="M6 7h10a3 3 0 0 1 3 3v1.8a7.5 7.5 0 0 1-7.5 7.5H6Z"/><path d="M6 10.6H3.6M6 14.2H3.6M6 17.8H3.6"/><path d="M15.5 7l1.8-3"/>'),
+  reach: s('<path d="M4 20.5h8"/><path d="M8 20.5v-3.2"/><path d="M8 17.3 11.2 10l5.3 1.5"/><circle cx="11.2" cy="10" r="1.6"/><path d="M18.3 8.8 21 11.5l-2.7 2.7"/>'),
+  wrist: s('<path d="M12 21v-3.8M8.3 17.2h7.4M8.3 17.2V13l1.7-2.6M15.7 17.2V13l-1.7-2.6"/><path d="M5 8.2a8 8 0 0 1 14 0"/><path d="M19.9 5.3 19 8.2l-2.9-.6"/>'),
+  dig: s('<path d="M9.5 11H19l-1.3 5.2a2 2 0 0 1-1.9 1.5h-3.4a2 2 0 0 1-1.9-1.4Z"/><path d="M12 17.7l-.4 2M15 17.7l.4 2"/><path d="M4 12.5a8.5 8.5 0 0 1 7-8"/><path d="M8.6 3.3l2.4 1.2-1 2.6"/>'),
+  depth: s('<rect x="3.5" y="11.5" width="9" height="9" rx="1.8"/><path d="M11.2 12.8 19.5 4.5M14.3 4.5h5.2v5.2"/>'),
+  'look-x': s('<rect x="6.5" y="4.5" width="11" height="7.5" rx="2"/><circle cx="12" cy="8.25" r="2"/><path d="M4 17.5h16M6.5 15 4 17.5 6.5 20M17.5 15l2.5 2.5-2.5 2.5"/>'),
+  'look-y': s('<rect x="3.5" y="8" width="10.5" height="8" rx="2"/><circle cx="8.75" cy="12" r="2"/><path d="M19 4v16M16.5 6.5 19 4l2.5 2.5M16.5 17.5 19 20l2.5-2.5"/>'),
+  whole: s('<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="8.3" r="1.6" fill="currentColor"/><circle cx="8.8" cy="14.1" r="1.6" fill="currentColor"/><circle cx="15.2" cy="14.1" r="1.6" fill="currentColor"/>'),
+  // the pad's legend for a set: one finger across or up and down, two fingers up and down or across
+  'swipe-x': s('<circle cx="12" cy="12" r="2.6"/><path d="M3.5 12H8M16 12h4.5M6 9.5 3.5 12 6 14.5M18 9.5l2.5 2.5-2.5 2.5"/>'),
+  'swipe-y': s('<circle cx="12" cy="12" r="2.6"/><path d="M12 3.5V8M12 16v4.5M9.5 6 12 3.5 14.5 6M9.5 18l2.5 2.5 2.5-2.5"/>'),
+  'pan-y': s('<circle cx="7.5" cy="12" r="2.2"/><circle cx="12.5" cy="12" r="2.2"/><path d="M19 4.5v15M16.8 6.7 19 4.5l2.2 2.2M16.8 17.3l2.2 2.2 2.2-2.2"/>'),
+  'pan-x': s('<circle cx="9.5" cy="7.5" r="2.2"/><circle cx="14.5" cy="7.5" r="2.2"/><path d="M4.5 16h15M6.7 13.8 4.5 16l2.2 2.2M17.3 13.8l2.2 2.2-2.2 2.2"/>'),
 }
 
 export const icon = (name: string | undefined) => (name && ICONS[name]) || ''

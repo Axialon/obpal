@@ -19,6 +19,13 @@ export const GIMBAL_SPEC: DeviceSpec = {
   },
   tray: [{ id: 'record', label: 'Record', type: 'button', icon: 'frame' }],
   buttons: { 'media:playpause': 'tray:record', 'key:KeyR': 'tray:record' },
+  // One axis at a time, or the aim (pan and tilt) with the roll held level; all three follow a 1:1 turn together.
+  parts: [
+    { id: 'pan', name: 'Pan', icon: 'look-x', channels: ['drag.x'], turn: true },
+    { id: 'tilt', name: 'Tilt', icon: 'look-y', channels: ['drag.y'], turn: true },
+    { id: 'roll', name: 'Roll', icon: 'roll', channels: ['twist'], turn: true },
+  ],
+  sets: [{ id: 'aim', name: 'Aim', icon: 'point', parts: ['pan', 'tilt'] }],
 }
 export function unitQuaternion(q: Quat): Quat {
   const length = Math.hypot(...q)

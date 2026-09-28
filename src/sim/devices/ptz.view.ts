@@ -222,6 +222,13 @@ export function createView(stage: Stage, logic: PtzLogic): DeviceView {
     framing: (() => { const [x, , z] = logic.cams[0].at; return { target: [x, 0.75, z], wide: [x + 1.5, 1.7, z + 2.4], tall: [x + 1.5, 1.7, z + 2.4], radius: 0.85, min: 0.3, max: 24 } })(),
     inspect() { const [x, y, z] = logic.cams[0].at; return { target: [x, y, z], wide: [x + 0.65, y + 0.4, z - 0.8], tall: [x + 0.8, y + 0.5, z - 1], radius: 0.35, min: 0.3, max: 24 } },
     overview: { target: [0, 0.7, -0.3], wide: [0, 7.5, 12], tall: [0, 9, 12], radius: 5.2, min: 1, max: 24 },
+    // The pan rings the head's collar, the tilt its trunnions, the zoom the lens.
+    partAt: (n, part) => {
+      const m = models[n]
+      if (!m) return null
+      return part === 'pan' ? { object: m.head, axis: 'y', radius: 0.14, at: [0, -0.02, 0] } : part === 'tilt' ? { object: m.body, axis: 'x', radius: 0.15 }
+        : part === 'zoom' ? { object: m.lens, axis: 'y', radius: 0.07, at: [0, -0.03, 0] } : null
+    },
     update(colors, t) {
       set.sculpture.rotation.y = t * 0.25
       train.place(logic.time)

@@ -10,6 +10,7 @@ import type { Theme } from '../../ui/themes'
 import type { DeviceLogic } from './types'
 import type { Framing, Stage } from './stage'
 import type { SimScene } from '../scene'
+import type { PartPivot } from './halo'
 
 export interface DeviceView {
   /** Optional live service (audio, for example), attached once the shared scene is ready. */
@@ -34,6 +35,8 @@ export interface DeviceView {
   pointFrom?(unit: number): THREE.Vector3
   /** Drawn over the stage once it's rendered (a camera's picture-in-picture). */
   afterRender?(): void
+  /** Where one of a unit's parts (DeviceSpec.parts) moves about, for the ring that shows it live (./halo.ts). */
+  partAt?(unit: number, part: string): PartPivot | null
   /** The visitor picked another surface (light or dark). */
   setTheme?(t: Theme): void
 }

@@ -94,11 +94,35 @@ export interface ScenePerson { id: string; name: string; color: string; lead?: b
 /**
  * Something in a shared scene one participant at a time can control. `parent`: the node this one is part of (a joint
  * of an arm). Whoever holds the parent controls this node too, so neither can be taken while the other is held.
+ * `parts` and `sets` (PROTOCOL §3a): what its holder can drive on its own, and named groups of those; `icon` names a
+ * glyph from the icon set for each. All optional: a device that doesn't know them drives the whole node, as before.
  */
-export interface SceneNode { id: string; name: string; kind: string; group?: string; parent?: string }
+export interface SceneNode { id: string; name: string; kind: string; group?: string; parent?: string; icon?: string; parts?: ScenePart[]; sets?: SceneSet[] }
+
+/** A piece of a node its holder can drive on its own: a joint of an arm, an excavator's boom. */
+export interface ScenePart { id: string; name: string; icon?: string }
+
+/**
+ * A named group of a node's parts that move together, for one kind of motion (Reach: base, shoulder and elbow). The
+ * first part takes a drag across, the second a drag up and down, a third two fingers up and down, a fourth two
+ * fingers across. `locks`: the node's other parts hold their pose while the set is chosen.
+ */
+export interface SceneSet { id: string; name: string; icon?: string; parts: string[]; locks?: boolean }
 
 /** Longest node id a device may send in `claim`. */
 export const MAX_NODE_ID = 64
+
+/** The most parts and sets a node offers; a device shows no more than these. */
+export const MAX_PARTS = 16
+export const MAX_SETS = 8
+
+/**
+ * What a device's trackpad and tilt drive within the node it holds (PROTOCOL §3a): value{PART_VALUE: a part or set
+ * id, '' for the whole node}, and the parts it locks, value{LOCKS_VALUE: their ids, comma-separated}. The host
+ * confirms both in `state` under the same names.
+ */
+export const PART_VALUE = 'control.part'
+export const LOCKS_VALUE = 'control.locks'
 
 /** Reliable control-channel messages (JSON on the "ctl" DataChannel). Unknown fields are ignored. */
 export type DeviceMsg =

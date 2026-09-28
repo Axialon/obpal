@@ -30,6 +30,13 @@ export const PTZ_SPEC: DeviceSpec = {
   tray: [{ id: 'snap', label: 'Picture', type: 'button', icon: 'frame' }],
   // A headset press or a keyboard's Space takes a picture, on every controller.
   buttons: { 'media:playpause': 'tray:snap', 'key:Space': 'tray:snap' },
+  // Aim (pan and tilt together), or one of pan, tilt and zoom alone: a drag then zooms, with the aim held steady.
+  parts: [
+    { id: 'pan', name: 'Pan', icon: 'look-x', channels: ['drag.x'], turn: true },
+    { id: 'tilt', name: 'Tilt', icon: 'look-y', channels: ['drag.y'], turn: true },
+    { id: 'zoom', name: 'Zoom', icon: 'zoom-in', channels: ['pinch'] },
+  ],
+  sets: [{ id: 'aim', name: 'Aim', icon: 'point', parts: ['pan', 'tilt'] }],
 }
 
 const D2R = Math.PI / 180

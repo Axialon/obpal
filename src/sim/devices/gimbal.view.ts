@@ -72,6 +72,7 @@ function filming(scene: THREE.Scene, logic: GimbalLogic, live?: () => void) {
   return {
     eye,
     root,
+    axes: { yaw, pitch, roll },
     step(t: number) {
       subject.rotation.y = t * 0.3
       subject.rotation.z = Math.sin(t * 0.4) * 0.1
@@ -95,6 +96,11 @@ export function createView(stage: Stage, logic: GimbalLogic): DeviceView {
       feed.label(logic.units[0].recording ? '● REC' : 'Camera view')
       feed.activity(logic.units[0].recording)
     },
+    // Each of the three axes rings its own motor.
+    partAt: (_n, part) => part === 'pan' ? { object: w.axes.yaw, axis: 'y', radius: 0.26 }
+      : part === 'tilt' ? { object: w.axes.pitch, axis: 'x', radius: 0.4, at: [0, 0, 0.1] }
+      : part === 'roll' ? { object: w.axes.roll, axis: 'z', radius: 0.34, at: [0, 0, -0.3] }
+      : null,
     afterRender() {
       feed.draw(stage.scene, w.eye, [w.root])
     },

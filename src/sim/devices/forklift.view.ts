@@ -88,6 +88,7 @@ function warehouse(scene: THREE.Scene, logic: ForkliftLogic, live?: () => void) 
     return g
   })
   return {
+    m,
     step() {
       const u = logic.units[0]
       m.root.position.set(u.x, 0, u.z)
@@ -111,6 +112,11 @@ export function createView(stage: Stage, logic: ForkliftLogic): DeviceView {
     inspect: () => playFrame(at(), 0.95, [0.25, 1.05, -1.5]),
     follow: () => new THREE.Vector3(...at()),
     update: () => w.step(),
+    // The drive rings the truck on the floor; the lift rings the carriage, the tilt the mast's foot.
+    partAt: (_n, part) => part === 'drive' ? { object: w.m.root, axis: 'y', radius: 1.05, at: [0, 0.03, 0] }
+      : part === 'lift' ? { object: w.m.forks, axis: 'y', radius: 0.5, at: [0, 0.33, -0.1] }
+      : part === 'tilt' ? { object: w.m.mast, axis: 'x', radius: 0.26, at: [0, 0.3, 0] }
+      : null,
   }
 }
 export function preview() {

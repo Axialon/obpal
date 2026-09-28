@@ -25,7 +25,7 @@ import { ceramic, darkTitanium } from '../kit/surfaces'
 import { fixtures, payloadSpeed, STOCK } from './workspace'
 import { instanceCopies } from '../kit/instances'
 import { InputSmoother, servo } from '../kit/motion'
-import type { SceneNode } from '@obpal/core'
+import type { SceneNode, SceneSet } from '@obpal/core'
 import { Mode, PadButton, type Frame, type Layout, type PadState, type Quat } from '@obpal/host'
 import { applyTheme, initialTheme } from '../../ui/themes'
 import { mountMarks } from '../../ui/icons'
@@ -200,6 +200,10 @@ interface Arm {
   goal: ToolTarget | null
   /** A block stopped some of its joints this frame (the claw takes that as having come down on something). */
   blocked: boolean
+  /** The holder's choice on the phone's strip last frame (PartFocus serial): a new one starts from where the arm is. */
+  chosen: number
+  /** For the finger now down: which way each joint it drives turns, so the gripper goes the way the finger does. */
+  jog: Map<string, [number, number]>
 }
 
 interface Track3 { gen: number; p0: [number, number, number]; q0: [number, number, number, number]; heading: number; tool: THREE.Vector3; delta: THREE.Vector3; forward: number; pitch: number; roll: number }
@@ -232,8 +236,28 @@ function findNode(node: string): { arm: Arm; joint?: Joint } | null {
   return node === arm.id ? { arm } : { arm, joint: arm.joints.find((j) => j.node === node) }
 }
 
+/** A joint's glyph on the phone's node strip, by how it moves. */
+const JOINT_ICON: Record<string, string> = { base: 'turn', shoulder: 'lift', elbow: 'bend', wrist: 'nod', twist: 'roll', roll: 'roll', z: 'slide', gripper: 'grip' }
+
+/**
+ * The ways to move an arm a set of joints at a time (PROTOCOL §3a), each holding the rest where it is: Reach, the
+ * joints that place the gripper, and Wrist, those that turn it. A way of one joint is that joint's own item (the
+ * gripper is Grip), and the joints one by one follow the sets on the phone's strip.
+ */
+function armSets(a: Arm): SceneSet[] {
+  const of = (keys: string[]) => keys.flatMap((k) => a.joints.filter((j) => j.spec.key === k).map((j) => j.node))
+  return [
+    { id: 'reach', name: 'Reach', icon: 'reach', parts: of(['base', 'shoulder', 'z', 'elbow', 'a1', 'a2', 'a3']), locks: true },
+    { id: 'wrist', name: 'Wrist', icon: 'wrist', parts: of(['roll', 'wrist', 'twist']), locks: true },
+  ].filter((s) => s.parts.length > 1)
+}
+
 function nodesOf(a: Arm): SceneNode[] {
-  const whole: SceneNode = { id: a.id, name: 'Whole arm', kind: 'arm', group: a.name }
+  // Its holder can drive any joint on its own, or a set of them, from the phone's strip.
+  const whole: SceneNode = {
+    id: a.id, name: 'Whole arm', kind: 'arm', group: a.name, icon: 'arm',
+    parts: a.joints.map((j) => ({ id: j.node, name: j.spec.key === 'gripper' ? 'Grip' : j.spec.name, icon: JOINT_ICON[j.spec.key] ?? 'lift' })), sets: armSets(a),
+  }
   const joints: SceneNode[] = a.joints.map((j) => ({
     id: j.node, name: j.spec.name, kind: j.spec.key === 'gripper' ? 'gripper' : 'joint', group: a.name,
     ...(a.profile === 'both' ? { parent: a.id } : {}),
@@ -255,7 +279,7 @@ function addArm(number?: number): Arm | null {
   model.root.userData.contactName = id
   const joints: Joint[] = KIN.joints.map((spec) => ({ spec, node: `${id}.${spec.key}`, angle: spec.home, vel: 0, target: null, state: '', flash: 0 }))
   joints.forEach((j, i) => model.apply[i](j.angle))
-  const arm: Arm = { n, id, name: `Arm ${n}`, model, joints, profile: 'both', drive: null, edge: false, state: '', homing: false, flash: 0, hw: null, hover: KIND.drive.hover[0], claw: null, track: null, scale: KIND.drive.scale, goal: null, blocked: false }
+  const arm: Arm = { n, id, name: `Arm ${n}`, model, joints, profile: 'both', drive: null, edge: false, state: '', homing: false, flash: 0, hw: null, hover: KIND.drive.hover[0], claw: null, track: null, scale: KIND.drive.scale, goal: null, blocked: false, chosen: 0, jog: new Map() }
   arms.push(arm)
   arms.sort((a, b) => a.n - b.n)
   armInstances.set(arms.map(a => a.model.root))
@@ -597,6 +621,7 @@ if (!shared.guest) void startSimScene({
   howTo,
   label: (n) => (n.group ? `${n.group} · ${n.name}` : n.name),
   changed: () => renderPanel(),
+  focused: () => { renderReadouts(); view.invalidate() },
 }).then((s) => {
   sim = s
   shared.connect(s.remote)
@@ -660,15 +685,61 @@ addEventListener('beforeunload', (e) => { if (arms.some((a) => a.hw?.live)) e.pr
 // ---- driving one joint: deadman, velocity from the input, then the caps ----
 
 const twistOf = (q: Quat) => 2 * Math.atan2(q[2], q[3]) * R2D
-const dialBase = new Map<string, { grab: number; angle: number }>()
+/**
+ * Where a 1:1 turn (or a calibrated aim) started for a participant's joint: the joint's value then, and the phone's
+ * twist and aim. A joint newly chosen mid-turn starts from where it is, and the turn carries on from where the phone is.
+ */
+const dialBase = new Map<string, { grab: number; node: string; angle: number; twist: number; aim: number }>()
 
-/** The velocity a participant commands for its joint this frame (units/s), or null when its deadman is released. */
-function commanded(j: Joint, who: string, f: Frame, pad: PadState | null, dt: number): number | null {
+/**
+ * How a finger drives one joint (PROTOCOL §3a): alone ('solo': a drag whichever way), or as the k-th of a set (0 a
+ * drag across, 1 up and down, 2 two fingers up and down, 3 two fingers across).
+ */
+type Slot = 'solo' | 0 | 1 | 2 | 3
+
+/**
+ * Which way a joint turns for the finger: the gripper goes right on the screen for a drag right, and up for a drag up
+ * ([across, up], each ±1). Worked out when the finger goes down and kept until it lifts, so nothing flips mid-drag.
+ */
+function jogSigns(a: Arm, j: Joint, who: string): [number, number] {
+  const kept = a.jog.get(j.node)
+  if (kept) return kept
+  const i = a.joints.indexOf(j)
+  let signs: [number, number] = [1, 1]
+  if (i < GRIP) {
+    const pose = poseOf(a), key = KIN.keys[i]
+    const at = toolWorld(a, KIN.forward(pose))
+    const moved = toolWorld(a, KIN.forward({ ...pose, [key]: pose[key] + (j.spec.unit === 'm' ? 0.004 : 1) })).sub(at)
+    const across = moved.dot(controlFrame(who).right), up = moved.y
+    const sx = Math.abs(across) > 1e-5 ? Math.sign(across) : 1
+    signs = [sx, Math.abs(up) > 1e-5 ? Math.sign(up) : sx]
+  }
+  a.jog.set(j.node, signs)
+  return signs
+}
+
+/**
+ * The velocity a participant commands for a joint this frame (units/s), or null when its deadman is released. `slot`:
+ * how the finger reaches it (a joint held as a node of its own is 'solo'). `chosen`: picked on the phone's strip, where
+ * a calibrated aim moves it on from where it was rather than to where the aim points.
+ */
+function commanded(a: Arm, j: Joint, who: string, f: Frame, pad: PadState | null, dt: number, slot: Slot = 'solo', chosen = false): number | null {
   const span = j.spec.max - j.spec.min
   if (sim?.control.scope(who) === 'scene') return null
   const space = sim?.control.aim(who)
+  // A degree of the phone's turn: a degree, 1/6 cm of a joint that slides, 1/120 of the gripper's opening.
+  const scale = j.spec.unit === '°' ? 1 : j.spec.unit === 'm' ? 1 / 600 : 1 / 120
+  const dial = (twist: number, aim: number) => {
+    const b = dialBase.get(who)
+    if (!b || b.grab !== f.grab || b.node !== j.node) dialBase.set(who, { grab: f.grab, node: j.node, angle: j.angle, twist, aim })
+    return dialBase.get(who)!
+  }
   if (!pad && space && f.clutch && f.mode === Mode.hold) {
-    j.target = j.spec.min + (space.aim[0] + 1) * span / 2
+    // Of a set, the first joint follows the turn; the others hold.
+    if (slot !== 'solo' && slot !== 0) return null
+    if (!chosen) { j.target = j.spec.min + (space.aim[0] + 1) * span / 2; return 0 }
+    const b = dial(0, space.aim[0])
+    j.target = clamp(b.angle + (space.aim[0] - b.aim) * span / 2, j.spec.min, j.spec.max)
     return 0
   }
   if (pad) {
@@ -678,22 +749,25 @@ function commanded(j: Joint, who: string, f: Frame, pad: PadState | null, dt: nu
     if (j.spec.key === 'gripper' && Math.abs(t) > 0.05) return -t * j.spec.vmax
     return x ? x * j.spec.vmax : null
   }
-  // 1:1: turn the phone like a dial while the gyro is on; the joint follows the phone's twist.
+  // 1:1: turn the phone like a dial while the gyro is on; the joint follows the phone's twist from where it was.
   if (f.mode === Mode.hold && f.clutch) {
-    const b = dialBase.get(who)
-    if (!b || b.grab !== f.grab) dialBase.set(who, { grab: f.grab, angle: j.angle })
-    const base = dialBase.get(who)!.angle
-    // A degree of the phone's turn: a degree, 1/6 cm of a joint that slides, 1/120 of the gripper's opening.
-    const scale = j.spec.unit === '°' ? 1 : j.spec.unit === 'm' ? 1 / 600 : 1 / 120
-    j.target = clamp(base + twistOf(f.qRel) * scale, j.spec.min, j.spec.max)
+    if (slot !== 'solo' && slot !== 0) return null
+    const b = dial(twistOf(f.qRel), 0)
+    j.target = clamp(b.angle + (twistOf(f.qRel) - b.twist) * scale, j.spec.min, j.spec.max)
     return 0
   }
-  dialBase.delete(who)
+  if (dialBase.get(who)?.node === j.node) dialBase.delete(who)
   if (!f.touching) return null
-  // A finger on the pad is the deadman: dragging moves the joint, tilting drives it.
-  if (f.pad1[0] && dt > 0) return (f.pad1[0] * span / 900) / dt
-  if (f.zoom && j.spec.key === 'gripper' && dt > 0) return (f.zoom * 0.6) / dt
-  if (f.mode === Mode.tilt) return f.tilt[0] * j.spec.vmax
+  // A finger on the pad is the deadman. Tilting drives the joint at a speed, the way the phone tips.
+  const [sx, sy] = jogSigns(a, j, who)
+  const tilt = f.mode === Mode.tilt ? (slot === 'solo' ? f.tilt[0] * sx - f.tilt[1] * sy : slot === 0 ? f.tilt[0] * sx : slot === 1 ? -f.tilt[1] * sy : 0) : 0
+  if (Math.abs(tilt) > 0.02) { j.target = null; return clamp(tilt, -1, 1) * j.spec.vmax }
+  // Dragging moves it on as far as the finger went (its target leads, and it follows within its caps), the way the
+  // finger goes on the screen: however the finger's moves arrive, the joint goes the whole way.
+  let px = slot === 'solo' ? f.pad1[0] * sx - f.pad1[1] * sy : slot === 0 ? f.pad1[0] * sx : slot === 1 ? -f.pad1[1] * sy : slot === 2 ? -f.pad2[1] * sy : f.pad2[0] * sx
+  // A pinch opens and closes the gripper.
+  if (slot === 'solo' && j.spec.key === 'gripper') px += f.zoom * 540
+  if (px) j.target = clamp((j.target ?? j.angle) + px * span / 900, j.spec.min, j.spec.max)
   return 0
 }
 
@@ -1074,9 +1148,27 @@ function stepArm(a: Arm, now: number, dt: number) {
   // Connected but not live: the twin follows the real arm, and nobody drives it.
   const mirror = !!hw && !hw.live
   const armWho = s?.claims.holder(a.id)
+  // What the holder's node strip chose (PROTOCOL §3a): on the trackpad, the one finger drives those joints, the rest hold.
+  const focus = armWho && armWho !== 'host' && s ? s.focus.of(armWho) : null
+  const frame = focus ? frames.get(armWho!) : undefined
+  const onPad = !!frame && !s?.remote.padOf(armWho!) && (frame.mode === Mode.hold || frame.mode === Mode.tilt || frame.mode === Mode.orbit)
+  const chosen = onPad && focus!.parts.length ? focus!.parts : null
+  if (focus && focus.serial !== a.chosen) {
+    // A new choice starts from where the arm is: no drive, dial or jog carried over; the newly chosen joints' rings flare.
+    a.chosen = focus.serial
+    settle(a)
+    a.jog.clear()
+    dialBase.delete(armWho!)
+    for (const j of a.joints) if (focus.parts.includes(j.node)) j.flash = 1
+  }
   a.state = ''
   if (stopped || mirror || !armWho || armWho === 'host' && !xrDrives.has(armWho) || !s) { a.drive = null; if (!armWho) a.edge = false }
-  else a.state = driveWhole(a, armWho, now, dt)
+  else if (chosen) { a.drive = null; a.claw = null; a.track = null; if (now - (lastInput.get(armWho) ?? 0) > 200) a.state = 'watchdog' }
+  else {
+    a.state = driveWhole(a, armWho, now, dt)
+    // Locked joints hold where they are while the rest of the arm moves.
+    if (onPad && focus?.locks.size && !a.homing) for (const j of a.joints) if (focus.locks.has(j.node)) j.target = null
+  }
   const got = mirror ? hw.driver.read() : null
   const angles = got ? fromRaw(hw!.cal, got.raw.map((v) => v ?? NaN)) : null
   const cap = hw?.live ? hw.cap : hw ? 1 : payloadSpeed(blocks.find(b => b.by === a)?.mass ?? 0)
@@ -1096,10 +1188,23 @@ function stepArm(a: Arm, now: number, dt: number) {
       if (g !== undefined && Number.isFinite(g)) j.angle += (g - j.angle) * Math.min(1, dt * 12)
       a.model.apply[i](j.angle)
       return
-    } else if (armWho && armWho !== 'host') j.state = a.state
+    } else if (chosen && s && armWho) {
+      // Chosen on the strip: the k-th of a set takes its gesture, one alone takes the drag either way; the rest hold.
+      const k = chosen.indexOf(j.node)
+      const f = frame!
+      if (!f.touching) a.jog.delete(j.node)
+      if (a.state === 'watchdog') { j.state = 'watchdog'; if (!a.homing) j.target = null }
+      else if (k < 0 || focus!.locks.has(j.node)) { j.state = focus!.locks.has(j.node) ? 'locked' : 'held'; if (!a.homing && j.spec.key !== 'gripper') j.target = null }
+      else {
+        const c = commanded(a, j, armWho, f, null, dt, chosen.length === 1 ? 'solo' : (Math.min(k, 3) as 0 | 1 | 2 | 3), true)
+        if (c === null) { j.state = 'deadman'; if (!a.homing && j.spec.key !== 'gripper') j.target = null } else v = c
+      }
+    } else if (armWho && armWho !== 'host') j.state = focus?.locks.has(j.node) && onPad ? 'locked' : a.state
     else if (who && who !== 'host' && s) {
       if (now - (lastInput.get(who) ?? 0) > 200) { j.state = 'watchdog'; if (!a.homing) j.target = null } else {
-        const c = commanded(j, who, frames.get(who) ?? s.remote.consumeOf(who, now), s.remote.padOf(who), dt)
+        const f = frames.get(who) ?? s.remote.consumeOf(who, now)
+        if (!f.touching) a.jog.delete(j.node)
+        const c = commanded(a, j, who, f, s.remote.padOf(who), dt)
         if (c === null) { j.state = 'deadman'; if (!a.homing && j.spec.key !== 'gripper') j.target = null } else v = c
       }
     }
@@ -1153,19 +1258,26 @@ function stepArm(a: Arm, now: number, dt: number) {
   blockStep(a, was, gripWas, following)
   a.model.secondary?.(dt)
   if (a.homing && a.joints.every((j) => j.target === null)) a.homing = false
-  // Rings wear their controller's colour, and flash when control changes.
-  a.joints.forEach((j, i) => paint(a.model.rings[i], s?.claims.controller(j.node), j, dt, Math.abs(j.vel) > 1e-3))
+  // Rings wear their controller's colour, and flash when control changes. While the holder's trackpad drives what its
+  // strip chose, those joints breathe in it, the others dim, and a locked one goes grey (PROTOCOL §3a): the switch
+  // shows on the model too.
+  const live = chosen
+  a.joints.forEach((j, i) => paint(a.model.rings[i], s?.claims.controller(j.node), j, dt, Math.abs(j.vel) > 1e-3,
+    onPad && focus?.locks.has(j.node) ? 'locked' : live ? (live.includes(j.node) ? 'live' : 'idle') : ''))
   paint(a.model.plate, armWho, a, dt, false)
+  if (live) view.invalidate()
   if (hw?.live) liveStep(a, now)
 }
 
-function paint(ring: THREE.Mesh, who: string | undefined, o: { flash: number }, dt: number, moving: boolean) {
+function paint(ring: THREE.Mesh, who: string | undefined, o: { flash: number }, dt: number, moving: boolean, focus: '' | 'live' | 'idle' | 'locked' = '') {
   const mat = ring.material as THREE.MeshStandardMaterial
   const idle = ring.userData.idleColor ?? '#5b6472'
-  mat.emissive.set(who ? sim!.colorOf(who) || idle : idle)
+  mat.emissive.set(who && focus !== 'locked' ? sim!.colorOf(who) || idle : idle)
   o.flash = Math.max(0, o.flash - dt / 0.7)
-  mat.emissiveIntensity = (who ? 1.4 : 0.25) + 2.2 * o.flash + (moving ? 0.6 : 0)
-  ring.scale.setScalar(1 + 0.25 * o.flash)
+  const breath = focus === 'live' ? 0.5 + 0.5 * Math.sin(performance.now() * 0.0032) : 0
+  const lit = !who ? 0.25 : focus === 'live' ? 2.2 + 1.1 * breath : focus === 'idle' ? 0.55 : focus === 'locked' ? 0.35 : 1.4
+  mat.emissiveIntensity = lit + 2.2 * o.flash + (moving ? 0.6 : 0)
+  ring.scale.setScalar(1 + 0.25 * o.flash + 0.06 * breath)
 }
 
 let last = 0
@@ -1513,6 +1625,9 @@ function xButton(onclick: () => void) {
 
 function renderReadouts() {
   for (const a of arms) {
+    // The joints its holder's strip drives, and those locked, marked in the grid as on the model.
+    const armWho = sim?.claims.holder(a.id)
+    const focus = armWho && armWho !== 'host' ? sim!.focus.of(armWho) : null
     const row = document.querySelector<HTMLElement>(`#arms li[data-node="${a.id}"]`)
     const whole = reaches.get(a.id)
     if (row && whole) {
@@ -1528,6 +1643,8 @@ function renderReadouts() {
       const shown = dials.get(j.node)
       if (shown && shown.dial.value !== j.angle) { shown.dial.value = j.angle; shown.angle.value = jointText(j.spec, j.angle) }
       li.dataset.state = j.state
+      li.classList.toggle('live', !!focus?.parts.includes(j.node) && !focus.locks.has(j.node))
+      li.classList.toggle('locked', !!focus?.locks.has(j.node))
     }
   }
 }
@@ -1621,6 +1738,8 @@ Object.assign(window, {
     view: (at: [number, number, number], to: [number, number, number]) => { camera.position.set(...at); controls.target.set(...to); controls.update() },
     aims: () => [...aims.entries()].map(([id, a]) => ({ id, on: a.on, b: a.b, hit: a.hit ? { x: a.hit.x, z: a.hit.z } : null })),
     stopped: () => stopped,
+    /** What the holder of an arm drives on its own from the phone's strip (tests): the choice, its joints, those locked. */
+    focus: (id: string) => { const who = sim?.claims.holder(id); if (!who || !sim) return null; const f = sim.focus.of(who); return { part: f.part, parts: [...f.parts], locks: [...f.locks] } },
     addArm: () => addArm()?.id ?? null,
     removeArm: (id: string) => { const a = armOf(id); return a ? removeArm(a) : undefined },
     setProfile: (id: string, p: Profile) => { const a = armOf(id); if (a) setProfile(a, p) },

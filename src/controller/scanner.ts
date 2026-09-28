@@ -15,42 +15,56 @@ export class Scanner {
     torch.onclick = () => void this.light()
   }
 
+  /**
+   * Open the camera and read codes from it; call from a tap. The camera is asked for inside the tap (a browser that
+   * ties the camera or its picture to a gesture keeps it), and a phone without a built-in code reader starts fetching
+   * the bundled one meanwhile.
+   */
   async start() {
     this.stop()
     const generation = this.generation
+    const alive = () => generation === this.generation
     this.say('Point at the code on your screen')
+    if (!(globalThis as { BarcodeDetector?: unknown }).BarcodeDetector) void import('jsqr').catch(() => { /* fetched again when it's needed */ })
+    let stream: MediaStream
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } })
-      if (generation !== this.generation) { stream.getTracks().forEach((t) => t.stop()); return }
-      this.stream = stream
-      this.video.srcObject = stream
-      const track = stream.getVideoTracks()[0]
-      this.torch.hidden = !(track?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean })?.torch
-      await this.video.play()
-      if (generation !== this.generation) return
-      const decode = await this.decoder(() => generation === this.generation)
-      const scan = async () => {
-        if (generation !== this.generation) return
-        try {
-          if (this.video.readyState >= 2) {
-            const text = await decode(this.video)
-            if (generation !== this.generation) return
-            if (text && (text !== this.seen.text || Date.now() - this.seen.at > 2500)) {
-              this.seen = { text, at: Date.now() }
-              this.found(text)
-            }
-          }
-        } catch { /* a camera frame can arrive during a resize */ }
-        if (generation === this.generation) this.timer = setTimeout(() => void scan(), 150)
-      }
-      if (generation === this.generation) void scan()
+      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } })
     } catch (e) {
-      if (generation !== this.generation) return
+      if (!alive()) return
       this.stop()
       this.say(e instanceof DOMException && e.name === 'NotAllowedError'
         ? 'Camera access is off. Allow it in your browser, or enter a code.'
         : 'Camera unavailable. Enter the code shown on your screen.')
+      return
     }
+    if (!alive()) { stream.getTracks().forEach((t) => t.stop()); return }
+    this.stream = stream
+    this.video.srcObject = stream
+    const track = stream.getVideoTracks()[0]
+    this.torch.hidden = !(track?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean })?.torch
+    // A browser that won't show the picture yet (it wants a tap for it) shows it on the next tap: the camera is fine.
+    await this.video.play().catch(() => {
+      if (!alive()) return
+      this.say('Tap the picture to start the camera')
+      this.video.addEventListener('click', () => void this.video.play().then(() => { if (alive()) this.say('Point at the code on your screen') }, () => {}), { once: true })
+    })
+    if (!alive()) return
+    const decode = await this.decoder(alive)
+    const scan = async () => {
+      if (!alive()) return
+      try {
+        if (this.video.readyState >= 2) {
+          const text = await decode(this.video)
+          if (!alive()) return
+          if (text && (text !== this.seen.text || Date.now() - this.seen.at > 2500)) {
+            this.seen = { text, at: Date.now() }
+            this.found(text)
+          }
+        }
+      } catch { /* a camera frame can arrive during a resize */ }
+      if (alive()) this.timer = setTimeout(() => void scan(), 150)
+    }
+    void scan()
   }
 
   stop() {
@@ -101,11 +115,20 @@ export class Scanner {
     return alive() ? this.fallback() : async () => null
   }
 
+  /**
+   * The bundled decoder, fetched the first time it's needed. A fetch that fails (the phone went offline) is tried again
+   * frame by frame while the camera keeps running, rather than taking the camera down.
+   */
   private async fallback() {
-    const { default: jsQR } = await import('jsqr')
+    type Read = typeof import('jsqr').default
+    let jsQR: Read | null = null
+    let loading: Promise<void> | null = null
+    const load = () => (loading ??= import('jsqr').then((m) => { jsQR = m.default }, () => { loading = null }))
+    await load()
     const canvas = document.createElement('canvas')
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!
     return async (video: HTMLVideoElement) => {
+      if (!jsQR) { await load(); if (!jsQR) return null }
       const scale = Math.min(1, 960 / video.videoWidth)
       canvas.width = Math.round(video.videoWidth * scale)
       canvas.height = Math.round(video.videoHeight * scale)

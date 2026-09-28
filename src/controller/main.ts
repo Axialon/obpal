@@ -43,6 +43,7 @@ import { uiRect, uiRotation, uiSize } from './uiframe'
 import { applyTheme, initialTheme, swatch, THEMES, themeById } from '../ui/themes'
 import { barSlots, byFit, choiceFor, CONTROLLER_ICON, controllerOn, FACE_OF, fallback, rateControllers, type Face, type Rating } from './ratings'
 import { Switcher } from './switcher'
+import { NodeStrip } from './strip'
 
 const app = document.getElementById('app')!
 const isApple = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
@@ -51,6 +52,8 @@ const store = {
   set: (k: string, v: string) => { try { localStorage.setItem(k, v) } catch { /* private mode */ } },
 }
 const safeImage = (u?: string) => (u && /^https:\/\//.test(u) ? u : undefined)
+/** Where the 3D hand can follow the phone with its camera (WebXR's immersive AR). */
+const CAMERA_3D_NEEDS = 'The camera follows the phone on Android with Google Play Services for AR'
 let connectTo: (join: Join) => Promise<void> = async () => {}
 let openConnections: (scan?: boolean) => void = () => {}
 
@@ -289,6 +292,8 @@ async function boot(code?: Join) {
   const imu = new ImuTracker()
   let imuHeld = false
   let imuScreen = 0
+  /** The way Settings shows as chosen: the camera only where this phone can follow with it (else Motion, in its place). */
+  const shownWay = () => (settings.track3d === 'xr' && !trackOk ? 'motion' : settings.track3d)
   /** How 3D follows the phone here: the chosen way, if this phone can do it. */
   function trackWay(): 'motion' | 'xr' | 'glow' {
     if (settings.track3d === 'xr' && trackOk) return 'xr'
@@ -576,11 +581,14 @@ async function boot(code?: Join) {
   })
   /** The controller bar and the catalogue (./switcher.ts). */
   const switcher = new Switcher({ pick, feel: (strong) => tick(strong), toast: (text) => toast(text) })
+  /** The node strip along the trackpad's edge: which part of what you hold the pad drives (./strip.ts). */
+  const strip = new NodeStrip({ send: (id, v) => { if (link.ready) link.sendCtl({ t: 'value', id, v }) }, feel: (strong) => tick(strong), changed: () => render() })
 
   // The top bar's connection badge: encrypted, how the screen was verified, the path and the round trip (./linkbadge.ts).
   const linkBadge = new LinkBadge()
   const connections = new ConnectionSheet(link)
-  openConnections = (scan = false) => { keyboard.close(); tick(); connections.open(scan) }
+  // The keyboard's dock hands its Back step to the sheet that opens over it (./sheet.ts).
+  openConnections = (scan = false) => { keyboard.close(true); tick(); connections.open(scan) }
   connectTo = async (join) => { hungUp = false; await link.connect(join) }
   link.setLimit(Number(store.get('obpal.connections.limit') ?? 3))
   addEventListener('pagehide', () => { connections.close(); link.destroy() })
@@ -640,6 +648,7 @@ async function boot(code?: Join) {
     tab = 'rotate'; lastTab = 'rotate'; mode = Mode.hold
     pointFace = null; ratedFrom = ''; faceShown = ''
     switcher.close()
+    strip.reset()
     linkBadge.down()
     keyboard.setField(false)
     if (!next?.welcome) { syncMotion(); startPage(); return }
@@ -998,6 +1007,7 @@ async function boot(code?: Join) {
           <button class="track-start glass" id="track-start" hidden>${ICONS.cube}<b>Start 3D</b><small></small></button>
           <button class="glow-end" id="glow-end" hidden aria-label="Stop glowing">${ICONS.close}</button>
           <button class="glow-stop" id="glow-stop" hidden>Stop</button>
+          ${strip.html()}
         </div>
         <div class="wii" id="wii" hidden>
           <div class="wii-part" id="wii-part" hidden><span class="pp-dot"></span><span class="wii-part-name"></span><span class="wii-part-value"></span></div>
@@ -1022,6 +1032,7 @@ async function boot(code?: Join) {
       <div class="rest" id="rest" aria-hidden="true"><span>Resting to keep your phone cool · touch to wake</span></div>`)
     surface = document.getElementById('surface')!
     switcher.mount(surface)
+    strip.mount(surface)
     linkBadge.mount(document.getElementById('link-badge')!)
     document.querySelector<HTMLButtonElement>('.connection-title')!.onclick = () => openConnections()
     document.body.classList.add('live')
@@ -1254,9 +1265,16 @@ async function boot(code?: Join) {
     if (part && mode === Mode.hold) hint('hold-part', () => document.getElementById('pad-part'), `1:1 turns ${part} · × to turn the whole model`, { place: 'bottom', delay: 300 })
     if (hov && !part) hint('parts-phone', () => document.getElementById('pad-part'), 'Tap to select, then drag, pinch or twist it', { place: 'bottom', delay: 300 })
 
+    // The node strip: which part of what you hold the pad drives (a part, a set, or all of it), on the trackpad.
+    const mine = scene ? Object.entries(scene.held).find(([, who]) => who === scene!.you)?.[0] : undefined
+    strip.sync(mine ? scene!.nodes.find((n) => n.id === mine) ?? null : null, values, tab === 'rotate' && !pointing && !glowing)
+    const moves = strip.legend()
+
     // Visual gesture legend instead of instructions.
     const g = (name: string, word: string) => html`<span>${icon(name)}<b>${word}</b></span>`
-    setMarkup(document.getElementById('gestures')!, live
+    setMarkup(document.getElementById('gestures')!, moves.length
+      ? moves.map((m) => g(m.gesture, m.name))
+      : live
       ? [g('drag', 'value'), g('tilt', 'sweep'), g('tap', '2? reset')]
       : part
       ? [g('drag', 'move'), g('pinch', 'scale'), g('twist', 'turn'), g('tap', '2? reset')]
@@ -1555,6 +1573,7 @@ async function boot(code?: Join) {
     setMarkup(sheet, html`
       <div class="sheet settings glass" role="dialog" aria-label="Settings">
         <div class="sheet-head"><div class="grip" aria-hidden="true"></div><button class="icon-btn glass sheet-x" id="set-close" aria-label="Close">${ICONS.close}</button></div>
+        <button class="set-row set-cam glass" id="scan-open">${ICONS.camera}<span>Scan a code<small>Connect another screen</small></span>${ICONS.right}</button>
         <p class="sheet-k"><b>01</b>Feel</p>
         <label class="bb-field"><span>Sensitivity</span><output id="gv"></output><input class="bb-range" type="range" id="gain" min="0.5" max="3" step="0.1"></label>
         <label class="bb-field"><span>Steadiness</span><output id="sv"></output><input class="bb-range" type="range" id="smooth" min="0" max="1" step="0.05"></label>
@@ -1567,17 +1586,18 @@ async function boot(code?: Join) {
         <p class="sheet-k"><b>04</b>Holding it</p>
         <label class="row sw-row"><span>Left-handed</span><input type="checkbox" class="kit-switch" role="switch" id="left"></label>
         <label class="row sw-row"><span>Lock rotation while motion steers</span><input type="checkbox" class="kit-switch" role="switch" id="lockgyro"></label>
-        <div class="row track3d" role="radiogroup" aria-label="3D follows"><span>The 3D hand follows</span>${(['motion', 'xr', 'glow'] as const).map((w) => html`<button class="way-opt" role="radio" data-way="${w}" aria-checked="${settings.track3d === w}" title="${{ motion: 'The phone’s own motion sensors', xr: 'Its camera, through space (Android)', glow: 'A glow for the screen’s camera' }[w]}">${ICONS[{ motion: 'gyro', xr: 'camera', glow: 'glow' }[w]]}<span>${{ motion: 'Motion', xr: 'Camera', glow: 'Glow' }[w]}</span></button>`)}</div>
+        <div class="row track3d" role="radiogroup" aria-label="3D follows"><span>The 3D hand follows</span>${(['motion', 'xr', 'glow'] as const).map((w) => html`<button class="way-opt" role="radio" data-way="${w}" aria-checked="${shownWay() === w}" aria-disabled="${w === 'xr' && !trackOk}" title="${{ motion: 'The phone’s own motion sensors', xr: 'Its camera, through space (Android)', glow: 'A glow for the screen’s camera' }[w]}">${ICONS[{ motion: 'gyro', xr: 'camera', glow: 'glow' }[w]]}<span>${{ motion: 'Motion', xr: 'Camera', glow: 'Glow' }[w]}</span></button>`)}${trackOk ? '' : html`<small class="way-why">${CAMERA_3D_NEEDS}</small>`}</div>
         <p class="sheet-k"><b>05</b>More</p>
         <button class="set-row glass" id="buttons-open">${BUTTONS_GLYPH}<span>Buttons<small>Headset, remote, clicker, pad</small></span><span class="set-srcs">${sourceStack(inputs)}</span>${ICONS.right}</button>
         <button class="set-row glass" id="connections-open">${ICONS.phone}<span>Connections<small>Switch, rename or forget a screen</small></span>${ICONS.right}</button>
-        <button class="set-row glass" id="scan-open">${ICONS.scan}<span>Scan a code<small>Connect another screen</small></span>${ICONS.right}</button>
         <a class="support-link" href="/sponsor/" target="_blank" rel="noopener">${ICONS.heart}<span>Support ob.Pal</span></a>
         <div class="actions"><button class="btn" id="disc">Disconnect</button><button class="btn primary" id="done">Done</button></div>
       </div>`)
     document.body.appendChild(sheet)
-    sheet.querySelector<HTMLButtonElement>('#connections-open')!.onclick = () => { close(); setTimeout(() => openConnections(), 220) }
-    sheet.querySelector<HTMLButtonElement>('#scan-open')!.onclick = () => { close(); setTimeout(() => openConnections(true), 220) }
+    // The camera, Connections and Buttons open in the same tap, over Settings as it slides away: the camera starts
+    // inside the tap (browsers that tie a camera to a gesture keep it), and each takes over Settings' Back step.
+    sheet.querySelector<HTMLButtonElement>('#connections-open')!.onclick = () => { close(true); openConnections() }
+    sheet.querySelector<HTMLButtonElement>('#scan-open')!.onclick = () => { close(true); openConnections(true) }
     const gain = sheet.querySelector<HTMLInputElement>('#gain')!
     const smooth = sheet.querySelector<HTMLInputElement>('#smooth')!
     const left = sheet.querySelector<HTMLInputElement>('#left')!
@@ -1601,6 +1621,8 @@ async function boot(code?: Join) {
     lockgyro.onchange = () => { settings.lockWithGyro = lockgyro.checked; store.set('obpal.lockgyro', lockgyro.checked ? '1' : '0') }
     sheet.querySelectorAll<HTMLButtonElement>('.track3d [data-way]').forEach((b) => {
       b.onclick = () => {
+        // The camera way only where the phone can follow itself with its camera: elsewhere it says so, and stays off.
+        if (b.dataset.way === 'xr' && !trackOk) { tick(true); toast(CAMERA_3D_NEEDS); return }
         settings.track3d = b.dataset.way as 'motion' | 'xr' | 'glow'
         store.set('obpal.track3d', settings.track3d)
         sheet.querySelectorAll('.track3d [data-way]').forEach((x) => x.setAttribute('aria-checked', String(x === b)))
@@ -1610,7 +1632,7 @@ async function boot(code?: Join) {
       }
     })
     // Buttons: its sheet opens as Settings closes.
-    sheet.querySelector<HTMLButtonElement>('#buttons-open')!.onclick = () => { tick(); close(); buttons.open() }
+    sheet.querySelector<HTMLButtonElement>('#buttons-open')!.onclick = () => { tick(); close(true); buttons.open() }
     sheet.querySelectorAll<HTMLButtonElement>('.theme-opt').forEach((b) => {
       b.onclick = () => {
         tick()
@@ -1628,10 +1650,11 @@ async function boot(code?: Join) {
         syncThemeRows()
       }
     })
-    let exits = () => {}
-    const close = () => { exits(); sheet.classList.add('out'); setTimeout(() => sheet.remove(), 200) }
-    sheet.querySelector<HTMLButtonElement>('#done')!.onclick = close
-    sheet.querySelector<HTMLButtonElement>('#set-close')!.onclick = close
+    let exits: (handOver?: boolean) => void = () => {}
+    /** `handOver`: another layer opens in this tap and takes Settings' Back step (./sheet.ts). */
+    const close = (handOver = false) => { exits(handOver); sheet.classList.add('out'); setTimeout(() => sheet.remove(), 200) }
+    sheet.querySelector<HTMLButtonElement>('#done')!.onclick = () => close()
+    sheet.querySelector<HTMLButtonElement>('#set-close')!.onclick = () => close()
     exits = sheetExits(sheet, close)
     // Disconnect asks once (a tap by mistake costs nothing), then says it's done, with the way back.
     const disc = sheet.querySelector<HTMLButtonElement>('#disc')!

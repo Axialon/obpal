@@ -37,7 +37,14 @@ function sliders(scene: THREE.Scene, logic: SliderLogic, count = 2, live?: () =>
 }
 export function createView(stage: Stage, logic: SliderLogic): DeviceView {
   const m = sliders(stage.scene, logic, 2, () => stage.view.invalidate()); let viewed = 0
-  return { framing: playFrame([0, 1.1, 0], 2.25, [0.65, 0.65, 1.25]), overview: playFrame([2.5, 1, -1], 6.2), inspect: () => playFrame([logic.units[viewed].x + viewed * 5, 1.15, 0], 0.6), follow: n => { viewed = n; return new THREE.Vector3(n * 5, 1.1, 0) }, update: (colors, t) => m.step(t, colors), afterRender: monitor(stage, stage.scene, () => m.models[viewed].camera.eye, () => logic.units[viewed].playing ? '● PLAYBACK' : `Slider ${viewed + 1} · camera`, m.models.map(m => m.root)) }
+  return { framing: playFrame([0, 1.1, 0], 2.25, [0.65, 0.65, 1.25]), overview: playFrame([2.5, 1, -1], 6.2), inspect: () => playFrame([logic.units[viewed].x + viewed * 5, 1.15, 0], 0.6), follow: n => { viewed = n; return new THREE.Vector3(n * 5, 1.1, 0) }, update: (colors, t) => m.step(t, colors), afterRender: monitor(stage, stage.scene, () => m.models[viewed].camera.eye, () => logic.units[viewed].playing ? '● PLAYBACK' : `Slider ${viewed + 1} · camera`, m.models.map(m => m.root)),
+    // The travel rings the carriage along its rail; the head's pan its base, the tilt its trunnions.
+    partAt: (n, part) => {
+      const s = m.models[n]
+      if (!s) return null
+      return part === 'travel' ? { object: s.carriage, axis: 'x', radius: 0.2 } : part === 'pan' ? { object: s.camera.pan, axis: 'y', radius: 0.24 }
+        : part === 'tilt' ? { object: s.camera.tilt, axis: 'x', radius: 0.3 } : null
+    } }
 }
 export function preview() {
   const l = new SliderLogic()

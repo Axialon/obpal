@@ -17,6 +17,17 @@ export const JIB_SPEC: DeviceSpec = {
   },
   tray: [{ id: 'record', label: 'Record / stop', type: 'button', icon: 'camera' }],
   buttons: { 'key:Space': 'tray:record', 'key:KeyR': 'tray:record', 'media:playpause': 'tray:record' },
+  // The crane arm and the camera head, each a set on the phone's strip, or any one of the four alone.
+  parts: [
+    { id: 'swing', name: 'Swing', icon: 'turn', channels: ['drag.x'] },
+    { id: 'boom', name: 'Boom', icon: 'lift', channels: ['drag.y'] },
+    { id: 'pan', name: 'Pan', icon: 'look-x', channels: ['pan.x'], turn: true },
+    { id: 'tilt', name: 'Tilt', icon: 'look-y', channels: ['pan.y'], turn: true },
+  ],
+  sets: [
+    { id: 'crane', name: 'Crane', icon: 'reach', parts: ['swing', 'boom'] },
+    { id: 'head', name: 'Head', icon: 'camera', parts: ['pan', 'tilt'] },
+  ],
 }
 export const jibTip = (swing: number, boom: number) => ({ x: -Math.sin(swing) * Math.cos(boom) * 2.5, y: 1.5 + Math.sin(boom) * 2.5, z: -Math.cos(swing) * Math.cos(boom) * 2.5 })
 export class JibLogic extends Machine {

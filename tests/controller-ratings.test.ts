@@ -28,27 +28,29 @@ describe('the ratings: how well each controller fits the screen (CATALOGUE §9.2
     expect(rateControllers({ tray: [] }, phone).map((x) => x.id)).toEqual(CONTROLLER_IDS)
   })
 
-  it('takes a screen that names no controllers (every host before them) at its modes: their faces are good, none best', () => {
-    // The Viewer lists modes only.
+  it('takes a screen that names no controllers (every host before them) at its modes: their faces are good, the first mode’s best', () => {
+    // The Viewer lists modes only: tilt first, so the trackpad is its best.
     const viewer: RatedLayout = { modes: [Mode.tilt, Mode.hold, Mode.point, Mode.track, Mode.gamepad], tray: [] }
     const r = rateControllers(viewer, phone)
     expect(fits(r)).toEqual({
-      'face.gamepad': 2, 'face.wheel': 1, 'face.wii': 2, 'face.mouse': 1, 'face.trackpad': 2, 'face.hand': 2, 'face.keyboard': 0, 'face.drums': 0, 'face.keys': 0,
+      'face.gamepad': 2, 'face.wheel': 1, 'face.wii': 2, 'face.mouse': 1, 'face.trackpad': 3, 'face.hand': 2, 'face.keyboard': 0, 'face.drums': 0, 'face.keys': 0,
     })
-    expect(r.some((x) => x.best)).toBe(false)
+    expect(r.filter((x) => x.best).map((x) => x.id)).toEqual([Controller.trackpad])
+    // Listed the other way round, the gamepad is.
+    expect(rateControllers({ ...viewer, modes: [Mode.gamepad, Mode.tilt] }, phone).find((x) => x.best)?.id).toBe(Controller.gamepad)
     // No modes at all is what phones showed without them: the trackpad and the Wii remote.
-    expect(fits(rateControllers({ tray: [] }, phone))).toMatchObject({ 'face.trackpad': 2, 'face.wii': 2, 'face.gamepad': 0, 'face.hand': 0 })
+    expect(fits(rateControllers({ tray: [] }, phone))).toMatchObject({ 'face.trackpad': 3, 'face.wii': 2, 'face.gamepad': 0, 'face.hand': 0 })
   })
 
   it('reads ob.Pal Link on the PC: the air mouse is its pointing face, the keyboard is in its tray, a suggested profile is best', () => {
     const pc: RatedLayout = { modes: [Mode.gamepad, Mode.tilt, Mode.point], point: 'mouse', tray: [keyboard] }
-    expect(fits(rateControllers(pc, phone))).toMatchObject({ 'face.mouse': 2, 'face.wii': 1, 'face.keyboard': 2, 'face.gamepad': 2, 'face.trackpad': 2, 'face.hand': 0 })
+    expect(fits(rateControllers(pc, phone))).toMatchObject({ 'face.mouse': 2, 'face.wii': 1, 'face.keyboard': 2, 'face.gamepad': 3, 'face.trackpad': 2, 'face.hand': 0 })
     // A racing site: Link suggests Driving, and the steering wheel is best; any other profile tunes the gamepad.
     const racing = rateControllers({ ...pc, profile: 'driving' }, phone)
     expect(racing.find((x) => x.best)?.id).toBe(Controller.wheel)
     expect(rateControllers({ ...pc, profile: 'flight' }, phone).find((x) => x.best)?.id).toBe(Controller.gamepad)
-    // A profile it can't use suggests nothing.
-    expect(rateControllers({ modes: [Mode.point], tray: [], profile: 'driving' }, phone).some((x) => x.best)).toBe(false)
+    // A profile it can't use gives way to its first mode.
+    expect(rateControllers({ modes: [Mode.point], tray: [], profile: 'driving' }, phone).find((x) => x.best)?.id).toBe(Controller.wii)
   })
 
   it('lets music faces in only where a screen names them', () => {
@@ -60,10 +62,10 @@ describe('the ratings: how well each controller fits the screen (CATALOGUE §9.2
 
   it('follows the utilities a screen takes: without tilt steering the wheel is out, and says so', () => {
     const r = rateControllers({ modes: [Mode.gamepad], utilities: ['pad', 'motion.aim'], tray: [] }, phone, 'Arcade')
-    expect(fits(r)).toMatchObject({ 'face.gamepad': 2, 'face.wheel': 0 })
+    expect(fits(r)).toMatchObject({ 'face.gamepad': 3, 'face.wheel': 0 })
     expect(r.find((x) => x.id === Controller.wheel)!.why).toBe('Arcade doesn’t take tilt steering')
     // The trackpad needs any one of touch, 1:1 or tilt.
-    expect(fits(rateControllers({ modes: [Mode.tilt], utilities: ['motion.tilt'], tray: [] }, phone))['face.trackpad']).toBe(2)
+    expect(fits(rateControllers({ modes: [Mode.tilt], utilities: ['motion.tilt'], tray: [] }, phone))['face.trackpad']).toBe(3)
     expect(fits(rateControllers({ modes: [Mode.tilt], utilities: ['pad'], tray: [] }, phone))['face.trackpad']).toBe(0)
   })
 
@@ -78,7 +80,7 @@ describe('the ratings: how well each controller fits the screen (CATALOGUE §9.2
     const odd = { modes: 'nope', controllers: 'face.wii', tray: null, utilities: 7 } as unknown as RatedLayout
     const r = rateControllers(odd, phone)
     expect(r).toHaveLength(CONTROLLER_IDS.length)
-    expect(fits(r)).toMatchObject({ 'face.trackpad': 2, 'face.wii': 2 })
+    expect(fits(r)).toMatchObject({ 'face.trackpad': 3, 'face.wii': 2 })
   })
 })
 

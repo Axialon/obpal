@@ -24,19 +24,33 @@ export class Tracker {
   /** The next pose starts a fresh host reference while the camera keeps tracking the same space. */
   recenter() { this.gen = (this.gen + 1) & 0xff }
 
-  /** Start tracking; call from a tap. `overlay` stays on screen over the camera view. */
+  /**
+   * Start tracking; call from a tap. `overlay` stays on screen over the camera view. Rejects when it can't start; a
+   * start that fails part way ends the session it began, so the next tap can try again.
+   */
   async start(overlay: HTMLElement) {
     const system = xr()
-    if (!system || this.session) return
+    if (!system) throw new Error('No WebXR here')
+    if (this.session) return
     const session = await system.requestSession('immersive-ar', { requiredFeatures: ['local'], optionalFeatures: ['dom-overlay'], domOverlay: { root: overlay } } as XRSessionInit)
     this.session = session
-    this.recenter()
-    // Nothing is drawn: a cleared, transparent layer shows the camera.
-    const canvas = document.createElement('canvas')
-    const gl = (canvas.getContext('webgl2', { xrCompatible: true, alpha: true }) ?? canvas.getContext('webgl', { xrCompatible: true, alpha: true })) as WebGLRenderingContext
-    session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) })
-    const space = await session.requestReferenceSpace('local')
-    session.addEventListener('end', () => { this.session = null; this.onEnd?.() })
+    session.addEventListener('end', () => { if (this.session !== session) return; this.session = null; this.onEnd?.() })
+    let space: XRReferenceSpace
+    let gl: WebGLRenderingContext
+    try {
+      this.recenter()
+      // Nothing is drawn: a cleared, transparent layer shows the camera.
+      const canvas = document.createElement('canvas')
+      const context = canvas.getContext('webgl2', { xrCompatible: true, alpha: true }) ?? canvas.getContext('webgl', { xrCompatible: true, alpha: true })
+      if (!context) throw new Error('No WebGL for the camera view')
+      gl = context as WebGLRenderingContext
+      session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) })
+      space = await session.requestReferenceSpace('local')
+    } catch (e) {
+      this.session = null
+      await session.end().catch(() => {})
+      throw e
+    }
     let p: Vec3 = [0, 0, 0]
     let q: Quat = [0, 0, 0, 1]
     const frame = (_t: number, f: XRFrame) => {

@@ -19,6 +19,13 @@ export const TANK_SPEC: DeviceSpec = {
   },
   tray: [{ id: 'fire', label: 'Fire', type: 'button', icon: 'point' }],
   buttons: { 'media:playpause': 'tray:fire', 'key:Space': 'tray:fire' },
+  // Drive, or aim (turret and gun) with the one finger while the tank rolls to a stop.
+  parts: [
+    { id: 'drive', name: 'Drive', icon: 'wheel', channels: ['drag.x', 'drag.y'], stick: true },
+    { id: 'turret', name: 'Turret', icon: 'turn', channels: ['pan.x'], turn: true },
+    { id: 'gun', name: 'Gun', icon: 'lift', channels: ['pan.y'], turn: true },
+  ],
+  sets: [{ id: 'aim', name: 'Aim', icon: 'point', parts: ['turret', 'gun'] }],
 }
 export const TARGETS = [
   [-5, -6],

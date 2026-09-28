@@ -23,6 +23,16 @@ export const PAINTER_SPEC: DeviceSpec = {
     { id: 'clear', label: 'Clear trails', type: 'button', icon: 'reset' },
   ],
   buttons: { 'media:playpause': 'tray:colour', 'key:KeyC': 'tray:colour', 'key:Backspace': 'tray:clear' },
+  // Strokes on a wall (across and up) or on the floor (across and away), or along one line at a time.
+  parts: [
+    { id: 'across', name: 'Across', icon: 'arrow-right', channels: ['drag.x'] },
+    { id: 'height', name: 'Height', icon: 'arrow-up', channels: ['drag.y'] },
+    { id: 'depth', name: 'Depth', icon: 'depth', channels: ['pan.y'] },
+  ],
+  sets: [
+    { id: 'wall', name: 'Wall', icon: 'frame', parts: ['across', 'height'] },
+    { id: 'floor', name: 'Floor', icon: 'grid', parts: ['across', 'depth'] },
+  ],
 }
 export const INKS = ['#77e6ff', '#ffa1df', '#c6ff68', '#ffd28e']
 export interface Stroke {

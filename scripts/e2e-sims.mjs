@@ -5,6 +5,8 @@
  *   the finger lifts, an e-stop from a phone that only the screen resumes. Each kind of arm (?kind=) opens with its own
  *   joints, and its arm 1 picks up a block and lifts it.
  *   Arena: two phones claim slots and roll their pucks.
+ *   The node strip (./sims-strip.mjs): on an arm and on the excavator, a part switched mid-drag holds, the new one
+ *   starts from where it was, and the same finger carries on with it.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch. OBPAL_SHOTS=<dir> saves screens.
  */
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -18,6 +20,7 @@ import { runVR } from './e2e-vr.mjs'
 import { runControlViews } from './e2e-control-views.mjs'
 import { runAudio } from './e2e-audio.mjs'
 import { runTemporal } from './e2e-temporal.mjs'
+import { simsStrip } from './sims-strip.mjs'
 import { runPanels } from './e2e-panels.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
 
@@ -440,6 +443,8 @@ try {
   // Finished arm and arena sessions must not compete with the studio's eight-phone timing measurement.
   await Promise.all(closers.map(c => c.close()))
   closers.length = 0
+  // The node strip on an arm and the excavator: switching parts mid-drag (./sims-strip.mjs), with its own browser.
+  await simsStrip({ origin: local.origin, check, executablePath, headed: HEADED, shots: SHOTS })
   await runTemporal(local, check)
   await runControl(local, check)
   await runMusic(local, check)

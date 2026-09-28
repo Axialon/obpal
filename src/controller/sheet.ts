@@ -10,10 +10,32 @@ const CLOSE_PX = 90
 const FLING = 0.55
 
 /**
- * Wire `wrap` (the .sheet-wrap holding a .sheet) to close through `close`. Returns what the sheet's own close must
- * call once: it takes the Back step off the history if the sheet didn't close through Back.
+ * Whether the history entry now is the one pushed with `mark`. history.state is a copy of what was pushed, never the
+ * object itself, so the mark is compared by its values.
  */
-export function sheetExits(wrap: HTMLElement, close: () => void): () => void {
+export function atMark(mark: Readonly<Record<string, number>> | null): boolean {
+  const s = history.state as Record<string, unknown> | null
+  return !!mark && !!s && typeof s === 'object' && Object.entries(mark).every(([k, v]) => s[k] === v)
+}
+
+/**
+ * A layer closing so that another opens in the same tap (Settings' camera opening the scanner) leaves its Back step
+ * to that one, which takes it over rather than adding its own: no step back and then forward again, which a browser
+ * takes its time over, while the new layer is already listening for Back. If nothing takes it by the next task, the
+ * step comes off.
+ */
+let handed = false
+export function handStep() {
+  handed = true
+  setTimeout(() => { if (handed) { handed = false; history.back() } })
+}
+
+/**
+ * Wire `wrap` (the .sheet-wrap holding a .sheet) to close through `close`. Returns what the sheet's own close must
+ * call once: it takes the Back step off the history if the sheet didn't close through Back, or with `handOver` leaves
+ * it to the layer opening next (handStep).
+ */
+export function sheetExits(wrap: HTMLElement, close: () => void): (handOver?: boolean) => void {
   const sheet = wrap.querySelector<HTMLElement>('.sheet')!
   let done = false
   const shut = () => { if (!done) close() }
@@ -21,10 +43,11 @@ export function sheetExits(wrap: HTMLElement, close: () => void): () => void {
   const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') shut() }
   addEventListener('keydown', onKey)
 
-  // Back closes the sheet instead of leaving the controller.
+  // Back closes the sheet instead of leaving the controller: its own step, or the one a closing layer handed it.
   const mark = { obpalSheet: Math.random() }
-  history.pushState(mark, '')
-  const onPop = () => { popped = true; shut() }
+  if (handed) { handed = false; history.replaceState(mark, '') } else history.pushState(mark, '')
+  // Back to its own step (a layer over it closed) keeps it open; any further back closes it.
+  const onPop = () => { if (atMark(mark)) return; popped = true; shut() }
   let popped = false
   addEventListener('popstate', onPop)
 
@@ -64,11 +87,13 @@ export function sheetExits(wrap: HTMLElement, close: () => void): () => void {
   sheet.addEventListener('touchend', release)
   sheet.addEventListener('touchcancel', release)
 
-  return () => {
+  return (handOver = false) => {
     if (done) return
     done = true
     removeEventListener('keydown', onKey)
     removeEventListener('popstate', onPop)
-    if (!popped && history.state === mark) history.back()
+    if (popped || !atMark(mark)) return
+    if (handOver) handStep()
+    else history.back()
   }
 }

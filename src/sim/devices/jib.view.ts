@@ -45,7 +45,14 @@ function cranes(scene: THREE.Scene, logic: JibLogic, count = 2, live?: () => voi
 }
 export function createView(stage: Stage, logic: JibLogic): DeviceView {
   const m = cranes(stage.scene, logic, 2, () => stage.view.invalidate()); let viewed = 0
-  return { framing: playFrame([-2.2, 1.5, -0.3], 2.5, [0.9, 0.65, 1.15]), overview: playFrame([0, 1.2, -1.5], 5.4), inspect: () => { const p = jibTip(logic.units[viewed].swing, logic.units[viewed].boom); return playFrame([p.x + (viewed ? 2.2 : -2.2), p.y + 0.2, p.z + 1], 0.65) }, follow: n => { viewed = n; return new THREE.Vector3(n ? 2.2 : -2.2, 1.5, -0.3) }, update: (colors, t) => m.step(t, colors), afterRender: monitor(stage, stage.scene, () => m.models[viewed].camera.eye, () => logic.units[viewed].recording ? `● REC ${logic.units[viewed].time.toFixed(1)} s` : `Jib ${viewed + 1} · camera`, m.models.map(m => m.root)) }
+  return { framing: playFrame([-2.2, 1.5, -0.3], 2.5, [0.9, 0.65, 1.15]), overview: playFrame([0, 1.2, -1.5], 5.4), inspect: () => { const p = jibTip(logic.units[viewed].swing, logic.units[viewed].boom); return playFrame([p.x + (viewed ? 2.2 : -2.2), p.y + 0.2, p.z + 1], 0.65) }, follow: n => { viewed = n; return new THREE.Vector3(n ? 2.2 : -2.2, 1.5, -0.3) }, update: (colors, t) => m.step(t, colors), afterRender: monitor(stage, stage.scene, () => m.models[viewed].camera.eye, () => logic.units[viewed].recording ? `● REC ${logic.units[viewed].time.toFixed(1)} s` : `Jib ${viewed + 1} · camera`, m.models.map(m => m.root)),
+    // The swing rings the column's top, the boom its pivot; the head's pan rings its base, the tilt its trunnions.
+    partAt: (n, part) => {
+      const c = m.models[n]
+      if (!c) return null
+      return part === 'swing' ? { object: c.swing, axis: 'y', radius: 0.32 } : part === 'boom' ? { object: c.boom, axis: 'x', radius: 0.26 }
+        : part === 'pan' ? { object: c.camera.pan, axis: 'y', radius: 0.24 } : part === 'tilt' ? { object: c.camera.tilt, axis: 'x', radius: 0.3 } : null
+    } }
 }
 export function preview() {
   const l = new JibLogic()

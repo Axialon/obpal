@@ -18,6 +18,13 @@ export const FORKLIFT_SPEC: DeviceSpec = {
   },
   tray: [{ id: 'load', label: 'Pallet', type: 'button', icon: 'cube' }],
   buttons: { 'media:playpause': 'tray:load', 'key:Space': 'tray:load' },
+  // Driving on its own, or the forks: the strip hands the one finger to either, and the truck coasts to a stop meanwhile.
+  parts: [
+    { id: 'drive', name: 'Drive', icon: 'wheel', channels: ['drag.x', 'drag.y'], stick: true },
+    { id: 'lift', name: 'Lift', icon: 'slide', channels: ['pan.y'] },
+    { id: 'tilt', name: 'Tilt', icon: 'nod', channels: ['twist'] },
+  ],
+  sets: [{ id: 'forks', name: 'Forks', icon: 'lift', parts: ['tilt', 'lift'] }],
 }
 export const RACKS = [-3, 3]
 /** Shared fork frame and pallet bearing plane, metres. */

@@ -82,6 +82,7 @@ function range(scene: THREE.Scene, logic: TankLogic, live?: () => void) {
   scene.add(balls)
   const dummy = new THREE.Object3D()
   return {
+    models,
     step(colors: readonly (string | null)[] = []) {
       models.forEach((m, n) => {
         const u = logic.units[n]
@@ -112,6 +113,13 @@ export function createView(stage: Stage, logic: TankLogic): DeviceView {
     inspect: () => playFrame(at(0), 1),
     follow: (n) => new THREE.Vector3(...at(n)),
     update: (c) => w.step(c),
+    // The drive rings the hull on the floor, the turret its ring, the gun its trunnion.
+    partAt: (n, part) => {
+      const m = w.models[n]
+      if (!m) return null
+      return part === 'drive' ? { object: m.root, axis: 'y', radius: 1.05, at: [0, 0.03, 0] } : part === 'turret' ? { object: m.turret, axis: 'y', radius: 0.52 }
+        : part === 'gun' ? { object: m.gun, axis: 'x', radius: 0.2 } : null
+    },
   }
 }
 export function preview() {

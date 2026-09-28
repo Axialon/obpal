@@ -440,6 +440,9 @@ body:has(.sheet-wrap) .hint { visibility: hidden; }
 .way-opt .ic { width: 22px; height: 22px; }
 .way-opt[aria-checked='true'] { border-color: rgb(var(--accent-rgb) / 0.75); background: rgb(var(--accent-rgb) / 0.12); color: var(--ink); }
 .way-opt[aria-checked='true'] .ic { color: var(--accent-text); }
+/* A way this phone can't follow by (the camera without WebXR AR) steps back, and the row says what it needs. */
+.way-opt[aria-disabled='true'] { opacity: 0.45; border-style: dashed; }
+.track3d .way-why { grid-column: 1 / -1; font-size: 12px; font-weight: 550; line-height: 1.35; color: var(--muted); }
 
 /* ---- part chip: what the pointer is on / what is selected ---- */
 .pad-part { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; max-width: calc(100% - 24px); height: 36px; padding: 0 6px 0 12px; border-radius: 999px; font-size: 13px; font-weight: 700; letter-spacing: -0.01em; animation: fade 0.2s var(--ease); z-index: 2; }
@@ -477,6 +480,53 @@ body:has(.sheet-wrap) .hint { visibility: hidden; }
 @media (prefers-reduced-motion: reduce) { .pad-part.flash, .pad-part.leaving, #pad.ctl-flash { animation-duration: 0.01ms; } }
 .pad-part.sel .pp-dot { background: var(--accent-ink); box-shadow: none; }
 .pad-part.sel .pp-x { display: grid; }
+
+/* ---- the node strip (./strip.ts): along the trackpad's thumb-side edge, what of the node you hold the pad drives ----
+   The whole node, its sets, then its parts one by one: 44 px circles (a set is a rounded square, with a dot per part),
+   the one chosen lit in the accent, the parts of a chosen set ringed, a locked part dimmed under a lock. A short list
+   sits low, in reach of the thumb; a long one scrolls. The pad's chip and legend move over to leave it room. */
+.nstrip { position: absolute; z-index: 3; right: var(--sp-2); top: var(--sp-2); bottom: var(--sp-2); width: 54px; display: flex; flex-direction: column; justify-content: flex-end;
+  pointer-events: none; }
+/* The rail itself hugs its items (a short list sits low, a long one fills the edge and scrolls); above it the pad is the pad. */
+.ns-list { pointer-events: auto; border-radius: 27px; background: rgb(var(--base-rgb) / 0.32); box-shadow: 0 0 0 1px var(--glass-edge), inset 0 1px 0 rgb(255 255 255 / 0.06); }
+/* More beyond an end: that end fades. */
+.ns-list.up { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 26px); mask-image: linear-gradient(to bottom, transparent, #000 26px); }
+.ns-list.down { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent); }
+.ns-list.up.down { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 26px, #000 calc(100% - 26px), transparent); mask-image: linear-gradient(to bottom, transparent, #000 26px, #000 calc(100% - 26px), transparent); }
+.nstrip[hidden] { display: none; }
+.ns-list { position: relative; display: flex; flex-direction: column; align-items: center; gap: var(--sp-1); min-height: 0; padding: 4px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; touch-action: none; }
+.ns-list::-webkit-scrollbar { display: none; }
+.ns-item { position: relative; flex: none; width: var(--tap); height: var(--tap); display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--secondary);
+  -webkit-tap-highlight-color: transparent; touch-action: none; transition: background 0.16s var(--ease), color 0.16s var(--ease), box-shadow 0.16s var(--ease), transform 0.12s var(--ease); }
+.ns-item .ic { width: 21px; height: 21px; }
+.ns-item[data-kind='set'] { border-radius: 14px; }
+.ns-item[data-kind='set'] .ic { margin-top: -5px; }
+.ns-count { position: absolute; left: 0; right: 0; bottom: 7px; display: flex; justify-content: center; gap: 3px; }
+.ns-count b { width: 3.5px; height: 3.5px; border-radius: 50%; background: currentColor; opacity: 0.75; }
+.ns-mono { font-size: 15px; font-weight: 750; }
+.ns-sep { flex: none; width: 22px; height: 1px; margin: 2px 0; background: var(--line); }
+.ns-item.down { transform: scale(0.92); }
+.ns-item[aria-pressed='true'] { background: var(--glass-light); color: var(--accent-ink); box-shadow: 0 6px 18px rgb(var(--accent-rgb) / 0.35), inset 0 1px 0 rgb(255 255 255 / 0.45); }
+.ns-item.in { color: var(--ink); box-shadow: inset 0 0 0 1.5px rgb(var(--accent-rgb) / 0.7); }
+.ns-item.held { color: var(--muted); }
+.ns-item.held > .ic, .ns-item.held > .ns-mono { opacity: 0.5; }
+.ns-lock { position: absolute; right: 2px; bottom: 2px; display: none; width: 17px; height: 17px; place-items: center; border-radius: 50%; background: rgb(var(--base-rgb) / 0.92); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
+.ns-lock .ic { width: 11px; height: 11px; stroke-width: 2.4; }
+.ns-item.held .ns-lock { display: grid; }
+/* The name, a moment beside the strip as a switch lands (and a lock with it when that's what changed). */
+.ns-tag { position: absolute; z-index: 3; right: 70px; top: var(--y, 50%); display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 999px;
+  font-size: 13px; font-weight: 700; letter-spacing: -0.01em; color: var(--ink); white-space: nowrap; pointer-events: none; opacity: 0; transform: translate(6px, -50%);
+  transition: opacity 0.18s var(--ease), transform 0.18s var(--ease); }
+.ns-tag.in { opacity: 1; transform: translate(0, -50%); }
+.ns-tag .ic { width: 14px; height: 14px; }
+.pad.stripped .gestures { left: 0; right: 62px; }
+.pad.stripped .pad-part { left: calc(50% - 31px); max-width: calc(100% - 148px); }
+.surface.left .nstrip { right: auto; left: var(--sp-2); }
+.surface.left .ns-tag { right: auto; left: 70px; transform: translate(-6px, -50%); }
+.surface.left .ns-tag.in { transform: translate(0, -50%); }
+.surface.left .pad.stripped .gestures { left: 62px; right: 0; }
+.surface.left .pad.stripped .pad-part { left: calc(50% + 31px); }
+@media (prefers-reduced-motion: reduce) { .ns-item, .ns-tag { transition: none; } }
 
 .support-link { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 14px; border-radius: 14px; border: 1px solid var(--glass-edge); background: rgb(var(--accent-rgb) / 0.08); color: var(--accent-soft); text-decoration: none; font-size: 14px; font-weight: 650; }
 .support-link .ic { width: 18px; height: 18px; color: var(--accent-text); }
@@ -737,6 +787,9 @@ body.resting .rest { display: grid; }
 .set-srcs { display: flex; gap: 4px; }
 .set-srcs i { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 9px; background: rgb(var(--src) / 0.2); color: var(--ink); }
 .set-srcs .ic { width: 15px; height: 15px; }
+/* Settings opens on the camera: another screen's code, one tap from the top, its lens in a lit well. */
+.set-row.set-cam { min-height: 64px; background: linear-gradient(150deg, rgb(var(--accent-rgb) / 0.18), rgb(var(--surface-rgb) / 0.45)) !important; border-color: rgb(var(--accent-rgb) / 0.38) !important; }
+.set-row.set-cam > .ic:first-child { width: 42px; height: 42px; padding: 10px; border-radius: 50%; background: var(--glass-light); color: var(--accent-ink); box-shadow: 0 6px 16px rgb(var(--accent-rgb) / 0.3); }
 
 /* The Buttons sheet: the controller's controls as chips carrying what's bound to them; tap one, then press a button. */
 .sheet.btns { gap: 14px; }

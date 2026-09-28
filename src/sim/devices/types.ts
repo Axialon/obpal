@@ -34,7 +34,29 @@ export interface DeviceSpec {
   tray: TrayControl[]
   /** What physical inputs press here (`layout.buttons`, CATALOGUE §3): on top of each controller's defaults. */
   buttons?: Record<string, string>
+  /**
+   * Its parts (PROTOCOL §3a): the pieces of a unit the phone's node strip picks one at a time, first to last as the
+   * strip shows them, and named sets of them. The unit's own icon heads the strip, for the whole of it.
+   */
+  parts?: readonly DevicePart[]
+  sets?: readonly DeviceSet[]
+  icon?: string
 }
+
+/** A trackpad gesture a device reads (DeviceInput): the one-finger drag or two-finger pan across or down, the twist, the pinch. */
+export type Channel = 'drag.x' | 'drag.y' | 'pan.x' | 'pan.y' | 'twist' | 'pinch'
+
+/**
+ * A part of a unit (a boom, a camera head's pan) and the trackpad gestures the device's own mapping reads for it: one,
+ * or two (across, then down). Chosen on the phone, it takes the one finger: a drag across or up moves it on, down or
+ * left back (a part with two gestures takes the drag as it is). `stick`: it reads the drag as a floating stick (a
+ * drive), which centres when the finger moves on to another part. `turn`: the phone's 1:1 turn and its calibrated aim
+ * move it too (a camera head).
+ */
+export interface DevicePart { id: string; name: string; icon: string; channels: readonly Channel[]; stick?: boolean; turn?: boolean }
+
+/** A named set of a unit's parts for one kind of motion; chosen, it drives them together and the others hold. */
+export interface DeviceSet { id: string; name: string; icon: string; parts: readonly string[] }
 
 /** The tray button every device has: the unit you hold goes home. */
 export const HOME: TrayControl = { id: 'home', label: 'Home', type: 'button', icon: 'reset' }

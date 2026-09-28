@@ -140,6 +140,12 @@ body.stopped #stage { filter: saturate(0.4) brightness(0.8); transition: filter 
 .jgrid li.held b { color: var(--bb-ink); }
 .jgrid li[data-state="limit"], .jgrid li[data-state="floor"], .jgrid li[data-state="block"], .jgrid li[data-state="watchdog"] { box-shadow: inset 0 0 0 1px rgb(252 211 77 / 0.6); }
 .jgrid .chip-x { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; font-size: 12px; background: rgb(var(--surface-rgb, 20 24 32) / 0.95); }
+/* The joints a phone's node strip drives on their own light up; a locked one steps back, marked with a lock. */
+.jgrid li.live { box-shadow: inset 0 0 0 1.5px rgb(var(--accent-rgb) / 0.75), 0 0 14px rgb(var(--accent-rgb) / 0.18); }
+.jgrid li.locked { opacity: 0.62; }
+.jgrid li.locked b::after { content: ''; display: inline-block; width: 9px; height: 9px; margin-left: 5px; vertical-align: -1px; background: currentColor;
+  -webkit-mask: var(--lock-glyph) center / contain no-repeat; mask: var(--lock-glyph) center / contain no-repeat; }
+.jgrid { --lock-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round'%3E%3Crect x='5.5' y='10.5' width='13' height='9.5' rx='2.6'/%3E%3Cpath d='M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5'/%3E%3C/svg%3E"); }
 .nodes li[data-state="edge"] .nn small::after { content: " · at the edge of its reach"; color: #fcd34d; }
 .nodes li[data-state="mirror"] .nn small::after { content: " · following the real arm"; color: #7dd3fc; }
 .sim-badge.live { background: #e11d48; border: 0; color: #fff; }

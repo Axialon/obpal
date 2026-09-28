@@ -5,8 +5,10 @@ export {
   Mode, Tier, PadButton, PadFlag, PointerFlag, pointerDelta, PROFILES, PROFILE_IDS, isProfileId,
   Controller, CONTROLLERS, CONTROLLER_IDS, isControllerId, controllerOf, layoutControllers, withControllers,
   type Layout, type TrayControl, type ModeId, type TierId, type Quat, type PadState, type PointerState, type Profile, type ProfileId,
-  type ControllerId, type ControllerSpec, type Caps, type SceneNode, type ScenePerson,
+  type ControllerId, type ControllerSpec, type Caps, type SceneNode, type ScenePerson, type ScenePart, type SceneSet,
+  PART_VALUE, LOCKS_VALUE, MAX_PARTS, MAX_SETS,
 } from '@obpal/core'
+export { focusOf, PartFocus, readLocks, type Focus } from './parts'
 export { handMove, handTurn, headingOf } from './hand'
 export { findBlob, GlowCamera, GlowFollower, glowMove, hsv, hueOf, type Blob } from './glow'
 export { PairingChip, type ChipCorner, type PairingChipOptions } from './chip'

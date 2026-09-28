@@ -89,6 +89,7 @@ function site(scene: THREE.Scene, logic: ExcavatorLogic, live?: () => void) {
   scene.add(m.root)
   if (live) upgradeSkins('excavator', { upperSkin: m.skin, boomSkin: m.boomSkin, stickSkin: m.stickSkin }, live)
   return {
+    m,
     step() {
       const u = logic.units[0]
       m.root.position.set(u.x, 0, u.z)
@@ -110,6 +111,12 @@ export function createView(stage: Stage, logic: ExcavatorLogic): DeviceView {
     overview: playFrame([0, 0.6, 0], 6),
     inspect: () => playFrame([0, 1, -0.5], 1.45),
     update: () => w.step(),
+    // The swing rings the turntable; the boom, stick and bucket ring their hinges.
+    partAt: (_n, part) => part === 'swing' ? { object: w.m.upper, axis: 'y', radius: 0.62, at: [0, -0.12, 0] }
+      : part === 'boom' ? { object: w.m.boom, axis: 'x', radius: 0.26 }
+      : part === 'stick' ? { object: w.m.stick, axis: 'x', radius: 0.24 }
+      : part === 'bucket' ? { object: w.m.bucket, axis: 'x', radius: 0.26 }
+      : null,
   }
 }
 export function preview() {

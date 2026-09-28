@@ -17,6 +17,13 @@ export const SLIDER_SPEC: DeviceSpec = {
   },
   tray: [{ id: 'key', label: 'Set keyframe', type: 'button', icon: 'tap' }, { id: 'play', label: 'Play / stop', type: 'button', icon: 'play' }, { id: 'clear', label: 'Clear keys', type: 'button', icon: 'reset' }, { id: 'duration', label: 'Duration', type: 'select', options: [{ value: '4', label: '4 seconds' }, { value: '8', label: '8 seconds' }, { value: '12', label: '12 seconds' }] }],
   buttons: { 'key:Space': 'tray:key', 'key:KeyP': 'tray:play', 'key:Backspace': 'tray:clear', 'media:playpause': 'tray:play' },
+  // The carriage's travel, or the head's aim, with the one finger (motion moves the travel and the tilt together).
+  parts: [
+    { id: 'travel', name: 'Travel', icon: 'slide', channels: ['drag.x'], turn: true },
+    { id: 'pan', name: 'Pan', icon: 'look-x', channels: ['pan.x'] },
+    { id: 'tilt', name: 'Tilt', icon: 'look-y', channels: ['pan.y'], turn: true },
+  ],
+  sets: [{ id: 'aim', name: 'Aim', icon: 'camera', parts: ['pan', 'tilt'] }],
 }
 export interface CameraKey { x: number; pan: number; tilt: number }
 export const easeShot = (t: number) => { const u = clamp(t, 0, 1); return u * u * u * (u * (u * 6 - 15) + 10) }

@@ -14,6 +14,7 @@
 import type { DeviceMsg } from '@obpal/core'
 import { ICONS } from '../ui/icons'
 import { SENTINEL, textMessages, TypingDiff } from './typing'
+import { atMark, handStep } from './sheet'
 
 /** What has the focus on the screen: a text field, or a password field. */
 export type TextField = 'text' | 'secret'
@@ -64,15 +65,16 @@ export class KeyboardDock {
   private goneTimer: ReturnType<typeof setTimeout> | undefined
   private repeatTimer: ReturnType<typeof setTimeout> | undefined
   /** The history entry that lets Back close the dock, as it closes a sheet. */
-  private mark: object | null = null
+  private mark: { obpalKeyboard: number } | null = null
   /** Where the prompt floats: the middle of the controls, and how far above the bottom (px, the UI's frame). */
   private at: { x: number; bottom: number } | null = null
   /** Which icons the dock and the prompt show now ('dock/prompt', text or secret), so typing doesn't redraw them. */
   private icons = ''
 
   constructor(private readonly deps: KeyboardDeps) {
+    // Back past the dock's step closes it; back to it (a sheet over it closed) keeps it.
     addEventListener('popstate', () => {
-      if (this.mark && history.state !== this.mark) { this.mark = null; this.close() }
+      if (this.mark && !atMark(this.mark)) { this.mark = null; this.close() }
     })
     visualViewport?.addEventListener('resize', this.fit)
     visualViewport?.addEventListener('scroll', this.fit)
@@ -188,8 +190,11 @@ export class KeyboardDock {
     if (opening) this.deps.changed(true)
   }
 
-  /** Close the dock: the phone's keyboard goes, and the field forgets what it held. */
-  close() {
+  /**
+   * Close the dock: the phone's keyboard goes, and the field forgets what it held. `handOver`: a sheet opens in the
+   * same tap and takes the dock's Back step (./sheet.ts).
+   */
+  close(handOver = false) {
     clearTimeout(this.goneTimer)
     this.stopRepeat()
     if (!this.by) return
@@ -200,7 +205,10 @@ export class KeyboardDock {
     if (this.root) this.root.hidden = true
     // Still focused on the screen: the prompt comes back, quietly.
     this.prompt?.classList.add('again')
-    if (this.mark && history.state === this.mark) history.back()
+    if (this.mark && atMark(this.mark)) {
+      if (handOver) handStep()
+      else history.back()
+    }
     this.mark = null
     this.render()
     this.fit()

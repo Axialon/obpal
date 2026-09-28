@@ -5,7 +5,8 @@
  *
  * The fit, from what the screen sent:
  *   3  best   the screen's first suggestion (`layout.controllers[0]`), or, from a screen that names none, the controller
- *             its suggested profile tunes (Driving is the steering wheel; the other profiles tune the gamepad)
+ *             its suggested profile tunes (Driving is the steering wheel; the other profiles tune the gamepad), else
+ *             the controller of the first mode it lists
  *   2  suits  the screen names it (`layout.controllers`), or it is a face of the modes it lists (a screen from before
  *             controllers: `layoutControllers`)
  *   1  works  the screen takes everything it sends, but doesn't name it (the air mouse where the screen's pointing
@@ -19,7 +20,7 @@ export type Fit = 0 | 1 | 2 | 3
 export interface Rating {
   id: ControllerId
   fit: Fit
-  /** The screen's best: its first suggestion. At most one controller is. */
+  /** The screen's best: its first suggestion (or its first mode's controller). At most one controller is. */
   best: boolean
   /** It steers with the phone's motion sensors, which this phone hasn't got (or hasn't allowed yet). */
   needsMotion: boolean
@@ -121,7 +122,8 @@ export function rateControllers(layout: RatedLayout, device: { motion: boolean }
     return (n.all ?? []).every(has) && (!n.any || n.any.some(has))
   }
   const profile = isProfileId(layout.profile) ? layout.profile : null
-  const best = named.find(takes) ?? (profile ? [profile === 'driving' ? Controller.wheel : Controller.gamepad].find(takes) : undefined) ?? null
+  // What it names first, else what its profile tunes, else the face of its first mode (a screen from before controllers).
+  const best = named.find(takes) ?? (profile ? [profile === 'driving' ? Controller.wheel : Controller.gamepad].find(takes) : undefined) ?? (named.length ? undefined : offered.find(takes)) ?? null
   return CONTROLLER_IDS.map((id) => {
     const ok = takes(id)
     const fit: Fit = !ok ? 0 : id === best ? 3 : offered.includes(id) ? 2 : 1

@@ -9,6 +9,8 @@
  *     the 3D hand, the gamepad, the wheel, the air mouse, the keyboard's dock, the drums and the keys), in the catalogue
  *     and in settings: no control nearer the screen's edge than the controller's edge (--edge, 16 px), and no touch
  *     target under 44 px (--tap).
+ *   - The node strip on the excavator's trackpad (src/controller/strip.ts): the whole, its sets and its parts, a tap
+ *     that lights one and that the screen drives, and the same layout rules at 360 px too.
  */
 import { devices } from 'playwright'
 import { join } from 'node:path'
@@ -161,10 +163,11 @@ export async function phoneControllers({ browser, origin, check, shots }) {
       await v.catalogue()
       const c = await v.cards()
       const fits = Object.fromEntries(c.map((x) => [x.id, x.fit]))
-      const expect = { 'face.trackpad': 2, 'face.wii': 2, 'face.hand': 2, 'face.gamepad': 2, 'face.wheel': 1, 'face.mouse': 1, 'face.keyboard': 0, 'face.drums': 0, 'face.keys': 0 }
+      const expect = { 'face.trackpad': 3, 'face.wii': 2, 'face.hand': 2, 'face.gamepad': 2, 'face.wheel': 1, 'face.mouse': 1, 'face.keyboard': 0, 'face.drums': 0, 'face.keys': 0 }
       const off = Object.entries(expect).filter(([k, f]) => fits[k] !== f)
       if (off.length || c.length !== 9) throw new Error(`fits ${JSON.stringify(fits)}`)
-      if (c.some((x) => x.best)) throw new Error('a screen that names no controllers has no best')
+      // A screen that names no controllers: its first mode's (the Viewer's tilt) is its best.
+      if (c.filter((x) => x.best).map((x) => x.id).join() !== 'face.trackpad') throw new Error(`best: ${c.filter((x) => x.best).map((x) => x.id)}`)
       if (!c.find((x) => x.id === 'face.trackpad').on || c.filter((x) => x.on).length !== 1) throw new Error('the trackpad isn’t the one in use')
       if (c.filter((x) => x.out).map((x) => x.id).join() !== 'face.keyboard,face.drums,face.keys') throw new Error(`dimmed: ${c.filter((x) => x.out).map((x) => x.id)}`)
       // The ones it takes come first, best first; the dimmed ones last.
@@ -216,10 +219,10 @@ export async function phoneControllers({ browser, origin, check, shots }) {
     })
 
     /**
-     * Look at every face `faces` names ([controller, how to show it, what to call it]) at the three sizes, and the
-     * catalogue at each: what comes nearer the edge than EDGE, or is smaller than TAP to touch.
+     * Look at every face `faces` names ([controller, how to show it, what to call it]) at the three sizes (or `sizes`),
+     * and the catalogue at each: what comes nearer the edge than EDGE, or is smaller than TAP to touch.
      */
-    const layouts = async (p, faces, extra = []) => {
+    const layouts = async (p, faces, extra = [], sizes = SIZES) => {
       const bad = []
       let looked = 0
       const look = async (z, label) => {
@@ -229,7 +232,7 @@ export async function phoneControllers({ browser, origin, check, shots }) {
         for (const n of a.near) bad.push(`${z.name} ${label}: ${n} from the edge`)
         for (const n of a.small) bad.push(`${z.name} ${label}: ${n} to touch`)
       }
-      for (const z of SIZES) {
+      for (const z of sizes) {
         await p.size(z)
         for (const [id, label, then] of faces) {
           if (id) {
@@ -319,6 +322,28 @@ export async function phoneControllers({ browser, origin, check, shots }) {
     const studio = await join('/sim/device/?d=studio')
     await check('the studio’s drums and keys at three phone sizes: nothing nearer the edge than 16 px, no touch target under 44 px', () => layouts(studio, [['face.drums', 'drums'], ['face.keys', 'keys']]))
     await studio.close()
+
+    // The node strip (./strip.ts): the excavator's parts along the trackpad's thumb edge.
+    const digger = await join('/sim/device/?d=excavator')
+    await check('the excavator’s node strip: an icon for the whole, each set and each part, a tap lights one and the screen drives it; at 360 px and three sizes nothing nearer the edge than 16 px, no touch target under 44 px', async () => {
+      await until('the excavator held', () => digger.screen.evaluate(() => !!window.__sim.claims.holder('excavator1')))
+      await digger.catalogue()
+      await digger.phone.locator('.ctl-card[data-c="face.trackpad"]').click()
+      await digger.phone.locator('#nstrip:not([hidden])').waitFor({ timeout: 8000 })
+      const strip = () => digger.phone.evaluate(() => [...document.querySelectorAll('#nstrip .ns-item')].map((b) => `${b.dataset.kind}:${b.dataset.part}${b.getAttribute('aria-pressed') === 'true' ? '*' : ''}`).join(' '))
+      const first = await strip()
+      if (first !== 'whole:* set:reach set:dig part:swing part:boom part:stick part:bucket') throw new Error(`strip ${first}`)
+      await digger.clear()
+      await digger.phone.locator('.ns-item[data-part="reach"]').click()
+      await until('Reach driven', () => digger.screen.evaluate(() => window.__device.focus(0)?.part === 'reach'))
+      const lit = await strip()
+      const ringed = await digger.phone.locator('.ns-item.in').evaluateAll((l) => l.map((b) => b.dataset.part).join())
+      if (!lit.includes('set:reach*') || ringed !== 'boom,stick') throw new Error(`after a tap on Reach: ${lit}, ringed ${ringed}`)
+      if (shots) await digger.phone.screenshot({ path: join(shots, 'phone-strip-excavator.png') })
+      const shown = await layouts(digger, [[null, 'trackpad with its node strip']], [], [{ name: '360×640', width: 360, height: 640, angle: 0 }, ...SIZES])
+      return `${lit}; ${shown}`
+    })
+    await digger.close()
     if (errors.length) throw new Error(errors[0])
   } catch (e) {
     await check('the controller bar and catalogue checks ran', async () => { throw e })

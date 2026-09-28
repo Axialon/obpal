@@ -48,13 +48,20 @@ function observatory(scene: THREE.Scene, logic: TelescopeLogic, count = 2) {
     rod(elevation, [0.08, 0.2, 0], [0.08, 0.2, -0.45], 0.035); batch(elevation)
     return { pan, elevation, light }
   })
-  return { step(colors: readonly (string | null)[] = []) { models.forEach((m, n) => { const u = logic.units[n]; m.pan.rotation.y = u.pan; m.elevation.rotation.x = u.elevation; wear(m.light, colors[n] ?? null) }) } }
+  return { models, step(colors: readonly (string | null)[] = []) { models.forEach((m, n) => { const u = logic.units[n]; m.pan.rotation.y = u.pan; m.elevation.rotation.x = u.elevation; wear(m.light, colors[n] ?? null) }) } }
 }
 export function createView(stage: Stage, logic: TelescopeLogic): DeviceView {
   const model = observatory(stage.scene, logic), stars = sky(), eye = new THREE.PerspectiveCamera(48, 1.6, 0.01, 60)
   const distant = stars.clone(); distant.name = 'named-sky'; stage.scene.add(distant)
   let viewed = 0
-  return { framing: playFrame([0, 1.3, 0], 1.2, [1.1, 0.45, 1.5]), overview: playFrame([1.4, 2.2, -4], 5.5), inspect: () => playFrame([viewed * 3, 1.65, 0], 0.65), follow: n => { viewed = n; return new THREE.Vector3(n * 3, 1.3, 0) }, update: colors => { model.step(colors); const u = logic.units[viewed]; eye.rotation.set(u.elevation, u.pan, 0, 'YXZ'); eye.fov = 48 / u.zoom }, afterRender: monitor(stage, stars, () => eye, () => `Eyepiece ${viewed + 1} · ${logic.units[viewed].zoom.toFixed(1)}×`, [], true) }
+  return { framing: playFrame([0, 1.3, 0], 1.2, [1.1, 0.45, 1.5]), overview: playFrame([1.4, 2.2, -4], 5.5), inspect: () => playFrame([viewed * 3, 1.65, 0], 0.65), follow: n => { viewed = n; return new THREE.Vector3(n * 3, 1.3, 0) }, update: colors => { model.step(colors); const u = logic.units[viewed]; eye.rotation.set(u.elevation, u.pan, 0, 'YXZ'); eye.fov = 48 / u.zoom }, afterRender: monitor(stage, stars, () => eye, () => `Eyepiece ${viewed + 1} · ${logic.units[viewed].zoom.toFixed(1)}×`, [], true),
+    // The pan rings the mount's turntable, the elevation the tube's trunnion, the zoom its eyepiece end.
+    partAt: (n, part) => {
+      const t = model.models[n]
+      if (!t) return null
+      return part === 'pan' ? { object: t.pan, axis: 'y', radius: 0.3 } : part === 'elevation' ? { object: t.elevation, axis: 'x', radius: 0.34 }
+        : part === 'zoom' ? { object: t.elevation, axis: 'z', radius: 0.3, at: [0, 0, 0.5] } : null
+    } }
 }
 export function preview() {
   const l = new TelescopeLogic()

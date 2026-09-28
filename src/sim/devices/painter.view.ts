@@ -71,6 +71,7 @@ function studio(scene: THREE.Scene, logic: PainterLogic) {
     up = new THREE.Vector3(0, 1, 0),
     color = new THREE.Color()
   return {
+    light: root,
     step() {
       const u = logic.units[0]
       root.visible = !logic.canvas
@@ -112,6 +113,9 @@ export function createView(stage: Stage, logic: PainterLogic): DeviceView {
     inspect: () => playFrame([logic.units[0].x, logic.units[0].y, logic.units[0].z], 0.36),
     follow: () => new THREE.Vector3(logic.units[0].x, logic.units[0].y, logic.units[0].z),
     update: () => w.step(),
+    // A ring about the light, across the way the chosen part moves it.
+    partAt: (_n, part) => part === 'across' || part === 'height' || part === 'depth'
+      ? { object: w.light, axis: part === 'across' ? 'x' : part === 'height' ? 'y' : 'z', radius: 0.16, at: [0, 0.22, 0] } : null,
   }
 }
 export function preview() {

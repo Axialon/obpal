@@ -18,6 +18,13 @@ export const TELESCOPE_SPEC: DeviceSpec = {
   },
   tray: [{ id: 'find', label: 'Found it', type: 'button', icon: 'tap' }, { id: 'in', label: 'Zoom in', type: 'button', icon: 'plus' }, { id: 'out', label: 'Zoom out', type: 'button', icon: 'minus' }],
   buttons: { 'key:Space': 'tray:find', 'media:playpause': 'tray:find' },
+  // Aim the mount, or one axis at a time, or zoom with a drag while the aim holds.
+  parts: [
+    { id: 'pan', name: 'Pan', icon: 'turn', channels: ['drag.x'], turn: true },
+    { id: 'elevation', name: 'Elevation', icon: 'lift', channels: ['drag.y'], turn: true },
+    { id: 'zoom', name: 'Zoom', icon: 'zoom-in', channels: ['pinch'] },
+  ],
+  sets: [{ id: 'aim', name: 'Aim', icon: 'point', parts: ['pan', 'elevation'] }],
 }
 export const SKY_OBJECTS = [
   { name: 'Moon', pan: 0, elevation: 0.4, color: '#e9dfc1' },

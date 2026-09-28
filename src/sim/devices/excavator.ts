@@ -1,9 +1,13 @@
-/** Excavator pattern: left swing/stick, right bucket/boom. Sand is transferred only at the bucket tip. */
+/**
+ * Excavator pattern: left swing/stick, right bucket/boom. Sand is transferred only at the bucket tip. On the trackpad
+ * a drag swings and raises the boom, two fingers work the stick (up and down) and the bucket (across); the phone's
+ * node strip picks any one of the four, or a set of them, for the one finger (./focus.ts).
+ */
 import { Controller, PadButton } from '@obpal/core'
 import { action, Machine, timestep } from './common'
 import { axis, clamp, down, wrapPi } from './input'
 import type { DeviceInput, DeviceSpec } from './types'
-import { planar } from '../vr/intent'
+import { panSign, planar } from '../vr/intent'
 export const EXCAVATOR_SPEC: DeviceSpec = {
   id: 'excavator',
   name: 'Excavator',
@@ -12,14 +16,27 @@ export const EXCAVATOR_SPEC: DeviceSpec = {
   kind: 'Machine',
   blurb: 'Work the two sticks, scoop the sand pile and swing a full bucket over the truck.',
   teaches: 'Two sticks operate four independent hydraulic joints',
-  controllers: [Controller.gamepad, Controller.hand],
+  controllers: [Controller.gamepad, Controller.hand, Controller.trackpad],
   how: {
     'face.gamepad': 'Left: swing / stick · right: bucket / boom (pull raises) · triggers travel · A curls / dumps',
     'face.hand': 'Hold and move the phone to place the bucket · tap Bucket to curl / dump',
+    'face.trackpad': 'Drag swings and raises the boom · two fingers work the stick and bucket · the strip picks one joint',
   },
   tray: [{ id: 'bucket', label: 'Bucket', type: 'button', icon: 'hand' }],
   buttons: { 'media:playpause': 'tray:bucket', 'key:Space': 'tray:bucket' },
+  parts: [
+    { id: 'swing', name: 'Swing', icon: 'turn', channels: ['drag.x'] },
+    { id: 'boom', name: 'Boom', icon: 'lift', channels: ['drag.y'] },
+    { id: 'stick', name: 'Stick', icon: 'bend', channels: ['pan.y'] },
+    { id: 'bucket', name: 'Bucket', icon: 'bucket', channels: ['pan.x'] },
+  ],
+  sets: [
+    { id: 'reach', name: 'Reach', icon: 'reach', parts: ['stick', 'boom'] },
+    { id: 'dig', name: 'Dig', icon: 'dig', parts: ['bucket', 'stick'] },
+  ],
 }
+/** The trackpad's rates: radians per px of drag, for the swing and for the boom, stick and bucket. */
+const SWING_PX = 0.004, ARM_PX = 0.003
 export interface Excavator {
   x: number
   z: number
@@ -109,6 +126,13 @@ export class ExcavatorLogic extends Machine {
       u.curl = clamp(u.curl - axis(a[2]) * dt, 0, 1)
       u.z = clamp(u.z + (i.pad.triggers[0] - i.pad.triggers[1]) * dt, -2, 3)
       if (down(i.pad.buttons, PadButton.B)) u.curl = 0
+    } else if (i.face === 'face.trackpad') {
+      // Dragged right, the boom swings right as the screen shows it; up raises it. Two fingers up reach the stick
+      // out, across curls the bucket.
+      u.swing = wrapPi(u.swing - i.drag[0] * SWING_PX * panSign(i.controlFrame, u.swing))
+      u.boom = clamp(u.boom - i.drag[1] * ARM_PX, 0.05, 1.35)
+      u.stick = clamp(u.stick - i.pan[1] * ARM_PX, -2.4, -0.1)
+      u.curl = clamp(u.curl + i.pan[0] * ARM_PX, 0, 1)
     }
     const pose = i.pose
     if (pose?.tracked && pose.touching) {

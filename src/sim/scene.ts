@@ -4,7 +4,7 @@
  * Each sim supplies its nodes and what their input does.
  */
 import type { SceneNode } from '@obpal/core'
-import { Claims, PairingChip, Remote, type Layout, type Participant } from '@obpal/host'
+import { Claims, PairingChip, PartFocus, Remote, type Layout, type Participant } from '@obpal/host'
 import { family } from '../family'
 import { ICONS } from '../ui/icons'
 import { ControlSession } from './control-space'
@@ -13,6 +13,8 @@ export interface SimScene {
   remote: Remote
   control: ControlSession
   claims: Claims
+  /** What each participant's trackpad drives within the node it holds (PROTOCOL §3a): a part, a set, or all of it. */
+  focus: PartFocus
   nodes: SceneNode[]
   /** Whether a participant may claim (approved, or approval isn't needed). */
   allowed(id: string): boolean
@@ -46,6 +48,8 @@ export interface SimOptions {
   label?(node: SceneNode): string
   /** Called after any change of who holds what. */
   changed?(): void
+  /** A participant chose another part or set of what it holds, or locked a part. */
+  focused?(who: string): void
   joined?(p: Participant): void
   left?(p: Participant): void
 }
@@ -64,6 +68,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   const people = new Map<string, Participant>()
   let nodes = o.nodes
   const nodeName = (id: string) => { const n = nodes.find((x) => x.id === id); return n ? o.label?.(n) ?? n.name : id }
+  const focus = new PartFocus(remote, (who) => { const id = claims.held(who); return id ? nodes.find((n) => n.id === id) : undefined }, (who) => o.focused?.(who))
   remote.setHostPerson({ name: 'Screen', color: family.accentColor() })
   // The pairing chip: open while nobody is here, closed by itself as a phone comes in; the people chip's + opens it.
   // Its card never covers the panel (the e-stop), the people list, the stop banner, the menus or a camera's picture
@@ -118,8 +123,11 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
     for (const lost of [...(r.lost ? [r.lost] : []), ...(r.evicted ?? [])]) {
       remote.feedback({ haptic: 'bump', toast: `The screen took ${name}` }, lost)
       remote.setValues({ part: '' }, lost)
+      focus.reset(lost)
       log(`The screen took ${name} from ${nameOf(lost)}`, colorOf('host'))
     }
+    // What the trackpad drove belonged to what `who` held before: it starts on the whole of the new node.
+    focus.reset(who)
     if (!r.lost && !r.evicted) log(`${nameOf(who)} took ${name}${r.released ? `, letting go of ${nodeName(r.released)}` : ''}`, colorOf(who))
     if (who !== 'host') {
       remote.feedback({ haptic: 'tick', toast: o.howTo?.(node) ?? `You have ${name}` }, who)
@@ -133,7 +141,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
     const node = claims.release(who)
     if (!node) return
     log(`${nameOf(who)} let go of ${nodeName(node)}`, colorOf(who))
-    if (who !== 'host') remote.setValues({ part: '' }, who)
+    if (who !== 'host') { remote.setValues({ part: '' }, who); focus.reset(who) }
     publish()
   }
 
@@ -225,6 +233,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
       if (who && who !== 'host') {
         remote.feedback({ haptic: 'bump', toast: `${nodeName(n.id)} left the scene` }, who)
         remote.setValues({ part: '' }, who)
+        focus.reset(who)
         log(`${nodeName(n.id)} left the scene: ${nameOf(who)} let go`, colorOf(who))
       }
     }
@@ -234,7 +243,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
     publish()
   }
 
-  const result: SimScene = { remote, control, claims, nodes, allowed, nameOf, colorOf, log, note, publish, take, release, setNodes, nodeName }
+  const result: SimScene = { remote, control, claims, focus, nodes, allowed, nameOf, colorOf, log, note, publish, take, release, setNodes, nodeName }
   publish()
   return result
 }
