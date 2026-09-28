@@ -5,6 +5,7 @@ import { contactPart } from '../contact'
  * in its holder's colour, flashing as it takes one.
  */
 import * as THREE from 'three'
+import { cameraFeed } from '../ui/feed'
 import { darkTitanium, gunmetal } from '../kit/surfaces'
 import { pov, tiledDeck } from '../kit/precision'
 import { skinSlot, upgradeSkins } from '../kit/skins'
@@ -195,29 +196,6 @@ function buildSet() {
   return { group: g, sculpture, floor: floorMat }
 }
 
-/**
- * The pictures' frames on the screen, and where each goes: down the right on a wide screen (ending above the pairing
- * chip in the corner: its offset, its 44px and a gap), side by side on a narrow one.
- */
-export function insetRects(count: number, W = innerWidth, H = innerHeight) {
-  if (W <= 860 && W > H) {
-    // Leave the centre for the courtyard, and stop above the pairing chip and bottom sheet.
-    const sheet = Math.max(H * 0.24, Math.min(H * 0.44, H - 432))
-    const h = Math.max(36, Math.min(86, Math.floor((H - sheet - 76 - 70 - (count - 1) * 8) / count)))
-    const w = Math.round(h * 16 / 9)
-    return Array.from({ length: count }, (_, i) => ({ x: W - 12 - w, y: 70 + i * (h + 8), w, h }))
-  }
-  if (W <= 860) {
-    // Keep the camera's head visible in the middle of the portrait play view.
-    const w = Math.min(140, Math.floor(W * 0.29)), h = Math.round(w * 9 / 16)
-    return Array.from({ length: count }, (_, i) => ({ x: W - 12 - w, y: 70 + i * (h + 8), w, h }))
-  }
-  const fits = (((H - 88 - 76 - (count - 1) * 14) / count) * 16) / 9
-  const w = Math.round(Math.max(160, Math.min(420, Math.max(240, W * 0.24), fits)))
-  const h = Math.round((w * 9) / 16)
-  return Array.from({ length: count }, (_, i) => ({ x: W - 20 - w, y: 88 + i * (h + 14), w, h }))
-}
-
 export function createView(stage: Stage, logic: PtzLogic): DeviceView {
   const set = buildSet()
   stage.scene.add(set.group)
@@ -231,23 +209,15 @@ export function createView(stage: Stage, logic: PtzLogic): DeviceView {
     return m
   })
   // The pictures' frames: a label, the zoom, and a flash.
-  const layer = document.createElement('div')
-  layer.className = 'ptz-insets'
-  document.body.appendChild(layer)
   const frames = logic.cams.map((_, n) => {
     const el = document.createElement('div')
     el.className = 'ptz-inset'
-    el.innerHTML = '<span class="ptz-rec"></span><b></b><i></i><span class="ptz-flash"></span>'
-    el.querySelector('b')!.textContent = `Cam ${n + 1}`
-    layer.appendChild(el)
-    return el
+    el.innerHTML = '<b><span class="ptz-rec"></span><span class="ptz-name"></span></b><i></i><span class="ptz-flash"></span>'
+    el.querySelector('.ptz-name')!.textContent = `Cam ${n + 1}`
+    return cameraFeed(stage, `Camera ${n + 1}`, `camera-${n + 1}`, n, el)
   })
   const setTheme = (t: Theme) => set.floor.color.set(t.light ? '#d9dee6' : '#262c37')
   setTheme(stage.theme)
-  let rects = insetRects(logic.cams.length)
-  addEventListener('resize', () => { rects = insetRects(logic.cams.length) })
-  const size = new THREE.Vector2()
-  const clear = new THREE.Color()
   return {
     framing: (() => { const [x, , z] = logic.cams[0].at; return { target: [x, 0.75, z], wide: [x + 1.5, 1.7, z + 2.4], tall: [x + 1.5, 1.7, z + 2.4], radius: 0.85, min: 0.3, max: 24 } })(),
     inspect() { const [x, y, z] = logic.cams[0].at; return { target: [x, y, z], wide: [x + 0.65, y + 0.4, z - 0.8], tall: [x + 0.8, y + 0.5, z - 1], radius: 0.35, min: 0.3, max: 24 } },
@@ -257,11 +227,8 @@ export function createView(stage: Stage, logic: PtzLogic): DeviceView {
       train.place(logic.time)
       logic.cams.forEach((c, n) => {
         placeCam(models[n], c, colors[n])
-        const f = frames[n]
-        const r = rects[n]
-        f.style.transform = `translate(${r.x}px, ${r.y}px)`
-        f.style.width = `${r.w}px`
-        f.style.height = `${r.h}px`
+        const feed = frames[n], f = feed.content
+        feed.activity(!!colors[n] || c.flash > 0)
         f.style.setProperty('--c', colors[n] ?? 'rgb(255 255 255 / 0.35)')
         f.querySelector('i')!.textContent = `${c.zoom.toFixed(1)}×`
         f.classList.toggle('held', !!colors[n])
@@ -270,28 +237,7 @@ export function createView(stage: Stage, logic: PtzLogic): DeviceView {
       })
     },
     afterRender() {
-      const r = stage.renderer
-      // The drawing buffer's pixels per CSS pixel (the stage draws at the density the device affords).
-      r.getSize(size)
-      const k = size.x / stage.view.width
-      r.getClearColor(clear)
-      const alpha = r.getClearAlpha()
-      r.setScissorTest(true)
-      logic.cams.forEach((_, n) => {
-        const rect = rects[n]
-        const [x, w, h] = [Math.round(rect.x * k), Math.round(rect.w * k), Math.round(rect.h * k)]
-        const y = size.y - Math.round(rect.y * k) - h
-        r.setViewport(x, y, w, h)
-        r.setScissor(x, y, w, h)
-        r.setClearColor(stage.theme.light ? '#dfe5ee' : '#0b0d12', 1)
-        r.clear()
-        models[n].eye.aspect = rect.w / rect.h
-        models[n].eye.updateProjectionMatrix()
-        stage.view.drawInset(stage.scene, models[n].eye)
-      })
-      r.setScissorTest(false)
-      r.setViewport(0, 0, size.x, size.y)
-      r.setClearColor(clear, alpha)
+      frames.forEach((feed, n) => feed.draw(stage.scene, models[n].eye))
     },
     setTheme,
   }

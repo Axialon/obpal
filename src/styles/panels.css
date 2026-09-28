@@ -1,0 +1,191 @@
+/*
+ * The sims' windows (src/sim/ui/panels.ts): frosted widget cards over the stage, each with a header that is its handle
+ * (an icon badge and its name in small caps) and round buttons, and the dock, a slim icon rail on the left whose open
+ * windows wear the accent ring. Colours and glass come from the family tokens, so every surface and accent follows.
+ */
+
+/* The insets windows keep, registered as lengths so panels.ts reads them in pixels (env() and calc() resolved). */
+@property --panel-gutter { syntax: '<length>'; inherits: true; initial-value: 64px; }
+@property --panel-safe-left { syntax: '<length>'; inherits: true; initial-value: 0px; }
+@property --panel-safe-right { syntax: '<length>'; inherits: true; initial-value: 0px; }
+@property --panel-safe-bottom { syntax: '<length>'; inherits: true; initial-value: 0px; }
+
+/* One layer for window stacking, below scene menus and pairing. */
+.sim-windows { position: fixed; inset: 0; z-index: 4; pointer-events: none; isolation: isolate; }
+.sim-window {
+  position: absolute; left: 0; top: 0; display: flex; flex-direction: column; box-sizing: border-box;
+  border: 1px solid var(--bb-frost-edge); border-radius: 22px;
+  background-color: var(--bb-frost); background-image: linear-gradient(180deg, rgb(var(--bb-hl-rgb) / 0.045), transparent 120px);
+  -webkit-backdrop-filter: var(--bb-frost-blur); backdrop-filter: var(--bb-frost-blur);
+  box-shadow: 0 26px 60px -30px rgb(0 0 0 / 0.85), 0 0 0 1px rgb(0 0 0 / 0.16), inset 0 1px 0 var(--bb-hi);
+  color: var(--bb-ink); pointer-events: auto;
+  /* Placed at once, never eased: reduced motion otherwise turns every move into a short transition. */
+  transition-property: none;
+}
+.sim-window[data-focused='true'] { border-color: var(--bb-line-strong); }
+/* On a light surface the faintest ink is too faint over glass for small text; it takes the second. */
+[data-bb-theme='light'] :is(.sim-window, .panel-tooltip) { --bb-ink-3: var(--bb-ink-2); }
+.sim-window[hidden], .sim-windows[hidden], .panel-dock[hidden], .panel-tooltip[hidden] { display: none; }
+
+/* ---- the header: badge, name, and round buttons ------------------------------------------------------------------ */
+
+.panel-header { display: flex; align-items: center; flex: 0 0 auto; gap: 4px; min-height: 46px; box-sizing: border-box; padding: 6px 8px 2px 7px; }
+.panel-header .panel-handle {
+  display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; height: 38px; margin: 0; padding: 0 8px 0 3px;
+  border: 0; border-radius: 14px; background: transparent; color: var(--bb-ink);
+  font: 600 11px/1 var(--bb-font-data); letter-spacing: 0.1em; text-transform: uppercase; text-align: left;
+  cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
+}
+.panel-header .panel-handle:hover { background: rgb(var(--bb-hl-rgb) / 0.05); }
+.panel-dragging .panel-handle { cursor: grabbing; }
+.panel-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The badge: the window's icon in a disc, ringed in the accent while the window is in front. */
+.panel-badge { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%; background: rgb(var(--bb-hl-rgb) / 0.06); box-shadow: inset 0 0 0 1px var(--bb-line); color: var(--bb-ink-2); transition: box-shadow var(--bb-dur-2), color var(--bb-dur-2), background var(--bb-dur-2); }
+.panel-badge svg { width: 16px; height: 16px; }
+.panel-badge sup { right: -3px; bottom: -3px; }
+.sim-window[data-focused='true'] .panel-badge { background: rgb(var(--bb-accent-rgb) / 0.13); box-shadow: var(--kit-ring); color: var(--bb-accent-text); }
+.panel-btn { display: grid; place-items: center; flex: none; width: 30px; height: 30px; margin: 0; padding: 0; border: 0; border-radius: 50%; background: rgb(var(--bb-hl-rgb) / 0.06); color: var(--bb-ink-2); cursor: pointer; -webkit-tap-highlight-color: transparent; transition: background var(--bb-dur-2), color var(--bb-dur-2), transform var(--bb-dur-1) var(--bb-ease); }
+.panel-btn:hover { background: rgb(var(--bb-hl-rgb) / 0.13); color: var(--bb-ink); }
+.panel-btn:active { transform: scale(0.92); }
+.panel-btn .panel-icon { width: 15px; height: 15px; }
+.panel-btn[aria-label^='Close ']:hover { background: rgb(251 113 133 / 0.16); color: var(--bb-ink); }
+.sim-window :focus-visible, .panel-dock :focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: -2px; }
+.sim-window .panel-handle:focus-visible { outline-offset: 0; }
+
+/* ---- the body: the window's content, scrolling inside its own corners when it's longer than the window ------------- */
+
+.panel-body { position: relative; min-height: 0; flex: 1; overflow: auto; overscroll-behavior: contain; border-radius: 0 0 21px 21px; padding: 4px 14px 14px; --bb-scroll-inset: 16px; }
+.panel-body > * { margin: 0; }
+.panel-body > .sim-panel { position: static; display: flex; flex-direction: column; width: auto; max-height: none; height: auto; margin: 0; padding: 0; gap: 11px; border: 0; border-radius: 0; background: transparent; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; overflow: visible; visibility: visible; }
+.panel-body > .sim-panel > * { flex-shrink: 0; }
+.panel-body > .arm { padding: 0; border: 0; background: none; box-shadow: none; }
+.panel-body .log-wrap { display: block; }
+/* The record's window is its title: the fold's own label would repeat it. */
+.panel-body > .log-wrap > summary { display: none; }
+.panel-body > .log-wrap > .log { margin: 0; }
+.sim-window .panel-body > .presence-controls { position: static; max-width: none; padding: 0; border: 0; background: transparent; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
+/* The viewpoint row (vr/experience.ts) in a window: glass pills, First person ringed in the accent, switches for comfort. */
+.sim-window .presence-controls { gap: 6px; --kit-select-h: 36px; --kit-select-r: 12px; --kit-select-size: 12.5px; }
+.sim-window .presence-controls .kit-select { max-width: 150px; }
+/* No display here: the row shows and hides its own buttons (overview, first person, hidden ones). */
+.sim-window .presence-controls > button, .sim-window .presence-controls > a { height: 36px; min-height: 36px; box-sizing: border-box; padding: 0 12px; border: 1px solid var(--bb-line); border-radius: 12px; background: var(--kit-fill); box-shadow: inset 0 1px 0 var(--bb-hi); color: var(--bb-ink); font: 650 12.5px/1 var(--bb-font-ui); text-decoration: none; transition: background var(--bb-dur-2), border-color var(--bb-dur-2); }
+.sim-window .presence-controls > button:hover:not(:disabled) { background: var(--kit-fill-hover); border-color: var(--bb-line-strong); }
+.sim-window .presence-controls > .presence-enter { border-color: rgb(var(--bb-accent-rgb) / 0.7); background: rgb(var(--bb-accent-rgb) / 0.1); box-shadow: var(--kit-ring); }
+.sim-window .presence-controls > button[aria-expanded='true'] { border-color: rgb(var(--bb-accent-rgb) / 0.6); }
+.sim-window .presence-controls > label { gap: 8px; padding: 4px 2px; color: var(--bb-ink-2); font: 600 12.5px/1.2 var(--bb-font-ui); }
+.sim-window .presence-controls > small { color: var(--bb-ink-2); font-size: 12px; opacity: 1; }
+.sim-window .presence-controls > small:empty { display: none; }
+.sim-window .presence-controls > .sim-sound { flex-basis: 100%; margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--bb-line); }
+.has-sim-panels.presence-active .sim-window .sim-panel { visibility: visible; }
+.has-sim-panels.presence-active .panel-camera { visibility: hidden; }
+
+/* ---- a control window's content: who it is, then numbered sections (numberSections in panels.ts) ------------------- */
+
+.sim-id { display: grid; gap: 5px; }
+.sim-panel .sim-id h1 { font-size: 23px; line-height: 1.12; }
+.sim-id .sim-lede { margin: 0; color: var(--bb-ink-2); font-size: 12.5px; line-height: 1.45; }
+.sim-sec, .sim-panel .sim-sound, .sim-panel .studio-audio { display: grid; gap: 10px; min-width: 0; padding-top: 11px; border-top: 1px solid var(--bb-line); }
+.sim-sec[hidden] { display: none; }
+.sim-panel .kit-card-head { min-height: 20px; }
+.sim-panel .kit-card-n:empty, .sim-panel [data-sound-home]:empty, .sim-presence:empty, .sim-actions:empty { display: none; }
+/* Actions: an icon and a word each, sharing a row. */
+.sim-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.sim-actions .kit-action { flex: 1 1 auto; gap: 6px; padding: 0 9px 0 7px; }
+/* A short screen keeps the controls: the description gives way. */
+@media (max-height: 560px) { .sim-id .sim-lede { display: none; } .sim-panel .sim-id h1 { font-size: 20px; } }
+
+/* ---- camera windows: the picture edge to edge under the header, corner brackets, and a REC light ------------------- */
+
+.panel-camera .panel-body { padding: 0 6px 6px; overflow: hidden; background: transparent; }
+.panel-camera .panel-body > .panel-feed { position: relative; width: 100%; height: 100%; border-radius: 16px; overflow: hidden; background: #0c1015; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.06); --kit-brackets-inset: 8px; }
+.panel-feed canvas { display: block; width: 100%; height: 100%; object-fit: contain; }
+/* The brackets (kit.css), over the picture and clear of the PTZ camera's own lock corners. */
+.panel-camera .panel-feed::after { z-index: 1; inset: var(--kit-brackets-inset); border: 0; border-radius: 0; --c: rgb(255 255 255 / 0.55); }
+.panel-camera .panel-feed[data-rec='true']::after { --c: rgb(255 255 255 / 0.95); }
+.panel-feed .feed-caption { position: absolute; z-index: 2; left: 16px; bottom: 16px; display: inline-flex; align-items: center; gap: 7px; max-width: calc(100% - 32px); box-sizing: border-box; padding: 6px 10px; border-radius: 999px; background: rgb(8 10 12 / 0.62); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); color: #f3f5f2; font: 600 10.5px/1 var(--bb-font-data); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.panel-feed .feed-caption:empty { display: none; }
+.panel-feed[data-rec='true'] .feed-caption { color: #fff; }
+.panel-feed .feed-reticle { position: absolute; z-index: 1; inset: 0; display: grid; place-items: center; font: 26px monospace; color: var(--bb-accent); pointer-events: none; }
+.panel-feed.ptz-inset { position: relative; left: auto; top: auto; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.06); visibility: visible; }
+/* A held camera: framed in its holder's colour. */
+.panel-feed.ptz-inset.held { outline: 2px solid var(--c); outline-offset: -2px; }
+.panel-feed.ptz-inset b { left: 16px; top: 16px; display: inline-flex; align-items: center; gap: 7px; padding: 5px 10px 5px 8px; border: 0; background: rgb(8 10 12 / 0.62); box-shadow: none; color: #f3f5f2; font: 600 10.5px/1 var(--bb-font-data); letter-spacing: 0.1em; text-transform: uppercase; }
+.panel-feed.ptz-inset i { right: 16px; top: 16px; border: 0; background: rgb(8 10 12 / 0.62); box-shadow: none; color: var(--bb-accent); font: 700 11px/1.2 var(--bb-font-data); }
+.panel-feed .ptz-rec { position: static; flex: none; width: 8px; height: 8px; }
+
+/* ---- resize grips: every edge and corner; the bottom-right corner shows it ------------------------------------------ */
+
+.panel-resize { position: absolute; z-index: 3; touch-action: none; }
+.panel-resize-n, .panel-resize-s { left: 20px; right: 20px; height: 8px; cursor: ns-resize; }
+.panel-resize-n { top: -4px; }
+.panel-resize-s { bottom: -4px; }
+.panel-resize-e, .panel-resize-w { top: 20px; bottom: 20px; width: 8px; cursor: ew-resize; }
+.panel-resize-e { right: -4px; }
+.panel-resize-w { left: -4px; }
+.panel-resize-ne, .panel-resize-nw, .panel-resize-se, .panel-resize-sw { width: 20px; height: 20px; }
+.panel-resize-ne { right: -4px; top: -4px; cursor: nesw-resize; }
+.panel-resize-nw { left: -4px; top: -4px; cursor: nwse-resize; }
+.panel-resize-se { right: -4px; bottom: -4px; cursor: nwse-resize; }
+.panel-resize-sw { left: -4px; bottom: -4px; cursor: nesw-resize; }
+/* The corner grip: a short arc that follows the window's rounded corner. */
+.panel-resize-se::after { content: ''; position: absolute; right: 7px; bottom: 7px; width: 12px; height: 12px; border-right: 2px solid rgb(var(--bb-hl-rgb) / 0.22); border-bottom: 2px solid rgb(var(--bb-hl-rgb) / 0.22); border-radius: 0 0 11px 0; transition: border-color var(--bb-dur-2); }
+.sim-window:hover .panel-resize-se::after { border-color: rgb(var(--bb-hl-rgb) / 0.45); }
+.panel-resize-se:hover::after { border-color: var(--bb-accent-text); }
+
+/* ---- the dock: a slim rail of round icon buttons on the left; faint until pointed at ------------------------------- */
+
+.panel-dock {
+  --panel-safe-left: env(safe-area-inset-left, 0px); --panel-safe-right: env(safe-area-inset-right, 0px); --panel-safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* Windows start this far from the screen's left edge, clear of the rail (read by panels.ts). */
+  --panel-gutter: 64px;
+  position: fixed; z-index: 6; left: calc(8px + var(--panel-safe-left)); top: max(84px, env(safe-area-inset-top, 0px)); box-sizing: border-box;
+  display: flex; flex-direction: column; align-items: center; gap: 6px; width: 46px; max-height: calc(100dvh - 96px - var(--panel-safe-bottom)); padding: 5px;
+  border: 1px solid var(--bb-frost-edge); border-radius: 23px; background: var(--bb-frost);
+  -webkit-backdrop-filter: var(--bb-frost-blur); backdrop-filter: var(--bb-frost-blur); box-shadow: var(--bb-frost-shadow);
+  opacity: 0.5; transition: opacity 200ms var(--bb-ease), transform 260ms var(--bb-ease-out), box-shadow 200ms;
+}
+.panel-dock:hover, .panel-dock:focus-within, .panel-dock[data-open='true'] { opacity: 1; box-shadow: 0 20px 44px -22px rgb(0 0 0 / 0.8), inset 0 1px 0 var(--bb-hi); }
+.panel-dock-items { display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 0; overflow-y: auto; scrollbar-width: none; margin: -3px; padding: 3px; }
+.panel-dock-items::-webkit-scrollbar { display: none; }
+.panel-dock button { position: relative; display: grid; place-items: center; flex: none; margin: 0; padding: 0; border: 0; background: transparent; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.panel-toggle { width: 36px; height: 36px; border-radius: 50%; color: var(--bb-ink-2); transition: background var(--bb-dur-2), color var(--bb-dur-2), box-shadow var(--bb-dur-2), transform var(--bb-dur-1) var(--bb-ease); }
+.panel-toggle .panel-icon { width: 18px; height: 18px; }
+.panel-toggle:hover { background: rgb(var(--bb-hl-rgb) / 0.09); color: var(--bb-ink); }
+.panel-toggle:active { transform: scale(0.92); }
+/* An open window: its icon lit and ringed in the accent. */
+.panel-toggle[aria-pressed='true'] { background: rgb(var(--bb-accent-rgb) / 0.13); box-shadow: var(--kit-ring); color: var(--bb-accent-text); }
+/* Something happened in a window that isn't open. */
+.panel-toggle[data-activity='true']::after { content: ''; position: absolute; right: 1px; top: 1px; width: 8px; height: 8px; border-radius: 50%; background: var(--bb-accent); box-shadow: 0 0 0 2px rgb(var(--bb-base-rgb)), 0 0 10px rgb(var(--bb-accent-rgb) / 0.8); }
+.panel-dock .panel-reset { flex: none; margin-top: 2px; }
+.panel-dock .panel-reset::before { content: ''; position: absolute; top: -5px; left: 9px; right: 9px; height: 1px; background: var(--bb-line); }
+.panel-dock .panel-reset .panel-icon { width: 16px; height: 16px; }
+/* The tab that brings the rail out on touch screens; pointers don't need it. */
+.panel-dock .panel-dock-handle { display: none; }
+.panel-icon { display: block; position: relative; width: 20px; height: 20px; }
+.panel-icon svg { display: block; width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.panel-icon sup { position: absolute; right: -7px; bottom: -5px; min-width: 9px; padding: 1px 3px; border-radius: 6px; background: rgb(var(--bb-base-rgb)); box-shadow: inset 0 0 0 1px var(--bb-line); color: var(--bb-ink); font: 700 8.5px/1.2 var(--bb-font-data); text-align: center; }
+
+/* The tooltip: a window's name and what it's for, beside its button. */
+.panel-tooltip { position: fixed; z-index: var(--bb-z-tip); display: grid; gap: 3px; max-width: min(260px, calc(100vw - 80px)); box-sizing: border-box; padding: 10px 13px 11px; border: 1px solid var(--bb-frost-edge); border-radius: 14px; background: var(--bb-frost); -webkit-backdrop-filter: var(--bb-frost-blur); backdrop-filter: var(--bb-frost-blur); box-shadow: var(--kit-pop-shadow, var(--bb-frost-shadow)); color: var(--bb-ink); pointer-events: none; transition-property: none; }
+.panel-tooltip b { font: 650 13px/1.25 var(--bb-font-ui); letter-spacing: -0.01em; }
+.panel-tooltip span { color: var(--bb-ink-2); font: 500 12px/1.4 var(--bb-font-ui); }
+.panel-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.has-sim-panels { --obpal-offset-x: 12px; --obpal-offset-y: 12px; }
+body.has-sim-panels .bb-menu { max-height: calc(100% - 90px) !important; }
+
+@media (pointer: coarse) {
+  .panel-header { min-height: 52px; }
+  .panel-btn { width: 38px; height: 38px; }
+  .panel-resize-se { width: 30px; height: 30px; }
+  /* The rail waits off the left edge behind its tab, and comes out when the tab is tapped. */
+  .panel-dock { --panel-gutter: 40px; width: 52px; opacity: 1; transform: translateX(calc(-100% - 12px)); }
+  .panel-dock:focus-within, .panel-dock[data-open='true'] { transform: none; }
+  .panel-toggle { width: 42px; height: 42px; }
+  .panel-dock .panel-dock-handle { display: grid; position: absolute; left: calc(100% + 8px); top: 6px; width: 24px; height: 56px; border: 1px solid var(--bb-frost-edge); border-radius: 12px; background: var(--bb-frost); -webkit-backdrop-filter: var(--bb-frost-blur); backdrop-filter: var(--bb-frost-blur); box-shadow: var(--bb-frost-shadow); color: var(--bb-ink-2); }
+  .panel-dock .panel-dock-handle .panel-icon { width: 14px; height: 14px; transition: transform 260ms var(--bb-ease-out); }
+  .panel-dock[data-open='true'] .panel-dock-handle .panel-icon { transform: scaleX(-1); }
+}
+/* A portrait phone's windows stand on the bottom edge: above the pairing button, which lives in its corner. */
+@media (orientation: portrait) and (max-width: 599px) { .panel-dock { --panel-safe-bottom: calc(env(safe-area-inset-bottom, 0px) + 64px); } }
+@media (prefers-reduced-motion: reduce) { .panel-dock, .panel-dock-handle .panel-icon { transition: none; } .panel-feed .ptz-rec { animation: none; } }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .sim-window, .panel-dock, .panel-tooltip { background-color: var(--bb-frost-solid); } }

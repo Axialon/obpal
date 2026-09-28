@@ -2,8 +2,8 @@
  * A device sim (/sim/device/?d=<id>): one device from the registry (./registry.ts) on the shared stage, in a shared
  * scene (CATALOGUE §5) where each phone drives a unit of its own. A phone that joins gets a free unit at once (its
  * scene list still picks another); pointing at a unit and pressing A takes it too, where the device can be pointed at.
- * The panel shows the controllers that suit the device and how each drives it, who holds which unit with what, and a
- * live readout of each.
+ * The panel is numbered sections: the view, the controllers that suit the device and how each drives it, who holds
+ * which unit with what and a live readout of each (drawn as an instrument, ui/kit/telemetry.ts), and sound.
  */
 import '../../styles/base.css'
 import '../../styles/sim.css'
@@ -26,6 +26,10 @@ import { mountSound } from '../audio/session'
 import { DeviceSound } from '../audio/devices'
 import { deviceTarget, sceneSelects } from './control-space'
 import { restInput } from './types'
+import { mountSimPanels, numberSections } from '../ui/panels'
+import { Telemetry } from '../../ui/kit/telemetry'
+import { ICONS } from '../../ui/icons'
+import { html, setMarkup } from '../../ui/markup'
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 const params = new URLSearchParams(location.search)
@@ -44,6 +48,20 @@ $('dev-name').textContent = spec.name
 $('dev-blurb').textContent = spec.blurb
 document.getElementById('seo-device')?.remove()
 $('stage').setAttribute('aria-label', spec.name)
+const panels = mountSimPanels(`device:${spec.id}`, spec.name)
+const scored = ['slotcars', 'kart', 'airhockey', 'football', 'pinball', 'maze', 'claw', 'sorting', 'marblerun', 'trebuchet'].includes(spec.id)
+if (scored) panels.add($('dev-units'), { id: 'scores', title: spec.id === 'slotcars' || spec.id === 'kart' ? 'Scores & laps' : 'Scores & seats', purpose: 'Live results and who controls each unit', icon: 'scores', anchor: 'scores' })
+if (spec.id === 'studio') {
+  const stations = document.createElement('div'); stations.id = 'dev-units'; stations.className = 'panel-collection'
+  $('dev-units').replaceWith(stations); panels.root.append(stations)
+}
+// Units with a window of their own (scores, the studio's stations) leave their section. Units in the panel carry
+// Home all (and the device's own reset) in their section's header; otherwise those stay in a row of their own.
+$('dev-units-sec').hidden = scored || spec.id === 'studio'
+if (!$('dev-units-sec').hidden) {
+  $('dev-count').after($('home-all'), $('reset'))
+  document.querySelector<HTMLElement>('.dev-panel .safety')!.hidden = true
+}
 
 const stage = createStage($<HTMLCanvasElement>('stage'), themeById(family.getTheme()))
 const logic = entry.logic()
@@ -56,6 +74,7 @@ const deviceSound = sound ? new DeviceSound(logic, sound, n => sim?.claims.holde
 let following = true
 let followedUnit = 0
 const presence = devicePresence(logic, stage, () => view, () => sim)
+numberSections(document.querySelector('.dev-panel')!)
 
 addEventListener('bb-theme', (e) => {
   const t = themeById((e as CustomEvent<{ theme: string }>).detail.theme)
@@ -67,6 +86,7 @@ addEventListener('bb-theme', (e) => {
 // ---- the panel: the controllers that suit it, and how each drives it ----
 
 let shownFace = spec.controllers[0]
+/** A tile per controller: its icon in a disc (ringed in the accent while shown), its name, and a dot per phone using it. */
 function renderFaces() {
   const using = new Map<string, string[]>()
   for (const p of sim?.remote.participants ?? []) if (p.controller) using.set(p.controller, [...(using.get(p.controller) ?? []), p.color])
@@ -77,8 +97,8 @@ function renderFaces() {
     b.dataset.face = c
     b.setAttribute('aria-pressed', String(c === shownFace))
     b.title = faceName(c)
-    b.innerHTML = `${faceGlyph(c)}<span></span><i class="dots"></i>`
-    b.querySelector('span')!.textContent = faceShort(c)
+    b.innerHTML = `<span class="dev-face-ic">${faceGlyph(c)}</span><span class="dev-face-name"></span><i class="dots"></i>`
+    b.querySelector('.dev-face-name')!.textContent = faceShort(c)
     const dots = b.querySelector('.dots')!
     for (const color of using.get(c) ?? []) { const d = document.createElement('b'); d.style.background = color; dots.appendChild(d) }
     b.onclick = () => { shownFace = c; renderFaces() }
@@ -90,31 +110,47 @@ renderFaces()
 
 // ---- units: who holds each, with what, and how it's doing ----
 
+/** Each unit row's live readout, drawn as an instrument (ui/kit/telemetry.ts). */
+const readouts = new WeakMap<HTMLElement, Telemetry>()
 function renderUnits() {
   const held = sim?.claims.snapshot() ?? {}
   const people = new Map((sim?.remote.participants ?? []).map((p) => [p.id, p]))
-  $('dev-units').replaceChildren(...units.map((u, n) => {
+  const rows = units.map((u, n) => {
     const who = held[u.id]
     const p = who ? people.get(who) : undefined
     const li = document.createElement('li')
     li.classList.toggle('held', !!who)
     li.dataset.unit = u.id
-    li.innerHTML = '<span class="dot"></span><span class="nn"><b></b><small></small></span><span class="nv"></span>'
-    const dot = li.querySelector<HTMLElement>('.dot')!
-    if (who) dot.style.background = sim!.colorOf(who)
+    li.innerHTML = '<span class="dot" aria-hidden="true"></span><span class="nn"><b></b><small></small></span><span class="nv"></span>'
+    // The unit's number in a ring, in its holder's colour while someone drives it.
+    li.querySelector('.dot')!.textContent = String(n + 1)
+    if (who) li.style.setProperty('--c', sim!.colorOf(who))
     li.querySelector('b')!.textContent = u.name
     const small = li.querySelector('small')!
     if (p?.controller) small.insertAdjacentHTML('afterbegin', faceGlyph(p.controller))
-    small.append(who ? sim!.nameOf(who) : 'Free: scan to drive')
-    li.querySelector('.nv')!.textContent = logic.readout(n)
+    small.append(who ? sim!.nameOf(who) : 'Free')
+    const readout = new Telemetry(logic.readout(n))
+    readouts.set(li, readout)
+    li.querySelector('.nv')!.append(readout.el)
     return li
-  }))
+  })
+  const count = document.getElementById('dev-count')
+  if (count) count.textContent = `${rows.filter((li) => li.classList.contains('held')).length}/${units.length}`
+  if (spec.id === 'studio') rows.forEach((row, n) => {
+    const list = document.createElement('ul'); list.className = 'dev-units'; list.append(row)
+    const p = panels.add(list, { id: `station-${n + 1}`, title: units[n].name, purpose: 'Station player and live instrument readout', icon: 'station', anchor: 'station', index: n })
+    $('dev-units').append(p.element)
+  })
+  else $('dev-units').replaceChildren(...rows)
 }
 let readoutAt = 0
 function refreshReadouts(now: number) {
   if (now - readoutAt < 250) return
   readoutAt = now
-  document.querySelectorAll<HTMLElement>('#dev-units li').forEach((li, n) => { li.querySelector('.nv')!.textContent = logic.readout(n) })
+  document.querySelectorAll<HTMLElement>('#dev-units li').forEach((li, n) => {
+    const readout = readouts.get(li), text = logic.readout(n)
+    if (readout && readout.value !== text) { readout.value = text; if (spec.id === 'studio') panels.get(`station-${n + 1}`)?.notify() }
+  })
 }
 
 $('home-all').onclick = () => {
@@ -225,28 +261,25 @@ function howTo(node: string) {
 void entry.view().then((m) => {
   view = m.createView(stage, logic)
   if (sim) view.connect?.(sim)
+  numberSections(document.querySelector('.dev-panel')!)
   stage.resize()
   stage.frame(view.framing)
   if (view.afterRender) stage.afterRender = () => view!.afterRender!()
-  const resetView = document.createElement('button')
-  resetView.className = 'btn'
-  resetView.textContent = 'Reset view'
-  resetView.onclick = () => { following = true; stage.frame(view!.framing) }
-  $('home-all').parentElement!.appendChild(resetView)
-  if (view.overview) {
-    const overview = document.createElement('button')
-    overview.className = 'btn'
-    overview.textContent = 'Overview'
-    overview.onclick = () => { following = false; stage.frame(view!.overview!) }
-    resetView.after(overview)
+  // The view's framings, as icon actions in the View section. A short word shows where the whole name doesn't fit
+  // beside the others; the whole name is still the button's.
+  const action = (label: string, glyph: string, onclick: () => void, shown = label) => {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.className = 'kit-action'
+    setMarkup(b, html`${ICONS[glyph]}<span>${shown}</span>`)
+    if (shown !== label) { b.setAttribute('aria-label', label); b.title = label }
+    b.onclick = onclick
+    $('dev-view').append(b)
+    return b
   }
-  if (view.inspect) {
-    const inspect = document.createElement('button')
-    inspect.className = 'btn'
-    inspect.textContent = 'Inspect model'
-    inspect.onclick = () => { following = false; stage.frame(view!.inspect!()) }
-    resetView.after(inspect)
-  }
+  action('Reset view', 'center', () => { following = true; stage.frame(view!.framing) })
+  if (view.inspect) action('Inspect model', 'zoom-in', () => { following = false; stage.frame(view!.inspect!()) }, 'Inspect')
+  if (view.overview) action('Overview', 'orbit', () => { following = false; stage.frame(view!.overview!) })
 })
 
 if (!presence.shared.guest) void startSimScene({
@@ -269,6 +302,7 @@ if (!presence.shared.guest) void startSimScene({
   sim = s
   presence.connect(s)
   view?.connect?.(s)
+  numberSections(document.querySelector('.dev-panel')!)
   const seats = new Seats(s.remote, layout, s.control)
   s.remote.on('mode', () => { renderFaces(); renderUnits() })
   // For tests: the device, and what each participant's input looked like last frame.
@@ -332,6 +366,7 @@ if (!presence.shared.guest) void startSimScene({
     // Left alone, the stage settles into its supersampled still.
     if (events.length || perUnit.some((i) => i)) stage.view.invalidate()
     for (const e of events) {
+      if (e.kind === 'score') panels.get('scores')?.notify()
       const who = s.claims.holder(units[e.unit]?.id)
       if ((e.kind === 'tick' || e.kind === 'score') && who && e.text) s.remote.feedback({ toast: e.text }, who)
       if (e.text && (e.kind === 'score' || e.kind === 'fall')) s.log(`${who ? s.nameOf(who) : units[e.unit]?.name}: ${e.text}`, who ? s.colorOf(who) : undefined)

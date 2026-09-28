@@ -7,6 +7,7 @@ import { comfort, DEFAULT_COMFORT, vignetteStrength, XRQuality } from './comfort
 import type { SharedPresence, Pose } from './presence'
 import type { V3 } from './world'
 import '../../styles/presence.css'
+import { simPanels } from '../ui/panels'
 
 export type ViewMode = 'overview' | 'first-person' | 'xr'
 const UP = new THREE.Vector3(0, 1, 0)
@@ -78,7 +79,8 @@ export class Experience extends EventTarget {
     this.exitTarget = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.05), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), depthTest: false }))
     this.exitTarget.position.set(0, -0.2, -0.5); this.exitTarget.renderOrder = 10001; this.camera.add(this.exitTarget)
     this.controls = document.createElement('div'); this.controls.className = 'presence-controls'; this.controls.setAttribute('aria-label', 'Scene viewpoint')
-    this.controlsHome = document.querySelector<HTMLElement>('.sim-panel') ?? document.body
+    // A panel may keep a place for the viewpoint row (the device panel's View section).
+    this.controlsHome = document.querySelector<HTMLElement>('[data-presence-home]') ?? document.querySelector<HTMLElement>('.sim-panel') ?? document.body
     this.controls.classList.toggle('presence-floating', this.controlsHome === document.body)
     const button = (label: string, action: () => void) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.onclick = action; if (!['First person', 'Enter VR', 'Share scene'].includes(label)) b.className = 'presence-extra'; this.controls.append(b); return b }
     this.picker = document.createElement('select'); this.picker.setAttribute('aria-label', 'Ride a device'); this.controls.append(this.picker)
@@ -95,7 +97,8 @@ export class Experience extends EventTarget {
     button('↶', () => this.snap(-1)).setAttribute('aria-label', 'Snap turn left')
     button('↷', () => this.snap(1)).setAttribute('aria-label', 'Snap turn right')
     const toggle = (label: string, checked: boolean, change: (v: boolean) => void) => {
-      const l = document.createElement('label'), box = document.createElement('input'); box.type = 'checkbox'; box.checked = checked; box.onchange = () => change(box.checked); l.append(box, label); this.controls.append(l)
+      // The kit's switch (ui/kit/toggle.ts): a checkbox drawn as a switch.
+      const l = document.createElement('label'), box = document.createElement('input'); box.type = 'checkbox'; box.className = 'kit-switch'; box.setAttribute('role', 'switch'); box.checked = checked; box.onchange = () => change(box.checked); l.className = 'kit-toggle'; l.append(box, label); this.controls.append(l)
     }
     toggle('Horizon lock', this.settings.horizon, v => { this.settings.horizon = v; this.save() })
     toggle('Comfort shade', this.settings.vignette, v => { this.settings.vignette = v; this.save() })
@@ -160,6 +163,10 @@ export class Experience extends EventTarget {
     document.body.classList.toggle('presence-active', mode !== 'overview')
     if (mode === 'overview') this.controlsHome.prepend(this.controls)
     else document.body.append(this.controls)
+    if (document.body.classList.contains('has-sim-panels')) {
+      if (mode === 'first-person') simPanels().add(this.controls, { id: 'view', title: 'View controls', purpose: 'Switch viewpoint, recenter, return to overview and adjust comfort', icon: 'view', anchor: 'view' }).setState('open')
+      else simPanels().remove('view')
+    }
     const soundControls = document.querySelector<HTMLElement>('.sim-sound')
     if (soundControls) {
       this.soundHome ??= soundControls.parentElement

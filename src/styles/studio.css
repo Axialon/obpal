@@ -1,25 +1,13 @@
-.studio .dev-panel { width: 292px; }
-.studio .dev-panel > * { flex-shrink: 0; }
-.studio .dev-units { gap: 2px; }
-.studio .dev-units li { padding: 5px 0; }
-.studio .dev-how { min-height: 0; }
-.studio-audio { display: grid; grid-template-columns: 1fr auto; gap: 9px 12px; padding: 12px 0; border-bottom: 1px solid var(--glass-edge); }
-.studio-audio button { min-height: 44px; border-radius: 12px; background: var(--accent); color: #17200a; font-weight: 750; padding: 8px 14px; }
-.studio-audio label { display: flex; align-items: center; gap: 8px; grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
-.studio-audio input { width: 100%; accent-color: var(--accent); }
-.studio-audio meter { align-self: center; width: 52px; height: 14px; accent-color: var(--accent); }
-.studio-audio small { grid-column: 1 / -1; color: var(--muted); font-size: 11px; line-height: 1.4; }
-@media (max-width: 860px) {
-  .studio .dev-panel { width: auto; max-height: 38vh; gap: 6px; }
-  .studio .dev-units { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 12px; }
-  .studio .dev-units .nv { display: none; }
-  .studio .dev-faces, .studio .dev-how { display: none; }
-  .studio-audio { grid-template-columns: 1fr 50px 1fr; padding: 0 0 8px; align-items: center; }
-  .studio-audio label { grid-column: 3; }.studio-audio small { display: none; }
-}
-@media (orientation: landscape) and (max-height: 600px) {
-  .studio .dev-panel { left: 16px; top: auto; bottom: 14px; width: 225px; height: calc(100vh - 82px); max-height: none; }
-  .studio .dev-units { grid-template-columns: 1fr; }.studio .dev-units li { padding: 2px 0; }
-  .studio .dev-units small { display: none; }
-  .studio-audio { grid-template-columns: 1fr 42px; }.studio-audio label { display: none; }
-}
+/* The studio's sound card (devices/studio.session.ts): start and mute with the room's output beside it, the volume
+   with its stops, and reduced sound. Each station is a window of its own (a unit row, as the other devices' are). */
+.studio-audio { display: grid; gap: 10px; min-width: 0; }
+.studio-audio .kit-card-n:empty { display: none; }
+.studio-audio .kit-card-aside { gap: 10px; }
+.studio-audio .kit-action { height: 32px; padding: 0 12px; font-size: 12px; }
+.studio-audio .kit-slider { padding: 0 6px; }
+.studio-audio > small { color: var(--bb-ink-2); font: 500 12px/1.4 var(--bb-font-ui); }
+.studio-audio > small:empty { display: none; }
+/* The output meter: a thin capsule that follows the room's level (silence isn't a warning here). */
+.studio-audio .kit-capsule { width: 44px; height: 8px; }
+.studio-audio .kit-capsule::after { display: none; }
+.studio-audio .kit-capsule-fill, .studio-audio .kit-capsule[data-low='true'] .kit-capsule-fill { left: 1px; top: 1px; bottom: 1px; width: max(0px, calc(var(--fill, 0%) - 2px)); background: linear-gradient(90deg, var(--bb-accent), color-mix(in srgb, var(--bb-accent) 55%, #fff)); box-shadow: 0 0 12px -2px rgb(var(--bb-accent-rgb) / 0.7); transition: none; }

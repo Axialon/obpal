@@ -217,12 +217,15 @@ export async function runAudio(local, check) {
       await saveRecording(page, join(out, `${id}.webm`))
       await page.screenshot({ path: join(out, `after-${id}.png`) })
       measurements.push({ sim: id, players: 1, samples: [s] })
-      // Muting releases loops; reduced sound is separate from reduced motion.
+      // Muting releases loops; the level's Reduced stop is separate from reduced motion.
       await page.locator('#sim-sound').click()
       assert.equal(await page.evaluate(() => window.__simAudio.muted), true)
       assert.equal(await page.evaluate(() => window.__simAudio.budget.active), 0)
-      await page.getByLabel('Reduced sound', { exact: true }).check()
-      assert.equal(await page.evaluate(() => window.__simAudio.reduced), true)
+      const level = page.getByRole('slider', { name: 'Sound level', exact: true })
+      assert.equal(await level.getAttribute('aria-valuetext'), 'Off')
+      await level.press('ArrowRight')
+      assert.equal(await level.getAttribute('aria-valuetext'), 'Reduced')
+      assert.deepEqual(await page.evaluate(() => [window.__simAudio.reduced, window.__simAudio.muted]), [true, false])
       await p.close(); await page.close()
     })
 

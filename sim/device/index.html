@@ -40,15 +40,30 @@
     </header>
 
     <aside class="sim-panel glass dev-panel" aria-labelledby="dev-name">
-      <p class="eyebrow" id="dev-kind">Device</p>
-      <h1 id="dev-name">Device</h1>
-      <p class="sim-lede" id="dev-blurb"></p>
-      <div class="dev-faces" id="dev-faces" role="group" aria-label="Controllers that suit it"></div>
-      <p class="dev-how" id="dev-how" aria-live="polite"></p>
-      <ul class="dev-units" id="dev-units" aria-label="Units"></ul>
-      <div class="safety">
-        <button class="btn" id="home-all" data-icon="reset">Home all</button>
-        <button class="btn" id="reset" hidden>Reset</button>
+      <header class="sim-id">
+        <p class="eyebrow" id="dev-kind">Device</p>
+        <h1 id="dev-name">Device</h1>
+        <p class="sim-lede" id="dev-blurb"></p>
+      </header>
+      <section class="sim-sec" aria-labelledby="dev-view-h">
+        <header class="kit-card-head"><span class="kit-card-n"></span><h2 class="kit-card-title" id="dev-view-h">View</h2></header>
+        <div class="sim-presence" data-presence-home></div>
+        <div class="sim-actions" id="dev-view"></div>
+      </section>
+      <section class="sim-sec" aria-labelledby="dev-faces-h">
+        <header class="kit-card-head"><span class="kit-card-n"></span><h2 class="kit-card-title" id="dev-faces-h">Controllers</h2></header>
+        <div class="dev-faces" id="dev-faces" role="group" aria-label="Controllers that suit it"></div>
+        <p class="dev-how" id="dev-how" aria-live="polite"></p>
+        <div class="dev-scope" data-scope-home></div>
+      </section>
+      <section class="sim-sec" id="dev-units-sec" aria-labelledby="dev-units-h">
+        <header class="kit-card-head"><span class="kit-card-n"></span><h2 class="kit-card-title" id="dev-units-h">Units</h2><span class="kit-card-aside"><span class="dev-count" id="dev-count"></span></span></header>
+        <ul class="dev-units" id="dev-units" aria-label="Units"></ul>
+      </section>
+      <div data-sound-home></div>
+      <div class="safety sim-actions">
+        <button class="kit-action" id="home-all" data-icon="guide"><span>Home all</span></button>
+        <button class="kit-action" id="reset" data-icon="reset" hidden>Reset</button>
       </div>
       <details class="log-wrap"><summary>Record</summary><ol class="log" id="log"></ol></details>
     </aside>

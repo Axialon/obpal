@@ -22,11 +22,15 @@ import { SharedPresence } from './vr/presence'
 import { looking, type Ride } from './vr/rigs'
 import { ControlFrame } from './vr/control-frame'
 import { mountSound } from './audio/session'
+import { mountSimPanels, numberSections } from './ui/panels'
+import { Readout } from '../ui/kit/readout'
 
 applyTheme(initialTheme())
 mountMarks()
 mountTopBar()
 const $ = (id: string) => document.getElementById(id)!
+const panels = mountSimPanels('arena', 'Arena controls')
+const scores = panels.add($('score'), { id: 'scores', title: 'Scores', purpose: 'Player slots and points in this round', icon: 'scores', anchor: 'scores' })
 
 const RING = 2.5
 const PUCK = 0.17
@@ -145,6 +149,7 @@ Object.assign(window, { __arena: { slots } })
 const layout: Layout = { v: 1, modes: [Mode.tilt, Mode.gamepad], tray: [{ id: 'dash', label: 'Dash', type: 'button', icon: 'spin' }] }
 let sim: SimScene | null = null
 const sound = mountSound('arena', (strong, weak, ms, who) => sim?.remote.rumble(strong, weak, ms, who))
+numberSections(document.querySelector('.arena-panel')!)
 let soundAt = 0
 const xrPads = new Map<string, { pad: PadState; at: number }>()
 const rides = (): Ride[] => slots.map(s => {
@@ -315,6 +320,7 @@ function loop(now: number) {
 }
 
 function renderScore() {
+  scores.notify()
   const held = sim?.claims.snapshot() ?? {}
   $('score').replaceChildren(...slots.map((s) => {
     const li = document.createElement('li')
@@ -326,7 +332,8 @@ function renderScore() {
     fx.style.background = who ? sim!.colorOf(who) : 'rgb(var(--hl-rgb) / 0.15)'
     li.querySelector('b')!.textContent = `Player ${s.id.slice(1)}`
     li.querySelector('small')!.textContent = who ? sim!.nameOf(who) : 'Open: pick it on your phone'
-    li.querySelector('.pts')!.textContent = String(s.points)
+    // The points as a dot-matrix counter.
+    li.querySelector('.pts')!.append(new Readout({ value: s.points, pitch: 3, label: 'points' }).el)
     return li
   }))
 }
@@ -340,9 +347,9 @@ function resize() {
   const halfAngle = Math.atan(Math.tan(camera.fov * Math.PI / 360) * Math.min(1, w / h))
   camera.position.setLength(Math.max(camera.position.length(), RING * 1.08 / Math.sin(halfAngle)))
   camera.lookAt(0, 0, 0.15)
-  const panel = document.querySelector('.sim-panel')!.getBoundingClientRect()
-  if (w > 860) camera.setViewOffset(w, h, -panel.right / 2, 0, w, h)
-  else camera.setViewOffset(w, h, 0, (h - panel.top) / 2, w, h)
+  const control = panels.get('controls')!, panel = control.placement.rect
+  if (control.visible && panel.x < 80 && panel.w < w / 2) camera.setViewOffset(w, h, -(panel.x + panel.w) / 2, 0, w, h)
+  else camera.clearViewOffset()
   camera.updateProjectionMatrix()
 }
 resize()

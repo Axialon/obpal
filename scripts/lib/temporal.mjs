@@ -69,6 +69,10 @@ export async function measureTemporal(page, { captures = false } = {}) {
         previous: luminance(x, y), moving: false })
     }
     if (tracks.length < 20) throw new Error(`only ${tracks.length} measurable surface interiors`)
+    // Finding the probes takes many frames' time. Measure the first rest frame against the frame just before it, as
+    // every other frame is: a scene's intentional motion (a boat's bob, its shadow) otherwise piles up over the search.
+    await next(); read()
+    for (const track of tracks) track.previous = luminance(track.x, track.y)
     const target = controls?.target?.clone() ?? controls?.getTarget?.(new Vector3()) ?? new Vector3(0, 0, .15)
     const start = camera.position.clone(), delta = start.clone().sub(target), radius = Math.hypot(delta.x, delta.z), angle = Math.atan2(delta.x, delta.z)
     const projected = new Vector3(), frames = [], shots = []

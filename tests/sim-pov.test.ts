@@ -7,6 +7,8 @@ import { DEVICES } from '../src/sim/devices/registry'
 import type { Stage } from '../src/sim/devices/stage'
 
 vi.mock('../src/ui/markup', () => ({ setMarkup() {}, html() {} }))
+// Camera windows are exercised in Chromium; these tests only inspect the model's scene graph.
+vi.mock('../src/sim/ui/feed', () => ({ cameraFeed: (_stage: unknown, _title: string, _id: string, _index: number, content?: object) => ({ content: content ?? element(), label() {}, activity() {}, draw() {} }) }))
 
 // These are scene-graph contracts. Textures need a canvas-shaped stub, not a GPU.
 const context = new Proxy({

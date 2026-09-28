@@ -10,6 +10,7 @@ import { DetentSlider } from './slider'
 import { toggle } from './toggle'
 import { CapsuleGauge, RingGauge } from './gauge'
 import { Readout, Sparkline } from './readout'
+import { Telemetry } from './telemetry'
 import { statusDot } from './status'
 import { widgetCard } from './card'
 import { Sheet } from './sheet'
@@ -100,7 +101,7 @@ export function mountSheet() {
   card(10, 'Arm 1 · joints', [div('kd-row', arm.el, div('kd-stack', reach.el, statusDot('live', 'Held · Player 2'), new CapsuleGauge({ label: 'Gripper', value: 1 }).el))]).querySelector('.kit-card-head')!.append(statusDot('live'))
   const alt = new Readout({ value: '2.40', unit: 'm alt', pitch: 4 })
   const speedR = new Readout({ value: '1.8', unit: 'm/s', pitch: 4 })
-  card(11, 'Drone · telemetry', [div('kd-row', alt.el, speedR.el), new Sparkline({ label: 'Altitude', values: [0, 0.4, 1.1, 1.8, 2.2, 2.5, 2.4, 2.38, 2.41, 2.4], width: 220, height: 40 }).el, div('kd-row kd-between', new CapsuleGauge({ label: 'Battery', value: 0.64 }).el, statusDot('ok', 'Hover'))])
+  card(11, 'Drone · telemetry', [div('kd-row', alt.el, speedR.el), new Sparkline({ label: 'Altitude', values: [0, 0.4, 1.1, 1.8, 2.2, 2.5, 2.4, 2.38, 2.41, 2.4], width: 220, height: 40 }).el, div('kd-row kd-between', new CapsuleGauge({ label: 'Battery', value: 0.64 }).el, statusDot('ok', 'Hover')), div('kd-row kd-between', new Telemetry('2.4 m up · 3/8 rings · Flying').el, new Telemetry('1.4× · 12 shots').el)])
   const view = div('kd-feed kit-brackets')
   view.append(div('kd-feed-rec', statusDot('rec', 'Rec')), div('kd-feed-cap', 'CAM 2 · 35 mm'))
   card(12, 'Camera · feed', [view])

@@ -82,24 +82,28 @@ body.stopped #stage { filter: saturate(0.4) brightness(0.8); transition: filter 
 .note.in { opacity: 1; transform: translate(-50%, 0); }
 .sim-badge { position: fixed; right: 20px; top: 84px; z-index: 3; margin: 0; padding: 6px 12px; border-radius: 999px; background: var(--frost); border: 1px solid var(--frost-edge); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); box-shadow: var(--frost-shadow); color: var(--secondary); font: 650 11.5px var(--font); letter-spacing: 0.02em; }
 
-/* Robot arms: a card per arm, its whole-arm row and a grid of its joints. */
+/* Robot arms: a window per arm. Its head (control profile in small caps, SIM, TWIN or LIVE, and its tools), the whole
+   arm's reach as an instrument, and a dial per joint: a ring of dots across the joint's range, its angle in dot-matrix. */
 .arms { display: grid; gap: 10px; }
-.arm { display: grid; gap: 8px; padding: 10px; border-radius: 18px; background: rgb(var(--hl-rgb) / 0.03); border: 1px solid rgb(var(--hl-rgb) / 0.08); }
+.arm { display: grid; gap: 10px; padding: 12px; border-radius: 20px; background: rgb(var(--hl-rgb) / 0.03); border: 1px solid rgb(var(--hl-rgb) / 0.08); }
 .arm[data-hw="twin"] { border-color: rgb(56 189 248 / 0.45); }
 .arm[data-hw="live"] { border-color: rgb(244 63 94 / 0.7); box-shadow: 0 0 0 1px rgb(244 63 94 / 0.35), 0 8px 26px -12px rgb(244 63 94 / 0.6); }
-.arm-head { display: flex; align-items: center; gap: 10px; }
-.arm-n { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 9px; background: rgb(var(--hl-rgb) / 0.1); font: 800 13px var(--font-data, var(--font)); }
+.arm-head { display: flex; align-items: center; gap: 8px; min-height: 30px; }
+.arm-n { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 50%; background: rgb(var(--hl-rgb) / 0.08); box-shadow: inset 0 0 0 1px var(--bb-line); font: 700 12px var(--font-data, var(--font)); }
 .arm-head .nn { flex: 1; min-width: 0; display: grid; line-height: 1.25; }
 .arm-head .nn b { font-size: 14px; }
-.arm-head .nn small { overflow: hidden; color: var(--muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
-.arm-badge { padding: 3px 8px; border-radius: 999px; background: rgb(var(--hl-rgb) / 0.08); color: var(--muted); font: 750 10.5px var(--font); letter-spacing: 0.06em; text-transform: uppercase; }
-.arm[data-hw="twin"] .arm-badge { background: rgb(56 189 248 / 0.18); color: #7dd3fc; }
-.arm[data-hw="live"] .arm-badge { background: #e11d48; color: #fff; }
-.arm-more { width: 28px; height: 28px; font-size: 15px; }
-.arm-tools { display: grid; gap: 8px; padding: 8px; border-radius: 12px; background: rgb(var(--hl-rgb) / 0.04); }
+.arm-head .nn small { overflow: hidden; color: var(--bb-ink-2); font: 600 10.5px/1.3 var(--bb-font-data); letter-spacing: 0.08em; text-transform: uppercase; text-overflow: ellipsis; white-space: nowrap; }
+/* In its window the arm's name is the window's title. */
+.sim-window .arm-head .arm-n, .sim-window .arm-head .nn b { display: none; }
+.arm-badge { flex: none; padding: 5px 9px; border-radius: 999px; background: rgb(var(--hl-rgb) / 0.07); box-shadow: inset 0 0 0 1px var(--bb-line); color: var(--bb-ink-2); font: 600 10px/1 var(--bb-font-data); letter-spacing: 0.1em; text-transform: uppercase; }
+.arm[data-hw="twin"] .arm-badge { background: rgb(56 189 248 / 0.18); box-shadow: none; color: #7dd3fc; }
+.arm[data-hw="live"] .arm-badge { background: #e11d48; box-shadow: 0 0 12px rgb(225 29 72 / 0.6); color: #fff; }
+.arm-more { flex: none; width: 30px; height: 30px; font-size: 15px; }
+.arm-more[aria-expanded="true"] { color: var(--bb-ink); box-shadow: var(--kit-ring); }
+.arm-tools { display: grid; gap: 8px; padding: 10px; border-radius: 14px; background: rgb(var(--hl-rgb) / 0.04); box-shadow: inset 0 0 0 1px var(--bb-line); }
 .arm-tools[hidden] { display: none; }
 .arm-prof { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 12.5px; }
-.sim-panel .arm-kind { margin: 2px 0 0; }
+.sim-panel .arm-kind { margin: 0; }
 .arm-kind .kit-select { flex: 1; max-width: 220px; }
 /* The arm's selects are the kit's glass ones (styles/kit.css), at the panel's size. */
 .arm-prof, .hw { --kit-select-h: 32px; --kit-select-r: 10px; --kit-select-size: 12.5px; }
@@ -109,25 +113,39 @@ body.stopped #stage { filter: saturate(0.4) brightness(0.8); transition: filter 
 .btn.sm.primary { border: 0; background: var(--accent); color: var(--accent-ink, #0b0f14); }
 .btn.sm.danger { border: 0; background: #e11d48; color: #fff; }
 .btn.sm:disabled { opacity: 0.5; cursor: progress; }
-.jgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 0; padding: 0; list-style: none; }
+/* The whole arm: its holder's ring, who holds it, where the gripper is, and how far out it reaches. */
+.arm .nodes li { --c: rgb(var(--hl-rgb) / 0.3); grid-template-columns: 30px minmax(0, 1fr) auto; grid-template-rows: auto auto; row-gap: 8px; padding: 9px 12px 10px 9px; border: 0; border-radius: 16px; background: rgb(var(--hl-rgb) / 0.035); box-shadow: inset 0 0 0 1px var(--bb-line); }
+.arm .nodes li.held { background: rgb(var(--hl-rgb) / 0.065); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 45%, transparent); }
+.arm .nodes .dot { width: 30px; height: 30px; box-sizing: border-box; border: 1.5px dashed rgb(var(--hl-rgb) / 0.3); box-shadow: none; }
+.arm .nodes li.held .dot { border: 0; background: color-mix(in srgb, var(--c) 20%, transparent); box-shadow: 0 0 0 2px var(--c), 0 0 14px color-mix(in srgb, var(--c) 55%, transparent); }
+.arm .nodes .nn small { color: var(--bb-ink-2); }
+.arm .nodes .nv { min-width: 0; }
+.arm .nodes .chip-x { position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; font-size: 12px; background: rgb(var(--surface-rgb, 20 24 32) / 0.95); }
+.arm .arm-reach { grid-column: 1 / -1; width: auto; height: 10px; }
+.arm .arm-reach .kit-capsule-fill { left: 2px; top: 2px; bottom: 2px; width: max(0px, calc(var(--fill, 0%) - 4px)); }
+.arm .arm-reach::after { display: none; }
+.arm .arm-reach[data-low='true'] .kit-capsule-fill { background: linear-gradient(90deg, var(--bb-accent), color-mix(in srgb, var(--bb-accent) 55%, #fff)); }
+/* The joints: two to a row, each a dial of dots beside its position in dot-matrix, its name under that. */
+.jgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 0; padding: 0; list-style: none; }
 .jgrid:empty { display: none; }
-.jgrid li { position: relative; display: grid; grid-template-columns: 10px 1fr auto; grid-template-rows: auto var(--bb-range-line); align-items: center; column-gap: 7px; row-gap: 5px; padding: 7px 8px; border-radius: 12px; background: rgb(var(--hl-rgb) / 0.04); border: 1px solid transparent; }
-.jgrid li.held { border-color: rgb(var(--hl-rgb) / 0.12); background: rgb(var(--hl-rgb) / 0.07); }
-.jgrid .dot { width: 10px; height: 10px; border-radius: 50%; box-shadow: inset 0 0 0 2px rgb(var(--hl-rgb) / 0.3); }
-.jgrid li.held .dot { box-shadow: none; }
-.jgrid b { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.jgrid .nv { font: 600 12px var(--font-data, var(--font)); font-variant-numeric: tabular-nums; }
-.jgrid .bar { grid-column: 1 / -1; }
-.jgrid li[data-state="limit"], .jgrid li[data-state="floor"], .jgrid li[data-state="block"], .jgrid li[data-state="watchdog"] { border-color: rgb(252 211 77 / 0.5); }
+.jgrid li { --c: rgb(var(--hl-rgb) / 0.3); position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr); grid-template-rows: auto auto; align-items: center; column-gap: 10px; row-gap: 3px; min-width: 0; padding: 8px 10px 8px 8px; border-radius: 16px; background: rgb(var(--hl-rgb) / 0.035); box-shadow: inset 0 0 0 1px var(--bb-line); }
+.jgrid li.held { background: rgb(var(--hl-rgb) / 0.065); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 45%, transparent); }
+.jgrid .kit-ring { grid-row: 1 / 3; }
+.jgrid .kit-ring-mid { display: none; }
+.jgrid .kit-readout { align-self: end; gap: 5px; }
+.jgrid .kit-readout-unit { font-size: 9px; }
+.jgrid .dot { position: absolute; top: 8px; right: 8px; width: 7px; height: 7px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px rgb(var(--hl-rgb) / 0.3); }
+.jgrid li.held .dot { background: var(--c); box-shadow: 0 0 8px var(--c); }
+.jgrid b { align-self: start; min-width: 0; overflow: hidden; color: var(--bb-ink-2); font: 600 11.5px/1.2 var(--bb-font-ui); text-overflow: ellipsis; white-space: nowrap; }
+.jgrid li.held b { color: var(--bb-ink); }
+.jgrid li[data-state="limit"], .jgrid li[data-state="floor"], .jgrid li[data-state="block"], .jgrid li[data-state="watchdog"] { box-shadow: inset 0 0 0 1px rgb(252 211 77 / 0.6); }
 .jgrid .chip-x { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; font-size: 12px; background: rgb(var(--surface-rgb, 20 24 32) / 0.95); }
 .nodes li[data-state="edge"] .nn small::after { content: " · at the edge of its reach"; color: #fcd34d; }
 .nodes li[data-state="mirror"] .nn small::after { content: " · following the real arm"; color: #7dd3fc; }
-.add-arm { display: flex; align-items: center; justify-content: center; gap: 8px; height: 38px; border: 1px dashed rgb(var(--hl-rgb) / 0.25); border-radius: 12px; background: none; color: var(--muted); font: 650 13px var(--font); cursor: pointer; }
-.add-arm:hover { color: var(--ink); border-color: rgb(var(--hl-rgb) / 0.45); }
-.add-arm .ic { width: 16px; height: 16px; }
-.add-arm[hidden] { display: none; }
 .sim-badge.live { background: #e11d48; border: 0; color: #fff; }
-.glow-cam[aria-pressed="true"] { border-style: solid; border-color: rgb(var(--accent-rgb) / 0.6); color: var(--ink); }
+/* The arm panel: its long toggle wraps, and Home stands as tall as Stop. */
+.glow-cam.kit-action { height: auto; min-height: 36px; padding-top: 8px; padding-bottom: 8px; white-space: normal; text-align: left; line-height: 1.3; }
+.arm-panel .safety .kit-action { height: 52px; padding: 0 18px; border-radius: 16px; font-size: 14px; }
 /* What the camera sees, mirrored like a mirror, with each glow circled in its phone's colour. */
 .glow-view { width: 100%; aspect-ratio: 4 / 3; border-radius: 14px; background: #000; transform: scaleX(-1); image-rendering: auto; }
 .glow-view[hidden] { display: none; }
@@ -154,14 +172,15 @@ body.stopped #stage { filter: saturate(0.4) brightness(0.8); transition: filter 
 .hw-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
 .hw-actions .grow { flex: 1; }
 
-/* The arena's scoreboard. */
+/* The arena's scoreboard: each slot's faction in a disc of its holder's colour, who holds it, and its points as a
+   dot-matrix counter. */
 .score { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.score li { display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 14px; background: rgb(var(--hl-rgb) / 0.04); }
-.score li.held { background: rgb(var(--hl-rgb) / 0.08); }
-.score .fx { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 9px; font: 800 11px var(--font-data, var(--font)); color: #0b0f14; }
+.score li { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 54px; box-sizing: border-box; padding: 8px 14px 8px 10px; border-radius: 16px; background: rgb(var(--hl-rgb) / 0.035); box-shadow: inset 0 0 0 1px var(--bb-line); }
+.score li.held { background: rgb(var(--hl-rgb) / 0.065); }
+.score .fx { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; font: 800 11px var(--font-data, var(--font)); color: #0b0f14; }
 .score b { font-size: 13.5px; }
-.score small { display: block; color: var(--muted); font-size: 11.5px; }
-.score .pts { font: 800 20px var(--font-display); font-variant-numeric: tabular-nums; }
+.score small { display: block; overflow: hidden; color: var(--bb-ink-2); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.score .pts { display: flex; justify-content: flex-end; }
 
 @media (max-width: 860px) {
   .sim-panel { top: auto; left: 10px; right: 10px; bottom: 10px; width: auto; max-height: var(--sim-sheet); padding: 14px; border-radius: 22px; }

@@ -243,6 +243,8 @@ export async function runControlViews(local, check) {
         const page = await context.newPage()
         await page.addInitScript(() => { Object.defineProperty(DeviceOrientationEvent, 'requestPermission', { value: async () => 'granted' }) })
         await page.goto(`${local.origin}/sim/device/?d=claw&test=vr`)
+        await page.waitForFunction(() => window.__presence?.experience.rides().length)
+        const controls = page.locator('[data-panel-toggle="controls"]'); await controls.focus(); await controls.click()
         await page.getByRole('button', { name: 'First person', exact: true }).click()
         const sample = await page.evaluate(async () => {
           const e = window.__presence.experience, send = alpha => dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha, beta: 70, gamma: 0 }))

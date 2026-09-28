@@ -1,5 +1,6 @@
 import { contactPart } from '../contact'
 import * as THREE from 'three'
+import { cameraFeed } from '../ui/feed'
 import { darkTitanium, gunmetal, optic } from '../kit/surfaces'
 import { pov, tiledDeck } from '../kit/precision'
 import { skinSlot, upgradeSkins } from '../kit/skins'
@@ -82,46 +83,20 @@ function filming(scene: THREE.Scene, logic: GimbalLogic, live?: () => void) {
   }
 }
 export function createView(stage: Stage, logic: GimbalLogic): DeviceView {
-  const w = filming(stage.scene, logic, () => stage.view.invalidate()),
-    size = new THREE.Vector2(),
-    clear = new THREE.Color()
-  const label = document.createElement('div')
-  label.className = 'gimbal-feed'
-  label.setAttribute('aria-label', 'Gimbal camera view')
-  label.style.cssText =
-    'position:fixed;right:16px;top:80px;pointer-events:none;border:1px solid #91a6b4;border-radius:8px;color:white;padding:6px;font:12px system-ui;box-sizing:border-box'
-  document.body.append(label)
+  const w = filming(stage.scene, logic, () => stage.view.invalidate())
+  const feed = cameraFeed(stage, 'Gimbal camera')
+  feed.content.classList.add('gimbal-feed')
   return {
     framing: playFrame([0, 1.3, 0], 1.15),
     overview: playFrame([0, 1, -2], 5),
     inspect: () => playFrame([0, 1.8, 0], 0.6),
     update: (_, t) => {
       w.step(t)
-      label.textContent = logic.units[0].recording ? '● REC' : 'Camera view'
+      feed.label(logic.units[0].recording ? '● REC' : 'Camera view')
+      feed.activity(logic.units[0].recording)
     },
     afterRender() {
-      const r = stage.renderer
-      r.getSize(size)
-      r.getClearColor(clear)
-      const alpha = r.getClearAlpha(),
-        k = size.x / stage.view.width,
-        width = Math.min(260, innerWidth * 0.32),
-        height = (width * 9) / 16,
-        x = innerWidth - width - 16,
-        y = 80
-      label.style.width = `${width}px`
-      label.style.height = `${height}px`
-      r.setScissorTest(true)
-      r.setScissor(x * k, size.y - (y + height) * k, width * k, height * k)
-      r.setViewport(x * k, size.y - (y + height) * k, width * k, height * k)
-      r.setClearColor('#252f39', 1)
-      r.clear()
-      w.root.visible = false
-      stage.view.drawInset(stage.scene, w.eye)
-      w.root.visible = true
-      r.setScissorTest(false)
-      r.setViewport(0, 0, size.x, size.y)
-      r.setClearColor(clear, alpha)
+      feed.draw(stage.scene, w.eye, [w.root])
     },
   }
 }

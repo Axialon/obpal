@@ -6,6 +6,9 @@ import type { StudioLogic } from './studio'
 import { StudioSound } from './studio.sound'
 import { StudioPlayers } from './studio.players'
 import { html, setMarkup } from '../../ui/markup'
+import { CapsuleGauge } from '../../ui/kit/gauge'
+import { DetentSlider } from '../../ui/kit/slider'
+import { toggle } from '../../ui/kit/toggle'
 import { resolveStrike } from '../../music-space'
 import { rail } from '../vr/intent'
 
@@ -16,17 +19,27 @@ export function attachStudio(sim: SimScene, logic: StudioLogic, stage: Stage, po
   const samples: { ms: number; uncertainty: number; seat: number; seq: number }[] = []
   const frameTimes: number[] = []
   let peak = 0, lastFrame = 0
-  const panel = document.createElement('div'); panel.className = 'studio-audio'
-  setMarkup(panel, html`<button type="button" id="studio-start">Start sound</button><meter min="0" max="1" value="0" aria-label="Studio output"></meter><label>Volume<input type="range" min="0" max="80" value="65" aria-label="Studio volume"></label><small role="status">Tap here to hear the room. Start with your speakers low.</small>`)
-  document.getElementById('dev-blurb')!.after(panel)
-  const reducedLabel = document.createElement('label'), reduced = document.createElement('input')
-  reduced.type = 'checkbox'
-  try { reduced.checked = localStorage.getItem('obpal.sim.reduced') === '1' } catch { /* private browsing */ }
-  sound.setReduced(reduced.checked)
-  reducedLabel.append(reduced, ' Reduced sound'); panel.append(reducedLabel)
-  reduced.onchange = () => { sound.setReduced(reduced.checked); try { localStorage.setItem('obpal.sim.reduced', reduced.checked ? '1' : '0') } catch { /* private browsing */ } }
-  const start = panel.querySelector<HTMLButtonElement>('button')!, status = panel.querySelector('small')!, meter = panel.querySelector('meter')!
+  // The studio's sound card: start and mute with the room's output beside it, the volume with its stops, and reduced sound.
+  const panel = document.createElement('section'); panel.className = 'studio-audio'; panel.setAttribute('aria-labelledby', 'studio-audio-h')
+  setMarkup(panel, html`<header class="kit-card-head"><span class="kit-card-n"></span><h2 class="kit-card-title" id="studio-audio-h">Sound</h2><span class="kit-card-aside"><button type="button" class="kit-action" id="studio-start">Start sound</button></span></header><small role="status">Tap here to hear the room. Start with your speakers low.</small>`)
+  const meter = new CapsuleGauge({ label: 'Studio output', value: 0 })
+  panel.querySelector('.kit-card-aside')!.prepend(meter.el)
   let muted = false, starting = false
+  const volume = new DetentSlider({
+    label: 'Studio volume', min: 0, max: 80, step: 1, value: 65,
+    detents: [{ value: 0, label: 'Off' }, { value: 40, label: 'Soft' }, { value: 65, label: 'Room' }, { value: 80, label: 'Max' }],
+    onInput: v => { if (!muted) sound.setVolume(v / 100) },
+  })
+  let quiet = false
+  try { quiet = localStorage.getItem('obpal.sim.reduced') === '1' } catch { /* private browsing */ }
+  sound.setReduced(quiet)
+  const reduced = toggle({ label: 'Reduced sound', checked: quiet, onChange: on => { sound.setReduced(on); try { localStorage.setItem('obpal.sim.reduced', on ? '1' : '0') } catch { /* private browsing */ } } })
+  panel.querySelector('header')!.after(volume.el, reduced)
+  // The panel keeps a place for sound; before it did, the card followed the device's description.
+  const home = document.querySelector('[data-sound-home]')
+  if (home) home.append(panel)
+  else document.getElementById('dev-blurb')!.after(panel)
+  const start = panel.querySelector<HTMLButtonElement>('#studio-start')!, status = panel.querySelector('small')!
   const startSound = async () => {
     if (starting || sound.running) return
     starting = true
@@ -36,12 +49,11 @@ export function attachStudio(sim: SimScene, logic: StudioLogic, stage: Stage, po
   }
   start.onclick = () => {
     if (!sound.running) { void startSound(); return }
-    muted = !muted; sound.setVolume(muted ? 0 : Number(panel.querySelector('input')!.value) / 100); start.textContent = muted ? 'Unmute' : 'Mute'
+    muted = !muted; sound.setVolume(muted ? 0 : volume.value / 100); start.textContent = muted ? 'Unmute' : 'Mute'
   }
   const firstInteraction = (e: Event) => { if (!(e.target as HTMLElement).closest('#studio-start')) void startSound() }
   document.addEventListener('pointerdown', firstInteraction, { once: true })
   document.addEventListener('keydown', firstInteraction, { once: true })
-  panel.querySelector('input')!.oninput = e => { if (!muted) sound.setVolume(Number((e.target as HTMLInputElement).value) / 100) }
   logic.onHome = n => sound.stop(n)
   const seatOf = (who: string) => sim.nodes.findIndex(n => n.id === sim.claims.held(who))
   const blockedAt = new Map<string, number>()

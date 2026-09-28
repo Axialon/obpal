@@ -8,34 +8,45 @@ body.sim.dev { background: radial-gradient(120% 95% at 50% 36%, var(--stage-a, #
 .dev-tool .ic { width: 19px; height: 19px; }
 .themes-menu { width: 280px; }
 
-/* The controllers that suit the device: its best first, lit; a dot for each phone using one now. */
-.dev-faces { display: flex; flex-wrap: wrap; gap: 6px; }
-.dev-face { position: relative; display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 12px 0 9px; border: 1px solid var(--line); border-radius: 999px; background: rgb(var(--hl-rgb) / 0.04); color: var(--secondary, var(--muted)); font: 650 12.5px var(--font); cursor: pointer; transition: background 0.2s var(--ease), border-color 0.2s, color 0.2s; }
-.dev-face .ic { width: 17px; height: 17px; }
-.dev-face:hover { color: var(--ink); border-color: rgb(var(--hl-rgb) / 0.22); }
-.dev-face.first { border-color: rgb(var(--accent-rgb) / 0.55); color: var(--ink); }
-.dev-face.first .ic { color: var(--accent-text); }
-.dev-face[aria-pressed='true'] { background: var(--glass-light); border-color: rgb(255 255 255 / 0.3); color: var(--accent-ink); }
-.dev-face[aria-pressed='true'] .ic { color: var(--accent-ink); }
-.dev-face .dots { position: absolute; top: -3px; right: -2px; display: flex; font-style: normal; }
-.dev-face .dots b { width: 11px; height: 11px; border-radius: 50%; box-shadow: 0 0 0 2px rgb(var(--surface-rgb) / 0.95); }
-.dev-face .dots b + b { margin-left: -4px; }
-.dev-how { min-height: 1.5em; margin: -4px 2px 2px; color: var(--secondary, var(--muted)); font-size: 13px; line-height: 1.45; }
+/* ---- the panel: its sections (styles/panels.css), with the device's own below -------------------------------------- */
 
-/* Units: who holds each, with which controller, and a live readout. */
+.dev-count { margin-right: 4px; color: var(--bb-ink-2); font: 600 11px/1 var(--bb-font-data); letter-spacing: 0.06em; font-variant-numeric: tabular-nums; }
+.dev-count:empty { display: none; }
+.dev-panel .safety[hidden] { display: none; }
+.dev-panel .safety .kit-action { flex: 1 1 calc(50% - 3px); height: 42px; border-radius: 14px; }
+/* Home all (and a device's reset) at the end of the Units header. */
+.dev-panel .kit-card-aside .kit-action { height: 30px; padding: 0 10px 0 8px; border-radius: 10px; font-size: 12px; }
+.dev-panel .kit-card-aside .kit-action > .ic { width: 15px; height: 15px; }
+
+/* Controllers: a tile each, its icon in a disc; the one shown is ringed in the accent, the best lit; a dot per phone. */
+.dev-faces { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
+.dev-face { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-width: 0; min-height: 66px; margin: 0; padding: 8px 6px 7px; border: 0; border-radius: 18px; background: rgb(var(--bb-hl-rgb) / 0.04); box-shadow: inset 0 0 0 1px var(--bb-line); color: var(--bb-ink-2); font: 600 12px/1.15 var(--bb-font-ui); text-align: center; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: background var(--bb-dur-2) var(--bb-ease), color var(--bb-dur-2), box-shadow var(--bb-dur-2); }
+.dev-face:hover { background: rgb(var(--bb-hl-rgb) / 0.07); color: var(--bb-ink); }
+.dev-face:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: 2px; }
+.dev-face-ic { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: rgb(var(--bb-hl-rgb) / 0.05); box-shadow: inset 0 0 0 1px var(--bb-line); transition: box-shadow var(--bb-dur-2), color var(--bb-dur-2), background var(--bb-dur-2); }
+.dev-face-ic .ic { width: 18px; height: 18px; }
+.dev-face-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dev-face.first .dev-face-ic { color: var(--bb-accent-text); }
+.dev-face[aria-pressed='true'] { background: linear-gradient(180deg, rgb(var(--bb-accent-rgb) / 0.14), rgb(var(--bb-accent-rgb) / 0.04)); box-shadow: inset 0 0 0 1px rgb(var(--bb-accent-rgb) / 0.55); color: var(--bb-ink); }
+.dev-face[aria-pressed='true'] .dev-face-ic { background: rgb(var(--bb-accent-rgb) / 0.14); box-shadow: var(--kit-ring); color: var(--bb-accent-text); }
+.dev-face .dots { position: absolute; top: 8px; right: 8px; display: flex; font-style: normal; }
+.dev-face .dots b { width: 10px; height: 10px; border-radius: 50%; box-shadow: 0 0 0 2px rgb(var(--bb-base-rgb)); }
+.dev-face .dots b + b { margin-left: -3px; }
+.dev-how { min-height: 0; margin: 0; color: var(--bb-ink-2); font-size: 12.5px; line-height: 1.5; }
+.dev-how:empty { display: none; }
+
+/* Units: the unit's number in a ring (its holder's colour while held), its name and holder, and its readout drawn
+   as an instrument (ui/kit/telemetry.ts). */
 .dev-units { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.dev-units li { display: grid; grid-template-columns: 12px minmax(0, 0.9fr) minmax(0, 1.4fr); align-items: center; gap: 10px; padding: 9px 12px 9px 10px; border-radius: 14px; background: rgb(var(--hl-rgb) / 0.04); border: 1px solid transparent; transition: border-color 0.3s, background 0.3s; }
-.dev-units li.held { border-color: rgb(var(--hl-rgb) / 0.12); background: rgb(var(--hl-rgb) / 0.07); }
-.dev-units .dot { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 2px rgb(var(--hl-rgb) / 0.3); }
-.dev-units li.held .dot { box-shadow: 0 0 12px currentColor; }
-.dev-units .nn { display: grid; min-width: 0; line-height: 1.25; }
-.dev-units .nn b { font-size: 13.5px; }
-.dev-units .nn small { display: flex; align-items: center; gap: 5px; overflow: hidden; color: var(--muted); font-size: 11.5px; white-space: nowrap; text-overflow: ellipsis; }
-.dev-units .nn small .ic { width: 13px; height: 13px; flex: none; color: var(--secondary, var(--muted)); }
-.dev-units .nv { min-width: 0; font: 600 12.5px/1.4 var(--font-data, var(--font)); font-variant-numeric: tabular-nums; color: var(--ink); text-align: right; overflow-wrap: anywhere; }
-.safety { flex-wrap: wrap; }
-.safety .btn { display: inline-flex; flex: 1 1 calc(50% - 5px); min-width: 0; align-items: center; justify-content: center; gap: 8px; }
-.safety .btn .ic { width: 17px; height: 17px; }
+.dev-units li { --c: rgb(var(--bb-hl-rgb) / 0.3); display: grid; grid-template-columns: 30px minmax(64px, 1fr) auto; align-items: center; gap: 10px; min-height: 52px; box-sizing: border-box; padding: 6px 12px 6px 9px; border-radius: 16px; background: rgb(var(--bb-hl-rgb) / 0.035); box-shadow: inset 0 0 0 1px var(--bb-line); transition: background 0.3s, box-shadow 0.3s; }
+.dev-units li.held { background: rgb(var(--bb-hl-rgb) / 0.065); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 45%, transparent); }
+.dev-units .dot { display: grid; place-items: center; width: 30px; height: 30px; box-sizing: border-box; border: 1.5px dashed rgb(var(--bb-hl-rgb) / 0.3); border-radius: 50%; color: var(--bb-ink-2); font: 700 11px/1 var(--bb-font-data); font-variant-numeric: tabular-nums; }
+.dev-units li.held .dot { border: 0; background: color-mix(in srgb, var(--c) 20%, transparent); box-shadow: 0 0 0 2px var(--c), 0 0 14px color-mix(in srgb, var(--c) 55%, transparent); color: var(--bb-ink); }
+.dev-units .nn { display: grid; gap: 3px; min-width: 0; line-height: 1.2; }
+.dev-units .nn b { overflow: hidden; font: 650 13.5px/1.2 var(--bb-font-ui); letter-spacing: -0.01em; text-overflow: ellipsis; white-space: nowrap; }
+.dev-units .nn small { display: block; min-width: 0; overflow: hidden; color: var(--bb-ink-2); font-size: 11.5px; line-height: 1.3; white-space: nowrap; text-overflow: ellipsis; }
+.dev-units .nn small .ic { display: inline-block; width: 13px; height: 13px; margin-right: 5px; vertical-align: -2px; color: var(--bb-accent-text); }
+.dev-units .nv { display: block; min-width: 0; max-width: 170px; }
 
 /* A pointing phone's cursor on the screen, in its colour; hollow while it points off the screen's edge. */
 .dev-cursors { position: fixed; inset: 0; z-index: 4; pointer-events: none; overflow: hidden; }
@@ -67,8 +78,4 @@ body.sim.dev { background: radial-gradient(120% 95% at 50% 36%, var(--stage-a, #
 /* The page's notes on one line where they fit (the shared note is otherwise as wide as half the screen). */
 body.dev .note { width: max-content; max-width: calc(100vw - 32px); text-align: center; }
 
-@media (max-width: 860px) {
-  .dev-panel .sim-lede, .dev-panel .log-wrap { display: none; }
-  .dev-panel { gap: 10px; }
-}
 @media (prefers-reduced-motion: reduce) { .dev-cursor { transition: none; } }

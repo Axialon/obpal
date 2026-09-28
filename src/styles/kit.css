@@ -27,7 +27,7 @@
 html.kit-locked { overflow: hidden; scrollbar-gutter: stable; }
 
 /* The icons the kit draws, wherever the page's own .ic rules are or aren't. */
-:is(.kit-select, .kit-pop, .kit-side, .kit-seg, .kit-sheet, .kit-chip, .kit-icon-btn, .kit-cta) .ic { display: block; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+:is(.kit-select, .kit-pop, .kit-side, .kit-seg, .kit-sheet, .kit-chip, .kit-icon-btn, .kit-cta, .kit-action) .ic { display: block; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ---- icon button: a round glass button for one icon (close, collapse) ---------------------------------------------- */
 
@@ -290,6 +290,43 @@ input.kit-switch:disabled { opacity: 0.45; cursor: not-allowed; }
 .kit-spark path { stroke: var(--bb-accent); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .kit-spark circle { fill: var(--bb-accent); filter: drop-shadow(0 0 3px rgb(var(--bb-accent-rgb) / 0.8)); }
 
+/* ---- telemetry: a readout as an instrument ------------------------------------------------------------------------------ */
+
+.tele { display: inline-grid; justify-items: end; min-width: 0; max-width: 100%; }
+.tele-face { display: grid; justify-items: end; gap: 6px; min-width: 0; max-width: 100%; }
+.tele-main { display: inline-flex; align-items: flex-end; gap: 6px; min-width: 0; color: var(--bb-accent); }
+.tele-main .kit-readout { flex: none; }
+.tele-main .tele-status { font-size: 10.5px; }
+.tele-unit { padding-bottom: 1px; color: var(--bb-ink-3); font: 600 9.5px/1 var(--bb-font-data); letter-spacing: 0.12em; text-transform: uppercase; white-space: nowrap; }
+.tele-main[data-rec] .tele-unit, .tele-stat[data-rec] small { color: var(--kit-rec); }
+.tele-more { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 5px 10px; min-width: 0; }
+.tele-stat { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; }
+.tele-stat b { color: var(--bb-ink); font: 650 12px/1 var(--bb-font-data); font-variant-numeric: tabular-nums; }
+.tele-stat small, .tele-gauge small { color: var(--bb-ink-3); font: 600 9.5px/1 var(--bb-font-data); letter-spacing: 0.1em; text-transform: uppercase; }
+.tele-gauge { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.tele-gauge .kit-capsule { width: 46px; height: 12px; }
+.tele-gauge .kit-capsule-fill { left: 2px; top: 2px; bottom: 2px; width: max(0px, calc(var(--fill, 0%) - 4px)); }
+.tele-gauge .kit-capsule::after { display: none; }
+.tele-main .tele-gauge .kit-capsule { width: 64px; height: 16px; }
+/* A share in a readout (3/8 keys), not a charge: a low one isn't a warning. */
+.tele-gauge .kit-capsule[data-low='true'] .kit-capsule-fill { background: linear-gradient(90deg, var(--bb-accent), color-mix(in srgb, var(--bb-accent) 55%, #fff)); box-shadow: 0 0 18px -2px rgb(var(--bb-accent-rgb) / 0.7), inset 0 1px 0 rgb(255 255 255 / 0.5); }
+.tele-status { gap: 6px; font-size: 9.5px; }
+.tele-quote { max-width: 18ch; overflow: hidden; color: var(--bb-ink); font: 650 12.5px/1.2 var(--bb-font-ui); text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- actions: an icon and a word, for what a panel can do ------------------------------------------------------------ */
+
+button.kit-action, a.kit-action { display: inline-flex; align-items: center; justify-content: center; gap: 7px; box-sizing: border-box; min-width: 0; height: 36px; margin: 0; padding: 0 12px 0 10px; border: 1px solid var(--bb-line); border-radius: 12px; background: var(--kit-fill); box-shadow: inset 0 1px 0 var(--bb-hi); color: var(--bb-ink); font: 650 12.5px/1 var(--bb-font-ui); letter-spacing: -0.005em; text-decoration: none; white-space: nowrap; cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; transition: background var(--bb-dur-2) var(--bb-ease), border-color var(--bb-dur-2), box-shadow var(--bb-dur-2), transform var(--bb-dur-1) var(--bb-ease); }
+button.kit-action:hover, a.kit-action:hover { background: var(--kit-fill-hover); border-color: var(--bb-line-strong); }
+button.kit-action:active { transform: scale(0.97); }
+button.kit-action:focus-visible, a.kit-action:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: 2px; }
+button.kit-action:disabled { opacity: 0.45; cursor: default; transform: none; }
+.kit-action[hidden] { display: none; }
+button.kit-action[aria-pressed='true'] { border-color: rgb(var(--bb-accent-rgb) / 0.7); background: rgb(var(--bb-accent-rgb) / 0.12); box-shadow: var(--kit-ring); color: var(--bb-ink); }
+.kit-action > .ic { width: 16px; height: 16px; color: var(--bb-accent-text); }
+button.kit-action.kit-primary { border-color: rgb(255 255 255 / 0.25); background: var(--bb-glass-accent); box-shadow: 0 10px 26px -14px rgb(var(--bb-accent-rgb) / 0.9), inset 0 1px 0 rgb(255 255 255 / 0.45); color: var(--bb-accent-ink); }
+button.kit-action.kit-primary > .ic { color: var(--bb-accent-ink); }
+@media (pointer: coarse) { button.kit-action, a.kit-action { height: 42px; } }
+
 /* ---- status dots ------------------------------------------------------------------------------------------------------ */
 
 .kit-status { display: inline-flex; align-items: center; gap: 8px; color: var(--bb-ink-2); font: 600 11px/1 var(--bb-font-data); letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
@@ -307,6 +344,7 @@ input.kit-switch:disabled { opacity: 0.45; cursor: not-allowed; }
 .kit-card { position: relative; display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 14px 16px 16px; border-radius: 22px; background: linear-gradient(180deg, rgb(var(--bb-surface-rgb) / 0.5), rgb(var(--bb-base-rgb) / 0.72)); border: 1px solid var(--bb-line); box-shadow: inset 0 1px 0 var(--bb-hi), 0 18px 40px -26px rgb(0 0 0 / 0.85); color: var(--bb-ink); }
 .kit-card-head { display: flex; align-items: center; gap: 9px; min-height: 18px; color: var(--bb-ink-2); font: 600 11px/1 var(--bb-font-data); letter-spacing: 0.09em; text-transform: uppercase; }
 .kit-card-n { color: var(--bb-ink-3); }
+.kit-card-n:empty { display: none; }
 .kit-card-title { flex: 1; min-width: 0; margin: 0; overflow: hidden; color: var(--bb-ink); font: inherit; text-overflow: ellipsis; white-space: nowrap; }
 .kit-card-aside { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
 .kit-card-body { display: grid; gap: 12px; min-width: 0; }

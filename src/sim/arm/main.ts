@@ -54,6 +54,12 @@ import { armRide } from '../vr/rigs'
 import { ControlFrame } from '../vr/control-frame'
 import type { SimValue } from '@obpal/core'
 import { mountSound } from '../audio/session'
+import { mountSimPanels, numberSections } from '../ui/panels'
+import { CapsuleGauge, RingGauge } from '../../ui/kit/gauge'
+import { Telemetry } from '../../ui/kit/telemetry'
+import { Readout } from '../../ui/kit/readout'
+import { ICONS } from '../../ui/icons'
+import { html, setMarkup } from '../../ui/markup'
 
 applyTheme(initialTheme())
 mountMarks()
@@ -68,7 +74,13 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 const KIND = kindFrom(new URLSearchParams(location.search).get('kind'))
 const KIN = KIND.kin
 const INFO = ARM_KINDS.find((k) => k.id === KIND.id)!
+const panels = mountSimPanels(`arm:${KIND.id}`, 'Arm controls')
+panels.root.append($('arms'))
+/** Each joint's dial, and each arm's whole-arm readout and reach, by node id (rebuilt with the cards). */
+const dials = new Map<string, { dial: RingGauge; angle: Readout }>()
+const reaches = new Map<string, { readout: Telemetry; reach: CapsuleGauge }>()
 const sound = mountSound(KIND.id, (strong, weak, ms, who) => sim?.remote.rumble(strong, weak, ms, who))
+numberSections(document.querySelector('.arm-panel')!)
 const soundPosition = new THREE.Vector3()
 let soundAt = 0
 /** The gripper's joint, after the pose's. */
@@ -879,6 +891,10 @@ function readInputs(now: number) {
 const follower = new GlowFollower()
 const glowView = $('glow-view') as HTMLCanvasElement
 const glowCtx = glowView.getContext('2d')!
+const glowContent = document.createElement('div'); glowContent.className = 'panel-feed kit-brackets'
+const glowNote = document.createElement('p'); glowNote.className = 'feed-caption'; glowNote.textContent = 'Turn on camera tracking in Arm controls.'
+glowContent.append(glowView, glowNote)
+const glowPanel = panels.add(glowContent, { id: 'tracking-camera', title: 'Phone tracking camera', purpose: 'Camera tracking for glowing phones', icon: 'camera', anchor: 'camera', state: 'closed', camera: true })
 follower.onUnseen = (id) => sim?.remote.feedback({ haptic: 'bump', toast: 'The camera can’t see your glow: turn the screen toward it' }, id)
 follower.onCameraOff = () => sim?.note('A phone is glowing: turn on “Follow glowing phones with this camera”')
 
@@ -889,6 +905,8 @@ $('glow-cam').onclick = async () => {
   }
   $('glow-cam').setAttribute('aria-pressed', String(follower.cam.on))
   glowView.hidden = !follower.cam.on
+  glowNote.hidden = follower.cam.on
+  if (follower.cam.on) { glowPanel.notify(); glowPanel.setState('open') }
 }
 
 /** Give each glowing phone (3D without its own tracking) a pose from the camera, as a tracked phone would send. */
@@ -1366,7 +1384,15 @@ function renderPanel() {
     if ((held[a.id] ?? '') !== (heldBefore[a.id] ?? '')) { a.flash = 1; for (const j of a.joints) j.flash = 1 }
   }
   heldBefore = held
-  $('arms').replaceChildren(...arms.map((a) => armCard(a, held)))
+  dials.clear(); reaches.clear()
+  for (const child of [...$('arms').children]) {
+    const id = (child as HTMLElement).dataset.panel!
+    if (!arms.some(a => `arm-${a.id}` === id)) panels.remove(id)
+  }
+  arms.forEach((a, n) => {
+    const p = panels.add(armCard(a, held), { id: `arm-${a.id}`, title: a.name, purpose: 'Joint positions, control profile and hardware settings', icon: 'arm', anchor: 'arm', index: n })
+    $('arms').append(p.element)
+  })
   $('add-arm').hidden = arms.length >= MAX_ARMS
   const live = arms.filter((a) => a.hw?.live).length
   const connected = arms.filter((a) => a.hw).length
@@ -1378,7 +1404,7 @@ function renderPanel() {
 }
 
 function disableGuestPanel() {
-  if (view.presence?.shared?.guest) document.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('.sim-panel button, .sim-panel input, .sim-panel select').forEach(e => { if (!e.closest('.presence-controls, .sim-sound')) e.disabled = true })
+  if (view.presence?.shared?.guest) document.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('.sim-panel button, .sim-panel input, .sim-panel select, .arm button, .arm input, .arm select').forEach(e => { if (!e.closest('.presence-controls, .sim-sound')) e.disabled = true })
 }
 
 function takeBack(node: string) { sim?.take(node, 'host', true); sim?.release('host') }
@@ -1386,6 +1412,11 @@ function takeBack(node: string) { sim?.take(node, 'host', true); sim?.release('h
 function holderText(who: string | undefined, via?: string) {
   if (!who) return 'Free'
   return via ? `${sim!.nameOf(who)}, with ${via}` : sim!.nameOf(who)
+}
+
+/** A joint's position as its readout shows it: degrees, centimetres (the readout adds the unit), or open percent. */
+function jointText(spec: JointSpec, v: number) {
+  return spec.unit === '°' ? `${Math.round(v)}°` : spec.unit === 'm' ? `${Math.round(v * 100)}` : `${Math.round(v * 100)}%`
 }
 
 function armCard(a: Arm, held: Record<string, string>): HTMLElement {
@@ -1433,9 +1464,15 @@ function armCard(a: Arm, held: Record<string, string>): HTMLElement {
   if (a.profile !== 'joints') {
     const li = document.createElement('li')
     li.dataset.node = a.id
-    li.innerHTML = '<i class="dot"></i><span class="nn"><b>Whole arm</b><small></small></span><span class="nv"></span><span class="bar bb-meter"></span>'
+    li.innerHTML = '<i class="dot"></i><span class="nn"><b>Whole arm</b><small></small></span><span class="nv"></span>'
     li.querySelector('small')!.textContent = holderText(armWho)
-    if (armWho) { li.classList.add('held'); li.querySelector<HTMLElement>('.dot')!.style.background = sim!.colorOf(armWho) }
+    if (armWho) { li.classList.add('held'); li.style.setProperty('--c', sim!.colorOf(armWho)) }
+    // Where the gripper is (reach and height, as an instrument), and how far out it reaches as a capsule.
+    const readout = new Telemetry(''), reach = new CapsuleGauge({ label: `${a.name} reach`, value: 0 })
+    reach.el.classList.add('arm-reach')
+    li.querySelector('.nv')!.append(readout.el)
+    li.append(reach.el)
+    reaches.set(a.id, { readout, reach })
     if (armWho) li.appendChild(xButton(() => takeBack(a.id)))
     sec.querySelector('.arm-nodes')!.appendChild(li)
   }
@@ -1444,10 +1481,16 @@ function armCard(a: Arm, held: Record<string, string>): HTMLElement {
       const li = document.createElement('li')
       li.dataset.node = j.node
       const who = held[j.node] ?? armWho
-      li.innerHTML = '<i class="dot"></i><b></b><span class="nv"></span><span class="bar bb-meter"></span>'
+      // A dial (a ring of dots lit across the joint's range) beside its position in dot-matrix, and its name.
+      const dial = new RingGauge({ label: j.spec.name, value: j.angle, min: j.spec.min, max: j.spec.max, kind: 'dots', dots: 17, size: 40, thickness: 3.4, format: (v) => jointText(j.spec, v) })
+      const angle = new Readout({ value: jointText(j.spec, j.angle), pitch: 2.4, unit: j.spec.unit === 'm' ? 'cm' : undefined })
+      angle.el.setAttribute('aria-hidden', 'true')
+      dials.set(j.node, { dial, angle })
+      li.innerHTML = '<i class="dot"></i><b></b>'
+      li.prepend(dial.el, angle.el)
       li.querySelector('b')!.textContent = j.spec.name
       li.title = holderText(who, held[j.node] ? undefined : armWho ? 'the whole arm' : undefined)
-      if (who) { li.classList.add('held'); li.querySelector<HTMLElement>('.dot')!.style.background = sim!.colorOf(who) }
+      if (who) { li.classList.add('held'); li.style.setProperty('--c', sim!.colorOf(who)) }
       if (held[j.node]) li.appendChild(xButton(() => takeBack(j.node)))
       return li
     }))
@@ -1468,18 +1511,19 @@ function xButton(onclick: () => void) {
 function renderReadouts() {
   for (const a of arms) {
     const row = document.querySelector<HTMLElement>(`#arms li[data-node="${a.id}"]`)
-    if (row) {
+    const whole = reaches.get(a.id)
+    if (row && whole) {
       const t = KIN.forward(poseOf(a))
       const [near, far] = KIND.drive.reach
-      row.querySelector('.nv')!.textContent = `${Math.round(t.reach * 100)} cm · ${Math.round(t.height * 100)} up`
-      row.querySelector<HTMLElement>('.bar')!.style.setProperty('--fill', `${clamp((t.reach - near) / (far - near), 0, 1) * 100}%`)
+      whole.readout.value = `${Math.round(t.reach * 100)} cm · ${Math.round(t.height * 100)} up`
+      whole.reach.value = clamp((t.reach - near) / (far - near), 0, 1)
       row.dataset.state = a.state || (a.hw && !a.hw.live ? 'mirror' : stopped ? 'stopped' : '')
     }
     for (const j of a.joints) {
       const li = document.querySelector<HTMLElement>(`#arms li[data-node="${j.node}"]`)
       if (!li) continue
-      li.querySelector('.nv')!.textContent = j.spec.unit === '°' ? `${Math.round(j.angle)}°` : j.spec.unit === 'm' ? `${Math.round(j.angle * 100)} cm` : `${Math.round(j.angle * 100)}%`
-      li.querySelector<HTMLElement>('.bar')!.style.setProperty('--fill', `${((j.angle - j.spec.min) / (j.spec.max - j.spec.min)) * 100}%`)
+      const shown = dials.get(j.node)
+      if (shown && shown.dial.value !== j.angle) { shown.dial.value = j.angle; shown.angle.value = jointText(j.spec, j.angle) }
       li.dataset.state = j.state
     }
   }
@@ -1491,10 +1535,11 @@ function resize() {
   const w = view.width
   const h = view.height
   camera.aspect = w / h
-  const panel = document.querySelector('.sim-panel')!.getBoundingClientRect()
-  if (w > 860) camera.setViewOffset(w, h, -panel.right / 2, 0, w, h)
-  else camera.setViewOffset(w, h, 0, (h - panel.top) / 2, w, h)
-  const free = w > 860 ? Math.min(w - panel.right, h - 90) : Math.min(w, panel.top - 64)
+  const control = panels.get('controls')!, panel = control.placement.rect
+  const left = control.visible && panel.x < 80 && panel.w < w / 2 ? panel.x + panel.w : 0
+  if (left) camera.setViewOffset(w, h, -left / 2, 0, w, h)
+  else camera.clearViewOffset()
+  const free = Math.min(w - left, h - 90)
   const height = arms.length ? new THREE.Box3().setFromObject(arms[0].model.root).getSize(new THREE.Vector3()).y : 0
   const radius = Math.max(KIND.cell.fence * (overview ? 0.95 : 0.48), height * 0.6)
   const distance = radius / (Math.tan(camera.fov * Math.PI / 360) * Math.max(0.2, free / h))
@@ -1506,19 +1551,21 @@ function resize() {
   controls.update()
   camera.updateProjectionMatrix()
 }
-const resetView = document.createElement('button')
-resetView.className = 'add-arm'
-resetView.textContent = 'Reset view'
+/** The view's framings, as icon actions in the View section; a short word where the whole name doesn't fit. */
+function viewAction(label: string, glyph: string, shown = label) {
+  const b = document.createElement('button')
+  b.type = 'button'
+  b.className = 'kit-action'
+  setMarkup(b, html`${ICONS[glyph]}<span>${shown}</span>`)
+  if (shown !== label) { b.setAttribute('aria-label', label); b.title = label }
+  $('arm-view').append(b)
+  return b
+}
+const resetView = viewAction('Reset view', 'center')
 resetView.onclick = () => { overview = false; resize() }
-$('add-arm').after(resetView)
-const overviewView = document.createElement('button')
-overviewView.className = 'add-arm'
-overviewView.textContent = 'Overview'
+const inspectArm = viewAction('Inspect arm', 'zoom-in', 'Inspect')
+const overviewView = viewAction('Overview', 'orbit')
 overviewView.onclick = () => { overview = true; resize() }
-resetView.after(overviewView)
-const inspectArm = document.createElement('button')
-inspectArm.className = 'add-arm'
-inspectArm.textContent = 'Inspect arm'
 inspectArm.onclick = () => {
   if (!arms.length) return
   const bounds = new THREE.Box3().setFromObject(arms[0].model.root)
@@ -1529,7 +1576,6 @@ inspectArm.onclick = () => {
   controls.target.copy(target)
   controls.update()
 }
-resetView.after(inspectArm)
 resize()
 renderPanel()
 renderer.setAnimationLoop(loop)

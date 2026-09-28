@@ -62,8 +62,22 @@ export async function runVR(local, check) {
     const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 800 }, ...options })
     const page = await context.newPage(); page.on('pageerror', e => errors.push(e.message)); return page
   }
-  const ready = page => page.waitForFunction(() => window.__presence && window.__presence.experience.rides().length, { timeout: 20000 })
+  const ready = async page => {
+    await page.waitForFunction(() => window.__presence && window.__presence.experience.rides().length, { timeout: 20000 })
+    const controls = page.locator('[data-panel="controls"]')
+    if (await controls.count() && !(await controls.isVisible())) {
+      const toggle = page.locator('[data-panel-toggle="controls"]'); await toggle.focus(); await toggle.click()
+    }
+  }
   const state = page => page.evaluate(() => window.__presence.state())
+  const containedControls = async page => {
+    const fits = await page.locator('[data-panel="view"]').evaluate(panel => {
+      const body = panel.querySelector('.panel-body'), controls = body.querySelector('.presence-controls')
+      const a = body.getBoundingClientRect(), b = controls.getBoundingClientRect()
+      return b.left >= a.left && b.right <= a.right && b.top >= a.top && b.top <= a.top + 20 && (b.bottom <= a.bottom || body.scrollHeight > body.clientHeight)
+    })
+    assert(fits, 'first-person controls must fit their window body and scroll when needed')
+  }
   try {
     const host = await makePage()
     await host.goto(`${local.origin}/sim/device/?d=drone&test=vr`)
@@ -74,6 +88,7 @@ export async function runVR(local, check) {
       const before = await host.evaluate(() => window.__device.stage.camera.position.toArray())
       await host.getByRole('button', { name: 'First person', exact: true }).click()
       assert.equal((await state(host)).mode, 'first-person')
+      await containedControls(host)
       await host.waitForFunction(() => {
         const listener = window.__simAudio?.context?.listener, p = window.__presence.state().camera.p
         return listener && Math.hypot(listener.positionX.value - p[0], listener.positionY.value - p[1], listener.positionZ.value - p[2]) < 0.03
@@ -154,6 +169,8 @@ export async function runVR(local, check) {
       await page.goto(`${local.origin}/sim/device/?d=rover&test=vr`); await ready(page)
       await page.getByRole('button', { name: 'Enter VR', exact: true }).click()
       await page.waitForFunction(() => window.__presence.experience.renderer.xr.isPresenting)
+      assert.equal(await page.locator('.sim-windows').isVisible(), false, 'windows are hidden in immersive VR')
+      assert.equal(await page.locator('.panel-dock').isVisible(), false, 'dock is hidden in immersive VR')
       await page.waitForFunction(() => window.__presence.experience.renderer.xr.getCamera().cameras.length === 2)
       await page.waitForFunction(() => window.__presence.state().fps > 0)
       const measurement = await page.evaluate(() => ({ requestedHz: window.__xrSession.frameRate, observedHz: window.__presence.state().fps, foveation: window.__presence.experience.renderer.xr.getFoveation() }))
@@ -173,6 +190,7 @@ export async function runVR(local, check) {
       await page.evaluate(() => dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 45, beta: 70, gamma: 0 })))
       await page.waitForTimeout(80); assert.notDeepEqual((await state(page)).camera.q, before)
       await page.waitForTimeout(300)
+      await containedControls(page)
       await page.screenshot({ path: join(out, 'phone-first-person.png') })
       await page.getByRole('button', { name: 'Overview', exact: true }).filter({ visible: true }).last().click()
       assert.equal((await state(page)).mode, 'overview'); await page.context().close()

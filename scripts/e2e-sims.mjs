@@ -18,6 +18,7 @@ import { runVR } from './e2e-vr.mjs'
 import { runControlViews } from './e2e-control-views.mjs'
 import { runAudio } from './e2e-audio.mjs'
 import { runTemporal } from './e2e-temporal.mjs'
+import { runPanels } from './e2e-panels.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
 
 const HEADED = process.argv.includes('--headed')
@@ -395,7 +396,7 @@ try {
   if (arena.errors.length) console.log(`  page errors: ${arena.errors.join(' | ')}`)
 
   // ---- the pairing chip beside the panel, on phones ----
-  await check('on phones the pairing card fits between the top bar and the panel, a short phone too, and folds while the people list is open', async () => {
+  await check('on phones windows start docked, pairing fits below the bar and yields to overlapping windows', async () => {
     const b = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
     closers.push(b)
     const out = []
@@ -410,17 +411,27 @@ try {
       const g = await page.evaluate(() => {
         const r = (el) => el.getBoundingClientRect()
         const root = document.querySelector('.obpal-chip').shadowRoot
-        return { card: r(root.querySelector('.card')), pill: r(root.querySelector('.pill')), panel: r(document.querySelector('.sim-panel')), bar: r(document.querySelector('.sim-top')).bottom }
+        return { card: r(root.querySelector('.card')), pill: r(root.querySelector('.pill')), open: document.querySelectorAll('.sim-window:not([hidden])').length, bar: r(document.querySelector('.sim-top')).bottom }
       })
       const at = `${w}×${h}`
       if (g.card.top < g.bar) throw new Error(`${at}: the card reaches ${Math.round(g.card.top)}px, under the top bar (to ${Math.round(g.bar)}px)`)
-      if (g.card.bottom > g.pill.top || g.pill.bottom > g.panel.top) throw new Error(`${at}: card to ${Math.round(g.card.bottom)}, chip ${Math.round(g.pill.top)}–${Math.round(g.pill.bottom)}, panel from ${Math.round(g.panel.top)}`)
+      if (g.card.bottom > g.pill.top || g.pill.bottom > h || g.open) throw new Error(`${at}: pairing or docked defaults do not fit: ${JSON.stringify(g)}`)
       await page.evaluate(() => { document.getElementById('people').hidden = false })
-      await until(`${at}: the card folded for the people list`, async () => !(await open()), 3000)
+      await until(`${at}: pairing leaves the people list clear`, () => page.evaluate(() => {
+        const root = document.querySelector('.obpal-chip').shadowRoot
+        if (root.querySelector('.pill').getAttribute('aria-expanded') !== 'true') return true
+        const a = root.querySelector('.card').getBoundingClientRect(), b = document.getElementById('people').getBoundingClientRect()
+        return Math.min(a.right, b.right) <= Math.max(a.left, b.left) || Math.min(a.bottom, b.bottom) <= Math.max(a.top, b.top)
+      }), 3000)
       await page.evaluate(() => { document.getElementById('people').hidden = true })
       await until(`${at}: the card back`, open, 3000)
+      const controls = page.locator('[data-panel-toggle="controls"]')
+      await controls.focus(); await controls.click()
+      await until(`${at}: the card folds for the control window`, async () => !(await open()), 3000)
+      await page.locator('[data-panel="controls"]').getByRole('button', { name: /^Minimise / }).click()
+      await until(`${at}: pairing returns after minimising`, open, 3000)
       if (SHOTS) await page.screenshot({ path: joinPath(SHOTS, `sim-arm-chip-${w}x${h}.png`) })
-      out.push(`${at}: card ${Math.round(g.card.top)}–${Math.round(g.card.bottom)}, panel from ${Math.round(g.panel.top)}`)
+      out.push(`${at}: card ${Math.round(g.card.top)}–${Math.round(g.card.bottom)}, windows docked`)
       await ctx.close()
     }
     return out.join('; ')
@@ -435,6 +446,7 @@ try {
   await runVR(local, check)
   await runControlViews(local, check)
   await runAudio(local, check)
+  await runPanels(local, check)
   await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {
   console.error(e)

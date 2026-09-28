@@ -32,12 +32,19 @@
       </div>
     </header>
 
-    <aside class="sim-panel glass" aria-label="Arena">
-      <p class="eyebrow">system.gamepad-slots</p>
-      <h1>Faction arena</h1>
-      <p class="sim-lede">Up to four players. Scan the code, pick a slot from your phone's scene list, then tilt to roll, drag to push and tap to dash. Knock the others off the ring.</p>
+    <aside class="sim-panel glass arena-panel" aria-label="Arena">
+      <header class="sim-id">
+        <p class="eyebrow">system.gamepad-slots</p>
+        <h1>Faction arena</h1>
+        <p class="sim-lede">Up to four players. Scan the code, pick a slot from your phone's scene list, then tilt to roll, drag to push and tap to dash. Knock the others off the ring.</p>
+      </header>
+      <section class="sim-sec" aria-labelledby="arena-view-h">
+        <header class="kit-card-head"><span class="kit-card-n"></span><h2 class="kit-card-title" id="arena-view-h">View</h2></header>
+        <div class="sim-presence" data-presence-home></div>
+      </section>
       <ul class="score" id="score"></ul>
-      <div class="safety"><button class="btn" id="reset-scores">Reset scores</button></div>
+      <div data-sound-home></div>
+      <div class="safety sim-actions"><button class="kit-action" id="reset-scores" data-icon="reset">Reset scores</button></div>
       <details class="log-wrap"><summary>Record</summary><ol class="log" id="log"></ol></details>
     </aside>
 

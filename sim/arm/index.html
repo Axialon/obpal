@@ -32,18 +32,31 @@
       </div>
     </header>
 
-    <aside class="sim-panel glass" aria-label="Arm">
-      <p class="eyebrow">system.robot-arm</p>
-      <h1>Robot arms</h1>
-      <p class="sim-lede">Scan to join, then take a whole arm or one joint. <b>Point</b>: aim at a spot and hold B; A picks up. <b>3D</b>: hold the pad and move your phone, and the gripper follows your hand.</p>
-      <label class="arm-prof arm-kind"><span>Kind of arm</span><select id="arm-kind"></select></label>
-      <div class="arms" id="arms"></div>
-      <button class="add-arm" id="add-arm" data-icon="plus">Add arm</button>
-      <button class="add-arm glow-cam" id="glow-cam" data-icon="view" aria-pressed="false">Follow glowing phones with this camera</button>
-      <canvas class="glow-view" id="glow-view" width="160" height="120" hidden aria-label="What the camera sees"></canvas>
+    <aside class="sim-panel glass arm-panel" aria-label="Arm">
+      <header class="sim-id">
+        <p class="eyebrow">system.robot-arm</p>
+        <h1>Robot arms</h1>
+        <p class="sim-lede">Scan to join, then take a whole arm or one joint. <b>Point</b>: aim at a spot and hold B; A picks up. <b>3D</b>: hold the pad and move your phone, and the gripper follows your hand.</p>
+      </header>
+      <section class="sim-sec" aria-labelledby="arm-view-h">
+        <header class="kit-card-head"><span class="kit-card-n">01</span><h2 class="kit-card-title" id="arm-view-h">View</h2></header>
+        <div class="sim-presence" data-presence-home></div>
+        <div class="sim-actions" id="arm-view"></div>
+      </section>
+      <section class="sim-sec" aria-labelledby="arm-arms-h">
+        <header class="kit-card-head"><span class="kit-card-n">02</span><h2 class="kit-card-title" id="arm-arms-h">Arms</h2></header>
+        <label class="arm-prof arm-kind"><span>Kind of arm</span><select id="arm-kind"></select></label>
+        <div class="arms" id="arms"></div>
+        <div class="sim-actions">
+          <button class="kit-action" id="add-arm" data-icon="plus">Add arm</button>
+          <button class="kit-action glow-cam" id="glow-cam" data-icon="glow" aria-pressed="false">Follow glowing phones with this camera</button>
+        </div>
+        <canvas class="glow-view" id="glow-view" width="160" height="120" hidden aria-label="What the camera sees"></canvas>
+      </section>
+      <div data-sound-home></div>
       <div class="safety">
         <button class="estop" id="estop">Stop<kbd>Space</kbd></button>
-        <button class="btn" id="home-all">Home</button>
+        <button class="kit-action" id="home-all" data-icon="guide">Home</button>
       </div>
       <details class="log-wrap" open><summary>Record: who held what</summary><ol class="log" id="log"></ol></details>
     </aside>

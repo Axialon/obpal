@@ -7,6 +7,7 @@ import { angleOf, arcPath, litDots, polar, valueOfAngle } from '../src/ui/kit/ga
 import { dotLayout, dotPath, GLYPHS, glyphRows, sparkPath } from '../src/ui/kit/readout'
 import { dismisses } from '../src/ui/kit/modal'
 import { cardNumber } from '../src/ui/kit/card'
+import { leadOf, parseReadout, sameShape, toneOf } from '../src/ui/kit/telemetry'
 
 const list = (...off: boolean[]) => off.map((disabled) => ({ disabled }))
 
@@ -281,5 +282,51 @@ describe('drawers, sheets and cards', () => {
     expect(cardNumber(1)).toBe('01')
     expect(cardNumber(12)).toBe('12')
     expect(cardNumber(104)).toBe('104')
+  })
+})
+
+describe('telemetry: a device readout read as an instrument', () => {
+  it('reads measurements, ranks, labelled values, fractions, shares, quotes and words', () => {
+    expect(parseReadout('#2 · 3 laps · gate 2/8 · 42 km/h')).toEqual([
+      { kind: 'metric', value: '#2', unit: 'place', label: '' },
+      { kind: 'metric', value: '3', unit: 'laps', label: '' },
+      { kind: 'ratio', a: 2, b: 8, label: 'gate' },
+      { kind: 'metric', value: '42', unit: 'km/h', label: '' },
+    ])
+    expect(parseReadout('78% open')).toEqual([{ kind: 'percent', value: 0.78, label: 'open' }])
+    expect(parseReadout('21.5 °C · set 21 °C')).toEqual([
+      { kind: 'metric', value: '21.5', unit: '°C', label: '' },
+      { kind: 'metric', value: '21', unit: '°C', label: 'set' },
+    ])
+    expect(parseReadout('-3.5° · buoy 2')).toEqual([
+      { kind: 'metric', value: '-3.5', unit: '°', label: '' },
+      { kind: 'metric', value: '2', unit: '', label: 'buoy' },
+    ])
+    expect(parseReadout('1.2 m · 3/6 keys · 3.2 / 12 s')[2]).toEqual({ kind: 'ratio', a: 3.2, b: 12, label: 's' })
+    expect(parseReadout('“hello there”')).toEqual([{ kind: 'quote', text: 'hello there' }])
+    expect(parseReadout('Landed · 3 rings')[0]).toEqual({ kind: 'status', text: 'Landed', tone: 'idle' })
+    expect(parseReadout('2.4 m head · REC 3.2 s')[1]).toEqual({ kind: 'metric', value: '3.2', unit: 's', label: 'REC' })
+    expect(parseReadout('')).toEqual([])
+  })
+
+  it('tones words for their status dot', () => {
+    expect(toneOf('Recording')).toBe('rec')
+    expect(toneOf('Off track')).toBe('warn')
+    expect(toneOf('Ready')).toBe('idle')
+    expect(toneOf('charging')).toBe('ok')
+    expect(toneOf('in play')).toBe('live')
+  })
+
+  it('leads with the first measurement, else a gauge, else words', () => {
+    expect(leadOf(parseReadout('Landed · 3 rings'))).toBe(1)
+    expect(leadOf(parseReadout('Fan off'))).toBe(0)
+    expect(leadOf(parseReadout('Holding · 3/5 wrecks'))).toBe(1)
+    expect(leadOf([])).toBe(-1)
+  })
+
+  it('updates in place while a readout keeps its shape, and rebuilds when it changes', () => {
+    expect(sameShape(parseReadout('12 km/h'), parseReadout('13 km/h'))).toBe(true)
+    expect(sameShape(parseReadout('Landed'), parseReadout('1.2 m · 0 rings'))).toBe(false)
+    expect(sameShape(parseReadout('best 12 s'), parseReadout('12 s'))).toBe(false)
   })
 })

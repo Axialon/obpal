@@ -194,18 +194,24 @@ export async function runMusic(local, check) {
         await screen.locator('.dev-panel').evaluate(panel => { panel.scrollTop = 0 })
         await screen.screenshot({ path: join(dir, `studio-${width}x${height}.png`) })
         const playDistance = await screen.evaluate(() => { const s = window.__device.stage; return s.camera.position.distanceTo(s.controls.target) })
+        const toggle = screen.locator('[data-panel-toggle="controls"]')
+        const wasDocked = !(await screen.locator('[data-panel="controls"]').isVisible())
+        if (wasDocked) { await toggle.focus(); await toggle.click() }
         await screen.getByRole('button', { name: 'Overview', exact: true }).click()
+        if (wasDocked) await screen.locator('[data-panel="controls"]').getByRole('button', { name: /^Minimise / }).click()
         await sleep(200)
         const overview = await screen.evaluate(() => {
-          const s = window.__device.stage, panel = document.querySelector('.dev-panel').getBoundingClientRect()
-          const side = panel.right < innerWidth / 2
-          const inside = p => { const q = s.toScreen(s.controls.target.clone().set(...p)); return q && q.x >= (side ? panel.right : 0) && q.x <= innerWidth && q.y >= 64 && q.y <= (side ? innerHeight : panel.top) }
+          const s = window.__device.stage, panel = document.querySelector('[data-panel="controls"]')
+          const bounds = panel.getBoundingClientRect(), side = !panel.hidden && bounds.right < innerWidth / 2
+          const inside = p => { const q = s.toScreen(s.controls.target.clone().set(...p)); return q && q.x >= (side ? bounds.right : 0) && q.x <= innerWidth && q.y >= 64 && q.y <= innerHeight }
           const corners = [-5.2, 5.2].flatMap(x => [[x, 0, -3.7], [x, 0, 3.7], [x, 2.23, -3.7]])
           return { distance: s.camera.position.distanceTo(s.controls.target), roomFits: corners.every(inside) }
         })
         assert(overview.distance > playDistance * 1.4 && overview.roomFits, `Studio framing ${width}x${height}: ${JSON.stringify({ playDistance, ...overview })}`)
         await screen.screenshot({ path: join(dir, `studio-overview-${width}x${height}.png`) })
+        if (wasDocked) { await toggle.focus(); await toggle.click() }
         await screen.getByRole('button', { name: 'Reset view', exact: true }).click()
+        if (wasDocked) await screen.locator('[data-panel="controls"]').getByRole('button', { name: /^Minimise / }).click()
         const resetDistance = await screen.evaluate(() => { const s = window.__device.stage; return s.camera.position.distanceTo(s.controls.target) })
         assert(Math.abs(resetDistance - playDistance) < 0.01, 'Reset view did not restore the closer play framing')
         for (const [p, name] of [[phones[0], 'drums'], [phones[3], 'keys']]) {

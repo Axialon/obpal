@@ -9,6 +9,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { environment, softKey } from '../kit'
 import type { Theme } from '../../ui/themes'
 import { simView, type SimView } from '../view'
+import { simPanels } from '../ui/panels'
 
 export type V3 = [number, number, number]
 
@@ -174,11 +175,10 @@ export function createStage(canvas: HTMLCanvasElement, theme: Theme): Stage {
       const h = view.height
       camera.aspect = w / h
       // The device sits in the middle of what the panel leaves free: beside it, or above it on a narrow screen.
-      const panel = document.querySelector('.sim-panel')?.getBoundingClientRect()
+      const control = simPanels().get('controls'), panel = control?.visible ? control.placement.rect : null
       const top = 64
-      if (panel && (w > 860 || panel.right < w / 2)) { camera.setViewOffset(w, h, -panel.right / 2, 0, w, h); free = { w: w - panel.right, h: h - top } }
-      else if (panel) { camera.setViewOffset(w, h, 0, (h - panel.top) / 2, w, h); free = { w, h: panel.top - top } }
-      else { camera.clearViewOffset(); free = { w, h } }
+      if (panel && panel.x < 80 && panel.w < w / 2) { camera.setViewOffset(w, h, -(panel.x + panel.w) / 2, 0, w, h); free = { w: w - panel.x - panel.w, h: h - top } }
+      else { camera.clearViewOffset(); free = { w, h: h - top } }
       camera.updateProjectionMatrix()
     },
   }

@@ -1,6 +1,12 @@
-/** Per-controller scope and motion freshness. Claims and permission remain owned by the scene. */
+/**
+ * Per-controller scope and motion freshness. Claims and permission remain owned by the scene. The screen shows, for the
+ * phone it's configuring, the scope as a segmented control (Object or Scene) and Set position.
+ */
 import type { Remote } from '@obpal/host'
 import { CONTROL_SPACES, readControlAim, type ControlAim, type ControlScope } from '../control-space'
+import { Segmented } from '../ui/kit/segmented'
+import { ICONS } from '../ui/icons'
+import { html, setMarkup } from '../ui/markup'
 import '../styles/control-space.css'
 
 export class ControlSession {
@@ -11,6 +17,8 @@ export class ControlSession {
   private positioning = new Set<string>()
   private targets = new Map<string, string>()
   private selected = ''
+  /** The row's controls, kept between draws so focus and the glass select stay put. */
+  private ui: { select: HTMLSelectElement; scope: Segmented; position: HTMLButtonElement } | null = null
   constructor(readonly remote: Remote, readonly id: string) {
     remote.setValues({ 'control.sim': id, 'control.scope': 'object' })
     remote.on('value', ({ id, v }, who) => {
@@ -59,31 +67,41 @@ export class ControlSession {
   }
   private draw() {
     if (!CONTROL_SPACES[this.id]) return
-    const parent = document.querySelector('.dev-panel, .sim-panel, #panel, #people')
+    // A panel may keep a place for these (the device panel's Controllers section). Managed windows come after the People
+    // sheet in the DOM; the controls still belong in the main card.
+    const parent = document.querySelector('[data-scope-home]') ?? document.querySelector('.dev-panel, .sim-panel') ?? document.querySelector('#panel, #people')
     if (!parent) return
     let row = parent.querySelector<HTMLElement>('.control-scopes')
     if (!row) {
       row = document.createElement('div'); row.className = 'control-scopes'
-      parent.insertBefore(row, parent.querySelector('#dev-units, #arms, #people-list'))
+      // Before the unit list while it's still in the card, at the end otherwise.
+      parent.insertBefore(row, parent.querySelector(':scope > :is(#dev-units, #arms, #people-list)'))
     }
     const people = this.remote.participants.filter(p => p.caps?.platform !== 'scene')
     row.hidden = !people.length
     if (!people.some(p => p.id === this.selected)) this.selected = people[0]?.id ?? ''
     const p = people.find(p => p.id === this.selected)
-    row.replaceChildren()
-    if (p) {
-      const select = document.createElement('select')
-      select.setAttribute('aria-label', 'Phone to configure'); select.hidden = people.length < 2
-      select.replaceChildren(...people.map(person => { const option = document.createElement('option'); option.value = person.id; option.textContent = person.name; return option }))
-      select.value = p.id; select.onchange = () => { this.selected = select.value; this.draw() }
-      const group = document.createElement('div'), scope = document.createElement('button'), position = document.createElement('button')
-      scope.type = position.type = 'button'; scope.className = position.className = 'btn'
-      scope.textContent = this.scope(p.id) === 'scene' ? 'Scene scope' : 'Object scope'
-      scope.setAttribute('aria-label', `Control scope for ${p.name}`)
-      scope.setAttribute('aria-pressed', String(this.scope(p.id) === 'scene'))
-      scope.onclick = () => this.setScope(p.id, this.scope(p.id) === 'scene' ? 'object' : 'scene')
-      position.textContent = 'Set position'; position.onclick = () => this.position(p.id)
-      group.append(scope, position); row.append(select, group)
-    }
+    if (!p) { row.replaceChildren(); this.ui = null; return }
+    if (!this.ui || !row.contains(this.ui.position)) this.ui = this.build(row)
+    const { select, scope, position } = this.ui
+    select.replaceChildren(...people.map(person => { const option = document.createElement('option'); option.value = person.id; option.textContent = person.name; return option }))
+    select.value = p.id; select.hidden = people.length < 2
+    scope.value = this.scope(p.id); scope.el.setAttribute('aria-label', `Control scope for ${p.name}`)
+    position.onclick = () => this.position(p.id)
+  }
+  private build(row: HTMLElement) {
+    const select = document.createElement('select')
+    select.setAttribute('aria-label', 'Phone to configure')
+    select.onchange = () => { this.selected = select.value; this.draw() }
+    const scope = new Segmented({
+      label: 'Control scope', value: 'object', className: 'control-scope',
+      items: [{ value: 'object', label: 'Object', icon: ICONS.cube }, { value: 'scene', label: 'Scene', icon: ICONS.orbit }],
+      onChange: v => { if (this.selected) this.setScope(this.selected, v as ControlScope) },
+    })
+    const position = document.createElement('button'); position.type = 'button'; position.className = 'kit-action'
+    setMarkup(position, html`${ICONS.center}<span>Set position</span>`)
+    const group = document.createElement('div'); group.append(scope.el, position)
+    row.replaceChildren(select, group)
+    return { select, scope, position }
   }
 }

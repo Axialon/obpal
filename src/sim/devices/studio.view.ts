@@ -166,7 +166,8 @@ export function createView(stage: Stage, logic: StudioLogic): DeviceView {
   stage.lights.hemi.intensity = 1.1
   stage.controls.maxPolarAngle = Math.PI * 0.46
   const panel = document.querySelector('.dev-panel')!
-  panel.querySelector('#home-all')!.textContent = 'Silence all'
+  // Its icon stays; only the words change.
+  panel.querySelector('#home-all span')!.textContent = 'Silence all'
   return {
     framing: { target: [-0.5, 0.65, -0.9], wide: [4.6, 5.4, 6.3], tall: [3.2, 5.7, 5.7], radius: 2.65 },
     overview: { target: [0, 0.55, 0], wide: [10, 10.5, 14], tall: [9, 12, 16], radius: 6.4 },

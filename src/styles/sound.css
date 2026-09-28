@@ -1,0 +1,23 @@
+/*
+ * A sim's sound card (src/sim/audio/session.ts): a small-caps header with the start and mute button at its end, the
+ * level slider (Off, Reduced, Full) under it, and a status line when there's something to say. It sits in a sim's
+ * panel, the viewer's catalogue, or the first-person view controls, and keeps its look in each.
+ */
+.sim-sound { display: grid; gap: 8px; min-width: 0; }
+.sim-sound > .kit-card-head { min-height: 34px; }
+.sim-sound .kit-card-n:empty { display: none; }
+.sim-sound .kit-slider { padding: 0 6px; }
+.sim-sound > small { color: var(--bb-ink-2); font: 500 12px/1.4 var(--bb-font-ui); }
+.sim-sound > small:empty { display: none; }
+/* The button: the kit's action at the card's size, wherever the card sits. */
+.sim-sound button.kit-action { height: 32px; min-height: 32px; padding: 0 11px 0 9px; border: 1px solid var(--bb-line); border-radius: 11px; background: var(--kit-fill); box-shadow: inset 0 1px 0 var(--bb-hi); color: var(--bb-ink); font: 650 12px/1 var(--bb-font-ui); }
+/* Muted is a state to notice, not a choice to light: the speaker crossed out, and no accent ring. */
+.sim-sound button.kit-action[aria-pressed='true'] { border-color: var(--bb-line-strong); background: var(--kit-fill); box-shadow: inset 0 1px 0 var(--bb-hi); }
+.sim-sound button.kit-action[aria-pressed='true'] > .ic { color: var(--bb-ink-2); }
+/* In the viewer's catalogue the card spans the catalogue's foot; folded to its rail, the catalogue keeps the button. */
+.catalog > .sim-sound { grid-column: 1 / -1; padding: 10px 16px 14px; border-top: 1px solid var(--bb-line); }
+.catalog[data-state='rail'] > .sim-sound { grid-column: 1; justify-items: center; padding: 8px 0 10px; }
+.catalog[data-state='rail'] > .sim-sound :is(.kit-card-title, .kit-card-n, .kit-slider, small, .kit-action > span) { display: none; }
+.catalog[data-state='rail'] > .sim-sound .kit-action { width: 40px; padding: 0; justify-content: center; }
+.catalog[data-state='rail'] > .sim-sound .kit-card-head { justify-content: center; }
+.catalog[data-state='rail'] > .sim-sound .kit-card-aside { margin: 0; }
