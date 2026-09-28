@@ -3,6 +3,7 @@ import { Controller } from '@obpal/core'
 import { action, Machine, timestep } from './common'
 import { approach, clamp, panTiltOf } from './input'
 import type { DeviceInput, DeviceSpec } from './types'
+import { planar } from '../vr/intent'
 export const SPOTLIGHTS_SPEC: DeviceSpec = {
   id: 'spotlights',
   name: 'Stage spotlights',
@@ -46,15 +47,15 @@ export class SpotlightsLogic extends Machine {
         if (i.space && i.spot) { h.x = i.spot[0]; h.z = i.spot[1] }
         else if (i.recentred) this.home(n)
         else if (i.point) {
-          h.x = clamp((n - 1.5) * 2 + (i.point.yaw - this.zeros[n][0]) * 0.15, -5, 5)
-          h.z = clamp(1 - (i.point.pitch - this.zeros[n][1]) * 0.12, -1, 4)
+          const [x, z] = planar(i.controlFrame, (i.point.yaw - this.zeros[n][0]) * 0.15, -(i.point.pitch - this.zeros[n][1]) * 0.12)
+          h.x = clamp((n - 1.5) * 2 + x, -5, 5); h.z = clamp(1 + z, -1, 4)
         } else if (i.hold) {
           const [pan, tilt] = panTiltOf(i.hold)
-          h.x = clamp(-pan * 4, -5, 5)
-          h.z = clamp(1 - tilt * 4, -1, 4)
+          const [x, z] = planar(i.controlFrame, -pan * 4, -tilt * 4)
+          h.x = clamp(x, -5, 5); h.z = clamp(1 + z, -1, 4)
         } else {
-          h.x = clamp(h.x + i.drag[0] * 0.015, -5, 5)
-          h.z = clamp(h.z + i.drag[1] * 0.015, -1, 4)
+          const [x, z] = planar(i.controlFrame, ...i.drag)
+          h.x = clamp(h.x + x * 0.015, -5, 5); h.z = clamp(h.z + z * 0.015, -1, 4)
         }
         h.pan = approach(h.pan, Math.atan2(h.x - (n - 1.5) * 2, 3.6), 2, dt)
         h.tilt = approach(h.tilt, Math.atan2(h.z + 1.5, 3.6), 2, dt)

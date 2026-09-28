@@ -2,6 +2,7 @@
 import { Mode, PadButton } from '@obpal/core'
 import { axis, clamp, DragStick } from './input'
 import type { DeviceEvent, DeviceInput, DeviceLogic, DeviceSpec } from './types'
+import { driving } from '../vr/intent'
 
 export abstract class Machine implements DeviceLogic {
   abstract readonly spec: DeviceSpec
@@ -22,23 +23,23 @@ export const action = (i: DeviceInput | null, id: string) =>
     !!(i.padPressed & (1 << PadButton.A)))
 
 /** Triggers are pedals; a gamepad's left stick or a trackpad's floating stick also drives. */
-export function drive(i: DeviceInput | null, drag: DragStick): [number, number] {
+export function drive(i: DeviceInput | null, drag: DragStick, ackermann = false): [number, number] {
   if (!i) {
     drag.update(false, [0, 0])
     return [0, 0]
   }
   if (i.pad)
-    return [
+    return driving(i.controlFrame,
       axis(i.pad.axes[0]),
       Math.abs(i.pad.triggers[1] - i.pad.triggers[0]) > 0.02
         ? i.pad.triggers[1] - i.pad.triggers[0]
         : -axis(i.pad.axes[1]),
-    ]
+      i.face === 'face.wheel' || Math.abs(i.pad.triggers[1] - i.pad.triggers[0]) > 0.02, ackermann)
   const [x, y] = drag.update(i.touching, i.drag)
-  return [
+  return driving(i.controlFrame,
     clamp(x + (i.mode === Mode.tilt ? i.tilt[0] : 0), -1, 1),
     clamp(-y - (i.mode === Mode.tilt ? i.tilt[1] : 0), -1, 1),
-  ]
+    false, ackermann)
 }
 
 /** A circular body against a rectangular furnishing, with sliding along its outside. */

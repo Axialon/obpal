@@ -7,9 +7,11 @@ import { StudioSound } from './studio.sound'
 import { StudioPlayers } from './studio.players'
 import { html, setMarkup } from '../../ui/markup'
 import { resolveStrike } from '../../music-space'
+import { rail } from '../vr/intent'
 
 export function attachStudio(sim: SimScene, logic: StudioLogic, stage: Stage, position: (seat: number) => readonly [number, number, number]) {
   const sound = new StudioSound(position)
+  logic.onControl = (seat, e) => { if (e.op === 'hit') sound.hit(seat, e.n, e.v); else sound.note(seat, e.n, e.v, seat === 6, true) }
   const players = new StudioPlayers(n => sound.stop(n))
   const samples: { ms: number; uncertainty: number; seat: number; seq: number }[] = []
   const frameTimes: number[] = []
@@ -62,7 +64,7 @@ export function attachStudio(sim: SimScene, logic: StudioLogic, stage: Stage, po
         const target = resolveStrike(e.aim, e.scope!, sim.control.scope(who.id), seat, n => {
           const holder = sim.claims.holder(sim.nodes[n].id)
           return !holder || holder === who.id
-        })
+        }, rail(stage.view.presence ? { yaw: stage.view.presence.controlFrame.yaw, heading: 0, immersive: stage.view.presence.immersive } : undefined))
         if (!target) {
           if (performance.now() - (blockedAt.get(who.id) ?? -Infinity) > 1500) {
             sim.remote.feedback({ toast: 'That instrument is in use · aim at a free instrument' }, who.id)

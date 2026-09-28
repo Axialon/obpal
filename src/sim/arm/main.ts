@@ -50,6 +50,7 @@ import { sceneCells, nearest } from '../../control-space'
 import { Experience } from '../vr/experience'
 import { SharedPresence } from '../vr/presence'
 import { armRide } from '../vr/rigs'
+import { ControlFrame } from '../vr/control-frame'
 import type { SimValue } from '@obpal/core'
 import { mountSound } from '../audio/session'
 
@@ -149,7 +150,7 @@ interface Joint {
 }
 
 /** A whole-arm drive, from when its holder's deadman went down: where the tool was, and where the phone pointed. */
-interface Drive { grab: number; following: boolean; q0: THREE.Quaternion | null; ref: ToolTarget; acc: ToolTarget }
+interface Drive { grab: number; following: boolean; q0: THREE.Quaternion | null; ref: ToolTarget; acc: ToolTarget; world: THREE.Vector3; phone: { yaw: number; pitch: number } }
 
 interface Hardware {
   driver: ArmDriver
@@ -188,7 +189,7 @@ interface Arm {
   blocked: boolean
 }
 
-interface Track3 { gen: number; p0: [number, number, number]; q0: [number, number, number, number]; heading: number; tool: THREE.Vector3; pitch: number; roll: number }
+interface Track3 { gen: number; p0: [number, number, number]; q0: [number, number, number, number]; heading: number; tool: THREE.Vector3; delta: THREE.Vector3; forward: number; pitch: number; roll: number }
 
 /** A claw move (A in Point): down to the floor, close or open, back up to the hover height. */
 interface Claw {
@@ -530,7 +531,8 @@ function resume() {
 
 for (let i = 0; i < 2; i++) addArm()
 
-const rides = () => arms.map(a => armRide(a.id, `${a.name} wrist`, a.model.root, a.model.grasp))
+const xrDrives = new Map<string, { pad: PadState; at: number }>()
+const rides = () => arms.map(a => armRide(a.id, a.name, a.model.root, a.model.grasp, KIND.drive.reach[1], KIND.drive.height[1]))
 const shared = new SharedPresence({
   rides,
   capture: () => ({ arms: arms.map(a => ({ id: a.id, angles: a.joints.map(j => j.angle) })), blocks: blocks.map(b => ({ p: b.mesh.getWorldPosition(new THREE.Vector3()).toArray(), q: b.mesh.getWorldQuaternion(new THREE.Quaternion()).toArray() })) }),
@@ -545,9 +547,28 @@ const shared = new SharedPresence({
     s.blocks.forEach((r, i) => { if (blocks[i]) { blocks[i].mesh.position.set(...r.p); blocks[i].mesh.quaternion.set(...r.q) } })
   },
   allowed: who => who === 'host' || !!sim?.allowed(who),
+  drive(who, ride, pad) {
+    if (!sim || stopped || who !== 'host' && !sim.allowed(who)) return
+    if (!sim.claims.holder(ride)) sim.take(ride, who)
+    if (sim.claims.holder(ride) !== who) return
+    const held = pad.triggers.some(t => t > 0.5)
+    xrDrives.set(who, { pad: held ? { ...pad, triggers: [0, 0] } : { ...pad, axes: [0, 0, 0, 0], triggers: [0, 0], buttons: 0 }, at: performance.now() })
+    lastInput.set(who, performance.now())
+  },
 })
 scene.add(shared.group)
 view.presence = new Experience(renderer, scene, camera, rides, shared, controls)
+const controlFrame = (who: string) => {
+  const input = xrDrives.get(who)
+  const head = input && performance.now() - input.at < 200 ? shared.people.get(who)?.head.q : undefined
+  return head ? new ControlFrame().set(new THREE.Quaternion(...head)) : view.presence!.controlFrame
+}
+/** Calibrated reach uses the participant's view expressed in this arm's base frame. */
+function workspace(a: Arm, who: string, aim: readonly [number, number]) {
+  a.model.root.updateWorldMatrix(true, false)
+  const right = controlFrame(who).right.clone().transformDirection(a.model.root.matrixWorld.clone().invert())
+  return armWorkspace(aim, KIN.yawRange, KIND.drive.reach, Math.atan2(-right.z, right.x))
+}
 if (!shared.guest) blocks.forEach(b => shared.world.add('block', b.mesh.position.toArray(), b.half[1], {
   read: () => b.mesh.getWorldPosition(new THREE.Vector3()).toArray(),
   write: (p, v) => { if (!b.by) { b.mesh.position.set(...p); b.vy = v[1] } },
@@ -596,8 +617,12 @@ if (!shared.guest) void startSimScene({
       else if (id === 'grip') s.remote.feedback({ toast: 'Grip works with the whole arm or the gripper' }, who.id)
     }
   })
-  s.remote.on('recenter', (who) => aims.get(who.id)?.pointer.recenter())
-  s.remote.on('leave', (p) => { dropAim(p.id); renderPanel() })
+  s.remote.on('recenter', (who) => {
+    aims.get(who.id)?.pointer.recenter()
+    const a = armOf(s.claims.held(who.id) ?? '')
+    if (a) { a.track = null; a.drive = null }
+  })
+  s.remote.on('leave', (p) => { xrDrives.delete(p.id); dropAim(p.id); renderPanel() })
   refreshNodes()
 })
 
@@ -677,13 +702,16 @@ const zeroTarget = (): ToolTarget => ({ yaw: 0, reach: 0, height: 0, pitch: 0, r
 function driveWhole(a: Arm, who: string, now: number, dt: number): string {
   const s = sim!
   const f = frames.get(who) ?? s.remote.consumeOf(who, now)
-  const pad = s.remote.padOf(who)
+  if (xrDrives.has(who) && now - xrDrives.get(who)!.at >= 200) xrDrives.delete(who)
+  const xr = xrDrives.get(who)
+  const pad = xr?.pad ?? s.remote.padOf(who)
   if (now - (lastInput.get(who) ?? 0) > 200) { settle(a); return 'watchdog' }
   if (s.control.scope(who) === 'scene') { settle(a); return 'deadman' }
   if (!pad && f.mode === Mode.point) return drivePoint(a, who, now)
   if (!pad && f.mode === Mode.track) return driveTrack(a, who, f)
   const grip = a.joints[GRIP]
   const inc = zeroTarget()
+  let right = 0, forward = 0
   let active = false
   let following = false
   if (pad) {
@@ -696,44 +724,49 @@ function driveWhole(a: Arm, who: string, now: number, dt: number): string {
     if (pressed & (1 << PadButton.B)) homeArm(a, who)
     if (Math.abs(t) > 0.05) grip.target = clamp((grip.target ?? grip.angle) - t * grip.spec.vmax * dt, 0, 1)
     active = !!(lx || ly || rx || ry)
-    inc.yaw = -lx * 60 * dt
-    inc.reach = -ly * 0.35 * dt
+    right = lx * 0.35 * dt
+    forward = -ly * 0.35 * dt
     inc.height = -ry * 0.35 * dt
     inc.roll = rx * 120 * dt
   } else {
     // A thumb on the pad is the deadman. With the gyro on (1:1), the phone's own motion drives the tool.
     active = f.touching
     following = f.clutch && f.mode === Mode.hold
-    inc.yaw = -f.pad1[0] * 0.2
-    inc.reach = -f.pad1[1] * 0.0008
+    right = f.pad1[0] * 0.0008
+    forward = -f.pad1[1] * 0.0008
     inc.height = -f.pad2[1] * 0.0008
     inc.pitch = f.pad2[0] * 0.15
     inc.roll = -f.twist * R2D
-    if (f.mode === Mode.tilt) { inc.yaw -= f.tilt[0] * 55 * dt; inc.height += f.tilt[1] * 0.3 * dt }
+    if (f.mode === Mode.tilt) { right += f.tilt[0] * 0.35 * dt; forward -= f.tilt[1] * 0.35 * dt }
     if (f.zoom) grip.target = clamp((grip.target ?? grip.angle) + f.zoom * 0.6, 0, 1)
   }
   if (!active) { settle(a); return a.homing ? '' : 'deadman' }
   a.homing = false
   // Begin a drive from where the tool is and where the phone points: letting go and pressing again ratchets.
   if (!a.drive || a.drive.grab !== f.grab || a.drive.following !== following) {
-    a.drive = { grab: f.grab, following, q0: following ? new THREE.Quaternion(f.qRel[0], f.qRel[1], f.qRel[2], f.qRel[3]) : null, ref: KIN.forward(poseOf(a)), acc: zeroTarget() }
+    const ref = KIN.forward(poseOf(a))
+    a.drive = { grab: f.grab, following, q0: following ? new THREE.Quaternion(f.qRel[0], f.qRel[1], f.qRel[2], f.qRel[3]) : null, ref, acc: zeroTarget(), world: toolWorld(a, ref), phone: { yaw: 0, pitch: 0 } }
   }
   const d = a.drive
   for (const k of ['yaw', 'reach', 'height', 'pitch', 'roll'] as const) d.acc[k] += inc[k]
   const ph = d.q0 ? phoneTurn(d.q0, f.qRel) : { yaw: 0, pitch: 0, roll: 0 }
+  const world = d.world.clone().add(controlFrame(who).move(right - (ph.yaw - d.phone.yaw) * D2R * LIFT, inc.height + (ph.pitch - d.phone.pitch) * D2R * LIFT, forward))
+  d.phone = ph
+  const local = a.model.root.worldToLocal(world.clone())
   const pitch = clamp(d.ref.pitch + d.acc.pitch, ...KIN.pitchRange)
   const roll = clamp(d.ref.roll + d.acc.roll - ph.roll, ...KIN.rollRange)
   const goal: ToolTarget = {
-    yaw: clamp(d.ref.yaw + d.acc.yaw + ph.yaw, ...KIN.yawRange),
-    reach: clamp(d.ref.reach + d.acc.reach, ...KIND.drive.reach),
+    yaw: KIN.heading(Math.atan2(local.z, -local.x) * R2D, poseOf(a)),
+    reach: clamp(Math.hypot(local.x, local.z), ...KIND.drive.reach),
     // No lower than the gripper can go at its angle: pushed down, it stops on the floor.
-    height: clamp(d.ref.height + d.acc.height + ph.pitch * D2R * LIFT, Math.max(KIND.drive.height[0], KIN.toolFloor(pitch, roll, heldBox(a))), KIND.drive.height[1]),
+    height: clamp(local.y, Math.max(KIND.drive.height[0], KIN.toolFloor(pitch, roll, heldBox(a))), KIND.drive.height[1]),
     pitch,
     roll,
   }
   const space = s.control.aim(who)
   if (space && following && !pad) {
-    goal.yaw = armWorkspace(space.aim, KIN.yawRange, KIND.drive.reach).yaw
+    const target = workspace(a, who, [space.aim[0], 0])
+    goal.yaw = target.yaw; goal.reach = target.reach
     goal.height = Math.max(KIN.toolFloor(pitch, roll, heldBox(a)), armHeight(space.aim[1], KIND.drive.height))
   }
   // No winding up past the clamps: pushing further out and back again answers at once.
@@ -741,7 +774,9 @@ function driveWhole(a: Arm, who: string, now: number, dt: number): string {
   const { pose, reached } = KIN.inverse(goal, heldBox(a), poseOf(a))
   const ok = reached && within(KIN, pose)
   // Past the arm's reach or a joint's limit, the arm holds the last pose it could reach.
-  if (ok) setPose(a, pose)
+  if (ok) { setPose(a, pose); d.world.copy(toolWorld(a, goal)) }
+  a.goal = goal
+  view.presence?.motionControl(f.mode === Mode.tilt || following)
   if (!ok && !a.edge) s.remote.feedback({ haptic: 'bump' }, who)
   a.edge = !ok
   return ok ? '' : 'edge'
@@ -790,6 +825,7 @@ function readInputs(now: number) {
   if (!s) return
   for (const p of s.remote.participants) {
     const f = s.remote.consumeOf(p.id, now)
+    view.presence?.motionControl(!!s.control.aim(p.id))
     frames.set(p.id, f)
     const pointing = f.connected && f.mode === Mode.point
     const aim = pointing || aims.has(p.id) ? aimOf(p.id) : null
@@ -800,13 +836,14 @@ function readInputs(now: number) {
     // A phone without motion sensors points with its trackpad.
     const st = aim.pointer.step(f.aim, [f.pad1[0] * 1.2, f.pad1[1] * 1.2], innerWidth, innerHeight)
     // Aiming straight at the screen is the middle of the floor; the pointer moves from there.
-    const mid = tv.set(0, 0, 0).project(camera)
+    const activeCamera = view.presence?.activeCamera ?? camera
+    const mid = tv.set(0, 0, 0).project(activeCamera)
     ndc.set(mid.x + ((st.x - innerWidth / 2) / innerWidth) * 2, mid.y - ((st.y - innerHeight / 2) / innerHeight) * 2)
-    raycaster.setFromCamera(ndc, camera)
+    raycaster.setFromCamera(ndc, activeCamera)
     let hit = st.off ? null : raycaster.ray.intersectPlane(floorPlane, aim.hit ?? new THREE.Vector3())
     const space = s.control.aim(p.id), heldArm = armOf(s.claims.held(p.id) ?? '')
     if (space && heldArm && s.control.scope(p.id) === 'object') {
-      const local = armWorkspace(space.aim, KIN.yawRange, KIND.drive.reach)
+      const local = workspace(heldArm, p.id, space.aim)
       hit = heldArm.model.root.localToWorld(new THREE.Vector3(local.x, 0, local.z))
     } else if (space && arms.length && s.control.scope(p.id) === 'scene') {
       const target = nearest(sceneCells(arms.length).map(([x, y], n) => ({ x, y, n })), space.aim)
@@ -912,17 +949,17 @@ function driveTrack(a: Arm, who: string, f: Frame): string {
   a.claw = null
   if (!a.track || a.track.gen !== pose.gen) {
     const t = KIN.forward(poseOf(a))
-    a.track = { gen: pose.gen, p0: [...pose.p], q0: [...pose.q], heading: headingOf(pose.q), tool: toolWorld(a, t), pitch: t.pitch, roll: t.roll }
+    a.track = { gen: pose.gen, p0: [...pose.p], q0: [...pose.q], heading: headingOf(pose.q), tool: toolWorld(a, t), delta: new THREE.Vector3(), forward: 0, pitch: t.pitch, roll: t.roll }
   }
   const k = a.track
   const m = handMove([pose.p[0] - k.p0[0], pose.p[1] - k.p0[1], pose.p[2] - k.p0[2]], k.heading)
   const turn = handTurn(k.q0, pose.q, k.heading)
   // The stage as the screen shows it: its right, and into it.
-  camera.getWorldDirection(camFwd)
-  camFwd.y = 0
-  camFwd.normalize()
-  camRight.crossVectors(camFwd, UP).normalize()
-  const w = tv.copy(k.tool).addScaledVector(camRight, m.right * a.scale).addScaledVector(UP, m.up * a.scale).addScaledVector(camFwd, m.forward * a.scale)
+  const frame = controlFrame(who)
+  camFwd.copy(frame.forward); camRight.copy(frame.right)
+  k.p0 = [...pose.p]
+  const delta = k.delta.clone().addScaledVector(camRight, m.right * a.scale).addScaledVector(UP, m.up * a.scale).addScaledVector(camFwd, m.forward * a.scale)
+  const w = tv.copy(k.tool).add(delta)
   const local = a.model.root.worldToLocal(w)
   // Behind the arm, it holds at a limit rather than swinging round (./layout.ts).
   const want = Math.atan2(local.z, -local.x) * R2D
@@ -936,15 +973,17 @@ function driveTrack(a: Arm, who: string, f: Frame): string {
   }
   const space = sim?.control.aim(who)
   if (space) {
-    goal.yaw = armWorkspace(space.aim, KIN.yawRange, KIND.drive.reach).yaw
+    const target = workspace(a, who, [space.aim[0], 0])
+    goal.yaw = target.yaw
     goal.height = armHeight(space.aim[1], KIND.drive.height)
-    const origin = a.model.root.worldToLocal(k.tool.clone())
-    goal.reach = clamp(Math.hypot(origin.x, origin.z) + m.forward * (KIND.drive.reach[1] - KIND.drive.reach[0]) / 0.3, ...KIND.drive.reach)
+    k.forward += m.forward
+    goal.reach = clamp(target.reach + k.forward * (KIND.drive.reach[1] - KIND.drive.reach[0]) / 0.3, ...KIND.drive.reach)
   }
   a.goal = goal
   // Where the gripper goes comes first: tip it if that's what it takes to get there.
   const r = solveNear(KIN, goal, 60, heldBox(a), current)
-  if (r) setPose(a, r.pose)
+  if (r) { setPose(a, r.pose); k.delta.copy(delta) }
+  view.presence?.motionControl(true)
   const ok = !!r && (!!space || turnBetween(goal.yaw, want) < 1e-6)
   if (!ok && !a.edge) sim?.remote.feedback({ haptic: 'bump' }, who)
   a.edge = !ok
@@ -1016,7 +1055,7 @@ function stepArm(a: Arm, now: number, dt: number) {
   const mirror = !!hw && !hw.live
   const armWho = s?.claims.holder(a.id)
   a.state = ''
-  if (stopped || mirror || !armWho || armWho === 'host' || !s) { a.drive = null; if (!armWho) a.edge = false }
+  if (stopped || mirror || !armWho || armWho === 'host' && !xrDrives.has(armWho) || !s) { a.drive = null; if (!armWho) a.edge = false }
   else a.state = driveWhole(a, armWho, now, dt)
   const got = mirror ? hw.driver.read() : null
   const angles = got ? fromRaw(hw!.cal, got.raw.map((v) => v ?? NaN)) : null
@@ -1513,6 +1552,7 @@ Object.assign(window, {
     goTo: (id: string, pose: Pose, open?: number) => { const a = armOf(id); if (!a) return; a.homing = false; setPose(a, pose); if (open !== undefined) a.joints[GRIP].target = open },
     /** The kind of arm, and its pose's joints. */
     kind: () => ({ id: KIND.id, keys: KIN.keys }),
+    toolPosition: (id: string) => { const a = armOf(id); return a ? toolWorld(a, KIN.forward(poseOf(a))).toArray() : null },
     /** Where an arm stands, and which way it's turned. */
     stand: (id: string) => { const a = armOf(id); return a ? standOf(a) : null },
     /** The pose that puts an arm's gripper `height` over (x, z) on the floor, as Point would (null: it can't, exactly). */

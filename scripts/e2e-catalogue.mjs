@@ -110,6 +110,7 @@ async function phone(invite, { landscape = false } = {}) {
   /** Press and hold `selector` with a finger for `ms`. */
   const hold = async (selector, ms) => {
     await clear()
+    await page.locator(selector).first().click({ trial: true })
     const at = await centre(selector)
     await touches('touchStart', [at])
     await sleep(ms)
@@ -373,11 +374,12 @@ try {
       await p.tapTray('Home')
       await sleep(300)
       const before = await rover()
+      const right = await at(s, () => { const c = window.__device.stage.camera; return c.position.clone().set(1, 0, 0).applyQuaternion(c.quaternion).toArray() })
       await p.drag('#pad', 60, -80, 1400)
       const after = await rover()
       const went = Math.hypot(after.x - before.x, after.z - before.z)
       if (went < 0.5) throw new Error(`moved ${went.toFixed(2)} m; the screen saw ${JSON.stringify(await at(s, () => window.__device.seen))}`)
-      if (!(after.h < before.h - 0.1)) throw new Error(`didn't turn right: heading ${before.h.toFixed(2)} → ${after.h.toFixed(2)}`)
+      if ((after.x - before.x) * right[0] + (after.z - before.z) * right[2] < 0.05) throw new Error(`didn't move screen right: ${JSON.stringify({ before, after, right })}`)
       return `${went.toFixed(2)} m, heading ${before.h.toFixed(2)} → ${after.h.toFixed(2)} rad`
     })
     await check('rover, Buttons: a keyboard’s H honks (key:KeyH → tray:horn), and Home parks it', async () => {
@@ -497,10 +499,12 @@ try {
       if (face !== 'face.wii') throw new Error(`opened on ${face}`)
       await sleep(600)
       const before = await cam()
+      const right = await at(s, () => { const c = window.__device.stage.camera; return c.position.clone().set(1, 0, 0).applyQuaternion(c.quaternion).toArray() })
       await turn(p, 10, 30)
       await sleep(1200)
       const after = await cam()
-      if (!(after.pan > before.pan + 0.15)) throw new Error(`pan ${before.pan.toFixed(3)} → ${after.pan.toFixed(3)}; the screen saw ${JSON.stringify(await at(s, () => window.__device.seen))}`)
+      const screen = (-Math.sin(after.pan) + Math.sin(before.pan)) * right[0] + (-Math.cos(after.pan) + Math.cos(before.pan)) * right[2]
+      if (screen > -0.05) throw new Error(`aim moved ${screen.toFixed(3)} along screen right; pan ${before.pan.toFixed(3)} → ${after.pan.toFixed(3)}`)
       return `phone 20° left → camera ${((after.pan - before.pan) * 57.3).toFixed(1)}° left`
     })
     await check('PTZ: A takes a picture, and ⌂ brings the camera back to the middle', async () => {

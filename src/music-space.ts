@@ -33,13 +33,13 @@ export const STUDIO_TARGETS: readonly MusicTarget[] = Array.from({ length: 8 }, 
   }))
 }).flat()
 
-export function musicTarget(aim: Reach, scope: ControlScope, seat: number): MusicTarget {
-  return nearest(scope === 'scene' ? STUDIO_TARGETS : instrumentTargets(seat), aim)
+export function musicTarget(aim: Reach, scope: ControlScope, seat: number, screenRight = 1): MusicTarget {
+  return nearest(scope === 'scene' ? STUDIO_TARGETS : instrumentTargets(seat), [aim[0] * screenRight, aim[1]])
 }
 
 /** A strike owns its aim. Changing the live cursor cannot move an event already in flight. */
-export function resolveStrike(aim: Reach, eventScope: ControlScope, scope: ControlScope, seat: number, available: (seat: number) => boolean): MusicTarget | null {
+export function resolveStrike(aim: Reach, eventScope: ControlScope, scope: ControlScope, seat: number, available: (seat: number) => boolean, screenRight = 1): MusicTarget | null {
   if (eventScope !== scope || !Number.isInteger(seat) || seat < 0 || seat >= STATION_NAMES.length) return null
-  const target = musicTarget(aim, eventScope, seat)
+  const target = musicTarget(aim, eventScope, seat, screenRight)
   return available(target.seat) ? target : null
 }

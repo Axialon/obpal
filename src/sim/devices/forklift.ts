@@ -61,7 +61,7 @@ export class ForkliftLogic extends Machine {
     const dt = timestep(delta),
       i = inputs[0] ?? null,
       u = this.units[0],
-      [steer, power] = drive(i, this.drag)
+      [steer, power] = drive(i, this.drag, true)
     const speed = u.lift > 1 ? 0.6 : u.load >= 0 ? 1.2 : 2
     u.v += (power * speed - u.v) * Math.min(1, dt * 7)
     u.h = wrapPi(u.h - steer * u.v * dt * 0.7)

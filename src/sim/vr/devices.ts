@@ -10,6 +10,7 @@ import { SharedPresence } from './presence'
 import { Experience } from './experience'
 import type { V3 } from './world'
 import { collideDevices } from './collisions'
+import { ViewInputs } from './inputs'
 
 /** Keep integration outside device models: rig anchors and the existing physics remain the source of truth. */
 export function devicePresence(logic: DeviceLogic, stage: Stage, getView: () => DeviceView | null, getSim: () => SimScene | null) {
@@ -36,6 +37,7 @@ export function devicePresence(logic: DeviceLogic, stage: Stage, getView: () => 
   })
   stage.scene.add(shared.group)
   const experience = new Experience(stage.renderer, stage.scene, stage.camera, rides, shared, stage.controls)
+  const viewInputs = new ViewInputs(logic, experience)
   stage.view.presence = experience
   if (!shared.guest) {
     const first = deviceState(logic, 0)
@@ -53,7 +55,7 @@ export function devicePresence(logic: DeviceLogic, stage: Stage, getView: () => 
     }))
   }
   return {
-    shared, experience,
+    shared, experience, mapInput: (input: DeviceInput, n: number) => viewInputs.map(input, n),
     afterStep: () => collideDevices(logic),
     connect(sim: SimScene) {
       shared.connect(sim.remote)
@@ -70,6 +72,14 @@ export function devicePresence(logic: DeviceLogic, stage: Stage, getView: () => 
         const input = restInput(); input.pad = d.pad; input.padPressed = d.pad.buttons & ~d.previous; d.previous = d.pad.buttons
         perUnit[n] = input
       }
+      perUnit.forEach((input, n) => {
+        if (input) {
+          const mapped = viewInputs.map(input, n, driving.has(n) ? shared.people.get(driving.get(n)!.who)?.head.q : undefined)
+          perUnit[n] = mapped
+          const who = sim?.claims.holder(`${logic.spec.id}${n + 1}`)
+          if (who && inputs.has(who)) inputs.set(who, mapped)
+        }
+      })
       for (const [who, inp] of inputs) {
         if (shared.isVisitor(who)) continue
         if (inp.quiet && !phones.has(who)) continue

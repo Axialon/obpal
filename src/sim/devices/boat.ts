@@ -56,7 +56,7 @@ export class BoatLogic extends Machine {
     const dt = timestep(delta)
     this.units.forEach((b, n) => {
       const i = inputs[n] ?? null,
-        [steer, throttle] = drive(i, this.drags[n])
+        [steer, throttle] = drive(i, this.drags[n], true)
       b.rudder += (steer * 0.6 - b.rudder) * Math.min(1, dt * 7)
       b.v = clamp(b.v + (throttle * 2 - b.v * 0.65) * dt, -1.4, 3)
       b.h = wrapPi(b.h - b.rudder * b.v * dt)

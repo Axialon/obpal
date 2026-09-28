@@ -10,6 +10,7 @@
 import { Controller, Mode, PadButton, qConj, qMul, type Quat } from '@obpal/core'
 import { axis, clamp, DragStick, padStick, readable, slopeOf } from './input'
 import type { DeviceEvent, DeviceInput, DeviceLogic, DeviceSpec } from './types'
+import { planar } from '../vr/intent'
 
 export const MAZE_SPEC: DeviceSpec = {
   id: 'maze',
@@ -244,7 +245,8 @@ export class MazeLogic implements DeviceLogic {
     this.boards.forEach((b, n) => {
       const inp = inputs[n]
       if (inp && (inp.padPressed >>> PadButton.A) & 1) { this.home(n); return }
-      const target = inp ? mazeTilt(inp, b, this.sticks[n]) : null
+      const tilt = inp ? mazeTilt(inp, b, this.sticks[n]) : null
+      const target = tilt ? planar(inp?.controlFrame, ...tilt) : null
       if (!inp) this.sticks[n].update(false, [0, 0])
       // A marble that dropped comes back to the start; one that got home starts again after a moment.
       if (b.falling) { b.falling += dt; if (b.falling > 0.9) this.restart(b) }

@@ -3,6 +3,7 @@ import { Controller, qRotate, type Quat, type Vec3 } from '@obpal/core'
 import { Machine, timestep } from './common'
 import { clamp } from './input'
 import type { DeviceInput, DeviceSpec } from './types'
+import { planar, rail } from '../vr/intent'
 export const PAINTER_SPEC: DeviceSpec = {
   id: 'painter',
   name: 'Light painter',
@@ -35,11 +36,13 @@ export class PainterLogic extends Machine {
   units = [{ x: 0, y: 1.5, z: 0, q: [0, 0, 0, 1] as Quat, colour: 0, points: 0 }]
   strokes: Stroke[] = []
   private last: Vec3 | null = null
+  private depth = 0
   private anchor: { p: Vec3; at: Vec3; gen: number } | null = null
   home() {
     Object.assign(this.units[0], { x: 0, y: 1.5, z: 0, q: [0, 0, 0, 1] })
     this.last = null
     this.anchor = null
+    this.depth = 0
   }
   reset() {
     this.strokes = []
@@ -85,13 +88,16 @@ export class PainterLogic extends Machine {
       paint = true
     } else this.anchor = null
     if (canvas) {
-      target = [i.space!.aim[0] * 3.5, 1.9 + i.space!.aim[1] * 1.6, -2.91]
+      target = [i.space!.aim[0] * 3.5 * rail(i.controlFrame), 1.9 + i.space!.aim[1] * 1.6, -2.91]
       paint = i.held.has('mouse-left') || i.held.has('wii-b') || i.touching || !!pose?.touching
     } else if (i.point) {
-      target = [i.point.yaw * 0.12, 1.5 + i.point.pitch * 0.1, u.z + i.wheel * 0.002]
+      this.depth = clamp(this.depth + i.wheel * 0.002, -2, 2)
+      const [x, z] = planar(i.controlFrame, i.point.yaw * 0.12, this.depth)
+      target = [x, 1.5 + i.point.pitch * 0.1, z]
       paint = i.held.has('mouse-left')
     } else if (i.touching && !pose) {
-      target = [u.x + i.drag[0] * 0.012, u.y - i.drag[1] * 0.012, u.z + i.pan[1] * 0.01]
+      const [x, z] = planar(i.controlFrame, i.drag[0] * 0.012, i.pan[1] * 0.01)
+      target = [u.x + x, u.y - i.drag[1] * 0.012, u.z + z]
       paint = true
     }
     target = [clamp(target[0], -3.5, 3.5), clamp(target[1], 0.3, 3.5), canvas ? -2.91 : clamp(target[2], -2, 2)]

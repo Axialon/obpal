@@ -27,7 +27,7 @@ import { initTips } from '../ui/tips'
 import { applyTheme, initialTheme, THEMES, themeById, type Theme } from '../ui/themes'
 import { Experience } from '../sim/vr/experience'
 import { SharedPresence } from '../sim/vr/presence'
-import { anchorPose } from '../sim/vr/rigs'
+import { looking, type Ride } from '../sim/vr/rigs'
 import { ControlSession } from '../sim/control-space'
 
 CameraControls.install({ THREE })
@@ -141,7 +141,8 @@ scene.add(holder)
 
 // Parts of the current model: hover cards, selection and per-part manipulation, for the screen and each device.
 const partsSent = new Map<string, string>()
-const parts = new Parts(camera, scene, {
+const partCamera = camera.clone()
+const parts = new Parts(partCamera, scene, {
   changed: (hand) => {
     // The trade-off model highlights what the screen is on, else what the hand that just changed holds.
     const lead = parts.selected || parts.hovered ? parts.host : hand
@@ -1181,7 +1182,7 @@ const raycaster = new THREE.Raycaster()
 /** Orbit about the point under a seat's cursor (the lead's). */
 function focusAt(s: Seat) {
   const ndc = new THREE.Vector2((s.x / innerWidth) * 2 - 1, -(s.y / innerHeight) * 2 + 1)
-  raycaster.setFromCamera(ndc, camera)
+  raycaster.setFromCamera(ndc, experience.activeCamera)
   const hit = raycaster.intersectObject(holder, true)[0]
   s.el.classList.remove('pulse')
   void s.el.offsetWidth
@@ -1227,6 +1228,7 @@ function applySeat(s: Seat, f: Frame, dt: number) {
   if (!f.connected) return
   const calibrated = controlSpace?.aim(s.who.id)
   if (calibrated) f = { ...f, tilt: calibrated.tilt }
+  experience.motionControl(!!calibrated)
   const lead = isLead(s)
   const h = s.hand
   const sceneScope = controlSpace?.scope(s.who.id) === 'scene'
@@ -1242,7 +1244,7 @@ function applySeat(s: Seat, f: Frame, dt: number) {
   const matching = f.clutch && f.mode === Mode.hold && !!target
   if (matching && target) {
     if (!s.wasClutch || f.grab !== s.lastGrab) { s.base.copy(target.quaternion); s.lastGrab = f.grab }
-    camQ.copy(camera.quaternion)
+    experience.activeCamera.getWorldQuaternion(camQ)
     camQi.copy(camQ).invert()
     qRel.set(f.qRel[0], f.qRel[1], f.qRel[2], f.qRel[3])
     const world = tmpQ.copy(camQ).multiply(qRel).multiply(camQi)
@@ -1267,16 +1269,16 @@ function applySeat(s: Seat, f: Frame, dt: number) {
     const m = handMove([pose.p[0] - k.p0[0], pose.p[1] - k.p0[1], pose.p[2] - k.p0[2]], k.heading)
     // A hand's move of a tenth of the viewing distance moves it an eighth of the way across.
     const reach = controls.distance * 1.2
-    trFwd.set(0, 0, -1).applyQuaternion(camera.quaternion)
-    trFwd.y = 0
-    trFwd.normalize()
-    trRight.crossVectors(trFwd, WORLD_UP).normalize()
+    trFwd.copy(experience.controlFrame.forward)
+    trRight.copy(experience.controlFrame.right)
     const world = trV.copy(k.pos0).addScaledVector(trRight, m.right * reach).addScaledVector(WORLD_UP, m.up * reach).addScaledVector(trFwd, m.forward * reach)
+    k.p0 = [...pose.p]; k.pos0.copy(world)
+    experience.motionControl(true)
     if (liveSel || !target) {
       // Drag it by however far the hand's move goes on the screen. A value snaps to its steps, so the drag builds up
       // from where the value last changed instead of rounding away frame by frame.
-      const a = k.last.clone().project(camera)
-      const b = world.clone().project(camera)
+      const a = k.last.clone().project(experience.activeCamera)
+      const b = world.clone().project(experience.activeCamera)
       if (parts.move(((b.x - a.x) / 2) * innerWidth, ((a.y - b.y) / 2) * innerHeight, h)) k.last.copy(world)
     } else {
       // The phone's turn, from its tracking space onto the stage: its heading lines up with the camera's.
@@ -1288,7 +1290,7 @@ function applySeat(s: Seat, f: Frame, dt: number) {
       target.quaternion.copy(parent.getWorldQuaternion(trQ0).invert().multiply(trQ))
     }
   } else s.track = null
-  camRight.set(1, 0, 0).applyQuaternion(camera.quaternion)
+  camRight.copy(experience.controlFrame.right)
   // Rate gyro (protocol mode 1): yaw about the world vertical, pitch about the camera's right axis.
   if (f.mode === Mode.orbit && (f.aim[0] || f.aim[1])) {
     const qa = new THREE.Quaternion().setFromAxisAngle(WORLD_UP, f.aim[0] * GAME_GAIN * D2R)
@@ -1309,11 +1311,12 @@ function applySeat(s: Seat, f: Frame, dt: number) {
     // Where the phone points; a phone without motion sensors steers with its trackpad instead.
     let { x: vx, y: vy, dx, dy, off } = s.aim.step(f.aim, sel ? [0, 0] : [f.pad1[0] * 1.2, f.pad1[1] * 1.2], innerWidth, innerHeight)
     if (calibrated) {
-      const key = `${sceneScope}:${sel?.object.uuid ?? 'scene'}`
+      const cameraKey = experience.activeCamera.matrixWorld.elements.filter((_, n) => [2, 6, 10, 12, 13, 14].includes(n)).map(v => Math.round(v * 20)).join(',')
+      const key = `${sceneScope}:${sel?.object.uuid ?? 'scene'}:${experience.mode}:${experience.ride}:${experience.look.viewpoint}:${cameraKey}`
       let bounds = controlBounds.get(s.who.id)
       if (!bounds || bounds.key !== key) {
         const box = new THREE.Box3().setFromObject(sel?.object ?? holder), points: THREE.Vector3[] = []
-        for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) points.push(new THREE.Vector3(x, y, z).project(camera))
+        for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) points.push(new THREE.Vector3(x, y, z).project(experience.activeCamera))
         const xs = points.map(p => (p.x + 1) * innerWidth / 2), ys = points.map(p => (1 - p.y) * innerHeight / 2)
         const valid = !box.isEmpty() && [...xs, ...ys].every(Number.isFinite)
         const x = valid ? clampX(Math.min(...xs)) : innerWidth * 0.1, y = valid ? clampY(Math.min(...ys)) : innerHeight * 0.1
@@ -1356,7 +1359,7 @@ function applySeat(s: Seat, f: Frame, dt: number) {
   if (f.zoom) { if (sel) parts.scaleBy(f.zoom, h); else if (lead) void controls.dolly(controls.distance * (1 - Math.pow(2, -f.zoom)), true) }
   if (f.twist && sel) parts.twist(f.twist, h)
   else if (f.twist && lead) {
-    towardViewer.set(0, 0, 1).applyQuaternion(camera.quaternion)
+    towardViewer.copy(experience.controlFrame.forward).negate()
     holder.quaternion.premultiply(tmpQ.setFromAxisAngle(towardViewer, -f.twist * D2R))
     if (matching) s.base.premultiply(tmpQ)
   }
@@ -1476,6 +1479,12 @@ function loop(now: number) {
   if (!experience.immersive && !sharedPresence.guest && !sharedPresence.people.size && now - lastActive > REST_AFTER_MS && lastFrame && now - lastFrame < REST_FRAME_MS) return
   const dt = lastFrame ? Math.min((now - lastFrame) / 1000, 0.1) : 0
   lastFrame = now
+  const visibleCamera = experience.activeCamera
+  partCamera.copy(visibleCamera, false)
+  partCamera.position.copy(visibleCamera.getWorldPosition(tmpV))
+  partCamera.quaternion.copy(visibleCamera.getWorldQuaternion(tmpQ))
+  partCamera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(1 / visibleCamera.projectionMatrix.elements[5]))
+  partCamera.updateMatrixWorld(true)
   if (sharedPresence.guest) {
     controls.update(dt)
     experience.update(dt, now)
@@ -1516,7 +1525,7 @@ function loop(now: number) {
   shadow.visible = !several
   for (const e of sceneObjects) {
     e.mixer?.update(dt)
-    e.tradeoff?.update(dt, camera)
+    e.tradeoff?.update(dt, partCamera)
     e.shadow.visible = several
     if (several) {
       e.wrap.getWorldPosition(tmpV)
@@ -1555,12 +1564,14 @@ async function restoreScene(fallback: CatalogItem) {
 // ---- boot -------------------------------------------------------------------
 
 let presenceLoading = ''
-const viewerRides = () => sceneObjects.map((e, i) => ({ id: `object${i + 1}`, name: e.name, pose: () => {
-  const anchor = e.obj.getObjectByName('pov')
-  if (anchor) return anchorPose(anchor)
-  const p = e.wrap.getWorldPosition(new THREE.Vector3()); p.y += 0.35; p.z += 0.6
-  return { p, q: new THREE.Quaternion() }
-} }))
+const viewerRides = (): Ride[] => sceneObjects.map((e, i) => {
+  const seat = (side = 0) => {
+    const target = e.wrap.getWorldPosition(new THREE.Vector3()), scale = e.wrap.getWorldScale(new THREE.Vector3())
+    const size = e.size.length() * Math.max(scale.x, scale.y, scale.z)
+    return looking(target.clone().add(new THREE.Vector3(side, 0.4, 1.3).multiplyScalar(Math.max(0.8, size))), target)
+  }
+  return { id: `object${i + 1}`, name: e.name, style: 'scene', horizon: true, pose: seat, views: [{ name: 'Object', pose: seat }, { name: 'Side', pose: () => seat(0.8) }] }
+})
 const sharedPresence = new SharedPresence({
   rides: viewerRides,
   capture: () => ({ models: sceneObjects.map(e => e.item?.id ?? ''), holder: [...holder.position.toArray(), ...holder.quaternion.toArray()], parts: parts.listable().map(p => [...p.object.position.toArray(), ...p.object.quaternion.toArray(), ...p.object.scale.toArray()]) }),

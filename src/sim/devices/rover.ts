@@ -10,6 +10,7 @@ import { Controller, Mode, PadButton } from '@obpal/core'
 import { axis, clamp, down, DragStick, readable, wrapPi } from './input'
 import { InputSmoother, servo } from '../kit/motion'
 import type { DeviceEvent, DeviceInput, DeviceLogic, DeviceSpec } from './types'
+import { driving } from '../vr/intent'
 
 export const ROVER_SPEC: DeviceSpec = {
   id: 'rover',
@@ -194,6 +195,7 @@ export class RoverLogic implements DeviceLogic {
       let intent: RoverIntent = { steer: 0, throttle: 0, brake: false }
       if (inp) {
         intent = roverIntent(inp, r, this.sticks[n])
+        if (!inp.point) [intent.steer, intent.throttle] = driving(inp.controlFrame, intent.steer, intent.throttle, inp.face === 'face.wheel' || !!inp.pad && Math.abs(inp.pad.triggers[1] - inp.pad.triggers[0]) > 0.04, true)
         const pressed = (b: number) => (inp.padPressed >>> b) & 1
         if (inp.presses.includes('horn') || inp.presses.includes('pad') || inp.presses.includes('wii-a') || pressed(PadButton.A)) this.horn(n)
         if (inp.presses.includes('lights') || pressed(PadButton.X)) r.lights = !r.lights

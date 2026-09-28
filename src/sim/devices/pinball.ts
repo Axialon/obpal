@@ -3,6 +3,7 @@ import { Controller, Mode, PadButton } from '@obpal/core'
 import { Machine, timestep } from './common'
 import { approach, clamp, down } from './input'
 import type { DeviceInput, DeviceSpec } from './types'
+import { planar } from '../vr/intent'
 
 export const PINBALL_SPEC: DeviceSpec = {
   id: 'pinball', name: 'Pinball', unit: 'Table', units: 2, kind: 'Game',
@@ -137,7 +138,10 @@ export class PinballLogic extends Machine {
         u.nudge = 1
         u.cooldown = 0.45
         u.actions++
-        if (u.active) { u.vx += u.actions % 2 ? 0.8 : -0.8; u.vz -= 0.7 }
+        if (u.active) {
+          const [x, z] = shook ? planar(live?.controlFrame, rock.side * 0.8, -0.7) : [u.actions % 2 ? 0.8 : -0.8, -0.7]
+          u.vx += x; u.vz += z
+        }
         this.events.push({ unit: n, kind: 'bump', strength: 0.25, text: 'Nudge' })
       }
       if (!u.active || !dt) return

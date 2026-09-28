@@ -1,5 +1,6 @@
 /** Bounded nonlinear pendulums with independent settings and a ten-second angle history. */
 import { Controller, Mode } from '@obpal/core'
+import { rail } from '../vr/intent'
 import { Machine, action, timestep } from './common'
 import { axis, clamp, slopeOf } from './input'
 import type { DeviceInput, DeviceSpec } from './types'
@@ -39,7 +40,7 @@ export class PendulumLogic extends Machine {
       const tilt = i?.hold ? slopeOf(i.hold)[0] : i?.mode === Mode.tilt ? i.tilt[0] : null
       if (tilt !== null && this.lastTilt[n] !== null && dt > 0 && !this.cooldown[n]) {
         const change = tilt - this.lastTilt[n]!
-        if (Math.abs(change) > 0.12 && Math.abs(change) / dt > 3) impulse = Math.sign(change) * Math.min(2.8, Math.abs(change) * 4)
+        if (Math.abs(change) > 0.12 && Math.abs(change) / dt > 3) impulse = Math.sign(change) * Math.min(2.8, Math.abs(change) * 4) * rail(i?.controlFrame)
       }
       this.lastTilt[n] = tilt
       if (impulse && !this.cooldown[n]) { u.omega += impulse; u.actions++; this.cooldown[n] = 0.3; this.events.push({ unit: n, kind: 'tick', text: 'Pendulum pushed' }) }

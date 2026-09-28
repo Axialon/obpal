@@ -153,6 +153,11 @@ function paint(model: ReturnType<typeof room>, logic: StudioLogic, colors: reado
 
 export function createView(stage: Stage, logic: StudioLogic): DeviceView {
   const model = room(() => stage.view.invalidate()); stage.scene.add(model.root)
+  const cursors = [3, 4, 5].map(n => {
+    const marker = new THREE.Mesh(new THREE.RingGeometry(0.027, 0.039, 16), new THREE.MeshBasicMaterial({ color: '#b9ee6d', side: THREE.DoubleSide }))
+    marker.name = `instrument-cursor-${n}`; marker.rotation.x = -Math.PI / 2; stage.scene.add(marker)
+    return { n, marker }
+  })
   document.body.classList.add('studio')
   const reduced = matchMedia('(prefers-reduced-motion: reduce)')
   stage.lights.hemi.intensity = 1.1
@@ -165,7 +170,11 @@ export function createView(stage: Stage, logic: StudioLogic): DeviceView {
     inspect: () => ({ target: [-0.8, 0.55, -1.5], wide: [1.8, 2.8, 3.8], tall: [1.8, 3.8, 4.8], radius: 1.8 }),
     anchor: n => new THREE.Vector3(POS[n][0], 0.8, POS[n][1]),
     connect: sim => attachStudio(sim, logic, stage, n => [POS[n][0], 0.8, POS[n][1]]),
-    update(colors, t) { paint(model, logic, colors, t, reduced.matches); if (logic.hits.some(h => h.some(v => v > 0.002))) stage.view.invalidate() },
+    update(colors, t) {
+      paint(model, logic, colors, t, reduced.matches)
+      for (const { n, marker } of cursors) marker.position.set(POS[n][0] + (logic.cursor[n] - 7.5) * 0.102, 0.905, POS[n][1] + 0.24)
+      if (logic.hits.some(h => h.some(v => v > 0.002))) stage.view.invalidate()
+    },
   }
 }
 

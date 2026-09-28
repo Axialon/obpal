@@ -1,7 +1,8 @@
 /** A three-axis camera follows the phone's quaternion exactly, relative to its last Home. */
 import { Controller, qConj, qMul, qAxisAngle, type Quat } from '@obpal/core'
-import { action, Machine } from './common'
-import { clamp, panTiltOf } from './input'
+import { action, Machine, timestep } from './common'
+import { axis, clamp, panTiltOf } from './input'
+import { panSign } from '../vr/intent'
 import type { DeviceInput, DeviceSpec } from './types'
 export const GIMBAL_SPEC: DeviceSpec = {
   id: 'gimbal',
@@ -36,13 +37,13 @@ export class GimbalLogic extends Machine {
     const u = this.units[0]
     return `${u.recording ? 'Recording' : 'Ready'} · ${Math.round(u.pan * 57.3)}°`
   }
-  step(inputs: readonly (DeviceInput | null)[]) {
+  step(inputs: readonly (DeviceInput | null)[], delta = 1 / 60) {
     const i = inputs[0],
       u = this.units[0]
     if (!i) return
     const q = i.hold ?? (i.pose?.tracked && i.pose.touching ? i.pose.q : null)
     if (i.space && !i.pad && !i.pose?.touching) {
-      u.pan = -i.space.aim[0] * Math.PI; u.pitch = i.space.aim[1] * 1.3
+      u.pan = -i.space.aim[0] * Math.PI * (i.controlFrame?.immersive ? 1 : panSign(i.controlFrame, 0)); u.pitch = i.space.aim[1] * 1.3
       u.q = qMul(qMul(qAxisAngle(0, 1, 0, u.pan), qAxisAngle(1, 0, 0, u.pitch)), qAxisAngle(0, 0, 1, u.roll))
     } else if (q) {
       this.last = unitQuaternion(q)
@@ -51,9 +52,14 @@ export class GimbalLogic extends Machine {
       ;[u.pan, u.pitch] = panTiltOf(u.q)
       const [x, y, z, w] = u.q
       u.roll = Math.atan2(2 * (x * y + w * z), 1 - 2 * (x * x + z * z))
-    } else if (i.drag.some((v) => v !== 0) || i.twist) {
-      u.pan -= i.drag[0] * 0.008
-      u.pitch = clamp(u.pitch - i.drag[1] * 0.008, -1.5, 1.5)
+      if (i.controlFrame && !i.controlFrame.immersive) {
+        u.pan *= panSign(i.controlFrame, 0)
+        u.q = qMul(qMul(qAxisAngle(0, 1, 0, u.pan), qAxisAngle(1, 0, 0, u.pitch)), qAxisAngle(0, 0, 1, u.roll))
+      }
+    } else if (i.pad || i.drag.some((v) => v !== 0) || i.twist) {
+      const dt = timestep(delta)
+      u.pan -= (i.pad ? axis(i.pad.axes[2]) * dt : i.drag[0] * 0.008) * panSign(i.controlFrame, u.pan)
+      u.pitch = clamp(u.pitch - (i.pad ? axis(i.pad.axes[3]) * dt : i.drag[1] * 0.008), -1.5, 1.5)
       u.roll += (i.twist * Math.PI) / 180
       u.q = qMul(qMul(qAxisAngle(0, 1, 0, u.pan), qAxisAngle(1, 0, 0, u.pitch)), qAxisAngle(0, 0, 1, u.roll))
     }

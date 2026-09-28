@@ -92,7 +92,8 @@ export function createView(stage: Stage, logic: SlotcarsLogic): DeviceView {
   const w = raceway(stage.scene, logic, () => stage.view.invalidate()),
     at = (n: number): [number, number, number] => [logic.units[n].x, 0.17, logic.units[n].z]
   return {
-    framing: playFrame(at(0), 0.5),
+    // The following overview clears the start gantry even after orbiting to its far side.
+    framing: playFrame(at(0), 1, [1, 1.6, 1.5]),
     overview: playFrame([0, 0, 0], 8.5),
     inspect: () => playFrame(at(0), 0.36),
     follow: (n) => new THREE.Vector3(...at(n)),

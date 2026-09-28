@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import { emptyPad } from '@obpal/core'
 import type { Ride } from './rigs'
+import { ControlFrame } from './control-frame'
+import { RideLook, SteadyPose, upright, viewFov } from './steady'
 import { comfort, DEFAULT_COMFORT, vignetteStrength, XRQuality } from './comfort'
 import type { SharedPresence, Pose } from './presence'
 import type { V3 } from './world'
@@ -19,8 +21,11 @@ export class Experience extends EventTarget {
   settings = { ...DEFAULT_COMFORT }
   ride = ''
   drive = false
-  private yaw = 0
-  private pitch = 0
+  readonly controlFrame = new ControlFrame()
+  readonly look = new RideLook()
+  private steady = new SteadyPose()
+  private xrZero: { p: THREE.Vector3; yaw: number } | null = null
+  private motionUntil = 0
   private gyro = new THREE.Quaternion()
   private gyroZero: THREE.Quaternion | null = null
   private sensor = false
@@ -33,6 +38,7 @@ export class Experience extends EventTarget {
   private emulated = false
   private controllerHands: THREE.Group[] = []
   private controllerSources: (XRInputSource | null)[] = [null, null]
+  private xrButtons = [0, 0]
   private grabbing = new Set<number>()
   private controls: HTMLDivElement
   private controlsHome: HTMLElement
@@ -40,6 +46,7 @@ export class Experience extends EventTarget {
   private picker: HTMLSelectElement
   private info: HTMLElement
   private leaveButton: HTMLButtonElement
+  private viewButton: HTMLButtonElement
   private overlay: HTMLDivElement
   private mask: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>
   private exitTarget: THREE.Mesh
@@ -74,13 +81,16 @@ export class Experience extends EventTarget {
     this.controls.classList.toggle('presence-floating', this.controlsHome === document.body)
     const button = (label: string, action: () => void) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.onclick = action; if (!['First person', 'Enter VR', 'Share scene'].includes(label)) b.className = 'presence-extra'; this.controls.append(b); return b }
     this.picker = document.createElement('select'); this.picker.setAttribute('aria-label', 'Ride a device'); this.controls.append(this.picker)
-    this.picker.onchange = () => { this.ride = this.picker.value; this.recenter() }
-    button('First person', () => { this.setMode('first-person'); void this.startSensors() })
+    this.picker.onchange = () => { this.ride = this.picker.value; this.look.viewpoint = 0; this.recenter() }
+    button('First person', () => { this.setMode('first-person'); void this.startSensors() }).classList.add('presence-enter')
     const enter = button('Enter VR', () => { void this.enterXR() }); enter.disabled = true; enter.title = 'Checking VR support'
     void navigator.xr?.isSessionSupported('immersive-vr').then(ok => { enter.disabled = !ok; enter.title = ok ? 'Look around inside this scene' : 'This browser does not offer immersive VR' }).catch(() => { enter.title = 'VR is unavailable here' })
     if (!navigator.xr) enter.title = 'Use a WebXR headset browser to enter VR'
     this.leaveButton = button('Overview', () => { void this.leave() }); this.leaveButton.hidden = true
+    this.viewButton = button('View', () => this.switchView()); this.viewButton.title = 'Switch viewpoint (V)'
     button('Recenter', () => this.recenter())
+    const options = button('Options', () => { const open = this.controls.classList.toggle('presence-expanded'); options.setAttribute('aria-expanded', String(open)) })
+    options.classList.add('presence-options'); options.setAttribute('aria-expanded', 'false')
     button('↶', () => this.snap(-1)).setAttribute('aria-label', 'Snap turn left')
     button('↷', () => this.snap(1)).setAttribute('aria-label', 'Snap turn right')
     const toggle = (label: string, checked: boolean, change: (v: boolean) => void) => {
@@ -94,6 +104,7 @@ export class Experience extends EventTarget {
     const stop = document.getElementById('estop')
     if (stop) button('Stop arms', () => shared?.guest ? shared.stopArms() : stop.click())
     this.info = document.createElement('small'); this.info.setAttribute('role', 'status'); this.controls.append(this.info)
+    for (const child of this.controls.children) if (!['SELECT'].includes(child.tagName) && !['Overview', 'View', 'Recenter', 'Options', 'Stop arms', 'First person'].includes(child.textContent ?? '')) child.classList.add('presence-secondary')
     this.controlsHome.prepend(this.controls)
     this.bindLook()
     for (let n = 0; n < 2; n++) {
@@ -107,7 +118,7 @@ export class Experience extends EventTarget {
       ray.addEventListener('selectstart', () => {
         const r = new THREE.Raycaster(ray.getWorldPosition(new THREE.Vector3()), new THREE.Vector3(0, 0, -1).applyQuaternion(ray.getWorldQuaternion(new THREE.Quaternion())))
         if (r.intersectObject(this.exitTarget).length) void this.leave()
-        else this.grabbing.add(n)
+        else if (!this.drive) this.grabbing.add(n)
       })
       ray.addEventListener('selectend', () => { this.grabbing.delete(n) })
       ray.addEventListener('squeezestart', () => { this.grabbing.add(n) })
@@ -121,15 +132,19 @@ export class Experience extends EventTarget {
     // The hook uses the same rig and input path; it cannot create participants or replace host state.
     if (new URLSearchParams(location.search).get('test') === 'vr') Object.assign(window, { __presence: {
       experience: this, shared, enter: () => { this.emulated = true; this.setMode('xr') }, exit: () => this.leave(),
-      state: () => ({ mode: this.mode, ride: this.ride, camera: pose(this.camera), fps: this.observedTime ? this.observedFrames / this.observedTime : 0, people: shared ? [...shared.people.values()] : [], bodies: shared?.world.bodies, status: shared?.status }),
+      probe: async () => (await import('./probe')).inspectView(scene, this.activeCamera, [this.rig, ...(shared ? [shared.group] : [])]),
+      state: () => ({ mode: this.mode, ride: this.ride, viewpoint: this.look.viewpoint, frame: this.controlFrame.yaw, camera: pose(this.activeCamera), fps: this.observedTime ? this.observedFrames / this.observedTime : 0, people: shared ? [...shared.people.values()] : [], bodies: shared?.world.bodies, status: shared?.status }),
     } })
   }
   get activeCamera() { return this.mode === 'overview' ? this.overview : this.renderer.xr.isPresenting ? this.renderer.xr.getCamera() : this.camera }
   get immersive() { return this.mode !== 'overview' }
   private save() { try { localStorage.setItem('obpal.comfort', JSON.stringify(this.settings)) } catch { /* private storage */ } }
   private showLink(url: string) { let a = this.controls.querySelector<HTMLAnchorElement>('a'); if (!a) { a = document.createElement('a'); this.controls.append(a) }; a.href = url; a.textContent = 'Open shared scene'; a.target = '_blank'; a.rel = 'noopener' }
-  recenter() { this.yaw = this.pitch = 0; this.gyroZero = null; this.gyro.identity(); this.lastPosition = null }
-  snap(direction: number) { this.yaw += direction * this.settings.snap * Math.PI / 180 }
+  recenter() { this.look.recenter(); this.gyroZero = null; this.gyro.identity(); this.xrZero = null; this.lastPosition = null; this.steady.reset() }
+  switchView() { const r = this.rides().find(r => r.id === this.ride); this.look.switch(r?.views?.length ?? 1); this.recenter(); this.dispatchEvent(new Event('viewchange')) }
+  snap(direction: number) { this.look.snap(direction, this.settings.snap) }
+  /** A phone acting as both display and motion controller holds its look until the control is released. */
+  motionControl(active: boolean) { if (active) this.motionUntil = performance.now() + 180 }
   setMode(mode: ViewMode) {
     this.mode = mode; this.grab = false; this.grabbing.clear(); this.recenter()
     this.camera.position.set(0, 0, 0); this.camera.quaternion.identity()
@@ -176,24 +191,25 @@ export class Experience extends EventTarget {
   }
   private bindLook() {
     const canvas = this.renderer.domElement
-    let held = false, x = 0, y = 0
-    canvas.addEventListener('pointerdown', e => { if (this.mode !== 'first-person') return; held = true; x = e.clientX; y = e.clientY; canvas.setPointerCapture(e.pointerId) })
-    canvas.addEventListener('pointerup', () => { held = false })
-    canvas.addEventListener('pointercancel', () => { held = false })
+    let x = 0, y = 0
+    canvas.addEventListener('pointerdown', e => { if (this.mode !== 'first-person') return; this.look.held = true; x = e.clientX; y = e.clientY; canvas.setPointerCapture(e.pointerId) })
+    canvas.addEventListener('pointerup', () => { this.look.held = false })
+    canvas.addEventListener('pointercancel', () => { this.look.held = false })
     canvas.addEventListener('pointermove', e => {
-      if (this.mode !== 'first-person' || (!held && document.pointerLockElement !== canvas)) return
-      this.yaw -= (document.pointerLockElement === canvas ? e.movementX : e.clientX - x) * 0.004
-      this.pitch = THREE.MathUtils.clamp(this.pitch - (document.pointerLockElement === canvas ? e.movementY : e.clientY - y) * 0.004, -1.45, 1.45)
+      if (this.mode !== 'first-person' || (!this.look.held && document.pointerLockElement !== canvas)) return
+      this.look.yaw -= (document.pointerLockElement === canvas ? e.movementX : e.clientX - x) * 0.004
+      this.look.pitch = THREE.MathUtils.clamp(this.look.pitch - (document.pointerLockElement === canvas ? e.movementY : e.clientY - y) * 0.004, -1.45, 1.45)
       x = e.clientX; y = e.clientY
     })
     canvas.addEventListener('dblclick', () => { if (this.mode === 'first-person' && !matchMedia('(pointer: coarse)').matches) void canvas.requestPointerLock()?.catch(() => {}) })
-    addEventListener('keydown', e => { if (!this.immersive || /INPUT|SELECT|TEXTAREA/.test((e.target as HTMLElement)?.tagName)) return; if (e.code === 'Escape') void this.leave(); if (e.code === 'KeyQ') this.snap(-1); if (e.code === 'KeyE') this.snap(1) })
+    addEventListener('keydown', e => { if (!this.immersive || e.repeat || /INPUT|SELECT|TEXTAREA/.test((e.target as HTMLElement)?.tagName)) return; if (e.code === 'Escape') void this.leave(); if (e.code === 'KeyQ') this.snap(-1); if (e.code === 'KeyE') this.snap(1); if (e.code === 'KeyV') this.switchView(); if (e.code === 'KeyR') this.recenter() })
     addEventListener('deviceorientation', e => {
       if (!this.sensor || this.mode !== 'first-person' || e.alpha === null || e.beta === null || e.gamma === null) return
       const d = Math.PI / 180
       const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(e.beta * d, e.alpha * d, -e.gamma * d, 'YXZ'))
       q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2))
       q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -(screen.orientation?.angle ?? 0) * d))
+      if (performance.now() < this.motionUntil) { this.gyroZero = this.gyro.clone().multiply(q.clone().invert()); return }
       this.gyroZero ??= q.clone().invert()
       this.gyro.copy(this.gyroZero).multiply(q)
     })
@@ -205,19 +221,40 @@ export class Experience extends EventTarget {
       this.lastUI = now
       if ([...this.picker.options].map(o => o.value).join() !== rides.map(r => r.id).join()) this.picker.replaceChildren(...rides.map(r => new Option(r.name, r.id)))
       this.picker.value = this.ride
-      this.info.textContent = this.shared?.status ?? (this.immersive ? 'Drag to look · Q / E turn · Escape returns' : '')
+      this.info.textContent = this.immersive ? this.mode === 'xr' ? 'X view · Y recenter · B exit · hold trigger to drive arms' : 'Drag to look · V view · R recenter · Q / E turn · Escape returns' : this.shared?.status ?? ''
     }
-    this.camera.aspect = this.renderer.domElement.clientWidth / Math.max(1, this.renderer.domElement.clientHeight); this.camera.updateProjectionMatrix()
     const r = rides.find(r => r.id === this.ride)
+    if (r?.views && this.look.viewpoint >= r.views.length) this.look.viewpoint = 0
+    const viewpoint = r?.views?.[this.look.viewpoint]
+    this.camera.aspect = this.renderer.domElement.clientWidth / Math.max(1, this.renderer.domElement.clientHeight)
+    this.camera.fov = viewFov(this.camera.aspect, this.mode === 'first-person' && this.look.viewpoint === 0 && ['operator', 'table', 'studio', 'scene'].includes(r?.style ?? ''))
+    this.camera.updateProjectionMatrix()
+    const viewLabel = `View: ${viewpoint?.name ?? 'Seat'}`
+    if (this.viewButton.textContent !== viewLabel) this.viewButton.textContent = viewLabel
+    this.viewButton.disabled = (r?.views?.length ?? 1) < 2
     if (r) {
-      const p = r.pose(), e = new THREE.Euler().setFromQuaternion(p.q, 'YXZ')
-      if (this.shared?.guest && this.lastPosition && this.lastPosition.distanceTo(p.p) < 3) p.p.lerp(this.lastPosition, Math.exp(-dt * 30))
+      const target = viewpoint?.pose() ?? r.pose()
+      if (this.settings.horizon) target.q.copy(upright(target.q, !!viewpoint?.level))
+      const p = this.steady.step(target, dt, viewpoint?.follows ? 40 : 18, viewpoint?.follows ? 14 : 10)
+      if (this.settings.horizon) p.q.copy(upright(p.q, !!viewpoint?.level))
+      const e = new THREE.Euler().setFromQuaternion(p.q, 'YXZ')
       const speed = this.lastPosition && dt ? this.lastPosition.distanceTo(p.p) / dt : 0
       const turn = dt ? Math.atan2(Math.sin(e.y - this.lastYaw), Math.cos(e.y - this.lastYaw)) / dt : 0
       this.lastPosition = p.p.clone(); this.lastYaw = e.y
-      if (this.settings.horizon && r.horizon) p.q.setFromAxisAngle(UP, e.y)
-      this.rig.position.copy(p.p); this.rig.quaternion.copy(p.q).multiply(new THREE.Quaternion().setFromAxisAngle(UP, this.yaw))
-      if (this.mode !== 'xr' || this.emulated) this.camera.quaternion.setFromEuler(new THREE.Euler(this.pitch, 0, 0, 'YXZ')).multiply(this.gyro)
+      this.look.step(dt, !!viewpoint?.follows && this.mode !== 'xr', !!r.moving?.())
+      // Artificial yaw is about world up, even when a lens looks down. Head tracking remains local to this origin.
+      this.rig.position.copy(p.p)
+      this.rig.quaternion.copy(p.q).premultiply(new THREE.Quaternion().setFromAxisAngle(UP, this.look.yaw + this.look.turn))
+      if (this.mode !== 'xr' || this.emulated) this.camera.quaternion.setFromEuler(new THREE.Euler(this.look.pitch, 0, 0, 'YXZ')).multiply(this.gyro)
+      else {
+        const xr = this.renderer.xr, reference = xr.getReferenceSpace(), head = reference && xr.getFrame()?.getViewerPose(reference)
+        const m = head?.transform?.matrix ?? head?.views[0]?.transform.matrix
+        if (m) {
+          this.xrZero ??= { p: new THREE.Vector3(m[12], m[13], m[14]), yaw: Math.atan2(m[8], m[10]) }
+          this.rig.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(UP, -this.xrZero.yaw))
+          this.rig.position.sub(this.xrZero.p.clone().applyQuaternion(this.rig.quaternion))
+        }
+      }
       const strength = this.immersive ? vignetteStrength(speed, turn, this.settings.vignette) : 0
       this.overlay.style.opacity = String(strength); this.mask.material.uniforms.strength.value = strength
     }
@@ -231,6 +268,7 @@ export class Experience extends EventTarget {
       this.renderer.xr.updateCamera(this.camera)
       this.observedFrames++; this.observedTime += dt
     }
+    this.controlFrame.set(this.activeCamera.getWorldQuaternion(new THREE.Quaternion()))
     if (this.shared && r) {
       const pad = emptyPad()
       const hands: Pose[] = []
@@ -250,11 +288,13 @@ export class Experience extends EventTarget {
         const side = source.handedness === 'left' ? 0 : 1
         pad.axes[side * 2] = gamepad.axes[2] ?? gamepad.axes[0] ?? 0; pad.axes[side * 2 + 1] = gamepad.axes[3] ?? gamepad.axes[1] ?? 0
         pad.triggers[side] = gamepad.buttons[0]?.value ?? 0
-        if (gamepad.buttons[4]?.pressed) pad.buttons |= 1
-        if (gamepad.buttons[5]?.pressed) void this.leave()
+        const buttons = (gamepad.buttons[4]?.pressed ? 1 : 0) | (gamepad.buttons[5]?.pressed ? 2 : 0)
+        const pressed = buttons & ~this.xrButtons[n]; this.xrButtons[n] = buttons
+        if (side === 0) { if (pressed & 1) this.switchView(); if (pressed & 2) this.recenter() }
+        else { if (buttons & 1) pad.buttons |= 1; if (pressed & 2) void this.leave() }
       }
       if (!this.drive) {
-        if (Math.abs(pad.axes[2]) > 0.7 && !this.turning) this.snap(pad.axes[2] > 0 ? -1 : 1)
+        if (Math.abs(pad.axes[2]) > 0.7 && !this.turning) this.snap(pad.axes[2] > 0 ? 1 : -1)
         this.turning = Math.abs(pad.axes[2]) > 0.3
       }
       const reference = this.renderer.xr.getReferenceSpace()

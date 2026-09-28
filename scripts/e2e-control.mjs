@@ -199,15 +199,44 @@ export async function runControl(local, check) {
     await claw.position(); await claw.record()
     await check('control space: the claw covers its pit and recentres from the phone and sim panel', async () => {
       await claw.aim(0.9, 0.8)
-      await until(() => claw.screen.evaluate(() => window.__device.logic.claws[0].x > 0.48 && window.__device.logic.claws[0].z < -0.42), 'far pit corner')
+      await until(() => claw.screen.evaluate(() => {
+        const d = window.__device, c = d.stage.view.presence.activeCamera, u = d.logic.claws[0]
+        const centre = c.position.clone().set(-1, 1.3, 0).project(c), tip = c.position.clone().set(u.x - 1, 1.3, u.z).project(c)
+        return tip.x > centre.x + 0.02 && tip.y > centre.y + 0.02
+      }), 'far pit corner in the view frame')
       await claw.position()
       await until(() => claw.screen.evaluate(() => Math.hypot(window.__device.logic.claws[0].x, window.__device.logic.claws[0].z) < 0.03), 'new neutral')
       await claw.orient({ alpha: 0, beta: 70, gamma: 0 })
       await claw.screen.locator('.control-scopes button').filter({ hasText: 'Set position' }).click()
       await claw.motion(); await sleep(100)
       await claw.aim(-0.9, -0.8)
-      await until(() => claw.screen.evaluate(() => window.__device.logic.claws[0].x < -0.48 && window.__device.logic.claws[0].z > 0.42), 'near pit corner')
+      await until(() => claw.screen.evaluate(() => {
+        const d = window.__device, c = d.stage.view.presence.activeCamera, u = d.logic.claws[0]
+        const centre = c.position.clone().set(-1, 1.3, 0).project(c), tip = c.position.clone().set(u.x - 1, 1.3, u.z).project(c)
+        return tip.x < centre.x - 0.02 && tip.y < centre.y - 0.02
+      }), 'near pit corner in the view frame')
       await claw.capture()
+    })
+    await check('control space: a paired phone aims screen right after orbiting behind and entering first person', async () => {
+      for (const mode of ['overview', 'first-person']) {
+        await claw.screen.evaluate(mode => {
+          const s = window.__device.stage, e = s.view.presence
+          if (mode === 'overview') { const d = s.camera.position.clone().sub(s.controls.target); d.x *= -1; d.z *= -1; s.camera.position.copy(s.controls.target).add(d); s.controls.update() }
+          else e.setMode(mode)
+        }, mode)
+        await claw.aim(0, 0); await sleep(300)
+        const before = await claw.screen.evaluate(() => {
+          const d = window.__device, c = d.stage.view.presence.activeCamera, u = d.logic.claws[0]
+          return c.position.clone().set(u.x - 1, 1.3, u.z).project(c).x
+        })
+        await claw.aim(0.65, 0); await sleep(300)
+        const after = await claw.screen.evaluate(() => {
+          const d = window.__device, c = d.stage.view.presence.activeCamera, u = d.logic.claws[0]
+          return c.position.clone().set(u.x - 1, 1.3, u.z).project(c).x
+        })
+        assert(after - before > 0.04, `${mode}: calibrated right projected ${after - before}`)
+      }
+      await claw.screen.evaluate(() => window.__device.stage.view.presence.setMode('overview'))
     })
     await check('control space: scene selection has its own reach and returns to object control', async () => {
       await claw.scope('scene'); await claw.aim(0.72, 0)
@@ -243,8 +272,12 @@ export async function runControl(local, check) {
         await hockey.scope(scope)
         for (const [x, y] of [[-0.95, 0.95], [0.95, -0.95]]) {
           await hockey.aim(x, y, [30, 25]); await sleep(450)
-          const u = await hockey.screen.evaluate(() => window.__device.logic.units[0])
-          assert(Math.abs(u.x - x * 0.86) < 0.03 && u.z >= 0.14 && u.z <= 1.46, JSON.stringify(u))
+          const result = await hockey.screen.evaluate(() => {
+            const d = window.__device, u = d.logic.units[0], c = d.stage.view.presence.activeCamera
+            const centre = c.position.clone().set(0, 1.02, 0.8).project(c), mallet = c.position.clone().set(u.x, 1.02, u.z).project(c)
+            return { ...u, dx: mallet.x - centre.x, dy: mallet.y - centre.y }
+          })
+          assert(result.dx * x > 0.01 && result.dy * y > 0.01 && Math.abs(result.x) <= 0.86 && result.z >= 0.14 && result.z <= 1.46, JSON.stringify(result))
         }
       }
       await hockey.capture()

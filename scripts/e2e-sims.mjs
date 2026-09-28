@@ -15,6 +15,7 @@ import { cspCheck } from './csp-watch.mjs'
 import { runMusic } from './e2e-music.mjs'
 import { runControl } from './e2e-control.mjs'
 import { runVR } from './e2e-vr.mjs'
+import { runControlViews } from './e2e-control-views.mjs'
 import { runAudio } from './e2e-audio.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
 
@@ -67,6 +68,8 @@ async function phone(invite, { xr = true, way = 'motion' } = {}) {
   const ctx = await chromium.launchPersistentContext(dir, { ...devices['Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS })
   closers.push(ctx)
   const page = ctx.pages()[0] ?? (await ctx.newPage())
+  // Test gestures start after onboarding; a delayed hint must not intercept a scene claim.
+  await ctx.addInitScript(() => sessionStorage.setItem('obpal.hint.gyro', '1'))
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
   const cdp = await ctx.newCDPSession(page)
@@ -428,6 +431,7 @@ try {
   await runControl(local, check)
   await runMusic(local, check)
   await runVR(local, check)
+  await runControlViews(local, check)
   await runAudio(local, check)
   await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {

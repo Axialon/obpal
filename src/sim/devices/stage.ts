@@ -158,12 +158,12 @@ export function createStage(canvas: HTMLCanvasElement, theme: Theme): Stage {
     },
     pick(x, y, y0 = 0) {
       ndc.set((x / innerWidth) * 2 - 1, -(y / innerHeight) * 2 + 1)
-      raycaster.setFromCamera(ndc, camera)
+      raycaster.setFromCamera(ndc, view.presence?.activeCamera ?? camera)
       plane.constant = -y0
       return raycaster.ray.intersectPlane(plane, new THREE.Vector3())
     },
     toScreen(p) {
-      const v = p.clone().project(camera)
+      const v = p.clone().project(view.presence?.activeCamera ?? camera)
       if (v.z > 1) return null
       return { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight }
     },

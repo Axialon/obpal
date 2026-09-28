@@ -6,8 +6,12 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium, devices } from 'playwright'
 
-function fakeXR() {
-  const matrix = (x = 0) => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, 0, 0, 1]
+export function fakeXR() {
+  window.__xrHead = { x: 0, y: 1.6, z: 0, yaw: 0 }
+  const matrix = (offset = 0, hand = false) => {
+    const h = window.__xrHead, c = Math.cos(h.yaw), s = Math.sin(h.yaw)
+    return [c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, h.x + offset * c, h.y - (hand ? 0.25 : 0), h.z - offset * s - (hand ? 0.3 : 0), 1]
+  }
   const projection = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1.0002, -1, 0, 0, -0.020002, 0]
   class Session extends EventTarget {
     renderState = { depthNear: 0.01, depthFar: 100, baseLayer: null }
@@ -18,11 +22,22 @@ function fakeXR() {
     supportedFrameRates = new Float32Array([72, 90])
     frameRate = 72
     ended = false
+    setInput(axes = [0, 0, 0, 0], triggers = [0, 0], buttons = 0) {
+      if (!this.inputSources.length) {
+        this.inputSources = ['left', 'right'].map((handedness, n) => ({ handedness, targetRayMode: 'tracked-pointer', targetRaySpace: { n }, gripSpace: { n }, profiles: ['generic-trigger-squeeze-thumbstick'], gamepad: { mapping: 'xr-standard', axes: [0, 0, 0, 0], buttons: Array.from({length:6}, () => ({pressed:false,touched:false,value:0})) } }))
+        this.dispatchEvent(Object.assign(new Event('inputsourceschange'), { added: this.inputSources, removed: [] }))
+      }
+      this.inputSources.forEach((source, n) => {
+        source.gamepad.axes = [0, 0, ...axes.slice(n * 2, n * 2 + 2)]
+        source.gamepad.buttons[0] = { value: triggers[n], pressed: triggers[n] > 0.5, touched: triggers[n] > 0 }
+        source.gamepad.buttons[4].pressed = n === 1 && !!(buttons & 1)
+      })
+    }
     updateRenderState(state) { Object.assign(this.renderState, state) }
     requestReferenceSpace() { return Promise.resolve({}) }
     updateTargetFrameRate(hz) { this.frameRate = hz; return Promise.resolve() }
     requestAnimationFrame(callback) {
-      return requestAnimationFrame(time => { if (!this.ended) callback(time, { session: this, getViewerPose: () => ({ views: [-0.032, 0.032].map(x => ({ eye: x < 0 ? 'left' : 'right', transform: { matrix: matrix(x) }, projectionMatrix: projection })) }), getPose: () => null }) })
+      return requestAnimationFrame(time => { if (!this.ended) callback(time, { session: this, getViewerPose: () => ({ transform: { matrix: matrix() }, views: [-0.032, 0.032].map(x => ({ eye: x < 0 ? 'left' : 'right', transform: { matrix: matrix(x) }, projectionMatrix: projection })) }), getPose: space => ({ transform: { matrix: matrix(space.n ? 0.2 : -0.2, true) }, emulatedPosition: false }) }) })
     }
     cancelAnimationFrame(id) { cancelAnimationFrame(id) }
     end() { this.ended = true; this.dispatchEvent(new Event('end')); return Promise.resolve() }
@@ -99,6 +114,7 @@ export async function runVR(local, check) {
         b.p = [d.x, 0.16, d.z - 0.8]; b.v = [0, 0, 0]
       })
       await guest.waitForTimeout(150)
+      await guest.getByRole('button', { name: 'Options', exact: true }).click()
       await guest.getByRole('button', { name: 'Grab / release', exact: true }).click()
       await host.waitForFunction(() => window.__presence.shared.world.bodies.some(b => b.owner && b.owner !== 'host'))
       await guest.waitForFunction(() => window.__presence.shared.world.bodies.some(b => b.owner))

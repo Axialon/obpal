@@ -2,8 +2,9 @@ import type { SimValue } from '@obpal/core'
 import type { DeviceLogic } from '../devices/types'
 
 /** Only presentation state crosses the link, never private input filters, drivers or hardware connections. */
-const keys = ['units', 'drones', 'rovers', 'boards', 'cams', 'lamps', 'claws', 'prizes', 'cones', 'pallets', 'hits', 'counts', 'last', 'puck', 'ball', 'rods', 'scores', 'sand', 'strokes', 'rocks', 'time', 'train', 'balls', 'targets', 'dust', 'temperature']
+const keys = ['units', 'drones', 'rovers', 'boards', 'cams', 'lamps', 'claws', 'prizes', 'cones', 'pallets', 'hits', 'counts', 'last', 'cursor', 'aimed', 'puck', 'ball', 'rods', 'scores', 'sand', 'strokes', 'rocks', 'time', 'train', 'balls', 'targets', 'dust', 'temperature']
 function plain(v: unknown): SimValue {
+  if (v instanceof Set) return [...v].map(plain)
   if (ArrayBuffer.isView(v)) return Array.from(v as unknown as ArrayLike<number>)
   if (Array.isArray(v)) return v.map(plain)
   if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).filter(([, x]) => typeof x !== 'function').map(([k, x]) => [k, plain(x)]))
@@ -15,6 +16,7 @@ export function captureDevice(logic: DeviceLogic): SimValue {
 }
 /** Preserve array and object references retained by a view. Only host snapshots enter here. */
 function assign(to: unknown, from: SimValue): unknown {
+  if (to instanceof Set && Array.isArray(from)) { to.clear(); from.forEach(v => to.add(v)); return to }
   if (ArrayBuffer.isView(to) && Array.isArray(from)) { (to as unknown as Float32Array).set(from as number[]); return to }
   if (Array.isArray(to) && Array.isArray(from)) { from.forEach((v, i) => { to[i] = assign(to[i], v) }); to.length = from.length; return to }
   if (to && from && typeof to === 'object' && typeof from === 'object' && !Array.isArray(from)) {

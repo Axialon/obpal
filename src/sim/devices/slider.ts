@@ -3,6 +3,7 @@ import { Controller, PadButton } from '@obpal/core'
 import { Machine, action, timestep } from './common'
 import { axis, clamp } from './input'
 import type { DeviceInput, DeviceSpec } from './types'
+import { rail, panSign } from '../vr/intent'
 
 export const SLIDER_SPEC: DeviceSpec = {
   category: 'camera-stage',
@@ -33,12 +34,12 @@ export class SliderLogic extends Machine {
       const pan = i?.pad ? -axis(i.pad.axes[2]) * dt * 0.7 : -(i?.pan[0] ?? 0) * 0.005
       const tilt = i?.pad ? -axis(i.pad.axes[3]) * dt * 0.7 : -(i?.pan[1] ?? 0) * 0.005
       if (x || pan || tilt) u.playing = false
-      u.x = clamp(u.x + x, -1.7, 1.7); u.pan = clamp(u.pan + pan, -1.2, 1.2); u.tilt = clamp(u.tilt + tilt, -0.65, 0.8)
+      u.x = clamp(u.x + x * rail(i?.controlFrame), -1.7, 1.7); u.pan = clamp(u.pan + pan * panSign(i?.controlFrame, u.pan + Math.atan2(n * 5, 3.5)), -1.2, 1.2); u.tilt = clamp(u.tilt + tilt, -0.65, 0.8)
       if (i?.space && !i.pad) {
         const [ax, ay] = i.space.aim
         const last = this.lastAim[n]
         if (last && Math.hypot(ax - last[0], ay - last[1]) > 0.025) u.playing = false
-        if (!u.playing) { u.x = ax * 1.7; u.tilt = ay * (ay >= 0 ? 0.8 : 0.65) }
+        if (!u.playing) { u.x = ax * 1.7 * rail(i.controlFrame); u.tilt = ay * (ay >= 0 ? 0.8 : 0.65) }
         this.lastAim[n] = [ax, ay]
       } else this.lastAim[n] = null
       for (const v of raw?.values ?? []) if (v.id === 'duration' && ['4', '8', '12'].includes(String(v.v))) { u.duration = Number(v.v); u.playing = false }

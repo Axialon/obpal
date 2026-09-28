@@ -9,6 +9,7 @@ import { handMove, headingOf } from '@obpal/host'
 import { clamp, padStick } from './input'
 import { seeded } from './maze'
 import type { DeviceEvent, DeviceInput, DeviceLogic, DeviceSpec } from './types'
+import { planar } from '../vr/intent'
 
 export const CLAW_SPEC: DeviceSpec = {
   id: 'claw',
@@ -110,7 +111,7 @@ export function clawIntent(inp: DeviceInput, c: Claw, at: [number, number], hand
   const drop = inp.presses.includes('drop') || inp.presses.includes('wii-a') || inp.presses.includes('mouse-left') || inp.presses.includes('pad') || pressed(PadButton.A)
   const i: ClawIntent = { goal: null, move: [0, 0], drop }
   if (inp.pad) {
-    i.move = padStick(inp.pad, 'left')
+    i.move = planar(inp.controlFrame, ...padStick(inp.pad, 'left'))
     return i
   }
   if (inp.point) {
@@ -127,9 +128,9 @@ export function clawIntent(inp: DeviceInput, c: Claw, at: [number, number], hand
     return i
   }
   hand.anchor = null
-  if (inp.mode === Mode.tilt && (inp.tilt[0] || inp.tilt[1])) i.move = [inp.tilt[0], inp.tilt[1]]
+  if (inp.mode === Mode.tilt && (inp.tilt[0] || inp.tilt[1])) i.move = planar(inp.controlFrame, ...inp.tilt)
   // Dragging moves the claw with the thumb (a floating stick would overshoot a prize).
-  if (inp.drag[0] || inp.drag[1]) i.goal = [c.x + inp.drag[0] * 0.0022, c.z + inp.drag[1] * 0.0022]
+  if (inp.drag[0] || inp.drag[1]) { const [x, z] = planar(inp.controlFrame, ...inp.drag); i.goal = [c.x + x * 0.0022, c.z + z * 0.0022] }
   return i
 }
 

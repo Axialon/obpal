@@ -1,5 +1,6 @@
 /** A tracked toy with an independently aimed turret and soft, gravity-driven practice balls. */
 import { Controller } from '@obpal/core'
+import { panSign } from '../vr/intent'
 import { action, drive, Machine, timestep } from './common'
 import { axis, clamp, DragStick, wrapPi } from './input'
 import type { DeviceInput, DeviceSpec } from './types'
@@ -78,9 +79,9 @@ export class TankLogic extends Machine {
       if (i) {
         if (i.space && (!i.pad || i.space.pointer)) {
           const [x, y] = i.space.aim
-          u.turret = -x * Math.PI; u.elevation = 0.08 + y * (y >= 0 ? 0.52 : 0.16)
+          u.turret = -x * Math.PI * (i.controlFrame?.immersive ? 1 : panSign(i.controlFrame, u.h)); u.elevation = 0.08 + y * (y >= 0 ? 0.52 : 0.16)
         } else {
-          u.turret = wrapPi(u.turret - (i.pad ? axis(i.pad.axes[2]) * dt * 1.8 : i.pan[0] * 0.012))
+          u.turret = wrapPi(u.turret - (i.pad ? axis(i.pad.axes[2]) * dt * 1.8 : i.pan[0] * 0.012) * panSign(i.controlFrame, u.h + u.turret))
           u.elevation = clamp(u.elevation - (i.pad ? axis(i.pad.axes[3]) * dt : i.pan[1] * 0.006), -0.08, 0.6)
         }
       }

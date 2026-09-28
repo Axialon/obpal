@@ -46,7 +46,7 @@ export class KartLogic extends Machine {
       const raw = inputs[n] ?? null
       if (!raw || raw.quiet || (!raw.touching && ![...(raw.pad?.axes ?? []), ...(raw.pad?.triggers ?? []), ...raw.tilt, ...raw.pan].some((v) => Math.abs(v) > 0.05))) this.waiting[n] = false
       const i = raw?.quiet || this.waiting[n] ? null : raw
-      const [steer, power] = drive(i, this.drags[n])
+      const [steer, power] = drive(i, this.drags[n], true)
       u.drift = i ? Math.max(0, u.drift - dt) : 0
       if (action(i, 'drift') || (!this.waiting[n] && raw?.presses.includes('drift'))) {
         u.drift = 0.85

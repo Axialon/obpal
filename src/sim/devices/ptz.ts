@@ -11,6 +11,7 @@
 import { Controller, Mode, PadButton, type Quat } from '@obpal/core'
 import { clamp, padStick, panTiltOf, readable } from './input'
 import type { DeviceEvent, DeviceInput, DeviceLogic, DeviceSpec } from './types'
+import { panSign } from '../vr/intent'
 
 export const PTZ_SPEC: DeviceSpec = {
   id: 'ptz',
@@ -100,11 +101,12 @@ const clampAim = (pan: number, tilt: number): [number, number] => [clamp(pan, -P
 /** A camera's goal and zoom from its operator's input, by the controller in use. Returns whether a picture was asked for. */
 export function ptzControl(c: Cam, inp: DeviceInput, dt: number): boolean {
   const P = PTZ
+  const direction = panSign(inp.controlFrame, c.pan)
   const pressed = (b: number) => ((inp.padPressed >>> b) & 1) === 1
   const snap = inp.presses.includes('snap') || inp.presses.includes('wii-a') || inp.presses.includes('mouse-left') || inp.presses.includes('pad') || pressed(PadButton.A)
   const zoomBy = (k: number) => { c.zoom = clamp(c.zoom * k, P.zoomMin, P.zoomMax) }
   if (inp.space && (!inp.pad || inp.space.pointer)) {
-    const [x, y] = inp.space.aim
+    const [ax, y] = inp.space.aim, x = ax * (inp.controlFrame?.immersive ? 1 : panSign(inp.controlFrame, c.home[0]))
     c.goal = [c.home[0] - x * (x >= 0 ? c.home[0] + P.pan : P.pan - c.home[0]), c.home[1] + y * (y >= 0 ? P.tiltUp - c.home[1] : c.home[1] - P.tiltDown)]
     for (const p of inp.presses) {
       if (p === 'wii-plus') zoomBy(1.25)
@@ -115,7 +117,7 @@ export function ptzControl(c: Cam, inp: DeviceInput, dt: number): boolean {
   } else if (inp.point) {
     // The camera looks where the phone points, from centre (⌂ puts the phone's aim back there).
     const k = P.gain / Math.sqrt(c.zoom)
-    c.goal = clampAim(c.home[0] + -inp.point.yaw * D2R * k, c.home[1] + inp.point.pitch * D2R * k)
+    c.goal = clampAim(c.home[0] + -inp.point.yaw * D2R * k * (inp.controlFrame?.immersive ? 1 : panSign(inp.controlFrame, c.home[0])), c.home[1] + inp.point.pitch * D2R * k)
     for (const p of inp.presses) {
       if (p === 'wii-plus') zoomBy(1.25)
       if (p === 'wii-minus') zoomBy(0.8)
@@ -126,7 +128,7 @@ export function ptzControl(c: Cam, inp: DeviceInput, dt: number): boolean {
     const [lx, ly] = padStick(inp.pad, 'left')
     const x = rx || lx, y = ry || ly
     const k = 1 / c.zoom
-    c.goal = clampAim(c.goal[0] - x * P.panRate * 0.7 * k * dt, c.goal[1] - y * P.tiltRate * 0.7 * k * dt)
+    c.goal = clampAim(c.goal[0] - x * P.panRate * 0.7 * k * dt * direction, c.goal[1] - y * P.tiltRate * 0.7 * k * dt)
     const [lt, rt] = inp.pad.triggers
     if (Math.abs(rt - lt) > 0.05) zoomBy(Math.pow(2, (rt - lt) * 1.6 * dt))
     if (pressed(PadButton.Up)) zoomBy(1.25)
@@ -135,14 +137,14 @@ export function ptzControl(c: Cam, inp: DeviceInput, dt: number): boolean {
     // 1:1: it turns as the phone turns, from where it was aiming when the gyro came on.
     if (!c.anchor) c.anchor = { pan: c.goal[0], tilt: c.goal[1] }
     const [yaw, pitch] = panTiltOf(inp.hold as Quat)
-    c.goal = clampAim(c.anchor.pan + yaw, c.anchor.tilt + pitch)
+    c.goal = clampAim(c.anchor.pan + yaw * (inp.controlFrame?.immersive ? 1 : panSign(inp.controlFrame, c.anchor.pan)), c.anchor.tilt + pitch)
     if (inp.pinch) zoomBy(Math.pow(2, inp.pinch))
   } else {
     // Dragging turns it by hand; with the gyro on in Tilt, tilting turns it like a stick.
     c.anchor = null
     const k = P.drag / c.zoom
-    let [pan, tilt] = [c.goal[0] - inp.drag[0] * k, c.goal[1] - inp.drag[1] * k]
-    if (inp.mode === Mode.tilt) { pan -= inp.tilt[0] * P.panRate * 0.6 * dt / c.zoom; tilt -= inp.tilt[1] * P.tiltRate * 0.6 * dt / c.zoom }
+    let [pan, tilt] = [c.goal[0] - inp.drag[0] * k * direction, c.goal[1] - inp.drag[1] * k]
+    if (inp.mode === Mode.tilt) { pan -= inp.tilt[0] * P.panRate * 0.6 * dt / c.zoom * direction; tilt -= inp.tilt[1] * P.tiltRate * 0.6 * dt / c.zoom }
     c.goal = clampAim(pan, tilt)
     if (inp.pinch) zoomBy(Math.pow(2, inp.pinch))
   }

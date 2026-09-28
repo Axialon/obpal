@@ -18,7 +18,8 @@ import { startSimScene, type SimScene } from './scene'
 import { simView } from './view'
 import { Experience } from './vr/experience'
 import { SharedPresence } from './vr/presence'
-import { anchorPose } from './vr/rigs'
+import { looking, type Ride } from './vr/rigs'
+import { ControlFrame } from './vr/control-frame'
 import { mountSound } from './audio/session'
 
 applyTheme(initialTheme())
@@ -144,10 +145,10 @@ let sim: SimScene | null = null
 const sound = mountSound('arena', (strong, weak, ms, who) => sim?.remote.rumble(strong, weak, ms, who))
 let soundAt = 0
 const xrPads = new Map<string, { pad: PadState; at: number }>()
-const rides = () => slots.map(s => ({ id: s.id, name: s.name, pose: () => {
-  const anchor = s.group.getObjectByName('pov')
-  return anchor ? anchorPose(anchor) : { p: new THREE.Vector3(s.pos.x, 0.28, s.pos.y), q: new THREE.Quaternion() }
-} }))
+const rides = (): Ride[] => slots.map(s => {
+  const seat = () => looking(new THREE.Vector3(s.spawn.x * 2.5, 2.1, s.spawn.y * 2.5), new THREE.Vector3(0, 0.1, 0))
+  return { id: s.id, name: s.name, style: 'table', horizon: true, pose: seat, views: [{ name: 'Player', pose: seat }, { name: 'Wide', pose: () => looking(new THREE.Vector3(s.spawn.x * 3.2, 3.3, s.spawn.y * 3.2), new THREE.Vector3()) }] }
+})
 const shared = new SharedPresence({
   rides,
   capture: () => slots.map(s => ({ p: s.group.position.toArray(), visible: s.group.visible, color: (s.ring.material as THREE.MeshStandardMaterial).emissive.getHex() })),
@@ -232,6 +233,9 @@ function loop(now: number) {
     padA.set(who, a)
     const calibrated = sim.control.aim(who)
     const d = steer(calibrated && !pad ? { ...f, tilt: calibrated.tilt } : f, pad)
+    const head = xrPad ? shared.people.get(who)?.head.q : undefined
+    const frame = head ? new ControlFrame().set(new THREE.Quaternion(...head)) : view.presence!.controlFrame
+    d.set(...frame.planar(d.x, d.y))
     if (d.lengthSq() > 1) d.normalize()
     s.vel.addScaledVector(d, 4.3 * dt)
   }

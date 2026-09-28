@@ -3,6 +3,7 @@ import { Controller, PadButton } from '@obpal/core'
 import { action, Machine, timestep } from './common'
 import { axis, clamp, down, wrapPi } from './input'
 import type { DeviceInput, DeviceSpec } from './types'
+import { planar } from '../vr/intent'
 export const EXCAVATOR_SPEC: DeviceSpec = {
   id: 'excavator',
   name: 'Excavator',
@@ -85,9 +86,14 @@ export class ExcavatorLogic extends Machine {
     const was = { ...u }
     if (i.pad) {
       const a = i.pad.axes
-      u.swing = wrapPi(u.swing - axis(a[0]) * dt)
-      u.stick = clamp(u.stick - axis(a[1]) * dt, -2.4, -0.1)
-      u.boom = clamp(u.boom + axis(a[3]) * dt, 0.05, 1.35)
+      if (i.controlFrame) {
+        const tip = bucketTip(u), [x, z] = planar(i.controlFrame, axis(a[0]) * dt, axis(a[1]) * dt)
+        Object.assign(u, bucketPose(tip[0] + x - u.x, tip[1] - axis(a[3]) * dt, tip[2] + z - u.z))
+      } else {
+        u.swing = wrapPi(u.swing - axis(a[0]) * dt)
+        u.stick = clamp(u.stick - axis(a[1]) * dt, -2.4, -0.1)
+        u.boom = clamp(u.boom + axis(a[3]) * dt, 0.05, 1.35)
+      }
       u.curl = clamp(u.curl - axis(a[2]) * dt, 0, 1)
       u.z = clamp(u.z + (i.pad.triggers[0] - i.pad.triggers[1]) * dt, -2, 3)
       if (down(i.pad.buttons, PadButton.B)) u.curl = 0
@@ -98,7 +104,8 @@ export class ExcavatorLogic extends Machine {
       const a = this.hand
       if (i.space) {
         const swing = -i.space.aim[0] * Math.PI, radius = clamp(Math.hypot(a.tip[0] - u.x, a.tip[2] - u.z) + (pose.p[2] - a.p[2]) * 4, 0.7, 3)
-        Object.assign(u, bucketPose(-Math.sin(swing) * radius, 1.55 + i.space.aim[1] * 1.4, -Math.cos(swing) * radius))
+        const [x, z] = planar(i.controlFrame, -Math.sin(swing) * radius, -Math.cos(swing) * radius)
+        Object.assign(u, bucketPose(x, 1.55 + i.space.aim[1] * 1.4, z))
       } else Object.assign(
         u,
         bucketPose(

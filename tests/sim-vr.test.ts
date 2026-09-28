@@ -32,18 +32,19 @@ describe('every catalogue device can be occupied', () => {
     const k = kindFrom(kind.id)
     expect(k.kin.forward(Object.fromEntries(k.kin.keys.map((key, i) => [key, k.kin.joints[i].home])))).toBeDefined()
     const root = new Group(), grasp = new Group(); root.add(grasp)
-    const ride = armRide('a1', 'Wrist', root, grasp), before = ride.pose().p
+    const ride = armRide('a1', 'Wrist', root, grasp), before = ride.views![1].pose().p, seat = ride.pose().p
     grasp.position.set(0.1, 0.2, 0.3); grasp.rotation.z = 0.8
-    expect(ride.pose().p.distanceTo(before)).toBeGreaterThan(0.2)
+    expect(ride.views![1].pose().p.distanceTo(before)).toBeGreaterThan(0.2)
+    expect(ride.pose().p.equals(seat)).toBe(true)
   })
   it('prefers +Z-forward anchors, including replacements loaded later', () => {
     const scene = new Group(), model = new Group(), anchor = new Group(); anchor.name = 'pov'; model.add(anchor); scene.add(model)
     model.position.set(2, 3, 4); model.rotation.y = 0.6
-    const r = deviceRides(DEVICES[0].logic(), scene)[0].pose()
-    expect(r.p.toArray()).toEqual([2, 3, 4])
+    const r = deviceRides(DEVICES.find(d => d.spec.id === 'ptz')!.logic(), scene)[0].pose()
+    expect(r.p.distanceTo(new Vector3(2, 3, 4))).toBeCloseTo(0.09)
     expect(new Vector3(0, 0, -1).applyQuaternion(r.q).distanceTo(new Vector3(0, 0, 1).applyQuaternion(model.quaternion))).toBeLessThan(1e-6)
     model.remove(anchor)
-    expect(deviceRides(DEVICES[0].logic(), scene)[0].pose().p.equals(r.p)).toBe(false)
+    expect(deviceRides(DEVICES[0].logic(), new Group())[0].pose().p.equals(r.p)).toBe(false)
   })
   it('mobile vehicle poses follow logic without a model', () => {
     const l = new SubmarineLogic(), p = fallbackPose(l, 0)

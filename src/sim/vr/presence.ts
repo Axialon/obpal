@@ -101,7 +101,8 @@ export class SharedPresence {
     const ride = this.adapter.rides().find(r => r.id === p.ride)
     if (!ride) return
     // A seated presence can lean and reach, but cannot teleport a grab across the world.
-    if (distance(ride.pose().p.toArray() as V3, p.head.p) > 3 || p.hands.some(h => distance(h.p, p.head.p) > 2)) return
+    const viewpoints = ride.views ?? [{ pose: ride.pose }]
+    if (viewpoints.every(v => distance(v.pose().p.toArray() as V3, p.head.p) > 3) || p.hands.some(h => distance(h.p, p.head.p) > 2)) return
     this.people.set(id, { ...p, id, color })
     if (this.adapter.allowed?.(id) === false) { this.world.release(id, false); return }
     if (p.active && p.pad) this.adapter.drive?.(id, p.ride, p.pad)

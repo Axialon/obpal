@@ -1,7 +1,8 @@
 /** A shared table: each phone owns one mallet and stays on its side of the centre line. */
 import { Controller } from '@obpal/core'
 import { Machine, timestep } from './common'
-import { clamp } from './input'
+import { axis, clamp } from './input'
+import { planar } from '../vr/intent'
 import type { DeviceInput, DeviceSpec } from './types'
 
 export const AIRHOCKEY_SPEC: DeviceSpec = {
@@ -55,11 +56,14 @@ export class AirhockeyLogic extends Machine {
           u.tx = live.spot[0] - (zero?.[0] ?? 0)
           u.tz = zero ? startZ(n) + live.spot[1] - zero[1] : live.spot[1]
         } else if (live.point && !live.point.off) {
-          u.tx = (live.point.yaw - this.angleZeros[n][0]) * 0.04
-          u.tz = startZ(n) - (live.point.pitch - this.angleZeros[n][1]) * 0.035
+          const [x, z] = planar(live.controlFrame, (live.point.yaw - this.angleZeros[n][0]) * 0.04, -(live.point.pitch - this.angleZeros[n][1]) * 0.035)
+          u.tx = x; u.tz = startZ(n) + z
+        } else if (live.pad) {
+          const [x, z] = planar(live.controlFrame, axis(live.pad.axes[0]), axis(live.pad.axes[1]))
+          u.tx += x * dt * 2; u.tz += z * dt * 2
         } else if (live.drag.every(Number.isFinite)) {
-          u.tx += live.drag[0] * 0.008
-          u.tz += live.drag[1] * 0.008
+          const [x, z] = planar(live.controlFrame, ...live.drag)
+          u.tx += x * 0.008; u.tz += z * 0.008
         }
         u.tx = clamp(u.tx, -M.halfWidth + M.mallet, M.halfWidth - M.mallet)
         u.tz = n === 0 ? clamp(u.tz, M.mallet, M.halfLength - M.mallet) : clamp(u.tz, -M.halfLength + M.mallet, -M.mallet)

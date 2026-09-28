@@ -6,7 +6,7 @@
 .music-heading b { font: 750 25px var(--font-display); letter-spacing: -0.04em; }
 .music-part { font-size: 12px; color: var(--muted); text-align: right; }
 .music-options { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
-.music-options label { flex: 1; color: var(--muted); font-size: 11px; display: grid; gap: 4px; }
+.music-options label { flex: 1; min-width: 0; color: var(--muted); font-size: 11px; display: grid; gap: 4px; }
 .music-options select, .music-toggle, .music-options button, .sustain { min-height: 44px; border: 1px solid var(--glass-edge); border-radius: 12px; background: var(--glass); color: var(--ink); padding: 8px 12px; font: inherit; }
 .music-toggle[aria-pressed=true], .sustain.playing { color: var(--accent); border-color: var(--accent); }
 .drum-pads { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, minmax(58px, 1fr)); gap: 9px; }

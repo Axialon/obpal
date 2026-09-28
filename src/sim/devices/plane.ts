@@ -72,7 +72,7 @@ export class PlaneLogic extends Machine {
       i = inputs[0] ?? null,
       u = this.units[0]
     if (action(i, 'engine')) u.powered = !u.powered
-    const [sx, sy] = drive(i, this.drag),
+    const [sx, sy] = drive(i ? { ...i, controlFrame: undefined } : null, this.drag),
       roll = i?.pad ? axis(i.pad.axes[2]) : sx,
       pitch = i?.pad ? -axis(i.pad.axes[3]) : sy
     const live = !!i && !i.quiet && (!!i.pad || (i.face === 'face.trackpad' && (i.touching || i.mode === Mode.tilt)))

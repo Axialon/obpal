@@ -3,6 +3,7 @@ import { Controller } from '@obpal/core'
 import { Machine, action, timestep } from './common'
 import { axis, clamp, wrapPi } from './input'
 import type { DeviceInput, DeviceSpec } from './types'
+import { rail } from '../vr/intent'
 
 export const FOOTBALL_SPEC: DeviceSpec = {
   category: 'games',
@@ -45,7 +46,7 @@ export class FootballLogic extends Machine {
       const dx = live?.pad ? axis(live.pad.axes[r.stick * 2]) * dt * 1.2 : (r.stick ? live?.pan[0] : live?.drag[0]) ?? 0
       const gesture = reach ? wrapPi(-reach[1] * Math.PI - rod.angle * (r.seat % 2 ? -1 : 1)) : live?.pad ? -axis(live.pad.axes[r.stick * 2 + 1]) * dt * 16 : -((r.stick ? live?.pan[1] : live?.drag[1]) ?? 0) * 0.035
       const turn = gesture * (r.seat % 2 ? -1 : 1)
-      rod.x = reach ? reach[0] * 0.3 : clamp(rod.x + dx * (live?.pad ? 1 : 0.006), -0.3, 0.3)
+      rod.x = reach ? reach[0] * 0.3 * rail(live?.controlFrame) : clamp(rod.x + dx * (live?.pad ? 1 : 0.006) * rail(live?.controlFrame), -0.3, 0.3)
       rod.spin = dt && turn ? clamp(turn / dt, -20, 20) : 0
       rod.angle = wrapPi(rod.angle + rod.spin * dt)
       if (r.stick === 0) { this.units[r.seat].x = rod.x; this.units[r.seat].angle = rod.angle }

@@ -84,10 +84,14 @@ and emission-to-schedule, with 16 warmup strikes and no discarded samples.
 
 ## Mapping choices
 
-- Object pointing is absolute and independent of screen camera position. Arms
-  use their own yaw, reach and height limits before IK and collision checks.
-  Point maps onto the floor workspace; the held hand maps yaw and height, with
-  30 cm of forward travel spanning reach. Trackpad handoff retains its deadman.
+- Object pointing is absolute within the calibrated reach. The active view
+  supplies its direction frame, as specified in VR.md; orbiting behind a device
+  turns spatial reach with the view. Ground targets stay within their original
+  bounds, and rails and canvases follow their screen projection. Arms apply
+  their base-local yaw, reach and height limits after the view transform, before
+  IK and collision checks. Point maps onto the floor workspace; the held hand
+  maps lateral reach and height, with 30 cm of forward travel spanning reach.
+  Trackpad handoff retains its deadman.
 - Scene selection uses centred rows with a 28% horizontal and 38% vertical
   margin. Partial rows stay centred. Take switches back to object scope and
   sets position. Hockey, football, pinball, slot cars and the arena preserve the
@@ -100,6 +104,9 @@ and emission-to-schedule, with 16 warmup strikes and no discarded samples.
 - Physical gamepads and phones without motion retain touch / stick control.
   Gamepad Steer uses the same fitted tilt range; gyro Aim controls the tank's
   turret independently of its driving stick.
+- Studio air targeting and strike snapshots use the same visible horizontal
+  order. Named keys, drums and pitch remain musical commands. The headset sees
+  the same surface highlights through shared presentation snapshots.
 
 Aim feedback belongs to the surface: Lime on the drum head, cymbal, bar or key;
 a small ring on a pointing surface. Generic floating rays, stalks and endpoint

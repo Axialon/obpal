@@ -24,7 +24,7 @@ import { spotRing, type DeviceView } from './view'
 import { devicePresence } from '../vr/devices'
 import { mountSound } from '../audio/session'
 import { DeviceSound } from '../audio/devices'
-import { deviceTarget, mapDeviceSpace, sceneSelects } from './control-space'
+import { deviceTarget, sceneSelects } from './control-space'
 import { restInput } from './types'
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
@@ -273,6 +273,7 @@ if (!presence.shared.guest) void startSimScene({
   // For tests: the device, and what each participant's input looked like last frame.
   const seen: Record<string, { face: string; mode: number; touching: boolean; touchFrames: number; frames: number; drag: [number, number]; tilt: [number, number]; point: boolean; spot: [number, number] | null; presses: string[] }> = {}
   Object.assign(window, { __device: { spec, logic, units, seats, stage, seen, anchorOnScreen: (n: number) => (view?.anchor ? stage.toScreen(view.anchor(n)) : null) } })
+  if (params.get('test') === 'vr') Object.assign((window as unknown as { __device: object }).__device, { mapInput: presence.mapInput })
   renderUnits()
   stage.onFrame = (t, dt) => {
     const now = performance.now()
@@ -299,17 +300,17 @@ if (!presence.shared.guest) void startSimScene({
         }
         const row = document.querySelector<HTMLElement>(`[data-unit="${units[target].id}"]`)
         row?.style.setProperty('outline', '1px solid #c6ff34')
-      } else if (inp.space && held >= 0) inputs.set(who, mapDeviceSpace(spec.id, inp, held))
-    }
-    for (const [who, i] of inputs) {
-      const was = seen[who]
-      seen[who] = { face: i.face, mode: i.mode, touching: i.touching, touchFrames: (was?.touchFrames ?? 0) + (i.touching ? 1 : 0), frames: (was?.frames ?? 0) + 1, drag: [(was?.drag[0] ?? 0) + i.drag[0], (was?.drag[1] ?? 0) + i.drag[1]], tilt: [...i.tilt], point: !!i.point, spot: i.spot, presses: [...(was?.presses ?? []), ...i.presses].slice(-12) }
+      }
     }
     const perUnit = units.map((u) => {
       const who = s.claims.holder(u.id)
       return who ? inputs.get(who) ?? null : null
     })
     presence.inputs(perUnit, inputs)
+    for (const [who, i] of inputs) {
+      const was = seen[who]
+      seen[who] = { face: i.face, mode: i.mode, touching: i.touching, touchFrames: (was?.touchFrames ?? 0) + (i.touching ? 1 : 0), frames: (was?.frames ?? 0) + 1, drag: [(was?.drag[0] ?? 0) + i.drag[0], (was?.drag[1] ?? 0) + i.drag[1]], tilt: [...i.tilt], point: !!i.point, spot: i.spot, presses: [...(was?.presses ?? []), ...i.presses].slice(-12) }
+    }
     for (const [who, inp] of inputs) if (pointToTake(who, inp)) inp.presses = inp.presses.filter((x) => x !== 'wii-a' && x !== 'mouse-left')
     // Home on every device: the tray's Home, or the gamepad's Guide.
     perUnit.forEach((inp, n) => {

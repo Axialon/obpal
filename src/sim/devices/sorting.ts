@@ -3,6 +3,7 @@ import { Controller } from '@obpal/core'
 import { action, Machine, timestep } from './common'
 import { approach, axis, clamp } from './input'
 import type { DeviceInput, DeviceSpec } from './types'
+import { rail } from '../vr/intent'
 
 export const SORTING_SPEC: DeviceSpec = {
   id: 'sorting',
@@ -76,8 +77,8 @@ export class SortingLogic extends Machine {
       if (live) {
         if (live.point && !live.point.off) {
           u.aim = live.spot ? live.spot[0] - SORTING.centres[n] : live.point.yaw * 0.045
-        } else if (live.pad) u.aim += axis(live.pad.axes[0]) * dt * 2.5
-        else if (live.touching) u.aim += live.drag[0] * 0.012
+        } else if (live.pad) u.aim += axis(live.pad.axes[0]) * dt * 2.5 * rail(live.controlFrame)
+        else if (live.touching) u.aim += live.drag[0] * 0.012 * rail(live.controlFrame)
         u.aim = clamp(u.aim, -0.9, 0.9)
         u.lane = Math.round(u.aim / 0.9) + 1
       }

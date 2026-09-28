@@ -12,6 +12,7 @@ import { Controller, Mode, PadButton } from '@obpal/core'
 import { handMove, headingOf } from '@obpal/host'
 import { axis, clamp, DragStick, padStick, readable, wrapPi } from './input'
 import type { DeviceEvent, DeviceInput, DeviceLogic, DeviceSpec } from './types'
+import { planar } from '../vr/intent'
 import { InputSmoother, Spring } from '../kit/motion'
 
 export const DRONE_SPEC: DeviceSpec = {
@@ -265,6 +266,8 @@ export class DroneLogic implements DeviceLogic {
     this.drones.forEach((d, n) => {
       const inp = inputs[n]
       const intent = inp ? droneIntent(inp, d, this.sticks[n], this.hands[n]) : none()
+      const [right, back] = planar(inp?.controlFrame, intent.right, -intent.fwd, true)
+      intent.right = right; intent.fwd = -back
       // Taking over Home is an action: respond to the raw intent before filtering its continuous axes.
       if (d.phase === 'home' && (Math.abs(intent.fwd) + Math.abs(intent.right) + Math.abs(intent.climb) + Math.abs(intent.turn) > .2 || intent.goal)) d.phase = 'flying'
       const filter = this.filters[n]

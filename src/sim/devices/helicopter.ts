@@ -3,6 +3,7 @@ import { Controller, Mode } from '@obpal/core'
 import { action, Machine, timestep } from './common'
 import { axis, clamp, DragStick, wrapPi } from './input'
 import type { DeviceInput, DeviceSpec } from './types'
+import { planar } from '../vr/intent'
 
 export const HELICOPTER_SPEC: DeviceSpec = {
   id: 'helicopter', name: 'Helicopter', unit: 'Helicopter', units: 2, kind: 'Flyer',
@@ -53,8 +54,10 @@ export class HelicopterLogic extends Machine {
       if (!raw || raw.quiet || (!raw.touching && ![...(raw.pad?.axes ?? []), ...(raw.pad?.triggers ?? []), ...raw.tilt, ...raw.pan].some((v) => Math.abs(v) > 0.05))) this.waiting[n] = false
       const i = raw?.quiet || this.waiting[n] ? null : raw
       const [dx, dy] = this.drags[n].update(!!i?.touching, i?.drag ?? [0, 0])
-      const right = i?.pad ? axis(i.pad.axes[2]) : clamp(dx + (i?.mode === Mode.tilt ? i.tilt[0] : 0), -1, 1)
-      const forward = i?.pad ? -axis(i.pad.axes[3]) : clamp(-dy - (i?.mode === Mode.tilt ? i.tilt[1] : 0), -1, 1)
+      const [right, back] = planar(i?.controlFrame,
+        i?.pad ? axis(i.pad.axes[2]) : clamp(dx + (i?.mode === Mode.tilt ? i.tilt[0] : 0), -1, 1),
+        i?.pad ? axis(i.pad.axes[3]) : clamp(dy + (i?.mode === Mode.tilt ? i.tilt[1] : 0), -1, 1), true)
+      const forward = -back
       const climb = i?.pad ? clamp(i.pad.triggers[1] - i.pad.triggers[0], -1, 1) : clamp(-(i?.pan[1] ?? 0) / 30, -1, 1)
       if (!i) u.flying = false
       if (action(i, 'fly') || (!this.waiting[n] && raw?.presses.includes('fly'))) {
