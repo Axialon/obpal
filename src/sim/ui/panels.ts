@@ -148,8 +148,9 @@ export class SimPanel {
     const natural = Math.ceil(this.header.offsetHeight + this.content.getBoundingClientRect().height + parseFloat(pad.paddingTop) + parseFloat(pad.paddingBottom) + 2)
     const portrait = this.owner.kind === 'portrait'
     const limits = { ...(this.options.limits ?? LIMITS), ...(portrait ? { maxH: Math.max(LIMITS.minH, Math.round(area.h * PORTRAIT_SHARE)) } : {}) }
-    // A window standing on the bottom edge (a portrait phone's, the scores) keeps it and grows upward.
-    const standing = portrait || (rect.y > area.y + 1 && rect.y + rect.h >= area.y + area.h - 1)
+    // A window standing on the bottom edge (a portrait phone's, the scores) keeps it and grows upward; one at the top
+    // (a portrait phone's view controls) grows down.
+    const standing = rect.y > area.y + 1 && (portrait || rect.y + rect.h >= area.y + area.h - 1)
     const next = fitHeight(rect, natural, area, limits, standing)
     if (Math.abs(next.h - rect.h) < 1 && Math.abs(next.y - rect.y) < 1) return
     this.placement.rect = next; this.draw()

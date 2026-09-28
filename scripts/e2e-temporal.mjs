@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { chromium } from 'playwright'
 import sharp from 'sharp'
 import { measureTemporal, prepareTemporal, temporalFailure } from './lib/temporal.mjs'
+import { pressInWindow } from './lib/sim-ui.mjs'
 
 export const TEMPORAL_SIMS = [
   ...['arm5', 'so101', 'six', 'scara', 'delta', 'desk'].map(kind => [`arm-${kind}`, `/sim/arm/?kind=${kind}`]),
@@ -28,9 +29,13 @@ export async function runTemporal(local, check, { ids = null, captures = [] } = 
           const page = await context.newPage()
           await page.goto(`${local.origin}${path}${path.includes('?') ? '&' : '?'}test=vr&quality=native`)
           await page.waitForFunction(() => window.__presence, null, { timeout: 20000 })
-          // Large environments have a public overview button; use it to see their floor, walls and props together.
-          const overview = page.locator('button').filter({ hasText: /^Overview$/ }).filter({ visible: true })
-          if (await overview.count()) await overview.last().click()
+          // Large environments have a public overview button; use it to see their floor, walls and props together. A
+          // sim keeps it in its Controls window, which starts docked on this small screen: opened from the dock for it,
+          // as a person would, and docked again.
+          if (!(await pressInWindow(page, 'controls', 'Overview'))) {
+            const overview = page.locator('button').filter({ hasText: /^Overview$/ }).filter({ visible: true })
+            if (await overview.count()) await overview.last().click()
+          }
           await page.waitForLoadState('networkidle')
           // Underwater caustics deliberately animate over the seabed with no input. Hold their clock,
           // keeping the shader and lighting drawn, so this check measures a genuinely static surface.

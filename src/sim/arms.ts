@@ -10,11 +10,12 @@ import type { SimCard } from './catalogue'
 const HOW: Partial<Record<ControllerId, string>> = {
   'face.wii': 'Point at a spot, hold B: it goes there · A picks up',
   'face.hand': 'Hold the pad and move: the gripper follows',
-  'face.trackpad': 'Drag to swing and reach · 1:1 with the gyro',
+  'face.trackpad': 'Pick a part on the strip, then drag · gyro 1:1',
   'face.gamepad': 'Sticks move the tool · A grips · B home',
 }
 
 export const ARM_CARDS: SimCard[] = ARM_KINDS.map((k) => ({
-  id: `arm-${k.id}`, name: k.name, kind: 'Arm', href: k.href, blurb: k.blurb, controllers: k.controllers, how: HOW,
+  id: `arm-${k.id}`, name: k.name, kind: 'Arm', href: k.href, blurb: k.blurb,
+  controllers: ['face.trackpad', 'face.hand', ...k.controllers.filter((c) => c !== 'face.trackpad' && c !== 'face.hand')], how: HOW,
   preview: () => import('./arm-preview').then((m) => m.armPreview(k)),
 }))

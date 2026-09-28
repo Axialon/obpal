@@ -63,7 +63,8 @@
 /* The record's window is its title: the fold's own label would repeat it. */
 .panel-body > .log-wrap > summary { display: none; }
 .panel-body > .log-wrap > .log { margin: 0; }
-.sim-window .panel-body > .presence-controls { position: static; max-width: none; padding: 0; border: 0; background: transparent; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
+/* (Its window scrolls, not the row: a phone's floating row scrolls itself, styles/presence.css.) */
+.sim-window .panel-body > .presence-controls { position: static; max-width: none; max-height: none; overflow: visible; padding: 0; border: 0; background: transparent; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
 /* The viewpoint row (vr/experience.ts) in a window: glass pills, First person ringed in the accent, switches for comfort. */
 .sim-window .presence-controls { gap: 6px; --kit-select-h: 36px; --kit-select-r: 12px; --kit-select-size: 12.5px; }
 .sim-window .presence-controls .kit-select { max-width: 150px; }
@@ -75,7 +76,14 @@
 .sim-window .presence-controls > label { gap: 8px; padding: 4px 2px; color: var(--bb-ink-2); font: 600 12.5px/1.2 var(--bb-font-ui); }
 .sim-window .presence-controls > small { color: var(--bb-ink-2); font-size: 12px; opacity: 1; }
 .sim-window .presence-controls > small:empty { display: none; }
-.sim-window .presence-controls > .sim-sound { flex-basis: 100%; margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--bb-line); }
+/* The sound card comes along into first person as one short row, so the view keeps its room: the switch, then the
+   level's track with its stops (their names are the slider's own), without its title or number. (Its own grid, over
+   sim.css's older row.) */
+.sim-window .presence-controls > .sim-sound { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 12px; flex-basis: 100%; margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--bb-line); }
+.sim-window .presence-controls > .sim-sound :is(.kit-card-n, .kit-card-title, .kit-slider-labels) { display: none; }
+.sim-window .presence-controls > .sim-sound > .kit-card-head { min-height: 0; }
+.sim-window .presence-controls > .sim-sound > .kit-card-head .kit-card-aside { margin: 0; }
+.sim-window .presence-controls > .sim-sound > small { grid-column: 1 / -1; }
 .has-sim-panels.presence-active .sim-window .sim-panel { visibility: visible; }
 .has-sim-panels.presence-active .panel-camera { visibility: hidden; }
 

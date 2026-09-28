@@ -191,7 +191,7 @@ $('reset-scores').onclick = () => { for (const s of slots) s.points = 0; renderS
 // back; its reset clears the scores.
 quickViews([
   { name: 'Overview', show: () => { void view.presence?.leave() } },
-  { name: 'First person', show: () => document.querySelector<HTMLButtonElement>('.presence-controls .presence-enter')?.click() },
+  { name: 'First person', show: () => document.querySelector<HTMLButtonElement>('.presence-controls .presence-enter')?.click(), current: () => view.presence?.mode === 'first-person', phone: true },
 ])
 if (!shared.guest) quickAction({ id: 'reset', label: 'Reset', hint: 'The scores back to nothing', icon: 'reset', run: () => $('reset-scores').click() })
 

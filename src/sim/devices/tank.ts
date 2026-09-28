@@ -15,7 +15,7 @@ export const TANK_SPEC: DeviceSpec = {
   controllers: [Controller.gamepad, Controller.trackpad],
   how: {
     'face.gamepad': 'Left stick drives · gyro Aim / right stick turns turret · A fires',
-    'face.trackpad': 'Drag drives · two fingers turn the turret · tap fires',
+    'face.trackpad': 'Pick a part on the strip, then drag · tap fires',
   },
   tray: [{ id: 'fire', label: 'Fire', type: 'button', icon: 'point' }],
   buttons: { 'media:playpause': 'tray:fire', 'key:Space': 'tray:fire' },

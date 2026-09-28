@@ -12,6 +12,13 @@ html.quick-on { --quick-reserve: 46px; }
   /* A finger's screen keeps its width: windows clear the tab, and the open column comes over them for a moment. */
   html.quick-on { --quick-reserve: 26px; }
 }
+/*
+ * A phone on its side has no height to spare beside an open pairing card: the pairing chip keeps clear of the tab's
+ * lane, so the tab is never under it (the card folds while the open column is over it: src/ui/quick.ts).
+ */
+@media (pointer: coarse) and (orientation: landscape) {
+  html.quick-on .obpal-chip { --obpal-offset-x: calc(12px + var(--quick-reserve)); }
+}
 
 .quick-tray { --quick-y: 50%; position: fixed; inset: 0 0 auto auto; z-index: 7; width: 0; height: 0; }
 .quick-tray[hidden] { display: none; }

@@ -300,8 +300,16 @@ void entry.view().then((m) => {
   action('Reset view', 'center', play)
   if (view.inspect) action('Inspect model', 'zoom-in', close, 'Inspect')
   if (view.overview) action('Overview', 'orbit', wide)
-  // The tray's camera steps through the same framings.
-  quickViews([{ name: 'Play view', show: play }, ...(view.overview ? [{ name: 'Overview', show: wide }] : []), ...(view.inspect ? [{ name: 'Close-up', show: close }] : [])])
+  // The tray's camera steps through the same framings and first person (the viewpoint row's own button; on a phone,
+  // right after the play view), and a framing brings the scene back from first person first.
+  const experience = presence.experience
+  const framed = (show: () => void) => () => { if (experience.immersive) void experience.leave().then(show); else show() }
+  quickViews([
+    { name: 'Play view', show: framed(play) },
+    ...(view.overview ? [{ name: 'Overview', show: framed(wide) }] : []),
+    ...(view.inspect ? [{ name: 'Close-up', show: framed(close) }] : []),
+    { name: 'First person', show: () => document.querySelector<HTMLButtonElement>('.presence-controls .presence-enter')?.click(), current: () => experience.mode === 'first-person', phone: true },
+  ])
 })
 
 if (!presence.shared.guest) void startSimScene({

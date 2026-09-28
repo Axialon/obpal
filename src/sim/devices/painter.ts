@@ -16,7 +16,7 @@ export const PAINTER_SPEC: DeviceSpec = {
   how: {
     'face.hand': 'Hold the pad and move the phone to paint · Colour changes the light',
     'face.mouse': 'Point with Left held to paint · the wheel changes depth',
-    'face.trackpad': 'Drag to paint · two fingers change depth · Colour changes the light',
+    'face.trackpad': 'Pick a part on the strip, then drag to paint',
   },
   tray: [
     { id: 'colour', label: 'Colour', type: 'button', icon: 'sun' },

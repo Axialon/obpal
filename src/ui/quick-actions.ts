@@ -50,16 +50,31 @@ export const quickActions = (): ReadonlyMap<QuickId, QuickAction> => actions
 /** Hear of changes (the tray). */
 export function onQuickChange(listener: (what: 'actions' | 'states') => void) { listeners.add(listener) }
 
+/** One of a page's views, for the camera action. */
+export interface QuickView {
+  name: string
+  show(): void
+  /** Whether it's showing now, where the page can tell (first person entered from its own button, say). */
+  current?(): boolean
+  /** The phone's own view, first person, where the phone is a window into the scene. */
+  phone?: boolean
+}
+
 /**
  * The camera action for a page with several views: each press shows the next (the first is where the page starts),
- * and the tooltip names it.
+ * and the tooltip names it. It goes on from the view showing now where the page can tell, else from the last it
+ * showed. On a touch screen the phone's own view comes straight after the first, one press away.
  */
-export function quickViews(views: readonly { name: string; show(): void }[]) {
-  if (!views.length) return
+export function quickViews(list: readonly QuickView[]) {
+  if (!list.length) return
+  const touch = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
+  const [first, ...rest] = list
+  const views = touch ? [first, ...rest.filter((v) => v.phone), ...rest.filter((v) => !v.phone)] : list
   let at = 0
-  const offer = () => quickAction({
-    id: 'camera', label: 'Camera view', hint: views.length > 1 ? `Next: ${views[(at + 1) % views.length].name}` : views[0].name, icon: 'camera', stay: true,
-    run: () => { at = (at + 1) % views.length; views[at].show(); offer() },
+  const now = () => { const i = views.findIndex((v) => v.current?.()); return i >= 0 ? i : at }
+  quickAction({
+    id: 'camera', label: 'Camera view', icon: 'camera', stay: true,
+    get hint() { return views.length > 1 ? `Next: ${views[(now() + 1) % views.length].name}` : views[0].name },
+    run: () => { at = (now() + 1) % views.length; views[at].show() },
   })
-  offer()
 }

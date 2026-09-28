@@ -524,6 +524,7 @@ function blockStep(a: Arm, was: Pose, gripWas: number, following: boolean) {
 const layout: Layout = {
   v: 1,
   modes: [Mode.point, Mode.track, Mode.hold, Mode.tilt, Mode.gamepad],
+  controllers: ['face.trackpad', 'face.hand', 'face.wii', 'face.gamepad'],
   tray: [
     { id: 'estop', label: 'Stop', type: 'button', tone: 'stop' },
     { id: 'grip', label: 'Grip', type: 'button', icon: 'grip' },
@@ -1696,8 +1697,16 @@ inspectArm.onclick = () => {
   controls.target.copy(target)
   controls.update()
 }
-// The quick-actions tray: its camera steps through the same framings, and its reset sends every arm home.
-quickViews([{ name: 'Play view', show: () => resetView.click() }, { name: 'Overview', show: () => overviewView.click() }, { name: 'Close-up', show: () => inspectArm.click() }])
+// The quick-actions tray: its camera steps through the same framings and first person (the viewpoint row's own
+// button; on a phone, right after the play view), a framing bringing the scene back from first person first; its reset
+// sends every arm home.
+const framed = (button: HTMLButtonElement) => () => { const e = view.presence; if (e?.immersive) void e.leave().then(() => button.click()); else button.click() }
+quickViews([
+  { name: 'Play view', show: framed(resetView) },
+  { name: 'Overview', show: framed(overviewView) },
+  { name: 'Close-up', show: framed(inspectArm) },
+  { name: 'First person', show: () => document.querySelector<HTMLButtonElement>('.presence-controls .presence-enter')?.click(), current: () => view.presence?.mode === 'first-person', phone: true },
+])
 if (!view.presence?.shared?.guest) quickAction({ id: 'reset', label: 'Reset', hint: 'Every arm home', icon: 'reset', run: () => $('home-all').click() })
 resize()
 renderPanel()

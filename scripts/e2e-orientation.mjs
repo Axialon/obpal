@@ -6,6 +6,7 @@ import { chromium, devices } from 'playwright'
 import { Quaternion } from 'three'
 import { startLocal } from '../extension/e2e/local.mjs'
 import { holds, reading, orient, delta, projection, trackingPose, cameraPoseFixture, D } from './lib/orientation.mjs'
+import { trayCamera } from './lib/sim-ui.mjs'
 
 const out = await mkdtemp(join(tmpdir(), 'obpal-orientation-'))
 const local = await startLocal()
@@ -225,7 +226,9 @@ try {
     try {
       await p.page.waitForFunction(() => window.__presence?.experience.rides().length)
       await move(p, hold, 'yaw', 0)
-      await p.page.getByRole('button', { name: 'First person', exact: true }).click()
+      // Into first person as a person holding the phone gets there: the quick-actions tray's camera (the Controls
+      // window with its own First person button starts docked on a phone).
+      await trayCamera(p.page, (page) => page.evaluate(() => window.__presence.state().mode === 'first-person'), { touch: true })
       const q0 = await p.page.evaluate(() => window.__presence.experience.camera.quaternion.toArray())
       for (const axis of ['yaw', 'pitch', 'roll']) await check(`sim first person ${hold.name}: ${axis}`, async () => {
         await move(p, hold, axis, 30)

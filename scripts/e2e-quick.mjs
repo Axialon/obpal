@@ -1,8 +1,9 @@
 /**
  * The quick-actions tray (src/ui/quick.ts) in real Chromium, one check per kind of page: it opens, it offers what
  * applies there in the tray's order, and each of its actions does its job (pairing opens the pairing card, the camera
- * moves the view, fullscreen asks for the full screen, sound switches, the theme opens the picker, reset puts the sim
- * back). It keeps clear of the dock rail, the sidebar, the pairing chip and a sim's windows; the keyboard, a click
+ * moves the view and goes round to first person, one press away on a phone, fullscreen asks for the full screen, sound
+ * switches, the theme opens the picker, reset puts the sim back). It keeps clear of the dock rail, the sidebar, the
+ * pairing chip and a sim's windows, and an open pairing card folds for it on a phone on its side; the keyboard, a click
  * outside and a swipe back close it; the phone controller and the embed don't have it. Run by scripts/e2e-pages.mjs.
  */
 const assert = (ok, message) => { if (!ok) throw new Error(message) }
@@ -124,6 +125,16 @@ export async function runQuick(browser, origin, checkIt) {
       await action(page, 'camera').click()
       await page.waitForFunction((w) => window.__device.stage.camera.position.toArray().map((v) => +v.toFixed(3)).join() !== w, was, { timeout: 8000 })
       assert(await isOpen(page), 'the camera closed the tray')
+      // First person is in its round (last, on a computer), and the framing after it brings the scene back.
+      at('first person')
+      const riding = () => page.evaluate(() => document.body.classList.contains('presence-active'))
+      let presses = 1
+      while (!(await riding())) {
+        assert(presses < 6, 'the camera went round without first person')
+        await openTray(page); await action(page, 'camera').click(); presses++; await sleep(200)
+      }
+      await openTray(page); await action(page, 'camera').click(); await sleep(200)
+      assert(!(await riding()), 'the view after first person kept it')
       at('sound')
       // A press anywhere may already have started it: the switch turns it the other way, and back.
       const playing = () => page.evaluate(() => window.__simAudio.running && !window.__simAudio.muted)
@@ -158,7 +169,7 @@ export async function runQuick(browser, origin, checkIt) {
       await sleep(500)
       clear('tab', await box(page, '.quick-tab'), { 'the pairing card': (await chip(page)).card })
       assert(!errors.length, errors.join(' | '))
-      return `${ids.join(', ')}; ${units} units home`
+      return `${ids.join(', ')}; first person at the camera's press ${presses}; ${units} units home`
     } finally { await context.close() }
   })
 
@@ -216,7 +227,7 @@ export async function runQuick(browser, origin, checkIt) {
     } finally { await context.close() }
   })
 
-  await check('quick actions: on a phone the tab is under the thumb and clear of the pairing chip; a tap opens it, a swipe back closes it', async () => {
+  await check('quick actions: on a phone the tab is under the thumb and clear of the pairing chip; a tap opens it, first person is the camera\'s first press, a swipe back closes it', async () => {
     const { page, context, errors } = await open(browser, origin, '/sim/drone/', { width: 390, height: 844, phone: true })
     try {
       await page.waitForFunction(() => document.querySelector('.quick-tray [data-quick="camera"]'), null, { timeout: 20000 })
@@ -224,8 +235,19 @@ export async function runQuick(browser, origin, checkIt) {
       const tab = await box(page, '.quick-tab'), pairing = await chip(page)
       clear('tab', tab, { 'the pairing pill': pairing.pill, 'the pairing card': pairing.card })
       assert(tab.right >= 389 && (tab.top + tab.bottom) / 2 > 844 * 0.3, `the tab is not on the edge within reach: ${JSON.stringify(tab)}`)
+      const reopen = async () => { if (!(await isOpen(page))) { await page.locator('.quick-tab').tap(); await sleep(200) } }
       await page.locator('.quick-tab').tap(); await sleep(200)
       assert(await isOpen(page), 'a tap did not open it')
+      // First person, the phone's own view, one press away; the next press brings the scene back.
+      at('first person')
+      const riding = () => page.evaluate(() => document.body.classList.contains('presence-active'))
+      await action(page, 'camera').tap(); await sleep(250)
+      assert(await riding(), 'the camera\'s first press on a phone was not first person')
+      await reopen()
+      await action(page, 'camera').tap(); await sleep(250)
+      assert(!(await riding()), 'the next press kept first person')
+      at('swipe')
+      await reopen()
       const panel = await box(page, '.quick-panel')
       const cdp = await context.newCDPSession(page), x = (panel.left + panel.right) / 2, y = (panel.top + panel.bottom) / 2
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] })
@@ -235,6 +257,36 @@ export async function runQuick(browser, origin, checkIt) {
       assert(!errors.length, errors.join(' | '))
       return `tab at ${Math.round((tab.top + tab.bottom) / 2)} px of 844`
     } finally { await context.close() }
+  })
+
+  await check('quick actions: on a phone on its side the tab keeps clear of the open pairing card, and the open tray never lies under it: it fits beside the card, or the card folds for it and comes back', async () => {
+    const out = []
+    for (const [width, height] of [[844, 390], [863, 360]]) {
+      const { page, context, errors } = await open(browser, origin, '/sim/drone/', { width, height, phone: true })
+      try {
+        const size = `${width}x${height}`
+        const card = () => page.evaluate(() => !!document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.wrap')?.hasAttribute('data-open'))
+        await page.waitForFunction(() => document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.wrap')?.hasAttribute('data-open'), null, { timeout: 20000 })
+        await sleep(600)
+        const pairing = await chip(page)
+        at(`${size} tab`)
+        clear('tab', await box(page, '.quick-tab'), { 'the pairing pill': pairing.pill, 'the pairing card': pairing.card })
+        at(`${size} open`)
+        await page.locator('.quick-tab').tap()
+        // Placed once the card has folded, if it had to: clear of what's showing, all of it on the screen.
+        await sleep(1200)
+        const panel = await box(page, '.quick-panel'), now = await chip(page), folded = !now.card
+        clear('open tray', panel, { 'the pairing pill': now.pill, 'the pairing card': now.card })
+        assert(panel.top >= 0 && panel.bottom <= height && panel.left >= 0, `the open tray runs off the screen: ${JSON.stringify(panel)}`)
+        at(`${size} close`)
+        await action(page, 'camera').focus(); await page.keyboard.press('Escape')
+        if (folded) await page.waitForFunction(() => document.querySelector('.obpal-chip').shadowRoot.querySelector('.wrap').hasAttribute('data-open'), null, { timeout: 3000 })
+        assert(await card(), 'the pairing card did not come back')
+        assert(!errors.length, errors.join(' | '))
+        out.push(`${size}: ${folded ? 'the card folded while it was open and came back' : 'beside the card'}, ${Math.round(panel.right - panel.left)}×${Math.round(panel.bottom - panel.top)} px`)
+      } finally { await context.close() }
+    }
+    return out.join('; ')
   })
 
   await check('quick actions: the phone controller and the embed have no tray', async () => {

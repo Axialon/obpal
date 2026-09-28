@@ -82,7 +82,8 @@ describe('the sim catalogue', () => {
     expect(arms.map((s) => s.id)).toEqual(ARM_KINDS.map((k) => `arm-${k.id}`))
     arms.forEach((s, i) => {
       const k = ARM_KINDS[i]
-      expect([s.name, s.blurb, s.href, s.controllers]).toEqual([k.name, k.blurb, `/sim/arm/?kind=${k.id}`, k.controllers])
+      expect([s.name, s.blurb, s.href]).toEqual([k.name, k.blurb, `/sim/arm/?kind=${k.id}`])
+      expect(s.controllers).toEqual(['face.trackpad', 'face.hand', ...k.controllers.filter((c) => c !== 'face.trackpad' && c !== 'face.hand')])
       for (const c of s.controllers) expect(s.how?.[c], `${s.id}: how for ${c}`).toBeTruthy()
       expect(typeof s.preview).toBe('function')
     })

@@ -12,7 +12,7 @@ export const SLIDER_SPEC: DeviceSpec = {
   teaches: 'Relative gestures program a repeatable camera move with an actual live camera view',
   controllers: [Controller.trackpad, Controller.gamepad],
   how: {
-    'face.trackpad': 'Drag travels · two fingers aim · tap saves a key · Play runs · move stops',
+    'face.trackpad': 'Pick a part on the strip, then drag · tap saves a key',
     'face.gamepad': 'Left stick travels · right stick aims · A saves a keyframe · X plays / stops · B clears keys',
   },
   tray: [{ id: 'key', label: 'Set keyframe', type: 'button', icon: 'tap' }, { id: 'play', label: 'Play / stop', type: 'button', icon: 'play' }, { id: 'clear', label: 'Clear keys', type: 'button', icon: 'reset' }, { id: 'duration', label: 'Duration', type: 'select', options: [{ value: '4', label: '4 seconds' }, { value: '8', label: '8 seconds' }, { value: '12', label: '12 seconds' }] }],

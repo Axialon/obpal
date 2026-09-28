@@ -14,7 +14,7 @@ export const GIMBAL_SPEC: DeviceSpec = {
   teaches: 'A quaternion keeps yaw, pitch and roll together',
   controllers: [Controller.trackpad, Controller.hand],
   how: {
-    'face.trackpad': 'Gyro on, 1:1: turn the camera with your phone · drag / twist also aim · tap records',
+    'face.trackpad': 'Pick a part on the strip, then drag · gyro 1:1',
     'face.hand': 'Hold the pad and turn the phone · Record starts a take',
   },
   tray: [{ id: 'record', label: 'Record', type: 'button', icon: 'frame' }],

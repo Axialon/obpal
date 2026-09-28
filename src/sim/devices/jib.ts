@@ -13,7 +13,7 @@ export const JIB_SPEC: DeviceSpec = {
   controllers: [Controller.gamepad, Controller.trackpad],
   how: {
     'face.gamepad': 'Left stick swings and booms · right stick pans and tilts the head · A starts / ends a take',
-    'face.trackpad': 'Drag swings and booms · two fingers or gyro 1:1 aim the head · tap starts / ends a take',
+    'face.trackpad': 'Pick a part on the strip, then drag · tap records',
   },
   tray: [{ id: 'record', label: 'Record / stop', type: 'button', icon: 'camera' }],
   buttons: { 'key:Space': 'tray:record', 'key:KeyR': 'tray:record', 'media:playpause': 'tray:record' },

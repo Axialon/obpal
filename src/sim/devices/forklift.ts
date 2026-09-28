@@ -14,7 +14,7 @@ export const FORKLIFT_SPEC: DeviceSpec = {
   controllers: [Controller.gamepad, Controller.trackpad],
   how: {
     'face.gamepad': 'Left stick drives · right up lifts / sideways tilts · A picks up or releases',
-    'face.trackpad': 'Drag drives · two fingers up lifts · twist tilts · tap picks up or releases',
+    'face.trackpad': 'Pick a part on the strip, then drag · tap loads',
   },
   tray: [{ id: 'load', label: 'Pallet', type: 'button', icon: 'cube' }],
   buttons: { 'media:playpause': 'tray:load', 'key:Space': 'tray:load' },

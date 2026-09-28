@@ -24,7 +24,7 @@ export const PTZ_SPEC: DeviceSpec = {
   controllers: [Controller.wii, Controller.trackpad, Controller.gamepad],
   how: {
     'face.wii': 'Point where it looks · − + zoom · A takes a picture · ⌂ centre',
-    'face.trackpad': 'Drag to turn it, pinch to zoom, tap for a picture · gyro on: it turns with you',
+    'face.trackpad': 'Pick a part on the strip, then drag · tap snaps',
     'face.gamepad': 'Right stick turns it · triggers zoom · A takes a picture',
   },
   tray: [{ id: 'snap', label: 'Picture', type: 'button', icon: 'frame' }],

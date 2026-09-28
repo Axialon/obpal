@@ -13,7 +13,7 @@ export const TELESCOPE_SPEC: DeviceSpec = {
   controllers: [Controller.wii, Controller.trackpad, Controller.gamepad],
   how: {
     'face.wii': 'Point to aim · + / − zoom · A checks the object at the crosshair · Home centres the mount',
-    'face.trackpad': 'Gyro 1:1 or drag aims · pinch zooms · tap checks the object at the crosshair',
+    'face.trackpad': 'Pick a part on the strip, then drag · tap checks',
     'face.gamepad': 'Right stick aims · triggers zoom · A checks the object at the crosshair',
   },
   tray: [{ id: 'find', label: 'Found it', type: 'button', icon: 'tap' }, { id: 'in', label: 'Zoom in', type: 'button', icon: 'plus' }, { id: 'out', label: 'Zoom out', type: 'button', icon: 'minus' }],

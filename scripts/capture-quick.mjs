@@ -5,8 +5,11 @@
  *
  *   node scripts/capture-quick.mjs            home, the sims hub, a sim and the viewer at 1920x1080, 1440x900, 390x844
  *                                             and 844x390, with the tray closed and open; its actions in use on the
- *                                             sim; and recordings of it opening and working, on a computer and a phone
+ *                                             sim, on a computer and on a phone (first person one press away, and the
+ *                                             tray beside or over the open pairing card on its side); and recordings of
+ *                                             it opening and working, on a computer and a phone
  *   node scripts/capture-quick.mjs --before   the same pages and sizes, as phase3-before-*.png, from whatever is built
+ *   node scripts/capture-quick.mjs --phones   only the phone's pictures of its actions in use
  *
  * Needs OBPAL_E2E_PORT and OBPAL_E2E_WORKER_PORT (free), a build (vite build), and Playwright's Chromium or
  * OBPAL_E2E_CHROMIUM. Never writes into the repository outside artifacts/.
@@ -20,6 +23,7 @@ import { resolveChromium } from './lib/browser.mjs'
 import { SIZES, TRAY_PAGES, phone, writeViewer } from './lib/sims-evidence.mjs'
 
 const before = process.argv.includes('--before')
+const phonesOnly = process.argv.includes('--phones')
 const out = 'artifacts/ui-system-2'
 const prefix = before ? 'phase3-before' : 'phase3-after'
 
@@ -37,8 +41,8 @@ const local = await startLocal()
 const browser = await chromium.launch({ headless: true, executablePath: (await resolveChromium()).path || undefined })
 const errors = []
 
-/** A page at a size, its pairing card folded, settled a moment; optionally recording. */
-async function open(path, [width, height], video = null) {
+/** A page at a size, its pairing card folded (unless `card`), settled a moment; optionally recording. */
+async function open(path, [width, height], video = null, { card = false } = {}) {
   const small = phone(width, height)
   const context = await browser.newContext({
     viewport: { width, height }, ignoreHTTPSErrors: true, reducedMotion: video ? 'no-preference' : 'reduce', deviceScaleFactor: small ? 2 : 1, isMobile: small, hasTouch: small,
@@ -49,7 +53,7 @@ async function open(path, [width, height], video = null) {
   await page.goto(`${local.origin}${path}`)
   await page.waitForLoadState('networkidle').catch(() => {})
   await page.waitForTimeout(2500)
-  await page.evaluate(() => {
+  if (!card) await page.evaluate(() => {
     const pill = document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.pill')
     if (pill?.getAttribute('aria-expanded') === 'true') pill.click()
   })
@@ -60,8 +64,32 @@ async function open(path, [width, height], video = null) {
 const shot = (page, name) => page.screenshot({ path: join(out, `${name}.png`) })
 const tab = (page) => page.locator('.quick-tab')
 
+/**
+ * On a phone: the camera's next view is first person, one press away, and what it shows; on its side, the tray beside
+ * the open pairing card where it fits, and over it (the card folded) where it doesn't.
+ */
+async function phoneShots() {
+  const o = await open('/sim/drone/', [390, 844])
+  const p = o.page, camera = p.locator('.quick-tray [data-quick="camera"]')
+  await tab(p).tap(); await p.waitForTimeout(500)
+  await camera.focus(); await p.waitForTimeout(300)
+  await shot(p, 'phase3-action-next-first-person-390x844')
+  await camera.tap(); await p.waitForTimeout(900)
+  if (await p.locator('.quick-tray[data-open="true"]').count()) { await camera.focus(); await p.keyboard.press('Escape') }
+  await p.waitForTimeout(500)
+  await shot(p, 'phase3-action-first-person-390x844')
+  await o.context.close()
+  for (const size of [[844, 390], [863, 360]]) {
+    const s = await open('/sim/drone/', size, null, { card: true })
+    await tab(s.page).tap(); await s.page.waitForTimeout(1300)
+    await shot(s.page, `phase3-action-sideways-${size[0]}x${size[1]}`)
+    await s.context.close()
+  }
+}
+
 try {
-  for (const [name, path] of TRAY_PAGES) {
+  if (!before) await phoneShots().catch((e) => errors.push(`phone shots: ${e.message.split('\n')[0]}`))
+  for (const [name, path] of phonesOnly ? [] : TRAY_PAGES) {
     for (const size of SIZES) {
       const tag = `${prefix}-${name}-${size[0]}x${size[1]}`
       let o
@@ -78,7 +106,7 @@ try {
       } finally { await o?.context.close() }
     }
   }
-  if (!before) {
+  if (!before && !phonesOnly) {
     // Its actions in use on a sim, one picture each: the tooltip, the camera's next view, the picker, the pairing card.
     const o = await open('/sim/drone/', [1440, 900])
     const p = o.page

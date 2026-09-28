@@ -1013,7 +1013,7 @@ async function startRemote() {
   // Open while nobody is here; it closes by itself as a phone comes in, and the + in the people chip opens it again.
   // It folds while a panel is where it opens, and on narrow screens the caption makes way for it.
   pairChip = new PairingChip({
-    remote, open: true, testLink: true, avoid: '#lighting, #themes, #more, #switcher, #people, #catalog, .presence-controls',
+    remote, open: true, testLink: true, avoid: '#lighting, #themes, #more, #switcher, #people, #catalog, .presence-controls, .quick-panel',
     onToggle: (open) => { $('chip-invite').setAttribute('aria-pressed', String(open)); $('caption').classList.toggle('pair-open', open) },
   })
   remote.on('connect', () => {
@@ -1600,12 +1600,13 @@ const experience = new Experience(renderer, scene, camera, viewerRides, sharedPr
 experience.addEventListener('camerachange', () => { if (experience.immersive) pairChip?.collapse() })
 Object.assign(window, { __activeSceneCamera: () => experience.activeCamera })
 // The quick-actions tray: its camera steps from the home view to the model framed and to first person (the viewpoint
-// row's own), and its reset is the view's; pairing, sound, the surface and fullscreen come with the tray.
+// row's own; on a phone, first person comes first), and its reset is the view's; pairing, sound, the surface and
+// fullscreen come with the tray.
 const inOverview = (show: () => void) => () => { if (experience.immersive) void experience.leave().then(show); else show() }
 quickViews([
   { name: 'Home view', show: inOverview(resetView) },
   { name: 'Framed', show: inOverview(frameModel) },
-  { name: 'First person', show: () => document.querySelector<HTMLButtonElement>('.presence-controls .presence-enter')?.click() },
+  { name: 'First person', show: () => document.querySelector<HTMLButtonElement>('.presence-controls .presence-enter')?.click(), current: () => experience.mode === 'first-person', phone: true },
 ])
 quickAction({ id: 'reset', label: 'Reset the view', hint: 'The model upright, the camera home', icon: 'reset', run: inOverview(resetView) })
 mountQuick()

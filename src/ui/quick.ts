@@ -7,9 +7,9 @@
  * steps through views), and mountQuick() adds what the tray can do itself: fullscreen; pairing, through the page's own
  * people chip where there is one, else by opening the viewer; and the surface picker where the page follows the
  * visitor's surface (site pages wear their own palette). The tab keeps clear of the page's bar, the pairing chip and
- * its card, and anything else fixed on that edge; sim windows keep clear of it (styles/panels.css). Esc, a click
- * outside or a swipe back to the edge closes it; it's a toolbar for the keyboard; reduced motion shows it without the
- * slide.
+ * its card, and anything else fixed on that edge; sim windows keep clear of it (styles/panels.css), as does the chip
+ * on a phone on its side (styles/quick.css), whose card folds while the open column is over it. Esc, a click outside
+ * or a swipe back to the edge closes it; it's a toolbar for the keyboard; reduced motion shows it without the slide.
  */
 import '../styles/kit.css'
 import '../styles/quick.css'
@@ -19,7 +19,7 @@ import { html, setMarkup } from './markup'
 import { edgeSpot, freeSpans, placePopover } from './kit/place'
 import { onQuickChange, QUICK_ORDER, quickActions, quickDefault, type QuickId } from './quick-actions'
 
-export { dropQuickAction, quickAction, quickChanged, quickViews, type QuickAction, type QuickId } from './quick-actions'
+export { dropQuickAction, quickAction, quickChanged, quickViews, type QuickAction, type QuickId, type QuickView } from './quick-actions'
 
 const actions = quickActions()
 let tray: QuickTray | null = null
@@ -61,6 +61,7 @@ class QuickTray {
   private readonly buttons = new Map<QuickId, HTMLButtonElement>()
   private picker: { menu: HTMLElement; api: { open(): void; close(): void } } | null = null
   private frame = 0
+  private sliding = 0
   private swipe: { id: number; x: number; y: number; done: boolean } | null = null
 
   constructor() {
@@ -79,6 +80,8 @@ class QuickTray {
     this.panel.setAttribute('role', 'toolbar')
     this.panel.setAttribute('aria-label', 'Quick actions')
     this.panel.setAttribute('aria-orientation', 'vertical')
+    this.panel.dataset.shown = 'hidden'
+    this.panel.addEventListener('transitionend', (e) => { if (e.target === this.panel) this.settle() })
     this.tip.className = 'quick-tip'
     this.tip.setAttribute('role', 'tooltip')
     this.tip.id = 'quick-tip'
@@ -121,8 +124,8 @@ class QuickTray {
       const wrap = document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.wrap')
       if (!wrap) return false
       new ResizeObserver(place).observe(wrap)
-      // The card opens with a short animation: placed again once it has settled.
-      new MutationObserver(() => { place(); setTimeout(place, 400) }).observe(wrap, { attributes: true, attributeFilter: ['data-open'] })
+      // The card opens with a short animation: placed again once it has settled. Pairing's switch shows it open or not.
+      new MutationObserver(() => { place(); this.sync(); setTimeout(place, 400) }).observe(wrap, { attributes: true, attributeFilter: ['data-open'] })
       return true
     }
     if (!watch()) {
@@ -185,17 +188,24 @@ class QuickTray {
     const a = actions.get(id)
     if (!a) return
     // What it opens (the picker, the pairing card) comes up without the tooltip over it.
+    const reading = this.tip.dataset.for === id
     this.hideTip()
     a.run()
     if (!a.stay) this.close(false)
-    // Switches' states once the action's own handlers have had their turn (a menu it opens, a card it unfolds).
-    requestAnimationFrame(() => this.sync())
+    // Switches' states once the action's own handlers have had their turn (a menu it opens, a card it unfolds); a
+    // tooltip being read on one that stays (a switch, the camera's next view) comes back with what it says now, unless
+    // the surface picker is open beside it.
+    requestAnimationFrame(() => {
+      this.sync()
+      if (reading && a.stay && this.open && (!this.picker || this.picker.menu.hidden)) this.showTip(id)
+    })
   }
 
   toggle(fromKeyboard: boolean) {
     if (this.open) { this.close(true); return }
     this.el.dataset.open = 'true'
     this.tab.setAttribute('aria-expanded', 'true')
+    this.slide('opening')
     this.place()
     if (fromKeyboard) this.buttons.get(this.focusable())?.focus()
   }
@@ -205,10 +215,27 @@ class QuickTray {
     const inside = this.el.contains(document.activeElement)
     this.el.dataset.open = 'false'
     this.tab.setAttribute('aria-expanded', 'false')
+    this.slide('closing')
     this.hideTip()
     this.picker?.api.close()
     this.place()
     if (refocus || inside) this.tab.focus({ preventScroll: true })
+  }
+
+  /**
+   * The column says on itself where its slide is (data-shown: opening, shown, closing, hidden), as it starts and once
+   * it has finished, since a pairing chip keeps its card from under the page's panels (its `avoid`, which lists the
+   * column): the card folds while the open column is over it and comes back once the column has gone.
+   */
+  private slide(state: 'opening' | 'closing') {
+    this.panel.dataset.shown = state
+    clearTimeout(this.sliding)
+    // (The end of the slide, or at once without motion; the timer in case no transition ends.)
+    this.sliding = setTimeout(() => this.settle(), matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 450)
+  }
+  private settle() {
+    const state = this.open ? 'shown' : 'hidden'
+    if (this.panel.dataset.shown !== state) this.panel.dataset.shown = state
   }
 
   /** The column is one tab stop: the arrow keys move through it, Home and End jump. */
@@ -303,14 +330,16 @@ class QuickTray {
     const button = parseFloat(getComputedStyle(this.panel).getPropertyValue('--quick-btn')) || 38, gap = 6, pad = 12
     let rows = count, blocked = blockedBy((this.tab.offsetWidth || 24) + 4), need = this.tab.offsetHeight || 56
     if (this.open) {
-      // Its width with `cols` columns, and its 6px from the edge.
+      // Its width with `cols` columns, and its 6px from the edge; how many rows a stretch of the edge holds.
       const reach = (cols: number) => cols * button + (cols - 1) * gap + pad + 6
+      const fit = (room: number) => Math.max(1, Math.min(count, Math.floor((room - pad + gap) / (button + gap))))
       for (let cols = 1; cols <= count; cols++) {
         blocked = blockedBy(reach(cols))
         const room = Math.max(0, ...freeSpans(top, bottom, blocked).map(([a, b]) => b - a))
-        // Nowhere clear at all: one column, over whatever is there for the moment it's open.
-        if (room < button + pad) { rows = count; blocked = blockedBy(reach(1)); break }
-        rows = Math.max(1, Math.min(count, Math.floor((room - pad + gap) / (button + gap))))
+        // Nowhere clear at all: over whatever is there for the moment it's open (the pairing card folds for it), in
+        // as many rows as the edge holds.
+        if (room < button + pad) { rows = fit(bottom - top); blocked = []; break }
+        rows = fit(room)
         if (Math.ceil(count / rows) <= cols) break
       }
       need = rows * button + (rows - 1) * gap + pad
