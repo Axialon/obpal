@@ -19,10 +19,13 @@ export const HANDLES = 90_000
 type Rate = { cap: number; every: number }
 
 export const LIMITS = {
-  /** Lookups that find nothing, per network: an address (an IPv4 address or an IPv6 /64), an IPv6 /56, and a wide one (an IPv6 /48 or an IPv4 /24). */
+  /**
+   * Lookups that find nothing, per network: an address (an IPv4 address or an IPv6 /64), an IPv6 /56, and a wide one
+   * (an IPv6 /48 or an IPv4 /24). These are the only limits on lookups by network: a lookup that finds a live code costs
+   * its network nothing (a classroom behind one address can all pair), and it gives nothing back either, since only time
+   * refills a bucket, so no run of finds hides or offsets earlier misses.
+   */
   miss: { addr: { cap: 10, every: 60_000 }, mid: { cap: 15, every: 30_000 }, wide: { cap: 20, every: 30_000 } },
-  /** Codes spent, per network (each lookup that finds a code retires it). */
-  hit: { addr: { cap: 6, every: 100_000 }, wide: { cap: 20, every: 30_000 } },
   /**
    * Lookups that find nothing, everyone together: 10 a minute (a burst of 120), more than any one network may use, so
    * it takes many networks to reach it. Past this budget every lookup brings a proof of work.
@@ -142,7 +145,7 @@ export class CodeBook {
   private byRoom = new Map<string, string>()
   /** Live codes per network key (kept as codes come and go, so no request scans them all). */
   private live = new Map<string, number>()
-  private b: Record<'missAddr' | 'missMid' | 'missWide' | 'hitAddr' | 'hitWide' | 'missAll' | 'room' | 'claimAddr' | 'claimWide', Buckets>
+  private b: Record<'missAddr' | 'missMid' | 'missWide' | 'missAll' | 'room' | 'claimAddr' | 'claimWide', Buckets>
   /** The key that signs challenges (new on every start: challenges from before simply fail, and are asked again). */
   private key = crypto.getRandomValues(new Uint8Array(32))
   /** Challenges already solved (spent), until they would have lapsed. */
@@ -160,8 +163,7 @@ export class CodeBook {
   ) {
     const bucket = (r: Rate) => new Buckets(r, now)
     this.b = {
-      missAddr: bucket(LIMITS.miss.addr), missMid: bucket(LIMITS.miss.mid), missWide: bucket(LIMITS.miss.wide),
-      hitAddr: bucket(LIMITS.hit.addr), hitWide: bucket(LIMITS.hit.wide), missAll: bucket(LIMITS.missAll),
+      missAddr: bucket(LIMITS.miss.addr), missMid: bucket(LIMITS.miss.mid), missWide: bucket(LIMITS.miss.wide), missAll: bucket(LIMITS.missAll),
       room: bucket(LIMITS.room), claimAddr: bucket(LIMITS.claim.addr), claimWide: bucket(LIMITS.claim.wide),
     }
   }
@@ -288,15 +290,14 @@ export class CodeBook {
   /**
    * A device looks a handle up. Found: the handle is spent (removed), the room gets its replacement at once, and
    * the device a ticket to show the host. Not found, expired and spent all answer the same, and so does every
-   * lookup while a limit holds: nothing tells a live handle from a dead one.
+   * lookup while a limit holds: nothing tells a live handle from a dead one. Only a lookup that finds nothing spends
+   * a network's allowance; finding a code spends none of it and refills none, so a classroom behind one address can
+   * all pair while guessing stays as slow as the misses allow.
    */
   take(handle: string, net: NetworkKeys, work?: Work): Take {
     this.sweep()
     const b = this.b
-    const wait = Math.max(
-      b.missAddr.wait(net.addr), net.mid ? b.missMid.wait(net.mid) : 0, b.missWide.wait(net.wide),
-      b.hitAddr.wait(net.addr), b.hitWide.wait(net.wide),
-    )
+    const wait = Math.max(b.missAddr.wait(net.addr), net.mid ? b.missMid.wait(net.mid) : 0, b.missWide.wait(net.wide))
     if (wait) return { error: 'slow-down', retry: wait }
     // Past everyone's budget, pairing slows down instead of stopping: each lookup brings a proof of work.
     const budget = b.missAll.wait('all') === 0
@@ -314,8 +315,6 @@ export class CodeBook {
       if (e) this.remove(handle)
       return { error: 'no-code' }
     }
-    b.hitAddr.take(net.addr)
-    b.hitWide.take(net.wide)
     this.remove(handle)
     return { room: e.room, ticket: this.ticket(), next: this.claim(e.room, e.net) }
   }

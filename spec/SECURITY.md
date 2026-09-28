@@ -57,7 +57,7 @@ lost.
 
 Rate limits apply per address (an IPv6 /64 counts as one address):
 - 600 socket opens and 300 ICE lookups a minute (`wrangler.jsonc:16-19`, `worker/limits.ts:16`);
-- the short code's own per-network limits, with proof of work under pressure (`worker/codes.ts:20-39`).
+- the short code's own per-network limits, with proof of work under pressure (`worker/codes.ts:21-44`).
 
 **ICE servers** (`worker/ice.ts`). STUN always. TURN credentials go only to rooms with a live host, and come from one
 of two places:
@@ -99,7 +99,7 @@ turns input into action frames and typing, and the path to the PC runs like this
 | **The room service or a TURN relay** (Cloudflare, or whoever self-hosts) | Sit between two DTLS sessions (a man in the middle); read the traffic; inject input | It never sees `S`, the code's secret or a pairing key, and a man in the middle needs one of them. The phone takes one answer per offer, and a later one (an ICE restart) only with the fingerprint already bound (`device.ts:241-255`). With a typed code, nothing the screen says counts until it proves the code (`device.ts:449-451`). A relay sees only ciphertext | Addresses and timing; denial of service; with a typed code, one guess in 100,000 per code; trust in the site's origin (last row) |
 | **Someone who can see the screen** | Scan the QR or type the code, now or from a photo later | Nothing, at the time: seeing the screen is what pairing means. One device controls at a time unless the screen shares the scene, and the phone that loses control is told (`remote.ts:732-742`). The screen can remove a device (`disconnect`), and a new invite locks out anyone not yet connected (`remote.ts:342-355`). ob.Pal Link makes a new invite each time a phone pairs (`rotateInvite`, `remote.ts:364-397`): the old room takes only the phone that paired in it and tells anyone else the code was used (`remote.ts:622`) | A web page's QR code works until the page makes a new invite |
 | **A phone that paired with Link** (or whoever pairs from its QR code) | Take the PC over: the PC target, or Whole PC | The person at the PC allows each phone once, in Link's own pages or its notification; until then ob.Pal Desktop stays disarmed and nothing is sent (`extension/src/background.ts:87-95`, `extension/src/offscreen.ts:436`). A phone they refused can't pick PC from its tray (`background.ts:154-167`). Only Link's own pages give an answer (`extension/src/shared/messages.ts:349-377`) | An allowed phone keeps its answer until it's changed (options page) or the phone is forgotten |
-| **A remote guesser** | Find a live code blind; flood the service; abuse TURN | One CPace attempt per code (1 in 100,000). Per-network limits and proof of work on lookups (`worker/codes.ts:20-39`). Rate limits on sockets and ICE lookups. TURN only for live rooms | A minted TURN credential relays for a day, whoever holds it; volume attacks meet Cloudflare's own protection |
+| **A remote guesser** | Find a live code blind; flood the service; abuse TURN | One CPace attempt per code (1 in 100,000). Per-network limits and proof of work on lookups (`worker/codes.ts:21-44`). Rate limits on sockets and ICE lookups. TURN only for live rooms | A minted TURN credential relays for a day, whoever holds it; volume attacks meet Cloudflare's own protection |
 | **A malicious screen** (a page that embeds ob.Pal) | Attack the phone through labels, images or toasts | The controller runs on ob.Pal's origin, never the screen's. Text from the screen is set as text or escaped, images must be `https:`, and colours are checked (`src/controller/main.ts:39-40`). The controller's policy allows scripts from its own origin only (`vite.config.ts:23-68`) | It decides what its own page does with your input, as any app does |
 | **A web page in a tab Link controls** | Make the PC type; change what the helper may do | Pages reach Link only through its content scripts, which can ask only about their own tab. The `pc-*` requests that change the helper come only from Link's own pages (`extension/src/shared/messages.ts:349-377`). The helper refuses anything but its extension | None known |
 | **Software on the PC** | Drive the helper | Chrome starts the helper only for the allowed extension, over stdio, and the helper checks the origin it's given (`desktop/src/main.rs:96-105`) | Local code can already inject input on its own |
@@ -203,14 +203,14 @@ Status values:
 | Phone connections | meets | `src/controller/connections.ts` gives input to one authenticated link, releases before switching and keeps background state private. Each host gets only its own `attention` boolean. Non-extractable reconnect keys and names stay in the origin's `obpal` IndexedDB `connections` store, beside existing `pairs`; old PC metadata migrates once. Rename is local. Forget closes the link and removes both the record and its direct pairing key. PC Allow/Deny remains host-side and cannot move to a different PC |
 | security.txt (RFC 9116) | meets | `public/.well-known/security.txt` |
 | `nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options`, COOP `same-origin` | meets | `public/_headers:8-14` |
-| CORS | meets | `*` only on credential-free public resources: `/api/ice`, `/api/health` and the embed script (`worker/index.ts:18`, `public/_headers:21-24`). `/api/code` is same-origin only (`worker/codes.ts:115-127`) |
+| CORS | meets | `*` only on credential-free public resources: `/api/ice`, `/api/health` and the embed script (`worker/index.ts:18`, `public/_headers:21-24`). `/api/code` is same-origin only (`worker/codes.ts:118-131`) |
 | No third-party scripts, styles or fonts, so no need for SRI | meets | Fonts are served from this origin (`scripts/fonts.mjs`), and e2e:pages fails on any request elsewhere (`scripts/e2e-pages.mjs:46`, `:64`). The one outside resource is an image: the controller shows thumbnails a screen's layout names, from `https:` only |
 
 ### OWASP ASVS 4.0.3, level 2 (the requirements that apply)
 | Requirement | Status | Where |
 |---|---|---|
 | 1.1.2 threat model | meets | this document |
-| 2.2.1, 11.1.4 anti-automation | meets | rate limits (`worker/limits.ts`); code limits and proof of work (`worker/codes.ts:20-39`) |
+| 2.2.1, 11.1.4 anti-automation | meets | rate limits (`worker/limits.ts`); code limits and proof of work (`worker/codes.ts:21-44`) |
 | 2.7.2 an out-of-band code expires within 10 minutes | meets | `code.ts:18`, `worker/codes.ts:12` |
 | 2.7.3 used once | meets | spent at lookup, with one CPace attempt (`remote.ts:917-942`) |
 | 2.7.6 at least 20 bits of entropy | partial | The code's secret part is 5 digits (16.6 bits). CPace allows one online guess per code, and lookups are limited per network, with proof of work under pressure |
@@ -230,7 +230,7 @@ Status values:
 | 9.1.1 TLS for all connections | meets | HTTPS, WSS, DTLS, and TURN over TLS |
 | 9.1.2, 9.1.3 strong ciphers, TLS 1.2 and later only | partial | The edge's minimum TLS version is a Cloudflare zone setting (default 1.0), not something the code sets. The owner checks that it's 1.2 or above |
 | 10.3.2 no code from untrusted sources | meets | the page policies; Link's own policy (`extension/vite.config.ts:78-79`) |
-| 13.2.1, 13.2.5 HTTP methods and content types | meets | `/api/code` takes POST only, with a JSON content type (`worker/codes.ts:119-127`) |
+| 13.2.1, 13.2.5 HTTP methods and content types | meets | `/api/code` takes POST only, with a JSON content type (`worker/codes.ts:126-127`) |
 | 14.4.1–14.4.7 security headers | meets | `public/_headers` |
 | 14.5.3 CORS | meets | see the web platform table |
 

@@ -113,8 +113,8 @@ For a device that can't scan the QR code (a TV, a headset, a phone across the ro
 
 **Limits** (token buckets; "10, one back a minute" means at most 10 at once and one more each minute). Each address counts in its networks: the address (an IPv4 address, or an IPv6 /64), an IPv6 /56, and a wide network (an IPv6 /48 or an IPv4 /24).
 - Lookups that find nothing: 10 per address (one back a minute), 15 per /56 (one back every 30 s), 20 per wide network (one back every 30 s).
-- Codes spent: 6 per address (one back every 100 s), 20 per wide network (one back every 30 s).
 - While any of these is used up, every lookup from that address answers `slow-down`, live handles included, so no answer tells a live handle from a dead one.
+- A lookup that finds a live handle costs its network nothing and gives nothing back (only time refills a bucket), so a class of phones behind one address can all pair, and no run of finds hides or offsets the misses before it: the guessing maths below count misses only.
 - Everyone together: a budget of 120 lookups that find nothing, 10 back a minute, bigger than any one network's, so reaching it takes many. Past it pairing doesn't stop: every lookup, from anyone, brings a proof of work (the answer is `work` before the handle is looked at, so again it says nothing about the handle).
 - New codes (claims and replacements): 20 per room (one back every 30 s), 60 per address (one back every 10 s) and 200 per wide network (one back every 2 s). Every attempt past the rate check spends a token, whatever comes of it.
 - Live codes: 32 per address, 64 per /56 and 128 per wide network (`busy` beyond). Overall, past 18,000 a new code brings a proof of work; at 60,000 there are none to give (`busy`). The service keeps the live counts as codes come and go, so no request walks them all.

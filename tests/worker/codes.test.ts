@@ -107,14 +107,93 @@ describe('limits per network', () => {
     expect(b.take('99999', '198.51.100.200')).toMatchObject({ error: 'slow-down' })
     expect(b.take('99999', '198.51.101.1')).toEqual({ error: 'no-code' })
   })
+})
 
-  it('lets one address spend 6 codes, then slows it down before it reaches the host', () => {
+describe('a lookup that finds a live code costs its network nothing', () => {
+  /** `n` screens, each in a network of its own (so the limits on new codes stay out of it), each showing a live code. */
+  const screens = (b: CodeBook, n: number) => Array.from({ length: n }, (_, i) => code(b.claim(room(i), `10.${i}.0.1`)))
+  /** Where the i-th phone of a class is, for each way a class can share a network. */
+  const classes: Record<string, (i: number) => string> = {
+    'one IPv4 address': () => '203.0.113.9',
+    'one IPv6 /64': (i) => `2001:db8:9:9::${i + 1}`,
+    'one IPv4 /24, an address each': (i) => `198.51.100.${i + 1}`,
+    'one IPv6 /56, a /64 each': (i) => `2001:db8:9:${(i + 1).toString(16)}::1`,
+  }
+
+  for (const [where, from] of Object.entries(classes)) {
+    it(`lets 30 phones on ${where} pair within a minute`, () => {
+      const { b, clock } = book()
+      for (const [i, handle] of screens(b, 30).entries()) {
+        expect(b.take(handle, from(i))).toMatchObject({ room: room(i) })
+        clock.t += 2_000
+      }
+    })
+  }
+
+  it('leaves a network its whole allowance of misses, however many codes it found', () => {
     const { b } = book()
-    const handles: string[] = []
-    for (let i = 0; i < 8; i++) handles.push(code(b.claim(room(i), `1.1.${i}.1`)))
-    for (let i = 0; i < LIMITS.hit.addr.cap; i++) expect('room' in b.take(handles[i], '8.8.8.8')).toBe(true)
-    expect(b.take(handles[6], '8.8.8.8')).toMatchObject({ error: 'slow-down' })
-    expect('room' in b.take(handles[6], '8.8.4.4')).toBe(true)
+    for (const handle of screens(b, 30)) expect('room' in b.take(handle, '203.0.113.9')).toBe(true)
+    for (let i = 0; i < LIMITS.miss.addr.cap; i++) expect(b.take(String(90000 + i), '203.0.113.9')).toEqual({ error: 'no-code' })
+    expect(b.take('89999', '203.0.113.9')).toMatchObject({ error: 'slow-down' })
+  })
+
+  it('never lets finds reset or hide the misses before them', () => {
+    const { b } = book()
+    const handles = screens(b, 30)
+    for (let i = 0; i < LIMITS.miss.addr.cap - 1; i++) expect(b.take(String(90000 + i), '203.0.113.9')).toEqual({ error: 'no-code' })
+    // One miss from its limit, the address still finds live codes, and that changes nothing: it has one miss left.
+    for (const handle of handles) expect('room' in b.take(handle, '203.0.113.9')).toBe(true)
+    expect(b.take('89000', '203.0.113.9')).toEqual({ error: 'no-code' })
+    expect(b.take('89001', '203.0.113.9')).toMatchObject({ error: 'slow-down' })
+  })
+
+  /**
+   * The broader networks, each with the misses it may have between its addresses (its limit) and a way to reach the n-th
+   * distinct address inside it: an IPv4 /24 by address, an IPv6 /56 by /64, an IPv6 /48 by /56 (so that only the /48's own
+   * limit can be the one that binds).
+   */
+  const broad: Record<string, { cap: number; at: (n: number) => string }> = {
+    'an IPv4 /24': { cap: LIMITS.miss.wide.cap, at: (n) => `198.51.100.${n + 1}` },
+    'an IPv6 /56': { cap: LIMITS.miss.mid.cap, at: (n) => `2001:db8:9:10${n.toString(16).padStart(2, '0')}::1` },
+    'an IPv6 /48': { cap: LIMITS.miss.wide.cap, at: (n) => `2001:db8:a:${(n + 1).toString(16)}00::1` },
+  }
+  for (const [where, { cap, at }] of Object.entries(broad)) {
+    it(`never lets finds refill the misses that ${where} has spent between its addresses`, () => {
+      const { b } = book()
+      const handles = screens(b, 30)
+      // Half an address's limit each, so that no address trips its own limit before the network does.
+      const each = Math.floor(LIMITS.miss.addr.cap / 2)
+      const miss = (i: number) => b.take(String(90000 + i), at(Math.floor(i / each)))
+      for (let i = 0; i < cap - 1; i++) expect(miss(i)).toEqual({ error: 'no-code' })
+      // One miss from the limit, and phones all over the network find their codes: it still has one miss left, no more.
+      for (const [i, handle] of handles.entries()) expect(b.take(handle, at(100 + i))).toMatchObject({ room: room(i) })
+      expect(miss(cap - 1)).toEqual({ error: 'no-code' })
+      expect(miss(cap)).toMatchObject({ error: 'slow-down' })
+    })
+  }
+
+  it('gives a guesser nothing for finds in between: misses are answered as they would be with none', () => {
+    /** 40 misses from `ip`, one every `gap` ms, each after a lookup of a live code from the same address when `finds` is set. */
+    const guess = (ip: string, gap: number, finds: boolean) => {
+      const { b, clock } = book()
+      const handles = finds ? screens(b, 40) : []
+      const answers: Take[] = []
+      for (let i = 0; i < 40; i++) {
+        if (finds) b.take(handles[i], ip)
+        answers.push(b.take(String(90000 + i), ip))
+        clock.t += gap
+      }
+      return answers
+    }
+    for (const ip of ['66.6.6.6', '2001:db8:6:6::1']) {
+      for (const gap of [1_000, 10_000]) expect(guess(ip, gap, true), `${ip} every ${gap} ms`).toEqual(guess(ip, gap, false))
+      // Faster than the limit refills: the tenth miss is the last let through, with or without finds.
+      for (const finds of [false, true]) {
+        const answers = guess(ip, 1_000, finds)
+        expect(answers.slice(0, 10)).toEqual(Array.from({ length: 10 }, () => ({ error: 'no-code' })))
+        expect(answers.slice(10).every((a) => 'error' in a && a.error === 'slow-down')).toBe(true)
+      }
+    }
   })
 })
 
