@@ -1,3 +1,4 @@
+import { contactPart, contactSurface, contactInstances } from '../contact'
 import * as THREE from 'three'
 import { ceramic, darkTitanium, gunmetal } from '../kit/surfaces'
 import { pov, service, tiledDeck } from '../kit/precision'
@@ -21,10 +22,10 @@ function cell(n: number) {
     block(frame, [0.09, 0.18, 3], [x, 0.76, -0.95], metal)
     for (const z of [-2.2, 0.3]) {
       block(frame, [0.1, 0.7, 0.1], [x, 0.35, z], metal)
-      block(frame, [0.23, 0.05, 0.23], [x, 0.025, z], rubber)
+      contactPart(block(frame, [0.23, 0.05, 0.23], [x, 0.025, z], rubber), `foot-${x}-${z}`)
     }
   }
-  block(frame, [1.05, 0.15, 2.9], [0, 0.74, -0.95], rubber)
+  contactSurface(block(frame, [1.05, 0.15, 2.9], [0, 0.775, -0.95], rubber), `belt-${n}`)
   block(frame, [3.1, 0.12, 0.55], [0, 0.76, 0.35], metal)
   for (const z of [0.1, 0.55]) rod(frame, [-1.45, 0.88, z], [1.45, 0.88, z], 0.022)
   const motor = disc(frame, 0.16, 0.28, [0.7, 0.69, -2.2], trim)
@@ -38,7 +39,7 @@ function cell(n: number) {
     bin.position.set(SORTING.lanes[k], 0, SORTING.bin)
     bins.add(bin)
     const colour = plastic(SORTING.colours[k])
-    block(bin, [0.82, 0.08, 0.88], [0, 0.15, 0], darkTitanium)
+    contactPart(block(bin, [0.82, 0.19, 0.88], [0, 0.095, 0], darkTitanium), `bin-${n}-${k}`, { supports: `bin-${n}-${k}` })
     for (const x of [-0.39, 0.39]) block(bin, [0.055, 0.48, 0.88], [x, 0.39, 0], gunmetal)
     block(bin, [0.82, 0.48, 0.055], [0, 0.39, 0.415], gunmetal)
     block(bin, [.65, .07, .012], [0, .5, .45], colour)
@@ -62,19 +63,21 @@ function cell(n: number) {
   slats.name = 'belt-slats'
   slats.castShadow = true
   root.add(slats)
-  const parts = Array.from({ length: 5 }, () => {
-    const part = block(root, [0.33, 0.24, 0.3], [0, 0.98, 0], plastic(SORTING.colours[0]))
+  const parts = Array.from({ length: 5 }, (_, k) => {
+    const part = block(root, [0.33, 0.24, 0.3], [0, 0.97, 0], plastic(SORTING.colours[0]))
     part.name = 'conveyor-part'
-    return part
+    return contactPart(part, `item-${k}`, { surface: `belt-${n}`, active: () => part.visible })
   })
   const carried = block(root, [0.33, 0.24, 0.3], [0, 1.02, 0], plastic(SORTING.colours[0]))
-  carried.name = 'sorted-part'
+  carried.name = 'sorted-part'; contactPart(carried, 'carried-item', { mode: 'clear', active: () => carried.visible })
   const marker = block(root, [0.6, 0.02, 0.13], [0, 0.96, 0.64], plastic('#c6ff34'))
   marker.name = 'lane-selection'
   const piles = SORTING.lanes.map((x, k) => {
     const pile = new THREE.InstancedMesh(rounded(0.25, 0.16, 0.23), plastic(SORTING.colours[k]), 6)
     pile.name = `${SORTING.names[k].toLowerCase()}-sorted-parts`
     pile.position.set(x, 0, SORTING.bin)
+    pile.castShadow = pile.receiveShadow = true
+    contactInstances(pile, `sorted-${n}-${k}`, i => ({ supports: `sorted-${n}-${k}-${i}`, surface: i < 2 ? `bin-${n}-${k}` : `sorted-${n}-${k}-${i - 2}`, active: () => i < pile.count }))
     root.add(pile)
     return pile
   })
@@ -84,7 +87,7 @@ function cell(n: number) {
 function workshop(scene: THREE.Scene, logic: SortingLogic) {
   const floor = new THREE.Group()
   floor.name = 'workshop-floor'
-  const deck = tiledDeck(8.7, 6.4, -.02, 1.2); deck.position.z = -.2; floor.add(deck)
+  const deck = tiledDeck(8.7, 6.4, 0, 1.2); deck.position.z = -.2; floor.add(deck)
   scene.add(floor)
   const cells = logic.units.map((_, n) => { const model = cell(n); scene.add(model.root); return model }),
     transform = new THREE.Object3D()
@@ -117,7 +120,7 @@ function workshop(scene: THREE.Scene, logic: SortingLogic) {
         m.piles.forEach((pile, k) => {
           pile.count = Math.min(6, u.bins[k])
           for (let j = 0; j < pile.count; j++) {
-            transform.position.set(j % 2 ? 0.17 : -0.17, 0.29 + Math.floor(j / 2) * 0.16, 0)
+            transform.position.set(j % 2 ? 0.17 : -0.17, 0.27 + Math.floor(j / 2) * 0.16, 0)
             transform.updateMatrix()
             pile.setMatrixAt(j, transform.matrix)
           }

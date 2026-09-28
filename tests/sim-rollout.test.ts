@@ -5,6 +5,8 @@ import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
 import { readModel } from '../assets/blender/read-model.mjs'
 import { KINDS } from '../src/sim/arm/kind'
 import { plateGeometry, pov } from '../src/sim/kit/precision'
+import { contactProbe, contactSurface } from '../src/sim/contact'
+import { homeOf, reachDown } from '../src/sim/arm/kin'
 
 vi.mock('../src/sim/kit/prototype', async importOriginal => ({
   ...await importOriginal<typeof import('../src/sim/kit/prototype')>(),
@@ -15,6 +17,21 @@ vi.mock('../src/sim/kit/prototype', async importOriginal => ({
 }))
 
 describe('confirmed appearance rollout', () => {
+  it.each(Object.keys(KINDS))('%s seats its base and reaches the surface before and after the model swap', async id => {
+    const kind = KINDS[id as keyof typeof KINDS], scene = new THREE.Scene()
+    const model = kind.build(1, { metal: new THREE.MeshStandardMaterial(), dark: new THREE.MeshStandardMaterial() }); scene.add(model.root)
+    const floor = contactSurface(new THREE.Mesh(new THREE.PlaneGeometry(10, 10))); floor.rotation.x = -Math.PI / 2; scene.add(floor)
+    const height = kind.kin.toolFloor(180, 0), pose = reachDown(kind.kin, 0, kind.cell.stand * .5, height, 0, null, homeOf(kind.kin))
+    expect(pose?.exact).toBe(true)
+    kind.kin.keys.forEach((key, i) => model.apply[i](pose!.pose[key])); model.apply.at(-1)!(1)
+    for (const loaded of [false, true]) {
+      if (loaded) (await model.upgrade!())!()
+      const rows = contactProbe(scene).sample()
+      expect(rows.some(r => r.part.includes('base'))).toBe(true)
+      for (const r of rows) expect(Math.abs(r.gapMm!), `${id}: ${loaded ? 'model' : 'placeholder'} ${r.part}`).toBeLessThanOrEqual(2)
+    }
+    model.dispose()
+  })
   it.each(Object.keys(KINDS))('%s keeps its tool camera and control frames through the optional mesh swap', async id => {
     const kind = KINDS[id as keyof typeof KINDS]
     const model = kind.build(1, { metal: new THREE.MeshStandardMaterial(), dark: new THREE.MeshStandardMaterial() })

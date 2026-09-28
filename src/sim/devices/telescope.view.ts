@@ -1,3 +1,4 @@
+import { contactPart } from '../contact'
 import * as THREE from 'three'
 import { batch, metal, plastic, rubber } from '../kit'
 import { SKY_OBJECTS, TelescopeLogic } from './telescope'
@@ -27,12 +28,12 @@ function sky() {
   return scene
 }
 function observatory(scene: THREE.Scene, logic: TelescopeLogic, count = 2) {
-  const floor = part(scene, 'observatory-platform'); const deck = tiledDeck(9, 9, -.01, 1.5); deck.position.x = 1.4; floor.add(deck)
+  const floor = part(scene, 'observatory-platform'); const deck = tiledDeck(9, 9, 0, 1.5); deck.position.x = 1.4; floor.add(deck)
   for (const x of [-2.5, 5.3]) { rod(floor, [x, 0, -2], [x, 1.3, -2], 0.06); block(floor, [0.13, 0.03, 0.13], [x, 1.35, -2], plastic('#bac687')) }
   batch(floor)
   const models = logic.units.slice(0, count).map((_, n) => {
     const base = part(scene, `telescope-${n + 1}`); base.position.x = n * 3
-    for (let j = 0; j < 3; j++) { const a = j * Math.PI * 2 / 3; rod(base, [0, 0.9, 0], [Math.sin(a) * 0.65, 0.04, Math.cos(a) * 0.65], 0.055); disc(base, 0.09, 0.05, [Math.sin(a) * 0.65, 0.03, Math.cos(a) * 0.65], rubber) }
+    for (let j = 0; j < 3; j++) { const a = j * Math.PI * 2 / 3; rod(base, [0, 0.9, 0], [Math.sin(a) * 0.65, 0.04, Math.cos(a) * 0.65], 0.055); contactPart(disc(base, 0.09, 0.05, [Math.sin(a) * 0.65, 0.025, Math.cos(a) * 0.65], rubber), `foot-${j}`) }
     rod(base, [0, 0.8, 0], [0, 1.15, 0], 0.1); batch(base)
     const pan = part(base, 'azimuth-mount'); pan.position.y = 1.2
     disc(pan, 0.2, 0.12, [0, 0, 0], gunmetal); block(pan, [0.12, 0.6, 0.16], [0.32, 0.28, 0], darkTitanium)

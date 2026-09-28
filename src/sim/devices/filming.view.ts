@@ -9,7 +9,7 @@ import { caption, part } from './optics.view'
 
 export function filmSet(scene: THREE.Scene, width = 10, centre = 0) {
   const set = part(scene, 'studio-set')
-  const deck = tiledDeck(width, 11, -.02, 1.5); deck.position.set(centre, 0, -1); set.add(deck)
+  const deck = tiledDeck(width, 11, 0, 1.5); deck.position.set(centre, 0, -1); set.add(deck)
   block(set, [8, 3.8, 0.15], [0, 1.9, -5.3], darkTitanium)
   for (const x of [-3.3, 3.3]) {
     rod(set, [x, 0, -3.1], [x, 3, -3.1], 0.036)

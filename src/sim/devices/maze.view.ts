@@ -1,3 +1,4 @@
+import { contactPart, contactSurface } from '../contact'
 /**
  * The maze boards' look (three.js): four boards on pedestals, each tilting as its player tilts it, with the maze's walls,
  * its holes and the lit goal, and a glass marble with a core in its player's colour.
@@ -23,14 +24,15 @@ function buildBoard(m: Maze, n: number): BoardModel {
   // A pedestal the board pivots on.
   const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.09, LIFT, 24), mats.dark())
   post.position.y = LIFT / 2
-  root.add(post)
+  post.castShadow = true
+  root.name = `maze-${n + 1}`; root.add(contactPart(post, 'pedestal'))
   const tray = new THREE.Group()
   tray.position.y = LIFT
   root.add(tray)
   const baseMat = new THREE.MeshStandardMaterial({ color: '#3d484f', roughness: .24, metalness: .9 })
   const base = box(S + 0.08, 0.04, S + 0.08, baseMat, 0.02)
   base.position.y = -0.02
-  tray.add(base)
+  tray.add(contactSurface(base, `board-${n}`))
   const oak = darkTitanium
   for (const side of [-1, 1]) {
     const rail = box(S + 0.14, 0.07, 0.055, oak, 0.01); rail.position.set(0, 0.01, side * (S / 2 + 0.035)); tray.add(rail)
@@ -88,8 +90,9 @@ function buildBoard(m: Maze, n: number): BoardModel {
   const core = new THREE.MeshStandardMaterial({ color: '#0b0f14', emissive: '#9aa4b5', emissiveIntensity: 1 })
   marble.add(new THREE.Mesh(new THREE.SphereGeometry(MAZE.ball * 0.5, 20, 14), core))
   marble.add(new THREE.Mesh(new THREE.SphereGeometry(MAZE.ball, 24, 16), new THREE.MeshPhysicalMaterial({ color: '#dfe8ff', metalness: 0.94, roughness: 0.13, clearcoat: 0.5, envMapIntensity: 1.6 })))
+  marble.children.forEach(part => { part.castShadow = true })
   batch(tray, [marble, walls, base])
-  tray.add(marble)
+  tray.add(contactPart(marble, 'marble', { surface: `board-${n}`, mode: () => marble.scale.x < .999 ? 'free' : 'touch' }))
   return { root, tray, marble, core, rim, goal, base: baseMat }
 }
 
@@ -115,7 +118,7 @@ export function createView(stage: Stage, logic: MazeLogic): DeviceView {
     stage.scene.add(m.root)
     return m
   })
-  stage.scene.add(tiledDeck(4.25, 4.3, -.02, 1))
+  stage.scene.add(tiledDeck(4.25, 4.3, 0, 1))
   const setTheme = (t: Theme) => { for (const m of models) m.base.color.set(t.light ? '#8a9499' : '#3d484f') }
   setTheme(stage.theme)
   return {

@@ -1,3 +1,4 @@
+import { contactPart } from '../contact'
 /** A small rehearsal room made from the shared kit. Static shells batch; heads, cymbals and keys keep their pivots. */
 import * as THREE from 'three'
 import * as kit from '../kit'
@@ -25,7 +26,7 @@ function room(live?: () => void) {
   const b = (p: THREE.Object3D, x: number, y: number, z: number, w: number, h: number, d: number, m: THREE.Material, r = 0.018) => add(kit.box(w, h, d, m, r), p, x, y, z)
   const c = (p: THREE.Object3D, x: number, y: number, z: number, radius: number, height: number, m: THREE.Material) => add(kit.cylinder(radius, height, m, 32), p, x, y, z)
   const animate = (mesh: THREE.Object3D, unit: number, n: number, kind: Moving['kind']) => { moving.push({ mesh, unit, n, kind, y: mesh.position.y }); return mesh }
-  root.add(tiledDeck(10.4, 7.4, -.005, 1.3))
+  root.add(tiledDeck(10.4, 7.4, 0, 1.3))
   for (const x of [-4.6, -1.75, 1.75, 4.6]) { const panel = service(.55, 1.75); panel.position.set(x, 1.15, -3.475); root.add(panel) }
   b(root, 0, 1.05, -3.65, 10.4, 2.35, 0.16, dark)
   b(root, -5.12, 0.6, -1.8, 0.14, 1.45, 3.7, dark)
@@ -43,22 +44,23 @@ function room(live?: () => void) {
     c(p, x, y - height / 2, z, r + 0.02, 0.035, kit.metal)
     animate(c(p, x, y + height / 2 + 0.025, z, r * 0.94, 0.022, skin), unit, n, 'head')
     for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; c(p, x + Math.cos(a) * (r + 0.013), y, z + Math.sin(a) * (r + 0.013), 0.014, height * 0.8, kit.metal) }
-    if (!hand) c(p, x, y / 2, z, 0.018, y, kit.metal)
+    if (y > 0) contactPart(c(p, x, y / 2, z, 0.018, y, kit.metal), `drum-stand-${unit}-${n}`)
   }
   function cymbal(p: THREE.Group, unit: number, n: number, x: number, y: number, z: number, r: number) {
-    c(p, x, y / 2, z, 0.014, y, kit.metal)
-    b(p, x, 0.05, z, 0.5, 0.025, 0.035, kit.metal)
+    contactPart(c(p, x, y / 2, z, 0.014, y, kit.metal), `cymbal-stand-${unit}-${n}`)
+    b(p, x, 0.0125, z, 0.5, 0.025, 0.035, kit.metal)
     const pivot = new THREE.Group(); pivot.position.set(x, y, z); p.add(pivot)
     const disc = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.12, r, 0.065, 40), brass); pivot.add(disc)
     c(pivot, 0, 0.045, 0, 0.018, 0.055, trim)
     animate(pivot, unit, n, 'cymbal')
   }
   POS.forEach(([x, z], unit) => {
-    const p = new THREE.Group(); p.position.set(x, 0.03, z); p.userData.static = true; root.add(p)
+    const p = new THREE.Group(); p.position.set(x, 0, z); p.name = `instrument-${unit + 1}`; p.userData.static = true; root.add(p)
     pov(p, [0, 1.35, unit === 0 ? -.9 : .8], [0, -.55, unit === 0 ? 1 : -1])
     const glow = new THREE.MeshStandardMaterial({ color: '#343d29', emissive: '#b9ee6d', emissiveIntensity: 0.2, roughness: 0.5 })
     glows.push(glow)
-    b(p, 0, 0.013, 0, unit === 0 ? 2.6 : 1.9, 0.025, unit === 0 ? 2 : 1.5, carbon)
+    // Flush acoustic mats share the floor datum with instrument feet.
+    b(p, 0, -.0125, 0, unit === 0 ? 2.6 : 1.9, 0.025, unit === 0 ? 2 : 1.5, carbon)
     b(p, 0, 0.04, unit === 0 ? 1 : 0.76, .12, 0.015, 0.025, glow)
     // Seat numbers and instrument names are generated, original artwork.
     const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 96
@@ -67,25 +69,26 @@ function room(live?: () => void) {
     const label = new THREE.Mesh(new THREE.PlaneGeometry(1.65, 0.31), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }))
     label.rotation.x = -Math.PI / 2; label.position.set(0, 0.04, unit === 0 ? 1.22 : 0.96); p.add(label)
     if (unit === 0) {
-      const kick = new THREE.Group(); kick.position.set(0, 0.48, 0.2); kick.rotation.x = Math.PI / 2; kick.userData.static = true; p.add(kick)
+      const kick = new THREE.Group(); kick.position.set(0, 0.485, 0.2); kick.rotation.x = Math.PI / 2; kick.userData.static = true; p.add(kick)
       drum(kick, unit, 0, 0, 0, 0, 0.46, 0.55)
+      contactPart(kick, 'kick-drum')
       drum(p, unit, 1, -0.64, 0.64, 0.55, 0.28, 0.18)
       drum(p, unit, 4, 0.73, 0.52, 0.22, 0.34, 0.39)
       drum(p, unit, 5, 0.3, 1, -0.14, 0.25, 0.24)
       drum(p, unit, 6, -0.26, 1.03, -0.13, 0.22, 0.22)
       cymbal(p, unit, 2, -0.92, 0.95, 0.1, 0.26); cymbal(p, unit, 3, -0.92, 0.88, 0.1, 0.26)
       cymbal(p, unit, 7, -0.84, 1.42, -0.6, 0.4); cymbal(p, unit, 8, 0.88, 1.26, -0.58, 0.42)
-      c(p, 0, 0.44, -0.8, 0.23, 0.11, trim); c(p, 0, 0.22, -0.8, 0.026, 0.4, kit.metal)
+      c(p, 0, 0.44, -0.8, 0.23, 0.11, trim); contactPart(c(p, 0, 0.2, -0.8, 0.026, 0.4, kit.metal), 'stool')
     } else if (unit === 1 || unit === 7) {
       drum(p, unit, 9, -0.43, 0.46, -0.12, 0.26, 0.75, true)
       drum(p, unit, 10, 0.24, 0.65, -0.22, 0.2, 0.26, true)
       drum(p, unit, 12, 0.58, 0.32, 0.4, 0.26, 0.5, true)
-      const cajon = b(p, -0.35, 0.26, 0.5, 0.35, 0.48, 0.32, wood)
-      animate(cajon, unit, 11, 'head')
+      const cajon = b(p, -0.35, 0.24, 0.5, 0.35, 0.48, 0.32, wood)
+      contactPart(cajon, `cajon-${unit}`)
     } else if (unit === 2) {
       slots[`case_${unit}`] = skinSlot(p, `case_${unit}`, b(p, 0, 0.8, 0, 1.4, 0.14, 0.95, dark))
       for (let n = 0; n < 9; n++) animate(b(p, (n % 3 - 1) * 0.42, 0.89, (Math.floor(n / 3) - 1) * 0.28, 0.36, 0.04, 0.23, n % 2 ? trim : ivory), unit, n, 'key')
-      for (const x of [-0.55, 0.55]) b(p, x, 0.4, 0, 0.04, 0.8, 0.6, kit.metal)
+      for (const x of [-0.55, 0.55]) contactPart(b(p, x, 0.4, 0, 0.04, 0.8, 0.6, kit.metal), `keyboard-leg-${unit}-${x}`)
     } else if (unit === 3 || unit === 4 || unit === 5) {
       slots[`case_${unit}`] = skinSlot(p, `case_${unit}`, b(p, 0, 0.72, 0, 1.8, 0.18, 0.8, unit === 4 ? trim : wood))
       for (let n = 0; n < 16; n++) {
@@ -95,11 +98,11 @@ function room(live?: () => void) {
       }
       if (unit === 3) { for (let k = 0; k < 6; k++) c(p, -0.65 + k * 0.17, 0.84, -0.29, 0.032, 0.045, brass); b(p, 0.55, 0.826, -0.28, 0.25, 0.015, 0.13, glow) }
       if (unit === 4) b(p, 0, 1.04, -0.26, 1.8, 0.56, 0.16, trim)
-      for (const x of [-0.7, 0.7]) b(p, x, 0.35, 0, 0.055, 0.7, 0.5, kit.metal)
+      for (const x of [-0.7, 0.7]) contactPart(b(p, x, 0.35, 0, 0.055, 0.7, 0.5, kit.metal), `keyboard-leg-${unit}-${x}`)
       if (unit === 5) for (let n = 0; n < 12; n++) c(p, (n - 5.5) * 0.125, 0.45, 0.04, 0.038, 0.4 - n * 0.016, brass)
     } else {
       // Air feedback lives on the instrument's base, with no floating orb or stalk.
-      animate(c(p, 0, 0.12, 0, 0.52, 0.2, glow), unit, 0, 'air')
+      contactPart(animate(c(p, 0, 0.1, 0, 0.52, 0.2, glow), unit, 0, 'air'), 'air-instrument')
     }
   })
   kit.batch(root, moving.map(m => m.mesh))

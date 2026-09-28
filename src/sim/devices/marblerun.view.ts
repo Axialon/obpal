@@ -1,3 +1,4 @@
+import { contactPart, contactSurface } from '../contact'
 import * as THREE from 'three'
 import { ceramic, darkTitanium, gunmetal, carbon } from '../kit/surfaces'
 import { pov, tiledDeck } from '../kit/precision'
@@ -11,11 +12,11 @@ function boards(scene: THREE.Scene, logic: MarblerunLogic, count = 2) {
   const channelPose = new THREE.Matrix4()
   const models = logic.units.slice(0, count).map((u, n) => {
     const base = new THREE.Group(); base.name = `track-pedestal-${n + 1}`; base.position.x = n * 3.8; scene.add(base)
-    base.add(tiledDeck(3.3, 3.3, -.01, 1.1))
-    disc(base, 0.7, 0.18, [0, 0.09, 0], darkTitanium); rod(base, [0, 0.1, 0], [0, 0.8, 0], 0.15, metal); batch(base)
+    base.add(tiledDeck(3.3, 3.3, 0, 1.1))
+    contactPart(disc(base, 0.7, 0.18, [0, 0.09, 0], darkTitanium), 'pedestal'); rod(base, [0, 0.1, 0], [0, 0.8, 0], 0.15, metal); batch(base)
     const board = new THREE.Group(); board.name = 'tilting-build-board'; board.position.y = 0.9; base.add(board)
     pov(board, [0, .6, 1.48], [0, -.4, -1])
-    block(board, [3.05, 0.12, 3.05], [0, -0.08, 0], gunmetal)
+    contactSurface(block(board, [3.05, 0.12, 3.05], [0, -0.06, 0], gunmetal), `board-${n}`)
     const light = mats.glow(); block(board, [0.45, 0.01, 0.08], [0, 0, 1.48], light)
     for (let k = 0; k <= 5; k++) {
       const at = (k - 2.5) * RUN.cell
@@ -23,7 +24,7 @@ function boards(scene: THREE.Scene, logic: MarblerunLogic, count = 2) {
     }
     batch(board)
     const pieces = Array.from({ length: 25 }, (_, j) => {
-      const g = new THREE.Group(); g.name = `channel-${j + 1}`; g.position.set((j % 5 - 2) * RUN.cell, 0.025, (Math.floor(j / 5) - 2) * RUN.cell); board.add(g)
+      const g = new THREE.Group(); g.name = `channel-${j + 1}`; g.position.set((j % 5 - 2) * RUN.cell, -0.0125, (Math.floor(j / 5) - 2) * RUN.cell); board.add(g)
       const kinds = [0, 1].map(kind => {
         const shape = new THREE.Group(); shape.name = kind ? 'bend' : 'straight'; g.add(shape)
         block(shape, [0.36, 0.025, 0.36], [0, 0, 0], darkTitanium)
@@ -46,7 +47,7 @@ function boards(scene: THREE.Scene, logic: MarblerunLogic, count = 2) {
       return { mesh, kind, index }
     }))
     const cursor = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.25, 32), plastic('#e6b766')); cursor.name = 'build-cursor'; cursor.rotation.x = -Math.PI / 2; board.add(cursor)
-    const marble = new THREE.Mesh(new THREE.SphereGeometry(RUN.radius, 24, 16), metal); marble.name = 'marble'; board.add(marble)
+    const marble = new THREE.Mesh(new THREE.SphereGeometry(RUN.radius, 24, 16), metal); marble.name = 'marble'; marble.castShadow = true; board.add(contactPart(marble, 'marble', { surface: `board-${n}` }))
     for (const [x, color] of [[-1.16, '#d9a65e'], [1.16, '#91c76c']] as const) { const goal = new THREE.Mesh(new THREE.RingGeometry(0.1, 0.13, 32), plastic(color)); goal.rotation.x = -Math.PI / 2; goal.position.set(x, 0.045, 0); board.add(goal) }
     return { board, pieces, channels, cursor, marble, light, u }
   })
@@ -65,7 +66,7 @@ function boards(scene: THREE.Scene, logic: MarblerunLogic, count = 2) {
         channel.mesh.count = count; channel.mesh.instanceMatrix.needsUpdate = true
       }
       m.cursor.visible = !u.running; m.cursor.position.set((Math.round(u.cursorX) - 2) * RUN.cell, 0.14, (Math.round(u.cursorZ) - 2) * RUN.cell)
-      m.marble.position.set(u.x, RUN.radius + 0.043, u.z)
+      m.marble.position.set(u.x, RUN.radius, u.z)
     })
   } }
 }

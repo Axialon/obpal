@@ -1,3 +1,4 @@
+import { contactSurface } from '../contact'
 import * as THREE from 'three'
 import { batch, floorMaterial, maker, metal, plastic, rubber } from '../kit'
 import { KartLogic, KART_CHECKPOINTS } from './kart'
@@ -44,16 +45,16 @@ function kart(n: number) {
 }
 function raceway(scene: THREE.Scene, logic: KartLogic, live?: () => void) {
   const track = new THREE.Group(); track.name = 'track-and-checkpoints'; scene.add(track)
-  track.add(tiledDeck(27, 27, -.085, 3))
+  track.add(tiledDeck(27, 27, 0, 3))
   const asphalt = new THREE.Mesh(new THREE.RingGeometry(4.9, 10.55, 128), floorMaterial('#30383e'))
-  asphalt.rotation.x = -Math.PI / 2; asphalt.position.y = -0.065; asphalt.receiveShadow = true; track.add(asphalt)
+  asphalt.rotation.x = -Math.PI / 2; asphalt.position.y = .0005; asphalt.receiveShadow = true; track.add(contactSurface(asphalt))
   for (const radius of [4.9, 10.55]) for (let n = 0; n < 72; n++) {
     const a = n / 72 * Math.PI * 2
     const kerb = block(track, [0.3, 0.14, radius * 0.085], [Math.sin(a) * radius, 0, Math.cos(a) * radius], n % 2 ? ceramic : darkTitanium)
     kerb.rotation.y = a + Math.PI / 2
   }
   for (let n = 0; n < 12; n++) for (let row = 0; row < 2; row++)
-    block(track, [0.22, 0.02, 0.4], [row * 0.22, 0.025, 5.25 + n * 0.4], plastic((n + row) % 2 ? '#e7e9df' : '#171c22'))
+    block(track, [0.22, 0.001, 0.4], [row * 0.22, 0.001, 5.25 + n * 0.4], plastic((n + row) % 2 ? '#e7e9df' : '#171c22'))
   KART_CHECKPOINTS.forEach((a, n) => {
     for (const r of [4.8, 10.7]) {
       rod(track, [Math.sin(a) * r, 0, Math.cos(a) * r], [Math.sin(a) * r, 1.5, Math.cos(a) * r], 0.045)

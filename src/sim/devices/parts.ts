@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { batch, box, cylinder, metal, plastic, rubber } from '../kit'
 import { previewScene, type Preview } from './view'
 import type { Framing } from './stage'
+import { contactPart } from '../contact'
 
 export function block(
   parent: THREE.Object3D,
@@ -57,15 +58,19 @@ export function wheel(parent: THREE.Object3D, x: number, y: number, z: number, r
     hub.rotation.z = Math.PI / 2
   }
   batch(g)
+  contactPart(g, `wheel-${x}-${z}`)
   return g
 }
 export function tracks(parent: THREE.Object3D, width = 1.2, length = 1.6) {
   for (const s of [-1, 1]) {
-    block(parent, [0.28, 0.38, length], [(s * width) / 2, 0.25, 0], rubber)
+    block(parent, [0.28, 0.38, length], [(s * width) / 2, 0.2075, 0], rubber)
     for (let z = -length / 2 + 0.22; z < length / 2; z += 0.3)
-      wheel(parent, s * (width / 2 + 0.14), 0.25, z, 0.18).userData.static = true
+      contactPart(wheel(parent, s * (width / 2 + 0.14), 0.215, z, 0.18), `roller-${s}-${z.toFixed(2)}`, { mode: 'clear' }).userData.static = true
     for (let z = -length / 2; z < length / 2; z += 0.1)
-      for (const y of [0.065, 0.44]) block(parent, [0.3, 0.035, 0.045], [(s * width) / 2, y, z], plastic('#424a50'))
+      for (const y of [0.0175, 0.415]) {
+        const tread = block(parent, [0.3, 0.035, 0.045], [(s * width) / 2, y, z], plastic('#424a50'))
+        if (y < .1) contactPart(tread, `tread-${s}-${z.toFixed(2)}`)
+      }
   }
 }
 export function playFrame(

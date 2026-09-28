@@ -1,3 +1,4 @@
+import { contactPart, contactSurface } from '../contact'
 /**
  * Robot arms (CATALOGUE §7, system.robot-arm): one to four arms in a shared scene, driven by phones, all of one kind
  * (?kind=, ./kinds.ts: the five-axis arm, the SO-101, a six-axis industrial arm, a SCARA, a delta, a desk arm; each
@@ -103,7 +104,7 @@ floor.rotation.x = -Math.PI / 2
 floor.position.y = -0.16
 floor.receiveShadow = true
 scene.add(floor)
-scene.add(tiledDeck(KIND.cell.fence * 2.8, KIND.cell.fence * 2.8, -.004, .48, .14))
+scene.add(tiledDeck(KIND.cell.fence * 2.8, KIND.cell.fence * 2.8, 0, .48, .14))
 // The cell's fence: the arms work inside it.
 const fence = new THREE.Mesh(new THREE.TorusGeometry(KIND.cell.fence * 1.3, 0.005, 6, 128), ceramic)
 fence.rotation.x = Math.PI / 2
@@ -118,7 +119,7 @@ for (const f of workholding) {
     : box(f.half[0] * 2, f.half[1] * 2, f.half[2] * 2, f.finish === 'shelf' ? darkTitanium : ceramic)
   m.position.set(f.x, f.y, f.z)
   m.castShadow = m.receiveShadow = true
-  fixtureMeshes.add(m)
+  fixtureMeshes.add(contactSurface(m))
 }
 batch(fixtureMeshes)
 scene.add(fixtureMeshes)
@@ -236,6 +237,7 @@ function addArm(number?: number): Arm | null {
   model.root.rotation.y = at.turn
   scene.add(model.root)
   const id = `a${n}`
+  model.root.userData.contactName = id
   const joints: Joint[] = KIN.joints.map((spec) => ({ spec, node: `${id}.${spec.key}`, angle: spec.home, vel: 0, target: null, state: '', flash: 0 }))
   joints.forEach((j, i) => model.apply[i](j.angle))
   const arm: Arm = { n, id, name: `Arm ${n}`, model, joints, profile: 'both', drive: null, edge: false, state: '', homing: false, flash: 0, hw: null, hover: KIND.drive.hover[0], claw: null, track: null, scale: KIND.drive.scale, goal: null, blocked: false }
@@ -328,7 +330,7 @@ const blocks: Block[] = STOCK.map((stock, i) => {
   mesh.position.set(Math.cos(a) * r, y, Math.sin(a) * r)
   mesh.castShadow = mesh.receiveShadow = true
   mesh.userData.pickable = true
-  scene.add(mesh)
+  scene.add(contactPart(mesh, `stock-${i + 1}`, { obstacle: 'stock', supports: `stock-${i + 1}`, mode: () => blocks[i].by || blocks[i].vy ? 'clear' : 'touch' }))
   return { mesh, half: stock.half, mass: stock.mass, by: null, vy: 0, grip: 0 }
 })
 const bq = new THREE.Quaternion()
@@ -1548,7 +1550,7 @@ Object.assign(window, {
     /** Send an arm to a pose (degrees; the gripper 0 closed … 1 open), as Home does (tests and screenshots). */
     goTo: (id: string, pose: Pose, open?: number) => { const a = armOf(id); if (!a) return; a.homing = false; setPose(a, pose); if (open !== undefined) a.joints[GRIP].target = open },
     /** The kind of arm, and its pose's joints. */
-    kind: () => ({ id: KIND.id, keys: KIN.keys }),
+    kind: () => ({ id: KIND.id, keys: KIN.keys, floorHeight: KIN.toolFloor(180, 0) }),
     toolPosition: (id: string) => { const a = armOf(id); return a ? toolWorld(a, KIN.forward(poseOf(a))).toArray() : null },
     /** Where an arm stands, and which way it's turned. */
     stand: (id: string) => { const a = armOf(id); return a ? standOf(a) : null },

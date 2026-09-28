@@ -9,6 +9,7 @@ import type { SerialSpec } from './serial'
 import { buildSerial } from './serial3d'
 import { meshOf } from './shapes3d'
 import { finishPrototype, loadPrototype, prototypeNodes, retirePrototype } from '../kit/prototype'
+import { contactFrame } from '../contact'
 
 export function buildSO101(spec: SerialSpec, n: number, _mats: ArmMaterials) {
   const stuff = { metal: titanium, dark: carbon, black: carbon, shell: ceramic }
@@ -101,6 +102,7 @@ export function buildSO101(spec: SerialSpec, n: number, _mats: ArmMaterials) {
         mechanisms.push(update); update()
       }
       model.root.userData.prototype = 'blender'
+      contactFrame(model.root, 'arm-so101-base')
       performance.mark('obpal:so101:visible')
     }
   }

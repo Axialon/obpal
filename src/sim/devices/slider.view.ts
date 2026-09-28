@@ -1,3 +1,4 @@
+import { contactPart } from '../contact'
 import * as THREE from 'three'
 import { batch, metal, plastic, rubber } from '../kit'
 import { SliderLogic } from './slider'
@@ -13,7 +14,10 @@ function sliders(scene: THREE.Scene, logic: SliderLogic, count = 2, live?: () =>
     const root = part(scene, `camera-slider-${n + 1}`); root.position.x = n * 5
     for (const x of [-1.9, 1.9]) {
       block(root, [0.25, 0.16, 0.65], [x, 0.7, 0], plastic('#465563'))
-      for (const z of [-0.3, 0.3]) rod(root, [x, 0.72, z * 0.5], [x * 1.04, 0.04, z * 1.5], 0.04)
+      for (const z of [-0.3, 0.3]) {
+        rod(root, [x, 0.72, z * 0.5], [x * 1.04, 0.04, z * 1.5], 0.04)
+        contactPart(block(root, [.12, .04, .12], [x * 1.04, .02, z * 1.5], rubber), `foot-${x}-${z}`)
+      }
     }
     for (const z of [-0.2, 0.2]) rod(root, [-1.9, 0.78, z], [1.9, 0.78, z], 0.036, metal)
     rod(root, [-1.9, 0.76, 0], [1.9, 0.76, 0], 0.012, rubber)

@@ -1,3 +1,4 @@
+import { contactPart, contactSurface } from '../contact'
 import * as THREE from 'three'
 import { batch, maker, metal, plastic, rubber } from '../kit'
 import { HelicopterLogic, HELICOPTER_PADS, HELICOPTER_RINGS } from './helicopter'
@@ -7,6 +8,7 @@ import { mats, plate, wear, type DeviceView } from './view'
 import { ceramic, darkTitanium, gunmetal, optic } from '../kit/surfaces'
 import { housing, pov, service, tiledDeck } from '../kit/precision'
 import { skinSlot, upgradeSkins } from '../kit/skins'
+import { seat, supportVertices } from '../kit/support'
 
 function helicopter(n: number) {
   const root = new THREE.Group(), cabin = new THREE.Group(), tail = new THREE.Group(), skids = new THREE.Group()
@@ -44,13 +46,14 @@ function helicopter(n: number) {
   const number = plate(n + 1, 0.25); number.position.set(0, 0.54, -0.99); cabin.add(number)
   maker(cabin, 0, 0.95, 0.08, 0.16)
   for (const part of [cabin, tail, skids, rotor, tailRotor]) batch(part)
-  return { root, rotor, tailRotor, glow, skin }
+  contactPart(skids, 'skids')
+  return { root, rotor, tailRotor, glow, skin, support: supportVertices(skids) }
 }
 function trainingField(scene: THREE.Scene, logic: HelicopterLogic, live?: () => void) {
   const field = new THREE.Group(); field.name = 'training-field'; scene.add(field)
-  field.add(tiledDeck(25, 23, -.06, 2))
+  field.add(tiledDeck(25, 23, 0, 2))
   HELICOPTER_PADS.forEach(([x, z]) => {
-    const pad = housing(3.1, .07, 3.1); pad.position.set(x, 0, z); field.add(pad)
+    const pad = housing(3.1, .07, 3.1); pad.position.set(x, 0, z); field.add(contactSurface(pad))
     for (const dx of [-0.35, 0.35]) block(field, [0.11, 0.02, 1.05], [x + dx, 0.046, z], plastic('#e2e5d9'))
     block(field, [0.7, 0.02, 0.11], [x, 0.046, z], plastic('#e2e5d9'))
     for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2; disc(field, 0.055, 0.1, [x + Math.sin(a) * 1.4, 0.04, z + Math.cos(a) * 1.4], ceramic) }
@@ -73,7 +76,12 @@ function trainingField(scene: THREE.Scene, logic: HelicopterLogic, live?: () => 
     step(colors: readonly (string | null)[] = []) {
       models.forEach((m, n) => {
         const u = logic.units[n]
+        m.root.userData.contactMode = u.y > .221 ? 'clear' : 'touch'
         m.root.position.set(u.x, u.y, u.z); m.root.rotation.set(u.pitch, u.h, u.roll, 'YXZ')
+        // The legacy .22 datum is retained in flight controls; skid geometry defines the physical landing datum.
+        const grounded = Math.min(1, Math.max(0, (u.y - .22) * 5))
+        m.root.rotation.set(u.pitch * grounded, u.h, u.roll * grounded, 'YXZ')
+        seat(m.root, m.support, (x, z) => HELICOPTER_PADS.some(([px, pz]) => Math.abs(x - px) < 1.5 && Math.abs(z - pz) < 1.5) ? .035 : 0, Math.max(0, u.y - .22))
         m.rotor.rotation.y = u.spin; m.tailRotor.rotation.x = u.spin * 1.8
         wear(m.glow, colors[n] ?? null)
       })

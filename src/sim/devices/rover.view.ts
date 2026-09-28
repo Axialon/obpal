@@ -1,3 +1,4 @@
+import { contactPart } from '../contact'
 /** The rovers' look (three.js): a fenced yard, cones, and each rover with its holder's colour on its stripe and antenna. */
 import * as THREE from 'three'
 import { ROVER, roverGround, RoverLogic, type Rover } from './rover'
@@ -9,6 +10,7 @@ import { telescoping } from '../kit/mechanism'
 import { instanceCopies } from '../kit/instances'
 import { finishPrototype, loadPrototype, prototypeNodes, retirePrototype } from '../kit/prototype'
 import { pov } from '../kit/precision'
+import { seat, supportVertices } from '../kit/support'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import type { Stage } from './stage'
 import type { Theme } from '../../ui/themes'
@@ -20,6 +22,7 @@ interface RoverModel {
   antenna: THREE.Group
   shocks: THREE.Group[]
   shockAnchors: THREE.Vector3[]
+  shockBases: THREE.Vector3[]
   mechanisms: (() => void)[]
   pitch: Spring
   lean: Spring
@@ -28,6 +31,7 @@ interface RoverModel {
   speed: number
   front: THREE.Group[]
   wheels: THREE.Object3D[]
+  supports: THREE.Vector3[][]
   accent: THREE.MeshStandardMaterial
   head: THREE.MeshStandardMaterial
   tail: THREE.MeshStandardMaterial
@@ -40,7 +44,7 @@ const SCALE = ROVER.radius / 0.25
 
 function buildRover(n: number): RoverModel {
   const root = new THREE.Group(), body = new THREE.Group()
-  root.scale.setScalar(SCALE); root.add(body)
+  root.name = `rover-${n + 1}`; root.scale.setScalar(SCALE); root.add(body)
   const accent = mats.glow()
   const chassis = shell(.28, .40, .06, carbon); chassis.rotation.x = Math.PI / 2; chassis.position.y = .087; body.add(chassis)
   // Split fenders and an overlapping nose leave the dark structural keel visible between the plates.
@@ -102,6 +106,12 @@ function buildRover(n: number): RoverModel {
       tread.push(block)
     }
     const tyre = new THREE.Mesh(mergeGeometries(tread)!, rubber)
+    // Match the hero's outer tyre radius before the lazy swap, including tread corners.
+    const positions = tyre.geometry.getAttribute('position')
+    let radius = 0
+    for (let i = 0; i < positions.count; i++) radius = Math.max(radius, Math.hypot(positions.getX(i), positions.getZ(i)))
+    tyre.geometry.scale(ROVER.modelWheelRadius / radius, 1, ROVER.modelWheelRadius / radius)
+    tyre.castShadow = true
     tread.forEach(g => g.dispose())
     tyre.rotation.z = Math.PI / 2
     const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.036, 0.054, 16), hubMat)
@@ -111,7 +121,7 @@ function buildRover(n: number): RoverModel {
       const rim = ring(.033, .0025, titanium); rim.rotation.x = Math.PI / 2; rim.position.y = side * .028; tyre.add(rim)
     }
     batch(tyre)
-    pivot.add(tyre)
+    pivot.add(contactPart(tyre, `wheel-${wheels.length}`, { slope: true }))
     root.add(pivot)
     wheels.push(tyre)
     if (z < 0) front.push(pivot)
@@ -127,7 +137,7 @@ function buildRover(n: number): RoverModel {
   root.add(honk)
   const shadow = blobShadow(0.3, 0.55); shadow.name = 'shadow'; root.add(shadow)
   batch(root, [...wheels, beam, honk, antenna, ...shocks]); batch(body, [antenna])
-  return { root, body, antenna, shocks, shockAnchors: shocks.map(s => s.position.clone()), mechanisms: [], front, wheels, accent, head, tail, beam, honk, pitch: new Spring(0, .24), lean: new Spring(0, .22), settle: new Spring(0, .2), sway: new Spring(0, .3), speed: 0 }
+  return { root, body, antenna, shocks, shockAnchors: shocks.map(s => s.position.clone()), shockBases: shocks.map(s => s.position.clone().setY(.064)), mechanisms: [], front, wheels, supports: wheels.map(supportVertices), accent, head, tail, beam, honk, pitch: new Spring(0, .24), lean: new Spring(0, .22), settle: new Spring(0, .2), sway: new Spring(0, .3), speed: 0 }
 }
 
 function placeRover(m: RoverModel, r: Rover, color: string | null, dt: number) {
@@ -144,18 +154,24 @@ function placeRover(m: RoverModel, r: Rover, color: string | null, dt: number) {
   m.body.position.y = m.settle.step(-Math.abs(acceleration) * .0006, dt)
   m.antenna.rotation.x = m.sway.step(acceleration * .025, dt)
   m.body.updateMatrix()
+  for (const f of m.front) f.rotation.y = -r.steer
+  for (const [i, w] of m.wheels.entries()) {
+    w.rotation.x = -r.roll
+    // Wheel pivots belong to the authored model. Independent suspension seats its actual tyre, including tread.
+    seat(w, m.supports[i], roverGround)
+  }
   for (const [i, shock] of m.shocks.entries()) {
     const anchor = m.shockAnchors[i]
     const top = new THREE.Vector3(anchor.x, .14, anchor.z).applyMatrix4(m.body.matrix)
-    const bottom = new THREE.Vector3(anchor.x, .064, anchor.z)
+    // Shocks are ordered by side, wheels by axle. Their lower bearings follow the seated wheel centres.
+    const centre = m.root.worldToLocal(m.wheels[[0, 2, 1, 3][i]].getWorldPosition(new THREE.Vector3()))
+    const bottom = m.shockBases[i].set(anchor.x, centre.y, anchor.z)
     const axis = top.clone().sub(bottom)
     shock.position.copy(top).add(bottom).multiplyScalar(.5)
     shock.scale.y = axis.length() / .076
     shock.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis.normalize())
   }
   m.mechanisms.forEach(update => update())
-  for (const f of m.front) f.rotation.y = -r.steer
-  for (const w of m.wheels) w.rotation.x = -r.roll
   wear(m.accent, color)
   m.head.emissiveIntensity = r.lights ? 3 : 0.15
   m.beam.visible = r.lights
@@ -219,8 +235,10 @@ export function createView(stage: Stage, logic: RoverLogic): DeviceView {
       m.shocks = [rig!.shock0, rig!.shock1, rig!.shock2, rig!.shock3] as THREE.Group[]
       m.front = [rig!.steer0, rig!.steer1] as THREE.Group[]
       m.wheels = [rig!.wheel0, rig!.wheel1, rig!.wheel2, rig!.wheel3]
+      m.wheels.forEach((wheel, j) => contactPart(wheel, `wheel-${j}`, { slope: true }))
+      m.supports = m.wheels.map(supportVertices)
       m.mechanisms = m.shocks.map((shock, j) => telescoping(rig![`shockSleeve${j}` as 'shockSleeve0'], rig![`shockRod${j}` as 'shockRod0'], body,
-        new THREE.Vector3(shock.position.x, .064, shock.position.z), new THREE.Vector3(shock.position.x, .14, shock.position.z), .026, .05))
+        m.shockBases[j], new THREE.Vector3(shock.position.x, .14, shock.position.z), .026, .05))
       m.mechanisms.forEach(update => update())
       m.root.userData.prototype = 'blender'
     })
@@ -276,7 +294,7 @@ export function preview(): Preview {
       const turn = ((h - r.h + Math.PI * 3) % (Math.PI * 2)) - Math.PI
       Object.assign(r, { x: x1, z: z1, v: Math.hypot(x1 - x0, z1 - z0) / Math.max(dt, 1e-3), h })
       r.steer += (Math.max(-0.5, Math.min(0.5, -turn * 12)) - r.steer) * Math.min(1, dt * 8)
-      r.roll += (r.v / 0.088) * dt
+      r.roll += (r.v / ROVER.wheelRadius) * dt
       placeRover(m, r, '#c6ff34', dt)
     },
   }

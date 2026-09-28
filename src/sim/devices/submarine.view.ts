@@ -1,3 +1,4 @@
+import { contactPart, contactSurface } from '../contact'
 import * as THREE from 'three'
 import { batch, floorMaterial, glass, maker, metal, plastic, rubber } from '../kit'
 import { SubmarineLogic, SUBMARINE_WRECKS } from './submarine'
@@ -7,6 +8,7 @@ import { mats, plate, wear, type DeviceView } from './view'
 import { darkTitanium, gunmetal } from '../kit/surfaces'
 import { housing, pov, service } from '../kit/precision'
 import { skinSlot, upgradeSkins } from '../kit/skins'
+import { seat, supportVertices } from '../kit/support'
 
 function submarine(n: number) {
   const root = new THREE.Group(), hull = new THREE.Group(), fittings = new THREE.Group(), prop = new THREE.Group()
@@ -40,13 +42,14 @@ function submarine(n: number) {
   const number = plate(n + 1, 0.25); number.position.set(0, 0.55, -0.235); hull.add(number)
   maker(hull, 0, 0.755, 0.02, 0.16)
   for (const part of [hull, fittings, prop]) batch(part)
-  return { root, prop, glow, skin }
+  contactPart(root, `hull-${n + 1}`, { mode: () => root.userData.grounded ? 'touch' : 'clear' })
+  return { root, prop, glow, skin, support: supportVertices(root) }
 }
 function seafloor(scene: THREE.Scene, logic: SubmarineLogic, live?: () => void) {
   scene.fog = new THREE.FogExp2('#266271', 0.027)
   const floor = new THREE.Group(); floor.name = 'seabed'; scene.add(floor)
   const sediment = floorMaterial('#677371'); sediment.metalness = .12; sediment.roughness = .7
-  block(floor, [34, 0.22, 32], [0, -0.26, 0], sediment)
+  contactSurface(block(floor, [34, 0.22, 32], [0, -0.26, 0], sediment))
   for (let n = 0; n < 28; n++) {
     const a = n * 2.39996, radius = 5 + n % 7 * 1.6
     const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.4 + n % 3 * 0.2, 0), plastic(n % 2 ? '#526d68' : '#819088'))
@@ -82,7 +85,7 @@ function seafloor(scene: THREE.Scene, logic: SubmarineLogic, live?: () => void) 
     batch(root)
     return glow
   })
-  const models = logic.units.map((_, n) => { const m = submarine(n); scene.add(m.root); if (live) upgradeSkins('submarine', { hullSkin: m.skin }, live); return m })
+  const models = logic.units.map((_, n) => { const m = submarine(n); scene.add(m.root); if (live) upgradeSkins('submarine', { hullSkin: m.skin }, () => { m.support = supportVertices(m.root); live() }); return m })
   const pings = models.map((_, n) => {
     const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 14), new THREE.MeshBasicMaterial({ color: n ? '#e9c97b' : '#91eadb', wireframe: true, transparent: true, opacity: 0.23, depthWrite: false }))
     mesh.name = `sonar-pulse-${n + 1}`; scene.add(mesh); return mesh
@@ -93,6 +96,8 @@ function seafloor(scene: THREE.Scene, logic: SubmarineLogic, live?: () => void) 
       models.forEach((m, n) => {
         const u = logic.units[n]
         m.root.position.set(u.x, u.y, u.z); m.root.rotation.set(u.pitch, u.h, 0, 'YXZ'); m.prop.rotation.z = u.prop
+        m.root.userData.grounded = u.y <= .65001
+        seat(m.root, m.support, () => -.15, Math.max(0, u.y - .65))
         wear(m.glow, colors[n] ?? null)
         pings[n].visible = u.ping > 0; pings[n].position.set(u.pingX, u.pingY, u.pingZ); pings[n].scale.setScalar(Math.max(0.01, u.ping))
         pings[n].material.opacity = (1 - u.ping / 6) * 0.3

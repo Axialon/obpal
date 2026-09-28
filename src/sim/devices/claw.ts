@@ -57,6 +57,12 @@ export type ClawPhase = 'idle' | 'drop' | 'close' | 'lift' | 'carry' | 'open'
 
 export interface Prize { x: number; y: number; z: number; r: number; kind: 'orb' | 'cube'; color: string; held: boolean; won: number }
 
+/** Quasi-static piles settle centred on their supporting prize, using the same half-height as the visible shape. */
+export function prizeSupport(p: Prize, all: readonly Prize[]) {
+  return all.filter(o => o !== p && !o.held && !o.won && o.y < p.y - 1e-5 && Math.hypot(o.x - p.x, o.z - p.z) < (o.r + p.r) * .75)
+    .sort((a, b) => b.y + b.r - a.y - a.r)[0]
+}
+
 export interface Claw {
   /** The gantry over the pit, and the hub's height. */
   x: number
@@ -94,7 +100,7 @@ function prizes(seed: number): Prize[] {
   const middle = out.filter(p => Math.abs(p.x) < 0.36 && Math.abs(p.z) < 0.36)
   for (let i = 0; i < middle.length; i += 2) {
     const base = middle[i], r = 0.055
-    out.push({ x: base.x + (rnd() - 0.5) * 0.025, y: base.y + base.r + r * 0.7, z: base.z + (rnd() - 0.5) * 0.025,
+    out.push({ x: base.x, y: base.y + base.r + r, z: base.z,
       r, kind: 'orb', color: PRIZE_COLORS[(i + 3) % PRIZE_COLORS.length], held: false, won: 0 })
   }
   return out
@@ -179,8 +185,9 @@ export class ClawLogic implements DeviceLogic {
         break
       case 'drop': {
         // Down until the fingers reach the floor or the top of what's under the claw.
-        const under = this.prizes[n].filter((p) => !p.held && !p.won && Math.hypot(p.x - c.x, p.z - c.z) < p.r + 0.03)
-        const stop = Math.max(C.floor + 0.02, ...under.map((p) => p.y + p.r * 0.4)) + C.reach
+        const under = this.prizes[n].filter((p) => !p.held && !p.won && Math.hypot(p.x - c.x, p.z - c.z) < p.r + 0.12)
+        // Open fingers sweep wider than the hub. Stop above the top of every prize under that sweep.
+        const stop = Math.max(C.floor + 0.025, ...under.map((p) => p.y + p.r + .007)) + C.reach
         c.y = Math.max(stop, c.y - C.drop * dt)
         if (c.y <= stop + 1e-6) { c.phase = 'close'; c.since = 0 }
         break
@@ -214,6 +221,8 @@ export class ClawLogic implements DeviceLogic {
         if (c.close <= 0) { c.phase = 'idle'; c.since = 0 }
         break
     }
+    // Closed finger plates extend 124 mm below the hub; the old 100 mm gameplay reach was not a collision envelope.
+    c.y = Math.max(C.floor + .125, c.y)
     // What it holds hangs under the claw.
     if (c.held >= 0) {
       const p = this.prizes[n][c.held]
@@ -260,7 +269,9 @@ export class ClawLogic implements DeviceLogic {
         if (p.won > 1.6) this.respawn(p, n)
         continue
       }
-      const rest = Math.max(CLAW.floor + p.r, ...all.filter((o) => o !== p && !o.held && !o.won && o.y < p.y - 1e-5 && Math.hypot(o.x - p.x, o.z - p.z) < (o.r + p.r) * 0.75).map((o) => o.y + o.r + p.r * 0.7))
+      const support = prizeSupport(p, all)
+      const rest = support ? support.y + support.r + p.r : CLAW.floor + p.r
+      if (support) { p.x = support.x; p.z = support.z }
       if (p.y > rest) p.y = Math.max(rest, p.y - dt * 1.4)
       else p.y = rest
     }

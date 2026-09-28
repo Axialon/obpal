@@ -1,3 +1,4 @@
+import { contactPart, contactSurface, contactInstances } from '../contact'
 /**
  * The claw machines' look (three.js): two glass cabinets lit in their players' colours, a gantry riding over a pit of
  * glass orbs and cubes, the claw on its cable opening and closing, and the chute in the corner.
@@ -6,7 +7,8 @@ import * as THREE from 'three'
 import { darkTitanium, carbon } from '../kit/surfaces'
 import { pov, service, tiledDeck } from '../kit/precision'
 import { batch, bolt, cylinder, maker, plastic, rounded } from '../kit'
-import { CABINETS, CLAW, ClawLogic, type Claw, type Prize } from './claw'
+import { CABINETS, CLAW, ClawLogic, prizeSupport, type Claw, type Prize } from './claw'
+import { fitFingers, fingerPenetration } from './claw-fingers'
 import type { Stage } from './stage'
 import type { Theme } from '../../ui/themes'
 import { restInput } from './types'
@@ -31,7 +33,7 @@ function buildCabinet(n: number, prizes: readonly Prize[]): ClawModel {
   const base = box(H * 2, CLAW.floor, H * 2, baseMat, 0.03)
   base.castShadow = true
   base.position.y = CLAW.floor / 2
-  root.add(base)
+  root.add(contactPart(base, `cabinet-${n}`))
   for (const side of [-1, 1]) { const panel = service(H * 1.5, CLAW.floor * .6); panel.position.set(side * (H + .005), CLAW.floor / 2, 0); panel.rotation.y = side * Math.PI / 2; root.add(panel) }
   const dark = mats.dark(), metalTrim = mats.metal()
   const console = box(H * 1.65, 0.09, 0.2, dark); console.position.set(0, 0.58, H + 0.075); root.add(console)
@@ -55,7 +57,8 @@ function buildCabinet(n: number, prizes: readonly Prize[]): ClawModel {
   const pit = new THREE.Mesh(new THREE.PlaneGeometry(CLAW.half * 2, CLAW.half * 2), carbon)
   pit.rotation.x = -Math.PI / 2
   pit.position.y = CLAW.floor + 0.001
-  root.add(pit)
+  pit.receiveShadow = true
+  root.add(contactSurface(pit, `pit-${n}`))
   const ch = CLAW.chute
   const hole = new THREE.Mesh(new THREE.PlaneGeometry(ch.half * 2, ch.half * 2), new THREE.MeshBasicMaterial({ color: '#05060a' }))
   hole.rotation.x = -Math.PI / 2
@@ -120,6 +123,7 @@ function buildCabinet(n: number, prizes: readonly Prize[]): ClawModel {
     const pivot = new THREE.Group()
     pivot.rotation.y = (k / 3) * Math.PI * 2
     const f = new THREE.Group()
+    f.name = `claw-${n}-finger-${k}`
     f.position.set(0.028, -0.02, 0)
     const upper = box(0.012, 0.06, 0.016, metal, 0.004)
     upper.position.set(0.012, -0.03, 0)
@@ -127,7 +131,9 @@ function buildCabinet(n: number, prizes: readonly Prize[]): ClawModel {
     const lower = box(0.012, 0.055, 0.016, metal, 0.004)
     lower.position.set(0.012, -0.075, 0)
     lower.rotation.z = -0.35
+    upper.castShadow = lower.castShadow = true
     f.add(upper, lower)
+    contactPart(f, `claw-${n}-finger-${k}`, { surface: `pit-${n}`, mode: 'clear', penetration: () => fingerPenetration([f], root, prizes) })
     pivot.add(f)
     hub.add(pivot)
     fingers.push(f)
@@ -141,14 +147,22 @@ function buildCabinet(n: number, prizes: readonly Prize[]): ClawModel {
     let bucket = buckets.get(key)
     if (!bucket) {
       const count = prizes.filter(q => q.kind === p.kind && q.color === p.color).length
-      const geometry = p.kind === 'orb' ? new THREE.SphereGeometry(p.r, 20, 12) : rounded(p.r * 1.7, p.r * 1.7, p.r * 1.7, p.r * 0.3)
+      const geometry = p.kind === 'orb' ? new THREE.SphereGeometry(p.r, 20, 12) : rounded(p.r * 2, p.r * 2, p.r * 2, p.r * 0.3)
       const mesh = new THREE.InstancedMesh(geometry, plastic(p.color), count)
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.frustumCulled = false
+      mesh.castShadow = mesh.receiveShadow = true
+      const same = prizes.filter(q => q.kind === p.kind && q.color === p.color)
+      contactInstances(mesh, `prize-${n}-${p.kind}-${buckets.size}`, i => ({
+        supports: `prize-${n}-${prizes.indexOf(same[i])}`,
+        surface: () => { const under = same[i].held ? null : prizeSupport(same[i], prizes); return under ? `prize-${n}-${prizes.indexOf(under)}` : `pit-${n}` },
+        active: () => !same[i].won,
+        mode: () => { const q = same[i], under = prizeSupport(q, prizes); return q.held || q.y > (under ? under.y + under.r : CLAW.floor) + q.r + .002 ? 'clear' : 'touch' },
+      }))
       bucket = { mesh, used: 0 }; buckets.set(key, bucket); root.add(mesh)
     }
     return { mesh: bucket.mesh, index: bucket.used++, last: '' }
   })
-  batch(root, [bridge, cable, ...prizeMeshes.map(p => p.mesh)])
+  batch(root, [bridge, cable, ...fingers, ...prizeMeshes.map(p => p.mesh)])
   return { root, trolley, bridge, cable, hub, fingers, sign, base: baseMat, prizes: prizeMeshes }
 }
 
@@ -161,7 +175,7 @@ function placeClaw(m: ClawModel, c: Claw, prizes: readonly Prize[], color: strin
   m.cable.position.set(c.x, (top + c.y) / 2, c.z)
   m.cable.scale.y = Math.max(0.01, top - c.y)
   // Open, the fingers splay out; closed, they meet under the hub.
-  for (const f of m.fingers) f.rotation.z = 0.55 - c.close * 0.75
+  fitFingers(m.fingers, m.root, prizes, c.close)
   wear(m.sign, color, 0.5, 1.8 + (color ? 0.4 * Math.sin(t * 3) : 0))
   prizes.forEach((p, k) => {
     const { mesh, index } = m.prizes[k]
@@ -176,7 +190,7 @@ function placeClaw(m: ClawModel, c: Claw, prizes: readonly Prize[], color: strin
 }
 
 export function createView(stage: Stage, logic: ClawLogic): DeviceView {
-  stage.scene.add(tiledDeck(4.5, 3.8, -.015, 1))
+  stage.scene.add(tiledDeck(4.5, 3.8, 0, 1))
   const models = logic.claws.map((_, n) => {
     const m = buildCabinet(n, logic.prizes[n])
     const [x, z] = CABINETS[n] ?? [0, 0]

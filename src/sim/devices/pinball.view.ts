@@ -1,3 +1,4 @@
+import { contactPart, contactSurface } from '../contact'
 /** Two cabinet tables with exposed playfields, moving flippers and readable backbox scores. */
 import * as THREE from 'three'
 import { ceramic, darkTitanium, gunmetal, carbon } from '../kit/surfaces'
@@ -32,7 +33,7 @@ function scoreboard(parent: THREE.Object3D) {
 
 function arcade(scene: THREE.Scene, logic: PinballLogic) {
   const floor = group(scene, 'arcade-floor')
-  floor.add(tiledDeck(4.2, 3.65, -.01, 1))
+  floor.add(tiledDeck(4.2, 3.65, 0, 1))
   batch(floor)
   const tables = logic.units.map((_, n) => {
     const root = group(scene, `pinball-table-${n + 1}`); root.position.x = tableX(n)
@@ -40,7 +41,7 @@ function arcade(scene: THREE.Scene, logic: PinballLogic) {
     block(cabinet, [1.56, 0.37, 2.82], [0, 0.75, 0], gunmetal)
     for (const x of [-0.66, 0.66]) for (const z of [-1.16, 1.16]) {
       rod(cabinet, [x * 1.08, 0.07, z * 1.06], [x, 0.71, z], 0.045)
-      disc(cabinet, 0.073, 0.035, [x * 1.08, 0.035, z * 1.06], rubber)
+      contactPart(disc(cabinet, 0.073, 0.035, [x * 1.08, 0.0175, z * 1.06], rubber), `table-foot-${x}-${z}`)
     }
     for (const side of [-1, 1]) {
       block(cabinet, [0.025, 0.075, 2.35], [side * 0.785, 0.79, 0], accent)
@@ -57,7 +58,7 @@ function arcade(scene: THREE.Scene, logic: PinballLogic) {
     const score = scoreboard(root)
     const playfield = group(root, 'playfield'); playfield.position.y = 0.96; playfield.rotation.x = 0.1
     const deck = group(playfield, 'deck-and-rails')
-    block(deck, [1.43, 0.065, 2.65], [0, -0.035, 0], carbon)
+    contactSurface(block(deck, [1.43, 0.065, 2.65], [0, -0.0325, 0], carbon), 'playfield')
     for (const x of [-0.73, 0.73]) block(deck, [0.065, 0.13, 2.72], [x, 0.04, 0], metal)
     block(deck, [1.46, 0.13, 0.055], [0, 0.04, -1.33], metal)
     for (const side of [-1, 1]) block(deck, [0.44, 0.1, 0.07], [side * 0.45, 0.02, 1.31], metal)
@@ -93,7 +94,7 @@ function arcade(scene: THREE.Scene, logic: PinballLogic) {
     block(plunger, [0.11, 0.08, 0.05], [0.59, 0.03, 1.59], accent)
     batch(plunger)
     const ball = new THREE.Mesh(new THREE.SphereGeometry(0.035, 20, 14), metal)
-    ball.name = 'steel-ball'; ball.castShadow = true; playfield.add(ball)
+    ball.name = 'steel-ball'; ball.castShadow = true; playfield.add(contactPart(ball, 'ball', { surface: 'playfield' }))
     const holder = mats.glow(), band = block(root, [0.9, 0.028, 0.03], [0, 1.69, -1.418], holder)
     band.name = 'holder-light'
     return { root, score, ball, flippers, plunger, bumpers, holder }
@@ -103,11 +104,12 @@ function arcade(scene: THREE.Scene, logic: PinballLogic) {
       let changed = false
       tables.forEach((m, n) => {
         const u = logic.units[n]
-        m.ball.position.set(u.x, 0.055, u.z)
+        m.ball.position.set(u.x, 0.035, u.z)
         m.flippers[0].rotation.y = -(0.4 - u.left * 0.92)
         m.flippers[1].rotation.y = 0.4 - u.right * 0.92
         m.plunger.position.z = u.plunger * 0.14
-        m.root.rotation.z = Math.sin(u.nudge * Math.PI * 4) * u.nudge * 0.012
+        // A nudge moves the ball through physics; the cabinet remains supported by its four feet.
+        m.root.rotation.z = 0
         m.bumpers.forEach((b, index) => { b.emissiveIntensity = 0.7 + u.bumperCooldown[index] * 16 })
         wear(m.holder, colors[n] ?? null)
         changed = m.score(u.score, n + 1) || changed

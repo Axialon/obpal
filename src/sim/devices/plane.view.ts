@@ -25,6 +25,8 @@ function trainer() {
     wheel(root, x * 0.4, -0.12, -0.2, 0.1).userData.static = true
   }
   const canopy = housing(2, 2, 2, optic, .2)
+  rod(root, [0, .02, .7], [0, -.16, .7], .018)
+  wheel(root, 0, -.16, .7, .06).userData.static = true
   canopy.scale.set(0.16, 0.18, 0.32)
   canopy.position.set(0, 0.31, -0.12)
   skin.add(canopy)
@@ -46,9 +48,9 @@ function trainer() {
 function airfield(scene: THREE.Scene, logic: PlaneLogic, live?: () => void) {
   const set = new THREE.Group()
   scene.add(set)
-  set.add(tiledDeck(72, 88, -.09, 8))
-  const runway = tiledDeck(5, 42, -.035, 3); runway.position.z = 3; set.add(runway)
-  for (let z = -16; z < 24; z += 3) block(set, [0.16, 0.012, 1.5], [0, -0.025, z], plastic('#ece6d8'))
+  set.add(tiledDeck(72, 88, 0, 8))
+  const runway = tiledDeck(5, 42, 0, 3); runway.position.z = 3; set.add(runway)
+  for (let z = -16; z < 24; z += 3) block(set, [0.16, 0.001, 1.5], [0, .0005, z], plastic('#ece6d8'))
   for (const x of [-2.6, 2.6]) for (let z = -16; z <= 24; z += 4) disc(set, 0.09, 0.06, [x, 0, z], plastic('#bbdbef'))
   block(set, [5, 2.7, 5], [-9, 1.25, 8], darkTitanium)
   const door = service(4, 2.2); door.position.set(-9, 1.02, 10.55); set.add(door)
@@ -66,13 +68,16 @@ function airfield(scene: THREE.Scene, logic: PlaneLogic, live?: () => void) {
     return m
   })
   const m = trainer()
-  scene.add(m.root)
+  m.root.name = 'plane'; scene.add(m.root)
   if (live) upgradeSkins('plane', { airframe: m.skin }, live)
   return {
     step() {
       const u = logic.units[0]
-      m.root.position.set(u.x, u.y, u.z)
-      m.root.rotation.set(u.pitch, u.h, u.bank, 'YXZ')
+      m.root.userData.contactMode = u.y > .231 ? 'clear' : 'touch'
+      // Wheel bottoms are -.22 in the model; flight's legacy floor datum is .23.
+      m.root.position.set(u.x, u.y - .01, u.z)
+      const airborne = Math.min(1, Math.max(0, (u.y - .23) * 2))
+      m.root.rotation.set(u.pitch * airborne, u.h, u.bank * airborne, 'YXZ')
       m.prop.rotation.z = u.prop
       rings.forEach((r, n) => r.scale.setScalar(n === u.next ? 1 : 0.92))
     },

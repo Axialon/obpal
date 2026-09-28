@@ -32,6 +32,18 @@ export interface Excavator {
 }
 export const BOOM = 1.7,
   STICK = 1.45
+/** Bucket plates and teeth in the hinge frame. Physics and rendering share their solid dimensions. */
+export const BUCKET: { size: [number, number, number]; at: [number, number, number] }[] = [
+  { size: [.65, .12, .6], at: [0, -.25, -.15] },
+  { size: [.65, .38, .08], at: [0, -.1, .12] },
+  ...[-.3, .3].map(x => ({ size: [.05, .34, .6] as [number, number, number], at: [x, -.15, -.15] as [number, number, number] })),
+  ...Array.from({ length: 5 }, (_, n) => ({ size: [.085, .07, .16] as [number, number, number], at: [(n - 2) * .13, -.25, -.5] as [number, number, number] })),
+]
+export function bucketFloor(u: Excavator) {
+  const c = Math.cos(u.curl * .8), s = Math.sin(u.curl * .8)
+  const sole = Math.min(...BUCKET.map(b => b.at[1] * c - b.at[2] * s - b.size[1] * Math.abs(c) / 2 - b.size[2] * Math.abs(s) / 2))
+  return 1 + BOOM * Math.sin(u.boom) + STICK * Math.sin(u.boom + u.stick) + sole
+}
 export function bucketTip(u: Excavator): [number, number, number] {
   const r = BOOM * Math.cos(u.boom) + STICK * Math.cos(u.boom + u.stick)
   return [
@@ -115,11 +127,18 @@ export class ExcavatorLogic extends Machine {
         ),
       )
     } else this.hand = null
-    if (bucketTip(u)[1] < 0.08) {
-      u.boom = was.boom
-      u.stick = was.stick
-    }
     if (action(i, 'bucket')) u.curl = u.curl > 0.5 ? 0 : 1
+    if (bucketFloor(u) < .0005) {
+      const wanted = { ...u }
+      let lo = 0, hi = 1
+      for (let n = 0; n < 28; n++) {
+        const f = (lo + hi) / 2
+        for (const key of ['boom', 'stick', 'curl'] as const) u[key] = was[key] + (wanted[key] - was[key]) * f
+        if (bucketFloor(u) >= .0005) lo = f
+        else hi = f
+      }
+      for (const key of ['boom', 'stick', 'curl'] as const) u[key] = was[key] + (wanted[key] - was[key]) * lo
+    }
     const [x, y, z] = bucketTip(u)
     if (!u.load && u.curl > 0.65 && y < 0.85 && Math.hypot(x, z + 2.5) < 1.35 && this.sand >= 1) {
       u.load = 1

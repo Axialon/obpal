@@ -1,3 +1,4 @@
+import { contactPart } from '../contact'
 import * as THREE from 'three'
 import { batch, metal, plastic, rubber } from '../kit'
 import { JibLogic, jibTip } from './jib'
@@ -13,7 +14,7 @@ function cranes(scene: THREE.Scene, logic: JibLogic, count = 2, live?: () => voi
     const root = part(scene, `jib-crane-${n + 1}`); root.position.set(n ? 2.2 : -2.2, 0, 1)
     for (let j = 0; j < 3; j++) {
       const a = j * Math.PI * 2 / 3, x = Math.sin(a) * 0.8, z = Math.cos(a) * 0.8
-      rod(root, [0, 0.95, 0], [x, 0.1, z], 0.055); disc(root, 0.13, 0.1, [x, 0.07, z], rubber)
+      rod(root, [0, 0.95, 0], [x, 0.1, z], 0.055); contactPart(disc(root, 0.13, 0.1, [x, 0.05, z], rubber), `foot-${j}`)
       rod(root, [0, 0.36, 0], [x * 0.7, 0.36, z * 0.7], 0.025)
     }
     rod(root, [0, 0.2, 0], [0, 1.5, 0], 0.1); batch(root)

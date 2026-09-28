@@ -17,7 +17,15 @@ export const PLANETARY_SPEC: DeviceSpec = {
   tray: [{ id: 'sample', label: 'Sample', type: 'button', icon: 'tap' }, { id: 'mast', label: 'Mast / arm', type: 'button', icon: 'camera' }],
   buttons: { 'key:Space': 'tray:sample', 'key:KeyM': 'tray:mast', 'media:playpause': 'tray:sample' },
 }
-export const terrain = (x: number, z: number) => 0.16 * Math.sin(x * 0.7) * Math.cos(z * 0.6) + 0.09 * Math.sin(z * 1.7 + x * 0.4)
+const elevation = (x: number, z: number) => 0.16 * Math.sin(x * 0.7) * Math.cos(z * 0.6) + 0.09 * Math.sin(z * 1.7 + x * 0.4)
+/** The same two triangles as the rendered 70 by 70 height field. */
+export function terrain(x: number, z: number) {
+  const step = 18 / 70, ix = Math.floor((x + 9) / step), iz = Math.floor((z + 9) / step)
+  const x0 = ix * step - 9, z0 = iz * step - 9, a = (x - x0) / step, b = (z - z0) / step
+  return a + b <= 1
+    ? elevation(x0, z0) * (1 - a - b) + elevation(x0 + step, z0) * a + elevation(x0, z0 + step) * b
+    : elevation(x0 + step, z0 + step) * (a + b - 1) + elevation(x0 + step, z0) * (1 - b) + elevation(x0, z0 + step) * (1 - a)
+}
 export const sampleRocks = () => [[-2, 1.6], [2, 1.6], [-4, -2], [3, -3.5], [0, -5], [5, 3]].map(([x, z], n) => ({ x, z, y: terrain(x, z), sampled: false, name: ['Basalt', 'Breccia', 'Olivine', 'Shale', 'Quartz', 'Gabbro'][n] }))
 export interface Explorer { x: number; y: number; z: number; h: number; v: number; vy: number; swing: number; boom: number; mastPan: number; mastTilt: number; mast: boolean; samples: number; actions: number; sampling: number }
 export function sampleTip(u: Explorer) { const a = u.h + u.swing, reach = 0.55 + Math.cos(u.boom) * 0.7; return { x: u.x - Math.sin(a) * reach, y: u.y + 0.62 + Math.sin(u.boom) * 0.7, z: u.z - Math.cos(a) * reach } }
@@ -38,9 +46,9 @@ export class PlanetaryLogic extends Machine {
       u.v += (throttle * 1.7 - u.v * (i ? 1.2 : 4)) * dt
       u.v = clamp(u.v, -0.8, 1.6); u.h = wrapPi(u.h - steer * dt * 1.2)
       u.x = clamp(u.x - Math.sin(u.h) * u.v * dt, -8, 8); u.z = clamp(u.z - Math.cos(u.h) * u.v * dt, -8, 8)
+      // Low gravity still acts in flight. A settled contact must not inject an upward impulse every frame.
       u.vy -= 1.62 * dt; u.y += u.vy * dt
-      const ground = terrain(u.x, u.z)
-      if (u.y < ground) { u.vy = Math.min(0.5, (ground - u.y) / Math.max(dt, 0.001)); u.y = ground }
+      if (u.y < terrain(u.x, u.z)) { u.y = terrain(u.x, u.z); u.vy = 0 }
       const pan = i?.pad ? axis(i.pad.axes[2]) * dt : (i?.pan[0] ?? 0) * 0.008
       const tilt = i?.pad ? -axis(i.pad.axes[3]) * dt : -(i?.pan[1] ?? 0) * 0.008
       if (u.mast) { u.mastPan = clamp(u.mastPan - pan, -Math.PI, Math.PI); u.mastTilt = clamp(u.mastTilt + tilt, -0.7, 0.8) }

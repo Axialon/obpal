@@ -53,6 +53,14 @@ export const DRONE = {
   maxTilt: 0.42,
 }
 
+/** The landing pad is an octagonal frustum, including its sloping outer edge. */
+export const DRONE_PAD = { top: .46, bottom: .48, height: .02, sides: 8 } as const
+export function dronePadHeight(x: number, z: number): number {
+  const a = Math.abs(x), b = Math.abs(z), bevel = Math.SQRT2 - 1
+  const radius = Math.max(a + bevel * b, b + bevel * a)
+  return DRONE_PAD.height * Math.max(0, Math.min(1, (DRONE_PAD.bottom - radius) / (DRONE_PAD.bottom - DRONE_PAD.top)))
+}
+
 export type DronePhase = 'landed' | 'takeoff' | 'flying' | 'landing' | 'home'
 
 export interface Drone {

@@ -1,3 +1,4 @@
+import { contactPart, contactSurface } from './contact'
 /**
  * Faction arena (CATALOGUE §7, system.gamepad-slots): four player slots in one shared scene. Each device claims a slot
  * (Player 1–4, one per faction) and drives its puck: tilt or the left stick to roll, a drag to push, a tap or A to
@@ -67,7 +68,7 @@ camera.lookAt(0, 0, 0.15)
 const disc = new THREE.Mesh(new THREE.CylinderGeometry(RING, RING, 0.08, 96), floorMaterial('#252e34'))
 disc.receiveShadow = true
 disc.position.y = -0.04
-scene.add(disc)
+scene.add(contactSurface(disc))
 const edge = new THREE.Mesh(new THREE.TorusGeometry(RING, 0.018, 12, 160), new THREE.MeshStandardMaterial({ color: '#0b0f14', emissive: '#c6ff34', emissiveIntensity: 0.9 }))
 edge.rotation.x = Math.PI / 2
 scene.add(edge)
@@ -101,7 +102,8 @@ const slots: Slot[] = FACTIONS.map((f, i) => {
   const group = new THREE.Group()
   const puck = new THREE.Mesh(new THREE.CylinderGeometry(PUCK, PUCK * 1.05, 0.07, 64), new THREE.MeshStandardMaterial({ color: '#171c25', metalness: 0.7, roughness: 0.3 }))
   puck.position.y = 0.035
-  group.add(puck)
+  puck.castShadow = true
+  group.add(contactPart(puck, `puck-${i}`, { active: () => group.visible, mode: () => slots[i].falling ? 'free' : 'touch' }))
   const bumper = new THREE.Mesh(new THREE.TorusGeometry(PUCK, 0.014, 8, 48), plastic('#11171d'))
   bumper.rotation.x = Math.PI / 2; bumper.position.y = 0.027; group.add(bumper)
   for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2; const screw = bolt(0.007); screw.position.set(Math.cos(a) * PUCK * 0.76, 0.073, Math.sin(a) * PUCK * 0.76); group.add(screw) }

@@ -74,8 +74,9 @@ export class TankLogic extends Machine {
         [steer, throttle] = drive(i, this.drags[n])
       u.v += (throttle * 1.7 - u.v) * Math.min(1, dt * 5)
       u.h = wrapPi(u.h - steer * dt * 1.5)
-      u.x = clamp(u.x - Math.sin(u.h) * u.v * dt, -8, 8)
-      u.z = clamp(u.z - Math.cos(u.h) * u.v * dt, -7, 7)
+      // Keep the 1.32 m swept hull and barrel envelope inside the range walls.
+      u.x = clamp(u.x - Math.sin(u.h) * u.v * dt, -7.38, 7.38)
+      u.z = clamp(u.z - Math.cos(u.h) * u.v * dt, -6.15, 6.65)
       if (i) {
         if (i.space && (!i.pad || i.space.pointer)) {
           const [x, y] = i.space.aim
@@ -110,9 +111,9 @@ export class TankLogic extends Machine {
       b.x += b.vx * dt
       b.z += b.vz * dt
       b.y += b.vy * dt
-      if (b.y < 0.1) {
-        b.y = 0.1
-        b.vy = Math.abs(b.vy) * 0.35
+      if (b.y < 0.12) {
+        b.y = 0.12
+        b.vy = Math.abs(b.vy) > .1 ? Math.abs(b.vy) * 0.35 : 0
         b.vx *= 0.7
         b.vz *= 0.7
       }
@@ -124,6 +125,6 @@ export class TankLogic extends Machine {
           this.events.push({ unit: b.owner, kind: 'score', text: 'Soft target down' })
         }
     }
-    this.balls = this.balls.filter((b) => b.life > 0 && Math.abs(b.x) < 10 && Math.abs(b.z) < 9)
+    this.balls = this.balls.filter((b) => b.life > 0 && Math.abs(b.x) < 8.88 && Math.abs(b.z) < 7.88)
   }
 }

@@ -1,3 +1,4 @@
+import { contactPart, contactSurface, lowestPoint } from '../contact'
 import * as THREE from 'three'
 import { batch, glass, maker, metal, plastic, rubber } from '../kit'
 import { BoatLogic, BUOYS } from './boat'
@@ -32,6 +33,7 @@ function launch() {
   )
   shell.rotation.x = Math.PI / 2
   shell.position.y = 0.23
+  shell.castShadow = true
   skin.add(shell)
   block(skin, [0.63, 0.1, 0.65], [0, 0.27, 0.23], darkTitanium)
   block(skin, [0.58, 0.3, 0.53], [0, 0.43, -0.15], gunmetal)
@@ -54,6 +56,8 @@ function launch() {
   disc(root, 0.04, 0.04, [0, 0.72, -0.2], glow)
   batch(prop)
   batch(root, [prop])
+  // The launch displaces water: the keel is 80 mm below its water line, not resting on top of it.
+  contactPart(skin, 'hull-keel', { surface: 'water', expectedGap: -.08 })
   return { root, prop, glow, skin }
 }
 function harbour(scene: THREE.Scene, logic: BoatLogic, live?: () => void) {
@@ -69,7 +73,8 @@ function harbour(scene: THREE.Scene, logic: BoatLogic, live?: () => void) {
   )
   water.rotation.x = -Math.PI / 2
   water.position.y = -0.05
-  scene.add(water)
+  water.receiveShadow = true
+  scene.add(contactSurface(water, 'water'))
   const dock = new THREE.Group()
   scene.add(dock)
   const deck = tiledDeck(6.8, 3, .24, .6); deck.position.set(-2.1, 0, 4.45); dock.add(deck)
@@ -82,19 +87,21 @@ function harbour(scene: THREE.Scene, logic: BoatLogic, live?: () => void) {
     const g = new THREE.Group()
     g.position.set(x, 0, z)
     scene.add(g)
-    disc(g, 0.24, 0.16, [0, 0.12, 0], plastic(n % 2 ? '#e97153' : '#f6d267'))
+    contactPart(disc(g, 0.24, 0.16, [0, 0.12, 0], plastic(n % 2 ? '#e97153' : '#f6d267')), `buoy-${n}`, { surface: 'water', expectedGap: -.04 })
     rod(g, [0, 0.18, 0], [0, 0.95, 0], 0.035)
     block(g, [0.35, 0.2, 0.02], [0.16, 0.85, 0], plastic('#e8ece2'))
     batch(g)
     return g
   })
   batch(dock)
-  const boats = logic.units.map(() => {
+  const boats = logic.units.map((_, n) => {
     const b = launch()
+    b.root.name = `boat-${n + 1}`
     scene.add(b.root)
     if (live) upgradeSkins('boat', { hullSkin: b.skin }, live)
     return b
   })
+  const ray = new THREE.Raycaster(), down = new THREE.Vector3(0, -1, 0)
   const wakes = boats.map(() => {
     const g = new THREE.Group()
     scene.add(g)
@@ -118,16 +125,23 @@ function harbour(scene: THREE.Scene, logic: BoatLogic, live?: () => void) {
       water.geometry.computeVertexNormals()
       boats.forEach((m, n) => {
         const b = logic.units[n]
-        m.root.position.set(b.x, Math.sin(t * 1.3 + n) * 0.025, b.z)
+        m.root.position.set(b.x, 0, b.z)
         m.root.rotation.set(Math.sin(t + n) * 0.015, b.h, b.rudder * b.v * 0.04)
+        m.root.updateMatrixWorld(true); water.updateMatrixWorld(true)
+        let keel = new THREE.Vector3(0, Infinity, 0)
+        m.skin.traverse(o => { const mesh = o as THREE.Mesh; if (mesh.isMesh) { const p = lowestPoint(mesh.geometry, mesh.matrixWorld); if (p.y < keel.y) keel = p } })
+        ray.set(new THREE.Vector3(keel.x, 2, keel.z), down)
+        const waterline = ray.intersectObject(water)[0]?.point.y ?? -.05
+        m.root.position.y = waterline - .08 - keel.y
         m.prop.rotation.z += b.v * dt * 25
         wear(m.glow, colors[n] ?? null)
-        wakes[n].position.set(b.x, 0.035, b.z)
+        wakes[n].position.set(b.x, waterline + .002, b.z)
         wakes[n].rotation.y = b.h
         wakes[n].visible = Math.abs(b.v) > 0.1
       })
-      buoys.forEach((b, n) => {
-        b.position.y = Math.sin(t + n) * 0.035
+      buoys.forEach(b => {
+        ray.set(new THREE.Vector3(b.position.x, 2, b.position.z), down)
+        b.position.y = (ray.intersectObject(water)[0]?.point.y ?? -.05) - .08
       })
     },
   }

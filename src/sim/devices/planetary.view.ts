@@ -1,3 +1,4 @@
+import { contactPart, contactSurface } from '../contact'
 import * as THREE from 'three'
 import { batch, floorMaterial, metal, plastic } from '../kit'
 import { PlanetaryLogic, terrain } from './planetary'
@@ -8,6 +9,7 @@ import { mats, wear, type DeviceView } from './view'
 import { ceramic, darkTitanium, gunmetal } from '../kit/surfaces'
 import { pov } from '../kit/precision'
 import { skinSlot, upgradeSkins } from '../kit/skins'
+import { seat, supportVertices } from '../kit/support'
 
 function expedition(scene: THREE.Scene, logic: PlanetaryLogic, count = 2, live?: () => void) {
   const ground = part(scene, 'crater-terrain')
@@ -16,7 +18,7 @@ function expedition(scene: THREE.Scene, logic: PlanetaryLogic, count = 2, live?:
   for (let i = 0; i < pos.count; i++) pos.setY(i, terrain(pos.getX(i), pos.getZ(i)))
   geo.computeVertexNormals()
   const soilMaterial = floorMaterial('#80786b'); soilMaterial.metalness = .12; soilMaterial.roughness = .7
-  const soil = new THREE.Mesh(geo, soilMaterial); soil.receiveShadow = true; ground.add(soil)
+  const soil = new THREE.Mesh(geo, soilMaterial); soil.receiveShadow = true; ground.add(contactSurface(soil))
   for (let j = 0; j < 26; j++) {
     const x = Math.sin(j * 42.7) * 7.8, z = Math.cos(j * 27.3) * 7.8
     const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.14 + (j % 3) * 0.09), plastic('#807467')); rock.position.set(x, terrain(x, z) + 0.08, z); rock.scale.y = 0.65; ground.add(rock)
@@ -24,7 +26,8 @@ function expedition(scene: THREE.Scene, logic: PlanetaryLogic, count = 2, live?:
   batch(ground)
   const rocks = logic.rocks.map((r, j) => {
     const g = part(scene, `sample-rock-${j + 1}`); g.position.set(r.x, r.y, r.z)
-    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.2), plastic('#cbbba0')); rock.position.y = 0.12; g.add(rock)
+    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.2), plastic('#cbbba0')); rock.castShadow = true; g.add(contactPart(rock, `sample-${j + 1}`, { slope: true, active: () => !logic.rocks[j].sampled }))
+    seat(rock, supportVertices(rock), terrain)
     const tag = caption(r.name, '#dfe8bd', 0.65); tag.position.y = 0.5; g.add(tag)
     return g
   })
@@ -33,10 +36,14 @@ function expedition(scene: THREE.Scene, logic: PlanetaryLogic, count = 2, live?:
     const skin = skinSlot(root, 'chassisSkin', block(root, [0.95, 0.28, 1.2], [0, 0.57, 0], gunmetal))
     block(root, [1.28, 0.04, 0.7], [0, 0.74, 0.28], plastic('#354c64'))
     for (const x of [-0.5, 0, 0.5]) block(root, [0.012, 0.008, 0.66], [x, 0.768, 0.28], metal)
-    for (const x of [-0.63, 0.63]) for (const z of [-0.48, 0, 0.48]) { rod(root, [0, 0.53, z], [x, 0.28, z], 0.036); wheel(root, x, 0.24, z, 0.23).userData.static = true }
+    const wheels: { part: THREE.Group; points: THREE.Vector3[] }[] = []
+    for (const x of [-0.63, 0.63]) for (const z of [-0.48, 0, 0.48]) {
+      rod(root, [0, 0.53, z], [x, 0.28, z], 0.036)
+      const part = wheel(root, x, .23, z, .23); contactPart(part, `wheel-${x}-${z}`, { slope: true }); wheels.push({ part, points: supportVertices(part) })
+    }
     const light = mats.glow(); block(root, [0.36, 0.035, 0.03], [0, 0.72, -0.59], light)
     rod(root, [0, 0.7, -0.14], [0, 1.35, -0.14], 0.045)
-    batch(root)
+    batch(root, wheels.map(w => w.part))
     const mast = part(root, 'mast-pan-tilt'); mast.position.set(0, 1.4, -0.14)
     const mastSkin = skinSlot(mast, 'mastSkin', block(mast, [0.38, 0.18, 0.23], [0, 0, 0], darkTitanium))
     pov(mast, [0, 0, -.2])
@@ -51,12 +58,13 @@ function expedition(scene: THREE.Scene, logic: PlanetaryLogic, count = 2, live?:
     const dust = new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMaterial({ color: '#cdb395', size: 0.045, transparent: true, opacity: 0.55, depthWrite: false }))
     dust.name = 'wheel-dust'; const dustPoints = new Float32Array(72); dust.geometry.setAttribute('position', new THREE.BufferAttribute(dustPoints, 3)); root.add(dust)
     if (live) upgradeSkins('planetary', { chassisSkin: skin, mastSkin }, live)
-    return { root, mast, eye, swing, boom, tool, light, dust, dustPoints }
+    return { root, wheels, mast, eye, swing, boom, tool, light, dust, dustPoints }
   })
   return { rovers, step(t: number, colors: readonly (string | null)[] = []) {
     rocks.forEach((r, n) => { r.visible = !logic.rocks[n].sampled })
     rovers.forEach((m, n) => {
       const u = logic.units[n]; m.root.position.set(u.x, u.y, u.z); m.root.rotation.y = u.h
+      for (const w of m.wheels) { w.part.position.y = .23; seat(w.part, w.points, terrain) }
       m.mast.rotation.set(u.mastTilt, u.mastPan, 0, 'YXZ'); m.swing.rotation.y = u.swing; m.boom.rotation.x = u.boom; m.tool.rotation.y = u.sampling * 20
       wear(m.light, colors[n] ?? null); m.dust.visible = Math.abs(u.v) > 0.05
       for (let j = 0; j < 24; j++) { const age = (t * 1.4 + j / 24) % 1; m.dustPoints.set([(j % 2 ? -0.63 : 0.63) + Math.sin(j * 8) * age * 0.2, 0.18 + age * 0.25, 0.4 + age * Math.abs(u.v)], j * 3) }

@@ -73,16 +73,13 @@ let shadowTex: THREE.Texture | null = null
 /** A soft round shadow on the floor, `r` metres across its dark middle. */
 export function blobShadow(r: number, opacity = 0.5): THREE.Mesh {
   if (!shadowTex) {
-    const c = document.createElement('canvas')
-    c.width = c.height = 128
-    const g = c.getContext('2d')!
-    const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64)
-    grad.addColorStop(0, 'rgba(0,0,0,1)')
-    grad.addColorStop(0.5, 'rgba(0,0,0,0.55)')
-    grad.addColorStop(1, 'rgba(0,0,0,0)')
-    g.fillStyle = grad
-    g.fillRect(0, 0, 128, 128)
-    shadowTex = new THREE.CanvasTexture(c)
+    const pixels = new Uint8Array(128 * 128 * 4)
+    for (let y = 0; y < 128; y++) for (let x = 0; x < 128; x++) {
+      const radius = Math.hypot(x + .5 - 64, y + .5 - 64) / 64
+      pixels[(y * 128 + x) * 4 + 3] = Math.round(255 * Math.max(0, radius < .5 ? 1 - radius * .9 : 1.1 * (1 - radius)))
+    }
+    shadowTex = new THREE.DataTexture(pixels, 128, 128)
+    shadowTex.magFilter = shadowTex.minFilter = THREE.LinearFilter; shadowTex.needsUpdate = true
   }
   const m = new THREE.Mesh(new THREE.PlaneGeometry(r * 2.4, r * 2.4), new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, opacity, depthWrite: false }))
   m.rotation.x = -Math.PI / 2

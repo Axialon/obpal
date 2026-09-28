@@ -1,3 +1,4 @@
+import { contactPart } from '../contact'
 /** An open-front living room keeps all four appliances legible from the play camera. */
 import * as THREE from 'three'
 import { ceramic, darkTitanium, gunmetal, carbon } from '../kit/surfaces'
@@ -25,7 +26,7 @@ function room(scene: THREE.Scene, logic: SmarthomeLogic) {
   block(furniture, [2.5, 0.7, 0.2], [-0.6, 0.67, 1.65], fabric)
   for (const x of [-1.82, 0.62]) block(furniture, [0.19, 0.56, 0.95], [x, 0.55, 1.25], fabric)
   for (const x of [-1.38, -0.6, 0.18]) block(furniture, [0.71, 0.16, 0.72], [x, 0.58, 1.18], plastic('#879395'))
-  for (const x of [-1.64, 0.45]) for (const z of [0.92, 1.58]) rod(furniture, [x, 0, z], [x, 0.28, z], 0.035)
+  for (const x of [-1.64, 0.45]) for (const z of [0.92, 1.58]) contactPart(rod(furniture, [x, 0, z], [x, 0.28, z], 0.035), `sofa-foot-${x}-${z}`)
   block(furniture, [1.5, 0.075, 0.72], [-0.4, 0.48, 0], wood)
   for (const x of [-1.03, 0.23]) for (const z of [-0.25, 0.25]) rod(furniture, [x, 0.03, z], [x, 0.45, z], 0.025)
   block(furniture, [0.28, 0.04, 0.2], [-0.6, 0.54, 0], plastic('#718d9c'))
@@ -33,7 +34,7 @@ function room(scene: THREE.Scene, logic: SmarthomeLogic) {
   block(furniture, [2.3, 0.38, 0.48], [1, 0.3, -1.98], wood)
   for (const x of [0.35, 1, 1.65]) block(furniture, [0.61, 0.27, 0.03], [x, 0.3, -1.715], trim)
   const plant = group(furniture, 'plant')
-  disc(plant, 0.23, 0.4, [2.45, 0.2, 1.6], ceramic)
+  contactPart(disc(plant, 0.23, 0.4, [2.45, 0.2, 1.6], ceramic), 'planter')
   for (let n = 0; n < 6; n++) {
     const a = n * Math.PI / 3, leaf = block(plant, [0.15, 0.55, 0.055], [2.45 + Math.cos(a) * 0.17, 0.63, 1.6 + Math.sin(a) * 0.17], plastic('#5f7958'))
     leaf.rotation.set(Math.cos(a) * 0.4, a, Math.sin(a) * 0.4)

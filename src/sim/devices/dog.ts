@@ -3,6 +3,7 @@ import { Controller, PadButton } from '@obpal/core'
 import { drive, Machine, timestep } from './common'
 import { approach, clamp, DragStick, wrapPi } from './input'
 import type { DeviceInput, DeviceSpec } from './types'
+import { DOG_PAD, plantDog, stepFeet, type DogLeg } from './dog-feet'
 
 export const DOG_SPEC: DeviceSpec = {
   id: 'dog',
@@ -24,12 +25,14 @@ export const DOG_SPEC: DeviceSpec = {
   buttons: { 'media:playpause': 'tray:sit', 'key:Space': 'tray:sit', 'key:KeyS': 'tray:stand' },
 }
 
-export const DOG_YARD = { x: 6, z: 5 }
+// Leave a full body radius at the fence, including the head during a turn.
+export const DOG_YARD = { x: 5.45, z: 4.45 }
 const BALL_ROUTE = [[0, -2.4], [2.2, -1], [-1, 0.8], [1.6, 2.4], [-1.8, -2]] as const
-export const dogHome = (n: number) => ({ x: n ? 2.2 : -2.2, z: 2.2 })
+export const dogHome = (n: number) => ({ x: DOG_PAD.x[n ? 1 : 0], z: DOG_PAD.z })
 
 export interface Dog {
   x: number
+  y: number
   z: number
   h: number
   v: number
@@ -39,7 +42,7 @@ export interface Dog {
   sit: number
   gait: number
   stride: number
-  legs: { hip: number; knee: number }[]
+  legs: DogLeg[]
   ball: { x: number; z: number }
   score: number
   actions: number
@@ -53,17 +56,19 @@ function ballAt(n: number, score: number) {
 export class DogLogic extends Machine {
   readonly spec = DOG_SPEC
   units: Dog[] = [0, 1].map((n) => ({
-    ...dogHome(n), h: 0, v: 0, turn: 0, sitting: false, sit: 0, gait: 0, stride: 0,
-    legs: Array.from({ length: 4 }, () => ({ hip: -0.22, knee: 0.44 })),
+    ...dogHome(n), y: 0, h: 0, v: 0, turn: 0, sitting: false, sit: 0, gait: 0, stride: 0,
+    legs: [],
     ball: ballAt(n, 0), score: 0, actions: 0,
   }))
   private drags = this.units.map(() => new DragStick())
   private parked = this.units.map(() => false)
 
+  constructor() { super(); this.units.forEach(u => plantDog(u)) }
+
   home(n: number) {
     const u = this.units[n]
     Object.assign(u, { ...dogHome(n), h: 0, v: 0, turn: 0, sitting: false, sit: 0, gait: 0, stride: 0 })
-    u.legs.forEach((leg) => Object.assign(leg, { hip: -0.22, knee: 0.44 }))
+    plantDog(u)
     this.drags[n] = new DragStick()
     this.parked[n] = true
   }
@@ -108,14 +113,7 @@ export class DogLogic extends Machine {
       }
       u.sit = approach(u.sit, u.sitting ? 1 : 0, 3, dt)
       u.stride = approach(u.stride, Math.min(1, Math.abs(u.v) / 1.4 + Math.abs(u.turn) * 0.2), 5, dt)
-      if (u.stride > 0.001) u.gait = (u.gait + dt * (5 + Math.abs(u.v) * 5)) % (Math.PI * 2)
-      u.legs.forEach((leg, k) => {
-        // Front-left and rear-right move together, opposite the other diagonal.
-        const phase = u.gait + (k === 0 || k === 3 ? 0 : Math.PI),
-          swing = Math.sin(phase) * u.stride * (1 - u.sit)
-        leg.hip = -0.22 + swing * 0.5 + u.sit * (k < 2 ? -0.15 : -1.05)
-        leg.knee = 0.44 + Math.max(0, -swing) * 0.55 + u.sit * (k < 2 ? 0.25 : 1.35)
-      })
+      stepFeet(u, dt)
       if (live && !u.sitting && Math.hypot(u.x - u.ball.x, u.z - u.ball.z) < 0.62) {
         u.score++
         u.ball = ballAt(n, u.score)

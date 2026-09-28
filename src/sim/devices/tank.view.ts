@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { contactObstacle, contactPart, contactInstances } from '../contact'
 import { batch, bolt, maker, metal, plastic, rubber } from '../kit'
 import { TankLogic } from './tank'
 import { block, disc, playFrame, rod, showcase, tracks } from './parts'
@@ -9,6 +10,8 @@ import { pov, tiledDeck } from '../kit/precision'
 import { skinSlot, upgradeSkins } from '../kit/skins'
 function tank(n: number) {
   const root = new THREE.Group()
+  root.name = `tank-${n + 1}`
+  contactPart(root, `hull-${n + 1}`, { mode: 'clear', collides: 'range-wall' })
   const skin = skinSlot(root, 'chassisSkin')
   tracks(root)
   block(skin, [1.15, 0.3, 1.7], [0, 0.5, 0], gunmetal)
@@ -45,15 +48,15 @@ function tank(n: number) {
 function range(scene: THREE.Scene, logic: TankLogic, live?: () => void) {
   const set = new THREE.Group()
   scene.add(set)
-  set.add(tiledDeck(18, 16, -.01, 2))
-  for (const x of [-8.8, 8.8]) block(set, [0.2, 0.7, 16], [x, 0.3, 0], darkTitanium)
+  set.add(tiledDeck(18, 16, 0, 2))
+  for (const x of [-8.8, 8.8]) contactObstacle(block(set, [0.2, 0.7, 16], [x, 0.3, 0], darkTitanium), 'range-wall')
   for (let x = -8; x <= 8; x += 0.8)
     for (let y = 0; y < 3; y++)
-      block(set, [0.78, 0.3, 0.65], [x + (y % 2) * 0.2, 0.15 + y * 0.3, -7.8], y === 1 ? ceramic : gunmetal)
+      contactObstacle(block(set, [0.78, 0.3, 0.65], [x + (y % 2) * 0.2, 0.15 + y * 0.3, -7.8], y === 1 ? ceramic : gunmetal), 'range-wall')
   batch(set)
   const targets = logic.targets.map((t) => {
     const root = new THREE.Group()
-    root.position.set(t.x, 0.2, t.z)
+    root.position.set(t.x, 0, t.z)
     scene.add(root)
     rod(root, [0, 0, 0], [0, 0.7, 0], 0.04)
     for (const [r, c, z] of [
@@ -74,6 +77,8 @@ function range(scene: THREE.Scene, logic: TankLogic, live?: () => void) {
     return m
   })
   const balls = new THREE.InstancedMesh(new THREE.SphereGeometry(0.12, 12, 8), plastic('#ffb780'), 24)
+  balls.castShadow = true
+  contactInstances(balls, 'projectile', i => ({ active: () => !!logic.balls[i], mode: () => logic.balls[i]?.y <= .121 && !logic.balls[i]?.vy ? 'touch' : 'clear' }))
   scene.add(balls)
   const dummy = new THREE.Object3D()
   return {

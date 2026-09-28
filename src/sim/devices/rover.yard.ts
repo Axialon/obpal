@@ -1,3 +1,4 @@
+import { contactSurface } from '../contact'
 /** The rover's hard-surface yard. Course dimensions still come from the driving model. */
 import * as THREE from 'three'
 import { batch } from '../kit'
@@ -26,7 +27,7 @@ function panel(w: number, h: number, d: number, material: THREE.Material, edge =
 
 function deck(w: number, h: number, d: number, material: THREE.Material, x: number, y: number, z: number, edge = HOUSING, opening?: readonly [number, number]) {
   const m = panel(w, h, d, material, edge, opening); m.rotation.x = -Math.PI / 2; m.position.set(x, y, z)
-  return m
+  return contactSurface(m)
 }
 
 /** Neutral access inlays sit flush, with the same physical seam as the model panels. */
@@ -94,7 +95,7 @@ export function buildCourse() {
     const shape = new THREE.Shape()
     shape.moveTo(-r.halfLength, 0); shape.lineTo(-r.halfLength / 2, r.height); shape.lineTo(r.halfLength / 2, r.height); shape.lineTo(r.halfLength, 0); shape.closePath()
     const geometry = new THREE.ExtrudeGeometry(shape, { depth: r.halfWidth * 2 - HOUSING * 2, bevelEnabled: true, bevelSize: HOUSING, bevelThickness: HOUSING, bevelSegments: 1, steps: 1 })
-    const ramp = new THREE.Mesh(geometry, gunmetal); ramp.rotation.y = -Math.PI / 2; ramp.position.set(r.x + r.halfWidth - HOUSING, -HOUSING, r.z); ramp.receiveShadow = true; g.add(ramp)
+    const ramp = new THREE.Mesh(geometry, gunmetal); ramp.rotation.y = -Math.PI / 2; ramp.position.set(r.x + r.halfWidth - HOUSING, -HOUSING, r.z); ramp.receiveShadow = true; g.add(contactSurface(ramp))
     for (const side of [-1, 1]) {
       // Straight inset strips follow the actual deck planes, including each incline.
       for (const section of [-1, 0, 1]) {

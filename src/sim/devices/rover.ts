@@ -39,6 +39,9 @@ export const ROVER_SPEC: DeviceSpec = {
 export const ROVER = {
   wheelbase: 0.42,
   radius: 0.34,
+  /** The authored tyre's outer radius, in its quarter-metre model frame. */
+  modelWheelRadius: .066428,
+  wheelRadius: .066428 * (.34 / .25),
   vmax: 3.6,
   vrev: 1.4,
   accel: 3.2,
@@ -156,7 +159,7 @@ export function stepRover(r: Rover, i: RoverIntent, dt: number) {
   r.h = wrapPi(r.h - (r.v / R.wheelbase) * Math.tan(r.steer) * dt)
   r.x += -Math.sin(r.h) * r.v * dt
   r.z += -Math.cos(r.h) * r.v * dt
-  r.roll += (r.v / 0.088) * dt
+  r.roll += (r.v / R.wheelRadius) * dt
   r.honk = Math.max(0, r.honk - dt)
 }
 

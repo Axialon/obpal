@@ -1,3 +1,4 @@
+import { contactPart } from '../contact'
 import * as THREE from 'three'
 import { darkTitanium, gunmetal, carbon } from '../kit/surfaces'
 import { pov, service, tiledDeck } from '../kit/precision'
@@ -38,7 +39,7 @@ function theatre(scene: THREE.Scene, logic: SpotlightsLogic) {
   set.add(tiledDeck(12, 8, .1, 1.5))
   block(set, [12, 4.8, 0.18], [0, 2.3, -3.8], gunmetal)
   for (const x of [-5.5, 5.5]) {
-    for (const z of [-1.8, -1.2]) rod(set, [x, 0, z], [x, 4.2, z], 0.055)
+    for (const z of [-1.8, -1.2]) contactPart(rod(set, [x, .1, z], [x, 4.2, z], 0.055), `truss-foot-${x}-${z}`)
     for (let y = 0; y < 4; y += 0.5) rod(set, [x, y, -1.8], [x, y + 0.5, -1.2], 0.025)
   }
   for (const y of [4, 4.4]) for (const z of [-1.8, -1.2]) rod(set, [-5.5, y, z], [5.5, y, z], 0.045)
@@ -47,7 +48,7 @@ function theatre(scene: THREE.Scene, logic: SpotlightsLogic) {
     rod(set, [x, 4.4, -1.8], [x + 0.5, 4, -1.8], 0.022)
   }
   for (const x of [-4.8, 4.8]) {
-    block(set, [0.7, 1.4, 0.6], [x, 0.85, 2], carbon)
+    contactPart(block(set, [0.7, 1.4, 0.6], [x, 0.8, 2], carbon), `speaker-${x}`)
     for (const y of [0.55, 1.05]) {
       const speaker = disc(set, 0.24, 0.02, [x, y, 2.32], darkTitanium)
       speaker.rotation.x = Math.PI / 2

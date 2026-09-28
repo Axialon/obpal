@@ -2,6 +2,7 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { carbon, ceramic, darkTitanium, gunmetal } from './surfaces'
+import { contactSurface } from '../contact'
 
 export const DETAIL = .0005, HOUSING = .002, SEAM = .0015
 
@@ -53,7 +54,7 @@ export function tiledDeck(w: number, d: number, top = 0, module = 1, depth = .03
   }
   const geometry = mergeGeometries(parts); parts.forEach(g => g.dispose())
   const tiles = new THREE.Mesh(geometry, deckFinish); tiles.receiveShadow = true; group.add(tiles)
-  return group
+  return contactSurface(group)
 }
 
 const deckFinish = gunmetal.clone(); deckFinish.roughness = .34; deckFinish.userData.simShared = true

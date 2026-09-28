@@ -25,8 +25,8 @@ export interface ToolTarget { yaw: number; reach: number; height: number; pitch:
 
 const D2R = Math.PI / 180
 
-/** How near the floor any part of the arm comes (m). */
-export const FLOOR_CLEAR = 0.005
+/** Numerical contact clearance, below the 2 mm visual tolerance (m). */
+export const FLOOR_CLEAR = 0.0005
 
 /**
  * The arm's parts past the elbow as the sim builds them (./model.ts), for how low they reach. Rings are circles about

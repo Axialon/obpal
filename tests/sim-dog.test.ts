@@ -22,9 +22,9 @@ it('trots on the left stick with opposite diagonals and independent seats', () =
   expect(u.z).toBeLessThan(dogHome(0).z - 0.5)
   expect(u.h).toBeLessThan(-0.1)
   expect(u.stride).toBeGreaterThan(0.5)
-  expect(u.legs[0]).toEqual(u.legs[3])
-  expect(u.legs[1]).toEqual(u.legs[2])
-  expect(u.legs[0].hip + u.legs[1].hip).toBeCloseTo(-0.44)
+  expect(u.legs[0].stance).toBe(u.legs[3].stance)
+  expect(u.legs[1].stance).toBe(u.legs[2].stance)
+  expect(Math.abs(u.legs[0].previous - u.legs[1].previous)).toBeCloseTo(.5)
   expect(logic.units[1].z).toBe(dogHome(1).z)
 })
 

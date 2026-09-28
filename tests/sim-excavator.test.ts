@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { ExcavatorLogic, bucketPose, bucketTip } from '../src/sim/devices/excavator'
+import { ExcavatorLogic, bucketPose, bucketTip, bucketFloor } from '../src/sim/devices/excavator'
 import { restInput } from '../src/sim/devices/types'
 it('maps the excavator pattern and holds every joint at its limits without input', () => {
   const l = new ExcavatorLogic(),
@@ -18,6 +18,20 @@ it('maps the excavator pattern and holds every joint at its limits without input
   const before = { ...u }
   l.step([null], 1)
   expect(u).toEqual(before)
+})
+it('stops lowering and curling at the bucket solid rather than an approximate tip', () => {
+  const l = new ExcavatorLogic(), i = restInput()
+  i.pad = { axes: [0, 0, 0, -1], triggers: [0, 0], buttons: 0, flags: 0, seq: 0, t: 0 }
+  for (let n = 0; n < 240; n++) {
+    l.step([i], 1 / 60)
+    expect(bucketFloor(l.units[0])).toBeGreaterThanOrEqual(.0004999)
+  }
+  expect(bucketFloor(l.units[0])).toBeLessThan(.000501)
+  for (let n = 0; n < 300; n++) {
+    i.pad.axes[2] = Math.sin(n / 30)
+    l.step([i], 1 / 60)
+    expect(bucketFloor(l.units[0])).toBeGreaterThanOrEqual(.0004999)
+  }
 })
 it('conserves sand when scooping, dumping into the truck and resetting', () => {
   const l = new ExcavatorLogic(),

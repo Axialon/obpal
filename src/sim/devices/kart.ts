@@ -63,7 +63,8 @@ export class KartLogic extends Machine {
       u.x += u.vx * dt
       u.z += u.vz * dt
       const radius = Math.hypot(u.x, u.z)
-      const safe = clamp(radius, KART_TRACK.inner, KART_TRACK.outer)
+      // Kerbs constrain the swept chassis and tyres, not just the driver's centre.
+      const safe = clamp(radius, KART_TRACK.inner + 1.1, KART_TRACK.outer - 1.1)
       if (radius !== safe) {
         const nx = radius ? u.x / radius : 0, nz = radius ? u.z / radius : 1
         u.x = nx * safe

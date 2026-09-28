@@ -1,3 +1,4 @@
+import { contactPart } from '../contact'
 import * as THREE from 'three'
 import { darkTitanium, gunmetal, optic } from '../kit/surfaces'
 import { pov, tiledDeck } from '../kit/precision'
@@ -10,7 +11,7 @@ import type { DeviceView } from './view'
 function filming(scene: THREE.Scene, logic: GimbalLogic, live?: () => void) {
   const set = new THREE.Group()
   scene.add(set)
-  const deck = tiledDeck(10, 12, -.01, 1.5); deck.position.z = -2; set.add(deck)
+  const deck = tiledDeck(10, 12, 0, 1.5); deck.position.z = -2; set.add(deck)
   block(set, [9, 4, 0.12], [0, 2, -6], darkTitanium)
   for (const x of [-3.5, 3.5]) {
     rod(set, [x, 0, -3], [x, 3.3, -3], 0.035)
@@ -27,7 +28,7 @@ function filming(scene: THREE.Scene, logic: GimbalLogic, live?: () => void) {
   rod(scene, [0, 0.2, -3.6], [0, 0.9, -3.6], 0.08)
   const root = new THREE.Group()
   scene.add(root)
-  disc(root, 0.38, 0.12, [0, 0.06, 0], rubber)
+  contactPart(disc(root, 0.38, 0.12, [0, 0.06, 0], rubber), 'base')
   rod(root, [0, 0.1, 0], [0, 1.25, 0], 0.085, metal)
   for (let n = 0; n < 3; n++) {
     const a = (n * Math.PI * 2) / 3

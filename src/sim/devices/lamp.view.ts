@@ -1,3 +1,4 @@
+import { contactPart, contactSurface } from '../contact'
 /**
  * The lamps' look (three.js): a room at dusk (a sofa, a rug, a side table and a coffee table) with an arc floor lamp, a
  * desk lamp, a pendant and a light bar, each lighting the room in its colour, with a soft halo round its bulb, a ring in
@@ -83,6 +84,7 @@ function buildRoom() {
   }
   const side1 = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.04, 40), wood)
   side1.position.set(1.95, 0.58, -1.65)
+  side1.receiveShadow = true
   const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.05, 0.56, 12), mats.dark())
   stem.position.set(1.95, 0.28, -1.65)
   const plant = new THREE.Mesh(new THREE.SphereGeometry(0.32, 20, 14), new THREE.MeshStandardMaterial({ color: '#3f6b4a', roughness: 0.9 }))
@@ -91,7 +93,7 @@ function buildRoom() {
   pot.position.set(-2.55, 0.21, -1.9)
   const tiles = tiledDeck(8.8, 6.8, 0, 1.1); tiles.position.z = .95; g.add(tiles)
   for (const x of [-3.1, 1.8]) { const panel = service(.65, 1.6); panel.position.set(x, 1.45, -2.355); g.add(panel) }
-  g.add(floor, back, side, rug, seat, backrest, armL, armR, cushion, coffee, side1, stem, plant, pot)
+  g.add(floor, back, side, rug, seat, backrest, armL, armR, cushion, coffee, contactSurface(side1, 'side-table'), stem, plant, pot)
   // The reading end of the room: shelving, books, a chair and a framed print.
   const extra = new THREE.Group()
   const timber = gunmetal, dark = mats.dark()
@@ -124,7 +126,8 @@ function buildLamps(parent: THREE.Object3D): LampModel[] {
   const pole = new THREE.Mesh(new THREE.TubeGeometry(arc, 40, 0.018, 8), metal)
   const dome = new THREE.Mesh(new THREE.CylinderGeometry(.12, .24, .24, 8, 1, true), shade)
   dome.position.set(-1.05, 2, -1.3)
-  parent.add(base, pole, dome)
+  base.castShadow = true
+  parent.add(contactPart(base, 'floor-lamp'), pole, dome)
   const floorLamp = bulbAt(parent, new THREE.Vector3(-1.05, 1.8, -1.3), 0.05, 7, new THREE.Vector3(-2.1, 0, -1.3))
   // The desk lamp on the side table: a foot, two arms, a cone.
   const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.1, 0.03, 24), dark)
@@ -138,7 +141,8 @@ function buildLamps(parent: THREE.Object3D): LampModel[] {
   const cone = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.18, 8, 1, true), shade)
   cone.position.set(1.6, 1.02, -1.5)
   cone.rotation.z = 0.5
-  parent.add(foot, arm1, arm2, cone)
+  foot.castShadow = true
+  parent.add(contactPart(foot, 'desk-lamp', { surface: 'side-table' }), arm1, arm2, cone)
   const desk = bulbAt(parent, new THREE.Vector3(1.6, 0.98, -1.5), 0.035, 3.5, new THREE.Vector3(1.95, 0, -1.65))
   // The pendant over the coffee table, on a cord from the ceiling.
   const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 1.1, 6), dark)

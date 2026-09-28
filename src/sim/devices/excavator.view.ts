@@ -1,6 +1,7 @@
 import * as THREE from 'three'
+import { contactPart } from '../contact'
 import { batch, cable, glass, maker, metal, plastic, rubber } from '../kit'
-import { ExcavatorLogic, BOOM, STICK } from './excavator'
+import { ExcavatorLogic, BOOM, STICK, BUCKET } from './excavator'
 import { block, disc, playFrame, rod, showcase, tracks, wheel } from './parts'
 import type { Stage } from './stage'
 import type { DeviceView } from './view'
@@ -10,6 +11,7 @@ import { skinSlot, upgradeSkins } from '../kit/skins'
 function digger() {
   const root = new THREE.Group(),
     yellow = gunmetal
+  root.name = 'excavator'
   tracks(root, 1.35, 1.9)
   disc(root, 0.5, 0.2, [0, 0.58, 0], metal)
   const upper = new THREE.Group()
@@ -45,10 +47,8 @@ function digger() {
   const bucket = new THREE.Group()
   bucket.position.z = -STICK
   stick.add(bucket)
-  block(bucket, [0.65, 0.12, 0.6], [0, -0.25, -0.15], plastic('#59636a'))
-  block(bucket, [0.65, 0.38, 0.08], [0, -0.1, 0.12], plastic('#59636a'))
-  for (const x of [-0.3, 0.3]) block(bucket, [0.05, 0.34, 0.6], [x, -0.15, -0.15], metal)
-  for (let n = 0; n < 5; n++) block(bucket, [0.085, 0.07, 0.16], [(n - 2) * 0.13, -0.25, -0.5], metal)
+  for (const [n, part] of BUCKET.entries()) block(bucket, part.size, part.at, n < 2 ? plastic('#59636a') : metal)
+  contactPart(bucket, 'bucket', { mode: 'clear' })
   const load = block(bucket, [0.5, 0.16, 0.43], [0, -0.12, -0.15], plastic('#d6b479'))
   batch(bucket, [load])
   batch(stick, [bucket])
@@ -60,7 +60,7 @@ function digger() {
 function site(scene: THREE.Scene, logic: ExcavatorLogic, live?: () => void) {
   const set = new THREE.Group()
   scene.add(set)
-  set.add(tiledDeck(14, 12, -.02, 2))
+  set.add(tiledDeck(14, 12, 0, 2))
   for (const x of [-6, 6])
     for (let z = -5; z <= 5; z += 2) {
       rod(set, [x, 0, z], [x, 0.8, z], 0.04)
@@ -76,7 +76,7 @@ function site(scene: THREE.Scene, logic: ExcavatorLogic, live?: () => void) {
   for (const x of [-0.72, 0.72]) {
     block(truck, [0.12, 0.55, 2.6], [x, 1.02, 0], darkTitanium)
     block(truck, [.005, .18, 1.8], [x + Math.sign(x)*.061, 1.03, 0], ceramic)
-    for (const z of [-1.7, 0.85]) wheel(truck, x, 0.34, z, 0.3).userData.static = true
+    for (const z of [-1.7, 0.85]) wheel(truck, x, 0.3, z, 0.3).userData.static = true
   }
   block(truck, [1.4, 0.12, 2.6], [0, 0.79, 0], gunmetal)
   batch(set)

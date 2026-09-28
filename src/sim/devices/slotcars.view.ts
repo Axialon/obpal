@@ -1,6 +1,8 @@
+import { contactPart, contactSurface } from '../contact'
 import * as THREE from 'three'
 import { batch, glass, maker, metal, plastic, rubber } from '../kit'
 import { SlotcarsLogic, laneLength, slotPose } from './slotcars'
+import { seat, supportVertices } from '../kit/support'
 import { block, playFrame, rod, showcase, wheel } from './parts'
 import type { Stage } from './stage'
 import type { DeviceView } from './view'
@@ -29,11 +31,12 @@ function strip(lane: number, width: number, y: number, material: THREE.Material)
   )
   g.setIndex(index)
   g.computeVertexNormals()
-  return new THREE.Mesh(g, material)
+  const mesh = new THREE.Mesh(g, material); mesh.receiveShadow = true; return mesh
 }
 function car(n: number) {
   const root = new THREE.Group(),
     paint = gunmetal
+  root.name = `slotcar-${n + 1}`
   const skin = skinSlot(root, 'bodySkin')
   pov(root, [0, .19, -.13])
   block(skin, [0.26, 0.1, 0.62], [0, 0.08, 0], paint)
@@ -51,11 +54,12 @@ function car(n: number) {
   return root
 }
 function raceway(scene: THREE.Scene, logic: SlotcarsLogic, live?: () => void) {
-  const set = new THREE.Group()
+  const set = new THREE.Group(), roads: THREE.Mesh[] = []
   scene.add(set)
   set.add(tiledDeck(21, 15, -.02, 3))
   for (let n = 0; n < 4; n++) {
-    set.add(strip(n, 0.44, 0.015, plastic('#424950')), strip(n, 0.017, 0.022, rubber))
+    const road = strip(n, 0.44, 0.015, plastic('#424950')); roads.push(road)
+    set.add(contactSurface(road), strip(n, 0.017, 0.022, rubber))
     for (const offset of [-0.025, 0.025]) {
       const rail = strip(n, 0.005, 0.023, metal)
       rail.position.z = offset
@@ -71,19 +75,29 @@ function raceway(scene: THREE.Scene, logic: SlotcarsLogic, live?: () => void) {
   }
   for (const x of [-1.4, 1.4]) rod(set, [x, 0, 0], [x, 1.4, 0], 0.04)
   block(set, [3.1, 0.3, 0.14], [0, 1.35, 0], plastic('#506675'))
-  batch(set)
+  batch(set, roads)
+  const ray = new THREE.Raycaster(), down = new THREE.Vector3(0, -1, 0)
+  const height = (x: number, z: number) => { ray.set(new THREE.Vector3(x, 1, z), down); return ray.intersectObjects(roads, false)[0]?.point.y ?? -.02 }
   const cars = logic.units.map((_, n) => {
     const m = car(n)
+    contactPart(m, `car-${n + 1}-support`, { slope: true, mode: () => logic.units[n].y > .091 ? 'clear' : 'touch' })
     scene.add(m)
     if (live) upgradeSkins('slotcars', { bodySkin: m.getObjectByName('bodySkin')! }, live)
-    return m
+    // Only the eight tyre sole corners can support a level car; this keeps runtime raycasts bounded.
+    const points = supportVertices(m), bottom = Math.min(...points.map(p => p.y))
+    return { root: m, support: points.filter(p => p.y < bottom + .00001) }
   })
   return {
     step() {
-      cars.forEach((m, n) => {
+      scene.updateMatrixWorld(true)
+      cars.forEach(({ root: m, support }, n) => {
         const u = logic.units[n]
-        m.position.set(u.x, u.y, u.z)
-        m.rotation.set(u.off ? 0.15 : 0, u.h, u.off ? 0.3 : 0)
+        m.userData.contactMode = u.off || u.y > .091 ? 'clear' : 'touch'
+        // Physics stores .09 at rest; the tyre's sole is .001 above its model origin and the track is .015.
+        const airborne = Math.max(0, u.y - .09)
+        m.position.set(u.x, 0, u.z)
+        m.rotation.set(0, u.h, 0)
+        seat(m, support, height, airborne)
       })
     },
   }

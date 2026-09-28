@@ -1,3 +1,4 @@
+import { contactPart } from '../contact'
 import * as THREE from 'three'
 import { ceramic, darkTitanium, gunmetal } from '../kit/surfaces'
 import { pov, service, tiledDeck } from '../kit/precision'
@@ -9,14 +10,14 @@ import type { DeviceView } from './view'
 function studio(scene: THREE.Scene, logic: PainterLogic) {
   const set = new THREE.Group()
   scene.add(set)
-  set.add(tiledDeck(10, 8, -.01, 1.5))
+  set.add(tiledDeck(10, 8, 0, 1.5))
   block(set, [10, 4.4, 0.12], [0, 2.2, -3], gunmetal)
   for (const x of [-4, 4]) {
     rod(set, [x, 0, -2.5], [x, 3.5, -2.5], 0.03)
     block(set, [0.15, 1.2, 0.12], [x, 2.8, -2.5], ceramic)
   }
   block(set, [1.7, 0.1, 0.7], [-3.4, 0.7, -2.3], darkTitanium)
-  for (const x of [-4, -2.8]) rod(set, [x, 0, -2.3], [x, 0.7, -2.3], 0.025)
+  for (const x of [-4, -2.8]) contactPart(rod(set, [x, 0, -2.3], [x, 0.7, -2.3], 0.025), `worktable-leg-${x}`)
   for (const z of [-2, 0, 2]) block(set, [7, 0.007, 0.014], [0, 0.002, z], plastic('#414555'))
   batch(set)
   const root = new THREE.Group()

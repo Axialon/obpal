@@ -1,28 +1,31 @@
+import { contactPart, contactSurface } from '../contact'
 /**
  * The drones' look (three.js): a netted cage with a lit frame, glowing rings, a pad per drone, and each quadcopter with
  * its holder's colour on its lights, its rotors a blur when they spin, and a shadow that softens as it climbs.
  */
 import * as THREE from 'three'
-import { DRONE, DroneLogic, PYLONS, RINGS, stepDrone, type Drone, type DroneIntent } from './drone'
+import { DRONE, DRONE_PAD, dronePadHeight, DroneLogic, PYLONS, RINGS, stepDrone, type Drone, type DroneIntent } from './drone'
 import { batch, cable, cylinder, floorMaterial } from '../kit'
 import { carbon, ceramic, duct, lime, optic, polished, ring, shell, titanium, warmShell } from '../kit/surfaces'
 import { Spring } from '../kit/motion'
 import { instanceCopies } from '../kit/instances'
 import { finishPrototype, loadPrototype, prototypeNodes, retirePrototype } from '../kit/prototype'
 import { pov, tiledDeck } from '../kit/precision'
+import { seat, supportVertices } from '../kit/support'
 import { darkTitanium, gunmetal } from '../kit/surfaces'
 import type { Stage } from './stage'
 import type { Theme } from '../../ui/themes'
 import { blobShadow, box, mats, plate, previewScene, wear, type DeviceView, type Preview } from './view'
 
-interface DroneModel { root: THREE.Group; body: THREE.Group; gimbal: THREE.Group; props: THREE.Group[]; blurs: THREE.Mesh[]; blades: THREE.MeshStandardMaterial; light: THREE.MeshStandardMaterial; shadow: THREE.Mesh; pitch: Spring; roll: Spring; leads: THREE.Group; sway: Spring }
+interface DroneModel { root: THREE.Group; body: THREE.Group; support: THREE.Vector3[]; gimbal: THREE.Group; props: THREE.Group[]; blurs: THREE.Mesh[]; blades: THREE.MeshStandardMaterial; light: THREE.MeshStandardMaterial; shadow: THREE.Mesh; pitch: Spring; roll: Spring; leads: THREE.Group; sway: Spring }
 
 /** The model is drawn 0.26 m in radius, then scaled to the drone's size in the logic. */
 const SCALE = DRONE.radius / 0.26
 
 function buildDrone(n: number): DroneModel {
   const root = new THREE.Group(), body = new THREE.Group()
-  body.scale.setScalar(SCALE); root.add(body)
+  root.name = `drone-${n + 1}`; body.scale.setScalar(SCALE); root.add(body)
+  contactPart(body, 'landing-gear')
   const light = mats.glow()
   // A flattened capsule, split into six curved panels over a continuous carbon pressure hull.
   const core = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), carbon)
@@ -77,13 +80,17 @@ function buildDrone(n: number): DroneModel {
   num.name = 'number'
   const shadow = blobShadow(.3 * SCALE, .5)
   batch(body, [...props, ...blurs, gimbal, leads]); batch(gimbal)
-  return { root, body, gimbal, props, blurs, blades, light, shadow, pitch: new Spring(), roll: new Spring(), leads, sway: new Spring(0, .24) }
+  return { root, body, support: supportVertices(body), gimbal, props, blurs, blades, light, shadow, pitch: new Spring(), roll: new Spring(), leads, sway: new Spring(0, .24) }
 }
 
-function placeDrone(m: DroneModel, d: Drone, color: string | null, dt: number) {
+function placeDrone(m: DroneModel, d: Drone, color: string | null, dt: number, ground: (x: number, z: number) => number = () => 0) {
+  m.root.userData.contactMode = d.y > 0 ? 'clear' : 'touch'
   m.root.position.set(d.x, d.y, d.z)
   m.root.rotation.y = d.yaw
   m.body.rotation.set(d.pitch, 0, -d.roll, 'YXZ')
+  // Physics altitude is clearance above the landing surface, not the optional mesh's origin.
+  m.body.position.y = 0
+  seat(m.body, m.support, ground, d.y)
   m.gimbal.rotation.set(m.pitch.step(-d.pitch, dt), 0, m.roll.step(d.roll, dt), 'YXZ')
   m.leads.rotation.z = m.sway.step(d.pitch * .45, dt)
   m.props.forEach((p, i) => { p.rotation.y = d.spin * (i % 3 === 0 ? 1 : -1) })
@@ -158,8 +165,9 @@ function buildCage(hx: number, hz: number, h: number) {
 
 function buildPad(n: number) {
   const g = new THREE.Group()
-  const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.48, 0.02, 8), gunmetal)
-  disc.position.y = 0.01
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(DRONE_PAD.top, DRONE_PAD.bottom, DRONE_PAD.height, DRONE_PAD.sides), gunmetal)
+  disc.position.y = DRONE_PAD.height / 2
+  disc.receiveShadow = true
   const glow = mats.glow()
   const ring = new THREE.Mesh(new THREE.RingGeometry(0.41, 0.43, 8), ceramic)
   ring.rotation.x = Math.PI / 2
@@ -167,7 +175,7 @@ function buildPad(n: number) {
   const num = plate(n + 1, 0.18)
   num.rotation.x = -Math.PI / 2
   num.position.set(0, 0.022, 0.3)
-  g.add(disc, ring, num)
+  g.add(contactSurface(disc), ring, num)
   const status = box(.12, .004, .016, glow); status.position.set(0, .023, -.3); g.add(status)
   return { group: g, glow }
 }
@@ -184,6 +192,11 @@ export function createView(stage: Stage, logic: DroneLogic): DeviceView {
   batch(obstacles); stage.scene.add(obstacles)
   const rings = logic.rings.map((r) => { const m = buildRing(r); stage.scene.add(m.group); return m })
   const pads = logic.drones.map((d, n) => { const p = buildPad(n); p.group.position.set(d.home[0], 0, d.home[1]); stage.scene.add(p.group); return p })
+  const ground = (x: number, z: number) => {
+    let height = 0
+    for (const d of logic.drones) height = Math.max(height, dronePadHeight(x - d.home[0], z - d.home[1]))
+    return height
+  }
   const models = logic.drones.map((_, n) => { const m = buildDrone(n); stage.scene.add(m.root, m.shadow); return m })
   const copies = instanceCopies(stage.scene); copies.set(models.map(m => m.root))
   models.forEach(m => { m.root.userData.prototype = 'procedural' })
@@ -200,7 +213,7 @@ export function createView(stage: Stage, logic: DroneLogic): DeviceView {
       const m = models[i], old = m.body, body = rig!.body as THREE.Group
       body.scale.copy(old.scale)
       body.add(...m.blurs, old.getObjectByName('number')!)
-      m.root.add(body); m.body = body
+      m.root.add(body); m.body = contactPart(body, 'landing-gear'); m.support = supportVertices(body)
       m.gimbal = rig!.gimbal as THREE.Group; m.leads = rig!.leads as THREE.Group
       m.gimbal.add(old.getObjectByName('pov')!)
       m.props = [rig!.prop0, rig!.prop1, rig!.prop2, rig!.prop3] as THREE.Group[]
@@ -228,7 +241,7 @@ export function createView(stage: Stage, logic: DroneLogic): DeviceView {
     pickY: 0,
     update(colors, t, dt) {
       logic.drones.forEach((d, n) => {
-        placeDrone(models[n], d, colors[n], dt)
+        placeDrone(models[n], d, colors[n], dt, ground)
         wear(pads[n].glow, colors[n], 0.4, 1.8)
         // A ring flown through flashes in the pilot's colour.
         if (d.rings !== passed[n]) {

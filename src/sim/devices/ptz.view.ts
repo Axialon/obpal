@@ -1,3 +1,4 @@
+import { contactPart } from '../contact'
 /**
  * The PTZ cameras' look (three.js): a round set with a toy train on its oval and a turning sculpture, each camera on a
  * tripod with its head turning and its lens reaching out as it zooms, and each camera's picture on the screen, framed
@@ -26,8 +27,8 @@ function buildCam(n: number, live?: () => void): CamModel {
     leg.rotation.set(-Math.sin(a) * 0.3, 0, Math.cos(a) * 0.3)
     root.add(leg)
     const foot = cylinder(0.038, 0.025, dark, 12)
-    foot.position.set(Math.cos(a) * 0.44, 0.018, Math.sin(a) * 0.44)
-    root.add(foot)
+    foot.position.set(Math.cos(a) * 0.44, 0.0125, Math.sin(a) * 0.44)
+    foot.castShadow = true; root.add(contactPart(foot, `tripod-${n}-${i}`))
   }
   const column = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.3, 12), mats.metal())
   column.position.y = 1.28
@@ -138,7 +139,7 @@ function buildSet() {
   const floorMat = floorMaterial()
   const floor = box(10, 0.06, 8, floorMat, 0.03)
   floor.position.y = -0.028
-  g.add(tiledDeck(10, 8, .01, 1.25))
+  g.add(tiledDeck(10, 8, 0, 1.25))
   g.add(floor)
   const architecture = new THREE.Group()
   const wall = darkTitanium, trim = mats.dark()

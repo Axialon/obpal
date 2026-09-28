@@ -21,6 +21,7 @@ import {
 import { Governor, pickPixels, pixelLadder, type GpuSample, type Step } from '../landing/governor'
 import type { Experience } from './vr/experience'
 import { listenFrom } from './audio/context'
+import { contactRecorder } from './contact'
 
 /** Frames averaged into the still picture. */
 export const STILL_FRAMES = 32
@@ -117,6 +118,8 @@ const QUAD_FRAG = 'uniform sampler2D tMap; varying vec2 vUv; void main() { gl_Fr
  * and view; before the first frame, the sim sets them up from `width` and `height`.
  */
 export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h: number): void; params?: WebGLRendererParameters }): SimView {
+  const contactTest = new URLSearchParams(location.search).get('test') === 'contact'
+  let recordContacts: (() => void) | undefined
   const renderer = new WebGLRenderer({ canvas, antialias: true, ...opts.params })
   let triangles = 0, calls = 0, renderMs = 0
   let insetTriangles = 0, insetCalls = 0, insetMs = 0
@@ -277,6 +280,7 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
       insetCalls += renderer.info.render.calls
     },
     draw(scene, camera, dt) {
+      if (contactTest) { recordContacts ??= contactRecorder(scene, camera); recordContacts() }
       view.presence?.update(dt, performance.now())
       if (view.presence?.immersive) camera = view.presence.camera
       const current = view.presence?.activeCamera ?? camera

@@ -20,6 +20,13 @@ export const FORKLIFT_SPEC: DeviceSpec = {
   buttons: { 'media:playpause': 'tray:load', 'key:Space': 'tray:load' },
 }
 export const RACKS = [-3, 3]
+/** Shared fork frame and pallet bearing plane, metres. */
+export const FORKS = { mastZ: -.79, loadZ: -.56, top: .03, deckBottom: .0125, runnerDepth: .12, halfDepth: .425 }
+export function forkLoad(u: { x: number; z: number; h: number; lift: number; tilt: number }) {
+  const c = Math.cos(u.tilt), s = Math.sin(u.tilt), y = u.lift + FORKS.top - FORKS.deckBottom
+  const z = FORKS.mastZ + y * s + FORKS.loadZ * c
+  return { x: u.x + Math.sin(u.h) * z, y: y * c - FORKS.loadZ * s, z: u.z + Math.cos(u.h) * z }
+}
 export const PALLETS = [
   [0, 0],
   [2, 1],
@@ -76,7 +83,11 @@ export class ForkliftLogic extends Machine {
       u.lift = clamp(u.lift + (i.pad ? -axis(i.pad.axes[3]) * dt * 0.8 : -i.pan[1] * 0.008), 0.08, 2.1)
       u.tilt = clamp(u.tilt + (i.pad ? axis(i.pad.axes[2]) * dt * 0.3 : i.twist * 0.006), -0.22, 0.25)
     }
-    const tip = [u.x - Math.sin(u.h) * 1.15, u.z - Math.cos(u.h) * 1.15]
+    const c = Math.cos(u.tilt), s = Math.sin(u.tilt)
+    const forkFloor = .03 + Math.max(0, -.975 * s / c)
+    const loadFloor = FORKS.runnerDepth - FORKS.top + FORKS.deckBottom + (FORKS.halfDepth * Math.abs(s) + FORKS.loadZ * s) / c
+    u.lift = Math.max(u.lift, forkFloor, u.load >= 0 ? loadFloor : 0)
+    const tip = forkLoad(u)
     if (action(i, 'load')) {
       u.actions++
       if (u.load >= 0) {
@@ -89,15 +100,15 @@ export class ForkliftLogic extends Machine {
         }
         u.load = -1
       } else if (u.lift < 0.25 && Math.abs(u.tilt) < 0.15) {
-        u.load = this.pallets.findIndex((p) => !p.stored && Math.hypot(p.x - tip[0], p.z - tip[1]) < 0.55)
+        u.load = this.pallets.findIndex((p) => !p.stored && Math.hypot(p.x - tip.x, p.z - tip.z) < 0.55)
         if (u.load >= 0) this.events.push({ unit: 0, kind: 'tick', text: 'Pallet on the forks' })
       }
     }
     if (u.load >= 0) {
       const p = this.pallets[u.load]
-      p.x = tip[0]
-      p.z = tip[1]
-      p.y = u.lift
+      p.x = tip.x
+      p.z = tip.z
+      p.y = tip.y
       p.vy = 0
       if (u.tilt < -0.18) {
         u.load = -1

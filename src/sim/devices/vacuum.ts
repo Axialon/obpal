@@ -26,7 +26,7 @@ export const FURNITURE = [
   { x: 3.5, z: 1.7, w: 1, d: 1.3 },
 ]
 export const DOCK = [-4, 3] as const
-const clear = (x: number, z: number) => Math.abs(x) <= 4.5 && Math.abs(z) <= 3.5 && !blocked(x, z, 0.36, FURNITURE)
+const clear = (x: number, z: number) => Math.abs(x) <= 4.5 && Math.abs(z) <= 3.5 && !blocked(x, z, 0.38, FURNITURE)
 /** A small grid search around the furniture, used only when Home is pressed. */
 export function dockRoute(x: number, z: number): [number, number][] {
   const points = Array.from(

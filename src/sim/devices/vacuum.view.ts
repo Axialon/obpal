@@ -1,10 +1,11 @@
+import { contactPart, contactInstances } from '../contact'
 import * as THREE from 'three'
 import { ceramic, darkTitanium, gunmetal, carbon } from '../kit/surfaces'
 import { pov, service, tiledDeck } from '../kit/precision'
 import { skinSlot, upgradeSkins } from '../kit/skins'
 import { batch, maker, metal, plastic, rubber } from '../kit'
 import { VacuumLogic, DOCK, FURNITURE } from './vacuum'
-import { block, disc, playFrame, rod, showcase } from './parts'
+import { block, disc, playFrame, rod, showcase, wheel } from './parts'
 import type { Stage } from './stage'
 import { mats, wear, type DeviceView } from './view'
 function room(scene: THREE.Scene, logic: VacuumLogic, live?: () => void) {
@@ -26,13 +27,14 @@ function room(scene: THREE.Scene, logic: VacuumLogic, live?: () => void) {
       for (const z of [-1, 1])
         rod(set, [b.x + x * b.w * 0.4, 0, b.z + z * b.d * 0.4], [b.x + x * b.w * 0.4, 0.7, b.z + z * b.d * 0.4], 0.045)
   }
-  block(set, [0.9, 0.13, 0.75], [DOCK[0], 0.06, DOCK[1]], rubber)
+  block(set, [0.9, 0.002, 0.75], [DOCK[0], 0, DOCK[1]], rubber)
   block(set, [0.9, 0.45, 0.15], [DOCK[0], 0.23, DOCK[1] + 0.3], ceramic)
   block(set, [0.4, 0.05, 0.02], [DOCK[0], 0.3, DOCK[1] + 0.21], plastic('#8cf5be'))
   batch(set)
   const root = new THREE.Group()
   scene.add(root)
-  disc(root, 0.38, 0.13, [0, 0.09, 0], rubber)
+  contactPart(disc(root, 0.38, 0.13, [0, 0.09, 0], rubber), 'underside', { mode: 'clear' })
+  for (const x of [-.24, .24]) wheel(root, x, .04, 0, .04).userData.static = true
   const skin = skinSlot(root, 'bodySkin', disc(root, 0.365, 0.095, [0, 0.18, 0], gunmetal))
   pov(root, [0, .23, -.365])
   if (live) upgradeSkins('vacuum', { bodySkin: skin }, live)
@@ -48,15 +50,19 @@ function room(scene: THREE.Scene, logic: VacuumLogic, live?: () => void) {
   block(root, [0.15, 0.015, 0.035], [0, 0.235, -0.17], glow)
   maker(root, 0, 0.238, 0.2, 0.11)
   const brush = new THREE.Group()
-  brush.position.set(0.29, 0.045, -0.23)
+  brush.position.set(0.29, 0.01, -0.23)
   root.add(brush)
   for (let n = 0; n < 3; n++) {
     const b = block(brush, [0.025, 0.02, 0.26], [0, 0, 0], rubber)
     b.rotation.y = (n * Math.PI) / 3
   }
-  batch(brush)
+  contactPart(brush, 'brush'); batch(brush)
   batch(root, [brush])
   const dust = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.025, 0), plastic('#e4c893'), logic.dust.length)
+  dust.geometry.computeBoundingBox()
+  const dustHeight = -dust.geometry.boundingBox!.min.y
+  dust.castShadow = true
+  contactInstances(dust, 'dust', n => ({ active: () => !logic.dust[n].cleaned }))
   scene.add(dust)
   const dummy = new THREE.Object3D()
   return {
@@ -67,7 +73,7 @@ function room(scene: THREE.Scene, logic: VacuumLogic, live?: () => void) {
       if (u.clean && Math.abs(u.v) > 0.01) brush.rotation.y += dt * 18
       wear(glow, colors[0] ?? null)
       logic.dust.forEach((d, n) => {
-        dummy.position.set(d.x, 0.025, d.z)
+        dummy.position.set(d.x, dustHeight, d.z)
         dummy.scale.setScalar(d.cleaned ? 0 : 1)
         dummy.rotation.y = n
         dummy.updateMatrix()

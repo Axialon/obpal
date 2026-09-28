@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { DETAIL, HOUSING, plateGeometry } from './precision'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+import { preserveContact } from '../contact'
 
 export const palette = { carbon: '#252b32', trim: '#11171d', metal: '#abb7c1', lime: '#c6ff34', porcelain: '#e5e9e5' }
 const plastics = new Map<string, THREE.MeshPhysicalMaterial>()
@@ -68,6 +69,7 @@ export function batch(root: THREE.Object3D, keep: readonly THREE.Object3D[] = []
     for (const child of [...group.children]) if (!protectedObjects.has(child)) visit(child)
     for (const child of [...group.children]) if (child.userData.static && !protectedObjects.has(child)) {
       child.updateMatrix()
+      preserveContact(child, group)
       for (const part of [...child.children]) { part.applyMatrix4(child.matrix); group.add(part) }
       group.remove(child)
     }
@@ -91,7 +93,7 @@ export function batch(root: THREE.Object3D, keep: readonly THREE.Object3D[] = []
       const merged = new THREE.Mesh(geometry, material)
       merged.castShadow = meshes.some(m => m.castShadow)
       merged.receiveShadow = meshes.some(m => m.receiveShadow)
-      meshes.forEach(m => group.remove(m))
+      meshes.forEach(m => { preserveContact(m, group); group.remove(m) })
       group.add(merged)
     }
   }

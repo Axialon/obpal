@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest'
-import { ForkliftLogic } from '../src/sim/devices/forklift'
+import { ForkliftLogic, forkLoad, FORKS } from '../src/sim/devices/forklift'
+import * as THREE from 'three'
 import { restInput } from '../src/sim/devices/types'
 it('maps two sticks to independent driving, lifting and tilt, with hard stops', () => {
   const l = new ForkliftLogic(),
@@ -12,6 +13,23 @@ it('maps two sticks to independent driving, lifting and tilt, with hard stops', 
   expect(u.z).toBeGreaterThanOrEqual(-4.6)
   l.step([null], 0.05)
   expect(u.lift).toBe(2.1)
+})
+it('carries a pallet on the fork bearing plane through lift, tilt and heading changes', () => {
+  const logic = new ForkliftLogic(), u = logic.units[0]
+  u.load = 0
+  for (let n = 0; n < 80; n++) {
+    u.h = n * .2; u.tilt = -.17 + n / 79 * .42; u.lift = .08
+    logic.step([null], 1 / 60)
+    const load = forkLoad(u), frame = new THREE.Object3D()
+    frame.position.set(u.x, 0, u.z); frame.rotation.y = u.h
+    const mast = new THREE.Object3D(); mast.position.z = FORKS.mastZ; mast.rotation.x = u.tilt; frame.add(mast)
+    frame.updateWorldMatrix(true, true)
+    const bearing = new THREE.Vector3(0, u.lift + FORKS.top, FORKS.loadZ).applyMatrix4(mast.matrixWorld)
+    const pallet = new THREE.Object3D(); pallet.position.set(load.x, load.y, load.z); pallet.rotation.set(u.tilt, u.h, 0, 'YXZ'); pallet.updateMatrixWorld()
+    const underside = new THREE.Vector3(0, FORKS.deckBottom, 0).applyMatrix4(pallet.matrixWorld)
+    expect(bearing.distanceTo(underside)).toBeLessThan(1e-10)
+    for (const z of [-FORKS.halfDepth, FORKS.halfDepth]) expect(new THREE.Vector3(0, -FORKS.runnerDepth, z).applyMatrix4(pallet.matrixWorld).y).toBeGreaterThanOrEqual(-1e-10)
+  }
 })
 it('requires low forks to pick up, and stores a pallet only on a matching shelf', () => {
   const l = new ForkliftLogic(),

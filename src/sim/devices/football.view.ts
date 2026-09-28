@@ -1,3 +1,4 @@
+import { contactPart, contactSurface } from '../contact'
 import * as THREE from 'three'
 import { darkTitanium, gunmetal } from '../kit/surfaces'
 import { pov, service, tiledDeck } from '../kit/precision'
@@ -11,8 +12,8 @@ function table(scene: THREE.Scene, logic: FootballLogic) {
   const root = new THREE.Group(); root.name = 'football-cabinet'; scene.add(root)
   root.add(tiledDeck(3.7, 4.2, -.01, 1))
   block(root, [2.24, 0.3, 3.62], [0, 0.82, 0], gunmetal)
-  for (const x of [-0.85, 0.85]) for (const z of [-1.4, 1.4]) rod(root, [x * 1.1, 0, z], [x, 0.8, z], 0.08, rubber)
-  block(root, [2, 0.04, 3.4], [0, 1, 0], plastic('#425b59'))
+  for (const x of [-0.85, 0.85]) for (const z of [-1.4, 1.4]) contactPart(rod(root, [x * 1.1, 0, z], [x, 0.8, z], 0.08, rubber), `table-leg-${x}-${z}`)
+  contactSurface(block(root, [2, 0.04, 3.4], [0, 1, 0], plastic('#425b59')), 'pitch')
   for (const x of [-1.06, 1.06]) block(root, [0.12, 0.17, 3.62], [x, 1.08, 0], darkTitanium)
   for (const z of [-1.76, 1.76]) for (const x of [-0.69, 0.69]) block(root, [0.73, 0.17, 0.12], [x, 1.08, z], darkTitanium)
   for (const z of [-1.82, 1.82]) { block(root, [0.65, 0.17, 0.06], [0, 1.02, z], rubber); rod(root, [-0.36, 1.19, z], [0.36, 1.19, z], 0.028) }
@@ -32,13 +33,14 @@ function table(scene: THREE.Scene, logic: FootballLogic) {
     const color = plastic(r.seat % 2 ? '#70adc7' : '#e3a660')
     for (const x of footballMen(r.count)) {
       block(g, [0.12, 0.15, 0.1], [x, -0.07, 0], color)
-      block(g, [0.14, 0.09, 0.1], [x, -0.175, 0], color)
+      // The swept corner stays above the pitch through a full turn, not just with the foot pointing down.
+      contactPart(block(g, [0.14, 0.08, 0.09], [x, -0.175, 0], color), `player-${n}-${x}`, { surface: 'pitch', mode: 'clear' })
       rod(g, [x, 0, 0], [x, 0.06, 0], 0.025, color)
       const head = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 8), color); head.position.set(x, 0.105, 0); g.add(head)
     }
     batch(g); return { g, light }
   })
-  const ball = new THREE.Mesh(new THREE.SphereGeometry(FOOTBALL.ball, 20, 12), plastic('#eee8cc')); ball.name = 'football'; scene.add(ball)
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(FOOTBALL.ball, 20, 12), plastic('#eee8cc')); ball.name = 'football'; ball.castShadow = true; scene.add(contactPart(ball, 'football', { surface: 'pitch' }))
   const score = [0, 1].map(n => {
     const g = new THREE.Group(); g.name = `score-beads-${n + 1}`; scene.add(g)
     rod(g, [-0.5, 1.35, n ? -1.88 : 1.88], [0.5, 1.35, n ? -1.88 : 1.88], 0.014)

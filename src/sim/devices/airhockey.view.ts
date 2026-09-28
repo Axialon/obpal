@@ -1,3 +1,4 @@
+import { contactPart, contactSurface } from '../contact'
 /** A low camera above a full-size tabletop keeps both mallets, goals and the puck in view. */
 import * as THREE from 'three'
 import { ceramic, darkTitanium, gunmetal } from '../kit/surfaces'
@@ -11,18 +12,18 @@ import { mats, wear, type DeviceView } from './view'
 function group(parent: THREE.Object3D, name: string) { const g = new THREE.Group(); g.name = name; parent.add(g); return g }
 function table(scene: THREE.Scene, logic: AirhockeyLogic) {
   const M = AIRHOCKEY, root = group(scene, 'air-hockey-table'), base = group(root, 'cabinet')
-  base.add(tiledDeck(3.1, 4.1, -.01, 1))
+  base.add(tiledDeck(3.1, 4.1, 0, 1))
   block(base, [2.22, 0.28, 3.43], [0, 0.76, 0], gunmetal)
   for (const x of [-0.84, 0.84]) for (const z of [-1.3, 1.3]) {
     rod(base, [x * 1.12, 0.07, z * 1.06], [x, 0.7, z], 0.07)
-    disc(base, 0.12, 0.04, [x * 1.12, 0.04, z * 1.06], rubber)
+    contactPart(disc(base, 0.12, 0.04, [x * 1.12, 0.02, z * 1.06], rubber), `table-foot-${x}-${z}`)
   }
   for (const side of [-1, 1]) block(base, [0.035, 0.055, 2.9], [side * 1.12, 0.79, 0], darkTitanium)
   maker(base, 0.82, 0.905, 1.61, 0.09)
   for (const side of [-1, 1]) { const panel = service(1.8, .17); panel.rotation.y = side * Math.PI / 2; panel.position.set(side * 1.113, .75, 0); base.add(panel) }
   batch(base)
   const playfield = group(root, 'perforated-playfield')
-  block(playfield, [2, 0.045, 3.2], [0, M.height - 0.0225, 0], ceramic)
+  contactSurface(block(playfield, [2, 0.045, 3.2], [0, M.height - 0.0225, 0], ceramic), 'playfield')
   block(playfield, [1.99, 0.003, 0.02], [0, M.height + 0.003, 0], plastic('#7e98a2'))
   const lineMaterial = plastic('#7e98a2')
   const centre = new THREE.Mesh(new THREE.RingGeometry(0.28, 0.29, 48), lineMaterial)
@@ -48,19 +49,19 @@ function table(scene: THREE.Scene, logic: AirhockeyLogic) {
   const mallets = logic.units.map((_, n) => {
     const mallet = group(root, `mallet-${n + 1}`), paint = plastic(n ? '#75adc2' : '#d18b6b')
     disc(mallet, M.mallet, 0.055, [0, 0.04, 0], paint)
-    disc(mallet, M.mallet * 0.89, 0.016, [0, 0.011, 0], rubber)
+    disc(mallet, M.mallet * 0.89, 0.016, [0, 0.008, 0], rubber)
     disc(mallet, 0.052, 0.13, [0, 0.11, 0], paint)
     disc(mallet, 0.076, 0.035, [0, 0.19, 0], paint)
     const light = mats.glow()
     disc(mallet, 0.055, 0.009, [0, 0.211, 0], light)
     pov(mallet, [0, .3, 0], [0, -.15, n ? 1 : -1])
-    batch(mallet)
+    contactPart(mallet, `mallet-${n + 1}`, { surface: 'playfield' }); batch(mallet)
     return { mallet, light }
   })
   const puck = group(root, 'puck')
-  disc(puck, M.puck, 0.025, [0, 0.017, 0], rubber)
+  disc(puck, M.puck, 0.025, [0, 0.0125, 0], rubber)
   disc(puck, M.puck * 0.73, 0.004, [0, 0.032, 0], plastic('#c6ff34'))
-  batch(puck)
+  contactPart(puck, 'puck', { surface: 'playfield' }); batch(puck)
   const scores = logic.units.map((_, n) => {
     const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 128
     const context = canvas.getContext('2d')!, texture = new THREE.CanvasTexture(canvas)
