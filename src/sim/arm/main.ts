@@ -60,10 +60,13 @@ import { Telemetry } from '../../ui/kit/telemetry'
 import { Readout } from '../../ui/kit/readout'
 import { ICONS } from '../../ui/icons'
 import { html, setMarkup } from '../../ui/markup'
+import { mountQuick, quickAction, quickViews } from '../../ui/quick'
 
 applyTheme(initialTheme())
 mountMarks()
 mountTopBar()
+// The quick-actions tray, before the windows, which keep clear of its edge.
+mountQuick()
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 const D2R = Math.PI / 180
 const R2D = 180 / Math.PI
@@ -74,7 +77,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 const KIND = kindFrom(new URLSearchParams(location.search).get('kind'))
 const KIN = KIND.kin
 const INFO = ARM_KINDS.find((k) => k.id === KIND.id)!
-const panels = mountSimPanels(`arm:${KIND.id}`, 'Arm controls')
+const panels = mountSimPanels(`arm:${KIND.id}`, 'Controls')
 panels.root.append($('arms'))
 /** Each joint's dial, and each arm's whole-arm readout and reach, by node id (rebuilt with the cards). */
 const dials = new Map<string, { dial: RingGauge; angle: Readout }>()
@@ -892,7 +895,7 @@ const follower = new GlowFollower()
 const glowView = $('glow-view') as HTMLCanvasElement
 const glowCtx = glowView.getContext('2d')!
 const glowContent = document.createElement('div'); glowContent.className = 'panel-feed kit-brackets'
-const glowNote = document.createElement('p'); glowNote.className = 'feed-caption'; glowNote.textContent = 'Turn on camera tracking in Arm controls.'
+const glowNote = document.createElement('p'); glowNote.className = 'feed-caption'; glowNote.textContent = 'Turn on camera tracking in Controls.'
 glowContent.append(glowView, glowNote)
 const glowPanel = panels.add(glowContent, { id: 'tracking-camera', title: 'Phone tracking camera', purpose: 'Camera tracking for glowing phones', icon: 'camera', anchor: 'camera', state: 'closed', camera: true })
 follower.onUnseen = (id) => sim?.remote.feedback({ haptic: 'bump', toast: 'The camera can’t see your glow: turn the screen toward it' }, id)
@@ -1576,6 +1579,9 @@ inspectArm.onclick = () => {
   controls.target.copy(target)
   controls.update()
 }
+// The quick-actions tray: its camera steps through the same framings, and its reset sends every arm home.
+quickViews([{ name: 'Play view', show: () => resetView.click() }, { name: 'Overview', show: () => overviewView.click() }, { name: 'Close-up', show: () => inspectArm.click() }])
+if (!view.presence?.shared?.guest) quickAction({ id: 'reset', label: 'Reset', hint: 'Every arm home', icon: 'reset', run: () => $('home-all').click() })
 resize()
 renderPanel()
 renderer.setAnimationLoop(loop)

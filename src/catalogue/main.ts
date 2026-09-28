@@ -6,6 +6,7 @@
 import { applyTheme, initialTheme } from '../ui/themes'
 import { calmMarks, mountMarks } from '../ui/icons'
 import { mountTopBar } from '../landing/topbar'
+import { mountQuick } from '../ui/quick'
 import {
   APP_ACTIONS, checkProfile, Controller, CONTROLLER_IDS, CONTROLLERS, INPUT_OPTIONS, isControllerId, KEY_TARGETS, MOTION_UTILITIES, optionOf,
   PROFILE_IDS, PROFILE_LIMITS, PROFILES, ROUTES, targetLabel, utilityKey, type ControllerId, type InputSource, type MotionUtility, type ProfileSpec,
@@ -16,6 +17,7 @@ applyTheme(initialTheme())
 mountMarks()
 calmMarks(document, 2)
 mountTopBar()
+mountQuick()
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 const NAMES: Record<MotionUtility, string> = { 'motion.aim': 'Aim', 'motion.steer': 'Steer', 'motion.point': 'Point' }

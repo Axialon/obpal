@@ -5,12 +5,14 @@
  *   - breaks no Content Security Policy directive (scripts/csp-watch.mjs) and throws no error;
  *   - has its policy: the page's own <meta> one and the headers' frame-ancestors one;
  *   - takes its fonts from this origin, never from a font service, and they load.
+ * Then the quick-actions tray on each kind of page (scripts/e2e-quick.mjs).
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch.
  */
 import { chromium, devices } from 'playwright'
 import { cspCheck, cspViolations } from './csp-watch.mjs'
 import { startWorker } from './local-worker.mjs'
 import { checkFrost, setSurface } from './lib/frost.mjs'
+import { runQuick } from './e2e-quick.mjs'
 
 const PORT = Number(process.env.OBPAL_E2E_WORKER_PORT) || 5179
 const HEADED = process.argv.includes('--headed')
@@ -210,6 +212,8 @@ try {
       } finally { await ctx.close() }
     })
   }
+  // The quick-actions tray on each kind of page (scripts/e2e-quick.mjs).
+  await runQuick(browser, worker.origin, check)
   await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {
   console.error(e)

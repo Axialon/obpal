@@ -147,7 +147,12 @@ async function rimAt(page, wall, at, a) {
   // (Within the screen: near a corner, the stretch beside it runs off it.)
   const x0 = Math.max(0, clip.x), y0 = Math.max(0, clip.y)
   Object.assign(clip, { x: x0, y: y0, width: Math.min(vw, clip.x + clip.width) - x0, height: Math.min(vh, clip.y + clip.height) - y0 })
-  const { data, info } = await sharp(await page.screenshot({ clip })).raw().toBuffer({ resolveWithObject: true })
+  // (The quick-actions tray's glass tab sits over the right edge, and the marble rolls on under it: the tray is out of
+  // the picture while it's taken, as the rim is the hero's own drawing.)
+  await page.evaluate(() => document.querySelector('.quick-tray')?.style.setProperty('display', 'none'))
+  const png = await page.screenshot({ clip })
+  await page.evaluate(() => document.querySelector('.quick-tray')?.style.removeProperty('display'))
+  const { data, info } = await sharp(png).raw().toBuffer({ resolveWithObject: true })
   let best = 0
   for (let i = 0; i < data.length; i += info.channels) best = Math.max(best, 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2])
   return best

@@ -8,6 +8,7 @@ import { profileOf } from './profiles'
 import { DetentSlider } from '../../ui/kit/slider'
 import { ICONS } from '../../ui/icons'
 import { html, setMarkup } from '../../ui/markup'
+import { quickAction } from '../../ui/quick-actions'
 import '../../styles/sound.css'
 
 /** The level slider's stops, in order: 0 is muted, 1 reduced, 2 full. */
@@ -37,13 +38,17 @@ export function mountSound(id: string, rumble: Rumble, panel = document.querySel
   // A panel may keep a place for it; it comes back there from first person.
   ;(panel?.querySelector('[data-sound-home]') ?? panel)?.append(row)
   const refresh = () => {
-    setMarkup(mute, html`${ICONS[sound.muted ? 'mute' : 'sound']}<span>${sound.muted ? 'Unmute sound' : sound.running ? 'Mute sound' : 'Start sound'}</span>`)
+    const words = sound.muted ? 'Unmute sound' : sound.running ? 'Mute sound' : 'Start sound'
+    setMarkup(mute, html`${ICONS[sound.muted ? 'mute' : 'sound']}<span>${words}</span>`)
     mute.setAttribute('aria-pressed', String(sound.muted))
     slider.value = level()
+    // The same switch in the quick-actions tray: on while the sound plays.
+    quickAction({ id: 'sound', label: words, hint: 'The sim’s sound', icon: sound.muted || !sound.running ? 'mute' : 'sound', stay: true, pressed: () => sound.running && !sound.muted, run: () => mute.click() })
   }
   const persist = () => { try { localStorage.setItem('obpal.sim.muted', sound.muted ? '1' : '0'); localStorage.setItem('obpal.sim.reduced', sound.reduced ? '1' : '0') } catch { /* private browsing */ } }
   const start = async () => { try { await sound.start(); status.textContent = ''; refresh() } catch { status.textContent = 'Tap Start sound to try again.' } }
-  const gesture = (e: Event) => { if (!sound.running && !sound.muted && e.target !== mute && !mute.contains(e.target as Node)) void start() }
+  // Any press starts the sound, but for the sound switches' own (this card's, the quick-actions tray's): they decide.
+  const gesture = (e: Event) => { if (!sound.running && !sound.muted && !mute.contains(e.target as Node) && !(e.target as Element | null)?.closest?.('[data-quick="sound"]')) void start() }
   document.addEventListener('pointerdown', gesture); document.addEventListener('keydown', gesture)
   mute.onclick = () => { sound.setMuted(sound.running ? !sound.muted : false); persist(); void start(); refresh() }
   const hidden = () => { if (document.hidden) { sound.stop(); sound.gate.clear(); void sound.context?.suspend() } }

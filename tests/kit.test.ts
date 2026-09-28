@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { edge, fold, printable, step, Typeahead, typeahead } from '../src/ui/kit/listnav'
-import { placePopover } from '../src/ui/kit/place'
+import { edgeSpot, freeSpans, placePopover } from '../src/ui/kit/place'
 import { readSidebar, sidebarMode, writeSidebar } from '../src/ui/kit/sidebar'
 import { nextStop, quantize, share, snapTo } from '../src/ui/kit/slider'
 import { angleOf, arcPath, litDots, polar, valueOfAngle } from '../src/ui/kit/gauge'
@@ -125,6 +125,38 @@ describe('placing a popover', () => {
     expect(right).toMatchObject({ side: 'right', left: 98, top: 900 - 8 - 420 })
     const left = placePopover({ left: 1300, top: 100, width: 76, height: 48 }, { width: 260, height: 200 }, view, { beside: true })
     expect(left).toMatchObject({ side: 'left', left: 1300 - 6 - 260, top: 100 })
+  })
+})
+
+describe('a place on a screen edge (the quick-actions tray)', () => {
+  it('sits where it would like to be when nothing is in the way', () => {
+    expect(edgeSpot(450, 300, 84, 892, [])).toBe(450)
+  })
+  it('keeps all of itself inside the edge it has', () => {
+    expect(edgeSpot(100, 300, 84, 892, [])).toBe(84 + 150)
+    expect(edgeSpot(880, 300, 84, 892, [])).toBe(892 - 150)
+  })
+  it('moves just clear of what is in the way: above the pairing card, below a toolbar', () => {
+    // A pairing card from 460 down: the tray ends where the card starts.
+    expect(edgeSpot(450, 300, 84, 892, [[460, 892]])).toBe(460 - 150)
+    // A toolbar at the top, and the card: the room between them.
+    expect(edgeSpot(300, 200, 84, 892, [[84, 140], [600, 892]])).toBe(300)
+    expect(edgeSpot(300, 200, 84, 892, [[84, 260], [600, 892]])).toBe(360)
+  })
+  it('takes the clear stretch nearest where it would like to be', () => {
+    // Room above and below a window in the middle: the nearer side wins.
+    expect(edgeSpot(500, 100, 0, 1000, [[300, 580]])).toBe(630)
+    expect(edgeSpot(400, 100, 0, 1000, [[300, 580]])).toBe(250)
+  })
+  it('stays where it would like to be when nowhere is clear, inside the edge', () => {
+    expect(edgeSpot(450, 300, 84, 892, [[84, 892]])).toBe(450)
+    expect(edgeSpot(450, 900, 84, 892, [])).toBe(84 + 450)
+  })
+  it('finds the clear stretches, however the blocked ones overlap or run past the ends', () => {
+    expect(freeSpans(0, 100, [])).toEqual([[0, 100]])
+    expect(freeSpans(0, 100, [[60, 80], [10, 30], [25, 40]])).toEqual([[0, 10], [40, 60], [80, 100]])
+    expect(freeSpans(20, 100, [[0, 30], [90, 140]])).toEqual([[30, 90]])
+    expect(freeSpans(0, 100, [[0, 100]])).toEqual([])
   })
 })
 

@@ -6,10 +6,12 @@ import '../styles/support.css'
 import { logo } from '../ui/icons'
 import { applyTheme, initialTheme } from '../ui/themes'
 import { mountTopBar } from '../landing/topbar'
+import { mountQuick } from '../ui/quick'
 
 /** Sponsor / donate for ob.Pal, on the shared Blackboxes contribution ledger (same API as the other engines). */
 applyTheme(initialTheme())
 mountTopBar()
+mountQuick()
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 const page = document.body.dataset.page === 'donate' ? 'donate' : 'sponsor'
 const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: n % 1 ? 2 : 0 })

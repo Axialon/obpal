@@ -26,6 +26,7 @@ import { ICONS, logo, settleMotion } from '../ui/icons'
 import { dismissHint, hint } from '../ui/hints'
 import { initTips } from '../ui/tips'
 import { enhanceSelects } from '../ui/kit/select'
+import { mountQuick, quickAction, quickViews } from '../ui/quick'
 import { applyTheme, initialTheme, THEMES, themeById, type Theme } from '../ui/themes'
 import { Experience } from '../sim/vr/experience'
 import { SharedPresence } from '../sim/vr/presence'
@@ -1598,6 +1599,16 @@ if (!sharedPresence.guest) { sharedPresence.world.add('ball', [0.7, 0.18, 0.8], 
 const experience = new Experience(renderer, scene, camera, viewerRides, sharedPresence, controls)
 experience.addEventListener('camerachange', () => { if (experience.immersive) pairChip?.collapse() })
 Object.assign(window, { __activeSceneCamera: () => experience.activeCamera })
+// The quick-actions tray: its camera steps from the home view to the model framed and to first person (the viewpoint
+// row's own), and its reset is the view's; pairing, sound, the surface and fullscreen come with the tray.
+const inOverview = (show: () => void) => () => { if (experience.immersive) void experience.leave().then(show); else show() }
+quickViews([
+  { name: 'Home view', show: inOverview(resetView) },
+  { name: 'Framed', show: inOverview(frameModel) },
+  { name: 'First person', show: () => document.querySelector<HTMLButtonElement>('.presence-controls .presence-enter')?.click() },
+])
+quickAction({ id: 'reset', label: 'Reset the view', hint: 'The model upright, the camera home', icon: 'reset', run: inOverview(resetView) })
+mountQuick()
 
 setTheme(theme, false)
 buildMore()

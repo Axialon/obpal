@@ -14,6 +14,7 @@
 import { applyTheme, initialTheme } from '../ui/themes'
 import { ICONS, mountMarks } from '../ui/icons'
 import { mountTopBar } from '../landing/topbar'
+import { mountQuick } from '../ui/quick'
 import {
   describeEnv, emptyTally, isTrack, keyInput, labelOf, mediaInput, padAxis, padButton, padName, sourceOf, summarize, trackWav,
   TRACKS, type Source, type Tally, type Track,
@@ -22,6 +23,7 @@ import {
 applyTheme(initialTheme())
 mountMarks()
 mountTopBar()
+mountQuick()
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 const s = (d: Content) => html`<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`

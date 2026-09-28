@@ -135,7 +135,9 @@
 /* ---- the dock: a slim rail of round icon buttons on the left; faint until pointed at ------------------------------- */
 
 .panel-dock {
-  --panel-safe-left: env(safe-area-inset-left, 0px); --panel-safe-right: env(safe-area-inset-right, 0px); --panel-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --panel-safe-left: env(safe-area-inset-left, 0px); --panel-safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* The quick-actions tray's edge (styles/quick.css) stays clear of windows too. */
+  --panel-safe-right: calc(env(safe-area-inset-right, 0px) + var(--quick-reserve, 0px));
   /* Windows start this far from the screen's left edge, clear of the rail (read by panels.ts). */
   --panel-gutter: 64px;
   position: fixed; z-index: 6; left: calc(8px + var(--panel-safe-left)); top: max(84px, env(safe-area-inset-top, 0px)); box-sizing: border-box;

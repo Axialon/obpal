@@ -2,6 +2,7 @@ import { setMarkup, html, insertMarkup } from '../ui/markup'
 import { applyTheme, initialTheme } from '../ui/themes'
 import { calmMarks, mountMarks } from '../ui/icons'
 import { mountTopBar } from './topbar'
+import { dropQuickAction, mountQuick, quickAction } from '../ui/quick'
 import { mountHero } from './hero'
 import { onPresence, startPairing } from './pair'
 import { addActor, wake } from './ticker'
@@ -59,6 +60,32 @@ hero.onSound = (s) => {
   soundBtn.title = s === 'on' ? 'Sound on' : s === 'off' ? 'Sound off' : 'Your browser starts sound after a click or a tap'
 }
 soundBtn.addEventListener('click', () => hero.toggleSound())
+// The quick-actions tray: the marbles' sound, and pairing through the hero's own card (or, on a phone, sending the
+// link to a computer); fullscreen comes with the tray.
+let soundState = 'none'
+const offerSound = () => {
+  if (soundState === 'none') { dropQuickAction('sound'); return }
+  quickAction({
+    id: 'sound', label: soundState === 'on' ? 'Sound on' : 'Sound off', hint: 'The marbles’ sound', icon: soundState === 'on' ? 'sound' : 'mute', stay: true,
+    pressed: () => soundState === 'on', run: () => hero.toggleSound(),
+  })
+}
+const heard = hero.onSound
+hero.onSound = (s) => { heard?.(s); soundState = s; offerSound() }
+quickAction(desk ? {
+  id: 'pair', label: 'Pair a phone', hint: 'The code to scan is on this page', icon: 'phone',
+  run: () => {
+    const card = $('[data-pair]')
+    card.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'center' })
+    card.tabIndex = -1
+    card.focus({ preventScroll: true })
+    card.classList.remove('pair-called'); void card.offsetWidth; card.classList.add('pair-called')
+  },
+} : {
+  id: 'pair', label: 'Pair a phone', hint: 'Send this to a computer, then scan its code', icon: 'phone',
+  run: () => $<HTMLButtonElement>('[data-send]').click(),
+})
+mountQuick()
 // For the end-to-end test (scripts/e2e-home.mjs), as the viewer exposes its own.
 Object.assign(window, { __home: { tips: () => hero.tips(), dot: () => hero.dot(), pads: () => hero.pads(), outline: (id: string) => hero.outline(id), gfx: () => hero.gfx(), audio: () => hero.audio(), drop: (x: number, y: number) => hero.drop(x, y), counters: () => hero.counters(), gaps: () => hero.gaps(), steps: () => hero.steps(), sim: () => hero.sim() } })
 if (debug.size) void import('./debug').then(({ mountDebug }) => mountDebug(debug, { audio: () => hero.audio(), gfx: () => hero.gfx() }))

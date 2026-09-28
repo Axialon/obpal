@@ -9,6 +9,7 @@ import { html, setMarkup } from '../../ui/markup'
 import { CapsuleGauge } from '../../ui/kit/gauge'
 import { DetentSlider } from '../../ui/kit/slider'
 import { toggle } from '../../ui/kit/toggle'
+import { quickAction } from '../../ui/quick-actions'
 import { resolveStrike } from '../../music-space'
 import { rail } from '../vr/intent'
 
@@ -40,18 +41,25 @@ export function attachStudio(sim: SimScene, logic: StudioLogic, stage: Stage, po
   if (home) home.append(panel)
   else document.getElementById('dev-blurb')!.after(panel)
   const start = panel.querySelector<HTMLButtonElement>('#studio-start')!, status = panel.querySelector('small')!
+  // The same switch in the quick-actions tray: on while the room plays.
+  const offer = () => quickAction({
+    id: 'sound', label: !sound.running ? 'Start sound' : muted ? 'Unmute sound' : 'Mute sound', hint: 'The studio’s sound', icon: sound.running && !muted ? 'sound' : 'mute',
+    stay: true, pressed: () => sound.running && !muted, run: () => start.click(),
+  })
   const startSound = async () => {
     if (starting || sound.running) return
     starting = true
     try { await sound.start(); start.textContent = 'Mute'; status.textContent = 'Sound is on · scan to join the room' }
     catch { status.textContent = 'Sound could not start. Tap Start sound to try again.' }
-    finally { starting = false }
+    finally { starting = false; offer() }
   }
   start.onclick = () => {
     if (!sound.running) { void startSound(); return }
     muted = !muted; sound.setVolume(muted ? 0 : volume.value / 100); start.textContent = muted ? 'Unmute' : 'Mute'
+    offer()
   }
-  const firstInteraction = (e: Event) => { if (!(e.target as HTMLElement).closest('#studio-start')) void startSound() }
+  offer()
+  const firstInteraction = (e: Event) => { if (!(e.target as HTMLElement).closest('#studio-start, [data-quick="sound"]')) void startSound() }
   document.addEventListener('pointerdown', firstInteraction, { once: true })
   document.addEventListener('keydown', firstInteraction, { once: true })
   logic.onHome = n => sound.stop(n)

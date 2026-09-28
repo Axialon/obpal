@@ -30,6 +30,7 @@ import { mountSimPanels, numberSections } from '../ui/panels'
 import { Telemetry } from '../../ui/kit/telemetry'
 import { ICONS } from '../../ui/icons'
 import { html, setMarkup } from '../../ui/markup'
+import { mountQuick, quickAction, quickViews } from '../../ui/quick'
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 const params = new URLSearchParams(location.search)
@@ -40,6 +41,8 @@ applyTheme(initialTheme())
 mountMarks()
 mountTopBar()
 family.mountThemes($('t-theme'), $('themes'))
+// The quick-actions tray, before the windows, which keep clear of its edge.
+mountQuick()
 family.watchTheme()
 
 document.title = `${spec.name} · ob.Pal`
@@ -48,7 +51,7 @@ $('dev-name').textContent = spec.name
 $('dev-blurb').textContent = spec.blurb
 document.getElementById('seo-device')?.remove()
 $('stage').setAttribute('aria-label', spec.name)
-const panels = mountSimPanels(`device:${spec.id}`, spec.name)
+const panels = mountSimPanels(`device:${spec.id}`, 'Controls')
 const scored = ['slotcars', 'kart', 'airhockey', 'football', 'pinball', 'maze', 'claw', 'sorting', 'marblerun', 'trebuchet'].includes(spec.id)
 if (scored) panels.add($('dev-units'), { id: 'scores', title: spec.id === 'slotcars' || spec.id === 'kart' ? 'Scores & laps' : 'Scores & seats', purpose: 'Live results and who controls each unit', icon: 'scores', anchor: 'scores' })
 if (spec.id === 'studio') {
@@ -166,6 +169,12 @@ if (logic.reset) {
   $('reset').textContent = logic.resetLabel ?? 'Reset'
   $('reset').onclick = () => { logic.reset!(); sim?.log(`The screen: ${(logic.resetLabel ?? 'reset').toLowerCase()}`) }
 }
+// The tray's reset: every unit home, and the device's own reset (a race, a game) where it has one. A guest's screen
+// only watches.
+if (!presence.shared.guest) quickAction({
+  id: 'reset', label: 'Reset', hint: logic.reset ? `${logic.resetLabel ?? 'Reset'}, and every unit home` : 'Every unit home', icon: 'reset',
+  run: () => { $('home-all').click(); if (logic.reset) $('reset').click() },
+})
 
 // ---- pointing: a cursor per pointing phone, and a ring where it meets the floor ----
 
@@ -277,9 +286,14 @@ void entry.view().then((m) => {
     $('dev-view').append(b)
     return b
   }
-  action('Reset view', 'center', () => { following = true; stage.frame(view!.framing) })
-  if (view.inspect) action('Inspect model', 'zoom-in', () => { following = false; stage.frame(view!.inspect!()) }, 'Inspect')
-  if (view.overview) action('Overview', 'orbit', () => { following = false; stage.frame(view!.overview!) })
+  const play = () => { following = true; stage.frame(view!.framing) }
+  const close = () => { following = false; stage.frame(view!.inspect!()) }
+  const wide = () => { following = false; stage.frame(view!.overview!) }
+  action('Reset view', 'center', play)
+  if (view.inspect) action('Inspect model', 'zoom-in', close, 'Inspect')
+  if (view.overview) action('Overview', 'orbit', wide)
+  // The tray's camera steps through the same framings.
+  quickViews([{ name: 'Play view', show: play }, ...(view.overview ? [{ name: 'Overview', show: wide }] : []), ...(view.inspect ? [{ name: 'Close-up', show: close }] : [])])
 })
 
 if (!presence.shared.guest) void startSimScene({

@@ -1,0 +1,323 @@
+/**
+ * Quick actions: a slim glass tab on the right edge of every ob.Pal page (not the phone controller, which has its own
+ * UI, nor the embed, which lives in other sites) that slides out a column of round icon actions, each with a glass
+ * tooltip: pair a phone, camera view, fullscreen, sound, theme and reset, in that order, where they apply.
+ *
+ * One registry (./quick-actions.ts): a page offers what it has with quickAction() (quickViews() for a camera that
+ * steps through views), and mountQuick() adds what the tray can do itself: fullscreen; pairing, through the page's own
+ * people chip where there is one, else by opening the viewer; and the surface picker where the page follows the
+ * visitor's surface (site pages wear their own palette). The tab keeps clear of the page's bar, the pairing chip and
+ * its card, and anything else fixed on that edge; sim windows keep clear of it (styles/panels.css). Esc, a click
+ * outside or a swipe back to the edge closes it; it's a toolbar for the keyboard; reduced motion shows it without the
+ * slide.
+ */
+import '../styles/kit.css'
+import '../styles/quick.css'
+import { family } from '../family'
+import { ICONS } from './icons'
+import { html, setMarkup } from './markup'
+import { edgeSpot, freeSpans, placePopover } from './kit/place'
+import { onQuickChange, QUICK_ORDER, quickActions, quickDefault, type QuickId } from './quick-actions'
+
+export { dropQuickAction, quickAction, quickChanged, quickViews, type QuickAction, type QuickId } from './quick-actions'
+
+const actions = quickActions()
+let tray: QuickTray | null = null
+onQuickChange((what) => { if (what === 'actions') tray?.render(); else tray?.sync() })
+
+/** The tray on this page, once, with what the tray does itself. */
+export function mountQuick() {
+  if (tray) return tray
+  if (document.fullscreenEnabled) quickDefault({
+    id: 'fullscreen', label: 'Full screen', hint: 'Fill the screen; Esc comes back', stay: true,
+    icon: () => (document.fullscreenElement ? 'fullscreen-exit' : 'fullscreen'),
+    pressed: () => !!document.fullscreenElement,
+    run: () => { if (document.fullscreenElement) void document.exitFullscreen().catch(() => {}); else void document.documentElement.requestFullscreen?.().catch(() => {}) },
+  })
+  const invite = document.getElementById('chip-invite')
+  quickDefault(invite ? {
+    // The page's people chip opens its pairing card (@obpal/host's PairingChip).
+    id: 'pair', label: 'Pair a phone', hint: 'Show the code to scan', icon: 'phone',
+    pressed: () => invite.getAttribute('aria-pressed') === 'true',
+    run: () => { if (invite.getAttribute('aria-pressed') !== 'true') invite.click() },
+  } : {
+    id: 'pair', label: 'Pair a phone', hint: 'Open the viewer and scan its code', icon: 'phone',
+    run: () => { location.href = '/view/' },
+  })
+  if (!document.documentElement.classList.contains('site')) quickDefault({
+    id: 'theme', label: 'Theme', hint: 'Surface and accent', icon: 'palette', stay: true,
+    run: () => tray?.themes(),
+  })
+  tray = new QuickTray()
+  return tray
+}
+
+/** The tab, the column it slides out, the tooltip, and the surface picker the column can open. */
+class QuickTray {
+  readonly el = document.createElement('nav')
+  private readonly tab = document.createElement('button')
+  private readonly panel = document.createElement('div')
+  private readonly tip = document.createElement('div')
+  private readonly buttons = new Map<QuickId, HTMLButtonElement>()
+  private picker: { menu: HTMLElement; api: { open(): void; close(): void } } | null = null
+  private frame = 0
+  private swipe: { id: number; x: number; y: number; done: boolean } | null = null
+
+  constructor() {
+    document.documentElement.classList.add('quick-on')
+    this.el.className = 'quick-tray'
+    this.el.setAttribute('aria-label', 'Quick actions')
+    this.el.dataset.open = 'false'
+    this.tab.type = 'button'
+    this.tab.className = 'quick-tab'
+    this.tab.setAttribute('aria-label', 'Quick actions')
+    this.tab.setAttribute('aria-expanded', 'false')
+    this.tab.setAttribute('aria-controls', 'quick-actions')
+    setMarkup(this.tab, html`${ICONS.left}`)
+    this.panel.className = 'quick-panel'
+    this.panel.id = 'quick-actions'
+    this.panel.setAttribute('role', 'toolbar')
+    this.panel.setAttribute('aria-label', 'Quick actions')
+    this.panel.setAttribute('aria-orientation', 'vertical')
+    this.tip.className = 'quick-tip'
+    this.tip.setAttribute('role', 'tooltip')
+    this.tip.id = 'quick-tip'
+    this.tip.hidden = true
+    this.el.append(this.tab, this.panel)
+    document.body.append(this.el, this.tip)
+
+    // Keyboard: a press on the tab from the keyboard lands on the first action.
+    this.tab.addEventListener('click', (e) => this.toggle(e.detail === 0))
+    this.panel.addEventListener('keydown', (e) => this.key(e))
+    this.el.addEventListener('keydown', (e) => { if (e.key === 'Escape' && this.open) { e.stopPropagation(); this.close(true) } })
+    // Leaving it (a click elsewhere, or focus moving on) closes it; its own surface picker is part of it.
+    document.addEventListener('pointerdown', (e) => { if (this.open && !this.owns(e.target as Node)) this.close(false) }, true)
+    this.el.addEventListener('focusout', (e) => { if (this.open && e.relatedTarget && !this.owns(e.relatedTarget as Node)) this.close(false) })
+    // A swipe back toward the edge closes it; on the tab, a swipe away from the edge opens it. Once a press moves
+    // sideways it's a swipe: the tray keeps the pointer (so the edge doesn't cut it short) and it presses nothing.
+    this.el.addEventListener('pointerdown', (e) => { this.swipe = { id: e.pointerId, x: e.clientX, y: e.clientY, done: false } })
+    this.el.addEventListener('pointermove', (e) => {
+      const s = this.swipe
+      if (!s || s.id !== e.pointerId || s.done) return
+      const dx = e.clientX - s.x, dy = e.clientY - s.y
+      if (Math.abs(dy) > Math.abs(dx)) return
+      if (Math.abs(dx) > 6 && !this.el.hasPointerCapture(e.pointerId)) this.el.setPointerCapture(e.pointerId)
+      if (Math.abs(dx) < 24) return
+      if (dx > 0 && this.open) { s.done = true; this.close(false) }
+      else if (dx < 0 && !this.open) { s.done = true; this.toggle(false) }
+    })
+    const end = (e: PointerEvent) => { if (this.swipe?.id === e.pointerId) setTimeout(() => { this.swipe = null }) }
+    this.el.addEventListener('pointerup', end)
+    this.el.addEventListener('pointercancel', end)
+    // A swipe that ended over a button isn't also a press on it.
+    this.el.addEventListener('click', (e) => { if (this.swipe?.done) { e.stopPropagation(); e.preventDefault() } }, true)
+
+    const place = () => { if (!this.frame) this.frame = requestAnimationFrame(() => { this.frame = 0; this.place() }) }
+    for (const type of ['resize', 'scroll', 'obpal:panels']) addEventListener(type, place, { passive: true })
+    window.visualViewport?.addEventListener('resize', place)
+    document.addEventListener('fullscreenchange', () => this.sync())
+    // The pairing chip opens and folds its card on that edge: the tray moves to stay clear.
+    const watch = () => {
+      const wrap = document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.wrap')
+      if (!wrap) return false
+      new ResizeObserver(place).observe(wrap)
+      // The card opens with a short animation: placed again once it has settled.
+      new MutationObserver(() => { place(); setTimeout(place, 400) }).observe(wrap, { attributes: true, attributeFilter: ['data-open'] })
+      return true
+    }
+    if (!watch()) {
+      const mo = new MutationObserver(() => { if (watch()) { mo.disconnect(); place() } })
+      mo.observe(document.body, { childList: true })
+    }
+    this.render()
+    place()
+  }
+
+  get open() { return this.el.dataset.open === 'true' }
+  private owns(node: Node | null) { return !!node && (this.el.contains(node) || this.tip.contains(node) || !!this.picker?.menu.contains(node)) }
+
+  /** The page's actions, in the tray's order; a button each, kept between renders so focus stays. */
+  render() {
+    const shown = QUICK_ORDER.filter((id) => actions.has(id))
+    for (const [id, b] of this.buttons) if (!shown.includes(id)) { b.remove(); this.buttons.delete(id) }
+    for (const id of shown) {
+      let b = this.buttons.get(id)
+      if (!b) {
+        b = document.createElement('button')
+        b.type = 'button'
+        b.className = 'quick-btn'
+        b.dataset.quick = id
+        b.tabIndex = -1
+        b.addEventListener('click', () => this.run(id))
+        const show = () => this.showTip(id)
+        b.addEventListener('pointerenter', show)
+        b.addEventListener('focus', show)
+        b.addEventListener('pointerleave', () => this.hideTip())
+        b.addEventListener('blur', () => this.hideTip())
+        this.buttons.set(id, b)
+        // The surface picker is the family's popover on this button: it opens and closes with the button's clicks.
+        if (id === 'theme') this.mountPicker(b)
+      }
+      this.panel.append(b)
+    }
+    this.tab.hidden = !shown.length
+    this.sync()
+    this.roving(this.focused() ?? shown[0])
+    this.place()
+  }
+
+  /** Names, icons and switches' states, as they are now. */
+  sync() {
+    for (const [id, b] of this.buttons) {
+      const a = actions.get(id)
+      if (!a) continue
+      const icon = typeof a.icon === 'function' ? a.icon() : a.icon
+      // (data-glyph, not data-icon: pages fill every [data-icon] with its icon when they start.)
+      if (b.dataset.glyph !== icon) { setMarkup(b, html`${ICONS[icon] ?? ''}`); b.dataset.glyph = icon }
+      b.setAttribute('aria-label', a.label)
+      if (a.pressed) b.setAttribute('aria-pressed', String(a.pressed()))
+      else b.removeAttribute('aria-pressed')
+    }
+    if (!this.tip.hidden && this.tip.dataset.for) this.showTip(this.tip.dataset.for as QuickId)
+  }
+
+  private run(id: QuickId) {
+    const a = actions.get(id)
+    if (!a) return
+    // What it opens (the picker, the pairing card) comes up without the tooltip over it.
+    this.hideTip()
+    a.run()
+    if (!a.stay) this.close(false)
+    // Switches' states once the action's own handlers have had their turn (a menu it opens, a card it unfolds).
+    requestAnimationFrame(() => this.sync())
+  }
+
+  toggle(fromKeyboard: boolean) {
+    if (this.open) { this.close(true); return }
+    this.el.dataset.open = 'true'
+    this.tab.setAttribute('aria-expanded', 'true')
+    this.place()
+    if (fromKeyboard) this.buttons.get(this.focusable())?.focus()
+  }
+
+  close(refocus: boolean) {
+    if (!this.open) return
+    const inside = this.el.contains(document.activeElement)
+    this.el.dataset.open = 'false'
+    this.tab.setAttribute('aria-expanded', 'false')
+    this.hideTip()
+    this.picker?.api.close()
+    this.place()
+    if (refocus || inside) this.tab.focus({ preventScroll: true })
+  }
+
+  /** The column is one tab stop: the arrow keys move through it, Home and End jump. */
+  private key(e: KeyboardEvent) {
+    const ids = [...this.buttons.keys()]
+    const at = ids.indexOf(this.focused() ?? ids[0])
+    const to = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? at + 1 : e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? at - 1
+      : e.key === 'Home' ? 0 : e.key === 'End' ? ids.length - 1 : null
+    if (to === null || !ids.length) return
+    e.preventDefault()
+    const id = ids[(to + ids.length) % ids.length]
+    this.roving(id)
+    this.buttons.get(id)!.focus()
+  }
+  private focused() {
+    for (const [id, b] of this.buttons) if (b === document.activeElement) return id
+    return null
+  }
+  private focusable() {
+    for (const [id, b] of this.buttons) if (b.tabIndex === 0) return id
+    return [...this.buttons.keys()][0]
+  }
+  private roving(id: QuickId | undefined) { for (const [k, b] of this.buttons) b.tabIndex = k === id ? 0 : -1 }
+
+  /** A glass tooltip beside the column: the action's name and what it does. */
+  private showTip(id: QuickId) {
+    const a = actions.get(id), b = this.buttons.get(id)
+    if (!a || !b || !this.open) return
+    const name = document.createElement('b'), what = document.createElement('span')
+    name.textContent = a.label
+    what.textContent = a.hint ?? ''
+    this.tip.replaceChildren(name, ...(a.hint ? [what] : []))
+    this.tip.dataset.for = id
+    this.tip.hidden = false
+    const r = b.getBoundingClientRect(), t = this.tip.getBoundingClientRect()
+    const at = placePopover({ left: r.left, top: r.top + r.height / 2 - t.height / 2, width: r.width, height: t.height }, { width: t.width, height: t.height }, { width: innerWidth, height: innerHeight }, { beside: true, gap: 12 })
+    this.tip.style.left = `${at.left}px`
+    this.tip.style.top = `${at.top}px`
+    b.setAttribute('aria-describedby', this.tip.id)
+  }
+  private hideTip() {
+    this.tip.hidden = true
+    delete this.tip.dataset.for
+    for (const b of this.buttons.values()) b.removeAttribute('aria-describedby')
+  }
+
+  /** The family's surface picker as the theme button's popover (the family opens and closes it with the button). */
+  private mountPicker(button: HTMLButtonElement) {
+    const menu = document.createElement('div')
+    menu.className = 'bb-menu bb-glass themes-menu quick-themes'
+    menu.setAttribute('aria-label', 'Surface and accent')
+    document.body.append(menu)
+    this.picker = { menu, api: family.mountThemes(button, menu) }
+  }
+
+  /** Once the family has opened the picker under its button, it moves beside the column instead. */
+  themes() {
+    const button = this.buttons.get('theme'), menu = this.picker?.menu
+    if (!button || !menu) return
+    requestAnimationFrame(() => {
+      if (menu.hidden) return
+      const r = button.getBoundingClientRect(), m = menu.getBoundingClientRect()
+      const at = placePopover({ left: r.left, top: r.top, width: r.width, height: r.height }, { width: m.width, height: m.height }, { width: innerWidth, height: innerHeight }, { beside: true, gap: 12 })
+      menu.style.left = `${at.left}px`
+      menu.style.top = `${at.top}px`
+      menu.style.maxHeight = `${at.maxHeight}px`
+    })
+  }
+
+  /**
+   * Its place on the edge: the column's middle (or the tab's, closed) as near its natural height as it can be, clear of
+   * the page's bar at the top, the pairing chip and its card, and anything else fixed on that edge. Where the clear
+   * stretch is shorter than the column (a phone on its side), the actions wrap into a second column.
+   */
+  place() {
+    const h = window.visualViewport?.height ?? innerHeight, w = window.visualViewport?.width ?? innerWidth
+    const coarse = matchMedia('(pointer: coarse)').matches
+    const bar = [...document.querySelectorAll('.sim-top, .topbar, header.top, .top')].reduce((y, el) => {
+      const r = el.getBoundingClientRect()
+      return r.width > w / 2 ? Math.max(y, r.bottom) : y
+    }, 0)
+    const top = Math.max(8, bar + 12), bottom = h - 8
+    // What's fixed on that edge: the pairing chip's pill, and its card while it's open (folded, the card keeps its box
+    // but isn't there); the viewer's viewpoint row; a sim's badge and windows; the home page's sound button.
+    const chip = document.querySelector('.obpal-chip')?.shadowRoot
+    const things = [chip?.querySelector('.pill'), chip?.querySelector('.wrap')?.hasAttribute('data-open') ? chip.querySelector('.card') : null,
+      ...document.querySelectorAll('.presence-floating, .sim-badge, [data-sound], .sim-window:not([hidden])')]
+      .filter((el): el is Element => !!el && !(el as HTMLElement).hidden).map((el) => el.getBoundingClientRect()).filter((r) => r.width && r.height)
+    // Those within `reach` of the edge are in the way.
+    const blockedBy = (reach: number) => things.filter((r) => r.right > w - reach && r.left < w).map((r): [number, number] => [r.top - 8, r.bottom + 8])
+    const count = Math.max(1, this.buttons.size)
+    const button = parseFloat(getComputedStyle(this.panel).getPropertyValue('--quick-btn')) || 38, gap = 6, pad = 12
+    let rows = count, blocked = blockedBy((this.tab.offsetWidth || 24) + 4), need = this.tab.offsetHeight || 56
+    if (this.open) {
+      // Its width with `cols` columns, and its 6px from the edge.
+      const reach = (cols: number) => cols * button + (cols - 1) * gap + pad + 6
+      for (let cols = 1; cols <= count; cols++) {
+        blocked = blockedBy(reach(cols))
+        const room = Math.max(0, ...freeSpans(top, bottom, blocked).map(([a, b]) => b - a))
+        // Nowhere clear at all: one column, over whatever is there for the moment it's open.
+        if (room < button + pad) { rows = count; blocked = blockedBy(reach(1)); break }
+        rows = Math.max(1, Math.min(count, Math.floor((room - pad + gap) / (button + gap))))
+        if (Math.ceil(count / rows) <= cols) break
+      }
+      need = rows * button + (rows - 1) * gap + pad
+    }
+    this.panel.style.setProperty('--quick-rows', String(rows))
+    // A phone held upright: the lower middle, under the thumb; elsewhere, the middle.
+    const want = h * (coarse && h > w ? 0.6 : 0.5)
+    this.el.style.setProperty('--quick-y', `${Math.round(edgeSpot(want, need, top, bottom, blocked))}px`)
+  }
+}

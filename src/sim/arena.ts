@@ -24,12 +24,15 @@ import { ControlFrame } from './vr/control-frame'
 import { mountSound } from './audio/session'
 import { mountSimPanels, numberSections } from './ui/panels'
 import { Readout } from '../ui/kit/readout'
+import { mountQuick, quickAction, quickViews } from '../ui/quick'
 
 applyTheme(initialTheme())
 mountMarks()
 mountTopBar()
+// The quick-actions tray, before the windows, which keep clear of its edge.
+mountQuick()
 const $ = (id: string) => document.getElementById(id)!
-const panels = mountSimPanels('arena', 'Arena controls')
+const panels = mountSimPanels('arena', 'Controls')
 const scores = panels.add($('score'), { id: 'scores', title: 'Scores', purpose: 'Player slots and points in this round', icon: 'scores', anchor: 'scores' })
 
 const RING = 2.5
@@ -184,6 +187,13 @@ if (!shared.guest) void startSimScene({
   renderScore()
 })
 $('reset-scores').onclick = () => { for (const s of slots) s.points = 0; renderScore(); sim?.log('Scores reset') }
+// The quick-actions tray: its camera goes from the ring to a player's own view (the viewpoint row's first person) and
+// back; its reset clears the scores.
+quickViews([
+  { name: 'Overview', show: () => { void view.presence?.leave() } },
+  { name: 'First person', show: () => document.querySelector<HTMLButtonElement>('.presence-controls .presence-enter')?.click() },
+])
+if (!shared.guest) quickAction({ id: 'reset', label: 'Reset', hint: 'The scores back to nothing', icon: 'reset', run: () => $('reset-scores').click() })
 
 /** A slot that just got a player enters at its spawn point; an empty one leaves the ring. */
 function spawnHeld() {

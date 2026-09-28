@@ -12,24 +12,18 @@
  * Needs OBPAL_E2E_PORT and OBPAL_E2E_WORKER_PORT (free), a build (vite build), and Playwright's Chromium or
  * OBPAL_E2E_CHROMIUM. Never writes into the repository outside artifacts/.
  */
-import { mkdir, readdir, writeFile } from 'node:fs/promises'
+import { mkdir } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { startLocal } from '../extension/e2e/local.mjs'
 import { resolveChromium } from './lib/browser.mjs'
+import { SIMS, SIZES, phone, writeViewer } from './lib/sims-evidence.mjs'
 
 const before = process.argv.includes('--before')
 const only = (process.argv.find((a) => a.startsWith('--only='))?.slice(7) ?? '').split(',').filter(Boolean)
 const out = 'artifacts/ui-system-2'
 const prefix = before ? 'before' : 'after'
-export const SIMS = [
-  ['arm', '/sim/arm/'], ['arena', '/sim/arena/'], ['drone', '/sim/device/?d=drone'], ['rover', '/sim/device/?d=rover'],
-  ['kart', '/sim/device/?d=kart'], ['gimbal', '/sim/device/?d=gimbal'], ['ptz', '/sim/device/?d=ptz'],
-  ['studio', '/sim/device/?d=studio'], ['smarthome', '/sim/device/?d=smarthome'], ['pinball', '/sim/device/?d=pinball'],
-]
-export const SIZES = [[1920, 1080], [1440, 900], [390, 844], [844, 390]]
-const phone = (w, h) => w <= 700 || h <= 500
 
 for (const key of ['OBPAL_E2E_PORT', 'OBPAL_E2E_WORKER_PORT']) {
   const port = Number(process.env[key])
@@ -113,28 +107,7 @@ try {
   await local.close()
 }
 
-// ---- the viewer --------------------------------------------------------------------------------------------------------
-const files = (await readdir(out)).filter((f) => f.endsWith('.png')).sort()
-const title = (f) => f.replace(/\.png$/, '').replaceAll('-', ' ')
-const figure = (f, caption) => files.includes(f) ? `<figure><figcaption>${caption}</figcaption><a href="${f}"><img loading="lazy" src="${f}" alt="${title(f)}"></a></figure>` : ''
-const rows = SIMS.map(([name]) => `<section class="sim" id="${name}"><h2>${name}</h2>${SIZES.map(([w, h]) => {
-  const s = `${w}x${h}`
-  const pairs = [[`before-${name}-${s}.png`, 'Before'], [`after-${name}-${s}.png`, 'After']]
-  if (phone(w, h)) pairs.push([`before-${name}-${s}-controls.png`, 'Before, controls open'], [`after-${name}-${s}-controls.png`, 'After, controls open'])
-  return `<h3>${s}</h3><div class="pair">${pairs.map(([f, c]) => figure(f, c)).join('')}</div>`
-}).join('')}</section>`).join('\n')
-const extra = files.filter((f) => /^after-(dock|moving|camera)/.test(f)).map((f) => figure(f, title(f))).join('')
-await writeFile(join(out, 'index.html'), `<!doctype html>
-<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ob.Pal · Sim panels review</title>
-<style>
-:root{color-scheme:dark;font-family:Inter,system-ui,sans-serif;background:#101316;color:#eef3ec}body{max-width:1680px;margin:auto;padding:28px}h1{font-size:clamp(28px,4vw,48px);letter-spacing:-.04em;margin:8px 0 10px}h1 span{color:#c6ff34}h2{margin:44px 0 6px;font-size:22px;text-transform:capitalize}h3{margin:18px 0 10px;font:600 13px ui-monospace,monospace;color:#c6ff34}p{color:#adb9af;max-width:900px;line-height:1.6}a{color:#c6ff34}.pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:14px}figure{margin:0;background:#171d1a;border:1px solid #2c3530;border-radius:16px;overflow:hidden}figure img{display:block;width:100%;height:auto;max-height:640px;object-fit:contain;background:#0a0c0b}figcaption{padding:10px 14px;font-size:13px;color:#c6cec4}nav{position:sticky;top:0;z-index:2;display:flex;flex-wrap:wrap;gap:14px;padding:12px 0;background:#101316ee;border-bottom:1px solid #2c3530;text-transform:capitalize}@media(max-width:700px){body{padding:16px}}
-</style>
-<small style="color:#c6ff34;letter-spacing:.12em;text-transform:uppercase;font-size:12px">ob.Pal · UI system, phase 2</small>
-<h1>Inside the sims: <span>widget cards, not pills</span></h1>
-<p>Ten sims before and after at 1920×1080, 1440×900, 390×844 and 844×390; on a phone the windows start docked, so each phone size also shows the controls window open. Then the dock with a tooltip, a window being moved, and a camera window enlarged. Click an image for full size.${errors.length ? ` <b style="color:#fb7185">Capture errors: ${errors.length}</b>` : ''}</p>
-<nav>${SIMS.map(([n]) => `<a href="#${n}">${n}</a>`).join('')}${extra ? '<a href="#more">Dock and windows</a>' : ''}</nav>
-${rows}
-${extra ? `<section id="more"><h2>Dock and windows</h2><div class="pair">${extra}</div></section>` : ''}
-</html>\n`)
+// ---- the viewer (scripts/lib/sims-evidence.mjs) ------------------------------------------------------------------------
+const count = await writeViewer(out, errors)
 if (errors.length) console.log(`errors:\n  ${errors.join('\n  ')}`)
-console.log(`${files.length} images in ${out}; viewer: ${join(out, 'index.html')}`)
+console.log(`${count} images in ${out}; viewer: ${join(out, 'index.html')}`)

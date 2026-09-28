@@ -1,0 +1,250 @@
+/**
+ * The quick-actions tray (src/ui/quick.ts) in real Chromium, one check per kind of page: it opens, it offers what
+ * applies there in the tray's order, and each of its actions does its job (pairing opens the pairing card, the camera
+ * moves the view, fullscreen asks for the full screen, sound switches, the theme opens the picker, reset puts the sim
+ * back). It keeps clear of the dock rail, the sidebar, the pairing chip and a sim's windows; the keyboard, a click
+ * outside and a swipe back close it; the phone controller and the embed don't have it. Run by scripts/e2e-pages.mjs.
+ */
+const assert = (ok, message) => { if (!ok) throw new Error(message) }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const ORDER = ['pair', 'camera', 'fullscreen', 'sound', 'theme', 'reset']
+
+/** A page at a size; its fullscreen requests counted, since a headless screen may not grant them. */
+async function open(browser, origin, path, { width = 1440, height = 900, phone = false } = {}) {
+  const context = await browser.newContext({ viewport: { width, height }, ignoreHTTPSErrors: true, reducedMotion: 'reduce', ...(phone ? { isMobile: true, hasTouch: true, deviceScaleFactor: 2 } : {}) })
+  await context.addInitScript(() => {
+    window.__fullscreenCalls = 0
+    const request = Element.prototype.requestFullscreen
+    Element.prototype.requestFullscreen = function (...args) { window.__fullscreenCalls++; return request ? request.apply(this, args).catch(() => {}) : Promise.resolve() }
+  })
+  const page = await context.newPage()
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await page.goto(origin + path)
+  await page.locator('.quick-tab').waitFor({ state: 'visible', timeout: 20000 })
+  return { page, context, errors }
+}
+const box = (page, selector) => page.evaluate((s) => {
+  const el = document.querySelector(s)
+  if (!el || el.hidden) return null
+  const r = el.getBoundingClientRect()
+  return r.width && r.height ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom } : null
+}, selector)
+const boxes = (page, selector) => page.locator(selector).evaluateAll((els) => els.filter((el) => !el.hidden).map((el) => {
+  const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom }
+}).filter((r) => r.right > r.left && r.bottom > r.top))
+const chip = (page) => page.evaluate(() => {
+  const root = document.querySelector('.obpal-chip')?.shadowRoot
+  const r = (el) => { if (!el) return null; const b = el.getBoundingClientRect(); return { left: b.left, top: b.top, right: b.right, bottom: b.bottom } }
+  return { pill: r(root?.querySelector('.pill')), card: root?.querySelector('.wrap')?.hasAttribute('data-open') ? r(root.querySelector('.card')) : null }
+})
+const meets = (a, b) => !!a && !!b && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
+function clear(what, of, others) {
+  for (const [name, list] of Object.entries(others)) for (const r of [list].flat()) assert(!meets(of, r), `the ${what} meets ${name}: ${JSON.stringify({ of, r })}`)
+}
+const offered = (page) => page.locator('.quick-tray [data-quick]').evaluateAll((els) => els.map((el) => el.dataset.quick))
+const isOpen = (page) => page.locator('.quick-tray').evaluate((el) => el.dataset.open === 'true')
+async function openTray(page) { if (!(await isOpen(page))) { await page.locator('.quick-tab').click(); await sleep(150) } assert(await isOpen(page), 'the tray did not open') }
+const action = (page, id) => page.locator(`.quick-tray [data-quick="${id}"]`)
+const inOrder = (ids) => ids.every((id, i) => i === 0 || ORDER.indexOf(ids[i - 1]) < ORDER.indexOf(id))
+
+export async function runQuick(browser, origin, checkIt) {
+  // Each check names the step it failed at.
+  let stage = ''
+  const at = (name) => { stage = name }
+  const check = (name, fn) => checkIt(name, async () => {
+    stage = ''
+    try { return await fn() } catch (e) { throw new Error(stage ? `${stage}: ${e.message.split('\n')[0]}` : e.message) }
+  })
+
+  await check('quick actions: home offers pairing, fullscreen and sound; each does its job; Esc closes it', async () => {
+    const { page, context, errors } = await open(browser, origin, '/')
+    try {
+      await page.waitForFunction(() => document.querySelector('.quick-tray [data-quick="sound"]'), null, { timeout: 15000 }).catch(() => {})
+      clear('tab', await box(page, '.quick-tab'), { 'the pairing card': await box(page, '[data-pair]'), 'the sound button': await box(page, '[data-sound]') })
+      // From the keyboard: the tab, then the first action.
+      await page.locator('.quick-tab').focus(); await page.keyboard.press('Enter'); await sleep(150)
+      const ids = await offered(page)
+      assert(ids.includes('pair') && ids.includes('fullscreen') && !ids.includes('theme') && !ids.includes('reset') && inOrder(ids), `home offers ${ids}`)
+      assert(await action(page, ids[0]).evaluate((el) => el === document.activeElement), 'the keyboard did not land on the first action')
+      await page.keyboard.press('ArrowDown')
+      assert(await action(page, ids[1]).evaluate((el) => el === document.activeElement), 'the arrow keys did not move through the actions')
+      await page.keyboard.press('Escape'); await sleep(100)
+      assert(!(await isOpen(page)) && await page.locator('.quick-tab').evaluate((el) => el === document.activeElement), 'Escape did not close it back to its tab')
+      await openTray(page)
+      await action(page, 'fullscreen').click()
+      assert(await page.evaluate(() => window.__fullscreenCalls) === 1, 'fullscreen was not asked for')
+      if (ids.includes('sound')) {
+        const before = await page.locator('[data-sound]').getAttribute('data-state')
+        await action(page, 'sound').click()
+        await page.waitForFunction((b) => document.querySelector('[data-sound]').dataset.state !== b, before, { timeout: 5000 })
+      }
+      await action(page, 'pair').click(); await sleep(400)
+      const card = await page.evaluate(() => { const c = document.querySelector('[data-pair]'); const r = c.getBoundingClientRect(); return { called: c.classList.contains('pair-called'), focused: c === document.activeElement, seen: r.top >= 0 && r.bottom <= innerHeight } })
+      assert(card.called && card.focused && card.seen, `pairing did not bring the card up: ${JSON.stringify(card)}`)
+      assert(!(await isOpen(page)), 'the tray stayed open after pairing')
+      assert(!errors.length, errors.join(' | '))
+      return `${ids.join(', ')}`
+    } finally { await context.close() }
+  })
+
+  await check('quick actions: the sims hub offers pairing (by the viewer) and fullscreen, clear of its sidebar', async () => {
+    const { page, context, errors } = await open(browser, origin, '/sim/')
+    try {
+      await openTray(page)
+      const ids = await offered(page)
+      assert(ids.join() === 'pair,fullscreen', `the hub offers ${ids}`)
+      clear('open tray', await box(page, '.quick-panel'), { 'the sidebar': await box(page, '.sims-side') })
+      await action(page, 'fullscreen').click()
+      assert(await page.evaluate(() => window.__fullscreenCalls) === 1, 'fullscreen was not asked for')
+      // A click outside (on the page's heading) closes it.
+      await page.locator('h1').first().click(); await sleep(100)
+      assert(!(await isOpen(page)), 'a click outside did not close it')
+      await openTray(page)
+      await Promise.all([page.waitForURL(/\/view\/$/), action(page, 'pair').click()])
+      assert(!errors.length, errors.join(' | '))
+      return ids.join(', ')
+    } finally { await context.close() }
+  })
+
+  await check('quick actions: a sim offers all six, each does its job, and the tray keeps clear of the dock, the windows and the chip', async () => {
+    const { page, context, errors } = await open(browser, origin, '/sim/drone/')
+    try {
+      await page.waitForFunction(() => window.__device && document.querySelector('.quick-tray [data-quick="camera"]') && document.querySelector('.quick-tray [data-quick="sound"]'), null, { timeout: 20000 })
+      const windows = await boxes(page, '.sim-window:not([hidden])')
+      const pairing = await chip(page)
+      clear('tab', await box(page, '.quick-tab'), { 'the dock': await box(page, '.panel-dock'), 'a window': windows, 'the pairing pill': pairing.pill, 'the pairing card': pairing.card })
+      await openTray(page)
+      const ids = await offered(page)
+      assert(ids.join() === ORDER.join(), `the sim offers ${ids}`)
+      clear('open tray', await box(page, '.quick-panel'), { 'the dock': await box(page, '.panel-dock'), 'a window': windows, 'the pairing pill': pairing.pill, 'the pairing card': pairing.card })
+      at('camera')
+      const camera = () => page.evaluate(() => window.__device.stage.camera.position.toArray().map((v) => +v.toFixed(3)).join())
+      const was = await camera()
+      await action(page, 'camera').click()
+      await page.waitForFunction((w) => window.__device.stage.camera.position.toArray().map((v) => +v.toFixed(3)).join() !== w, was, { timeout: 8000 })
+      assert(await isOpen(page), 'the camera closed the tray')
+      at('sound')
+      // A press anywhere may already have started it: the switch turns it the other way, and back.
+      const playing = () => page.evaluate(() => window.__simAudio.running && !window.__simAudio.muted)
+      const before = await playing()
+      await action(page, 'sound').click()
+      await page.waitForFunction((b) => (window.__simAudio.running && !window.__simAudio.muted) !== b, before, { timeout: 8000 })
+      assert(await action(page, 'sound').getAttribute('aria-pressed') === String(!before), 'the sound switch does not show its state')
+      await action(page, 'sound').click()
+      await page.waitForFunction((b) => (window.__simAudio.running && !window.__simAudio.muted) === b, before, { timeout: 8000 })
+      assert(await playing() === before, 'the sound switch did not turn it back')
+      at('theme')
+      await action(page, 'theme').click(); await sleep(200)
+      const picker = await box(page, '.quick-themes')
+      assert(picker && !meets(picker, await box(page, '.quick-panel')), `the picker did not open beside the tray: ${JSON.stringify(picker)}`)
+      await page.keyboard.press('Escape'); await sleep(100)
+      at('fullscreen')
+      await openTray(page)
+      await action(page, 'fullscreen').click()
+      assert(await page.evaluate(() => window.__fullscreenCalls) === 1, 'fullscreen was not asked for')
+      at('reset')
+      await page.evaluate(() => { const logic = window.__device.logic, home = logic.home.bind(logic); window.__homed = []; logic.home = (n) => { window.__homed.push(n); home(n) } })
+      await action(page, 'reset').click(); await sleep(100)
+      const units = await page.evaluate(() => window.__device.units.length)
+      assert((await page.evaluate(() => window.__homed.length)) >= units, 'reset did not send every unit home')
+      at('pair')
+      await openTray(page)
+      await page.evaluate(() => { const pill = document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.pill'); if (pill?.getAttribute('aria-expanded') === 'true') pill.click() })
+      await action(page, 'pair').click()
+      await page.waitForFunction(() => document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.wrap')?.hasAttribute('data-open'), null, { timeout: 5000 })
+      assert(!(await isOpen(page)), 'the tray stayed open over the pairing card')
+      // Clear of the card it opened, too.
+      await sleep(500)
+      clear('tab', await box(page, '.quick-tab'), { 'the pairing card': (await chip(page)).card })
+      assert(!errors.length, errors.join(' | '))
+      return `${ids.join(', ')}; ${units} units home`
+    } finally { await context.close() }
+  })
+
+  await check('quick actions: the arena’s camera rides a player and back, and its reset clears the scores', async () => {
+    const { page, context, errors } = await open(browser, origin, '/sim/arena/')
+    try {
+      await page.waitForFunction(() => window.__arena && document.querySelector('.quick-tray [data-quick="reset"]'), null, { timeout: 20000 })
+      await openTray(page)
+      const ids = await offered(page)
+      assert(ids.join() === ORDER.join(), `the arena offers ${ids}`)
+      await action(page, 'camera').click()
+      await page.waitForFunction(() => document.body.classList.contains('presence-active'), null, { timeout: 5000 })
+      await openTray(page)
+      await action(page, 'camera').click()
+      await page.waitForFunction(() => !document.body.classList.contains('presence-active'), null, { timeout: 5000 })
+      await page.evaluate(() => { for (const s of window.__arena.slots) s.points = 3 })
+      await openTray(page)
+      await action(page, 'reset').click()
+      assert(await page.evaluate(() => window.__arena.slots.every((s) => s.points === 0)), 'reset did not clear the scores')
+      assert(!errors.length, errors.join(' | '))
+      return ids.join(', ')
+    } finally { await context.close() }
+  })
+
+  await check('quick actions: the viewer offers all six; the camera moves, reset brings it home, theme opens the picker', async () => {
+    const { page, context, errors } = await open(browser, origin, '/view/')
+    try {
+      await page.waitForFunction(() => window.__viewer && document.querySelector('.quick-tray [data-quick="sound"]'), null, { timeout: 20000 })
+      await openTray(page)
+      const ids = await offered(page)
+      assert(ids.join() === ORDER.join(), `the viewer offers ${ids}`)
+      clear('open tray', await box(page, '.quick-panel'), { 'the catalogue': await box(page, '#catalog') })
+      // Reset brings the camera home; the camera's next view moves it; reset brings it back to the same place.
+      const camera = () => page.evaluate(() => window.__viewer.camera.position.toArray().map((v) => +v.toFixed(2)).join())
+      const settled = async () => { let last = ''; for (let i = 0; i < 40; i++) { const now = await camera(); if (now === last) return now; last = now; await sleep(150) } return last }
+      await action(page, 'reset').click()
+      const home = await settled()
+      await openTray(page)
+      await action(page, 'camera').click()
+      await page.waitForFunction((h) => window.__viewer.camera.position.toArray().map((v) => +v.toFixed(2)).join() !== h, home, { timeout: 8000 })
+      await settled()
+      await openTray(page)
+      await action(page, 'reset').click()
+      await page.waitForFunction((h) => window.__viewer.camera.position.toArray().map((v) => +v.toFixed(2)).join() === h, home, { timeout: 8000 })
+      await openTray(page)
+      await action(page, 'theme').click(); await sleep(200)
+      assert(await box(page, '.quick-themes'), 'the picker did not open')
+      await page.keyboard.press('Escape')
+      await openTray(page)
+      const before = await page.evaluate(() => window.__simAudio.running && !window.__simAudio.muted)
+      await action(page, 'sound').click()
+      await page.waitForFunction((b) => (window.__simAudio.running && !window.__simAudio.muted) !== b, before, { timeout: 8000 })
+      assert(!errors.length, errors.join(' | '))
+      return ids.join(', ')
+    } finally { await context.close() }
+  })
+
+  await check('quick actions: on a phone the tab is under the thumb and clear of the pairing chip; a tap opens it, a swipe back closes it', async () => {
+    const { page, context, errors } = await open(browser, origin, '/sim/drone/', { width: 390, height: 844, phone: true })
+    try {
+      await page.waitForFunction(() => document.querySelector('.quick-tray [data-quick="camera"]'), null, { timeout: 20000 })
+      await sleep(600)
+      const tab = await box(page, '.quick-tab'), pairing = await chip(page)
+      clear('tab', tab, { 'the pairing pill': pairing.pill, 'the pairing card': pairing.card })
+      assert(tab.right >= 389 && (tab.top + tab.bottom) / 2 > 844 * 0.3, `the tab is not on the edge within reach: ${JSON.stringify(tab)}`)
+      await page.locator('.quick-tab').tap(); await sleep(200)
+      assert(await isOpen(page), 'a tap did not open it')
+      const panel = await box(page, '.quick-panel')
+      const cdp = await context.newCDPSession(page), x = (panel.left + panel.right) / 2, y = (panel.top + panel.bottom) / 2
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] })
+      for (const dx of [10, 20, 32, 44]) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + dx, y, id: 1 }] })
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await sleep(200)
+      assert(!(await isOpen(page)), 'a swipe back did not close it')
+      assert(!errors.length, errors.join(' | '))
+      return `tab at ${Math.round((tab.top + tab.bottom) / 2)} px of 844`
+    } finally { await context.close() }
+  })
+
+  await check('quick actions: the phone controller and the embed have no tray', async () => {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true })
+    try {
+      const page = await context.newPage()
+      for (const path of ['/p/', '/embed/']) {
+        await page.goto(origin + path); await sleep(1500)
+        assert(!(await page.locator('.quick-tray').count()), `${path} has a tray`)
+      }
+    } finally { await context.close() }
+  })
+}

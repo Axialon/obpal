@@ -1,0 +1,78 @@
+/*
+ * The quick-actions tray (src/ui/quick.ts): a slim glass tab on the right edge of the page that slides out a column of
+ * round icon actions. The tab and the column share their middle (--quick-y, set where it's clear of the page's bar,
+ * the pairing chip and anything else fixed on that edge). Switches that are on wear the accent ring, as the dock's
+ * open windows do. Family tokens throughout, so the site's palette and every app surface carry it.
+ */
+:root { --quick-tab-w: 20px; --quick-btn: 38px; }
+/* Sim windows keep this much clear of the right edge (styles/panels.css), so the open column never covers them. */
+html.quick-on { --quick-reserve: 46px; }
+@media (pointer: coarse) {
+  :root { --quick-tab-w: 24px; --quick-btn: 44px; }
+  /* A finger's screen keeps its width: windows clear the tab, and the open column comes over them for a moment. */
+  html.quick-on { --quick-reserve: 26px; }
+}
+
+.quick-tray { --quick-y: 50%; position: fixed; inset: 0 0 auto auto; z-index: 7; width: 0; height: 0; }
+.quick-tray[hidden] { display: none; }
+.quick-tab, .quick-panel { position: fixed; right: env(safe-area-inset-right, 0px); top: var(--quick-y); box-sizing: border-box; touch-action: none; -webkit-tap-highlight-color: transparent; }
+
+/* The tab: a sliver of glass at the edge, faint until pointed at; its chevron says which way the tray comes out. */
+.quick-tab {
+  display: grid; place-items: center; width: var(--quick-tab-w); height: 56px; margin: 0; padding: 0; transform: translateY(-50%);
+  border: 1px solid var(--bb-frost-edge); border-right: 0; border-radius: 14px 0 0 14px; background: var(--bb-frost);
+  -webkit-backdrop-filter: var(--bb-frost-blur); backdrop-filter: var(--bb-frost-blur); box-shadow: var(--bb-frost-shadow);
+  color: var(--bb-ink-2); cursor: pointer; opacity: 0.62;
+  transition: opacity 200ms var(--bb-ease), transform 260ms var(--bb-ease-out), color var(--bb-dur-2);
+}
+/* A finger gets more to aim at than the sliver shows. */
+.quick-tab::before { content: ''; position: absolute; inset: -6px 0 -6px -18px; }
+.quick-tab .ic { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.quick-tab:hover, .quick-tab:focus-visible { opacity: 1; color: var(--bb-ink); }
+.quick-tab:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: 2px; }
+.quick-tab[hidden] { display: none; }
+.quick-tray[data-open='true'] .quick-tab { opacity: 0; transform: translate(12px, -50%); pointer-events: none; }
+
+/* The column: the page's actions, a round glass button each. Closed, it waits past the edge. */
+.quick-panel {
+  /* One column; where the edge is short (a phone on its side), the tray says how many rows fit and it wraps. */
+  display: grid; grid-auto-flow: column; grid-template-rows: repeat(var(--quick-rows, 6), var(--quick-btn)); grid-auto-columns: var(--quick-btn);
+  place-items: center; gap: 6px; padding: 5px; margin-right: 6px;
+  border: 1px solid var(--bb-frost-edge); border-radius: calc(var(--quick-btn) / 2 + 5px); background: var(--bb-frost);
+  -webkit-backdrop-filter: var(--bb-frost-blur); backdrop-filter: var(--bb-frost-blur);
+  box-shadow: 0 22px 50px -24px rgb(0 0 0 / 0.85), 0 0 0 1px rgb(0 0 0 / 0.14), inset 0 1px 0 var(--bb-hi);
+  transform: translate(calc(100% + 12px), -50%); visibility: hidden;
+  transition: transform 260ms var(--bb-ease-out), visibility 0s linear 260ms;
+}
+.quick-tray[data-open='true'] .quick-panel { transform: translate(0, -50%); visibility: visible; transition: transform 320ms var(--bb-ease-out), visibility 0s; }
+button.quick-btn {
+  position: relative; display: grid; place-items: center; flex: none; width: var(--quick-btn); height: var(--quick-btn); margin: 0; padding: 0;
+  border: 0; border-radius: 50%; background: transparent; color: var(--bb-ink-2); cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: background var(--bb-dur-2), color var(--bb-dur-2), box-shadow var(--bb-dur-2), transform var(--bb-dur-1) var(--bb-ease);
+}
+button.quick-btn .ic { display: block; width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+button.quick-btn:hover { background: rgb(var(--bb-hl-rgb) / 0.09); color: var(--bb-ink); }
+button.quick-btn:active { transform: scale(0.92); }
+button.quick-btn:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: 1px; }
+/* A switch that's on (sound, fullscreen), and pairing while its card is open: lit, and ringed in the accent. */
+button.quick-btn[aria-pressed='true'], button.quick-btn[aria-expanded='true'] { background: rgb(var(--bb-accent-rgb) / 0.13); box-shadow: var(--kit-ring); color: var(--bb-accent-text); }
+
+/* The tooltip: the action's name and what it does, beside the column. */
+.quick-tip { position: fixed; z-index: var(--bb-z-tip, 80); display: grid; gap: 3px; max-width: min(250px, calc(100vw - 96px)); box-sizing: border-box; padding: 9px 13px 10px; border: 1px solid var(--bb-frost-edge); border-radius: 14px; background: var(--bb-frost); -webkit-backdrop-filter: var(--bb-frost-blur); backdrop-filter: var(--bb-frost-blur); box-shadow: var(--kit-pop-shadow, var(--bb-frost-shadow)); color: var(--bb-ink); pointer-events: none; transition-property: none; }
+.quick-tip[hidden] { display: none; }
+.quick-tip b { font: 650 13px/1.25 var(--bb-font-ui); letter-spacing: -0.01em; }
+.quick-tip span { color: var(--bb-ink-2); font: 500 12px/1.4 var(--bb-font-ui); }
+/* The tray's own surface picker (the family's), beside the column. */
+.quick-themes { width: 280px; transition-property: none; }
+/* Pairing asked for from the tray on the home page: the hero's own card rings once in the accent. */
+.pair-called { outline: none; animation: quick-called 1.6s var(--bb-ease) 1; }
+@keyframes quick-called {
+  30% { box-shadow: 0 0 0 3px rgb(var(--bb-accent-rgb) / 0.85), 0 0 44px rgb(var(--bb-accent-rgb) / 0.35); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quick-tab, .quick-panel, .quick-tray[data-open='true'] .quick-panel { transition: none; }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .quick-tab, .quick-panel, .quick-tip { background: var(--bb-frost-solid); }
+}

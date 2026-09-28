@@ -136,11 +136,11 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   glass.onState = (s) => { if (field) heroApi.onSound?.(s) }
   // A click, tap or key press is the moment a browser lets sound start: offered to the sound right there, inside the
   // event (Safari allows it nowhere else). On a computer, any on the page; on a phone, only playing in the hero (not
-  // browsing, or following a link: starting sound there could pause the person's own music). The sound button decides
-  // for itself.
+  // browsing, or following a link: starting sound there could pause the person's own music). The sound button, and the
+  // quick-actions tray's sound switch (../ui/quick.ts), decide for themselves.
   const unlock = (e: Event) => {
     const t = e.target as Element | null
-    if (t?.closest?.('[data-sound]')) return
+    if (t?.closest?.('[data-sound], [data-quick="sound"]')) return
     if (coarse && (!t || !hero.contains(t) || t.closest('a, [data-send]'))) return
     glass.gesture()
   }
@@ -230,13 +230,21 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   const onControl = (e: Event) => !!(e.target as Element | null)?.closest?.('a, button')
   // The mouse rolls the marble after it; a click (or a tap) hops it onto the spot. Touching to scroll leaves it be.
   let press: { x: number; y: number; t: number } | null = null
-  hero.addEventListener('pointermove', (e) => {
+  const follow = (e: PointerEvent) => {
     if (e.pointerType !== 'mouse') return
     const p = heroAt(e)
     local.x = p.x; local.y = p.y; local.at = performance.now()
     if (anchor && Math.hypot(p.x - anchor.sx, p.y - anchor.sy) > 10) anchor = null
     takeOver()
     wake()
+  }
+  hero.addEventListener('pointermove', follow, { passive: true })
+  // The quick-actions tray's tab (../ui/quick.ts) is a sliver over the hero's right edge: the mouse on it still rolls
+  // the marble, so the marble meets that edge all along it.
+  document.addEventListener('pointermove', (e) => {
+    if (!(e.target as Element | null)?.closest?.('.quick-tab')) return
+    const r = hero.getBoundingClientRect()
+    if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) follow(e)
   }, { passive: true })
   const hop = (e: PointerEvent) => {
     if (!field) return

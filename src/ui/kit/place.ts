@@ -1,7 +1,8 @@
 /**
- * Where a popover goes: next to what opened it, inside the frame it lives in. The frame is the viewport, unless a page
- * turns its UI against the viewport (the phone controller locks its orientation that way, ../../controller/uiframe.ts):
- * then it says how to measure in its own frame with setPopoverFrame(). The placement itself is pure.
+ * Where a popover goes: next to what opened it, inside the frame it lives in; and where something on a screen edge goes
+ * along it, clear of what else is there. The frame is the viewport, unless a page turns its UI against the viewport
+ * (the phone controller locks its orientation that way, ../../controller/uiframe.ts): then it says how to measure in
+ * its own frame with setPopoverFrame(). The placement itself is pure.
  */
 
 export interface Box { left: number; top: number; width: number; height: number }
@@ -33,6 +34,32 @@ export function placePopover(anchor: Box, pop: Size, frame: Size, { beside = fal
   const height = Math.min(pop.height, room)
   const top = side === 'below' ? anchor.top + anchor.height + gap : anchor.top - gap - height
   return { left: x(align === 'end' ? anchor.left + anchor.width - pop.width : anchor.left), top: Math.round(top), maxHeight: Math.floor(room), side }
+}
+
+/**
+ * Where something that lives on a screen edge goes along it (the quick-actions tray, ../quick.ts): its middle as near
+ * `want` as it can be with all `need` px of it clear of every blocked span, inside [start, end]; `want` itself, kept
+ * inside, when nowhere is clear.
+ */
+export function edgeSpot(want: number, need: number, start: number, end: number, blocked: readonly (readonly [number, number])[]): number {
+  const half = need / 2
+  let best: number | null = null
+  for (const [a, b] of freeSpans(start, end, blocked)) {
+    if (b - a < need) continue
+    const c = Math.max(a + half, Math.min(b - half, want))
+    if (best === null || Math.abs(c - want) < Math.abs(best - want)) best = c
+  }
+  return best ?? Math.max(start + half, Math.min(end - half, want))
+}
+
+/** The stretches of [start, end] that no blocked span covers, in order. */
+export function freeSpans(start: number, end: number, blocked: readonly (readonly [number, number])[]): [number, number][] {
+  const spans = [...blocked].filter(([a, b]) => b > start && a < end).sort((p, q) => p[0] - q[0])
+  const free: [number, number][] = []
+  let at = start
+  for (const [a, b] of spans) { if (a > at) free.push([at, Math.min(a, end)]); at = Math.max(at, b) }
+  if (at < end) free.push([at, end])
+  return free
 }
 
 export interface Frame {
