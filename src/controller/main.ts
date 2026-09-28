@@ -4,8 +4,8 @@ import '../styles/base.css'
 import '../styles/controller.css'
 import {
   Controller, CONTROLLERS, emptyState, PadButton, encodeState, Flag, isControllerId,
-  loadCertificate, Mode, OneEuro, parsePairingCode, qIdentity, qScale, relativeInView, STATE_BYTES, Tier, TossDetector, viewFrameAt,
-  type Caps, type ControllerId, type HostMsg, type Layout, type LinkStatus, type ModeId, type PairingCode, type Quat, type SceneNode,
+  loadCertificate, Mode, OrientationReference, OrientationSmoother, parsePairingCode, qIdentity, STATE_BYTES, Tier, TossDetector,
+  type Caps, type ControllerId, type HostMsg, type Layout, type LinkStatus, type ModeId, type PairingCode, type SceneNode,
   type ScenePerson, type TierId, type TrayControl,
 } from '@obpal/core'
 import { formatCode, lookupCode, normalizeCode, splitCode } from '@obpal/core'
@@ -34,7 +34,7 @@ import { PhysicalInputs } from './inputs'
 import { Buttons, BUTTONS_GLYPH, sourceStack } from './buttons'
 import { Tracker } from './track'
 import { EARTH_TO_POSE, ImuTracker, toPoseFrame } from './imu3d'
-import { encodePose, POSE_BYTES, PoseFlag, qMul } from '@obpal/core'
+import { encodePose, POSE_BYTES, PoseFlag, qAxisAngle, qMul } from '@obpal/core'
 import { OrientationLock } from './lock'
 import { uiRect, uiRotation, uiSize } from './uiframe'
 import { applyTheme, initialTheme, swatch, THEMES, themeById } from '../ui/themes'
@@ -246,6 +246,7 @@ async function boot(code?: Join) {
   let lockFromGyro = false
   setHintFrame({ rect: uiRect, size: () => { const s = uiSize(); return { w: s.w, h: s.h } } })
   lock.onChange = (reanchor) => {
+    motion.refreshScreen()
     applyLayout()
     requestAnimationFrame(applyLayout)
     if (reanchor && gyroOn) anchor()
@@ -286,6 +287,7 @@ async function boot(code?: Join) {
   /** 3D from the phone's own sensors (the default): the gyro and an arm model, pushes from the accelerometer. */
   const imu = new ImuTracker()
   let imuHeld = false
+  let imuScreen = 0
   /** How 3D follows the phone here: the chosen way, if this phone can do it. */
   function trackWay(): 'motion' | 'xr' | 'glow' {
     if (settings.track3d === 'xr' && trackOk) return 'xr'
@@ -432,7 +434,8 @@ async function boot(code?: Join) {
   let controlActive = false
   const smoother = new GyroSmoother()
   const tilt = new TiltStick()
-  const qf = [0, 1, 2, 3].map(() => new OneEuro())
+  const orientation = new OrientationReference()
+  const qf = new OrientationSmoother()
   const st = emptyState()
   const buf = new ArrayBuffer(STATE_BYTES)
   let stateSent = false
@@ -460,9 +463,6 @@ async function boot(code?: Join) {
   let resting = false
   let lastTouch = performance.now()
   let grab = 0
-  let q0: Quat | null = null
-  let R: Quat | null = null
-  let lastRel: Quat | null = null
   let started = false
   let permissionReady = false
   let motionPrompt = false
@@ -518,8 +518,8 @@ async function boot(code?: Join) {
   }
 
   const applySmooth = () => {
-    // Quaternion filter for 1:1 match: light by default (the OS already fuses orientation).
-    for (const f of qf) { f.minCutoff = 6 - 5 * settings.smooth; f.beta = 3 }
+    // 1:1 follows the OS-fused orientation directly. Steadiness applies to pointing and rate controls.
+    qf.seconds = 0
     smoother.smoothBelow = 4 + 8 * settings.smooth
     wii.setSteadiness(settings.smooth)
   }
@@ -860,10 +860,9 @@ async function boot(code?: Join) {
   function anchor() {
     grab = (grab + 1) & 0xff
     if (motion.q) tilt.capture(motion.up())
-    q0 = motion.q
-    R = q0 ? viewFrameAt(q0) : null
-    lastRel = null
-    qf.forEach((f) => f.reset())
+    if (motion.q) orientation.capture(motion.q, screenAngle())
+    else orientation.reset()
+    qf.reset()
   }
 
   /** The centre button: set the tilt level here, or recentre (Point: aim here = the middle of the screen). */
@@ -873,6 +872,7 @@ async function boot(code?: Join) {
     control.recenter()
     drums.release(); keys.recenter(); gamepad.setPosition()
     imuHeld = false; imu.release()
+    if (tracker.active) tracker.recenter()
     if (motion.q) wii.recenter(motion.q)
     wiiLast = [wii.acc[0], wii.acc[1]]
     if (control.sim) link.sendCtl({ t: 'value', id: 'control.aim', v: JSON.stringify({ aim: [0, 0], tilt: [0, 0], active: false }) })
@@ -1151,7 +1151,7 @@ async function boot(code?: Join) {
     const hm = hostModes()
     rotateTab.hidden = !(hm.includes(Mode.hold) || hm.includes(Mode.tilt))
     pointTab.hidden = !hm.includes(Mode.point)
-    if ((tab === 'rotate' && rotateTab.hidden) || (tab === 'point' && pointTab.hidden)) {
+    if ((tab === 'rotate' && rotateTab.hidden) || (tab === 'point' && pointTab.hidden) || (tab === 'track' && trackTab.hidden)) {
       const next: Tab = !pointTab.hidden ? 'point' : !rotateTab.hidden ? 'rotate' : tab
       if (next !== tab) { tab = next; queueMicrotask(setMode) }
     }
@@ -1168,9 +1168,9 @@ async function boot(code?: Join) {
     document.getElementById('glow-stop')!.hidden = !glowing || !layout.tray.some((c) => c.tone === 'stop')
     surface.classList.toggle('tracking', tracker.active)
     const center = document.getElementById('center')!
-    center.hidden = pointing || (mode !== Mode.point && !(mode === Mode.tilt && gyroOn))
+    center.hidden = pointing || !((mode === Mode.tilt || mode === Mode.hold) && gyroOn || mode === Mode.track)
     requestAnimationFrame(repositionHints)
-    center.setAttribute('aria-label', mode === Mode.tilt ? 'Set level here' : 'Recenter pointer')
+    center.setAttribute('aria-label', mode === Mode.tilt ? 'Set level here' : 'Set position here')
     document.getElementById('level')!.hidden = !(mode === Mode.tilt && gyroOn)
 
     const gyro = document.getElementById('gyro')!
@@ -1494,6 +1494,7 @@ async function boot(code?: Join) {
         <div class="sheet-head"><div class="grip" aria-hidden="true"></div><button class="icon-btn glass sheet-x" id="set-close" aria-label="Close">${ICONS.close}</button></div>
         <label class="bb-field"><span>Sensitivity</span><output id="gv"></output><input class="bb-range" type="range" id="gain" min="0.5" max="3" step="0.1"></label>
         <label class="bb-field"><span>Steadiness</span><output id="sv"></output><input class="bb-range" type="range" id="smooth" min="0" max="1" step="0.05"></label>
+        <p class="sheet-k">These adjust tilt and aiming. 1:1 turn follows your phone exactly.</p>
         <p class="sheet-k">Surface</p>
         <div class="theme-row" role="radiogroup" aria-label="Surface">${THEMES.map((t) => html`<button class="theme-opt" role="radio" data-theme="${t.id}" aria-checked="${document.documentElement.dataset.theme === t.id}">${swatch(t)}<span>${t.name}</span></button>`)}</div>
         <p class="sheet-k">Colour${seatColor ? html`<small> · yours in this scene</small>` : ''}</p>
@@ -1626,13 +1627,8 @@ async function boot(code?: Join) {
     st.grav = motion.up()
 
     st.qRel = qIdentity()
-    if (gyroOn && mode === Mode.hold && q && q0 && R) {
-      let rel = relativeInView(q0, q, R)
-      if (lastRel && rel[0] * lastRel[0] + rel[1] * lastRel[1] + rel[2] * lastRel[2] + rel[3] * lastRel[3] < 0) rel = rel.map((c) => -c) as Quat
-      lastRel = rel
-      const f = rel.map((c, i) => qf[i].filter(c, s)) as Quat
-      const l = Math.hypot(f[0], f[1], f[2], f[3]) || 1
-      st.qRel = qScale([f[0] / l, f[1] / l, f[2] / l, f[3] / l], settings.gain)
+    if (gyroOn && mode === Mode.hold && q) {
+      st.qRel = qf.filter(orientation.relative(q, screenAngle()), s)
     }
 
     if (mode === Mode.point && q) {
@@ -1658,7 +1654,7 @@ async function boot(code?: Join) {
       wasLevel = level
       const [a, b] = tilt.angles(motion.up())
       const dot = document.getElementById('level-dot')
-      if (dot) dot.style.transform = `translate(${Math.max(-1, Math.min(1, a / tilt.sat)) * 46}px, ${Math.max(-1, Math.min(1, -b / tilt.sat)) * 46}px)`
+      if (dot) dot.style.transform = `translate(${Math.max(-1, Math.min(1, a / tilt.sat)) * 46}px, ${Math.max(-1, Math.min(1, b / tilt.sat)) * 46}px)`
     }
     if (pad) {
       st.pad1 = [pad.pad1[0], pad.pad1[1]]
@@ -1671,7 +1667,9 @@ async function boot(code?: Join) {
     if (mode === Mode.track && trackWay() === 'motion' && q) {
       const held = touches > 0 || buttonHold
       if (held) {
-        const qp = qMul(EARTH_TO_POSE, q)
+        if (!imuHeld) imuScreen = screenAngle()
+        // Keep the pose's device axes fixed for this grab when an unlocked viewport changes orientation.
+        const qp = qMul(qMul(EARTH_TO_POSE, q), qAxisAngle(0, 0, 1, (screenAngle() - imuScreen) * Math.PI / 180))
         if (!imuHeld) imu.anchor(qp)
         const p = imu.step(qp, motion.accel ? toPoseFrame(q, motion.accel) : null, motion.hasGyro ? toPoseFrame(q, motion.gyro) : null, s)
         poseSeq = (poseSeq + 1) & 0xffff

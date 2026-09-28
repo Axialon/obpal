@@ -19,7 +19,7 @@ import { onTilt, onToss, recentre, startTilt, tiltOn } from './tilt'
 import { hopTo } from './bounce'
 import { createGlass, type GlassStats, type SoundState } from './glass'
 import { Governor, ladder, pick, type Step } from './governor'
-import type { Participant, Remote } from '@obpal/host'
+import type { Frame, Participant, Remote } from '@obpal/host'
 import type { ScreenPointer } from '../viewer/pointer'
 import type { Field, FieldOrb, Gfx, Hit, PadRect } from './field'
 import { family } from '../family'
@@ -75,7 +75,7 @@ function pinnedStep(steps: readonly Step[]): number | null {
 
 export interface Hero {
   /** Phones join through this remote (a computer's pairing card), each with its own marble. */
-  attach(remote: Remote, pointer: typeof ScreenPointer): void
+  attach(remote: Remote, pointer: typeof ScreenPointer, read?: (who: string, now: number) => Frame): void
   /** Start following the phone's tilt and tosses (on a phone; iOS asks first, from a tap). */
   tilt(): Promise<boolean>
   readonly tilting: boolean
@@ -279,6 +279,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   // ---- phones on a computer: one marble each, rolling where it points ----
 
   let remote: Remote | null = null
+  let read: ((who: string, now: number) => Frame) | undefined
   let Pointer: typeof ScreenPointer | null = null
   const pointers = new Map<string, ScreenPointer>()
   const phones = new Map<string, { at: number; gone: boolean; buzzAt: number; pointing: boolean }>()
@@ -294,7 +295,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     for (const p of remote.participants) {
       if (!phones.has(p.id) || phones.get(p.id)!.gone) join(p)
       const ph = phones.get(p.id)!
-      const f = remote.consumeOf(p.id, now)
+      const f = read ? read(p.id, now) : remote.consumeOf(p.id, now)
       const st = pointers.get(p.id)!.step(f.aim, f.pad1, W, H)
       const o = field.orb(p.id, colors.get(p.id) ?? p.color)
       // Held as a tray (Tilt, with its gyro on), the phone's tilt rolls its marble; pointed (Point, or a finger on
@@ -612,8 +613,9 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
 
   const heroApi: Hero = {
     onSound: null,
-    attach(r, P) {
+    attach(r, P, consume) {
       remote = r
+      read = consume
       Pointer = P
       r.on('join', join)
       r.on('leave', (p) => { const ph = phones.get(p.id); if (ph) ph.gone = true; pointers.delete(p.id); colors.delete(p.id); wake() })

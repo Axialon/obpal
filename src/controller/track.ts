@@ -10,7 +10,7 @@ const xr = () => (navigator as Navigator & { xr?: XRSystem }).xr
 
 export class Tracker {
   private session: XRSession | null = null
-  /** Counts tracking sessions: each has its own origin. */
+  /** Counts tracking origins: a session or recenter establishes a new one for the host. */
   gen = 0
   onPose?: (p: Vec3, q: Quat, tracked: boolean) => void
   onEnd?: () => void
@@ -21,13 +21,16 @@ export class Tracker {
 
   get active() { return !!this.session }
 
+  /** The next pose starts a fresh host reference while the camera keeps tracking the same space. */
+  recenter() { this.gen = (this.gen + 1) & 0xff }
+
   /** Start tracking; call from a tap. `overlay` stays on screen over the camera view. */
   async start(overlay: HTMLElement) {
     const system = xr()
     if (!system || this.session) return
     const session = await system.requestSession('immersive-ar', { requiredFeatures: ['local'], optionalFeatures: ['dom-overlay'], domOverlay: { root: overlay } } as XRSessionInit)
     this.session = session
-    this.gen = (this.gen + 1) & 0xff
+    this.recenter()
     // Nothing is drawn: a cleared, transparent layer shows the camera.
     const canvas = document.createElement('canvas')
     const gl = (canvas.getContext('webgl2', { xrCompatible: true, alpha: true }) ?? canvas.getContext('webgl', { xrCompatible: true, alpha: true })) as WebGLRenderingContext

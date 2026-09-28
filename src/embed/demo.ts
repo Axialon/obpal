@@ -10,6 +10,7 @@ import * as THREE from 'three'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import type { Frame } from '@obpal/host'
+import { Mode, poseRelativeInView, poseVectorInView, type Quat } from '@obpal/core'
 import type { ObpalRemote } from '@obpal/host/element'
 
 const canvas = document.getElementById('stage') as HTMLCanvasElement
@@ -42,7 +43,7 @@ const grid = new THREE.PolarGridHelper(5.2, 12, 6, 96, '#2a3446', '#1a2130')
 ;(grid.material as THREE.Material).opacity = 0.5
 scene.add(grid)
 
-interface Shape { id: string; name: string; obj: THREE.Mesh; halo: THREE.Mesh; home: THREE.Vector3; pos: THREE.Vector3; label: HTMLSpanElement; grab: number; atGrab: THREE.Quaternion | null; hand: { gen: number; p0: THREE.Vector3; at: THREE.Vector3 } | null }
+interface Shape { id: string; name: string; obj: THREE.Mesh; halo: THREE.Mesh; home: THREE.Vector3; pos: THREE.Vector3; label: HTMLSpanElement; grab: number; atGrab: THREE.Quaternion | null; hand: { gen: number; p0: THREE.Vector3; at: THREE.Vector3; q0: Quat; rotation: THREE.Quaternion } | null }
 
 const glossy = (color: string) => new THREE.MeshPhysicalMaterial({ color, roughness: 0.22, metalness: 0.15, clearcoat: 1, clearcoatRoughness: 0.12 })
 const labels = document.getElementById('labels')!
@@ -146,7 +147,7 @@ function drive(s: Shape, f: Frame, dt: number) {
   s.obj.scale.setScalar(THREE.MathUtils.clamp(s.obj.scale.x * 2 ** f.zoom, 0.4, 2.4))
   s.obj.quaternion.premultiply(q.setFromAxisAngle(back, -f.twist * DEG))
   // The gyro, 1:1: while it is on, the shape turns as the phone does (PROTOCOL §4: camera · qRel · camera⁻¹ · at grab).
-  if (f.clutch) {
+  if (f.clutch && f.mode === Mode.hold) {
     if (s.grab !== f.grab || !s.atGrab) { s.grab = f.grab; s.atGrab = s.obj.quaternion.clone() }
     q.set(f.qRel[0], f.qRel[1], f.qRel[2], f.qRel[3])
     s.obj.quaternion.copy(camera.quaternion).multiply(q).multiply(camera.quaternion.clone().invert()).multiply(s.atGrab)
@@ -157,10 +158,12 @@ function drive(s: Shape, f: Frame, dt: number) {
   if (f.mode === 2) s.pos.addScaledVector(right, -f.aim[0] * 0.06).addScaledVector(up, f.aim[1] * 0.06)
   // 3D: with a thumb down, it moves as the hand does (twice as far).
   const pose = f.pose
-  if (pose?.touching) {
-    if (!s.hand || s.hand.gen !== pose.gen) s.hand = { gen: pose.gen, p0: new THREE.Vector3(...pose.p), at: s.pos.clone() }
-    v.set(...pose.p).sub(s.hand.p0).multiplyScalar(2)
+  if (pose?.tracked && pose.touching) {
+    if (!s.hand || s.hand.gen !== pose.gen) s.hand = { gen: pose.gen, p0: new THREE.Vector3(...pose.p), at: s.pos.clone(), q0: [...pose.q], rotation: s.obj.quaternion.clone() }
+    v.set(...poseVectorInView(s.hand.q0, [pose.p[0] - s.hand.p0.x, pose.p[1] - s.hand.p0.y, pose.p[2] - s.hand.p0.z])).multiplyScalar(2)
     s.pos.copy(s.hand.at).addScaledVector(right, v.x).addScaledVector(up, v.y).addScaledVector(back, v.z)
+    q.set(...poseRelativeInView(s.hand.q0, pose.q))
+    s.obj.quaternion.copy(camera.quaternion).multiply(q).multiply(camera.quaternion.clone().invert()).multiply(s.hand.rotation)
   } else s.hand = null
   s.pos.set(THREE.MathUtils.clamp(s.pos.x, -4, 4), THREE.MathUtils.clamp(s.pos.y, 0.3, 3.4), THREE.MathUtils.clamp(s.pos.z, -3.5, 2.6))
 }

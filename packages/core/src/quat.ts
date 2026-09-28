@@ -44,7 +44,7 @@ export function qSlerp(a: Quat, b: Quat, t: number): Quat {
   let [bx, by, bz, bw] = b
   let cos = a[0] * bx + a[1] * by + a[2] * bz + a[3] * bw
   if (cos < 0) { cos = -cos; bx = -bx; by = -by; bz = -bz; bw = -bw }
-  if (cos > 0.9995) {
+  if (cos > 1 - 1e-12) {
     return qNorm([a[0] + (bx - a[0]) * t, a[1] + (by - a[1]) * t, a[2] + (bz - a[2]) * t, a[3] + (bw - a[3]) * t])
   }
   const th = Math.acos(Math.min(1, cos))

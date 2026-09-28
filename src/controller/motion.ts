@@ -1,13 +1,9 @@
-import { qAxisAngle, qConj, qRotate, quatFromDeviceOrientation, type Quat, type Vec3 } from '@obpal/core'
+import { deviceScreenAngle, qAxisAngle, qConj, qRotate, quatFromDeviceOrientation, type Quat, type Vec3 } from '@obpal/core'
 
 const D2R = Math.PI / 180
 
 /** The screen's actual orientation angle (degrees, 0/90/180/270). */
-export function actualScreenAngle(): number {
-  const so = typeof screen !== 'undefined' ? screen.orientation : undefined
-  const a = so && typeof so.angle === 'number' ? so.angle : Number((window as unknown as { orientation?: number }).orientation ?? 0)
-  return ((a % 360) + 360) % 360
-}
+export const actualScreenAngle = deviceScreenAngle
 
 let lockedAngle: number | null = null
 /** While the page counter-rotates to stay locked (./lock.ts), motion reads the angle it was locked at. */
@@ -28,15 +24,33 @@ export class Motion {
   sampleAt = 0
   onSample: ((dtMs: number) => void) | null = null
   private last = 0
+  private reading: [number, number, number] | null = null
+  private vectorScreen = 0
+
+  /** Re-express the last sensor sample immediately when the UI frame changes, before any neutral is captured. */
+  refreshScreen() {
+    const angle = screenAngle()
+    if (this.reading) this.q = quatFromDeviceOrientation(...this.reading, angle)
+    if (angle !== this.vectorScreen) {
+      const reframe = qAxisAngle(0, 0, 1, (angle - this.vectorScreen) * D2R)
+      if (this.accel) this.accel = qRotate(reframe, this.accel)
+      this.gyro = qRotate(reframe, this.gyro)
+      this.vectorScreen = angle
+    }
+  }
 
   start() {
     window.addEventListener('deviceorientation', this.orient)
     window.addEventListener('devicemotion', this.motion)
+    screen.orientation?.addEventListener('change', this.refresh)
+    window.addEventListener('orientationchange', this.refresh)
   }
 
   stop() {
     window.removeEventListener('deviceorientation', this.orient)
     window.removeEventListener('devicemotion', this.motion)
+    screen.orientation?.removeEventListener('change', this.refresh)
+    window.removeEventListener('orientationchange', this.refresh)
   }
 
   /** World "up" expressed in the screen frame. */
@@ -49,20 +63,25 @@ export class Motion {
   }
 
   private orient = (e: DeviceOrientationEvent) => {
-    if (e.beta == null || e.gamma == null) return
+    if (e.beta == null || e.gamma == null || ![e.alpha ?? 0, e.beta, e.gamma].every(Number.isFinite)) return
     this.hasOrientation = true
-    this.q = quatFromDeviceOrientation(e.alpha ?? 0, e.beta, e.gamma, screenAngle())
+    this.reading = [e.alpha ?? 0, e.beta, e.gamma]
+    this.refreshScreen()
   }
+
+  private refresh = () => this.refreshScreen()
 
   private motion = (e: DeviceMotionEvent) => {
     // Linear acceleration (gravity removed), in the screen frame like the gyro: 3D pushes and pulls (./imu3d.ts).
     const a = e.acceleration
-    this.accel = a && a.x != null ? qRotate(qAxisAngle(0, 0, 1, screenAngle() * D2R), [a.x, a.y ?? 0, a.z ?? 0]) : null
+    this.refreshScreen()
+    const frame = qAxisAngle(0, 0, 1, this.vectorScreen * D2R)
+    this.accel = a && a.x != null ? qRotate(frame, [a.x, a.y ?? 0, a.z ?? 0]) : null
     const r = e.rotationRate
     if (r && (r.alpha != null || r.beta != null || r.gamma != null)) {
       this.hasGyro = true
       const device: Vec3 = [(r.beta ?? 0) * D2R, (r.gamma ?? 0) * D2R, (r.alpha ?? 0) * D2R]
-      this.gyro = qRotate(qAxisAngle(0, 0, 1, screenAngle() * D2R), device)
+      this.gyro = qRotate(frame, device)
     }
     const now = performance.now()
     this.sampleAt = Number.isFinite(e.timeStamp) && Math.abs(now - e.timeStamp) < 1000 ? e.timeStamp : now

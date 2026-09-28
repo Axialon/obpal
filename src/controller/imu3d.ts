@@ -8,10 +8,10 @@
  * Output is a POSE (./track.ts is the camera-tracked alternative): metres in a y-up frame, orientation device → that
  * frame, origin where the thumb went down.
  */
-import { qAxisAngle, qMul, qRotate, type Quat, type Vec3 } from '@obpal/core'
+import { EARTH_TO_VIEW, qMul, qRotate, type Quat, type Vec3 } from '@obpal/core'
 
 /** Earth (x east, y north, z up) to the POSE frame (y up): x stays, up becomes y, north becomes −z. */
-export const EARTH_TO_POSE: Quat = qAxisAngle(1, 0, 0, -Math.PI / 2)
+export const EARTH_TO_POSE = EARTH_TO_VIEW
 
 const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 const len = (a: Vec3) => Math.sqrt(dot(a, a))

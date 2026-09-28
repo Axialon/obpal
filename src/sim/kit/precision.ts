@@ -41,10 +41,10 @@ export function service(w: number, h: number) {
   return group
 }
 
-/** One merged draw for the tiles, one for the substrate; the requested top is unchanged. */
-export function tiledDeck(w: number, d: number, top = 0, module = 1) {
+/** One draw for the tiles, one for the substrate. Extend the depth for a workbench, without a second slab at its top. */
+export function tiledDeck(w: number, d: number, top = 0, module = 1, depth = .031) {
   const group = new THREE.Group(); group.name = 'modular-deck'; group.userData.static = true
-  const base = housing(w, .025, d, carbon); base.position.y = top-.0185; group.add(base)
+  const base = housing(w, depth-.006, d, carbon); base.position.y = top-(depth+.006)/2; group.add(base)
   const cols = Math.max(1, Math.ceil(w/module)), rows = Math.max(1, Math.ceil(d/module))
   const parts: THREE.BufferGeometry[] = []
   for (let x = 0; x < cols; x++) for (let z = 0; z < rows; z++) {
@@ -57,6 +57,8 @@ export function tiledDeck(w: number, d: number, top = 0, module = 1) {
 }
 
 const deckFinish = gunmetal.clone(); deckFinish.roughness = .34; deckFinish.userData.simShared = true
+// At a distant overview the physical gap to the backing can be smaller than a depth-buffer step.
+deckFinish.polygonOffset = true; deckFinish.polygonOffsetFactor = -1; deckFinish.polygonOffsetUnits = -1
 
 /** A camera frame with +Z along the optical axis, attached to its actual moving part. */
 export function pov(parent: THREE.Object3D, at: readonly [number, number, number], forward: readonly [number, number, number] = [0, 0, -1], up: readonly [number, number, number] = [0, 1, 0]) {

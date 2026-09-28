@@ -5,7 +5,9 @@ import { mountTopBar } from './topbar'
 import { mountHero } from './hero'
 import { onPresence, startPairing } from './pair'
 import { addActor, wake } from './ticker'
-import { onTilt, tiltOn } from './tilt'
+import { onOrientation, onTilt, tiltOn } from './tilt'
+import { Mode, poseRelativeInView, type Quat } from '@obpal/core'
+import type { Frame, Remote } from '@obpal/host'
 import { armScene, desktopScene, H, playScene, pointScene, togetherScene, turnScene, W, type Point, type Scene, type SceneMode } from './scenes'
 
 applyTheme(initialTheme())
@@ -26,6 +28,14 @@ const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySe
 // ---- hero ----
 
 const heroEl = $('.hero')
+let remote: Remote | null = null
+const frames = new Map<string, { at: number; frame: Frame }>()
+/** The hero and the cards share one consumption of each participant's input per animation frame. */
+function readPhone(who: string, at: number) {
+  let entry = frames.get(who)
+  if (!entry || entry.at !== at) { entry = { at, frame: remote!.consumeOf(who, at) }; frames.set(who, entry) }
+  return entry.frame
+}
 const hint = $('[data-hint]')
 const hintText = $('[data-hint-text]')
 let hintAway = 0
@@ -60,11 +70,15 @@ if (desk) {
   pair.hidden = false
   onPresence(() => {
     startPairing(slot)
-      .then(({ remote, Pointer }) => {
-        hero.attach(remote, Pointer)
+      .then(({ remote: paired, Pointer }) => {
+        remote = paired
+        hero.attach(remote, Pointer, readPhone)
         Object.assign(window, { __obpal: remote })
+        remote.on('leave', p => frames.delete(p.id))
+        remote.on('input', () => wake())
+        syncTurnLayout()
         const live = () => {
-          const n = remote.participants.length
+          const n = paired.participants.length
           heroEl.toggleAttribute('data-live', n > 0)
           if (n) { hint.classList.remove('gone'); hintText.textContent = n > 1 ? `${n} phones: tilt to roll, flick up to toss` : 'Tilt your phone to roll, flick it up to toss'; hintAway = 0; settleHint() }
         }
@@ -155,6 +169,15 @@ interface Live {
   drag: { from: Point; per: Point; hand: Point } | null
 }
 const lives: Live[] = []
+let turnLayout = false
+function syncTurnLayout() {
+  if (!remote) return
+  const visible = lives.some(l => l.visible && l.scene.turn)
+  if (visible === turnLayout) return
+  turnLayout = visible
+  remote.setLayout({ v: 1, tray: [], modes: visible ? [Mode.hold, Mode.track, Mode.point] : [Mode.tilt, Mode.point], toss: true })
+}
+Object.assign(window, { __turn: () => lives.find(l => l.scene.turn)?.scene.orientation?.() })
 
 for (const host of document.querySelectorAll<HTMLElement>('[data-scene]')) {
   const make = MAKERS[host.dataset.scene ?? '']
@@ -188,7 +211,10 @@ for (const host of document.querySelectorAll<HTMLElement>('[data-scene]')) {
   host.addEventListener('pointerup', up)
   host.addEventListener('pointercancel', up)
   host.addEventListener('pointerleave', (e) => { if (e.pointerType !== 'touch' && !live.down) { live.pointer = null; wake() } })
-  playByTouch(host, { play: follow, move: follow, tap: (x, y) => { follow(x, y); scene.press?.(live.pointer!) } })
+  playByTouch(host, { play: follow, move: follow, tap: (x, y) => {
+    if (scene.turn && !desk && !tiltOn()) { live.pointer = null; void tiltUp(); return }
+    follow(x, y); scene.press?.(live.pointer!)
+  } })
 }
 
 /**
@@ -481,6 +507,7 @@ const seen = new IntersectionObserver((entries) => {
     if (!e.isIntersecting) { live.kept = null; live.drag = null }
     if (e.isIntersecting && !still) { live.until = performance.now() + ACTIVE_MS; wake() }
   }
+  syncTurnLayout()
 }, { threshold: 0.18 })
 // Cards in a row arrive one after another (the delay is on the arrival only, not on hover).
 // Headings, the build cards and the last word arrive the same way.
@@ -504,13 +531,42 @@ onTilt((t) => {
   const cl = (v: number) => Math.max(-1, Math.min(1, v / 24))
   for (const l of lives) {
     if (!l.visible) continue
+    if (l.scene.turn) continue
     l.tilt = { x: W / 2 + cl(t.x) * W * 0.42, y: H / 2 + cl(t.y) * H * 0.4 }
     if (l.mode) { if (l.mode.act === 'motion' && (t.wake || l.kept)) steer(l, l.tilt); continue }
     if (t.wake) { l.tiltAt = now; l.until = Math.max(l.until, now + ACTIVE_MS); wake() }
   }
 })
 
+onOrientation((q, generation) => {
+  for (const l of lives) if (l.scene.turn) {
+    l.scene.turn(q, `local:${generation}`)
+    l.until = Infinity
+  }
+  wake()
+})
+
+let hand: { who: string; gen: number; q: Quat } | null = null
+let remoteTurn = false
+function turnPhones(now: number) {
+  const lead = remote?.participants.find(p => p.lead)
+  const f = lead ? readPhone(lead.id, now) : null
+  let q: Quat | null = null, grab = ''
+  if (f?.connected && f.mode === Mode.hold && f.clutch) { q = f.qRel; grab = `${lead!.id}:${f.grab}` }
+  const pose = f?.pose
+  if (f?.connected && f.mode === Mode.track && pose?.tracked && pose.touching) {
+    if (!hand || hand.who !== lead!.id || hand.gen !== pose.gen) hand = { who: lead!.id, gen: pose.gen, q: pose.q }
+    q = poseRelativeInView(hand.q, pose.q); grab = `${lead!.id}:pose:${pose.gen}`
+  } else hand = null
+  for (const l of lives) if (l.scene.turn && (q || remoteTurn)) {
+    l.scene.turn(q, grab)
+    l.until = q ? Infinity : now + ACTIVE_MS
+  }
+  remoteTurn = !!q
+}
+
 addActor((now, dt) => {
+  turnPhones(now)
   let busy = false
   for (const l of lives) {
     if (!l.visible || now > l.until) continue
@@ -519,7 +575,8 @@ addActor((now, dt) => {
     const modes = !!l.scene.modes
     const pointing = modes ? !!l.kept : !!l.pointer && (l.down || now - l.pointerAt < HOLD_MS)
     const tilted = !modes && !pointing && !!l.tilt && now - l.tiltAt < HOLD_MS
-    if (!pointing && !tilted && still) continue
+    const turning = !!l.scene.turn && (tiltOn() || remoteTurn)
+    if (!pointing && !tilted && !turning && still) continue
     l.t += dt
     l.scene.step(dt, pointing ? (modes ? l.kept!.p : l.pointer) : tilted ? l.tilt : null, l.t)
     busy = true

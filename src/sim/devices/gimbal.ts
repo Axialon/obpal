@@ -1,5 +1,5 @@
 /** A three-axis camera follows the phone's quaternion exactly, relative to its last Home. */
-import { Controller, qConj, qMul, qAxisAngle, type Quat } from '@obpal/core'
+import { Controller, poseRelativeInView, qConj, qMul, qAxisAngle, type Quat } from '@obpal/core'
 import { action, Machine, timestep } from './common'
 import { axis, clamp, panTiltOf } from './input'
 import { panSign } from '../vr/intent'
@@ -29,8 +29,10 @@ export class GimbalLogic extends Machine {
   units = [{ q: [0, 0, 0, 1] as Quat, pan: 0, pitch: 0, roll: 0, recording: false, takes: 0 }]
   private zero: Quat = [0, 0, 0, 1]
   private last: Quat = [0, 0, 0, 1]
+  private hand: { gen: number; zero: Quat; at: Quat } | null = null
   home() {
     this.zero = [...this.last]
+    this.hand = null
     Object.assign(this.units[0], { q: [0, 0, 0, 1], pan: 0, pitch: 0, roll: 0 })
   }
   readout() {
@@ -41,20 +43,33 @@ export class GimbalLogic extends Machine {
     const i = inputs[0],
       u = this.units[0]
     if (!i) return
-    const q = i.hold ?? (i.pose?.tracked && i.pose.touching ? i.pose.q : null)
+    const pose = i.pose?.tracked && i.pose.touching ? i.pose : null
+    if (!pose) this.hand = null
+    let q = i.hold
+    if (!q && pose) {
+      if (!this.hand || this.hand.gen !== pose.gen) {
+        let at = [...u.q] as Quat
+        // Undo the overview pan mapping before capturing a new input origin; it is applied once below.
+        if (i.controlFrame && !i.controlFrame.immersive) at = qMul(qAxisAngle(0, 1, 0, (panSign(i.controlFrame, 0) - 1) * panTiltOf(at)[0]), at)
+        this.hand = { gen: pose.gen, zero: unitQuaternion(pose.q), at }
+      }
+      q = qMul(poseRelativeInView(this.hand.zero, unitQuaternion(pose.q)), this.hand.at)
+    }
     if (i.space && !i.pad && !i.pose?.touching) {
       u.pan = -i.space.aim[0] * Math.PI * (i.controlFrame?.immersive ? 1 : panSign(i.controlFrame, 0)); u.pitch = i.space.aim[1] * 1.3
       u.q = qMul(qMul(qAxisAngle(0, 1, 0, u.pan), qAxisAngle(1, 0, 0, u.pitch)), qAxisAngle(0, 0, 1, u.roll))
     } else if (q) {
       this.last = unitQuaternion(q)
       if (i.recentred) this.zero = [0, 0, 0, 1]
-      u.q = unitQuaternion(qMul(qConj(this.zero), this.last))
+      u.q = pose ? this.last : unitQuaternion(qMul(this.last, qConj(this.zero)))
       ;[u.pan, u.pitch] = panTiltOf(u.q)
       const [x, y, z, w] = u.q
       u.roll = Math.atan2(2 * (x * y + w * z), 1 - 2 * (x * x + z * z))
       if (i.controlFrame && !i.controlFrame.immersive) {
+        const pan = u.pan
         u.pan *= panSign(i.controlFrame, 0)
-        u.q = qMul(qMul(qAxisAngle(0, 1, 0, u.pan), qAxisAngle(1, 0, 0, u.pitch)), qAxisAngle(0, 0, 1, u.roll))
+        // Keep the view's pan direction without rebuilding a quaternion from singular upright Euler angles.
+        u.q = qMul(qAxisAngle(0, 1, 0, u.pan - pan), u.q)
       }
     } else if (i.pad || i.drag.some((v) => v !== 0) || i.twist) {
       const dt = timestep(delta)

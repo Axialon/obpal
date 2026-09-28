@@ -32,6 +32,7 @@
     "oss:audit": "node scripts/oss-audit.mjs",
     "e2e:phone": "vite build && node scripts/e2e-phone.mjs",
     "e2e:home": "vite build && node scripts/e2e-home.mjs",
+    "e2e:orientation": "vite build && node scripts/e2e-orientation.mjs",
     "e2e:embed": "vite build && node scripts/e2e-embed.mjs",
     "e2e:code": "vite build && node scripts/e2e-code.mjs",
     "e2e:pages": "vite build && node scripts/e2e-pages.mjs",

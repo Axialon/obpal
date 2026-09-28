@@ -5,6 +5,7 @@
  * looked at), so a phone stays cool.
  */
 import { ICONS } from '../ui/icons'
+import { qAxisAngle, qMul, qRotate, qSlerp, type Quat } from '@obpal/core'
 import { aim, BLOCK, FINGER, follow, HOLD, JOINT_R, LINK_W, PADS, play, PLATE, pose, RIM, SHOULDER, story, storyFrom, TABLE, tidy, type Arm, type Leg } from './arm'
 import { BALL_R, FIELD, PUCK_R, rally, stepRally } from './rally'
 
@@ -51,6 +52,10 @@ export interface Scene {
    * story at time `t`. Returns whether anything still moves.
    */
   step(dt: number, p: Point | null, t: number): boolean
+  /** A phone's exact view-frame rotation since engagement; null releases it. */
+  turn?(q: Quat | null, grab: string): void
+  /** The drawn orientation, for browser projection checks. */
+  orientation?(): Quat
   /** A tap or click at `p`. */
   press?(p: Point): void
   /**
@@ -117,19 +122,16 @@ const BOX_FACES: [number[], V3][] = [
 ]
 const LIGHT: V3 = (() => { const v: V3 = [-0.45, -0.75, -0.5]; const l = Math.hypot(...v); return [v[0] / l, v[1] / l, v[2] / l] })()
 
-/** Draw a box (half-sizes sx, sy, sz, `k` px per unit) turned by yaw then pitch; `paint` colours each face it shows. */
-function drawBox(polys: SVGPolygonElement[], sx: number, sy: number, sz: number, k: number, yaw: number, pitch: number, paint: (face: number, light: number) => Attrs) {
-  const cy = Math.cos(yaw), sy_ = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch)
-  const rot = (x: number, y: number, z: number): V3 => {
-    const x1 = x * cy + z * sy_, z1 = -x * sy_ + z * cy
-    return [x1, y * cp - z1 * sp, y * sp + z1 * cp]
-  }
+/** Draw a box (half-sizes sx, sy, sz, `k` px per unit) in the camera frame; `paint` colours each face it shows. */
+function drawBox(polys: SVGPolygonElement[], sx: number, sy: number, sz: number, k: number, q: Quat, paint: (face: number, light: number) => Attrs) {
+  // Camera coordinates are x right, y up, z toward the person; SVG flips y only at projection.
+  const rot = (x: number, y: number, z: number): V3 => qRotate(q, [x, y, z])
   const V = [-1, 1].flatMap((x) => [-1, 1].flatMap((y) => [-1, 1].map((z) => rot(x * sx, y * sy, z * sz))))
-  const P = V.map(([x, y, z]) => { const f = k / (1 + z * 0.16); return [x * f, y * f, z] as V3 })
+  const P = V.map(([x, y, z]) => { const f = k / (1 - z * 0.16); return [x * f, -y * f, z] as V3 })
   const shown = BOX_FACES.map(([idx, n], i) => {
     const r = rot(...n)
-    return { i, idx, z: idx.reduce((s, v) => s + P[v][2], 0) / 4, facing: r[2] < -0.02, light: Math.max(0, r[0] * LIGHT[0] + r[1] * LIGHT[1] + r[2] * LIGHT[2]) }
-  }).filter((f) => f.facing).sort((a, b) => b.z - a.z)
+    return { i, idx, z: idx.reduce((s, v) => s + P[v][2], 0) / 4, facing: r[2] > 0.02, light: Math.max(0, r[0] * LIGHT[0] - r[1] * LIGHT[1] - r[2] * LIGHT[2]) }
+  }).filter((f) => f.facing).sort((a, b) => a.z - b.z)
   polys.forEach((p, j) => {
     const f = shown[j]
     if (!f) { p.setAttribute('points', ''); return }
@@ -152,19 +154,26 @@ export function turnScene(): Scene {
   const model = el('g', { transform: 'translate(268 130)' }, svg)
   el('circle', { r: 88, fill: u('glow'), opacity: 0.55 }, model)
   const faces = Array.from({ length: 3 }, () => el('polygon', { 'stroke-linejoin': 'round', 'stroke-width': 1.6 }, model))
-  let yaw = 0.7, pitch = 0.42, pt = 0
+  const pose = (yaw: number, pitch: number) => qMul(qAxisAngle(1, 0, 0, -pitch), qAxisAngle(0, 1, 0, -yaw))
+  let q = pose(0.7, 0.42), atGrab = q, grab = '', driven = false, pt = 0
   return {
     svg,
+    turn(relative, nextGrab) {
+      if (!relative) { driven = false; return }
+      if (!driven || nextGrab !== grab) { atGrab = q; grab = nextGrab }
+      driven = true
+      q = qMul(relative, atGrab)
+    },
+    orientation: () => [...q],
     step(dt, p, t) {
       const ty = p ? ((p.x - W / 2) / (W / 2)) * 1.4 + 0.6 : 0.6 + 0.95 * Math.sin(t * 0.52) + 0.25 * Math.sin(t * 1.37)
       const tp = p ? ((p.y - H / 2) / (H / 2)) * 0.9 + 0.42 : 0.42 + 0.26 * Math.sin(t * 0.77 + 1)
-      yaw = ease(yaw, ty, dt, p ? 8 : 5)
-      pitch = ease(pitch, tp, dt, p ? 8 : 5)
+      if (!driven || p) q = qSlerp(q, pose(ty, tp), 1 - Math.exp(-dt * (p ? 8 : 5)))
       // The phone: a slab, screen lit in lime. The model: the ob.Pal box, obsidian with lime edges.
-      drawBox(phoneFaces, 0.5, 1, 0.08, 34, yaw, pitch, (f, l) => f === 4
+      drawBox(phoneFaces, 0.5, 1, 0.08, 34, q, (f, l) => f === 5
         ? { fill: shade([14, 11, 36], [40, 58, 22], 0.35 + 0.65 * l), stroke: LIME, 'stroke-opacity': 0.7 }
         : { fill: shade([30, 23, 72], [88, 74, 170], l), stroke: HAZE, 'stroke-opacity': 0.55 })
-      drawBox(faces, 1, 1, 1, 50, yaw, pitch, (f, l) => f === 2
+      drawBox(faces, 1, 1, 1, 50, q, (f, l) => f === 3
         ? { fill: shade([40, 58, 14], [176, 232, 48], 0.35 + 0.65 * l), stroke: CORE, 'stroke-opacity': 0.8 }
         : { fill: shade([20, 15, 48], [104, 88, 214], l), stroke: '#ffffff', 'stroke-opacity': 0.28 })
       pt = (pt + dt * 0.55) % 1

@@ -45,6 +45,7 @@ import { chromium, devices } from 'playwright'
 import { cspCheck } from './csp-watch.mjs'
 import sharp from 'sharp'
 import { startLocal } from '../extension/e2e/local.mjs'
+import { trayReading } from './lib/orientation.mjs'
 
 const HEADED = process.argv.includes('--headed')
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
@@ -120,14 +121,14 @@ async function settle(page, drive, least = 1.5, wall = 45000) {
  */
 function tilter(page) {
   let angle = 0, k = 0
-  const send = (b, g) => page.evaluate(([b, g]) => dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 0, beta: b, gamma: g })), [b, g])
+  const send = (down, right) => page.evaluate(r => dispatchEvent(new DeviceOrientationEvent('deviceorientation', r)), trayReading(down, right, angle))
   return {
-    async on() { angle = await page.evaluate(() => screen.orientation?.angle ?? 0); await send(40, 0) },
+    async on() { angle = await page.evaluate(() => screen.orientation?.angle ?? 0); await send(0, 0) },
     tip(down, right) {
       k++
       const w = (k % 2) * 4
       const d = right ? down : down + Math.sign(down) * w, r = right ? right + Math.sign(right) * w : right
-      return angle === 90 ? send(40 + r, -d) : send(40 + d, r)
+      return send(d, r)
     },
   }
 }
@@ -240,7 +241,7 @@ try {
     const tip = () => page.evaluate(() => window.__home.tips().find((t) => t.id === 'me'))
     // Let the opening finish, so the marble is resting on the full stop.
     await until('the marble at rest after the opening', () => restingOnDot(page), 25000, 300)
-    const tilt = (beta, gamma) => page.evaluate(([b, g]) => dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 0, beta: b, gamma: g })), [beta, gamma])
+    const tilt = (beta, gamma) => page.evaluate(r => dispatchEvent(new DeviceOrientationEvent('deviceorientation', r)), trayReading(beta - 60, gamma, 0, 60))
     // Motion is the visitor's to switch on: one tap on the hint (iOS asks its own question too).
     await page.locator('[data-hint]').tap()
     await sleep(200)
@@ -605,7 +606,7 @@ try {
     // The phone's tilt, from how it's held when the tilt starts (the middle of its first readings): turned so the
     // scene's tilt point is at (x, y) (viewBox units) by the page's own mapping (24 degrees past a 1.2 degree dead zone
     // reach 0.42 of the width, and 0.4 of the height, from the middle), smoothly, as a hand turns it, and held there.
-    const send = (b, g) => page.evaluate(([b, g]) => dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 0, beta: b, gamma: g })), [b, g])
+    const send = (b, g) => page.evaluate(r => dispatchEvent(new DeviceOrientationEvent('deviceorientation', r)), trayReading(b - 40, g))
     for (let i = 0; i < 8; i++) { await send(40, 0); await sleep(10) }
     let now = { b: 40, g: 0 }
     const deg = (v) => (v ? Math.sign(v) * (Math.abs(v) + 1.2) : 0)

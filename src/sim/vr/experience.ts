@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { emptyPad } from '@obpal/core'
+import { deviceScreenAngle, emptyPad, OrientationReference, quatFromDeviceOrientation } from '@obpal/core'
 import type { Ride } from './rigs'
 import { ControlFrame } from './control-frame'
 import { RideLook, SteadyPose, upright, viewFov } from './steady'
@@ -27,7 +27,8 @@ export class Experience extends EventTarget {
   private xrZero: { p: THREE.Vector3; yaw: number } | null = null
   private motionUntil = 0
   private gyro = new THREE.Quaternion()
-  private gyroZero: THREE.Quaternion | null = null
+  private orientation = new OrientationReference()
+  private reading: [number, number, number] | null = null
   private sensor = false
   private grab = false
   private turning = false
@@ -140,7 +141,14 @@ export class Experience extends EventTarget {
   get immersive() { return this.mode !== 'overview' }
   private save() { try { localStorage.setItem('obpal.comfort', JSON.stringify(this.settings)) } catch { /* private storage */ } }
   private showLink(url: string) { let a = this.controls.querySelector<HTMLAnchorElement>('a'); if (!a) { a = document.createElement('a'); this.controls.append(a) }; a.href = url; a.textContent = 'Open shared scene'; a.target = '_blank'; a.rel = 'noopener' }
-  recenter() { this.look.recenter(); this.gyroZero = null; this.gyro.identity(); this.xrZero = null; this.lastPosition = null; this.steady.reset() }
+  recenter() { this.look.recenter(); this.resetOrientation(); this.xrZero = null; this.lastPosition = null; this.steady.reset() }
+  private resetOrientation() {
+    this.orientation.reset(); this.gyro.identity()
+    if (this.reading) {
+      const angle = deviceScreenAngle()
+      this.orientation.capture(quatFromDeviceOrientation(...this.reading, angle), angle)
+    }
+  }
   switchView() { const r = this.rides().find(r => r.id === this.ride); this.look.switch(r?.views?.length ?? 1); this.recenter(); this.dispatchEvent(new Event('viewchange')) }
   snap(direction: number) { this.look.snap(direction, this.settings.snap) }
   /** A phone acting as both display and motion controller holds its look until the control is released. */
@@ -186,7 +194,7 @@ export class Experience extends EventTarget {
   private async startSensors() {
     if (!matchMedia('(pointer: coarse)').matches) return
     const EventType = window.DeviceOrientationEvent as typeof DeviceOrientationEvent & { requestPermission?: () => Promise<string> }
-    try { if (EventType?.requestPermission && await EventType.requestPermission() !== 'granted') { this.info.textContent = 'Drag to look; motion permission was declined'; return }; this.sensor = true }
+    try { if (EventType?.requestPermission && await EventType.requestPermission() !== 'granted') { this.info.textContent = 'Drag to look; motion permission was declined'; return }; this.resetOrientation(); this.sensor = true }
     catch { this.info.textContent = 'Drag to look; motion sensors are unavailable' }
   }
   private bindLook() {
@@ -204,14 +212,14 @@ export class Experience extends EventTarget {
     canvas.addEventListener('dblclick', () => { if (this.mode === 'first-person' && !matchMedia('(pointer: coarse)').matches) void canvas.requestPointerLock()?.catch(() => {}) })
     addEventListener('keydown', e => { if (!this.immersive || e.repeat || /INPUT|SELECT|TEXTAREA/.test((e.target as HTMLElement)?.tagName)) return; if (e.code === 'Escape') void this.leave(); if (e.code === 'KeyQ') this.snap(-1); if (e.code === 'KeyE') this.snap(1); if (e.code === 'KeyV') this.switchView(); if (e.code === 'KeyR') this.recenter() })
     addEventListener('deviceorientation', e => {
-      if (!this.sensor || this.mode !== 'first-person' || e.alpha === null || e.beta === null || e.gamma === null) return
-      const d = Math.PI / 180
-      const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(e.beta * d, e.alpha * d, -e.gamma * d, 'YXZ'))
-      q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2))
-      q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -(screen.orientation?.angle ?? 0) * d))
-      if (performance.now() < this.motionUntil) { this.gyroZero = this.gyro.clone().multiply(q.clone().invert()); return }
-      this.gyroZero ??= q.clone().invert()
-      this.gyro.copy(this.gyroZero).multiply(q)
+      if (e.alpha === null || e.beta === null || e.gamma === null || ![e.alpha, e.beta, e.gamma].every(Number.isFinite)) return
+      // Browsers need not repeat a stationary reading after First person or Recenter is pressed.
+      this.reading = [e.alpha, e.beta, e.gamma]
+      if (!this.sensor || this.mode !== 'first-person') return
+      const angle = deviceScreenAngle()
+      const q = quatFromDeviceOrientation(e.alpha, e.beta, e.gamma, angle)
+      if (performance.now() < this.motionUntil) { this.orientation.hold(q, angle); return }
+      this.gyro.set(...this.orientation.relative(q, angle))
     })
   }
   update(dt: number, now: number) {

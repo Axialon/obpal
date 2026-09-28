@@ -1,4 +1,5 @@
 export * from './quat'
+export * from './orientation'
 export * from './state'
 export * from './messages'
 export * from './pairing'

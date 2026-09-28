@@ -20,7 +20,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { batch, box, environment, floorMaterial, metal, palette, plastic, softKey } from '../kit'
 import { tiledDeck } from '../kit/precision'
-import { carbon, ceramic, darkTitanium } from '../kit/surfaces'
+import { ceramic, darkTitanium } from '../kit/surfaces'
 import { fixtures, payloadSpeed, STOCK } from './workspace'
 import { instanceCopies } from '../kit/instances'
 import { InputSmoother, servo } from '../kit/motion'
@@ -103,10 +103,7 @@ floor.rotation.x = -Math.PI / 2
 floor.position.y = -0.16
 floor.receiveShadow = true
 scene.add(floor)
-const bench = box(KIND.cell.fence * 2.8, 0.14, KIND.cell.fence * 2.8, carbon)
-bench.position.y = -0.074
-scene.add(bench)
-scene.add(tiledDeck(KIND.cell.fence * 2.8, KIND.cell.fence * 2.8, -.004, .48))
+scene.add(tiledDeck(KIND.cell.fence * 2.8, KIND.cell.fence * 2.8, -.004, .48, .14))
 // The cell's fence: the arms work inside it.
 const fence = new THREE.Mesh(new THREE.TorusGeometry(KIND.cell.fence * 1.3, 0.005, 6, 128), ceramic)
 fence.rotation.x = Math.PI / 2

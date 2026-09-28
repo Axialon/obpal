@@ -7,6 +7,7 @@
  * run, frame for frame.
  */
 import { readTilt, tiltState } from '../../src/landing/tilt'
+import { Euler, Quaternion, Vector3 } from 'three'
 import type { World, WorldMarble } from '../../src/landing/world'
 
 /** mulberry32: a small, fast, seeded random source (0 ≤ x < 1). */
@@ -41,7 +42,7 @@ export function frames(seconds: number, hz: number, r: () => number, spikes = 0.
   return out
 }
 
-export interface Orient { t: number; beta: number; gamma: number }
+export interface Orient { t: number; alpha: number; beta: number; gamma: number }
 export interface GyroOptions {
   /** Where the phone is held: beta (tipped toward you) and gamma (to the right), degrees. */
   beta?: number
@@ -59,15 +60,24 @@ export interface GyroOptions {
 export function gyro(seconds: number, r: () => number, o: GyroOptions = {}): Orient[] {
   const hz = o.hz ?? 60, noise = o.noise ?? 0.7, drift = o.drift ?? 0.05, spikes = o.spikes ?? 0.3
   const out: Orient[] = []
+  const d = Math.PI / 180
+  const neutral = new Quaternion().setFromEuler(new Euler((o.beta ?? 40) * d, (o.gamma ?? 0) * d, 0, 'ZXY'))
+  const up = new Vector3(0, 0, 1).applyQuaternion(neutral.clone().invert())
+  const rightAxis = new Vector3(1, 0, 0).applyQuaternion(neutral.clone().invert())
+  const forward = new Vector3().crossVectors(up, rightAxis)
   const db = (r() - 0.5) * 2 * drift, dg = (r() - 0.5) * 2 * drift
   for (let i = 0; i < seconds * hz; i++) {
     const t = i / hz
     const [down, right] = o.tilt ? o.tilt(t) : [0, 0]
-    let b = (o.beta ?? 40) + down + db * t + gauss(r) * noise
-    let g = (o.gamma ?? 0) + right + dg * t + gauss(r) * noise
+    let b = down + db * t + gauss(r) * noise
+    let g = right + dg * t + gauss(r) * noise
     // A spike: one reading well off (a knock, a sensor glitch).
     if (r() < spikes / hz) { b += (r() - 0.5) * 12; g += (r() - 0.5) * 12 }
-    out.push({ t: 1000 + t * 1000, beta: b, gamma: g })
+    // A physical tray slope, not a gamma increment (gamma also contains yaw in a tipped grip).
+    const tiltedUp = up.clone().addScaledVector(rightAxis, -Math.tan(g * d)).addScaledVector(forward, Math.tan(b * d)).normalize()
+    const q = neutral.clone().multiply(new Quaternion().setFromUnitVectors(tiltedUp, up))
+    const e = new Euler().setFromQuaternion(q, 'ZXY')
+    out.push({ t: 1000 + t * 1000, alpha: e.z / d, beta: e.x / d, gamma: e.y / d })
   }
   return out
 }
@@ -96,7 +106,7 @@ export class Hand {
   private pointer: { x: number; y: number; at: number } | null = null
   constructor(private world: World, private m: WorldMarble) {}
   orient(e: Orient) {
-    const t = readTilt(this.st, e.beta, e.gamma, 0, e.t)
+    const t = readTilt(this.st, e.beta, e.gamma, 0, e.t, e.alpha)
     if (!t) return
     this.tiltPush = [t.x * TILT_PUSH, t.y * TILT_PUSH]
     if (t.wake) this.tiltAt = e.t

@@ -14,6 +14,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
 import { GlowFollower, handMove, headingOf, Mode, PairingChip, PointerFlag, Remote, type Frame, type Layout, type ModeId, type PadState, type Participant, type PointerState } from '@obpal/host'
+import { poseRelativeInView } from '@obpal/core'
 import { CATALOG, CATEGORIES, DEFAULT_ITEM, LOCAL_CATEGORY, type CatalogItem } from './catalog'
 import { localFolder } from './local-folder'
 import { applyGamepad, type GamepadContext } from './gamepad-input'
@@ -1281,10 +1282,10 @@ function applySeat(s: Seat, f: Frame, dt: number) {
       const b = world.clone().project(experience.activeCamera)
       if (parts.move(((b.x - a.x) / 2) * innerWidth, ((a.y - b.y) / 2) * innerHeight, h)) k.last.copy(world)
     } else {
-      // The phone's turn, from its tracking space onto the stage: its heading lines up with the camera's.
-      trAlign.setFromAxisAngle(WORLD_UP, Math.atan2(-trFwd.x, -trFwd.z) - k.heading)
-      trQ.set(pose.q[0], pose.q[1], pose.q[2], pose.q[3]).multiply(trQ0.set(k.q0[0], k.q0[1], k.q0[2], k.q0[3]).invert())
-      trQ.premultiply(trAlign).multiply(trQ0.copy(trAlign).invert()).multiply(k.quat0)
+      // The same camera frame as 1:1 turn, including the camera's pitch and roll.
+      experience.activeCamera.getWorldQuaternion(camQ)
+      trQ.set(...poseRelativeInView(k.q0, pose.q))
+      trQ.premultiply(camQ).multiply(trQ0.copy(camQ).invert()).multiply(k.quat0)
       const parent = target.parent!
       target.position.copy(parent.worldToLocal(world))
       target.quaternion.copy(parent.getWorldQuaternion(trQ0).invert().multiply(trQ))
@@ -1388,7 +1389,6 @@ $('glow-cam').onclick = async () => {
 const trFwd = new THREE.Vector3()
 const trRight = new THREE.Vector3()
 const trV = new THREE.Vector3()
-const trAlign = new THREE.Quaternion()
 const trQ = new THREE.Quaternion()
 const trQ0 = new THREE.Quaternion()
 const tmpQ = new THREE.Quaternion()

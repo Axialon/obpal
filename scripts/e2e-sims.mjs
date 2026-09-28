@@ -17,6 +17,7 @@ import { runControl } from './e2e-control.mjs'
 import { runVR } from './e2e-vr.mjs'
 import { runControlViews } from './e2e-control-views.mjs'
 import { runAudio } from './e2e-audio.mjs'
+import { runTemporal } from './e2e-temporal.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
 
 const HEADED = process.argv.includes('--headed')
@@ -428,6 +429,7 @@ try {
   // Finished arm and arena sessions must not compete with the studio's eight-phone timing measurement.
   await Promise.all(closers.map(c => c.close()))
   closers.length = 0
+  await runTemporal(local, check)
   await runControl(local, check)
   await runMusic(local, check)
   await runVR(local, check)
