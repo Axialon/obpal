@@ -4,6 +4,29 @@ An open protocol for pairing a **control device** (phone, tablet, custom hardwar
 
 Status: draft, implemented by `packages/core` and `packages/host`. Keywords follow RFC 2119. The controls built on these packets, their routes and profiles are in [CATALOGUE.md](CATALOGUE.md).
 
+### Optional calibrated sim space
+
+The existing `state{values}` / `value{id,v}` envelopes carry the optional
+[control space](CONTROL-SPACE.md) profile. Hosts advertise `control.sim` (catalogue
+id) and `control.scope` (`object` or `scene`); a phone can send the latter as a
+value to change its own scope. `control.position` is a host-sent changing number
+requesting a new neutral. Phones send the existing `recenter` after capturing it.
+The Buttons action `app:recentre` is labelled **Set position**.
+
+`control.aim` is JSON of at most 160 characters: `{aim:[x,y],tilt:[x,y],active}`,
+with finite normalized coordinates in −1…1. Optional boolean `pointer` identifies
+the gamepad's gyro Aim / Point independently of its physical driving stick.
+Phones send at most 30 samples/second and a final inactive sample on release.
+Hosts expire samples after 300 ms and clear them on mode, scope or claim change.
+Aim is absolute relative to the captured orientation, not a binary STATE delta.
+Unknown optional values are ignored; all binary packet layouts stay unchanged.
+
+Music `hit` events may add both `aim:[x,y]` and `scope`. `at` is the timestamp of
+the acceleration peak, translated by the existing music clock exchange. The host
+validates scope, claim and target availability, then resolves this event snapshot
+before scheduling sound. Legacy events without these fields keep their claimed
+instrument behavior; see [MUSIC.md](MUSIC.md) for timing and voice ownership.
+
 ## 1. Roles and transport
 
 - **Host:** creates a pairing and receives input.
@@ -125,6 +148,33 @@ A failed exchange, or one not finished within 20 s, ends with `lock{reason:"reje
 
 Unknown message types and fields MUST be ignored.
 
+### A phone with several connections
+
+A phone MAY keep several independently authenticated links open (the controller keeps three by default, configurable
+from one to four). Only its selected connection receives input. Switching MUST release held buttons, typing,
+music notes and touch gestures, send neutral state, then stop all input to the previous screen before routing to
+the next. A background link keeps only its signaling, ping and recovery traffic. Its layout, values, approval
+notice, scene and connection statistics stay separate from every other link.
+
+`welcome{attention:true, kind?}` advertises pause handling; `kind` is `pc`, `sim`, `viewer` or `site`, for the phone's
+local list only. The device sends `attention{active:false}` when keeping this link idle, and `attention{active:true}`
+when returning. A host that supports it MUST reset that participant's input stream and ignore its input messages
+and binary packets while paused, while still accepting `attention`, `ping` and `bye`. It SHOULD show that phone as
+paused. This carries no other screen's name, identity, state or reason for the pause. It neither grants permissions
+nor changes a pairing identity or a shared-scene claim. PC Allow/Deny continues to apply on that PC.
+
+Older hosts ignore the optional message and fields; they receive the releases and neutral state, then their normal
+input watchdog goes idle. They cannot show the explicit paused label. A new host treats a phone that sends no
+`attention` as active, as before. There is no protocol version change.
+
+The phone's in-app camera accepts only canonical `/p/#1.…` or `/p/#2.…` links at its own deployment's origin, or a
+complete ten-digit short code. A scan is never opened as a URL. All paths use the same fingerprint pin, HMAC or
+CPace exchange and existing invite single-use rules. After successful authentication a phone MAY keep the online
+invite's room, fingerprint and non-extractable HKDF key in IndexedDB, and use that key for the exact same QR HMAC
+on a later connection. It keeps no short-code secret, lookup ticket or direct-code nonce. A rotated/closed host or
+expired device certificate still needs its current code. Legacy remembered-PC rows migrate as metadata and keep
+their existing direct-pairing keys; reconnecting them requires a current code until an online invite is remembered.
+
 ### Optional shared-sim presence (version 1)
 
 Sim renderers can join through the same invite and authenticated `DeviceLink` as a phone. No worker or signaling change is needed. These optional JSON messages use `ctl`; the main protocol version is unchanged. Older hosts and phones ignore `sim`.
@@ -150,10 +200,11 @@ The Viewer replicates catalogue models and their listed movable parts; local fil
 - `recenter`
 - `claim{node}`: claim a node the host listed in `scene`; `null` releases what this device holds (CATALOGUE §5). Hosts that list no nodes ignore it.
 - `ping{t0}`
+- `attention{active: boolean}`: this connection is in use or paused (above).
 - `bye`
 
 **Host → device:**
-- `welcome{proto, name, layout, pair?, invite?, restart?}`: `pair{id, key}` is a pairing grant (§2a) from a host that remembers this device; `invite` is the QR link's pairing code, for a device that joined by short code (§2b); `restart: true` when the host takes ICE restarts on this connection (§1; not on a direct LAN code's)
+- `welcome{proto, name, layout, pair?, invite?, restart?, attention?, kind?}`: `pair{id, key}` is a pairing grant (§2a) from a host that remembers this device; `invite` is the QR link's pairing code, for a device that joined by short code (§2b); `restart: true` when the host takes ICE restarts on this connection (§1; not on a direct LAN code's); `attention` and `kind` describe the optional connection hub support above.
 - `pake{y, mac}`: the host's share and confirmation in the short-code exchange (§2b)
 - `layout{layout}`
 - `state{values}`: values the device shows, or acts on, by id. Devices know `textField` (Typing, below) and `notice`: a line the device shows over its controls until it changes or is `false`, for whatever holds its input up on the host's side (ob.Pal Link: "Waiting for approval on the PC" while the person at the PC hasn't allowed this phone yet, or its refusal). A host MAY repeat a notice as a `feedback` toast, for devices from before `notice`; a device that shows the notice skips a toast that says the same.

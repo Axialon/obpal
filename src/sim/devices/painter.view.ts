@@ -46,6 +46,8 @@ function studio(scene: THREE.Scene, logic: PainterLogic) {
   light.position.y = 0.22
   root.add(light)
   batch(root, [bulb, halo])
+  const reticle = new THREE.Mesh(new THREE.RingGeometry(0.055, 0.065, 32), new THREE.MeshBasicMaterial({ color: '#c6ff34', depthWrite: false }))
+  scene.add(reticle)
   const geo = new THREE.CylinderGeometry(0.018, 0.018, 1, 8),
     mat = new THREE.MeshBasicMaterial({ color: 'white' }),
     trail = new THREE.InstancedMesh(geo, mat, 512),
@@ -70,6 +72,9 @@ function studio(scene: THREE.Scene, logic: PainterLogic) {
   return {
     step() {
       const u = logic.units[0]
+      root.visible = !logic.canvas
+      reticle.visible = logic.canvas
+      reticle.position.set(u.x, u.y, u.z + 0.01)
       root.position.set(u.x, u.y, u.z)
       root.quaternion.set(...u.q)
       bulb.material.color.set(INKS[u.colour])

@@ -3,6 +3,29 @@
 Wave 2 of the sims programme. The studio is eight instruments in one shared room,
 with `face.drums` and `face.keys` offered only by screens that name them.
 
+## Calibrated air stick
+
+[CONTROL-SPACE.md](CONTROL-SPACE.md) defines the object kit arc, mallet bars,
+cymbals and 75 scene surfaces, with a phone map and Lime feedback on the aimed
+surface. Set position captures the phone's heading and elevation; ±35° / ±25°
+spans the workspace. Hold Strike to arm, aim, then flick downward. Upward recoil
+does not strike. Peak acceleration sets velocity; a quiet recovery and 100 ms
+refractory period prevent repeats without dropping the next deliberate beat.
+
+The phone snapshots aim and time at the peak, with at most 35 ms spent finding
+it. `music.event` optionally carries `aim` and `scope` on hits. The screen resolves
+that snapshot immediately and validates scope and occupancy. A scene strike
+keeps the player's claim, polyphony budget and release ownership, while using
+the struck station's voice and spatial bus. No render-frame target lookup or
+audio buffering is added.
+
+The control-space e2e uses 16 warmup and 80 measured acceleration strikes. It
+reports all four percentiles for capture-to-schedule, event dispatch, detection
+and emission-to-schedule. The full path includes detection; the handler gate
+starts at emission, separating the sensor peak search from transport and audio.
+It applies the same median <35 ms, p90 <100 ms and handler median <15 ms gates,
+in addition to the independent Drums and Keys touch gates below.
+
 ## Feel and latency
 
 Target on a local network: event to scheduled sound median below 15 ms, p95 below

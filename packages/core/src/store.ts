@@ -3,10 +3,10 @@
  * stable and the other side can pin it) and the pairings it remembers. Everything degrades to "this session
  * only" where storage is unavailable (private mode, storage denied, a browser that can't store certificates).
  */
-import { certFingerprint, importPairKey } from './pairing'
+import { certFingerprint, importPairKey, type SavedInvite } from './pairing'
 
 const DB = 'obpal'
-const VERSION = 1
+const VERSION = 2
 const CERT_TTL = 365 * 24 * 3600 * 1000
 /** Renew a certificate this close to its expiry, so a pairing never breaks mid-week. */
 const CERT_RENEW = 7 * 24 * 3600 * 1000
@@ -28,7 +28,20 @@ export interface StoredPair {
   at: number
 }
 
-const memory = { certs: new Map<string, RTCCertificate>(), pairs: new Map<string, StoredPair>() }
+export type ScreenKind = 'pc' | 'sim' | 'viewer' | 'site'
+
+/** Phone-only metadata and a verified invite; never a PC's Allow/Deny answer or another screen's state. */
+export interface StoredConnection {
+  id: string
+  name: string
+  kind: ScreenKind
+  renamed?: boolean
+  at: number
+  pairId?: string
+  invite?: SavedInvite
+}
+
+const memory = { certs: new Map<string, RTCCertificate>(), pairs: new Map<string, StoredPair>(), connections: new Map<string, StoredConnection>() }
 let dbPromise: Promise<IDBDatabase | null> | null = null
 
 function open(): Promise<IDBDatabase | null> {
@@ -39,8 +52,12 @@ function open(): Promise<IDBDatabase | null> {
         const db = req.result
         if (!db.objectStoreNames.contains('certs')) db.createObjectStore('certs')
         if (!db.objectStoreNames.contains('pairs')) db.createObjectStore('pairs', { keyPath: 'id' })
+        if (!db.objectStoreNames.contains('connections')) db.createObjectStore('connections', { keyPath: 'id' })
       }
-      req.onsuccess = () => resolve(req.result)
+      req.onsuccess = () => {
+        req.result.onversionchange = () => { req.result.close(); dbPromise = null }
+        resolve(req.result)
+      }
       req.onerror = () => resolve(null)
       req.onblocked = () => resolve(null)
     } catch {
@@ -50,14 +67,14 @@ function open(): Promise<IDBDatabase | null> {
   return dbPromise
 }
 
-function tx<T>(store: 'certs' | 'pairs', mode: IDBTransactionMode, run: (s: IDBObjectStore) => IDBRequest<T>): Promise<T | undefined> {
+function tx<T>(store: 'certs' | 'pairs' | 'connections', mode: IDBTransactionMode, run: (s: IDBObjectStore) => IDBRequest<T>): Promise<T | undefined> {
   return open().then((db) => {
     if (!db) return undefined
     return new Promise<T | undefined>((resolve) => {
       try {
         const t = db.transaction(store, mode)
         const req = run(t.objectStore(store))
-        req.onsuccess = () => resolve(req.result)
+        t.oncomplete = () => resolve(req.result)
         req.onerror = () => resolve(undefined)
         t.onabort = () => resolve(undefined)
       } catch {
@@ -65,6 +82,52 @@ function tx<T>(store: 'certs' | 'pairs', mode: IDBTransactionMode, run: (s: IDBO
       }
     })
   })
+}
+
+/** Old remembered PCs become list entries once, without copying or exporting their pairing keys. */
+export function migrateConnections(rows: readonly StoredConnection[], pairs: readonly StoredPair[]): StoredConnection[] {
+  const out = [...rows]
+  for (const p of pairs) if (!out.some((r) => r.pairId === p.id)) {
+    const row: StoredConnection = { id: `pair:${p.id}`, pairId: p.id, name: p.peerName.slice(0, 80) || 'PC', kind: 'pc', at: p.at }
+    if (isConnection(row)) out.push(row)
+  }
+  return out.sort((a, b) => b.at - a.at)
+}
+
+export function isConnection(x: unknown): x is StoredConnection {
+  const r = x as StoredConnection
+  if (!r || typeof r !== 'object' || typeof r.id !== 'string' || r.id.length > 100 || !r.id ||
+    typeof r.name !== 'string' || r.name.length > 80 || !['pc', 'sim', 'viewer', 'site'].includes(r.kind) ||
+    !Number.isFinite(r.at) || r.at < 0 || (r.pairId !== undefined && typeof r.pairId !== 'string')) return false
+  const i = r.invite
+  return !i || (typeof i.room === 'string' && /^[A-Za-z0-9_-]{22}$/.test(i.room) && i.fp instanceof Uint8Array && i.fp.length === 32 &&
+    typeof CryptoKey !== 'undefined' && i.key instanceof CryptoKey && !i.key.extractable && i.key.algorithm.name === 'HKDF')
+}
+
+export async function listConnections(): Promise<StoredConnection[]> {
+  const saved = (await tx<unknown[]>('connections', 'readonly', (s) => s.getAll())) ?? []
+  const rows = new Map(saved.filter(isConnection).map((r) => [r.id, r]))
+  for (const [id, r] of memory.connections) rows.set(id, r)
+  const migrated = migrateConnections([...rows.values()], await listPairs())
+  for (const r of migrated) if (!rows.has(r.id)) await putConnection(r)
+  return migrated
+}
+
+export async function putConnection(row: StoredConnection): Promise<void> {
+  if (!isConnection(row)) throw new Error('Invalid connection')
+  memory.connections.set(row.id, row)
+  await tx('connections', 'readwrite', (s) => s.put(row))
+}
+
+/** Remove metadata only, for merging a migrated row after its PC is recognised. */
+export async function removeConnection(id: string): Promise<void> {
+  memory.connections.delete(id)
+  await tx('connections', 'readwrite', (s) => s.delete(id))
+}
+
+export async function forgetConnection(row: StoredConnection): Promise<void> {
+  if (row.pairId) await forgetPair(row.pairId)
+  await removeConnection(row.id)
 }
 
 /** This side's persistent certificate (generated on first use, renewed a week before it expires) and its fingerprint. */

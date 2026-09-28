@@ -3,7 +3,7 @@ import { family } from '../family'
 import '../styles/base.css'
 import '../styles/controller.css'
 import {
-  b64url, Controller, CONTROLLERS, DeviceLink, emptyState, PadButton, encodeState, Flag, forgetAllPairs, getPair, isControllerId, listPairs,
+  Controller, CONTROLLERS, emptyState, PadButton, encodeState, Flag, isControllerId,
   loadCertificate, Mode, OneEuro, parsePairingCode, qIdentity, qScale, relativeInView, STATE_BYTES, Tier, TossDetector, viewFrameAt,
   type Caps, type ControllerId, type HostMsg, type Layout, type LinkStatus, type ModeId, type PairingCode, type Quat, type SceneNode,
   type ScenePerson, type TierId, type TrayControl,
@@ -17,12 +17,17 @@ import { GamepadMode } from './gamepad'
 import { Drums } from './drums'
 import { Keys } from './keys'
 import { MusicWire } from './music'
+import { CalibratedControl } from './control-space'
+import { CONTROL_SPACES } from '../control-space'
 import { WiiPointer } from './pointing'
 import { MouseFace } from './mouseface'
 import { ScrollWheel } from './wheel'
 import { KeyboardDock } from './keyboard'
 import { LinkBadge } from './linkbadge'
 import { sheetExits } from './sheet'
+import { Connections, type Connection, type Join } from './connections'
+import { ConnectionSheet } from './connection-sheet'
+import '../styles/connections.css'
 import { calmMarks, icon, ICONS, logo, logoMark } from '../ui/icons'
 import { dismissHint, hint, repositionHints, setHintFrame } from '../ui/hints'
 import { PhysicalInputs } from './inputs'
@@ -41,6 +46,8 @@ const store = {
   set: (k: string, v: string) => { try { localStorage.setItem(k, v) } catch { /* private mode */ } },
 }
 const safeImage = (u?: string) => (u && /^https:\/\//.test(u) ? u : undefined)
+let connectTo: (join: Join) => Promise<void> = async () => {}
+let openConnections: (scan?: boolean) => void = () => {}
 
 applyTheme(initialTheme())
 insertMarkup(document.body, 'afterbegin', html`<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>`)
@@ -98,21 +105,29 @@ function screenMessage(opts: { title: string; body: Content; spinner?: boolean; 
     </main>`)
   calmMarks(app, 2)
   if (opts.action) document.getElementById('act')!.onclick = opts.action.run
+  const actions = document.createElement('div')
+  actions.className = 'connection-actions'
+  for (const [text, scan] of [['Scan a code', true], ['Connections', false]] as const) {
+    const button = document.createElement('button')
+    button.className = 'btn'
+    button.textContent = text
+    button.onclick = () => openConnections(scan)
+    actions.append(button)
+  }
+  app.querySelector('.msg-card')!.append(actions)
 }
 
-// Scanning a new code while this tab is open only changes the fragment; re-pair with a clean load.
+// A camera-app scan into this tab joins beside its existing connections.
 addEventListener('hashchange', () => {
-  if (!parsePairingCode(location.hash)) return
-  try { sessionStorage.setItem('obpal.pair', location.hash.slice(1)) } catch { /* ignore */ }
-  location.replace(location.pathname)
+  const code = parsePairingCode(location.hash)
+  if (!code) return
+  history.replaceState(null, '', location.pathname)
+  void connectTo(code).catch(() => openConnections(true))
 })
 
 /** How the phone came: a code from the URL (scanned), or a short code typed on the start page (PROTOCOL §2b). */
-type Join = PairingCode | { v: 'code'; code: { handle: string; secret: string; room: string; ticket: string } }
-
 const pairing = takePairing()
-if (!pairing) startPage()
-else void boot(pairing)
+void boot(pairing ?? undefined)
 
 /**
  * The start page, when the phone came with no code: scan the one on the screen, or type the short code beside it.
@@ -178,7 +193,7 @@ function startPage() {
     busy = false
     input.readOnly = false
     go.textContent = 'Connect'
-    if ('room' in r) return void boot({ v: 'code', code: { ...parts, room: r.room, ticket: r.ticket } })
+    if ('room' in r) return void connectTo({ v: 'code', code: { ...parts, room: r.room, ticket: r.ticket } })
     input.setAttribute('aria-invalid', 'true')
     if (r.error === 'no-code') tell('No screen shows that code. Check it: each code works once.', true)
     else if (r.error === 'slow-down') {
@@ -210,19 +225,11 @@ const TAB_OF: Partial<Record<ControllerId, Tab>> = {
   [Controller.trackpad]: 'rotate', [Controller.hand]: 'track',
 }
 
-async function boot(code: Join) {
+async function boot(code?: Join) {
   // This phone's own DTLS identity, kept across sessions so a screen can pin it and reconnect over the LAN.
   // It loads while the link starts signaling; the peer connection waits for it.
   const own = loadCertificate('device').then((c) => c.cert, () => null)
   // A direct code only works for a screen this phone paired with online before (that is where the key came from).
-  const pair = code.v === 2 ? await getPair(b64url(code.lan.id)) : null
-  if (code.v === 2 && !pair) {
-    return screenMessage({
-      title: 'Pair online once first',
-      art: ICONS.phone,
-      body: 'Scan the regular code on your screen while both are online. From then on, the direct code works without internet.',
-    })
-  }
   const settings = {
     gain: Number(store.get('obpal.gain') ?? 1) || 1,
     smooth: Number(store.get('obpal.smooth') ?? 0.5),
@@ -344,7 +351,7 @@ async function boot(code: Join) {
   inputs.onInput = (id, down) => {
     // Back caught while a sheet or the keyboard is open closes that first, as Back does (their history step).
     if (id === 'back' && !buttons.sheetOpen && (document.querySelector('.sheet-wrap') || keyboard.open)) { if (down) history.back(); return true }
-    return surface || buttons.sheetOpen ? buttons.input(id, down) : false
+    return (surface && link.ready) || buttons.sheetOpen ? buttons.input(id, down) : false
   }
   /** A control's PAD button, on the gamepad and the steering wheel. */
   const PAD_OF: Record<string, number> = {
@@ -420,6 +427,9 @@ async function boot(code: Join) {
   /** The tabs the bar shows now, in its order. */
   const shownTabs = (): Tab[] => [...(surface?.querySelectorAll<HTMLElement>('.modes [data-tab]') ?? [])].filter((b) => !b.hidden).map((b) => b.dataset.tab as Tab)
   const motion = new Motion()
+  const control = new CalibratedControl(motion)
+  let controlSent = 0
+  let controlActive = false
   const smoother = new GyroSmoother()
   const tilt = new TiltStick()
   const qf = [0, 1, 2, 3].map(() => new OneEuro())
@@ -453,6 +463,8 @@ async function boot(code: Join) {
   let R: Quat | null = null
   let lastRel: Quat | null = null
   let started = false
+  let permissionReady = false
+  let motionPrompt = false
   /** The person disconnected: nothing reconnects or covers the Disconnected screen. */
   let hungUp = false
   let surface: HTMLElement | null = null
@@ -514,16 +526,11 @@ async function boot(code: Join) {
 
   const caps = (): Caps => ({ tier, sensorApi: motionSupported() ? 'events' : 'none', haptics: hapticsKind(), platform: navigator.platform || 'unknown' })
   const name = deviceName()
-  const link = code.v === 2
-    ? new DeviceLink({ lan: code.lan, pair: pair!, cert: own, caps, name })
-    : code.v === 'code'
-      ? new DeviceLink({ service: location.origin, code: code.code, remember: true, cert: own, caps, name })
-      : new DeviceLink({ service: location.origin, pairing: code.pairing, remember: true, cert: own, caps, name })
-  // In by short code, the screen hands over its regular code: kept for reloads, like a scanned one.
-  link.on('invite', (fragment) => { try { sessionStorage.setItem('obpal.pair', fragment) } catch { /* private mode */ } })
+  const link = new Connections({ service: location.origin, cert: own, caps, name, beforeSwitch: releaseControls, switched: switchSurface,
+    status: onStatus, message: onHost, stats: (s) => linkBadge.update(s), notice: (text) => toast(text) })
   const musicWire = new MusicWire(m => { if (link.ready) link.sendCtl(m) })
-  const drums = new Drums(musicWire, motion)
-  const keys = new Keys(musicWire, motion)
+  const drums = new Drums(musicWire, motion, control)
+  const keys = new Keys(musicWire, motion, control, recenterHere)
   let sentController = ''
   let musicActive = false
   // Gamepad mode: Xbox-style controller streaming PAD packets (./gamepad.ts).
@@ -531,22 +538,94 @@ async function boot(code: Join) {
     motion, settings, t0, send: (b) => link.sendState(b), toast, openSettings, fullscreen: goFullscreen, exit: () => { tab = lastTab; setMode() },
     // A new profile on the gamepad tells the screen, as mode{p}.
     profile: () => { if (surface && mode === Mode.gamepad) sendMode() },
+    position: () => control.recenter(),
+    recenter: recenterHere, scope: toggleControlScope,
   })
 
   // The top bar's connection badge: encrypted, how the screen was verified, the path and the round trip (./linkbadge.ts).
   const linkBadge = new LinkBadge()
-  screenMessage({ title: 'Connecting', body: code.v === 2 ? 'Reaching your screen over Wi-Fi…' : 'Finding your screen…', spinner: true })
-  link.on('status', onStatus)
-  link.on('message', onHost)
-  link.on('pair', () => toast('Remembered · works without internet next time'))
-  link.on('stats', (s) => linkBadge.update(s))
-  void link.start()
+  const connections = new ConnectionSheet(link)
+  openConnections = (scan = false) => { keyboard.close(); tick(); connections.open(scan) }
+  connectTo = async (join) => { hungUp = false; await link.connect(join) }
+  link.setLimit(Number(store.get('obpal.connections.limit') ?? 3))
+  addEventListener('pagehide', () => { connections.close(); link.destroy() })
+  if (code) {
+    screenMessage({ title: 'Connecting', body: code.v === 2 ? 'Reaching your screen over Wi-Fi…' : 'Finding your screen…', spinner: true })
+    void connectTo(code).catch((e: Error) => screenMessage({ title: 'Scan again', body: e.message, art: ICONS.phone }))
+  } else {
+    startPage()
+    void link.settled().then(() => {
+      let id = ''
+      try { id = sessionStorage.getItem('obpal.active') ?? '' } catch { /* private mode */ }
+      if (id && link.rows.get(id)?.invite) void link.use(id)
+    })
+  }
+
+  function releaseControls() {
+    buttons.releaseAll()
+    buttonHold = false
+    wiiA(false); wiiB(false)
+    mouseFace.reset()
+    padWheel?.reset()
+    pad?.reset()
+    keyboard.close()
+    keys.reset()
+    drums.release()
+    if (control.sim) link.sendCtl({ t: 'value', id: 'control.aim', v: JSON.stringify({ aim: [0, 0], tilt: [0, 0], active: false }) })
+    controlActive = false
+    if (musicActive) musicWire.event('stop')
+    musicWire.use(false)
+    musicActive = false
+    gamepad.releaseConnection()
+    if (gyroOn) setGyro(false)
+    if (tracker.active) void tracker.stop()
+    glowing = false
+    const neutral = emptyState()
+    neutral.seq = (st.seq + 1) & 0xffff
+    neutral.t = Math.round((performance.now() - t0) * 1000) >>> 0
+    link.sendState(encodeState(neutral))
+  }
+
+  function switchSurface(next: Connection | null) {
+    musicWire.resetClock()
+    control.sim = ''; control.scope = 'object'; control.defer(); controlSent = 0
+    gamepad.setControlReach(null)
+    hungUp = false
+    surface = null
+    pad = null
+    for (const k of Object.keys(values)) delete values[k]
+    hostNotice = ''; linkLine = null; seatColor = ''; scene = null; chipKey = ''; heldShown = ''
+    clearTimeout(chipTimer)
+    layout = { v: 1, tray: [] }
+    hostName = 'Screen'
+    suggestionTaken = false
+    sentController = ''
+    tab = 'rotate'; lastTab = 'rotate'; mode = Mode.hold
+    linkBadge.down()
+    keyboard.setField(false)
+    if (!next?.welcome) { syncMotion(); startPage(); return }
+    onHost(next.welcome)
+    onHost({ t: 'state', values: next.values })
+    if (next.scene) onHost(next.scene)
+    if (started) showSurface()
+    else startControls()
+    tick()
+    toast(`Controlling ${next.row.name}`)
+  }
 
   const permission = motionSupported() ? await requestMotionPermission() : 'denied'
-  if (permission === 'prompt') showGate()
-  else begin()
+  permissionReady = true
+  motionPrompt = permission === 'prompt'
+  startControls()
+
+  function startControls() {
+    if (!permissionReady || !link.active || started) return
+    if (motionPrompt) showGate()
+    else begin()
+  }
 
   function showGate() {
+    if (document.getElementById('gate')) return
     insertMarkup(app, 'beforeend', html`
       <div class="gate" id="gate">
         <div class="gate-card glass">
@@ -582,7 +661,7 @@ async function boot(code: Join) {
   // is driven; and after two minutes untouched the screen rests (black, and free to sleep) until a touch.
   function motionWanted() {
     // A screen that takes tosses listens for a flick in any mode, gyro on or not.
-    return document.visibilityState === 'visible' && !resting && (!tierSettled || gyroOn || mode === Mode.point || mode === Mode.track || mode === Mode.gamepad || tab === 'drums' || tab === 'keys' || !!layout.toss)
+    return !!link.active && document.visibilityState === 'visible' && !resting && (!tierSettled || gyroOn || mode === Mode.point || mode === Mode.track || mode === Mode.gamepad || tab === 'drums' || tab === 'keys' || !!layout.toss)
   }
   /** Start or stop the sensors to match what's needed; true if they just started. */
   function syncMotion(): boolean {
@@ -591,6 +670,7 @@ async function boot(code: Join) {
     motionOn = want
     if (want) motion.start()
     else motion.stop()
+    control.defer()
     return want
   }
   function busy() { return gyroOn || mode === Mode.point || mode === Mode.track || mode === Mode.gamepad || (pad?.touches ?? 0) > 0 || buttonHold }
@@ -603,15 +683,16 @@ async function boot(code: Join) {
   }
 
   function begin() {
+    if (started) return
     started = true
     syncMotion()
     // A host that bounces things (the home page's marbles) asks for tosses: the phone flicked upward, screen level.
     const tosses = new TossDetector()
     motion.onSample = (dt) => {
+      if (anchorOnSample) { anchorOnSample = false; anchor(); control.recenter() }
+      if (recenterOnSample) { recenterOnSample = false; recenterPointer() }
       drums.sample()
       keys.sample()
-      if (anchorOnSample) { anchorOnSample = false; anchor() }
-      if (recenterOnSample) { recenterOnSample = false; recenterPointer() }
       pump(dt)
       const a = motion.accel
       if (!layout.toss || !a || !motion.q || !link.ready) return
@@ -692,7 +773,7 @@ async function boot(code: Join) {
       // with it. A code typed just as it moved on meets the same.
       surface = null
       try { sessionStorage.removeItem('obpal.pair') } catch { /* private mode */ }
-      return code.v === 'code'
+      return code?.v === 'code'
         ? screenMessage({ title: 'That code was just used', art: ICONS.close, body: 'Type the new one your screen shows now.', action: { label: 'Type it', run: () => location.replace(location.pathname) } })
         : screenMessage({ title: 'This code was used', art: ICONS.phone, body: 'Once a phone pairs, the screen shows a new code. Scan the one it shows now.' })
     }
@@ -731,6 +812,16 @@ async function boot(code: Join) {
       keyboard.offered(layout.tray.some((c) => c.type === 'keyboard'))
     } else if (m.t === 'state') {
       if ('music.sync' in m.values) musicWire.reply(m.values['music.sync'])
+      if (typeof m.values['control.sim'] === 'string' && CONTROL_SPACES[m.values['control.sim']]) {
+        if (control.sim !== m.values['control.sim']) control.recenter()
+        control.sim = m.values['control.sim']
+        gamepad.setControlReach(CONTROL_SPACES[control.sim].reach)
+      }
+      if (m.values['control.scope'] === 'object' || m.values['control.scope'] === 'scene') {
+        if (control.scope !== m.values['control.scope']) { drums.release(); keys.reset() }
+        control.scope = m.values['control.scope']
+      }
+      if ('control.position' in m.values && values['control.position'] !== m.values['control.position']) recenterHere(false)
       Object.assign(values, m.values)
       // A text or password field has the focus on the screen (textField 'text' or 'secret'): the Type prompt.
       if ('textField' in m.values) keyboard.setField(m.values.textField)
@@ -772,11 +863,18 @@ async function boot(code: Join) {
   }
 
   /** The centre button: set the tilt level here, or recentre (Point: aim here = the middle of the screen). */
-  function recenterHere() {
+  function recenterHere(notify = true) {
     smoother.reset()
-    if (mode === Mode.tilt) { if (motion.q) tilt.capture(motion.up()); toast('Level set') }
-    else if (mode === Mode.point) recenterPointer()
-    else link.sendCtl({ t: 'recenter' })
+    anchor()
+    control.recenter()
+    drums.release(); keys.recenter(); gamepad.setPosition()
+    imuHeld = false; imu.release()
+    if (motion.q) wii.recenter(motion.q)
+    wiiLast = [wii.acc[0], wii.acc[1]]
+    if (control.sim) link.sendCtl({ t: 'value', id: 'control.aim', v: JSON.stringify({ aim: [0, 0], tilt: [0, 0], active: false }) })
+    link.sendCtl({ t: 'recenter' })
+    controlSent = 0
+    if (notify) toast('Position set')
   }
 
   function setGyro(on: boolean) {
@@ -789,6 +887,7 @@ async function boot(code: Join) {
     if (on && settings.lockWithGyro && !lock.locked) void setLock(true, true)
     else if (!on && lockFromGyro) void setLock(false)
     if (on) {
+      control.recenter()
       if (woke) anchorOnSample = true
       else anchor()
       dismissHint('gyro')
@@ -829,6 +928,7 @@ async function boot(code: Join) {
 
   /** Aim here = the centre of the screen: resets the phone's pointing reference and the host's cursor. */
   function recenterPointer() {
+    control.recenter()
     if (motion.q) wii.recenter(motion.q)
     wiiLast = [wii.acc[0], wii.acc[1]]
     link.sendCtl({ t: 'recenter' })
@@ -842,7 +942,7 @@ async function boot(code: Join) {
       <div class="surface${settings.left ? ' left' : ''}" id="surface">
         <header class="bar">
           <span class="host-ic">${logoMark()}</span>
-          <span class="host-name"></span>
+          <button class="host-name connection-title" aria-label="Connections"></button>
           <span id="link-badge"></span>
           <button class="icon-btn glass lock-btn" id="lock" aria-label="Lock screen rotation" aria-pressed="false">${ICONS.unlock}</button>
           <button class="icon-btn glass" id="gear" aria-label="Settings">${ICONS.settings}</button>
@@ -889,6 +989,7 @@ async function boot(code: Join) {
       <div class="rest" id="rest" aria-hidden="true"><span>Resting to keep your phone cool · touch to wake</span></div>`)
     surface = document.getElementById('surface')!
     linkBadge.mount(document.getElementById('link-badge')!)
+    document.querySelector<HTMLButtonElement>('.connection-title')!.onclick = () => openConnections()
     document.body.classList.add('live')
     calmMarks(surface)
     gamepad.mount(surface)
@@ -1019,7 +1120,7 @@ async function boot(code: Join) {
     surface.dataset.mode = String(mode)
     surface.classList.toggle('no-motion', tier === Tier.touch)
     surface.classList.toggle('gyro-on', gyroOn)
-    surface.querySelector('.host-name')!.textContent = hostName
+    surface.querySelector('.host-name')!.textContent = link.active?.row.name ?? hostName
     surface.querySelectorAll<HTMLButtonElement>('.modes button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === tab)))
     const styles = document.getElementById('styles')!
     styles.hidden = tab !== 'rotate' || !(styleAvailable('game') && styleAvailable('match'))
@@ -1124,6 +1225,7 @@ async function boot(code: Join) {
       ? [gyroOn ? g('point', 'aim') : g('drag', 'move'), g('tap', 'focus'), g('pan', 'pan'), g('pinch', 'zoom')]
       : [g('drag', 'orbit'), g('pan', 'pan'), g('pinch', 'zoom'), g('twist', 'roll')])
     gamepad.sync({ active: mode === Mode.gamepad, offered: hostModes().includes(Mode.gamepad) })
+    gamepad.setControlScope(control.scope, String(values['control.target'] ?? ''))
     placeTyping()
     // The controller may have changed: Back's arming follows its bindings, and the badges go on what's shown.
     buttons.syncBack()
@@ -1204,10 +1306,33 @@ async function boot(code: Join) {
 
   const initialsOf = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('') || '•'
 
+  function toggleControlScope() {
+    const next = control.scope === 'object' ? 'scene' : 'object'
+    drums.release(); keys.reset(); control.scope = next
+    link.sendCtl({ t: 'value', id: 'control.scope', v: next }); renderTray(); render()
+  }
+
   function renderTray() {
     const tray = document.getElementById('tray')
     if (!tray) return
     tray.replaceChildren()
+    if (control.sim) {
+      const position = document.createElement('button'), scope = document.createElement('button')
+      position.className = scope.className = 'tray-btn glass text'
+      position.type = scope.type = 'button'
+      position.textContent = 'Set position'; position.dataset.id = 'control.position'
+      position.onclick = () => { void requestMotionPermission(); tick(); recenterHere() }
+      scope.textContent = control.scope === 'object' ? 'Object scope' : 'Scene scope'
+      scope.dataset.id = 'control.scope'; scope.setAttribute('aria-pressed', String(control.scope === 'scene'))
+      scope.onclick = toggleControlScope
+      tray.append(position, scope)
+      if (control.scope === 'scene' && !['studio', 'airhockey', 'football', 'pinball', 'slotcars', 'arena'].includes(control.sim)) {
+        const take = document.createElement('button'); take.type = 'button'; take.className = 'tray-btn glass text'
+        take.textContent = `Take ${values['control.target'] || 'aimed object'}`; take.dataset.id = 'control.take'
+        take.onclick = () => link.sendCtl({ t: 'btn', id: 'control.take', ev: 'tap' })
+        tray.append(take)
+      }
+    }
     // In a shared scene, what you hold (or the scene list, to claim something) comes first.
     if (scene && scene.nodes.length) {
       const c = sceneControl()
@@ -1261,7 +1386,7 @@ async function boot(code: Join) {
       }
       tray.appendChild(b)
     }
-    tray.hidden = layout.tray.length === 0 && !(scene && scene.nodes.length)
+    tray.hidden = !control.sim && layout.tray.length === 0 && !(scene && scene.nodes.length)
   }
 
   /**
@@ -1374,14 +1499,13 @@ async function boot(code: Join) {
         <div class="row track3d" role="radiogroup" aria-label="3D follows"><span>3D follows</span>${(['motion', 'xr', 'glow'] as const).map((w) => html`<button class="way-opt" role="radio" data-way="${w}" aria-checked="${settings.track3d === w}"><span>${{ motion: 'The phone’s motion', xr: 'Its camera (Android)', glow: 'A glow for the screen’s camera' }[w]}</span></button>`)}</div>
         <button class="set-row glass" id="buttons-open">${BUTTONS_GLYPH}<span>Buttons<small>Headset, remote, clicker, pad</small></span><span class="set-srcs">${sourceStack(inputs)}</span>${ICONS.right}</button>
         <a class="support-link" href="/sponsor/" target="_blank" rel="noopener">${ICONS.heart}<span>Support ob.Pal</span></a>
-        <button class="btn" id="forget" hidden>${ICONS.close}<span>Forget remembered screens</span></button>
+        <button class="set-row glass" id="connections-open">${ICONS.phone}<span>Connections<small>Switch, rename or forget a screen</small></span>${ICONS.right}</button>
+        <button class="set-row glass" id="scan-open">${ICONS.phone}<span>Scan a code<small>Connect another screen</small></span>${ICONS.right}</button>
         <div class="actions"><button class="btn" id="disc">Disconnect</button><button class="btn primary" id="done">Done</button></div>
       </div>`)
     document.body.appendChild(sheet)
-    // Screens this phone can reach with a direct code; forgetting them means pairing online again.
-    const forget = sheet.querySelector<HTMLButtonElement>('#forget')!
-    void listPairs().then((ps) => { forget.hidden = ps.length === 0 })
-    forget.onclick = () => { tick(); void forgetAllPairs().then(() => { forget.hidden = true; toast('Forgotten') }) }
+    sheet.querySelector<HTMLButtonElement>('#connections-open')!.onclick = () => { close(); setTimeout(() => openConnections(), 220) }
+    sheet.querySelector<HTMLButtonElement>('#scan-open')!.onclick = () => { close(); setTimeout(() => openConnections(true), 220) }
     const gain = sheet.querySelector<HTMLInputElement>('#gain')!
     const smooth = sheet.querySelector<HTMLInputElement>('#smooth')!
     const left = sheet.querySelector<HTMLInputElement>('#left')!
@@ -1467,6 +1591,14 @@ async function boot(code: Join) {
 
   function pump(dt: number) {
     if (!link.ready) return
+    if (control.sim && performance.now() - controlSent >= 33) {
+      const state = control.sample(dt / 1000)
+      const active = state.active && !document.hidden && (gyroOn || mode === Mode.point || mode === Mode.track && trackWay() === 'motion' || drums.aiming || keys.aiming || mode === Mode.gamepad && gamepad.spatialActive)
+      if (active || controlActive) link.sendCtl({ t: 'value', id: 'control.aim', v: JSON.stringify({
+        aim: state.aim.map(n => Math.round(n * 10000) / 10000), tilt: state.tilt.map(n => Math.round(n * 10000) / 10000), active, pointer: mode === Mode.gamepad && gamepad.spatialPointer,
+      }) })
+      controlActive = active; controlSent = performance.now()
+    }
     if (mode === Mode.gamepad && gamepad.pump(dt)) return // gamepad mode sends PAD (and POINTER) packets instead of STATE
     const now = performance.now()
     const touches = pad?.touches ?? 0

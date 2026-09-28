@@ -85,22 +85,15 @@ const previews = mountPreviews(made.flatMap((m) => (m.slot ? [m.slot] : [])))
 
 let filters = filtersFrom(location.search)
 const search = $('search') as HTMLInputElement
+const controller = $('controller-filter') as HTMLSelectElement
 
-function chip(id: ControllerId | null) {
-  const b = document.createElement('button')
-  b.type = 'button'
-  b.className = 'sims-chip'
-  b.dataset.face = id ?? ''
-  b.innerHTML = id ? faceGlyph(id) : ICONS.models
-  const name = document.createElement('span')
-  name.textContent = id ? faceShort(id) : 'All'
-  const count = document.createElement('i')
-  b.append(name, count)
-  b.title = id ? CONTROLLERS[id].for : 'Every sim'
-  b.onclick = () => setFace(id)
-  return b
-}
-$('filter').replaceChildren(chip(null), ...FACES.map(chip))
+controller.replaceChildren(...[null, ...FACES].map(id => {
+  const option = document.createElement('option')
+  option.value = id ?? ''
+  option.title = id ? CONTROLLERS[id].for : 'Every sim'
+  return option
+}))
+controller.addEventListener('change', () => setFace(controller.value as ControllerId || null))
 const collections: { id: CollectionId | null; name: string }[] = [{ id: null, name: 'All' }, { id: 'featured', name: 'Featured' }, { id: 'new', name: 'New' }, ...CATEGORIES]
 $('categories').replaceChildren(...collections.map(c => {
   const b = document.createElement('button')
@@ -111,11 +104,16 @@ $('categories').replaceChildren(...collections.map(c => {
   b.onclick = () => setFilters({ ...filters, category: c.id })
   return b
 }))
-// The bar joins the top bar's glass once it sticks under it.
-const sentinel = document.createElement('div')
-sentinel.className = 'sims-sentinel'
-document.querySelector('.sims-bar')!.before(sentinel)
-new IntersectionObserver(([e]) => document.querySelector('.sims-bar')!.classList.toggle('stuck', !e.isIntersecting), { rootMargin: '-65px 0px 0px 0px' }).observe(sentinel)
+
+/** Reveal the selected category without moving the page vertically. */
+function revealCategory() {
+  const lane = $('categories')
+  const selected = lane.querySelector<HTMLElement>('[aria-pressed="true"]')
+  if (!selected) return
+  const bounds = lane.getBoundingClientRect(), tab = selected.getBoundingClientRect()
+  if (tab.left < bounds.left) lane.scrollLeft -= bounds.left - tab.left + 2
+  else if (tab.right > bounds.right) lane.scrollLeft += tab.right - bounds.right + 2
+}
 
 /** Show the sims `next` suits, moving the cards that stay to their new places rather than jumping (FLIP). */
 function setFilters(next: SimFilters, animate = true, navigation: 'push' | 'replace' | 'none' = 'push') {
@@ -124,14 +122,17 @@ function setFilters(next: SimFilters, animate = true, navigation: 'push' | 'repl
   const url = filtersUrl(new URL(location.href), filters)
   if (navigation !== 'none' && url.href !== location.href) history[navigation === 'push' ? 'pushState' : 'replaceState'](null, '', url)
   if (search.value.trim() !== filters.q) search.value = filters.q
-  document.querySelectorAll<HTMLElement>('.sims-category').forEach(b => b.setAttribute('aria-pressed', String((b.dataset.category || null) === filters.category)))
-  document.querySelectorAll<HTMLButtonElement>('.sims-chip').forEach(b => {
-    const id = b.dataset.face as ControllerId || null
-    const n = filterSims(SIMS, { ...filters, face: id }).length
-    b.setAttribute('aria-pressed', String(id === face))
-    b.querySelector('i')!.textContent = String(n)
-    b.disabled = n === 0 && id !== face && id !== null
+  document.querySelectorAll<HTMLElement>('.sims-category').forEach(b => {
+    const selected = (b.dataset.category || null) === filters.category
+    b.setAttribute('aria-pressed', String(selected))
   })
+  for (const option of controller.options) {
+    const id = option.value as ControllerId || null
+    const n = filterSims(SIMS, { ...filters, face: id }).length
+    option.textContent = `${id ? faceShort(id) : 'Controllers'} (${n})`
+    option.disabled = n === 0 && id !== face && id !== null
+  }
+  controller.value = face ?? ''
   const cards = [...grid.children] as HTMLElement[]
   const before = new Map(cards.map((c) => [c, c.hidden ? null : c.getBoundingClientRect()]))
   const matches = new Set(filterSims(SIMS, filters).map(c => c.id))
@@ -147,6 +148,7 @@ function setFilters(next: SimFilters, animate = true, navigation: 'push' | 'repl
   $('none').hidden = cards.some((c) => !c.hidden)
   $('result-count').textContent = `${matches.size} ${matches.size === 1 ? 'sim' : 'sims'}`
   $('clear-filters').hidden = !filters.category && !face && !filters.q
+  revealCategory()
   previews.refresh()
   if (!animate || motion.matches) return
   for (const c of cards) {
@@ -169,4 +171,6 @@ search.addEventListener('blur', () => { searching = false })
 $('clear-filters').onclick = () => setFilters({ category: null, face: null, q: '' })
 addEventListener('popstate', () => { searching = false; setFilters(filtersFrom(location.search), false, 'none') })
 setFilters(filters, false, 'replace')
+void document.fonts.ready.then(revealCategory)
+addEventListener('resize', revealCategory)
 Object.assign(window, { __sims: { cards: () => [...grid.children].filter((c) => !(c as HTMLElement).hidden).map((c) => (c as HTMLElement).dataset.id), setFace, previews: previews.stats } })

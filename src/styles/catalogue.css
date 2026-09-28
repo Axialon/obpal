@@ -35,6 +35,7 @@
 .bld .rng input { grid-column: 1 / -1; grid-row: 2; }
 .bld .rng output { grid-column: 2; grid-row: 1; color: var(--ink); font: 650 12.5px var(--font-data, var(--font)); font-variant-numeric: tabular-nums; }
 .bld-out { position: sticky; top: 84px; display: grid; gap: 10px; }
+.bld-out { --muted: var(--secondary); background: var(--frost); border: 1px solid var(--frost-edge); border-radius: 18px; -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); box-shadow: var(--frost-shadow); }
 .bld-out pre { --bb-scroll-inset: 10px; margin: 0; max-height: 420px; overflow: auto; padding: 16px; border-radius: 18px; border: 1px solid var(--line); background: rgb(0 0 0 / 0.35); color: var(--secondary); font: 500 12.5px/1.55 var(--font-data, ui-monospace, monospace); }
 .errs { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .errs:empty { display: none; }

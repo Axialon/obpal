@@ -188,6 +188,14 @@ export class LampLogic implements DeviceLogic {
       }
       this.preview(l)
     }
+    if (inp.space && !inp.pad) {
+      // Pointing previews the lamp; holding paints it, leaving wheel and presets at their chosen values.
+      if (!inp.point || inp.held.has('wii-b')) {
+        const [x, y] = inp.space.aim
+        l.h = (x + 1) * 179.9; l.v = 0.02 + (y + 1) * 0.49; l.party = false
+      }
+      return
+    }
     if (inp.point) {
       // B held (or the wheel held, on the mouse): sweep to paint, across for the colour, up and down for the brightness.
       if (inp.held.has('wii-b')) {

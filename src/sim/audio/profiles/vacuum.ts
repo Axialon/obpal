@@ -6,6 +6,6 @@ export default profile<VacuumLogic>({
   id: 'vacuum', space: 'room', materials: ['plastic', 'tile'], texture: 'motor', pitch: 2, distance: 3, action: 'dock',
 }, (logic, n, out) => {
   const u = logic.units[n]
-  sample(out, u.x, 0.15, u.z, u.clean && !u.docked ? 0.6 : Math.abs(u.v), u.v, u.v)
+  sample(out, u.x, 0.15, u.z, u.clean && !u.docked ? 0.65 : 0, u.clean && !u.docked ? 0.55 + Math.abs(u.v) * 0.1 : 0, u.v)
 })
 

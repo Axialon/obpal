@@ -25,6 +25,7 @@ export class Motion {
   hasOrientation = false
   hasGyro = false
   lastSample = 0
+  sampleAt = 0
   onSample: ((dtMs: number) => void) | null = null
   private last = 0
 
@@ -64,6 +65,7 @@ export class Motion {
       this.gyro = qRotate(qAxisAngle(0, 0, 1, screenAngle() * D2R), device)
     }
     const now = performance.now()
+    this.sampleAt = Number.isFinite(e.timeStamp) && Math.abs(now - e.timeStamp) < 1000 ? e.timeStamp : now
     const dt = this.last ? Math.min(Math.max(now - this.last, 0), 50) : 16.7
     this.last = now
     this.lastSample = now

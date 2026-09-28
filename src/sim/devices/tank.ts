@@ -76,8 +76,13 @@ export class TankLogic extends Machine {
       u.x = clamp(u.x - Math.sin(u.h) * u.v * dt, -8, 8)
       u.z = clamp(u.z - Math.cos(u.h) * u.v * dt, -7, 7)
       if (i) {
-        u.turret = wrapPi(u.turret - (i.pad ? axis(i.pad.axes[2]) * dt * 1.8 : i.pan[0] * 0.012))
-        u.elevation = clamp(u.elevation - (i.pad ? axis(i.pad.axes[3]) * dt : i.pan[1] * 0.006), -0.08, 0.6)
+        if (i.space && (!i.pad || i.space.pointer)) {
+          const [x, y] = i.space.aim
+          u.turret = -x * Math.PI; u.elevation = 0.08 + y * (y >= 0 ? 0.52 : 0.16)
+        } else {
+          u.turret = wrapPi(u.turret - (i.pad ? axis(i.pad.axes[2]) * dt * 1.8 : i.pan[0] * 0.012))
+          u.elevation = clamp(u.elevation - (i.pad ? axis(i.pad.axes[3]) * dt : i.pan[1] * 0.006), -0.08, 0.6)
+        }
       }
       u.cooldown = Math.max(0, u.cooldown - dt)
       if (action(i, 'fire') && !u.cooldown) {

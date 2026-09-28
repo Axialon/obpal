@@ -31,6 +31,7 @@ export class TrebuchetLogic extends Machine {
       if (i && u.phase === 'ready') {
         u.weight = clamp(u.weight + (i.pad ? -axis(i.pad.axes[1]) * dt * 15 : i.drag[0] * 0.1), 5, 50)
         u.angle = clamp(u.angle + (i.pad ? -axis(i.pad.axes[3]) * dt * 20 : -i.drag[1] * 0.15), 20, 75)
+        if (i.space && !i.pad) { u.weight = 27.5 + i.space.aim[0] * 22.5; u.angle = 47.5 + i.space.aim[1] * 27.5 }
       }
       if (raw?.presses.includes('launch') || action(i, 'launch')) {
         u.actions++

@@ -5,6 +5,7 @@ body { letter-spacing: -0.005em; }
 /* ---- top bar ---- */
 .topbar { position: fixed; top: 0; left: 0; right: 0; height: 76px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; padding: 0 22px; pointer-events: none; z-index: 5; }
 .topbar > * { pointer-events: auto; }
+.topbar { --muted: var(--secondary); background: var(--frost); border-bottom: 1px solid var(--frost-edge); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); box-shadow: var(--frost-shadow); }
 .brand { grid-column: 1; justify-self: start; display: flex; align-items: center; gap: 2px; }
 .switch-btn { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 10px; background: transparent; color: var(--muted); transition: background 0.2s var(--ease), color 0.2s, transform 0.2s var(--ease); }
 .switch-btn:hover { background: rgb(var(--hl-rgb) / 0.07); color: var(--ink); }
@@ -114,7 +115,7 @@ body.multi .pointer .pt-name { display: block; }
 .loading { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-radius: 999px; font-size: 13px; font-weight: 650; color: var(--secondary); z-index: 5; }
 .loading .ring { width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgb(var(--hl-rgb) / 0.18); border-top-color: var(--accent); animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.drop { position: fixed; inset: 16px; border: 2px dashed rgb(var(--accent-rgb) / 0.7); border-radius: 30px; display: grid; place-items: center; background: rgb(var(--base-rgb) / 0.55); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); pointer-events: none; z-index: 9; font-size: 20px; font-weight: 750; }
+.drop { position: fixed; inset: 16px; border: 2px dashed rgb(var(--accent-rgb) / 0.7); border-radius: 30px; display: grid; place-items: center; background: var(--frost); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); pointer-events: none; z-index: 9; font-size: 20px; font-weight: 750; }
 .drop > div { display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .drop .ic { width: 40px; height: 40px; color: var(--accent-text); }
 .note { position: fixed; top: 88px; left: 50%; transform: translate(-50%, -8px); opacity: 0; padding: 10px 16px; border-radius: 14px; font-weight: 650; font-size: 13.5px; transition: opacity 0.25s var(--ease), transform 0.25s var(--ease); pointer-events: none; z-index: 8; }
@@ -143,7 +144,7 @@ body.multi .pointer .pt-name { display: block; }
 /* ---- active controls: light frosted accent with dark ink (reference-card style) ---- */
 .tool[aria-pressed='true'], .tool.accent { color: var(--accent-ink); background: var(--glass-light); box-shadow: 0 8px 22px rgb(var(--accent-rgb) / 0.25), inset 0 1px 0 rgb(255 255 255 / 0.5); }
 .tile[aria-current='true'] { border-color: rgb(var(--accent-rgb) / 0.7); background: linear-gradient(160deg, rgb(var(--accent-rgb) / 0.22), rgb(var(--surface-rgb) / 0.3)); }
-.catalog, .tools, .caption, .chip, .loading, .note { background: var(--glass); }
+.catalog, .tools, .caption, .chip, .loading, .note { background: var(--frost); }
 
 /* ---- theme picker ---- */
 .themes { position: fixed; top: 76px; right: 22px; z-index: 12; padding: 6px 10px 10px; border-radius: 22px; width: 320px; animation: rise-in 0.3s var(--ease); }
@@ -205,6 +206,9 @@ body.multi .pointer .pt-name { display: block; }
 }
 @media (max-width: 600px) {
   .topbar { padding: 0 12px; height: 68px; }
+  body:not(.presence-active) .presence-floating { width: calc(100vw - 16px); height: 56px; flex-wrap: nowrap; gap: 4px; padding: 6px; overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--frost-edge) transparent; }
+  body:not(.presence-active) .presence-floating > * { flex-shrink: 0; white-space: nowrap; }
+  body:not(.presence-active) .catalog { top: 144px; }
   .logo .mark { width: 34px; height: 34px; }
   .logo .word { font-size: 19px; }
   .tool { width: 38px; height: 38px; }
@@ -219,8 +223,8 @@ body.multi .pointer .pt-name { display: block; }
 .to-tags { position: fixed; inset: 0; z-index: 3; pointer-events: none; overflow: hidden; }
 .to-tag {
   position: absolute; left: 0; top: 0; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px 0 8px;
-  border-radius: 999px; background: rgb(var(--base-rgb) / 0.72); border: 1px solid rgb(var(--hl-rgb) / 0.14);
-  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); white-space: nowrap;
+  border-radius: 999px; background: var(--frost); border: 1px solid var(--frost-edge); box-shadow: var(--frost-shadow);
+  -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); white-space: nowrap;
   font: 600 11.5px/1 var(--font-data); color: var(--ink); font-variant-numeric: tabular-nums;
   transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease); will-change: transform;
 }
@@ -240,8 +244,8 @@ body.multi .pointer .pt-name { display: block; }
 .tile { position: relative; }
 .tile-add {
   position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%;
-  background: rgb(var(--base-rgb) / 0.72); border: 1px solid rgb(var(--hl-rgb) / 0.14); color: var(--ink);
-  opacity: 0; transform: scale(0.85); transition: opacity 0.16s var(--ease), transform 0.16s var(--ease), background 0.16s; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  background: var(--frost); border: 1px solid var(--frost-edge); box-shadow: var(--frost-shadow); color: var(--ink);
+  opacity: 0; transform: scale(0.85); transition: opacity 0.16s var(--ease), transform 0.16s var(--ease), background 0.16s; -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur);
 }
 .tile-add .ic { width: 15px; height: 15px; }
 .tile:hover .tile-add, .tile:focus-visible .tile-add, .tile-add:focus-visible { opacity: 1; transform: none; }

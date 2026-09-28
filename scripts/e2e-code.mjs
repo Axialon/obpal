@@ -256,9 +256,18 @@ try {
     }, 30000)
   })
 
-  await check('the phone kept the screen’s regular code: a reload rejoins the same scene without the short code', async () => {
-    const stored = await phone.evaluate(() => sessionStorage.getItem('obpal.pair'))
-    if (!stored?.startsWith('1.')) throw new Error(`stored ${stored}`)
+  await check('the phone kept the verified invite as a key: a reload rejoins without the short code', async () => {
+    await until('remembered invite key', () => phone.evaluate(() => new Promise((resolve) => {
+      const request = indexedDB.open('obpal')
+      request.onsuccess = () => {
+        const db = request.result, id = sessionStorage.getItem('obpal.active')
+        if (!id) { db.close(); resolve(false); return }
+        const read = db.transaction('connections').objectStore('connections').get(id)
+        read.onsuccess = () => { resolve(read.result?.invite?.key instanceof CryptoKey && !read.result.invite.key.extractable); db.close() }
+        read.onerror = () => { db.close(); resolve(false) }
+      }
+      request.onerror = () => resolve(false)
+    })))
     await phone.reload()
     await phone.locator('.modes').waitFor({ timeout: 25000 })
     await until('still one on the screen', () => screen.evaluate(() => window.__obpal.participants.length === 1), 10000)

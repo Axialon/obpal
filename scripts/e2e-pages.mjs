@@ -10,6 +10,7 @@
 import { chromium, devices } from 'playwright'
 import { cspCheck, cspViolations } from './csp-watch.mjs'
 import { startWorker } from './local-worker.mjs'
+import { checkFrost, setSurface } from './lib/frost.mjs'
 
 const PORT = Number(process.env.OBPAL_E2E_WORKER_PORT) || 5179
 const HEADED = process.argv.includes('--headed')
@@ -51,6 +52,7 @@ try {
         const seen = cspViolations.length
         const res = await page.goto(worker.origin + path, { waitUntil: 'load' })
         const headers = res.headers()
+        if (path === '/p/' && !/camera=\(self\)/.test(headers['permissions-policy'] ?? '')) throw new Error('the phone camera is blocked by Permissions-Policy')
         await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
         await sleep(1500)
         await page.evaluate(() => window.scrollTo(0, 0))
@@ -77,6 +79,93 @@ try {
       } finally {
         await ctx.close()
       }
+    })
+  }
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+    await check(`/sim/ has compact, readable frost at ${viewport.width}x${viewport.height}`, async () => {
+      const ctx = await browser.newContext({ viewport, reducedMotion: 'reduce' })
+      try {
+        const page = await ctx.newPage()
+        await page.goto(worker.origin + '/sim/')
+        await page.waitForFunction(() => window.__sims?.cards().length)
+        await page.evaluate(() => scrollTo(0, 1050))
+        for (const theme of ['carbon', 'light']) {
+          await setSurface(page, theme)
+          await checkFrost(page, '.top', { text: ['.top-nav a'] })
+          await checkFrost(page, '.sims-bar', { maxHeight: viewport.width < 600 ? 126 : 64, text: ['.sims-category', '#search', '#controller-filter', '#result-count', '#clear-filters'] })
+          const layout = await page.evaluate(() => ({
+            top: document.querySelector('.top').getBoundingClientRect().bottom,
+            bar: document.querySelector('.sims-bar').getBoundingClientRect().top,
+            overflow: document.documentElement.scrollWidth - innerWidth,
+          }))
+          if (Math.abs(layout.top - layout.bar) > 1 || layout.overflow > 0) throw new Error(`sticky layout: ${JSON.stringify(layout)}`)
+        }
+        return `${viewport.width < 600 ? 126 : 64}px limit; both themes; AA over black and white`
+      } finally { await ctx.close() }
+    })
+  }
+  await check('frost has an opaque fallback when backdrop filters are unavailable', async () => {
+    const ctx = await browser.newContext()
+    try {
+      const page = await ctx.newPage()
+      let replaced = false
+      await page.route('**/*.css', async route => {
+        const response = await route.fetch()
+        const css = await response.text()
+        const body = css.replace(/\((?:-webkit-)?backdrop-filter:/g, () => { replaced = true; return '(obpal-unsupported-backdrop-filter:' })
+        await route.fulfill({ response, body })
+      })
+      await page.goto(worker.origin + '/sim/')
+      await page.waitForFunction(() => window.__sims?.cards().length)
+      if (!replaced) throw new Error('no backdrop support query was exercised')
+      await checkFrost(page, '.top', { solid: true })
+      await checkFrost(page, '.sims-bar', { solid: true })
+      await page.goto(worker.origin + '/')
+      await page.locator('.cta-alt').hover()
+      await checkFrost(page, '.cta-alt', { solid: true })
+    } finally { await ctx.close() }
+  })
+  for (const [path, surfaces] of [
+    ['/', ['.top', '.pair']],
+    ['/link/', ['.top']],
+    ['/catalogue/', ['.top', '.bld-out']],
+    ['/sim/device/', ['.sim-top', '.sim-panel']],
+    ['/sim/arm/', ['.sim-top', '.sim-panel']],
+    ['/sim/arena/', ['.sim-top', '.sim-panel']],
+    ['/embed/', ['.sim-top', '.sim-panel']],
+    ['/view/', ['.topbar', '.catalog', '.presence-floating', '.obpal-chip .pill', '.obpal-chip .card']],
+    ['/p/', ['.msg-card']],
+  ]) {
+    await check(`${path} overlays keep their frost and AA text in both themes`, async () => {
+      const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: 'reduce' })
+      try {
+        const page = await ctx.newPage()
+        await page.goto(worker.origin + path)
+        for (const theme of ['carbon', 'light']) {
+          await setSurface(page, theme)
+          for (const selector of surfaces) await checkFrost(page, selector, { text: ['p', 'small', 'label', 'h1', 'h2', '.top-nav a', '.presence-controls button', '.k', '.status'] })
+          if (path === '/') {
+            await page.locator('.cta-alt').hover()
+            await checkFrost(page, '.cta-alt')
+          }
+          if (path === '/view/') {
+            const overlap = await page.evaluate(() => document.querySelector('.topbar').getBoundingClientRect().bottom - document.querySelector('.presence-floating').getBoundingClientRect().top)
+            if (overlap > 0) throw new Error(`viewpoint toolbar overlaps the header by ${overlap}px`)
+            await page.locator('#t-theme').click()
+            await page.locator(`[data-bb-theme-id="${theme}"]`).click()
+            await checkFrost(page, '#themes', { text: ['.bb-label', '.bb-theme'] })
+            await page.keyboard.press('Escape')
+          }
+        }
+        if (path === '/view/') {
+          for (const width of [390, 320]) {
+            await page.setViewportSize({ width, height: 844 })
+            await checkFrost(page, '.presence-floating', { maxHeight: 64, text: ['button', 'select'] })
+            const overlap = await page.evaluate(() => document.querySelector('.presence-floating').getBoundingClientRect().bottom - document.querySelector('.catalog').getBoundingClientRect().top)
+            if (overlap > 0) throw new Error(`${width}px: viewpoint toolbar covers the catalogue by ${overlap}px`)
+          }
+        }
+      } finally { await ctx.close() }
     })
   }
   await check('no Content Security Policy violations on any page', cspCheck)

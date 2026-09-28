@@ -34,7 +34,7 @@ for (const line of md.split('\n')) {
 // What to tick and pick where there's nothing to paste (the owner's choices, 2026-09-27; UPLOAD.md's decisions).
 const choices = {
   'Store listing tab': ['Category: Tools', 'Language: English', 'Official URL: leave empty', 'Mature content: No', 'Upload the icon, the five screenshots and the two promo tiles (below), then Save draft'],
-  'Privacy practices tab': ['Remote code: No, then paste its text', 'Data usage: tick none of the data types', 'Tick all three certifications', 'Then Save draft'],
+  'Privacy practices tab': ['Remote code: No, then paste its text', 'Data usage: tick Location, Web history and User activity; leave the other six unticked', 'Tick all three certifications', 'Then Save draft'],
   'Distribution tab': ['Visibility: Public', 'Regions: all regions', 'No in-app purchases', 'Then Save draft'],
 }
 /** The dashboard's "Unable to publish" list, in its words, and the tab below that fixes each. */
@@ -60,7 +60,7 @@ const images = [
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const copyable = (label, text, meta = '') => `<div class="field"><div class="head"><b>${esc(label)}</b>${meta}<button type="button" data-copy="${esc(text)}">Copy</button></div><pre>${esc(text)}</pre></div>`
 const fileRow = (f) => `<div class="file"><span>${esc(f.name)}<code>${esc(f.path)}</code></span><button type="button" data-copy="${esc(f.path)}">Copy path</button></div>`
-const count = (f) => (/summary/i.test(f.name) ? ` <span class="n">${f.text.length} of 132</span>` : /description/i.test(f.name) ? ` <span class="n">${f.text.length} of 16,000</span>` : '')
+const count = (f) => (/summary/i.test(f.name) ? ` <span class="n">${f.text.length} of 132</span>` : /description/i.test(f.name) ? ` <span class="n">${f.text.length} of 16,000</span>` : /test instructions/i.test(f.name) ? ` <span class="n">${f.text.length} of 500</span>` : '')
 
 const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">

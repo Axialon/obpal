@@ -29,8 +29,10 @@ export class MusicWire {
     } catch { /* Unknown state is ignored, like the other optional controls. */ }
   }
   use(on: boolean) { this.active = on; if (on) this.sync(); else this.event('stop') }
-  event(op: MusicEvent['op'], n = 0, v = 0, x = 0, time = performance.now()) {
-    const e: MusicEvent = { op, seq: this.seq++, at: Number.isFinite(this.rtt) ? performance.timeOrigin + time + this.offset : 0, uncertainty: Number.isFinite(this.rtt) ? this.rtt / 2 : 0, n, v, x }
+  /** A new screen has its own clock. No timing estimate crosses a connection switch. */
+  resetClock() { this.offset = 0; this.rtt = Infinity; this.syncAt = 0 }
+  event(op: MusicEvent['op'], n = 0, v = 0, x = 0, time = performance.now(), space?: Pick<MusicEvent, 'aim' | 'scope'>) {
+    const e: MusicEvent = { op, seq: this.seq++, at: Number.isFinite(this.rtt) ? performance.timeOrigin + time + this.offset : 0, uncertainty: Number.isFinite(this.rtt) ? this.rtt / 2 : 0, n, v, x, ...space }
     this.send({ t: 'value', id: 'music.event', v: JSON.stringify(e) })
   }
 }

@@ -51,7 +51,7 @@ body.live .aurora i { animation-play-state: paused; }
 
 /* ---- control surface ---- */
 .surface { position: fixed; inset: 0; display: flex; flex-direction: column; gap: 12px; padding: calc(8px + env(safe-area-inset-top)) 16px calc(14px + env(safe-area-inset-bottom)); animation: fade 0.35s var(--ease); }
-.bar { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.bar { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 44px; border-radius: 14px; background: var(--frost); border: 1px solid var(--frost-edge); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); box-shadow: var(--frost-shadow); }
 /* The ob.Pal mark (the family cube in ob.Pal's light, with its orbit) beside the screen's name. */
 .host-ic { width: 34px; height: 34px; display: grid; place-items: center; flex: none; }
 .host-ic .mark { width: 34px; height: 34px; filter: drop-shadow(0 4px 10px rgb(var(--accent-rgb) / 0.25)); }
@@ -157,16 +157,19 @@ body.live .aurora i { animation-play-state: paused; }
 
 /* ---- landscape: controls on the thumb side ---- */
 /* Compact landscape layout: set by the controller from the UI's own shape (it stays put while rotation is locked). */
-:root.land .surface { display: grid; grid-template-columns: 1fr minmax(240px, 38%); grid-template-rows: auto auto auto 1fr auto; column-gap: 14px; row-gap: 10px; padding-left: calc(16px + env(safe-area-inset-left)); padding-right: calc(16px + env(safe-area-inset-right)); }
+:root.land .surface { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 38%); grid-template-rows: auto auto auto minmax(0, 1fr) auto; column-gap: 14px; row-gap: 10px; padding-left: calc(16px + env(safe-area-inset-left)); padding-right: calc(16px + env(safe-area-inset-right)); }
 :root.land .bar, :root.land .banner { grid-column: 1 / -1; }
 /* The work area (the trackpad, or Point's face) fills the thumb-free side. */
 :root.land .pad, :root.land .wii, :root.land .mouse { grid-column: 1; grid-row: 2 / 6; }
+:root.land .wii { gap: 8px; padding: 4px 6px; }
+:root.land .wii-a { width: min(26dvh, 110px); flex-shrink: 0; }
+:root.land .wii-b { min-height: 52px; }
 :root.land .modes { grid-column: 2; grid-row: 2; }
 :root.land .styles { grid-column: 2; grid-row: 3; }
-:root.land .tray { grid-column: 2; grid-row: 4; flex-wrap: wrap; align-content: start; overflow: visible; -webkit-mask-image: none; mask-image: none; margin-right: 0; padding-right: 0; }
+:root.land .tray { grid-column: 2; grid-row: 4; flex-wrap: wrap; align-content: start; min-height: 0; overflow-y: auto; touch-action: pan-y; -webkit-mask-image: none; mask-image: none; margin-right: 0; padding-right: 0; }
 :root.land .dock { grid-column: 2; grid-row: 5; }
 :root.land .gyro, :root.land .icon-btn.square { min-height: 62px; }
-:root.land .surface.left { grid-template-columns: minmax(240px, 38%) 1fr; }
+:root.land .surface.left { grid-template-columns: minmax(240px, 38%) minmax(0, 1fr); }
 :root.land .surface.left .pad, :root.land .surface.left .wii, :root.land .surface.left .mouse { grid-column: 2; }
 :root.land .surface.left .modes, :root.land .surface.left .styles, :root.land .surface.left .tray, :root.land .surface.left .dock { grid-column: 1; }
 
@@ -187,15 +190,16 @@ body.live .aurora i { animation-play-state: paused; }
 @supports (height: 100dvh) { .sheet-wrap { bottom: auto; height: 100dvh; } }
 .sheet-wrap.out::before { animation: fade-out 0.2s var(--ease) forwards; }
 .sheet-wrap.out .sheet { animation: sheet-down 0.2s var(--ease) forwards; }
+/* A coaching hint must not cover a sheet's controls, including one that appears after the sheet opens. */
+body:has(.sheet-wrap) .hint { visibility: hidden; }
 .sheet { width: min(480px, 100%); max-height: 100%; padding: 10px 20px 20px; border-radius: 30px; display: grid; gap: 16px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; -webkit-overflow-scrolling: touch;
-  background: linear-gradient(180deg, rgb(var(--surface-rgb) / 0.62), rgb(var(--base-rgb) / 0.68)) !important;
-  -webkit-backdrop-filter: var(--blur-heavy) !important; backdrop-filter: var(--blur-heavy) !important;
+  background: var(--frost);
+  -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur);
   animation: sheet-up 0.32s var(--ease); transition: transform 0.28s var(--ease); }
 .sheet::-webkit-scrollbar { display: none; }
-/* The head and the answer buttons stay put while the rest scrolls under them and fades into their denser glass (a
-   blur of their own can't see through the sheet's), in the sheet's own colour at that edge. */
+/* The head and answer buttons are opaque: a nested backdrop cannot blur through the sheet's backdrop root. */
 .sheet-head { position: sticky; top: -10px; z-index: 2; display: grid; grid-template-columns: 40px 1fr 40px; align-items: center; margin: -10px -20px -6px; padding: 10px 12px 6px;
-  background: linear-gradient(180deg, rgb(var(--surface-rgb) / 0.94) 62%, rgb(var(--surface-rgb) / 0)); border-radius: 30px 30px 0 0; }
+  background: var(--frost-solid); border-bottom: 1px solid var(--frost-edge); border-radius: 30px 30px 0 0; }
 .sheet-head .grip { grid-column: 2; }
 .sheet-x { grid-column: 3; width: 40px; height: 40px; border-radius: 50%; }
 .sheet-x .ic { width: 18px; height: 18px; }
@@ -203,7 +207,7 @@ body.live .aurora i { animation-play-state: paused; }
 .sheet-k small { font-size: inherit; font-weight: 650; letter-spacing: 0.04em; text-transform: none; }
 /* The sheet's answer buttons stay in view however far it scrolls. */
 .sheet .actions { position: sticky; bottom: -20px; z-index: 2; display: flex; justify-content: flex-end; gap: 10px; margin: 0 -20px -20px; padding: 14px 20px 20px;
-  background: linear-gradient(0deg, rgb(var(--base-rgb) / 0.94) 66%, rgb(var(--base-rgb) / 0)); }
+  background: var(--frost-solid); border-top: 1px solid var(--frost-edge); }
 #disc.armed { background: rgb(239 68 68 / 0.92); border-color: transparent; color: #fff; }
 @keyframes fade { from { opacity: 0; } }
 @keyframes fade-out { to { opacity: 0; } }
@@ -440,8 +444,8 @@ body.resting .rest { display: grid; }
 /* --kb: how far the phone's keyboard reaches up (visualViewport); the dock rides on it. */
 .kbd { position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 22; max-width: 720px; margin: 0 auto;
   display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'field hide' 'keys keys'; gap: 8px; padding: 8px; border-radius: 24px;
-  background: linear-gradient(160deg, rgb(var(--surface-rgb) / 0.66), rgb(var(--base-rgb) / 0.6));
-  -webkit-backdrop-filter: var(--blur-heavy); backdrop-filter: var(--blur-heavy);
+  background: var(--frost);
+  -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur);
   transform: translate3d(0, calc(-1 * var(--kb, 0px)), 0); transition: transform 0.2s var(--ease); animation: dock-up 0.28s var(--ease); }
 /* It slides up rather than fades in, so the glass is frosted from its first frame (see the sheets). */
 @keyframes dock-up { from { transform: translate3d(0, calc(100% + 16px), 0); } }
@@ -486,7 +490,7 @@ body.resting .rest { display: grid; }
 /* Placed by the controller over its work area (--tp-x, --tp-bottom); it pulses twice as it comes, and not again. */
 .type-prompt { position: fixed; left: var(--tp-x, 50%); bottom: var(--tp-bottom, calc(120px + env(safe-area-inset-bottom))); z-index: 21; transform: translateX(-50%);
   display: flex; align-items: center; gap: 10px; height: 54px; padding: 0 22px 0 7px; border-radius: 999px; border: 1px solid rgb(255 255 255 / 0.32);
-  background: var(--glass-light); color: var(--accent-ink); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  background: var(--frost-accent); color: var(--accent-ink); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur);
   box-shadow: 0 18px 40px -10px rgb(var(--accent-rgb) / 0.55), 0 10px 26px rgb(0 0 0 / 0.3), inset 0 1px 0 rgb(255 255 255 / 0.5);
   font: 750 17px/1 var(--font); letter-spacing: -0.015em; white-space: nowrap; touch-action: manipulation; cursor: pointer;
   animation: tp-in 0.4s var(--ease), tp-pulse 1.6s ease-out 0.4s 2; }

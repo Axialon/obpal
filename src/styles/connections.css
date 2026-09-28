@@ -1,0 +1,47 @@
+.connection-title { min-height: 44px; padding: 0; border: 0; border-radius: 8px; text-align: left; background: none; color: inherit; cursor: pointer; }
+.connection-title::after { content: '⌄'; margin-left: 8px; color: var(--muted); }
+.connection-wrap { width: 100%; max-width: none; height: 100%; max-height: none; margin: 0; padding: max(20px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom)); border: 0; color: var(--ink); background: transparent; }
+.connection-wrap:not([open]) { display: none; }
+.connection-wrap::backdrop { background: rgb(0 0 0 / .5); }
+.connection-sheet { --accent: #c6ff34; --accent-rgb: 198 255 52; --accent-soft: #ddff88; --accent-ink: #171b0b; --focus: var(--accent); --glass-light: linear-gradient(150deg, rgb(var(--accent-rgb) / .95), rgb(var(--accent-rgb) / .78)); width: min(100%, 540px); background: var(--frost, rgb(var(--surface-rgb, 18 20 22) / .94)) !important; padding: 16px 18px max(18px, env(safe-area-inset-bottom)); gap: 12px; }
+.connection-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.connection-head h2 { margin: 0; font-size: 22px; }
+.connection-head .grip { position: absolute; top: 7px; left: calc(50% - 18px); }
+.connection-list { display: grid; margin-top: 12px; }
+.connection-row { padding: 10px 0; border-bottom: 1px solid var(--glass-edge); }
+.connection-use { display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 0; min-height: 64px; border: 0; border-radius: 12px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.connection-mark { flex: 0 0 32px; text-align: center; color: var(--muted); font-size: 23px; }
+.connection-row[data-active=true] .connection-mark { color: var(--accent); }
+.connection-label { min-width: 0; flex: 1; }
+.connection-label b { display: block; font-size: 16px; overflow-wrap: anywhere; }
+.connection-label small, .connection-detail small { display: block; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.connection-detail { flex: 0 0 auto; text-align: right; font-variant-numeric: tabular-nums; }
+.connection-detail .connection-badge { display: flex; align-items: center; justify-content: end; gap: 4px; color: var(--secondary); }
+.connection-badge .ic { width: 14px; height: 14px; }
+.connection-manage { display: flex; padding-left: 44px; gap: 12px; }
+.connection-option { min-height: 44px; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--secondary); font-size: 12px; cursor: pointer; }
+.connection-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.connection-actions .btn { flex: 1; min-height: 46px; white-space: nowrap; }
+.connection-limit { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; color: var(--muted); font-size: 13px; }
+.connection-limit select { min-width: 70px; min-height: 44px; border: 1px solid var(--glass-edge); border-radius: 12px; padding: 8px; color: inherit; background: var(--sheet); }
+.connection-say { min-height: 20px; margin: 10px 0 0; font-size: 13px; color: var(--secondary); line-height: 1.4; }
+.connection-say:empty { display: none; }
+.connection-empty { padding: 20px 0; color: var(--muted); }
+.connection-rename { display: flex; gap: 6px; width: 100%; }
+.connection-rename input { min-width: 0; flex: 1; border: 1px solid var(--glass-edge); border-radius: 10px; padding: 8px; background: transparent; color: inherit; font-size: 16px; }
+.scan-frame { position: relative; height: min(47dvh, 380px); margin-top: 16px; border-radius: 20px; overflow: hidden; background: #090b0b; }
+.scan-frame video { width: 100%; height: 100%; object-fit: cover; }
+.scan-guide { position: absolute; width: min(68%, 240px); aspect-ratio: 1; inset: 50% auto auto 50%; transform: translate(-50%, -50%); border: 2px solid var(--accent); border-radius: 22px; box-shadow: 0 0 0 100vmax rgb(0 0 0 / .25); pointer-events: none; }
+.connection-sheet .code-form { margin-top: 20px; }
+.connection-sheet .code-in { width: 100%; }
+@media (orientation: landscape) and (max-height: 520px) {
+  .connection-sheet { width: min(100%, 760px); }
+  .connection-body:has(.connection-list) { display: grid; grid-template-columns: minmax(0, 1fr) 210px; column-gap: 22px; align-items: end; }
+  .connection-list { grid-row: span 2; margin-top: 0; }
+  .connection-row { padding: 2px 0; }
+  .connection-body:has(.connection-list) .connection-actions { flex-direction: column; }
+  .connection-body:has(.scan-frame) { display: grid; grid-template-columns: 1fr 210px; gap: 18px; align-items: end; }
+  .scan-frame { height: 51dvh; margin-top: 6px; }
+  .scan-guide { width: auto; height: 80%; }
+  .connection-body:has(.scan-frame) .connection-actions { flex-direction: column; }
+}

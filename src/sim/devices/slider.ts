@@ -20,6 +20,7 @@ export const SLIDER_SPEC: DeviceSpec = {
 export interface CameraKey { x: number; pan: number; tilt: number }
 export const easeShot = (t: number) => { const u = clamp(t, 0, 1); return u * u * u * (u * (u * 6 - 15) + 10) }
 export class SliderLogic extends Machine {
+  private lastAim: ([number, number] | null)[] = [null, null]
   readonly spec = SLIDER_SPEC
   readonly units = [0, 1].map(() => ({ x: 0, pan: 0, tilt: 0, keys: [] as CameraKey[], playing: false, elapsed: 0, duration: 8, takes: 0, actions: 0 }))
   home(n: number) { Object.assign(this.units[n], { x: 0, pan: 0, tilt: 0, playing: false, elapsed: 0 }) }
@@ -27,11 +28,19 @@ export class SliderLogic extends Machine {
     const dt = timestep(delta)
     this.units.forEach((u, n) => {
       const raw = inputs[n], i = raw && !raw.quiet ? raw : null
+      if (raw?.positioned) this.lastAim[n] = null
       const x = i?.pad ? axis(i.pad.axes[0]) * dt : (i?.drag[0] ?? 0) * 0.006
       const pan = i?.pad ? -axis(i.pad.axes[2]) * dt * 0.7 : -(i?.pan[0] ?? 0) * 0.005
       const tilt = i?.pad ? -axis(i.pad.axes[3]) * dt * 0.7 : -(i?.pan[1] ?? 0) * 0.005
       if (x || pan || tilt) u.playing = false
       u.x = clamp(u.x + x, -1.7, 1.7); u.pan = clamp(u.pan + pan, -1.2, 1.2); u.tilt = clamp(u.tilt + tilt, -0.65, 0.8)
+      if (i?.space && !i.pad) {
+        const [ax, ay] = i.space.aim
+        const last = this.lastAim[n]
+        if (last && Math.hypot(ax - last[0], ay - last[1]) > 0.025) u.playing = false
+        if (!u.playing) { u.x = ax * 1.7; u.tilt = ay * (ay >= 0 ? 0.8 : 0.65) }
+        this.lastAim[n] = [ax, ay]
+      } else this.lastAim[n] = null
       for (const v of raw?.values ?? []) if (v.id === 'duration' && ['4', '8', '12'].includes(String(v.v))) { u.duration = Number(v.v); u.playing = false }
       if (raw?.presses.includes('clear') || i && (i.padPressed & (1 << PadButton.B))) { u.keys = []; u.playing = false; u.elapsed = 0 }
       if (raw?.presses.includes('key') || action(i, 'key')) {

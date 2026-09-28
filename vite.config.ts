@@ -96,7 +96,12 @@ function controllerServiceWorker(): Plugin {
       for (const name of chunks) {
         const chunk = bundle[name]
         if (!chunk || chunk.type !== 'chunk') continue
-        for (const dep of [...chunk.imports, ...chunk.dynamicImports]) { files.add(`/${dep}`); chunks.add(dep) }
+        for (const dep of [...chunk.imports, ...chunk.dynamicImports]) {
+          const target = bundle[dep]
+          // The camera decoder is fetched only when scanning, including on a service worker's first install.
+          if (target?.type === 'chunk' && Object.keys(target.modules).some((id) => /[\\/]jsqr[\\/]/i.test(id))) continue
+          files.add(`/${dep}`); chunks.add(dep)
+        }
         for (const css of chunk.viteMetadata?.importedCss ?? []) files.add(`/${css}`)
       }
       for (const f of CONTROLLER_STATIC) files.add(f)

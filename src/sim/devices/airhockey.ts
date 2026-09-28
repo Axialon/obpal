@@ -42,7 +42,7 @@ export class AirhockeyLogic extends Machine {
     this.units.forEach((u, n) => {
       const i = inputs[n], live = i && !i.quiet ? i : null
       if (live?.point) this.angles[n] = [live.point.yaw, live.point.pitch]
-      if (live?.recentred) {
+      if (live?.recentred && !live.space) {
         if (live.spot) this.spots[n] = [...live.spot]
         this.home(n)
         return
@@ -51,7 +51,7 @@ export class AirhockeyLogic extends Machine {
       else {
         if (live.spot && live.spot.every(Number.isFinite)) {
           this.spots[n] = [...live.spot]
-          const zero = this.zeros[n]
+          const zero = live.space ? null : this.zeros[n]
           u.tx = live.spot[0] - (zero?.[0] ?? 0)
           u.tz = zero ? startZ(n) + live.spot[1] - zero[1] : live.spot[1]
         } else if (live.point && !live.point.off) {

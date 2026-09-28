@@ -6,6 +6,7 @@ import type { StudioLogic } from './studio'
 import { StudioSound } from './studio.sound'
 import { StudioPlayers } from './studio.players'
 import { html, setMarkup } from '../../ui/markup'
+import { resolveStrike } from '../../music-space'
 
 export function attachStudio(sim: SimScene, logic: StudioLogic, stage: Stage, position: (seat: number) => readonly [number, number, number]) {
   const sound = new StudioSound(position)
@@ -41,6 +42,7 @@ export function attachStudio(sim: SimScene, logic: StudioLogic, stage: Stage, po
   panel.querySelector('input')!.oninput = e => { if (!muted) sound.setVolume(Number((e.target as HTMLInputElement).value) / 100) }
   logic.onHome = n => sound.stop(n)
   const seatOf = (who: string) => sim.nodes.findIndex(n => n.id === sim.claims.held(who))
+  const blockedAt = new Map<string, number>()
   sim.remote.on('value', ({ id, v }, who) => {
     const now = performance.timeOrigin + performance.now()
     if (id === 'music.sync' && typeof v === 'number' && Number.isFinite(v)) {
@@ -54,9 +56,27 @@ export function attachStudio(sim: SimScene, logic: StudioLogic, stage: Stage, po
     else if (e.op === 'off') sound.off(seat, e.n)
     else if (e.op === 'bend') sound.bend(seat, e.x)
     else if (e.op === 'hit') {
-      const drum = seat === 1 || seat === 7 ? (e.n >= 9 ? e.n : 9 + e.n % 4) : e.n
-      at = seat >= 3 && seat <= 6 ? sound.note(seat, scaleNote(e.n, 0, 4, 'pentatonic'), e.v, seat === 6, true) : sound.hit(seat, drum, e.v)
-      logic.play(seat, { ...e, n: drum })
+      if (e.aim) {
+        // Resolve the event snapshot, not the latest rendered aim. The player owns voices;
+        // the target chooses their instrument and spatial bus.
+        const target = resolveStrike(e.aim, e.scope!, sim.control.scope(who.id), seat, n => {
+          const holder = sim.claims.holder(sim.nodes[n].id)
+          return !holder || holder === who.id
+        })
+        if (!target) {
+          if (performance.now() - (blockedAt.get(who.id) ?? -Infinity) > 1500) {
+            sim.remote.feedback({ toast: 'That instrument is in use · aim at a free instrument' }, who.id)
+            blockedAt.set(who.id, performance.now())
+          }
+          return
+        }
+        at = target.melodic ? sound.note(seat, target.n, e.v, target.seat === 6, true, target.seat) : sound.hit(seat, target.n, e.v, target.seat)
+        logic.play(target.seat, { ...e, op: target.melodic ? 'on' : 'hit', n: target.n }, target.surface)
+      } else {
+        const drum = seat === 1 || seat === 7 ? (e.n >= 9 ? e.n : 9 + e.n % 4) : e.n
+        at = seat >= 3 && seat <= 6 ? sound.note(seat, scaleNote(e.n, 0, 4, 'pentatonic'), e.v, seat === 6, true) : sound.hit(seat, drum, e.v)
+        logic.play(seat, { ...e, n: drum })
+      }
     } else if (e.op === 'on') {
       at = seat < 3 || seat === 7 ? sound.hit(seat, seat === 1 || seat === 7 ? 9 + e.n % 4 : e.n % 9, e.v) : sound.note(seat, e.n, e.v)
       logic.play(seat, e)
@@ -66,7 +86,7 @@ export function attachStudio(sim: SimScene, logic: StudioLogic, stage: Stage, po
       if (ms >= -e.uncertainty && ms < 10_000) { samples.push({ ms: Math.max(0, ms), uncertainty: e.uncertainty, seat, seq: e.seq }); if (samples.length > 8192) samples.shift() }
     }
   })
-  sim.remote.on('leave', p => players.drop(p.id))
+  sim.remote.on('leave', p => { players.drop(p.id); blockedAt.delete(p.id) })
   sim.remote.on('mode', (_mode, p) => players.drop(p.id))
   sim.remote.on('claim', () => players.check(performance.now(), seatOf))
   const watchdog = setInterval(() => players.check(performance.now(), seatOf), 100)

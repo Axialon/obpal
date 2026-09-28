@@ -18,7 +18,7 @@ body.embed-demo { background: radial-gradient(120% 90% at 60% 35%, #141a26 0%, #
 
 /* A label under each shape: its name, and who holds it in their colour. */
 .embed-labels { position: fixed; inset: 0; z-index: 2; pointer-events: none; }
-.embed-labels span { position: absolute; left: 0; top: 0; display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 11px 0 9px; border-radius: 999px; background: rgb(8 10 16 / 0.58); border: 1px solid rgb(var(--hl-rgb) / 0.1); color: var(--ink); font: 650 12px var(--font); white-space: nowrap; backdrop-filter: blur(10px); will-change: transform; }
+.embed-labels span { position: absolute; left: 0; top: 0; display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 11px 0 9px; border-radius: 999px; background: var(--frost); border: 1px solid var(--frost-edge); box-shadow: var(--frost-shadow); color: var(--ink); font: 650 12px var(--font); white-space: nowrap; -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); will-change: transform; }
 .embed-labels span i { width: 8px; height: 8px; border-radius: 50%; background: rgb(var(--hl-rgb) / 0.35); }
 .embed-labels span.held { border-color: color-mix(in srgb, var(--c) 55%, transparent); }
 .embed-labels span.held i { background: var(--c); box-shadow: 0 0 10px var(--c); }

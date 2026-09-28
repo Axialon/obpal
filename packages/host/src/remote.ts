@@ -4,7 +4,7 @@ import {
   packetType, POINTER_HEADER, POSE_HEADER, PROTO, putPair, randomBytes, REACH_TIMEOUT_MS, readLocalIce, readMode, roomIdFor, roomSocketUrl, sdpFingerprint, sdpSession, SignalClient,
   withControllers,
   type Caps, type DeviceMsg, type HostMsg, type Layout, type ModeId, type PadState, type PairGrant, type PointerState, type SceneNode,
-  type ScenePerson, type SignalIn, type SignalPayload, type StoredPair, type IceSet, type LinkInfo, type VerifiedBy,
+  type ScenePerson, type SignalIn, type SignalPayload, type StoredPair, type IceSet, type LinkInfo, type VerifiedBy, type ScreenKind,
 } from '@obpal/core'
 import { CODE_SECRET_DIGITS, CodePake, isCodeHandle, randomDigits, solveWork } from '@obpal/core'
 import { Stream, type Frame } from './stream'
@@ -17,6 +17,8 @@ export type HostStatus = 'starting' | 'ready' | 'connecting' | 'connected' | 'of
 export interface RemoteOptions {
   /** Shown on the phone ("Controlling <appName>"). */
   appName: string
+  /** A label for the phone's local connection list. This describes the screen, never its permissions. */
+  kind?: ScreenKind
   /** Room service origin. Defaults to this origin on ob-pal hosts, else the public service. */
   service?: string
   /**
@@ -80,6 +82,7 @@ export interface Participant {
   id: string; name: string; color: string; lead: boolean; since: number; caps: Caps | null
   controller?: string; profile?: string
   pair?: string; fp?: string
+  paused?: boolean
 }
 
 /** A connected device's link (Remote.links): who, how it proved itself, and what its connection says of itself. */
@@ -92,6 +95,8 @@ export interface PairSummary { id: string; name: string; at: number }
 export interface LinkDiag { status: HostStatus; connectedAt: number; firstInputAt: number; direct: boolean }
 
 interface RemoteEvents {
+  /** A phone paused or resumed this connection. Says nothing about any other screen. */
+  attention: (who: Participant) => void
   sim: (message: SimMessage, who: Participant) => void
   status: (s: HostStatus) => void
   /** A device connected to an empty scene (with one seat: every device that takes over). */
@@ -125,6 +130,7 @@ interface RemoteEvents {
 }
 
 interface Peer {
+  paused?: boolean
   id: string
   /** The signaling socket it talks through: its first, or a new one after its phone's socket was lost and came back. */
   sig: string
@@ -238,7 +244,7 @@ export class Remote {
   private held: Record<string, string> = {}
   private scenePending = false
   private handlers: { [K in keyof RemoteEvents]: RemoteEvents[K][] } = {
-    status: [], connect: [], disconnect: [], join: [], leave: [], button: [], text: [], toss: [], value: [], mode: [], recenter: [], pad: [], input: [], claim: [], lan: [], code: [], invite: [], sim: [],
+    status: [], connect: [], disconnect: [], join: [], leave: [], button: [], text: [], toss: [], value: [], mode: [], recenter: [], pad: [], input: [], claim: [], lan: [], code: [], invite: [], sim: [], attention: [],
   }
   private cards: { el: HTMLElement; status: HTMLElement; qr: HTMLElement; link: HTMLAnchorElement | null; compact: boolean }[] = []
   /** The short code on show (PROTOCOL §2b): the room service's handle, this host's secret, and when it lapses. */
@@ -594,7 +600,7 @@ export class Remote {
     }
     ctl.onmessage = (e) => void this.onCtl(peer, e.data)
     st.onmessage = (e) => {
-      if (!this.listening(peer) || !(e.data instanceof ArrayBuffer)) return
+      if (!this.listening(peer) || peer.paused || !(e.data instanceof ArrayBuffer)) return
       const type = packetType(e.data)
       if (type === PAD_HEADER) peer.stream.onPad(e.data)
       else if (type === POINTER_HEADER) peer.stream.onPointer(e.data)
@@ -762,7 +768,8 @@ export class Remote {
       // A device that came by short code gets the QR link's code, to reconnect and reload with like a scanned one.
       const invite = 'code' in m ? encodePairing({ secret: this.secret, fp: this.fp }) : undefined
       // Through the room service, the phone may renegotiate this connection when its path goes (restart).
-      this.send(peer, { t: 'welcome', proto: PROTO, name: this.opts.appName, layout: this.layout, ...(pair ? { pair } : {}), ...(invite ? { invite } : {}), ...(peer.lan ? {} : { restart: true }) })
+      const kind = this.opts.kind ?? (typeof location === 'undefined' ? 'site' : location.protocol === 'chrome-extension:' ? 'pc' : location.pathname.startsWith('/sim/') ? 'sim' : location.pathname.startsWith('/view/') ? 'viewer' : 'site')
+      this.send(peer, { t: 'welcome', proto: PROTO, name: this.opts.appName, layout: this.layout, attention: true, kind, ...(pair ? { pair } : {}), ...(invite ? { invite } : {}), ...(peer.lan ? {} : { restart: true }) })
       // A shared scene's settings so far, and this participant's colour (a device wears it as its accent).
       if (this.shared) this.send(peer, { t: 'state', values: { ...this.values, color: peer.color } })
       // Paired through the invite: it moves on, so the code that paired this device pairs nobody else.
@@ -777,6 +784,18 @@ export class Remote {
       return
     }
     if (!this.listening(peer)) return
+    if (m.t === 'attention' && typeof m.active === 'boolean') {
+      const paused = !m.active
+      if (!!peer.paused === paused) return
+      peer.paused = paused
+      const hadPad = !!peer.stream.pad
+      peer.stream.reset()
+      if (hadPad) this.emit('pad', false, this.participant(peer))
+      this.emit('attention', this.participant(peer))
+      this.renderCards()
+      return
+    }
+    if (peer.paused && m.t !== 'ping' && m.t !== 'bye') return
     const who = this.participant(peer)
     switch (m.t) {
       case 'sim': if (m.kind !== 'frame' && validSimMessage(m)) this.emit('sim', m, who); break
@@ -957,6 +976,7 @@ export class Remote {
       id: p.id, name: p.name, color: p.color, lead: p === this.active, since: p.since, caps: p.caps,
       ...(p.controller ? { controller: p.controller } : {}), ...(p.profile ? { profile: p.profile } : {}),
       ...(p.pair ? { pair: p.pair } : {}), ...(p.fp ? { fp: b64url(p.fp) } : {}),
+      ...(p.paused ? { paused: true } : {}),
     }
   }
 
@@ -991,7 +1011,7 @@ export class Remote {
 
   /** Read the device in control's (the lead's) input for this frame. Call once per rendered frame. */
   consume(now = performance.now()): Frame {
-    return (this.active?.stream ?? this.idle).consume(now, this.status === 'connected')
+    return (this.active?.stream ?? this.idle).consume(now, this.status === 'connected' && !this.active?.paused)
   }
 
   /** One participant's gamepad state, pointer and frame (shared scenes). */
@@ -999,7 +1019,7 @@ export class Remote {
   pointerOf(who: string): PointerState | null { const p = this.peers.get(who); return p?.bound ? p.stream.pointer : null }
   consumeOf(who: string, now = performance.now()): Frame {
     const p = this.peers.get(who)
-    return (p?.bound ? p.stream : this.idle).consume(now, !!p?.bound)
+    return (p?.bound ? p.stream : this.idle).consume(now, !!p?.bound && !p.paused)
   }
 
   // ---- output -------------------------------------------------------------------------------------------------
@@ -1209,7 +1229,7 @@ export class Remote {
     }
     const short: Record<HostStatus, string> = { starting: 'Starting', ready: 'Waiting', connecting: 'Connecting', connected: n > 1 ? `${n} connected` : 'Connected', offline: 'Offline' }
     for (const c of this.cards) {
-      c.status.textContent = (c.compact ? short : text)[this.status]
+      c.status.textContent = this.bound().length && this.bound().every((p) => p.paused) ? 'Phone paused' : (c.compact ? short : text)[this.status]
       c.status.dataset.s = this.status
     }
   }

@@ -38,8 +38,14 @@ export async function runAudio(local, check) {
   await context.addInitScript(() => { try { localStorage.removeItem('obpal.sim.muted'); localStorage.removeItem('obpal.sim.reduced') } catch {} })
   const errors = []
   context.on('page', page => page.on('pageerror', e => errors.push(e.message)))
-  async function screen(id) {
+  async function screen(id, failOpus = false) {
     const page = await context.newPage(), cdp = await context.newCDPSession(page)
+    const samplesRequested = []
+    page.on('request', request => { if (/\.(webm|mp3)(\?|$)/.test(request.url())) samplesRequested.push(request.url()) })
+    if (failOpus) {
+      await page.route('**/*.webm*', route => route.abort('failed'))
+      await page.addInitScript(() => { AudioParam.prototype.cancelAndHoldAtTime = undefined })
+    }
     let audioId = null, nodes = 0
     cdp.on('WebAudio.contextCreated', ({ context }) => { audioId = context.contextId })
     cdp.on('WebAudio.audioNodeCreated', () => nodes++)
@@ -48,6 +54,7 @@ export async function runAudio(local, check) {
     await page.goto(local.origin + (id === 'arm' ? '/sim/arm/' : `/sim/device/?d=${id}`))
     await page.waitForFunction(() => window.__simAudio && window.__obpal?.pairingUrl)
     assert.equal(await page.evaluate(() => window.__simAudio.context), null, 'no context before a gesture')
+    assert.equal(samplesRequested.length, 0, 'no sample download before a gesture')
     await page.locator('#sim-sound').click()
     await page.waitForFunction(() => window.__simAudio.running)
     const stats = async () => {
@@ -93,6 +100,19 @@ export async function runAudio(local, check) {
     return { page, drive, close: () => ctx.close() }
   }
   try {
+    await check('3D audio: a failed Opus request decodes the portable sample fallback', async () => {
+      const { page } = await screen('vacuum', true)
+      const loaded = await page.evaluate(async () => { const s = window.__simAudio; await s.samplesReady; return !!s.samples.get('suction') && !!s.samples.get('latch') })
+      assert.ok(loaded, 'MP3 suction and latch decoded after failed Opus requests')
+      const envelopes = await page.evaluate(() => {
+        const s = window.__simAudio
+        s.bus.emit({ kind: 'motor', source: 'portable', at: [0, 0, 0], strength: 0.7, rpm: 0.7, load: 0.5 })
+        const active = s.budget.active; s.stop()
+        return active > 0 && s.budget.active === 0
+      })
+      assert.ok(envelopes, 'legacy gain scheduling starts and releases the decoded loop')
+      await page.close()
+    })
     await check('3D audio: phone-driven rover contact produces spatial sound and matching phone/gamepad feedback', async () => {
       const { page, stats } = await screen('rover')
       const p = await phone(await page.evaluate(() => window.__obpal.pairingUrl))
@@ -104,7 +124,11 @@ export async function runAudio(local, check) {
         Object.assign(window.__device.logic.rovers[0], { x: 0, z: 0.65, h: 0, v: 0 })
       })
       await record(page)
-      await p.drive('.gp-trig[data-trig="1"]', 0, 0, 2100)
+      const moving = []
+      await Promise.all([
+        p.drive('.gp-trig[data-trig="1"]', 0, 0, 2100),
+        (async () => { for (let i = 0; i < 10; i++) { await sleep(150); moving.push(await stats()) } })(),
+      ])
       await sleep(300)
       const hits = await p.page.evaluate(() => ({ messages: window.__rumble, pads: window.__padFeedback, vibrations: window.__vibration }))
       assert.ok(hits.messages.some(m => m.strong > 0.15), 'collision message reached phone')
@@ -113,7 +137,7 @@ export async function runAudio(local, check) {
       const collision = hits.messages.find(m => m.strong > 0.15)
       assert.ok(hits.pads.some(m => m.strongMagnitude === collision.strong && m.duration === collision.ms))
       const before = await stats(); assert.ok(before.contacts > 0 && before.scheduled > 2)
-      assert.ok(before.peak > 0.00001, 'non-silent post-limiter output')
+      assert.ok(moving.some(s => s.peak > 0.00001), 'non-silent post-limiter output during movement')
       const samples = []
       // Four independent phones, each owning one moving body. The first collision above was driven on the phone.
       const peers = [p]
@@ -127,7 +151,7 @@ export async function runAudio(local, check) {
       assert.ok(samples.some(s => s.motors === 4), 'all four motors rendered together')
       await saveRecording(page, join(out, 'rover.webm'))
       await page.screenshot({ path: join(out, 'after-rover.png') })
-      measurements.push({ sim: 'rover', players: 4, samples })
+      measurements.push({ sim: 'rover', players: 4, motionPeak: Math.max(...moving.map(s => s.peak)), samples })
       // Stress the production event path, checking send timing independently of network jitter.
       await page.evaluate(async () => {
         const who = window.__sim.claims.holder('rover1'); window.__sentRumble = []
@@ -156,7 +180,7 @@ export async function runAudio(local, check) {
       return 'four players; collision addressed; feedback preference and rate limit verified'
     })
 
-    for (const id of ['drone', 'kart', 'pinball', 'submarine']) await check(`3D audio: ${id} gesture, motion and action sources`, async () => {
+    for (const id of ['drone', 'dog', 'vacuum', 'kart', 'pinball', 'submarine']) await check(`3D audio: ${id} gesture, motion and action sources`, async () => {
       const { page, stats } = await screen(id)
       const p = await phone(await page.evaluate(() => window.__obpal.pairingUrl))
       await page.waitForFunction(id => window.__sim.claims.holder(`${id}1`), id)
@@ -166,11 +190,21 @@ export async function runAudio(local, check) {
         await p.drive('.gp-f[data-k="a"]', 0, 0, 160)
         await sleep(1200)
         await p.drive('.gp-stick[data-stick="1"]', 45, -40, 2200)
+      } else if (id === 'dog') {
+        await p.drive('.gp-stick[data-stick="0"]', 10, -50, 3200)
+        assert.ok(await page.evaluate(() => window.__simAudio.haptics > 0), 'gait and servo feedback reached the owned dog')
+      } else if (id === 'vacuum') {
+        await page.evaluate(() => { const u = window.__device.logic.units[0]; u.clean = true; u.docked = false })
+        await p.page.locator('[data-tab="rotate"]').click()
+        await p.drive('#pad', 10, -50, 3200)
+        const recording = await page.evaluate(async () => { const s = window.__simAudio; await s.samplesReady; return { loaded: !!s.samples.get('suction'), bytes: s.samples.bytes } })
+        assert.ok(recording.loaded && recording.bytes < 150000, 'suction recording loaded only for this sim')
       } else if (id === 'pinball') { await p.drive('.gp-trig[data-trig="1"]', 0, 0, 900); await sleep(2800) }
       else if (id === 'kart') await p.drive('.gp-trig[data-trig="1"]', 0, 0, 3200)
       else { await p.drive('.gp-stick[data-stick="0"]', 25, -55, 2200); await p.page.keyboard.press('Space'); await sleep(1000) }
       const s = await stats()
-      assert.ok(s.scheduled > 2, `${id} generated sources: ${s.scheduled}`)
+      assert.ok(s.scheduled >= (id === 'drone' ? 2 : 3), `${id} generated sources: ${s.scheduled}`)
+      if (id === 'drone') assert.ok(s.motors > 0, 'rotor spool-up replaces the old artificial launch impact')
       assert.ok(s.active <= 32)
       const spatial = await page.evaluate(() => {
         const s = window.__simAudio, c = window.__device.stage.camera, l = s.context.listener
@@ -187,6 +221,33 @@ export async function runAudio(local, check) {
       await page.getByLabel('Reduced sound', { exact: true }).check()
       assert.equal(await page.evaluate(() => window.__simAudio.reduced), true)
       await p.close(); await page.close()
+    })
+
+    await check('3D audio: dominant servo voices share HRTF positions without cutting each other off', async () => {
+      const { page } = await screen('arm')
+      await page.evaluate(() => window.__simAudio.setMuted(true))
+      await page.waitForFunction(() => window.__simAudio.groups.size === 0)
+      const graph = await page.evaluate(() => {
+        const s = window.__simAudio; s.setMuted(false)
+        for (let i = 0; i < 8; i++) s.bus.emit({ kind: 'motor', source: `group-test-${i}`, spatialGroup: i < 4 ? 'left-arm' : 'right-arm', at: [i < 4 ? -1 : 1, i * 0.05, 0], strength: 0.6, rpm: 0.2 + i * 0.08, load: 0.5 })
+        const voices = s.strips.filter(v => v.source && v.group)
+        return { voices: voices.length, groups: s.groups.size, rates: new Set(voices.map(v => v.feeds[0].rate)).size, hrtf: [...s.groups.values()].every(g => g.pan.panningModel === 'HRTF') }
+      })
+      assert.deepEqual(graph, { voices: 6, groups: 2, rates: 6, hrtf: true })
+      assert.ok(await page.evaluate(() => {
+        const s = window.__simAudio
+        s.bus.emit({ kind: 'motor', source: 'owned-quiet', spatialGroup: 'left-arm', at: [-1, 0, 0], who: 'host', strength: 0.05, rpm: 0.05, load: 0.1 })
+        return s.budget.slots.some(v => v.active && v.key === 'owned-quiet:motor')
+      }), 'an owned quiet joint outranks unowned machinery in the same arm')
+      await page.evaluate(() => {
+        const s = window.__simAudio, index = s.budget.slots.findIndex(v => v.key === 'group-test-1:motor')
+        s.strips[index].until = 0; s.tick(performance.now() + 100)
+      })
+      await page.waitForFunction(() => window.__simAudio.groups.get('left-arm')?.strips.size === 2)
+      assert.equal(await page.evaluate(() => window.__simAudio.groups.get('right-arm')?.strips.size), 3)
+      await page.evaluate(() => window.__simAudio.setMuted(true))
+      await page.waitForFunction(() => window.__simAudio.groups.size === 0)
+      await page.close()
     })
 
     await check('3D audio: arm servos and a falling block use the same spatial engine', async () => {

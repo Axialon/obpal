@@ -37,6 +37,17 @@ export interface Pairing {
   fp: Uint8Array
 }
 
+/** A verified invite kept on the phone without keeping its secret bytes. Uses the same QR binding on reconnect. */
+export interface SavedInvite {
+  room: string
+  key: CryptoKey
+  fp: Uint8Array
+}
+
+export async function saveInvite(p: Pairing): Promise<SavedInvite> {
+  return { room: await roomIdFor(p.secret), key: await importPairKey(p.secret), fp: p.fp }
+}
+
 export const newSecret = () => crypto.getRandomValues(new Uint8Array(16))
 export const randomBytes = (n: number) => crypto.getRandomValues(new Uint8Array(n))
 
@@ -45,12 +56,13 @@ export function encodePairing(p: Pairing): string {
 }
 
 export function parsePairing(fragment: string): Pairing | null {
+  if (!/^#?1\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}$/.test(fragment)) return null
   const [v, s, f] = fragment.replace(/^#/, '').split('.')
   if (v !== '1' || !s || !f) return null
   try {
     const secret = fromB64url(s)
     const fp = fromB64url(f)
-    return secret.length === 16 && fp.length === 32 ? { secret, fp } : null
+    return secret.length === 16 && fp.length === 32 && b64url(secret) === s && b64url(fp) === f ? { secret, fp } : null
   } catch {
     return null
   }

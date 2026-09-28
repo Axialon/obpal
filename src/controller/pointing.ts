@@ -16,8 +16,8 @@ import { OneEuro, qRotate, type Quat, type Vec3 } from '@obpal/core'
 const R2D = 180 / Math.PI
 /** Wrap a degree difference into [-180, 180). */
 const wrap = (d: number) => ((((d + 180) % 360) + 360) % 360) - 180
-/** Screen normal this close to horizontal (tipped more than 70° from flat) = held upright, pointing with the back. */
-const UPRIGHT = 0.34
+/** Above 55° from flat, point with the back. The full 25° upward reach then stays clear of the top-edge pole. */
+const UPRIGHT = Math.cos(55 * Math.PI / 180)
 
 export class WiiPointer {
   private ready = false
@@ -30,6 +30,8 @@ export class WiiPointer {
   readonly acc: [number, number] = [0, 0]
   /** Latest absolute aim relative to the recentre pose (degrees): yaw + = right, pitch + = up. */
   readonly aim: [number, number] = [0, 0]
+  /** Unfiltered angle for timestamped strikes: smoothing must not move a captured hit. */
+  readonly rawAim: [number, number] = [0, 0]
 
   get calibrated() { return this.ready }
   /** The phone's own pointing axis: the top edge [0, 1, 0] or the back [0, 0, -1]. */
@@ -48,6 +50,7 @@ export class WiiPointer {
     this.el0 = el
     this.ready = true
     this.prev = null
+    this.rawAim[0] = this.rawAim[1] = this.aim[0] = this.aim[1] = 0
     for (const f of this.f) f.reset()
   }
 
@@ -57,6 +60,7 @@ export class WiiPointer {
     const [az, el] = this.angles(q)
     const yaw = wrap(this.az0 - az) // turning right (clockwise seen from above) lowers the azimuth
     const pitch = el - this.el0
+    this.rawAim[0] = yaw; this.rawAim[1] = pitch
     const y = this.f[0].filter(this.prev ? this.aim[0] + wrap(yaw - this.aim[0]) : yaw, dt)
     const p = this.f[1].filter(pitch, dt)
     if (this.prev) {

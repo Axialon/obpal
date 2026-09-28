@@ -184,7 +184,7 @@ const CONTROL_LABELS: Record<string, string> = {
   grab: 'Gyro', level: 'Level', hold: 'Hold', recentre: 'Recentre',
 }
 const MOUSE_LABELS: Record<string, string> = { left: 'Left', right: 'Right', middle: 'Middle', wheel: 'Wheel', minus: 'Zoom −', plus: 'Zoom +', home: '⌂' }
-const APP_LABELS: Record<AppAction, string> = { gyro: 'Gyro', recentre: 'Recentre', next: 'Next controller', prev: 'Previous controller', keyboard: 'Keyboard' }
+const APP_LABELS: Record<AppAction, string> = { gyro: 'Gyro', recentre: 'Set position', next: 'Next controller', prev: 'Previous controller', keyboard: 'Keyboard' }
 
 /** A target as a person reads it on `controller`: "A", "Left", "Zoom +", "Keyboard", or a tray button's label. */
 export function targetLabel(controller: string, t: string, tray?: readonly { id: string; label: string }[]): string {

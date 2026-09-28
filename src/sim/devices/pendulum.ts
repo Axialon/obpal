@@ -35,6 +35,7 @@ export class PendulumLogic extends Machine {
       }
       u.omega *= (oldLength / u.length) ** 2
       let impulse = raw?.presses.includes('push') || action(i, 'push') ? 1.6 : 0
+      if (raw?.positioned) this.lastTilt[n] = null
       const tilt = i?.hold ? slopeOf(i.hold)[0] : i?.mode === Mode.tilt ? i.tilt[0] : null
       if (tilt !== null && this.lastTilt[n] !== null && dt > 0 && !this.cooldown[n]) {
         const change = tilt - this.lastTilt[n]!

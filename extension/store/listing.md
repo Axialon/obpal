@@ -143,15 +143,23 @@ Optional and off by default: requested only when the user turns on "Notify me" u
 No. All of the extension's code is in the package, and its pages allow only their own scripts (script-src 'self'). The phone's controller is a web page on the phone, not code the extension runs; what the phone sends is input data (JSON and binary packets), never code.
 ```
 
-**Data usage:** tick none of the data types, and tick all three certifications:
+**Data usage:** tick Location, Web history and User activity (leave the other six unticked), and tick all three certifications:
 
 - I do not sell or transfer user data to third parties, outside of the approved use cases.
 - I do not use or transfer user data for purposes that are unrelated to my item's single purpose.
 - I do not use or transfer user data to determine creditworthiness or for lending purposes.
 
-Why none (and one judgement call, in UPLOAD.md):
+Why these three: the store's user data FAQ asks for data an extension handles to be disclosed even when it's only processed on the user's device and never transmitted. Nothing reaches the developer (there are no accounts, no analytics and no logs of input), but Link does handle:
 
-- Nothing reaches the developer. There are no accounts, no analytics and no logs of input.
+- **Location:** the computer's IP addresses, in the connection candidates it sends to the phone (below).
+- **Web history:** the controlled tab's address, read in the browser only (below).
+- **User activity:** the phone's input and typing, which become clicks, pointer movement, scrolling and keystrokes, and, with ob.Pal Desktop, which program is in front.
+
+Not ticked, as judgement calls:
+- Typing can include a password or a message, but Link passes keystrokes through without reading or keeping them. That's User activity, not Authentication information or Personal communications.
+- Link looks for 3D canvases and frames on a page, to aim input. It never reads or sends a page's text, images or media, so it isn't Website content.
+
+The details:
 - What leaves the computer, and where it goes:
   - To pair, the extension exchanges connection setup messages with the phone through the ob.Pal service (a Cloudflare Worker): a random room identifier, the WebRTC session descriptions and the network candidates, which hold the computer's IP addresses. The service passes them to the phone in memory and doesn't store them.
   - For networks that block direct connections, it fetches short-lived relay credentials, and the connection may then run through Cloudflare's TURN relay. It stays encrypted end to end.
@@ -170,14 +178,11 @@ Why none (and one judgement call, in UPLOAD.md):
 ## Test instructions tab (notes for the reviewer)
 
 ```text
-No account or login is needed.
-
-Click the ob.Pal Link icon on any web page and scan the QR code with any phone's camera; the phone needs no app. Without a phone, open the link the QR code holds (any QR reader decodes it from a screenshot of the popup) in another browser window, in DevTools device mode. The ob.Pal controller opens and connects, and the popup shows the device as connected. Then turn on "This tab" in the popup. Each code pairs once: after a pairing the popup shows a new one, so decode a fresh screenshot for each new try.
-- Controller: pick Controller in the popup and Gamepad on the phone. The page's navigator.getGamepads() shows "ob.Pal Controller", and a button tap on the phone presses it.
-- 3D: pick 3D in the popup and Rotate on the phone. A drag on the phone's trackpad rotates a 3D viewer, for example https://obpal.blackboxes.net/view/
-- Keys: pick Keys. A on the phone presses Space, and the D-pad presses the arrow keys.
-
-The PC target needs the optional ob.Pal Desktop helper for Windows (https://obpal.blackboxes.net/link/, free, open source). Without it, choosing PC asks for the native messaging permission and then says that ob.Pal Desktop isn't installed; everything else works without it. With it, the popup first asks whether the paired phone may control this PC (Allow or Deny), once per phone.
-
-Source code: https://github.com/Axialon/obpal (the extension is in extension/). The package is built without minifying, so the code in it reads like the TypeScript in the repository.
+No login needed. Click the ob.Pal Link icon and scan its QR code with any phone camera (no app). No phone: open the QR code's link in another window in DevTools device mode; each code pairs once. Turn on "This tab", then pick a mode:
+- Controller: getGamepads() shows "ob.Pal Controller".
+- 3D: drag on the phone to turn obpal.blackboxes.net/view/
+- Keys: A presses Space.
+PC mode needs the optional Windows helper; without it, Link says so. Source: github.com/Axialon/obpal
 ```
+
+The field takes 500 characters at most.

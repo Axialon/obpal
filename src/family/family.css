@@ -186,6 +186,16 @@
   --bb-glass-accent: linear-gradient(180deg, rgb(var(--bb-accent-rgb) / 0.96), rgb(var(--bb-accent-rgb) / 0.8));
   --bb-blur: blur(20px) saturate(150%);
   --bb-focus: 0 0 0 2px var(--bb-page), 0 0 0 4px rgb(var(--bb-accent-rgb) / 0.85);
+  /* Opaque by default. Supported browsers soften the small amount of colour that passes through. */
+  --bb-frost-solid: rgb(var(--bb-base-rgb));
+  --bb-frost: var(--bb-frost-solid);
+  --bb-frost-accent: var(--bb-accent);
+  --bb-frost-blur: blur(28px) saturate(150%);
+  --bb-frost-edge: var(--bb-line-strong);
+  --bb-frost-shadow: 0 8px 28px -12px rgb(0 0 0 / 0.38), inset 0 1px 0 var(--bb-hi);
+}
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  :root { --bb-frost: rgb(var(--bb-base-rgb) / 0.96); --bb-frost-accent: rgb(var(--bb-accent-rgb) / 0.96); }
 }
 
 /* ---- base ------------------------------------------------------------------------------------------------ */
@@ -211,15 +221,13 @@
 /* ---- glass ----------------------------------------------------------------------------------------------- */
 
 .bb-glass {
-  background: var(--bb-glass);
-  border: 1px solid var(--bb-line);
-  box-shadow: var(--bb-shadow), inset 0 1px 0 var(--bb-hi);
-  -webkit-backdrop-filter: var(--bb-blur);
-  backdrop-filter: var(--bb-blur);
+  --bb-ink-3: var(--bb-ink-2);
+  background: var(--bb-frost);
+  border: 1px solid var(--bb-frost-edge);
+  box-shadow: var(--bb-frost-shadow);
+  -webkit-backdrop-filter: var(--bb-frost-blur);
+  backdrop-filter: var(--bb-frost-blur);
   background-clip: border-box;
-}
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .bb-glass { background: var(--bb-glass-solid); }
 }
 
 /* ---- controls -------------------------------------------------------------------------------------------- */
@@ -466,7 +474,8 @@
 
 .bb-tip {
   position: fixed; z-index: var(--bb-z-tip); pointer-events: none; padding: 6px 9px; border-radius: 9px;
-  background: rgb(var(--bb-surface-rgb) / 0.96); color: var(--bb-ink); border: 1px solid var(--bb-line-strong);
+  background: var(--bb-frost); color: var(--bb-ink); border: 1px solid var(--bb-frost-edge);
+  -webkit-backdrop-filter: var(--bb-frost-blur); backdrop-filter: var(--bb-frost-blur);
   font: 600 12px/1.2 var(--bb-font-ui); white-space: nowrap; box-shadow: var(--bb-shadow);
   opacity: 0; transform: translate3d(0, 3px, 0); transition: opacity var(--bb-dur-1) var(--bb-ease), transform var(--bb-dur-2) var(--bb-ease);
 }
@@ -474,7 +483,8 @@
 
 .bb-hint {
   position: fixed; z-index: var(--bb-z-hint); display: flex; align-items: center; gap: 10px; max-width: min(320px, calc(100vw - 24px));
-  padding: 10px 8px 10px 14px; border-radius: 16px; background: var(--bb-glass-accent); color: var(--bb-accent-ink);
+  padding: 10px 8px 10px 14px; border-radius: 16px; background: var(--bb-frost-accent); color: var(--bb-accent-ink); border: 1px solid var(--bb-frost-edge);
+  -webkit-backdrop-filter: var(--bb-frost-blur); backdrop-filter: var(--bb-frost-blur);
   font: 650 13px/1.35 var(--bb-font-ui); box-shadow: 0 18px 40px -16px rgb(0 0 0 / 0.6), inset 0 1px 0 rgb(255 255 255 / 0.4);
   animation: bb-rise var(--bb-dur-3) var(--bb-ease-out), bb-float 3.2s var(--bb-ease) 0.4s 3; will-change: transform;
 }

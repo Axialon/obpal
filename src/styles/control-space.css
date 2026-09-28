@@ -1,0 +1,6 @@
+.control-scopes { display: grid; gap: 6px; margin-top: 10px; }
+.control-scopes > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.control-scopes button { min-height: 36px; }
+.control-scopes button[aria-pressed=true] { color: #c6ff34; border-color: currentColor; }
+.control-scopes select { min-height: 32px; max-width: 100%; background: transparent; color: inherit; border: 1px solid var(--glass-edge); border-radius: 8px; padding: 4px 8px; }
+.control-scopes[hidden] { display: none; }

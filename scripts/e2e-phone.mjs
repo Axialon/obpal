@@ -17,8 +17,10 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join as joinPath } from 'node:path'
 import { chromium, devices } from 'playwright'
+import { checkFrost, setSurface } from './lib/frost.mjs'
 import { cspCheck } from './csp-watch.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
+import { phoneConnections } from './phone-connections.mjs'
 
 const HEADED = process.argv.includes('--headed')
 const SHOTS = process.env.OBPAL_SHOTS || ''
@@ -93,7 +95,9 @@ try {
   const ctx = await chromium.launchPersistentContext(dir, { ...devices['Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS })
   closers.push(ctx)
   // No native orientation lock in this run (as on an iPhone): the controller must lock by counter-rotating itself.
-  await ctx.addInitScript(() => { if (screen.orientation) screen.orientation.lock = () => Promise.reject(new DOMException('not here', 'NotSupportedError')) })
+  await ctx.addInitScript(() => {
+    if (screen.orientation) screen.orientation.lock = () => Promise.reject(new DOMException('not here', 'NotSupportedError'))
+  })
   const phone = ctx.pages()[0] ?? (await ctx.newPage())
   const cdp = await ctx.newCDPSession(phone)
   await cdp.send('DeviceOrientation.setDeviceOrientationOverride', { alpha: 10, beta: 70, gamma: 0 })
@@ -109,13 +113,18 @@ try {
   }))
   const portrait = { width: 412, height: 915, deviceScaleFactor: 2.625, mobile: true, screenOrientation: { type: 'portraitPrimary', angle: 0 } }
   const landscape = { width: 915, height: 412, deviceScaleFactor: 2.625, mobile: true, screenOrientation: { type: 'landscapePrimary', angle: 90 } }
+  // Screenshots and fullscreen restore Playwright's viewport; keep it in agreement with CDP.
+  const metrics = async (m) => {
+    await phone.setViewportSize({ width: m.width, height: m.height })
+    await cdp.send('Emulation.setDeviceMetricsOverride', m)
+  }
 
   await check('turning the gyro on locks rotation; the phone turning to landscape keeps the portrait controls', async () => {
     await clear()
     await phone.locator('#gyro').click()
     await until('gyro on and locked', async () => { const s = await state(); return s.gyro && s.locked })
-    await cdp.send('Emulation.setDeviceMetricsOverride', landscape)
-    const s = await until('counter-rotated', async () => { const v = await state(); return v.vlock ? v : null })
+    await metrics(landscape)
+    const s = await until('counter-rotated portrait layout', async () => { const v = await state(); return v.vlock && !v.land ? v : null })
     if (s.land) throw new Error('the landscape layout took over while locked')
     if (s.rot !== '270deg' && s.rot !== '-90deg') throw new Error(`rotated ${s.rot}`)
     // The controls still fill the (turned) screen: the body is the portrait size.
@@ -127,10 +136,11 @@ try {
   await check('unlocking lets the layout follow the screen again', async () => {
     await clear()
     await phone.locator('#lock').click()
-    const s = await until('unlocked', async () => { const v = await state(); return !v.locked && !v.vlock ? v : null })
+    await metrics(landscape)
+    const s = await until('unlocked in landscape', async () => { const v = await state(); return !v.locked && !v.vlock && v.land ? v : null })
     if (!s.land) throw new Error(`no landscape layout after unlocking in landscape: ${JSON.stringify({ ...s, size: await phone.evaluate(() => [innerWidth, innerHeight]) })}`)
     if (SHOTS) await phone.screenshot({ path: joinPath(SHOTS, 'phone-unlocked-landscape.png') })
-    await cdp.send('Emulation.setDeviceMetricsOverride', portrait)
+    await metrics(portrait)
     await until('portrait again', async () => !(await state()).land)
     return 'landscape layout while unlocked'
   })
@@ -261,6 +271,15 @@ try {
     const open = async () => { await phone.locator('#gear').click(); await phone.locator('.sheet.settings').waitFor({ timeout: 3000 }); await sleep(350) }
     const gone = (how) => until(`${how} closed it`, () => phone.evaluate(() => !document.querySelector('.sheet.settings')), 3000)
     await open()
+    const theme = await phone.evaluate(() => document.documentElement.dataset.bbTheme)
+    for (const surface of ['carbon', 'light']) {
+      await setSurface(phone, surface)
+      await checkFrost(phone, '.bar')
+      await checkFrost(phone, '.sheet.settings', { text: ['.sheet-k', '.meta', 'label', 'output'] })
+      await checkFrost(phone, '.sheet-head', { solid: true })
+      await checkFrost(phone, '.sheet .actions', { solid: true })
+    }
+    await setSurface(phone, theme || 'carbon')
     // Its answer buttons are on the visible screen, however long the sheet.
     const fit = await phone.evaluate(() => ({ bottom: document.getElementById('done').getBoundingClientRect().bottom, vh: innerHeight }))
     if (fit.bottom > fit.vh) throw new Error(`Done is at ${fit.bottom.toFixed(0)}px of a ${fit.vh}px screen`)
@@ -287,6 +306,7 @@ try {
     if (left.title !== 'Disconnected' || !left.back) throw new Error(`after disconnecting: ${JSON.stringify(left)}`)
     return `Done at ${fit.bottom.toFixed(0)} of ${fit.vh}px; swipe, Back and × close it; Disconnect asks, then says so`
   })
+  await phoneConnections({ browser: sb, origin: local.origin, check, shots: SHOTS })
   await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {
   console.error(e)

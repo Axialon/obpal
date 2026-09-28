@@ -1,12 +1,12 @@
 import { DeviceLink, emptyPad, parsePairing, validSimMessage, type SimMessage, type SimValue, type PadState } from '@obpal/core'
 import type { Remote } from '@obpal/host'
-import { ConeGeometry, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, SphereGeometry, BoxGeometry, Vector3, Quaternion, CylinderGeometry } from 'three'
+import { ConeGeometry, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, SphereGeometry, BoxGeometry, Vector3, Quaternion } from 'three'
 import type { Ride } from './rigs'
 import { PropWorld, validVector, distance, type Body, type Collider, type V3 } from './world'
 
 export interface Pose { p: V3; q: [number, number, number, number] }
 export interface PresenceInput { ride: string; active: boolean; head: Pose; hands: Pose[]; grab: boolean; pad: PadState | null }
-export interface Person extends PresenceInput { id: string; color: string }
+export interface Person extends PresenceInput { id: string; color: string; phone?: boolean }
 export interface SceneAdapter { capture(): SimValue; apply(state: SimValue): void; rides(): Ride[]; colliders?(): Collider[]; drive?(who: string, ride: string, pad: PadState): void; allowed?(who: string): boolean }
 const value = (x: unknown) => x as SimValue
 const poseOK = (x: unknown): x is Pose => {
@@ -143,18 +143,17 @@ export class SharedPresence {
       m.position.set(...b.p)
       m.visible = !b.bound
     }
-    for (const [id, g] of this.avatars) g.visible = this.people.has(id) && id !== this.id && !!this.people.get(id)?.active
+    for (const [id, g] of this.avatars) g.visible = this.people.has(id) && id !== this.id && !!this.people.get(id)?.active && !this.people.get(id)?.phone
     for (const p of this.people.values()) {
-      if (p.id === this.id || !p.active) continue
+      if (p.id === this.id || !p.active || p.phone) continue
       let g = this.avatars.get(p.id)
       if (!g) {
         g = new Group()
         const mat = new MeshBasicMaterial({ color: p.color })
         g.add(new Mesh(new SphereGeometry(0.09, 12, 8), mat))
         for (let n = 0; n < 2; n++) {
-          const hand = new Mesh(new SphereGeometry(0.035, 10, 6), mat)
-          const ray = new Mesh(new CylinderGeometry(0.003, 0.003, 0.7, 4), mat)
-          ray.rotation.x = Math.PI / 2; ray.position.z = -0.38; hand.add(ray); g.add(hand)
+          const hand = new Mesh(new BoxGeometry(0.045, 0.025, 0.075), mat)
+          g.add(hand)
         }
         this.avatars.set(p.id, g); this.group.add(g)
       }
@@ -169,6 +168,8 @@ export class SharedPresence {
     if (!r) return
     const pose = r.pose(), hand = new Vector3(...offset).applyQuaternion(pose.q).add(pose.p)
     this.accept(who, this.remote?.participants.find(p => p.id === who)?.color ?? '#b3a4ff', { ride, active: true, head: { p: pose.p.toArray() as V3, q: pose.q.toArray() }, hands: [{ p: hand.toArray() as V3, q: pose.q.toArray() }], grab, pad: null }, performance.now())
+    const person = this.people.get(who)
+    if (person) person.phone = true
   }
   neutralPad() { return emptyPad() }
 }

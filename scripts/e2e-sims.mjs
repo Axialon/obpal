@@ -13,6 +13,7 @@ import { join as joinPath } from 'node:path'
 import { chromium, devices } from 'playwright'
 import { cspCheck } from './csp-watch.mjs'
 import { runMusic } from './e2e-music.mjs'
+import { runControl } from './e2e-control.mjs'
 import { runVR } from './e2e-vr.mjs'
 import { runAudio } from './e2e-audio.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
@@ -95,6 +96,8 @@ async function phone(invite, { xr = true, way = 'motion' } = {}) {
   })
   await page.goto(invite)
   await page.locator('.modes').waitFor({ timeout: 25000 })
+  // A delayed coach hint can appear after a gesture's initial cleanup.
+  await page.addLocatorHandler(page.locator('.hint.in'), hint => hint.getByRole('button', { name: 'Dismiss hint' }).click())
   const touches = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map(([x, y], i) => ({ x, y, id: i + 1 })) })
   const clear = () => page.evaluate(() => document.querySelectorAll('.hint').forEach((h) => h.remove()))
   /** Hold a finger on the trackpad and drag it right by `dx` px over `steps` moves. */
@@ -422,6 +425,7 @@ try {
   // Finished arm and arena sessions must not compete with the studio's eight-phone timing measurement.
   await Promise.all(closers.map(c => c.close()))
   closers.length = 0
+  await runControl(local, check)
   await runMusic(local, check)
   await runVR(local, check)
   await runAudio(local, check)

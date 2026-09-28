@@ -230,7 +230,8 @@ function loop(now: number) {
     const a = pad ? pad.buttons & 1 : 0
     if (a && !padA.get(who)) dash(s, who)
     padA.set(who, a)
-    const d = steer(f, pad)
+    const calibrated = sim.control.aim(who)
+    const d = steer(calibrated && !pad ? { ...f, tilt: calibrated.tilt } : f, pad)
     if (d.lengthSq() > 1) d.normalize()
     s.vel.addScaledVector(d, 4.3 * dt)
   }

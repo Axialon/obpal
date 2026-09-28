@@ -107,4 +107,15 @@ export class Trackpad {
   private clearLong() {
     if (this.longTimer) { clearTimeout(this.longTimer); this.longTimer = null }
   }
+
+  /** A connection switch cancels every gesture, including a long press still waiting to fire. */
+  reset() {
+    this.clearLong()
+    this.pts.clear()
+    this.two = null
+    this.touches = 0
+    this.moved = true
+    this.lastTap = 0
+    this.onTouchChange?.(false)
+  }
 }

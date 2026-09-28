@@ -34,8 +34,8 @@ html.gp-mode .hint { display: none !important; }
   padding: calc(10px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left));
   background:
     radial-gradient(80% 60% at 50% 0%, rgb(var(--accent-rgb) / 0.08), transparent 70%),
-    linear-gradient(180deg, rgb(var(--surface-rgb) / 0.6), rgb(var(--base-rgb) / 0.9));
-  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+    var(--frost);
+  -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur);
   touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
   overflow: hidden;
   animation: gp-in 0.3s var(--ease);
@@ -81,6 +81,9 @@ html.gp-mode .hint { display: none !important; }
 .gp-mid { grid-area: mid; display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 12px; min-height: 0; container: gpmid / inline-size; }
 .gp-center { display: flex; gap: clamp(16px, 5vmin, 28px); margin-top: 8%; }
 .gp .gp-sm { width: 46px; height: 46px; border-radius: 50%; }
+.gp .gp-scope { width: 100%; min-height: 44px; padding: 8px; gap: 4px; border-radius: 14px; font-size: 12px; line-height: 1.2; }
+.gp-scope small { font-size: 10px; font-weight: 600; color: var(--muted); }
+.gp .gp-scope[aria-pressed='true'] { border-color: var(--accent-text); color: var(--accent-text); }
 .gp-sm .ic { width: 19px; height: 19px; }
 /* chips on one line, the profile and centre button on the next; the centre button keeps its slot while hidden, so nothing
    shifts under a finger when a chip turns on (a shift would land the release on the profile pill) */

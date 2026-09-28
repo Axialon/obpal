@@ -123,6 +123,7 @@ export class PinballLogic extends Machine {
       if (presses.includes('launch')) this.launch(n, u.plunger || 0.75)
       // A deliberate quick reversal of the existing Tilt signal shakes the cabinet once.
       const rock = this.rocks[n]
+      if (i?.positioned) { rock.side = 0; rock.age = 0 }
       rock.age += Number.isFinite(delta) ? Math.max(0, delta) : 0.35
       let shook = false
       if (live?.mode === Mode.tilt) {

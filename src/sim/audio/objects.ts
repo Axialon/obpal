@@ -22,6 +22,7 @@ export class ObjectSound {
     const movement = state.p.distanceTo(this.p) + state.q.angleTo(this.q) * 0.2
     state.at[0] = this.p.x; state.at[1] = this.p.y; state.at[2] = this.p.z
     state.event.strength = unit(movement / dt); state.event.rpm = state.event.strength; state.event.who = who
+    state.event.load = unit(state.event.strength * 0.4)
     if (state.event.strength > 0.02 && now - state.time < 300) this.sound.bus.emit(state.event)
     state.p.copy(this.p); state.q.copy(this.q); state.time = now
   }

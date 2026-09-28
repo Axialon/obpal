@@ -31,6 +31,7 @@ export interface Stroke {
 }
 export class PainterLogic extends Machine {
   readonly spec = PAINTER_SPEC
+  canvas = false
   units = [{ x: 0, y: 1.5, z: 0, q: [0, 0, 0, 1] as Quat, colour: 0, points: 0 }]
   strokes: Stroke[] = []
   private last: Vec3 | null = null
@@ -54,6 +55,7 @@ export class PainterLogic extends Machine {
       i = inputs[0],
       u = this.units[0]
     if (!i) {
+      this.canvas = false
       this.last = null
       this.anchor = null
       return
@@ -67,6 +69,9 @@ export class PainterLogic extends Machine {
     let paint = false,
       target: Vec3 = [u.x, u.y, u.z]
     const pose = i.pose
+    const canvas = !!i.space && !i.pad
+    if (canvas !== this.canvas) this.last = null
+    this.canvas = canvas
     if (pose?.tracked && pose.touching) {
       if (!this.anchor || this.anchor.gen !== pose.gen)
         this.anchor = { p: [...pose.p], at: [u.x, u.y, u.z], gen: pose.gen }
@@ -79,20 +84,24 @@ export class PainterLogic extends Machine {
       u.q = [...pose.q]
       paint = true
     } else this.anchor = null
-    if (i.point) {
+    if (canvas) {
+      target = [i.space!.aim[0] * 3.5, 1.9 + i.space!.aim[1] * 1.6, -2.91]
+      paint = i.held.has('mouse-left') || i.held.has('wii-b') || i.touching || !!pose?.touching
+    } else if (i.point) {
       target = [i.point.yaw * 0.12, 1.5 + i.point.pitch * 0.1, u.z + i.wheel * 0.002]
       paint = i.held.has('mouse-left')
     } else if (i.touching && !pose) {
       target = [u.x + i.drag[0] * 0.012, u.y - i.drag[1] * 0.012, u.z + i.pan[1] * 0.01]
       paint = true
     }
-    target = [clamp(target[0], -3.5, 3.5), clamp(target[1], 0.3, 3.5), clamp(target[2], -2, 2)]
+    target = [clamp(target[0], -3.5, 3.5), clamp(target[1], 0.3, 3.5), canvas ? -2.91 : clamp(target[2], -2, 2)]
     const distance = Math.hypot(target[0] - u.x, target[1] - u.y, target[2] - u.z),
       k = distance ? Math.min(1, (dt * 12) / distance) : 1
     u.x += (target[0] - u.x) * k
     u.y += (target[1] - u.y) * k
     u.z += (target[2] - u.z) * k
-    const tip = qRotate(u.q, [0, 0.2, 0]),
+    if (canvas) u.z = target[2]
+    const tip = canvas ? [0, 0, 0] : qRotate(u.q, [0, 0.2, 0]),
       at: Vec3 = [u.x + tip[0], u.y + tip[1], u.z + tip[2]]
     if (paint) {
       if (this.last && Math.hypot(...at.map((v, n) => v - this.last![n])) > 0.025) {

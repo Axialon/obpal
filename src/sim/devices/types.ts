@@ -6,6 +6,7 @@
  */
 import { Mode, type ControllerId, type Layout, type ModeId, type PadState, type Quat, type TrayControl, type Vec3 } from '@obpal/core'
 import type { CategoryId } from '../catalogue'
+import type { ControlAim, ControlScope } from '../../control-space'
 
 export interface DeviceSpec {
   /** Stable id: the sim's address (/sim/device/?d=<id>) and its catalogue card. */
@@ -65,6 +66,11 @@ export interface Pointing {
  * frame; presses are what went down since then, in order.
  */
 export interface DeviceInput {
+  /** Calibrated motion from a current phone; absent for legacy and touch-only clients. */
+  space?: ControlAim
+  scope?: ControlScope
+  /** A calibrated neutral changed this frame; forget derivative gesture history without homing the sim. */
+  positioned?: boolean
   /** The watchdog has stopped continuous input; explicit tray actions can still arrive. */
   quiet?: boolean
   /** The catalogue controller in use (CATALOGUE §9.1): what the phone says, else what its mode stands for. */

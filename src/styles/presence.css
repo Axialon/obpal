@@ -1,5 +1,7 @@
 .presence-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--ink, #f1f2f5); font: 500 12px/1.4 var(--font, system-ui); }
-.presence-active .presence-controls, .presence-floating { position: fixed; z-index: 75; right: 14px; top: 70px; max-width: min(500px, calc(100vw - 28px)); padding: 8px; border: 1px solid var(--line, #626573); border-radius: 12px; background: var(--panel, #171b25); }
+.presence-active .presence-controls, .presence-floating { position: fixed; z-index: 75; right: 14px; top: 84px; max-width: min(500px, calc(100vw - 28px)); padding: 8px; border: 1px solid var(--frost-edge); border-radius: 12px; background: var(--frost); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); box-shadow: var(--frost-shadow); }
+/* In overview, menus and their hints open above the viewpoint toolbar. */
+.presence-floating { z-index: 6; }
 .presence-extra, .presence-controls small { display: none; }
 .presence-active .presence-extra { display: inline-block; }
 .presence-active .presence-extra[hidden] { display: none; }
@@ -13,6 +15,5 @@
 .presence-active .presence-controls label { display: inline-flex; }
 .presence-controls select option { color: #171b25; background: #fff; }
 .presence-active .sim-panel, .presence-active .ptz-inset { visibility: hidden; }
-.presence-active .presence-controls { background: #171b25; color: #f1f2f5; }
 .presence-shade { pointer-events: none; position: fixed; inset: 0; z-index: 65; opacity: 0; background: radial-gradient(ellipse at center, transparent 30%, #000 90%); }
-@media (max-width: 600px) { .presence-active .presence-controls, .presence-floating { top: 62px; right: 8px; max-width: calc(100vw - 16px); font-size: 11px; } .presence-controls button, .presence-controls select { min-height: 36px; } }
+@media (max-width: 600px) { .presence-active .presence-controls, .presence-floating { top: 76px; right: 8px; max-width: calc(100vw - 16px); font-size: 11px; } .presence-controls button, .presence-controls select { min-height: 36px; } }

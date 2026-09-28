@@ -34,6 +34,12 @@
   --blur: blur(28px) saturate(150%);
   /* Heavy frosted glass, for sheets and docks over busy controls: what's behind reads as colour and shape, never text. */
   --blur-heavy: blur(40px) saturate(180%);
+  --frost: var(--bb-frost);
+  --frost-accent: var(--bb-frost-accent);
+  --frost-solid: var(--bb-frost-solid);
+  --frost-blur: var(--bb-frost-blur);
+  --frost-edge: var(--bb-frost-edge);
+  --frost-shadow: var(--bb-frost-shadow);
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --font: var(--bb-font-ui);
   --font-display: var(--bb-font-display);
@@ -48,7 +54,7 @@ a { color: var(--accent-text); }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 [hidden] { display: none !important; }
 
-.glass { background: var(--glass); border: 1px solid var(--glass-edge); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); box-shadow: var(--glass-shadow); }
+.glass { --muted: var(--secondary); --bb-ink-3: var(--bb-ink-2); background: var(--frost); border: 1px solid var(--frost-edge); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); box-shadow: var(--frost-shadow); }
 .ic { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; display: block; }
 
 /* logo lockup: obsidian box + orbit mark, then the ob.Pal wordmark */
@@ -76,14 +82,14 @@ a { color: var(--accent-text); }
 .swatch i:last-child { right: 0; bottom: 0; background: var(--sw-b); box-shadow: 0 0 12px color-mix(in srgb, var(--sw-b) 45%, transparent); }
 
 /* floating tooltips (src/ui/tips.ts) */
-.tip { position: fixed; left: 0; top: 0; z-index: 60; padding: 6px 10px; border-radius: 10px; background: var(--sheet); border: 1px solid var(--glass-edge); box-shadow: 0 10px 26px rgb(0 0 0 / 0.35); font-size: 12px; font-weight: 600; letter-spacing: -0.005em; color: var(--ink); white-space: nowrap; pointer-events: none; opacity: 0; transform: translate3d(0, 3px, 0); transition: opacity 0.14s var(--ease), transform 0.14s var(--ease); will-change: transform, opacity; }
+.tip { position: fixed; left: 0; top: 0; z-index: 60; padding: 6px 10px; border-radius: 10px; background: var(--frost); border: 1px solid var(--frost-edge); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); box-shadow: var(--frost-shadow); font-size: 12px; font-weight: 600; letter-spacing: -0.005em; color: var(--ink); white-space: nowrap; pointer-events: none; opacity: 0; transform: translate3d(0, 3px, 0); transition: opacity 0.14s var(--ease), transform 0.14s var(--ease); will-change: transform, opacity; }
 .tip[data-side='top'] { transform: translate3d(0, -3px, 0); }
 .tip[data-side='right'] { transform: translate3d(-3px, 0, 0); }
 .tip.in { opacity: 1; transform: none; }
 
 /* coach-mark hints: light frosted accent cards with dark ink, like the reference swatch cards */
 .hint { position: fixed; left: 0; top: 0; z-index: 50; display: flex; align-items: center; gap: 10px; max-width: min(300px, calc(var(--ui-vw, 1vw) * 100 - 24px)); padding: 11px 8px 11px 15px; border-radius: 16px;
-  background: var(--glass-light); border: 1px solid rgb(255 255 255 / 0.35); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  background: var(--frost-accent); border: 1px solid var(--frost-edge); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur);
   box-shadow: 0 18px 44px rgb(0 0 0 / 0.38), inset 0 1px 0 rgb(255 255 255 / 0.5);
   font-size: 13.5px; font-weight: 650; line-height: 1.35; letter-spacing: -0.01em; color: var(--accent-ink); opacity: 0; transition: opacity 0.3s var(--ease); pointer-events: auto; will-change: transform, opacity; backface-visibility: hidden; }
 .hint.in { opacity: 1; animation: hint-float 3.6s cubic-bezier(0.45, 0, 0.55, 1) 3; }

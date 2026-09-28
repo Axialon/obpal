@@ -103,7 +103,16 @@ export function ptzControl(c: Cam, inp: DeviceInput, dt: number): boolean {
   const pressed = (b: number) => ((inp.padPressed >>> b) & 1) === 1
   const snap = inp.presses.includes('snap') || inp.presses.includes('wii-a') || inp.presses.includes('mouse-left') || inp.presses.includes('pad') || pressed(PadButton.A)
   const zoomBy = (k: number) => { c.zoom = clamp(c.zoom * k, P.zoomMin, P.zoomMax) }
-  if (inp.point) {
+  if (inp.space && (!inp.pad || inp.space.pointer)) {
+    const [x, y] = inp.space.aim
+    c.goal = [c.home[0] - x * (x >= 0 ? c.home[0] + P.pan : P.pan - c.home[0]), c.home[1] + y * (y >= 0 ? P.tiltUp - c.home[1] : c.home[1] - P.tiltDown)]
+    for (const p of inp.presses) {
+      if (p === 'wii-plus') zoomBy(1.25)
+      if (p === 'wii-minus') zoomBy(0.8)
+    }
+    if (inp.wheel) zoomBy(Math.pow(2, -inp.wheel / 1200))
+    if (inp.pinch) zoomBy(Math.pow(2, inp.pinch))
+  } else if (inp.point) {
     // The camera looks where the phone points, from centre (⌂ puts the phone's aim back there).
     const k = P.gain / Math.sqrt(c.zoom)
     c.goal = clampAim(c.home[0] + -inp.point.yaw * D2R * k, c.home[1] + inp.point.pitch * D2R * k)
@@ -138,7 +147,7 @@ export function ptzControl(c: Cam, inp: DeviceInput, dt: number): boolean {
     if (inp.pinch) zoomBy(Math.pow(2, inp.pinch))
   }
   if (!inp.hold) c.anchor = null
-  if (inp.recentred && !inp.point) { c.goal = [...c.home]; c.anchor = null }
+  if (inp.recentred && !inp.point && !inp.space) { c.goal = [...c.home]; c.anchor = null }
   return snap
 }
 

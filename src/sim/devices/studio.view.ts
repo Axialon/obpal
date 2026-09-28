@@ -98,9 +98,8 @@ function room(live?: () => void) {
       for (const x of [-0.7, 0.7]) b(p, x, 0.35, 0, 0.055, 0.7, 0.5, kit.metal)
       if (unit === 5) for (let n = 0; n < 12; n++) c(p, (n - 5.5) * 0.125, 0.45, 0.04, 0.038, 0.4 - n * 0.016, brass)
     } else {
-      c(p, 0, 0.12, 0, 0.52, 0.2, dark); c(p, 0, 0.54, 0, 0.035, 0.8, brass)
-      const halo = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.019, 8, 64), brass); halo.position.y = 1.25; p.add(halo)
-      const orb = new THREE.Mesh(new THREE.IcosahedronGeometry(0.23, 2), glow); orb.position.y = 1.25; p.add(orb); animate(orb, unit, 0, 'air')
+      // Air feedback lives on the instrument's base, with no floating orb or stalk.
+      animate(c(p, 0, 0.12, 0, 0.52, 0.2, glow), unit, 0, 'air')
     }
   })
   kit.batch(root, moving.map(m => m.mesh))
@@ -118,12 +117,19 @@ function room(live?: () => void) {
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); root.add(mesh)
     sources.forEach(s => { s.visible = false }); instances.push({ mesh, sources })
   }
+  const aimMaterial = new THREE.MeshBasicMaterial({ color: '#c6ff34', toneMapped: false, transparent: true, opacity: 0.68, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
+  const highlights = moving.map(part => {
+    const surface = (part.mesh as THREE.Mesh).isMesh ? part.mesh as THREE.Mesh : part.mesh.children.find(o => (o as THREE.Mesh).isMesh) as THREE.Mesh
+    const mesh = new THREE.Mesh(surface.geometry, aimMaterial)
+    mesh.name = 'aim-surface'; mesh.matrixAutoUpdate = false; mesh.visible = false; root.add(mesh)
+    return { mesh, surface, unit: part.unit, n: part.n }
+  })
   if (live) upgradeSkins('studio', slots, () => {
     for (const slot of Object.values(slots)) slot.userData.static = true
-    kit.batch(root, moving.map(m => m.mesh))
+    kit.batch(root, [...moving.map(m => m.mesh), ...highlights.map(h => h.mesh)])
     live()
   })
-  return { root, moving, glows, instances }
+  return { root, moving, glows, instances, highlights }
 }
 
 function paint(model: ReturnType<typeof room>, logic: StudioLogic, colors: readonly (string | null)[], t: number, reduced: boolean) {
@@ -131,10 +137,14 @@ function paint(model: ReturnType<typeof room>, logic: StudioLogic, colors: reado
   for (const a of model.moving) {
     const hit = a.kind === 'air' ? Math.max(...logic.hits[a.unit]) : logic.hits[a.unit][a.n]
     if (a.kind === 'cymbal') a.mesh.rotation.z = reduced ? 0 : Math.sin(t * 45) * hit * 0.16
-    else if (a.kind === 'air') { a.mesh.scale.setScalar(1 + hit * (reduced ? 0 : 0.35)); a.mesh.rotation.y = reduced ? 0 : t * 0.3 }
+    else if (a.kind === 'air') a.mesh.scale.set(1 + hit * (reduced ? 0 : 0.08), 1, 1 + hit * (reduced ? 0 : 0.08))
     else a.mesh.position.y = a.y - (reduced ? 0 : hit * (a.kind === 'head' ? 0.028 : 0.018))
   }
   model.root.updateMatrixWorld(true)
+  for (const h of model.highlights) {
+    h.mesh.visible = logic.aimed[h.unit].has(h.n)
+    h.mesh.matrix.copy(h.surface.matrixWorld)
+  }
   for (const group of model.instances) {
     group.sources.forEach((s, i) => group.mesh.setMatrixAt(i, s.matrixWorld))
     group.mesh.instanceMatrix.needsUpdate = true

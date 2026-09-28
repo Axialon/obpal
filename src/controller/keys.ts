@@ -6,6 +6,7 @@ import type { Motion } from './motion'
 import { requestMotionPermission } from './motion'
 import type { MusicWire } from './music'
 import { html, setMarkup } from '../ui/markup'
+import type { CalibratedControl } from './control-space'
 
 const NOTE_NAMES = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B']
 
@@ -19,9 +20,10 @@ export class Keys {
   private sustained = new Set<number>()
   private sustain = false
   private air = false
+  get aiming() { return this.active && this.air }
   private tilt = new TiltStick(0, 30, 1)
   private sampled = 0
-  constructor(private wire: MusicWire, private motion: Motion) {}
+  constructor(private wire: MusicWire, private motion: Motion, private control: CalibratedControl, private setPosition: () => void) {}
   mount(parent: HTMLElement) {
     this.el = document.createElement('section'); this.el.className = 'music-face keys-face'; this.el.hidden = true
     this.el.setAttribute('aria-label', 'Tone keys')
@@ -29,17 +31,17 @@ export class Keys {
       <div class="music-options"><label>Key<select aria-label="Musical key">${NOTE_NAMES.map((s, n) => html`<option value="${n}">${s}</option>`)}</select></label>
       <label>Scale<select aria-label="Scale"><option value="pentatonic">Pentatonic</option><option value="major">Major</option><option value="minor">Minor</option></select></label>
       <button type="button" aria-label="Octave down">−</button><output aria-label="Octave">4</output><button type="button" aria-label="Octave up">+</button></div>
-      <div class="tone-keys"></div><div class="keys-expression"><button type="button" class="sustain">Hold to sustain</button><button type="button" class="air-pad">Hold for Air</button><button type="button" class="music-toggle" aria-label="Level tilt bend">Level</button></div><p class="music-hint">Tilt to bend · every key belongs</p>`)
+      <div class="tone-keys"></div><div class="keys-expression"><button type="button" class="sustain">Hold to sustain</button><button type="button" class="air-pad">Hold for Air</button><button type="button" class="music-toggle" aria-label="Set position for music">Set position</button></div><p class="music-hint">Tilt to bend · every key belongs</p>`)
     parent.querySelector('#pad')!.before(this.el)
     this.el.querySelector<HTMLSelectElement>('[aria-label="Musical key"]')!.onchange = e => { this.reset(); this.root = Number((e.target as HTMLSelectElement).value); this.draw() }
     this.el.querySelector<HTMLSelectElement>('[aria-label="Scale"]')!.onchange = e => { this.reset(); this.scale = (e.target as HTMLSelectElement).value as Scale; this.draw() }
     this.el.querySelector<HTMLButtonElement>('[aria-label="Octave down"]')!.onclick = () => this.shift(-1)
     this.el.querySelector<HTMLButtonElement>('[aria-label="Octave up"]')!.onclick = () => this.shift(1)
-    this.el.querySelector<HTMLButtonElement>('[aria-label="Level tilt bend"]')!.onclick = () => { void requestMotionPermission(); this.tilt.capture(this.motion.up()) }
+    this.el.querySelector<HTMLButtonElement>('[aria-label="Set position for music"]')!.onclick = () => { void requestMotionPermission(); this.setPosition() }
     this.bindHold('.sustain', on => this.pedal(on))
     this.bindHold('.air-pad', on => {
       this.air = on
-      if (on) { void requestMotionPermission(); this.tilt.capture(this.motion.up()); this.wire.event('air', this.note(0), 0.5) }
+      if (on) { void requestMotionPermission(); this.wire.event('air', this.note(0), 0.5) }
       else this.wire.event('off', 127)
     })
     addEventListener('blur', () => this.reset())
@@ -78,7 +80,6 @@ export class Keys {
   }
   private down(id: number, note: number, v: number, at = performance.now()) {
     if (!this.active) return
-    if (!this.fingers.size) this.tilt.capture(this.motion.up())
     this.fingers.set(id, note); this.sustained.delete(note); this.wire.event('on', note, v, 0, at); tick()
   }
   private up(id: number) {
@@ -96,11 +97,15 @@ export class Keys {
     this.fingers.clear(); this.sustained.clear(); this.air = this.sustain = false
     this.el?.querySelectorAll('.playing').forEach(b => b.classList.remove('playing'))
   }
+  recenter() { this.tilt.capture(this.motion.up()) }
   sample() {
     if (!this.active || !this.motion.q || performance.now() - this.sampled < 33) return
     this.sampled = performance.now()
-    const [roll, pitch] = this.tilt.angles(this.motion.up())
-    if (this.air) this.wire.event('air', this.note(Math.round(clamp(pitch / 30, -1, 1) * 7)), clamp((roll + 40) / 80, 0.12))
+    const [roll] = this.tilt.angles(this.motion.up())
+    if (this.air) {
+      const [x, y] = this.control.sample().aim
+      this.wire.event('air', this.note(Math.round((x + 1) * 7.5)), clamp((y + 1) / 2, 0.12))
+    }
     else if (this.fingers.size || this.sustained.size) this.wire.event('bend', 0, 0, clamp(roll / 25, -1, 1))
   }
   sync(active: boolean, part: string) {

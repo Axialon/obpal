@@ -28,6 +28,7 @@ import { applyTheme, initialTheme, THEMES, themeById, type Theme } from '../ui/t
 import { Experience } from '../sim/vr/experience'
 import { SharedPresence } from '../sim/vr/presence'
 import { anchorPose } from '../sim/vr/rigs'
+import { ControlSession } from '../sim/control-space'
 
 CameraControls.install({ THREE })
 
@@ -873,6 +874,9 @@ function syncPhoneModels() {
 const MODE_LABEL: Partial<Record<ModeId, string>> = { [Mode.tilt]: 'Tilt', [Mode.hold]: '1:1', [Mode.point]: 'Point', [Mode.orbit]: 'Gyro', [Mode.gamepad]: 'Gamepad' }
 const emptyPadState: PadState = { flags: 0, seq: 0, t: 0, buttons: 0, axes: [0, 0, 0, 0], triggers: [0, 0] }
 let remote: Remote | null = null
+let controlSpace: ControlSession | null = null
+const controlParts = new Map<string, THREE.Object3D | null>()
+const controlBounds = new Map<string, { key: string; x: number; y: number; w: number; h: number }>()
 const sound = mountSound('viewer', (strong, weak, ms, who) => remote?.rumble(strong, weak, ms, who), document.getElementById('catalog'))
 const objectSound = new ObjectSound(sound)
 /** The pairing chip: the QR code and the short code, in the bottom-right corner. */
@@ -941,7 +945,7 @@ function removeSeat(id: string) {
   seats.delete(id)
 }
 
-function recenterSeat(s: Seat) { s.aim.recenter(); s.x = innerWidth / 2; s.y = innerHeight / 2 }
+function recenterSeat(s: Seat) { s.aim.recenter(); s.x = innerWidth / 2; s.y = innerHeight / 2; s.track = null; controlBounds.delete(s.who.id) }
 
 function setSeatPointer(s: Seat, on: boolean) {
   s.pointerOn = on
@@ -981,7 +985,8 @@ function seatGrab(s: Seat, down: boolean) {
 
 /** A grab drags what the seat holds; the lead, holding nothing, turns the view. */
 function dragBy(s: Seat, dx: number, dy: number) {
-  if (s.hand.selected?.movable) parts.move(dx, dy, s.hand)
+  if (controlSpace?.scope(s.who.id) === 'scene') { if (isLead(s)) void controls.rotate(-dx * 0.006, -dy * 0.006, true) }
+  else if (s.hand.selected?.movable) parts.move(dx, dy, s.hand)
   else if (isLead(s)) void controls.rotate(-dx * 0.006, -dy * 0.006, true)
 }
 
@@ -995,6 +1000,7 @@ function drawCursor(s: Seat, px: number, py: number, vx: number, vy: number, off
 
 async function startRemote() {
   remote = await Remote.create({ appName: 'ob.Pal Viewer', layout, seats: 8 })
+  controlSpace = new ControlSession(remote, 'viewer')
   sharedPresence.connect(remote)
   remote.setHostPerson({ name: 'Screen', color: family.accentColor() })
   Object.assign(window, { __obpal: remote, __viewer: { holder, camera, controls, view, seats, parts } })
@@ -1070,6 +1076,7 @@ function seatButton(s: Seat, id: string, ev: string) {
   if (id === 'reset') { if (h.selected) parts.resetSelected(h); else if (lead) resetView() }
   else if (id === 'frame') { if (lead) frameModel() }
   else if (id === 'part-release') { parts.select(null, h); renderScene(false) }
+  else if (id === 'control.take' && ev === 'tap') { seatSelect(s); if (s.hand.selected) controlSpace?.setScope(s.who.id, 'object') }
   else if (id === 'wii-a' && ev === 'tap' && s.pointerOn) seatSelect(s) // A also reports down and up (for the PC); a tap selects
   else if (id === 'wii-b' && s.pointerOn) seatGrab(s, ev === 'down')
   else if ((id === 'wii-plus' || id === 'wii-minus') && s.pointerOn) {
@@ -1218,9 +1225,17 @@ function ownGamepad(s: Seat): GamepadContext {
 /** Apply one seat's frame: what it holds follows its phone; the lead, holding nothing, moves the view and the scene. */
 function applySeat(s: Seat, f: Frame, dt: number) {
   if (!f.connected) return
+  const calibrated = controlSpace?.aim(s.who.id)
+  if (calibrated) f = { ...f, tilt: calibrated.tilt }
   const lead = isLead(s)
   const h = s.hand
-  const sel = h.selected?.movable ? h.selected : null
+  const sceneScope = controlSpace?.scope(s.who.id) === 'scene'
+  const sel = !sceneScope && h.selected?.movable ? h.selected : null
+  if (controlParts.get(s.who.id) !== (h.selected?.object ?? null)) {
+    controlParts.set(s.who.id, h.selected?.object ?? null)
+    controlSpace?.position(s.who.id)
+    controlBounds.delete(s.who.id)
+  }
   if (sel && (f.clutch || f.touching || (f.mode === Mode.tilt && (f.tilt[0] || f.tilt[1])) || f.aim[0] || f.aim[1] || f.twist || f.zoom)) parts.active(h)
   // 1:1 match: while the gyro is on, what the seat drives copies the phone's rotation since it was turned on.
   const target = sel && !parts.live_(sel) ? sel.object : lead && !sel ? holder : null
@@ -1292,7 +1307,23 @@ function applySeat(s: Seat, f: Frame, dt: number) {
   }
   if (f.mode === Mode.point) {
     // Where the phone points; a phone without motion sensors steers with its trackpad instead.
-    const { x: vx, y: vy, dx, dy, off } = s.aim.step(f.aim, sel ? [0, 0] : [f.pad1[0] * 1.2, f.pad1[1] * 1.2], innerWidth, innerHeight)
+    let { x: vx, y: vy, dx, dy, off } = s.aim.step(f.aim, sel ? [0, 0] : [f.pad1[0] * 1.2, f.pad1[1] * 1.2], innerWidth, innerHeight)
+    if (calibrated) {
+      const key = `${sceneScope}:${sel?.object.uuid ?? 'scene'}`
+      let bounds = controlBounds.get(s.who.id)
+      if (!bounds || bounds.key !== key) {
+        const box = new THREE.Box3().setFromObject(sel?.object ?? holder), points: THREE.Vector3[] = []
+        for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) points.push(new THREE.Vector3(x, y, z).project(camera))
+        const xs = points.map(p => (p.x + 1) * innerWidth / 2), ys = points.map(p => (1 - p.y) * innerHeight / 2)
+        const valid = !box.isEmpty() && [...xs, ...ys].every(Number.isFinite)
+        const x = valid ? clampX(Math.min(...xs)) : innerWidth * 0.1, y = valid ? clampY(Math.min(...ys)) : innerHeight * 0.1
+        bounds = { key, x, y, w: valid ? Math.max(80, clampX(Math.max(...xs)) - x) : innerWidth * 0.8, h: valid ? Math.max(80, clampY(Math.max(...ys)) - y) : innerHeight * 0.8 }
+        controlBounds.set(s.who.id, bounds)
+      }
+      vx = bounds.x + (calibrated.aim[0] + 1) * bounds.w / 2
+      vy = bounds.y + (1 - calibrated.aim[1]) * bounds.h / 2
+      dx = vx - s.x; dy = vy - s.y; off = false
+    }
     // Holding B drags what it grabbed: a part (or a live pillar's value), otherwise (the lead) the view.
     if (s.grabbing && (dx || dy)) dragBy(s, dx, dy)
     let px = clampX(vx)
@@ -1304,6 +1335,7 @@ function applySeat(s: Seat, f: Frame, dt: number) {
     s.y = py
     drawCursor(s, px, py, vx, vy, off)
     if (!s.grabbing) parts.hover(off ? null : px, off ? null : py, h)
+    if (calibrated) s.el.hidden = !h.hovered && !s.grabbing
     if (sel && !s.grabbing && (f.pad1[0] || f.pad1[1])) parts.move(f.pad1[0] * 1.4, f.pad1[1] * 1.4, h)
     // Like the Wii: a short buzz as the cursor crosses onto something it can pick up.
     const ho = h.hovered?.movable ? h.hovered.object : null

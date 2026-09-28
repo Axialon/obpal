@@ -8,6 +8,7 @@
 import { controllerOf, Mode, type Layout, type Remote } from '@obpal/host'
 import { ScreenPointer } from '../../viewer/pointer'
 import { restInput, type DeviceInput } from './types'
+import type { ControlSession } from '../control-space'
 
 export const WATCHDOG_MS = 300
 
@@ -37,7 +38,7 @@ export function joinText(a: { text: string; del: number }, s: string, del: numbe
 export class Seats {
   private seats = new Map<string, Seat>()
 
-  constructor(private remote: Remote, private layout: Pick<Layout, 'point'> = {}) {
+  constructor(private remote: Remote, private layout: Pick<Layout, 'point'> = {}, private control?: ControlSession) {
     remote.on('input', (who) => { this.seat(who.id).lastInput = performance.now() })
     remote.on('button', ({ id, ev }, who) => {
       const s = this.seat(who.id)
@@ -95,14 +96,16 @@ export class Seats {
       }
       const padPressed = pad ? pad.buttons & ~s.padButtons : 0
       s.padButtons = pad?.buttons ?? 0
-      const quiet = now - s.lastInput > WATCHDOG_MS
-      const events = { held: new Set(s.held), presses: s.presses, values: s.values, wheel: s.wheel, text: s.text, del: s.del, recentred: s.recentred }
+      const quiet = now - s.lastInput > WATCHDOG_MS || this.control?.awaitingPosition(p.id)
+      const calibrated = this.control?.calibrated(p.id)
+      const events = { held: new Set(s.held), presses: s.presses, values: s.values, wheel: s.wheel, text: s.text, del: s.del, recentred: s.recentred && !calibrated, positioned: s.recentred && !!calibrated }
       out.set(p.id, quiet ? { ...restInput(face, mode), ...events, quiet: true, held: new Set() } : {
         face, mode, pad, padPressed,
         touching: f.touching, drag: f.pad1, pan: f.pad2, pinch: f.zoom, twist: f.twist, tilt: f.tilt,
         hold: f.clutch && mode === Mode.hold ? f.qRel : null,
         point, spot: point && spotOf ? spotOf(point.x, point.y, p.id) : null,
         pose: f.pose,
+        space: this.control?.aim(p.id, now) ?? undefined, scope: this.control?.scope(p.id),
         ...events,
       })
       s.presses = []

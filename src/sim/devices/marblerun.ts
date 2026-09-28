@@ -53,6 +53,7 @@ export class MarblerunLogic extends Machine {
         if (i) {
           u.cursorX = clamp(u.cursorX + (i.pad ? axis(i.pad.axes[0]) * dt * 3 : i.drag[0] * 0.025), 0, 4)
           u.cursorZ = clamp(u.cursorZ + (i.pad ? axis(i.pad.axes[1]) * dt * 3 : i.drag[1] * 0.025), 0, 4)
+          if (i.space && !i.pad) { u.cursorX = 2 + i.space.aim[0] * 2; u.cursorZ = 2 - i.space.aim[1] * 2 }
         }
         if (raw?.presses.includes('turn') || i && (i.padPressed & (1 << PadButton.B))) u.turn = (u.turn + 1) % 4
         if (raw?.presses.includes('piece') || i && (i.padPressed & (1 << PadButton.X))) u.kind = (u.kind + 1) % 2
@@ -72,8 +73,8 @@ export class MarblerunLogic extends Machine {
       }
       // A lost phone pauses the clock and marble, so reconnecting cannot lose the run.
       if (!i) { u.vx = u.vz = u.tiltX = u.tiltZ = 0; return }
-      u.tiltX = clamp(i.pad ? axis(i.pad.axes[0]) : this.slopes[n][0] - this.zeros[n][0] + i.drag[0] * 0.03, -1, 1)
-      u.tiltZ = clamp(i.pad ? axis(i.pad.axes[1]) : this.slopes[n][1] - this.zeros[n][1] + i.drag[1] * 0.03, -1, 1)
+      u.tiltX = clamp(i.pad ? axis(i.pad.axes[0]) : this.slopes[n][0] - (i.space ? 0 : this.zeros[n][0]) + i.drag[0] * 0.03, -1, 1)
+      u.tiltZ = clamp(i.pad ? axis(i.pad.axes[1]) : this.slopes[n][1] - (i.space ? 0 : this.zeros[n][1]) + i.drag[1] * 0.03, -1, 1)
       const steps = Math.ceil(dt * 240), h = steps ? dt / steps : 0
       for (let s = 0; s < steps; s++) {
         u.time += h

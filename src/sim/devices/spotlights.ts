@@ -43,7 +43,8 @@ export class SpotlightsLogic extends Machine {
       if (!i) return
       if (!i.quiet) {
         if (i.point) this.points[n] = [i.point.yaw, i.point.pitch]
-        if (i.recentred) this.home(n)
+        if (i.space && i.spot) { h.x = i.spot[0]; h.z = i.spot[1] }
+        else if (i.recentred) this.home(n)
         else if (i.point) {
           h.x = clamp((n - 1.5) * 2 + (i.point.yaw - this.zeros[n][0]) * 0.15, -5, 5)
           h.z = clamp(1 - (i.point.pitch - this.zeros[n][1]) * 0.12, -1, 4)

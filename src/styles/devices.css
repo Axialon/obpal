@@ -48,7 +48,7 @@ body.sim.dev { background: radial-gradient(120% 95% at 50% 36%, var(--stage-a, #
    corners lit while the train is in the middle of it. The picture itself is drawn into the stage's canvas beneath. */
 .ptz-insets { position: fixed; inset: 0; z-index: 2; pointer-events: none; }
 .ptz-inset { --c: rgb(255 255 255 / 0.35); position: absolute; left: 0; top: 0; border-radius: 16px; box-shadow: 0 0 0 2px var(--c), 0 18px 44px rgb(0 0 0 / 0.35); overflow: hidden; }
-.ptz-inset b, .ptz-inset i { position: absolute; top: 8px; padding: 3px 9px; border-radius: 999px; background: rgb(0 0 0 / 0.5); color: #fff; font: 700 11.5px var(--font); font-style: normal; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.ptz-inset b, .ptz-inset i { position: absolute; top: 8px; padding: 3px 9px; border-radius: 999px; background: var(--frost); border: 1px solid var(--frost-edge); color: var(--ink); font: 700 11.5px var(--font); font-style: normal; -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); box-shadow: var(--frost-shadow); }
 .ptz-inset b { left: 30px; }
 .ptz-inset i { right: 8px; font-family: var(--font-data, var(--font)); font-variant-numeric: tabular-nums; }
 .ptz-rec { position: absolute; left: 10px; top: 13px; width: 10px; height: 10px; border-radius: 50%; background: rgb(255 255 255 / 0.35); }
@@ -60,7 +60,7 @@ body.sim.dev { background: radial-gradient(120% 95% at 50% 36%, var(--stage-a, #
 @keyframes ptz-rec { 50% { opacity: 0.35; } }
 
 /* The lamps: what someone is typing to a lamp, floating beside it as they type. */
-.lamp-typing { --c: #fff; position: fixed; left: 0; top: 0; z-index: 3; max-width: 260px; padding: 8px 14px; border-radius: 16px 16px 16px 4px; background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: 0 0 0 2px var(--c), 0 14px 32px rgb(0 0 0 / 0.35); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); color: var(--ink); font: 650 15px var(--font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.lamp-typing { --c: #fff; position: fixed; left: 0; top: 0; z-index: 3; max-width: 260px; padding: 8px 14px; border-radius: 16px 16px 16px 4px; background: var(--frost); border: 1px solid var(--frost-edge); box-shadow: 0 0 0 2px var(--c), var(--frost-shadow); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); color: var(--ink); font: 650 15px var(--font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
 .lamp-typing::after { content: ''; display: inline-block; width: 2px; height: 1em; margin-left: 2px; vertical-align: -2px; background: var(--c); animation: lamp-caret 1s steps(2) infinite; }
 @keyframes lamp-caret { 50% { opacity: 0; } }
 

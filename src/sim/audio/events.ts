@@ -3,11 +3,13 @@ import type { DeviceEvent } from '../devices/types'
 
 export type Material = 'metal' | 'rubber' | 'tile' | 'wood' | 'plastic' | 'glass' | 'water'
 export type Position = readonly [number, number, number]
-export type Texture = 'motor' | 'engine' | 'rotor' | 'servo' | 'hydraulic' | 'roll' | 'scrape' | 'water' | 'air'
+export type Texture = 'motor' | 'engine' | 'rotor' | 'servo' | 'hydraulic' | 'roll' | 'scrape' | 'water' | 'air' | 'tracks'
 export type SoundKind = 'contact' | 'sustain' | 'motor' | 'action' | 'footstep'
 export interface SoundEvent {
   kind: SoundKind
   source: string
+  /** Nearby actuators keep separate voices but share one spatial origin. */
+  spatialGroup?: string
   at: Position
   who?: string
   strength: number
@@ -17,6 +19,9 @@ export interface SoundEvent {
   texture?: Texture
   rpm?: number
   load?: number
+  /** Measured angular manoeuvre, 0..1, and world velocity in metres per second. */
+  bank?: number
+  velocity?: Position
   action?: string
 }
 

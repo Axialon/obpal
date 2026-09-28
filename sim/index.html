@@ -51,14 +51,14 @@
         <p class="lede">Scan its code, take the controls, bring friends.</p>
       </section>
 
-      <div class="sims-bar">
+      <div class="sims-bar" role="region" aria-label="Filter sims">
         <div class="sims-categories" id="categories" role="group" aria-label="Sim categories"></div>
         <div class="sims-tools">
-          <label class="sims-search"><span>Search sims</span><input id="search" type="search" placeholder="Name, controller or activity" maxlength="160" autocomplete="off" /></label>
+          <label class="sims-search"><span class="sims-label">Search sims</span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4 4" /></svg><input id="search" type="search" placeholder="Search sims" maxlength="160" autocomplete="off" /></label>
+          <label class="sims-controller"><span class="sims-label">Controller</span><select id="controller-filter" aria-label="Controller"></select><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg></label>
           <span id="result-count" role="status" aria-live="polite"></span>
-          <button id="clear-filters" type="button" hidden>Clear filters</button>
+          <button id="clear-filters" type="button" aria-label="Clear filters" title="Clear filters" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg></button>
         </div>
-        <div class="sims-filter" id="filter" role="group" aria-label="Controllers"></div>
       </div>
 
       <section class="sims-grid" id="sims" aria-label="Sims"></section>

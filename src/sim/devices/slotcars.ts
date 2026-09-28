@@ -11,9 +11,10 @@ export const SLOTCARS_SPEC: DeviceSpec = {
   kind: 'Game',
   blurb: 'Squeeze one trigger, coast into the bends and see how fast you can keep your car in its lane.',
   teaches: 'One analogue trigger is a complete controller',
-  controllers: [Controller.wheel, Controller.gamepad],
+  controllers: [Controller.wheel, Controller.gamepad, Controller.trackpad],
   profile: 'driving',
   how: {
+    'face.trackpad': 'Gyro on: tip forward for power, back to coast · tap puts your car back',
     'face.wheel': 'RT is the throttle · release before a bend · A puts your car back',
     'face.gamepad': 'RT is the throttle · steering has no effect · A puts your car back',
   },
@@ -79,7 +80,7 @@ export class SlotcarsLogic extends Machine {
         u.vz *= Math.exp(-dt * (u.y <= 0.09 ? 4 : 0.3))
         return
       }
-      const power = clamp(i?.pad?.triggers[1] ?? 0, 0, 1)
+      const power = clamp(i?.pad?.triggers[1] ?? (i?.space ? -i.space.tilt[1] : 0), 0, 1)
       u.v = clamp(u.v + (power * 10 - u.v * 1.2 - (power ? 0 : 2.5)) * dt, 0, 8)
       const next = u.s + u.v * dt
       if (next >= laneLength(n)) {

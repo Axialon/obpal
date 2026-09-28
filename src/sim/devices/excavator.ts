@@ -96,7 +96,10 @@ export class ExcavatorLogic extends Machine {
     if (pose?.tracked && pose.touching) {
       if (!this.hand || this.hand.gen !== pose.gen) this.hand = { p: [...pose.p], tip: bucketTip(u), gen: pose.gen }
       const a = this.hand
-      Object.assign(
+      if (i.space) {
+        const swing = -i.space.aim[0] * Math.PI, radius = clamp(Math.hypot(a.tip[0] - u.x, a.tip[2] - u.z) + (pose.p[2] - a.p[2]) * 4, 0.7, 3)
+        Object.assign(u, bucketPose(-Math.sin(swing) * radius, 1.55 + i.space.aim[1] * 1.4, -Math.cos(swing) * radius))
+      } else Object.assign(
         u,
         bucketPose(
           a.tip[0] + (pose.p[0] - a.p[0]) * 4 - u.x,

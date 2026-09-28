@@ -30,7 +30,7 @@ The steps in the Developer Dashboard, in order. What to paste is in [listing.md]
    - the justification for each permission;
    - the remote code answer (No), with its text.
 
-   Under data usage, tick none of the data types and all three certifications. Then paste the privacy policy URL.
+   Under data usage, tick Location, Web history and User activity, and all three certifications. Then paste the privacy policy URL.
 6. **Distribution:** Public, and the regions you choose.
 7. **Test instructions:** paste the reviewer notes from listing.md.
 8. **Submit for review.** Reviews take from a few days to a few weeks. Choose to publish by hand after approval if you'd like the site to link to the listing the same day.
@@ -48,7 +48,7 @@ The steps in the Developer Dashboard, in order. What to paste is in [listing.md]
 - **Regions:** all regions is suggested. Nothing in Link depends on the country.
 - **Trader or non-trader** (EU Digital Services Act, on the account page): a trader's legal name, address and phone number are shown to EU visitors. This depends on whether you publish as a business.
 - **Official URL** (optional): the listing shows a verified publisher only after the site is verified in Google Search Console with the same Google account.
-- **Data usage:** listing.md ticks none of the data types, because nothing reaches the developer. The judgement call is typing and input, which go through the extension, but only to your own PC and only in memory. The most cautious reading would tick "User activity" as well. That would tell visitors that the developer collects their activity, which isn't so, so it isn't suggested.
+- **Data usage:** Location, Web history and User activity (2026-09-28). The store's user data FAQ asks for data an extension handles to be disclosed even when it never leaves the device, so the earlier "none, because nothing reaches the developer" no longer holds. Typing stays under User activity, not Authentication information or Personal communications; listing.md has the reasons.
 - **Publisher name** and the contact email shown on the listing.
 
 Docs used: [images](https://developer.chrome.com/docs/webstore/images), [listing](https://developer.chrome.com/docs/webstore/cws-dashboard-listing), [privacy](https://developer.chrome.com/docs/webstore/cws-dashboard-privacy), [distribution](https://developer.chrome.com/docs/webstore/cws-dashboard-distribution), [publish](https://developer.chrome.com/docs/webstore/publish), [review](https://developer.chrome.com/docs/webstore/review-process), [trader](https://developer.chrome.com/docs/webstore/program-policies/trader-disclosure). The key.pem first upload isn't on developer.chrome.com today: it comes from Chrome's original packaging guide and the [Chromium extensions group](https://groups.google.com/a/chromium.org/g/chromium-extensions/c/Su50pbNzRms).

@@ -7,9 +7,11 @@ import type { SceneNode } from '@obpal/core'
 import { Claims, PairingChip, Remote, type Layout, type Participant } from '@obpal/host'
 import { family } from '../family'
 import { ICONS } from '../ui/icons'
+import { ControlSession } from './control-space'
 
 export interface SimScene {
   remote: Remote
+  control: ControlSession
   claims: Claims
   nodes: SceneNode[]
   /** Whether a participant may claim (approved, or approval isn't needed). */
@@ -54,6 +56,8 @@ const clock = () => new Date().toLocaleTimeString('en-GB', { hour12: false })
 
 export async function startSimScene(o: SimOptions): Promise<SimScene> {
   const remote = await Remote.create({ appName: o.appName, layout: o.layout, seats: 8 })
+  const query = new URLSearchParams(location.search)
+  const control = new ControlSession(remote, query.get('d') ?? (location.pathname.includes('/arm/') ? `arm-${query.get('kind') ?? 'arm5'}` : 'arena'))
   const claims = new Claims()
   const approved = new Set<string>()
   const pending = new Set<string>()
@@ -69,7 +73,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
     onToggle: (open) => $('chip-invite').setAttribute('aria-pressed', String(open)),
   })
   addEventListener('obpal:viewmode', e => { if ((e as CustomEvent<string>).detail !== 'overview') chip.collapse() })
-  Object.assign(window, { __obpal: remote, __sim: { claims, approved, chip } })
+  Object.assign(window, { __obpal: remote, __sim: { claims, approved, chip, control } })
 
   const autoAllow = $('auto-allow') as HTMLInputElement | null
   const allowed = (id: string) => !o.approval || approved.has(id) || !!autoAllow?.checked
@@ -120,6 +124,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
     if (who !== 'host') {
       remote.feedback({ haptic: 'tick', toast: o.howTo?.(node) ?? `You have ${name}` }, who)
       remote.setValues({ part: name, partLive: false, partValue: '' }, who)
+      control.position(who)
     }
     publish()
     return true
@@ -229,7 +234,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
     publish()
   }
 
-  const result: SimScene = { remote, claims, nodes, allowed, nameOf, colorOf, log, note, publish, take, release, setNodes, nodeName }
+  const result: SimScene = { remote, control, claims, nodes, allowed, nameOf, colorOf, log, note, publish, take, release, setNodes, nodeName }
   publish()
   return result
 }

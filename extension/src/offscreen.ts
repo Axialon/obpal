@@ -502,9 +502,10 @@ function startClock() {
 async function boot() {
   const r = await Remote.create({ appName: APP_NAME, service: SERVICE, layout: layoutFor(suggested), remember: true, rotateInvite: true })
   remote = r
-  const state = (): LinkState => ({ status: r.status, url: r.pairingUrl, device: r.deviceName, lan: r.lanUrl, lanFor: r.lanFor, pairs: r.remembered })
+  const state = (): LinkState => ({ status: r.status, url: r.pairingUrl, device: r.deviceName && r.participants.every(p => p.paused) ? `${r.deviceName} · paused` : r.deviceName, lan: r.lanUrl, lanFor: r.lanFor, pairs: r.remembered })
   const report = () => void toBg({ to: 'bg', type: 'link', link: state() })
   r.on('status', report)
+  r.on('attention', () => { pc.gestures.reset(); report() })
   r.on('lan', report)
   // The invite moved on (a phone paired through it): the popup shows the new QR code.
   r.on('invite', report)

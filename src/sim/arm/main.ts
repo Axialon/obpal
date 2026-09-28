@@ -45,6 +45,8 @@ import { placement, turnBetween } from './layout'
 import type { ArmModel, JointSpec } from './model'
 import { GlowFollower, handMove, handTurn, headingOf } from '@obpal/host'
 import { ScreenPointer } from '../../viewer/pointer'
+import { armWorkspace, armHeight } from './control-space'
+import { sceneCells, nearest } from '../../control-space'
 import { Experience } from '../vr/experience'
 import { SharedPresence } from '../vr/presence'
 import { armRide } from '../vr/rigs'
@@ -566,6 +568,15 @@ if (!shared.guest) void startSimScene({
   s.remote.on('input', (who) => lastInput.set(who.id, performance.now()))
   s.remote.on('button', ({ id, ev }, who) => {
     if (id === 'estop') { estop(who.id); return }
+    if (id === 'wii-a' && ev !== 'tap') return
+    if (s.control.scope(who.id) === 'scene' && (id === 'control.take' || id === 'wii-a')) {
+      const space = s.control.aim(who.id)
+      if (space && s.allowed(who.id) && !stopped && arms.length) {
+        const target = nearest(sceneCells(arms.length).map(([x, y], n) => ({ x, y, n })), space.aim)
+        if (s.take(arms[target.n].id, who.id)) s.control.setScope(who.id, 'object')
+      }
+      return
+    }
     // B is Point's deadman: the arm follows the pointer while it's held.
     if (id === 'wii-b') { const aim = aimOf(who.id); aim.b = ev === 'down'; return }
     const node = s.claims.held(who.id)
@@ -615,6 +626,12 @@ const dialBase = new Map<string, { grab: number; angle: number }>()
 /** The velocity a participant commands for its joint this frame (units/s), or null when its deadman is released. */
 function commanded(j: Joint, who: string, f: Frame, pad: PadState | null, dt: number): number | null {
   const span = j.spec.max - j.spec.min
+  if (sim?.control.scope(who) === 'scene') return null
+  const space = sim?.control.aim(who)
+  if (!pad && space && f.clutch && f.mode === Mode.hold) {
+    j.target = j.spec.min + (space.aim[0] + 1) * span / 2
+    return 0
+  }
   if (pad) {
     // Gamepad: a deflected stick is its own deadman; the triggers work the gripper.
     const x = Math.abs(pad.axes[0]) > 0.12 ? pad.axes[0] : Math.abs(pad.axes[2]) > 0.12 ? pad.axes[2] : 0
@@ -662,6 +679,7 @@ function driveWhole(a: Arm, who: string, now: number, dt: number): string {
   const f = frames.get(who) ?? s.remote.consumeOf(who, now)
   const pad = s.remote.padOf(who)
   if (now - (lastInput.get(who) ?? 0) > 200) { settle(a); return 'watchdog' }
+  if (s.control.scope(who) === 'scene') { settle(a); return 'deadman' }
   if (!pad && f.mode === Mode.point) return drivePoint(a, who, now)
   if (!pad && f.mode === Mode.track) return driveTrack(a, who, f)
   const grip = a.joints[GRIP]
@@ -713,6 +731,11 @@ function driveWhole(a: Arm, who: string, now: number, dt: number): string {
     pitch,
     roll,
   }
+  const space = s.control.aim(who)
+  if (space && following && !pad) {
+    goal.yaw = armWorkspace(space.aim, KIN.yawRange, KIND.drive.reach).yaw
+    goal.height = Math.max(KIN.toolFloor(pitch, roll, heldBox(a)), armHeight(space.aim[1], KIND.drive.height))
+  }
   // No winding up past the clamps: pushing further out and back again answers at once.
   d.acc = { yaw: goal.yaw - d.ref.yaw - ph.yaw, reach: goal.reach - d.ref.reach, height: goal.height - d.ref.height - ph.pitch * D2R * LIFT, pitch: goal.pitch - d.ref.pitch, roll: goal.roll - d.ref.roll + ph.roll }
   const { pose, reached } = KIN.inverse(goal, heldBox(a), poseOf(a))
@@ -726,7 +749,7 @@ function driveWhole(a: Arm, who: string, now: number, dt: number): string {
 
 // ---- Point and go: each participant's aim lands on the floor, Wii-style ----
 
-interface Aim { pointer: ScreenPointer; on: boolean; b: boolean; hit: THREE.Vector3 | null; dot: THREE.Group; beam: THREE.Mesh }
+interface Aim { pointer: ScreenPointer; on: boolean; b: boolean; hit: THREE.Vector3 | null; dot: THREE.Group }
 const aims = new Map<string, Aim>()
 /** This frame's input from each participant: read once, used by whatever they drive. */
 const frames = new Map<string, Frame>()
@@ -742,13 +765,12 @@ function aimOf(id: string): Aim {
   const ring = new THREE.Mesh(new THREE.RingGeometry(0.045, 0.062, 48), mat)
   const core = new THREE.Mesh(new THREE.CircleGeometry(0.016, 24), mat)
   ring.rotation.x = core.rotation.x = -Math.PI / 2
-  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 1, 8), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.4, depthWrite: false }))
   const dot = new THREE.Group()
-  dot.add(ring, core, beam)
+  dot.add(ring, core)
   dot.visible = false
   dot.renderOrder = 2
   scene.add(dot)
-  a = { pointer: new ScreenPointer(), on: false, b: false, hit: null, dot, beam }
+  a = { pointer: new ScreenPointer(), on: false, b: false, hit: null, dot }
   aims.set(id, a)
   return a
 }
@@ -781,7 +803,16 @@ function readInputs(now: number) {
     const mid = tv.set(0, 0, 0).project(camera)
     ndc.set(mid.x + ((st.x - innerWidth / 2) / innerWidth) * 2, mid.y - ((st.y - innerHeight / 2) / innerHeight) * 2)
     raycaster.setFromCamera(ndc, camera)
-    const hit = st.off ? null : raycaster.ray.intersectPlane(floorPlane, aim.hit ?? new THREE.Vector3())
+    let hit = st.off ? null : raycaster.ray.intersectPlane(floorPlane, aim.hit ?? new THREE.Vector3())
+    const space = s.control.aim(p.id), heldArm = armOf(s.claims.held(p.id) ?? '')
+    if (space && heldArm && s.control.scope(p.id) === 'object') {
+      const local = armWorkspace(space.aim, KIN.yawRange, KIND.drive.reach)
+      hit = heldArm.model.root.localToWorld(new THREE.Vector3(local.x, 0, local.z))
+    } else if (space && arms.length && s.control.scope(p.id) === 'scene') {
+      const target = nearest(sceneCells(arms.length).map(([x, y], n) => ({ x, y, n })), space.aim)
+      s.control.target(p.id, s.nodeName(arms[target.n].id))
+      hit = arms[target.n].model.root.getWorldPosition(new THREE.Vector3())
+    }
     // Keep it inside the cell's fence.
     const edge = KIND.cell.fence - 0.05
     if (hit && Math.hypot(hit.x, hit.z) > edge) { const k = edge / Math.hypot(hit.x, hit.z); hit.x *= k; hit.z *= k }
@@ -800,14 +831,9 @@ function readInputs(now: number) {
     aim.dot.visible = !!hit
     if (!hit) continue
     aim.dot.position.set(hit.x, 0.004, hit.z)
-    const color = s.colorOf(p.id) || '#ffffff'
+    const color = '#c6ff34'
     aim.dot.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) (m.material as THREE.MeshBasicMaterial).color.set(color) })
     aim.dot.scale.setScalar(aim.b ? 1.35 : 1)
-    // Holding a whole arm: a beam up to where the gripper will hover.
-    const held = s.claims.held(p.id)
-    const arm = held ? armOf(held) : undefined
-    aim.beam.visible = !!arm
-    if (arm) { aim.beam.scale.y = arm.hover; aim.beam.position.y = arm.hover / 2 }
   }
   glowStep(now)
 }
@@ -908,11 +934,18 @@ function driveTrack(a: Arm, who: string, f: Frame): string {
     pitch: clamp(k.pitch - turn.tip, ...KIN.pitchRange),
     roll: clamp(k.roll + turn.twist, ...KIN.rollRange),
   }
+  const space = sim?.control.aim(who)
+  if (space) {
+    goal.yaw = armWorkspace(space.aim, KIN.yawRange, KIND.drive.reach).yaw
+    goal.height = armHeight(space.aim[1], KIND.drive.height)
+    const origin = a.model.root.worldToLocal(k.tool.clone())
+    goal.reach = clamp(Math.hypot(origin.x, origin.z) + m.forward * (KIND.drive.reach[1] - KIND.drive.reach[0]) / 0.3, ...KIND.drive.reach)
+  }
   a.goal = goal
   // Where the gripper goes comes first: tip it if that's what it takes to get there.
   const r = solveNear(KIN, goal, 60, heldBox(a), current)
   if (r) setPose(a, r.pose)
-  const ok = !!r && turnBetween(goal.yaw, want) < 1e-6
+  const ok = !!r && (!!space || turnBetween(goal.yaw, want) < 1e-6)
   if (!ok && !a.edge) sim?.remote.feedback({ haptic: 'bump' }, who)
   a.edge = !ok
   return ok ? '' : 'edge'
@@ -1089,9 +1122,11 @@ function loop(now: number) {
     soundAt = now
     for (const a of arms) for (let i = 0; i < a.joints.length; i++) {
       const j = a.joints[i], speed = Math.min(1, Math.abs(j.vel) / Math.max(0.01, j.spec.vmax))
-      if (speed < 0.02) continue
+      const stalled = j.state === 'limit' || j.state === 'floor' || a.blocked && j.target !== null && Math.abs(j.target - j.angle) > 0.015
+      if (speed < 0.02 && !stalled) continue
       a.model.rings[i].getWorldPosition(soundPosition)
-      sound.bus.emit({ kind: 'motor', texture: 'servo', source: j.node, at: [soundPosition.x, soundPosition.y, soundPosition.z], who: sim?.claims.controller(j.node), strength: speed, rpm: speed, load: a.blocked ? 1 : 0.4 })
+      const payload = blocks.find(b => b.by === a)?.mass ?? 0
+      sound.bus.emit({ kind: 'motor', texture: 'servo', source: j.node, spatialGroup: a.id, at: [soundPosition.x, soundPosition.y, soundPosition.z], who: sim?.claims.controller(j.node), strength: stalled ? Math.max(0.35, speed) : speed, rpm: speed, load: stalled ? 1 : Math.min(0.9, 0.25 + payload * 0.7) })
     }
   }
   sound.tick(now)

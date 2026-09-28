@@ -41,7 +41,10 @@ export class GimbalLogic extends Machine {
       u = this.units[0]
     if (!i) return
     const q = i.hold ?? (i.pose?.tracked && i.pose.touching ? i.pose.q : null)
-    if (q) {
+    if (i.space && !i.pad && !i.pose?.touching) {
+      u.pan = -i.space.aim[0] * Math.PI; u.pitch = i.space.aim[1] * 1.3
+      u.q = qMul(qMul(qAxisAngle(0, 1, 0, u.pan), qAxisAngle(1, 0, 0, u.pitch)), qAxisAngle(0, 0, 1, u.roll))
+    } else if (q) {
       this.last = unitQuaternion(q)
       if (i.recentred) this.zero = [0, 0, 0, 1]
       u.q = unitQuaternion(qMul(qConj(this.zero), this.last))
@@ -54,7 +57,7 @@ export class GimbalLogic extends Machine {
       u.roll += (i.twist * Math.PI) / 180
       u.q = qMul(qMul(qAxisAngle(0, 1, 0, u.pan), qAxisAngle(1, 0, 0, u.pitch)), qAxisAngle(0, 0, 1, u.roll))
     }
-    if (i.recentred && !q) this.home()
+    if (i.recentred && !q && !i.space) this.home()
     if (action(i, 'record')) {
       u.recording = !u.recording
       if (u.recording) u.takes++

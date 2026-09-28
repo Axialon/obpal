@@ -14,6 +14,9 @@ export interface MusicEvent {
   n: number
   v: number
   x: number
+  /** Optional strike-time space snapshot; legacy pad and key events omit it. */
+  aim?: [number, number]
+  scope?: 'object' | 'scene'
 }
 
 /** Reject malformed music before it can allocate voices or schedule nonfinite AudioParams. */
@@ -26,6 +29,9 @@ export function readMusic(value: unknown): MusicEvent | null {
     if (!Number.isInteger(e.seq) || e.seq < 0 || !Number.isInteger(e.n) || e.n < 0 || e.n > 127 || e.at < 0 || e.uncertainty < 0) return null
     if (e.v < 0 || e.v > 1 || e.x < -1 || e.x > 1 || (e.op === 'hit' && e.n >= DRUMS.length)) return null
     if ((e.op === 'on' || e.op === 'air') && (e.n < 24 || e.n > 108)) return null
+    if (e.aim !== undefined || e.scope !== undefined) {
+      if (e.op !== 'hit' || !Array.isArray(e.aim) || e.aim.length !== 2 || !e.aim.every(n => Number.isFinite(n) && Math.abs(n) <= 1) || !['object', 'scene'].includes(e.scope ?? '')) return null
+    }
     return e
   } catch { return null }
 }
@@ -54,6 +60,32 @@ export class StrikeDetector {
     const v = clamp((this.peak - 5) / 28, 0.18)
     this.peak = 0; this.last = now; this.armed = false
     return v
+  }
+}
+
+/** A downward peak carries its own aim and timestamp, never those of the later falling sample. */
+export class SpatialStrike {
+  private peak: { acceleration: number; aim: [number, number]; at: number } | null = null
+  private began = 0
+  private last = -Infinity
+  private armed = true
+  private sampled = -Infinity
+  reset() { this.peak = null; this.last = this.sampled = -Infinity; this.armed = true }
+  sample(down: number, aim: readonly [number, number], at: number): { aim: [number, number]; at: number; v: number } | null {
+    if (![down, ...aim, at].every(Number.isFinite)) return null
+    if (at < this.sampled) return null
+    if (at - this.sampled > 80) this.peak = null
+    this.sampled = at
+    if (down < 3) this.armed = true
+    if (!this.armed || at - this.last < 100) return null
+    if (!this.peak) {
+      if (down >= 7) { this.peak = { acceleration: down, aim: [...aim], at }; this.began = at }
+      return null
+    }
+    if (down >= this.peak.acceleration && at - this.began < 35) { this.peak = { acceleration: down, aim: [...aim], at }; return null }
+    const peak = this.peak
+    this.peak = null; this.armed = false; this.last = at
+    return { aim: peak.aim, at: peak.at, v: clamp((peak.acceleration - 5) / 28, 0.18) }
   }
 }
 

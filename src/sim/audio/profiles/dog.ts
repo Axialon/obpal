@@ -6,6 +6,7 @@ export default profile<DogLogic>({
   id: 'dog', space: 'yard', materials: ['rubber', 'tile'], texture: 'servo', pitch: 0.75, distance: 3, action: 'tick',
 }, (logic, n, out) => {
   const u = logic.units[n]
-  sample(out, u.x, 0.4, u.z, Math.abs(u.v) / 3, Math.abs(u.v) / 3, 0, u.gait)
+  const stride = u.stride * (1 - u.sit)
+  sample(out, u.x, 0.4, u.z, stride * (0.3 + Math.abs(Math.cos(u.gait)) * 0.45), stride * (0.4 + Math.abs(Math.sin(u.gait)) * 0.45), 0, u.gait, u.sit)
 })
 

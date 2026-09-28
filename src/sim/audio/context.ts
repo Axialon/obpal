@@ -1,6 +1,9 @@
 /** A sim owns one context. The studio borrows it without changing its instrument scheduler. */
 let context: AudioContext | null = null
 const previous = new Float64Array(16).fill(NaN)
+export const listenerPosition: [number, number, number] = [0, 0, 0]
+export const listenerVelocity: [number, number, number] = [0, 0, 0]
+let listenerAt = -Infinity
 export const audioContext = () => context ??= new AudioContext({ latencyHint: 'interactive' })
 export const currentContext = () => context
 
@@ -9,6 +12,13 @@ export function listenFrom(matrix: ArrayLike<number>) {
   const c = context
   if (!c || c.state !== 'running') return
   const l = c.listener, t = c.currentTime
+  const dt = t - listenerAt
+  for (let i = 0; i < 3; i++) {
+    const next = matrix[12 + i], velocity = dt > 0 && dt < 0.25 ? (next - listenerPosition[i]) / dt : 0
+    listenerVelocity[i] = Number.isFinite(velocity) && Math.abs(velocity) < 60 ? velocity : 0
+    listenerPosition[i] = next
+  }
+  listenerAt = t
   if (l.positionX) {
     if (matrix[12] !== previous[12]) l.positionX.setTargetAtTime(matrix[12], t, 0.015)
     if (matrix[13] !== previous[13]) l.positionY.setTargetAtTime(matrix[13], t, 0.015)

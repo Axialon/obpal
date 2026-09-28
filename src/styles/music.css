@@ -1,6 +1,7 @@
-﻿.surface.music-on { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; }
+﻿.surface.music-on { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; }
+.surface.music-on > .bar, .surface.music-on > .tray { min-width: 0; }
 .surface.music-on > .dock, .surface.music-on > #pad, .surface.music-on > .styles { display: none; }
-.music-face { min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+.music-face { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
 .music-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .music-heading b { font: 750 25px var(--font-display); letter-spacing: -0.04em; }
 .music-part { font-size: 12px; color: var(--muted); text-align: right; }
@@ -18,6 +19,9 @@
 .music-hint { margin: 0; min-height: 17px; text-align: center; color: var(--muted); font-size: 11px; }
 .strike-pad { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: radial-gradient(circle, rgb(var(--accent-rgb) / .13), transparent 65%); border: 1px solid var(--glass-edge); border-radius: 28px; color: var(--ink); touch-action: none; }
 .strike-pad b { font-size: 26px; }.strike-pad span, .strike-pad small { color: var(--muted); }.strike-pad.playing { border-color: var(--accent); }
+.strike-map { width: min(100%, 260px); height: min(24vh, 190px); flex-shrink: 1; min-height: 60px; overflow: visible; pointer-events: none; }
+.strike-map circle { fill: var(--muted); opacity: .45; }.strike-map circle.aimed { fill: #c6ff34; opacity: 1; stroke: #c6ff34; stroke-width: 2; }
+.strike-map text { fill: var(--muted); font-size: 7px; text-anchor: middle; }
 .music-face button:focus-visible, .music-face select:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .tone-keys { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(2, 1fr); gap: 8px; }
 .tone-key { display: flex; flex-direction: column; justify-content: space-between; align-items: center; padding: 16px 8px; border-radius: 10px 10px 24px 24px; background: linear-gradient(#e7ece2, #adb4a4); color: #182012; border: 1px solid #eef4e8; touch-action: none; user-select: none; }

@@ -45,8 +45,8 @@ html.field3d .hero::after { opacity: 0; }
 /* One sweep of light across the main button when the pointer arrives. */
 .cta-main::after { content: ''; position: absolute; inset: 0; background: linear-gradient(105deg, transparent 30%, rgb(255 255 255 / 0.45) 50%, transparent 70%); transform: translateX(-120%); pointer-events: none; }
 @media (hover: hover) and (pointer: fine) { .cta-main:hover::after { transform: translateX(120%); transition: transform 0.75s var(--ease); } }
-.cta-alt { min-height: 54px; padding: 0 22px; font-size: 16px; color: var(--ink); text-decoration: none; background: rgb(var(--hl-rgb) / 0.05); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
-.cta-alt:hover { background: rgb(var(--hl-rgb) / 0.09); }
+.cta-alt { min-height: 54px; padding: 0 22px; font-size: 16px; color: var(--ink); text-decoration: none; background: var(--frost); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); }
+.cta-alt:hover { background: var(--frost); border-color: var(--accent-text); }
 /* The hero's raised things (its buttons, the hint, the sound control, the three steps' icons) are blocks in the
    marbles' world (hero.ts): a marble knocks against one's side, and climbs it with a clear tilt. Each is its top, and
    below that its side, as tall as the block stands on screen and leaning the way it's seen (--pad-dx, --pad-dy: from
@@ -77,13 +77,13 @@ html.field3d .hero::after { opacity: 0; }
 .quick { display: flex; flex-wrap: wrap; gap: calc(10px + var(--pad-room)) 24px; margin: calc(24px + var(--pad-room)) 0 0; padding: 0; list-style: none; color: var(--secondary); font-size: 14.5px; font-weight: 600; }
 .quick li { display: inline-flex; align-items: center; gap: 10px; }
 /* Each step's icon, a small glass block like the sound control. */
-.qi { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; border: 1px solid var(--line); background: rgb(var(--base-rgb) / 0.5); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); color: var(--accent-text); }
+.qi { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; border: 1px solid var(--line); background: var(--frost); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); color: var(--accent-text); }
 .qi .ic { width: 18px; height: 18px; }
 
 /* Try it right here: a real pairing code (computers only), in glass lit from above. */
 .pair { position: relative; z-index: 3; width: 300px; padding: 20px; border-radius: 30px; border: 1px solid var(--line);
-  background: linear-gradient(165deg, rgb(var(--surface-rgb) / 0.6), rgb(var(--base-rgb) / 0.5));
-  backdrop-filter: blur(24px) saturate(160%); -webkit-backdrop-filter: blur(24px) saturate(160%);
+  background: var(--frost);
+  -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur);
   box-shadow: 0 40px 80px -40px rgb(0 0 0 / 0.8), inset 0 1px 0 rgb(var(--hl-rgb) / 0.12); }
 .pair::before { content: ''; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; pointer-events: none;
   background: linear-gradient(160deg, rgb(var(--accent-rgb) / 0.55), transparent 38%, transparent 70%, rgb(var(--haze-rgb) / 0.35));
@@ -101,7 +101,7 @@ html.field3d .hero::after { opacity: 0; }
 .hero[data-live] .pair::before { background: linear-gradient(160deg, rgb(var(--accent-rgb) / 0.9), rgb(var(--accent-rgb) / 0.2) 50%, rgb(var(--haze-rgb) / 0.5)); }
 
 .hero-hint { position: absolute; left: 50%; bottom: calc(30px + var(--pad-room)); z-index: 1; display: inline-flex; align-items: center; gap: 10px; padding: 10px 16px 10px 12px; border-radius: 999px;
-  border: 1px solid var(--line); background: rgb(var(--base-rgb) / 0.5); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line); background: var(--frost); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur);
   color: var(--secondary); font: 650 13.5px/1 var(--font); white-space: nowrap; transform: translate3d(-50%, 0, 0); transition: opacity 0.6s var(--ease), transform 0.6s var(--ease);
   animation: hint-bob 3.2s var(--ease) 1.2s 3; }
 .hero-hint .ic { width: 18px; height: 18px; color: var(--accent-text); }
@@ -110,7 +110,7 @@ html.field3d .hero::after { opacity: 0; }
 /* The marbles' sound: a glass button in the corner. On or off, it's an icon; waiting for the click or tap a browser
    wants before a page may sound, it says so, and asks softly a few times. */
 .hero-sound { position: absolute; right: max(var(--gut), 24px); bottom: calc(26px + var(--pad-room)); z-index: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 44px; height: 44px; padding: 0 16px 0 12px; border-radius: 999px; font: 650 13.5px/1 var(--font);
-  border: 1px solid var(--line); background: rgb(var(--base-rgb) / 0.5); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); color: var(--secondary); cursor: pointer;
+  border: 1px solid var(--line); background: var(--frost); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); color: var(--secondary); cursor: pointer;
   transition: color 0.2s var(--ease), border-color 0.2s var(--ease), box-shadow 0.3s var(--ease), transform 0.2s var(--ease); }
 .hero-sound:hover { color: var(--ink); border-color: rgb(var(--accent-rgb) / 0.45); }
 .hero-sound:active { transform: scale(0.94); }
@@ -168,7 +168,7 @@ html.tilting .play-cue-t > :first-child, html:not(.tilting) .play-cue-t > :last-
 .scene-tip > span[data-on] { visibility: visible; opacity: 1; }
 /* A scene's switch between its ways to play (the arm's Motion and Drag): glass like the cards', at the row's end. */
 .scene-modes { flex: none; display: inline-flex; gap: 2px; margin-left: auto; padding: 3px; border-radius: 999px; border: 1px solid var(--line);
-  background: rgb(var(--base-rgb) / 0.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: inset 0 1px 0 rgb(var(--hl-rgb) / 0.08); cursor: default; }
+  background: var(--frost); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); box-shadow: inset 0 1px 0 rgb(var(--hl-rgb) / 0.08); cursor: default; }
 .scene-modes button { display: grid; place-items: center; width: 32px; height: 26px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--secondary); cursor: pointer; transition: background 0.2s, color 0.2s; }
 .scene-modes button:hover { color: var(--ink); }
 .scene-modes button[aria-checked='true'] { background: rgb(var(--accent-rgb) / 0.16); color: var(--accent-text); }
@@ -275,3 +275,7 @@ html.phone .top-menu { margin-left: auto; }
   .scene, .rise { opacity: 1; transform: none; transition: none; }
   .pair-qr, .hero-hint { animation: none; }
 }
+
+/* Keep the hero's drawn block sides while sharing the frosted edge. */
+.cta-alt, .qi, .pair, .hero-hint, .hero-sound, .scene-modes { border-color: var(--frost-edge); }
+.pair, .scene-modes { box-shadow: var(--frost-shadow); }

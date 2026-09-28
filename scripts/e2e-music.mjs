@@ -30,7 +30,7 @@ export async function runMusic(local, check) {
       await screen.goto(`${local.origin}/sim/?face=drums`)
       await screen.locator('.dcard[data-id="studio"] .dcard-stage.live').waitFor({ timeout: 20000 })
       assert((await screen.evaluate(() => window.__sims.cards())).join() === 'studio', 'Drums filter')
-      await screen.locator('.sims-chip[data-face="face.keys"]').click()
+      await screen.locator('#controller-filter').selectOption('face.keys')
       assert((await screen.evaluate(() => window.__sims.cards())).join() === 'studio', 'Keys filter')
       assert(await screen.locator('.dcard[data-id="studio"] .dcard-go').getAttribute('href') === '/sim/device/?d=studio', 'Studio card route')
       assert(!contextId, 'The preview started audio')
@@ -72,7 +72,7 @@ export async function runMusic(local, check) {
       await p.page.keyboard.press('Enter')
       await p.page.locator('.music-toggle', { hasText: 'Strike mode' }).click()
       const arm = await p.point('.strike-pad'); await p.touch('touchStart', [arm])
-      for (const a of [0, 9, 24, 8, 0]) { await p.page.evaluate(a => window.dispatchEvent(new DeviceMotionEvent('devicemotion', { acceleration: { x: a, y: 0, z: 0 }, rotationRate: { alpha: 0, beta: 0, gamma: 0 }, interval: 16 })), a); await sleep(18) }
+      for (const a of [0, 9, 24, 8, 0]) { await p.page.evaluate(a => window.dispatchEvent(new DeviceMotionEvent('devicemotion', { acceleration: { x: 0, y: -a * Math.sin(70 * Math.PI / 180), z: -a * Math.cos(70 * Math.PI / 180) }, rotationRate: { alpha: 0, beta: 0, gamma: 0 }, interval: 16 })), a); await sleep(18) }
       await p.touch('touchEnd'); await p.page.locator('.music-toggle', { hasText: 'Strike mode' }).click()
       await until(async () => await screen.evaluate(() => window.__device.logic.counts[0]) >= before + 3)
       return 'pad, Enter and one debounced strike'
@@ -140,7 +140,7 @@ export async function runMusic(local, check) {
       const controllers = [0, 3].map((seat, p) => {
         const own = data.filter(s => s.seat === seat)
         assert(own.length === count / 2 && perPhone[p].length === own.length, `Seat ${seat}: ${own.length} sounds, ${perPhone[p].length} touches`)
-        return { seat, samples: own.length, ...latencyStats(own.map(s => s.ms)), handlerToSchedule: latencyStats(own.map((s, i) => Math.max(0, s.ms - perPhone[p][i]))) }
+        return { seat, samples: own.length, ...latencyStats(own.map(s => s.ms)), browserDispatch: latencyStats(perPhone[p]), handlerToSchedule: latencyStats(own.map((s, i) => Math.max(0, s.ms - perPhone[p][i]))) }
       })
       const budget = { medianMs: 35, p90Ms: 100, handlerMedianMs: 15 }
       report.latency = { warmup, samples: data.length, ...latencyStats(ms), clockUncertaintyP95Ms: quantile(data.map(s => s.uncertainty), 0.95), browserDispatch: latencyStats(dispatch), handlerToSchedule: latencyStats(application), controllers, budget }

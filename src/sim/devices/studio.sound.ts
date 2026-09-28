@@ -89,11 +89,11 @@ export class StudioSound {
     this.analyser.getFloatTimeDomainData(this.levels)
     return this.levels.reduce((peak, v) => Math.max(peak, Math.abs(v)), 0)
   }
-  private voice(seat: number, key: number, velocity: number, decay: number, held: boolean): Voice {
+  private voice(seat: number, key: number, velocity: number, decay: number, held: boolean, instrument = seat): Voice {
     const c = this.context!, at = c.currentTime
     const own = this.voices.filter(v => v.seat === seat)
     if (own.length >= AUDIO_LIMITS.voices) { own[0].release(); this.stolen++ }
-    const gain = c.createGain(); gain.connect(this.buses[seat])
+    const gain = c.createGain(); gain.connect(this.buses[instrument])
     const peak = clamp(velocity) * 0.65
     gain.gain.setValueAtTime(0, at); gain.gain.linearRampToValueAtTime(peak, at + 0.003)
     gain.gain.exponentialRampToValueAtTime(held ? Math.max(0.001, peak * 0.48) : 0.0001, at + decay)
@@ -123,11 +123,11 @@ export class StudioSound {
     }
     return at
   }
-  hit(seat: number, n: number, velocity: number): number | null {
+  hit(seat: number, n: number, velocity: number, instrument = seat): number | null {
     if (!this.running) return null
     const c = this.context!, at = c.currentTime, p = drumSpec(n)
     if (n === 2) this.voices.filter(v => v.seat === seat && v.key === -4).forEach(v => v.release())
-    const v = this.voice(seat, -n - 1, velocity, p.decay, false)
+    const v = this.voice(seat, -n - 1, velocity, p.decay, false, instrument)
     const extras: AudioNode[] = []
     for (let i = 0; i < p.modes.length; i++) {
       const o = c.createOscillator(), g = c.createGain()
@@ -146,15 +146,15 @@ export class StudioSound {
     noise.connect(filter); filter.connect(ng); ng.connect(v.gain); v.sources.push(noise); extras.push(filter, ng)
     return this.finish(v, p.decay + 0.05, extras)
   }
-  note(seat: number, note: number, velocity: number, air = false, oneShot = false): number | null {
+  note(seat: number, note: number, velocity: number, air = false, oneShot = false, instrument = seat): number | null {
     if (!this.running) return null
     const c = this.context!, key = air ? 127 : note
     this.off(seat, key)
-    const modal = seat === 4 || seat === 5
-    const v = this.voice(seat, key, velocity, modal ? (seat === 5 ? 1.5 : 3) : oneShot ? 0.6 : 0.22, !modal && !oneShot)
+    const modal = instrument === 4 || instrument === 5
+    const v = this.voice(seat, key, velocity, modal ? (instrument === 5 ? 1.5 : 3) : oneShot ? 0.6 : 0.22, !modal && !oneShot, instrument)
     const filter = c.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = air ? 1800 : 2600; filter.Q.value = 0.5
     filter.connect(v.gain); v.filter = filter
-    const modes = modal ? (seat === 5 ? [1, 4, 10] : [1, 2.002, 3.01]) : [1, 1]
+    const modes = modal ? (instrument === 5 ? [1, 4, 10] : [1, 2.002, 3.01]) : [1, 1]
     const extras: AudioNode[] = [filter]
     modes.forEach((ratio, i) => {
       const o = c.createOscillator(), g = c.createGain()
@@ -162,7 +162,7 @@ export class StudioSound {
       o.detune.value = modal ? 0 : (i ? 5 : -5); g.gain.value = (modal ? 1 / (i + 1) ** 2 : 0.32)
       o.connect(g); g.connect(filter); v.sources.push(o); v.oscillators.push(o); extras.push(g)
     })
-    return this.finish(v, modal ? (seat === 5 ? 1.6 : 3.1) : oneShot ? 0.7 : AUDIO_LIMITS.maxSeconds, extras)
+    return this.finish(v, modal ? (instrument === 5 ? 1.6 : 3.1) : oneShot ? 0.7 : AUDIO_LIMITS.maxSeconds, extras)
   }
   air(seat: number, note: number, brightness: number) {
     let v = this.voices.find(v => v.seat === seat && v.key === 127)

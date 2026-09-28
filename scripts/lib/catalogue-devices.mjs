@@ -62,8 +62,8 @@ export const deviceExercises = [
     button: 'colour',
     home: [
       ['x', 0],
-      ['y', 1.5],
-      ['z', 0],
+      ['y', 1.9],
+      ['z', -2.91],
     ],
   },
   {
@@ -106,7 +106,7 @@ export const deviceExercises = [
       ['turret', 0],
     ],
   },
-  { id: 'spotlights', face: 'face.wii', turn: true, field: 'pan', key: 'KeyC', button: 'colour' },
+  { id: 'spotlights', face: 'face.wii', turn: true, field: 'pan', key: 'KeyC', button: 'colour', home: [['x', 0], ['z', 1.5]] },
   {
     id: 'vacuum',
     face: 'face.wii',
@@ -182,6 +182,8 @@ export async function exerciseDevice(e, { device, phone, heldBy, check, at, unti
           await new Promise((r) => setTimeout(r, 16))
         }
       })
+      // Calibrated Aim reads orientation; a real turn supplies orientation and angular velocity together.
+      await turn(p, 10, 35)
     } else if (e.turn) await turn(p, 10, 35)
     if (e.hold) {
       await p.page.locator(e.hold).waitFor({ state: 'visible' })
@@ -216,6 +218,20 @@ export async function exerciseDevice(e, { device, phone, heldBy, check, at, unti
         `${error.message}: ${JSON.stringify(await state())}; inputs ${JSON.stringify(await at(s, () => window.__device.seen))}`,
       )
     })
+  })
+  if (e.id === 'tank') await check('tank: Set position and scene Take work inside the gamepad', async () => {
+    await turn(p, 35, 45)
+    await until('turret aims away', async () => Math.abs((await state()).turret) > 0.2)
+    const shots = (await state()).shots
+    await p.page.getByRole('button', { name: 'Set position', exact: true }).click()
+    await until('turret re-centred', async () => Math.abs((await state()).turret) < 0.02)
+    if ((await state()).shots !== shots) throw new Error('Set position fired a shot')
+    await p.page.locator('.gp-scope').click()
+    await turn(p, 45, 45 - 35 * 0.72)
+    await until('second tank aimed', () => p.page.locator('.gp-scope small').textContent().then(t => t.includes('Tank 2')))
+    await p.hold('.gp-f[data-k="a"]', 120)
+    await until('second tank taken', () => heldBy(s, 'tank2'))
+    await until('object scope', () => p.page.locator('.gp-scope').getAttribute('aria-pressed').then(v => v === 'false'))
   })
   if (e.id === 'pinball') await check('pinball: a quick phone tilt reversal nudges the cabinet', async () => {
     await p.tab('rotate')

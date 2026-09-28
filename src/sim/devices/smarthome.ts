@@ -76,6 +76,7 @@ export class SmarthomeLogic extends Machine {
           }
         }
         if (!i.quiet) {
+          if (i.space && !i.pad) { u.target = (i.space.aim[1] + 1) / 2; this.scene = 'Custom' }
           const change = -i.drag[1] / 240 + i.twist / 360 - i.wheel / 1200
           if (Number.isFinite(change) && change) {
             u.target = clamp(u.target + change, 0, 1)

@@ -24,6 +24,8 @@ import { spotRing, type DeviceView } from './view'
 import { devicePresence } from '../vr/devices'
 import { mountSound } from '../audio/session'
 import { DeviceSound } from '../audio/devices'
+import { deviceTarget, mapDeviceSpace, sceneSelects } from './control-space'
+import { restInput } from './types'
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 const params = new URLSearchParams(location.search)
@@ -114,7 +116,14 @@ function refreshReadouts(now: number) {
   document.querySelectorAll<HTMLElement>('#dev-units li').forEach((li, n) => { li.querySelector('.nv')!.textContent = logic.readout(n) })
 }
 
-$('home-all').onclick = () => { units.forEach((_, n) => logic.home(n)); sim?.log('The screen sent every unit home') }
+$('home-all').onclick = () => {
+  units.forEach((unit, n) => {
+    logic.home(n)
+    const who = sim?.claims.holder(unit.id)
+    if (who && sim?.control.calibrated(who)) sim.control.position(who)
+  })
+  sim?.log('The screen sent every unit home')
+}
 if (logic.reset) {
   $('reset').hidden = false
   $('reset').textContent = logic.resetLabel ?? 'Reset'
@@ -160,12 +169,13 @@ function drawCursors(inputs: Map<string, DeviceInput>) {
   for (const [id, inp] of inputs) {
     if (!inp.point) continue
     const c = cursorOf(id)
-    const color = sim?.colorOf(id) || '#ffffff'
+    const color = '#c6ff34'
     const [x, y] = aimAt(inp.point.x, inp.point.y, id)
     c.el.style.setProperty('--c', color)
     c.el.style.transform = `translate(${Math.max(6, Math.min(innerWidth - 6, x))}px, ${Math.max(6, Math.min(innerHeight - 6, y))}px)`
     c.el.classList.toggle('off', inp.point.off)
     c.el.classList.toggle('press', inp.held.has('wii-b') || inp.held.has('mouse-left'))
+    c.el.hidden = !!inp.space || !!c.ring
     if (c.ring) {
       c.ring.visible = !!inp.spot
       if (inp.spot) c.ring.position.set(inp.spot[0], (view?.pickY ?? 0) + 0.004, inp.spot[1])
@@ -179,6 +189,7 @@ function drawCursors(inputs: Map<string, DeviceInput>) {
  * (CATALOGUE §5): true when it did, so the press isn't also the unit's.
  */
 function pointToTake(who: string, inp: DeviceInput): boolean {
+  if (inp.space && inp.scope === 'object') return false
   if (!view?.anchor || !inp.point || inp.point.off || !sim) return false
   if (!inp.presses.includes('wii-a') && !inp.presses.includes('mouse-left')) return false
   let best = -1
@@ -257,7 +268,7 @@ if (!presence.shared.guest) void startSimScene({
   sim = s
   presence.connect(s)
   view?.connect?.(s)
-  const seats = new Seats(s.remote, layout)
+  const seats = new Seats(s.remote, layout, s.control)
   s.remote.on('mode', () => { renderFaces(); renderUnits() })
   // For tests: the device, and what each participant's input looked like last frame.
   const seen: Record<string, { face: string; mode: number; touching: boolean; touchFrames: number; frames: number; drag: [number, number]; tilt: [number, number]; point: boolean; spot: [number, number] | null; presses: string[] }> = {}
@@ -272,6 +283,24 @@ if (!presence.shared.guest) void startSimScene({
       return p ? [p.x, p.z] as [number, number] : null
     } : undefined
     const inputs = seats.read(now, spotOf)
+    const aimed = new Set<number>()
+    document.querySelectorAll<HTMLElement>('#dev-units [data-unit]').forEach(row => row.style.removeProperty('outline'))
+    for (const [who, inp] of inputs) {
+      const held = unitOf(s.claims.held(who))
+      if (spec.id === 'studio') continue
+      if (inp.scope === 'scene' && sceneSelects(spec.id)) {
+        inputs.set(who, { ...restInput(inp.face, inp.mode), scope: 'scene', quiet: true })
+        if (!inp.space) continue
+        const target = deviceTarget(spec.id, 'scene', held, inp.space.aim, units.length)
+        aimed.add(target)
+        s.control.target(who, units[target].name)
+        if (inp.presses.some(p => ['control.take', 'wii-a', 'mouse-left', 'pad'].includes(p)) || (inp.padPressed >>> PadButton.A) & 1) {
+          if (s.take(units[target].id, who)) s.control.setScope(who, 'object')
+        }
+        const row = document.querySelector<HTMLElement>(`[data-unit="${units[target].id}"]`)
+        row?.style.setProperty('outline', '1px solid #c6ff34')
+      } else if (inp.space && held >= 0) inputs.set(who, mapDeviceSpace(spec.id, inp, held))
+    }
     for (const [who, i] of inputs) {
       const was = seen[who]
       seen[who] = { face: i.face, mode: i.mode, touching: i.touching, touchFrames: (was?.touchFrames ?? 0) + (i.touching ? 1 : 0), frames: (was?.frames ?? 0) + 1, drag: [(was?.drag[0] ?? 0) + i.drag[0], (was?.drag[1] ?? 0) + i.drag[1]], tilt: [...i.tilt], point: !!i.point, spot: i.spot, presses: [...(was?.presses ?? []), ...i.presses].slice(-12) }
@@ -288,6 +317,7 @@ if (!presence.shared.guest) void startSimScene({
       if (inp.presses.includes('home') || (inp.padPressed >>> PadButton.Guide) & 1) {
         logic.home(n)
         const who = s.claims.holder(units[n].id)!
+        if (s.control.calibrated(who)) { s.control.position(who); perUnit[n] = null }
         s.remote.feedback({ haptic: 'tick', toast: `${units[n].name} went home` }, who)
         s.log(`${s.nameOf(who)} sent ${units[n].name} home`, s.colorOf(who))
       }
@@ -304,7 +334,7 @@ if (!presence.shared.guest) void startSimScene({
       if ((e.kind === 'tick' || e.kind === 'score') && who && e.text) s.remote.feedback({ toast: e.text }, who)
       if (e.text && (e.kind === 'score' || e.kind === 'fall')) s.log(`${who ? s.nameOf(who) : units[e.unit]?.name}: ${e.text}`, who ? s.colorOf(who) : undefined)
     }
-    view?.update(units.map((u) => { const who = s.claims.holder(u.id); return who ? s.colorOf(who) : null }), t, dt)
+    view?.update(units.map((u, n) => { const who = s.claims.holder(u.id); return aimed.has(n) ? '#c6ff34' : who ? s.colorOf(who) : null }), t, dt)
     if (following && view?.follow) {
       const active = perUnit.findIndex((i) => i && !i.quiet && (i.touching || i.held.size || i.presses.length || i.pose?.touching || i.pad && [...i.pad.axes, ...i.pad.triggers].some((v) => Math.abs(v) > 0.04)))
       if (active >= 0) followedUnit = active

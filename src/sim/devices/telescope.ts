@@ -38,7 +38,10 @@ export class TelescopeLogic extends Machine {
         if (i.point && !i.point.off) this.angles[n] = [-i.point.yaw * Math.PI / 180, i.point.pitch * Math.PI / 180]
         else if (i.hold) this.angles[n] = panTiltOf(i.hold)
         if (i.recentred) { this.zeros[n] = [...this.angles[n]]; u.pan = 0; u.elevation = 0.4 }
-        if (i.hold || i.point && !i.point.off) {
+        if (i.space && !i.pad) {
+          const [x, y] = i.space.aim
+          u.pan = -x * 1.45; u.elevation = 0.4 + y * (y >= 0 ? 0.8 : 0.32)
+        } else if (i.hold || i.point && !i.point.off) {
           u.pan = this.angles[n][0] - this.zeros[n][0]; u.elevation = 0.4 + this.angles[n][1] - this.zeros[n][1]
         } else { u.pan -= i.pad ? axis(i.pad.axes[2]) * dt * 0.6 / u.zoom : i.drag[0] * 0.004 / u.zoom; u.elevation += i.pad ? -axis(i.pad.axes[3]) * dt * 0.6 / u.zoom : -i.drag[1] * 0.004 / u.zoom }
         u.zoom *= Math.exp(i.pinch * 0.5 + (i.pad ? (i.pad.triggers[1] - i.pad.triggers[0]) * dt : 0))

@@ -14,6 +14,7 @@ import { screenAngle, type Motion } from './motion'
 import { WiiPointer } from './pointing'
 import { ICONS } from '../ui/icons'
 import type { FamilyApi } from '../family'
+import { reachOf, type Reach } from '../control-space'
 
 type Vec2 = [number, number]
 
@@ -200,6 +201,7 @@ function layerHtml(): Content {
       </div>
       <div class="gp-mid">
         <div class="gp-center">${round('gp-sm', B.View, 'View', ICONS.view)}${round('gp-sm', B.Menu, 'Menu', ICONS.menu)}</div>
+        <button class="gp-scope" data-act="scope" type="button" hidden><span>Object scope</span><small hidden></small></button>
         <div class="gp-motion" role="group" aria-label="Motion">
           <div class="gp-chips"></div>
           <div class="gp-tools">
@@ -360,6 +362,10 @@ export interface GamepadDeps {
   fullscreen?: () => void
   /** The profile in effect changed: the host suggested another, or the person picked one. */
   profile?: (id: ProfileId) => void
+  /** Share the neutral with calibrated sim workspaces when a motion utility starts. */
+  position?: () => void
+  recenter?: () => void
+  scope?: () => void
 }
 
 /** What the host declared about itself: its name, and the catalogue fields of its layout. */
@@ -396,6 +402,22 @@ export class TurnWatch {
 }
 
 export class GamepadMode {
+  private controlReach: Reach | null = null
+  setControlReach(reach: Reach | null) { this.controlReach = reach }
+  setControlScope(scope: 'object' | 'scene', target = '') {
+    const button = this.el?.querySelector<HTMLButtonElement>('[data-act="scope"]')
+    if (!button) return
+    button.hidden = !this.controlReach
+    button.setAttribute('aria-pressed', String(scope === 'scene'))
+    button.querySelector('span')!.textContent = scope === 'scene' ? 'Scene scope' : 'Object scope'
+    const hint = button.querySelector('small')!
+    hint.hidden = scope !== 'scene' || !target
+    hint.textContent = `A: take ${target}`
+    this.paintChips()
+  }
+  setPosition() { this.relevel() }
+  get spatialActive() { return this.active && this.on.size > 0 }
+  get spatialPointer() { return this.active && (this.on.has(Utility.aim) || this.on.has(Utility.point)) }
   private el: HTMLElement | null = null
   private active = false
   private readonly pad = emptyPad()
@@ -458,7 +480,12 @@ export class GamepadMode {
     el.querySelector<HTMLElement>('[data-act="exit"]')!.onclick = () => { tick(); this.deps.exit() }
     el.querySelector<HTMLElement>('[data-act="settings"]')!.onclick = () => { tick(); this.deps.openSettings() }
     el.querySelector<HTMLElement>('[data-act="profile"]')!.onclick = () => { tick(); this.openProfiles() }
-    el.querySelector<HTMLElement>('[data-act="centre"]')!.onclick = () => { tick(); this.recentre(); this.deps.toast('Centred') }
+    el.querySelector<HTMLElement>('[data-act="centre"]')!.onclick = () => {
+      tick()
+      if (this.controlReach && this.deps.recenter) this.deps.recenter()
+      else { this.recentre(); this.deps.toast('Centred') }
+    }
+    el.querySelector<HTMLElement>('[data-act="scope"]')!.onclick = () => { tick(); this.deps.scope?.() }
     this.renderChips()
     el.hidden = !this.active
     surface.classList.toggle('gp-on', this.active)
@@ -536,6 +563,16 @@ export class GamepadMode {
 
   // ---- internals --------------------------------------------------------------------
 
+  /** A different screen starts with no buttons, sticks or pending taps from this one. */
+  releaseConnection() {
+    ++this.connectionGeneration
+    this.releaseAll()
+    this.sendNeutral()
+    this.pulse(0, 0)
+  }
+
+  private connectionGeneration = 0
+
   private setActive(on: boolean) {
     if (on === this.active) return
     this.active = on
@@ -553,7 +590,8 @@ export class GamepadMode {
       this.pulse(0, 0)
       // Leave the host a neutral pad, so nothing keeps moving until its pad times out.
       this.sendNeutral()
-      for (const ms of [40, 100]) setTimeout(() => { if (!this.active) this.sendNeutral() }, ms)
+      const connection = this.connectionGeneration
+      for (const ms of [40, 100]) setTimeout(() => { if (!this.active && connection === this.connectionGeneration) this.sendNeutral() }, ms)
     }
   }
 
@@ -566,6 +604,7 @@ export class GamepadMode {
   private recentre() {
     const { motion } = this.deps
     if (!motion.q) return
+    this.deps.position?.()
     if (this.on.has(Utility.steer)) this.tilt.capture(motion.up())
     if (this.on.has(Utility.point)) { this.wii.recenter(motion.q); this.ptr.gen = (this.ptr.gen + 1) & 0xff }
     this.mouseAcc = [0, 0]
@@ -577,6 +616,7 @@ export class GamepadMode {
     if (on && !this.on.has(u)) {
       if ((u === Utility.aim && !motion.hasGyro) || !motion.q) return this.deps.toast('Motion is off on this phone')
       this.on.add(u)
+      this.deps.position?.()
       if (u === Utility.aim) this.smoother.reset()
       if (u === Utility.steer) this.tilt.capture(motion.up()) // the pose right now is straight ahead
       if (u === Utility.point) { this.wii.recenter(motion.q); this.ptr.gen = (this.ptr.gen + 1) & 0xff }
@@ -602,7 +642,7 @@ export class GamepadMode {
     this.wii.setSteadiness(settings.smooth)
     this.inputs = { rates: null, tilt: null }
     if (this.on.has(Utility.aim) && motion.hasGyro && motion.flowing) this.inputs.rates = this.smoother.apply(...playerSpaceRates(motion.gyro, motion.up()))
-    if (this.on.has(Utility.steer) && motion.q) this.inputs.tilt = this.tilt.stick(motion.up(), 1)
+    if (this.on.has(Utility.steer) && motion.q) this.inputs.tilt = this.controlReach ? reachOf(this.tilt.angles(motion.up()), this.controlReach, 3) : this.tilt.stick(motion.up(), 1)
     if (this.pointing) this.wii.update(motion.q!, dtMs / 1000)
     const { axes, mouse } = composeSticks(this.sticks[0]?.value ?? [0, 0], this.sticks[1]?.value ?? [0, 0], this.inputs, this.profile, settings.gain)
     this.pad.axes = axes
@@ -795,7 +835,11 @@ export class GamepadMode {
       prof.setAttribute('aria-label', `Profile: ${this.profile.name}`)
     }
     const centre = el.querySelector<HTMLElement>('[data-act="centre"]')
-    if (centre) centre.hidden = !(this.on.has(Utility.steer) || this.on.has(Utility.point))
+    if (centre) {
+      centre.hidden = !(this.controlReach || this.on.has(Utility.steer) || this.on.has(Utility.point))
+      centre.setAttribute('aria-label', this.controlReach ? 'Set position' : 'Centre here')
+      centre.title = this.controlReach ? 'Set position' : 'Centre here'
+    }
   }
 
   // ---- sheets: utility options, profile picker --------------------------------------------

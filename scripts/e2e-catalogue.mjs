@@ -89,7 +89,13 @@ async function phone(invite, { landscape = false } = {}) {
   await page.waitForFunction(() => document.body.classList.contains('live'), null, { timeout: 25000 })
   const touches = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map(([x, y], i) => ({ x, y, id: i + 1 })) })
   const clear = () => page.evaluate(() => document.querySelectorAll('.hint').forEach((h) => h.remove()))
-  const centre = async (selector) => { const b = await page.locator(selector).first().boundingBox(); return [b.x + b.width / 2, b.y + b.height / 2] }
+  const centre = async (selector) => {
+    const target = page.locator(selector).first()
+    // Let the opening controller layout settle before sending low-level touch events.
+    await target.click({ trial: true })
+    const b = await target.boundingBox()
+    return [b.x + b.width / 2, b.y + b.height / 2]
+  }
   /** Put a finger down on `selector`, move it by (dx, dy) over `steps`, hold it there `ms`, and lift it. */
   const drag = async (selector, dx, dy, ms = 0, steps = 12) => {
     await clear()
@@ -134,6 +140,11 @@ async function device(id, phoneOpts) {
   const p = await phone(s.invite, phoneOpts)
   await until(`${id} unit held`, () => heldBy(s, `${id}1`), 15000)
   const face = await until('controller named', () => s.page.evaluate(() => window.__obpal.participants[0]?.controller), 8000)
+  // Metadata can arrive before the new connection's first neutral gamepad frame.
+  if (face === 'face.gamepad' || face === 'face.wheel') await until('gamepad stream ready', () => s.page.evaluate(() => {
+    const who = window.__obpal.participants[0]?.id
+    return who && window.__device.seen[who]?.mode === 5 && window.__obpal.padOf(who)?.buttons === 0
+  }))
   return { s, p, face }
 }
 /** No console errors or uncaught exceptions on the screen or the phone. */
@@ -172,20 +183,20 @@ try {
         await until(`${id} preview`, () => card.locator('.dcard-stage.live').count(), 15000)
         if (await card.locator('.dcard-go').getAttribute('href') !== `/sim/device/?d=${id}`) throw new Error(`${id} link`)
       }
-      await page.locator('.sims-chip[data-face=""]').scrollIntoViewIfNeeded()
+      await page.locator('#controller-filter').scrollIntoViewIfNeeded()
     })
     await check('catalogue: a controller filters the cards, and the address keeps it', async () => {
-      await page.locator('.sims-chip[data-face="face.keyboard"]').click()
+      await page.locator('#controller-filter').selectOption('face.keyboard')
       const only = await page.evaluate(() => window.__sims.cards())
       if (only.join() !== 'lamp') throw new Error(`the keyboard shows ${only}`)
       if (!page.url().endsWith('?face=keyboard')) throw new Error(page.url())
-      await page.locator('.sims-chip[data-face="face.wii"]').click()
+      await page.locator('#controller-filter').selectOption('face.wii')
       const wii = await page.evaluate(() => window.__sims.cards())
       if (wii.includes('maze') || !wii.includes('ptz')) throw new Error(`the Wii remote shows ${wii}`)
       await page.goto(`${ORIGIN}/sim/?face=hand`)
       const hand = await until('filtered on load', () => page.evaluate(() => window.__sims?.cards()), 8000)
       if (hand.includes('rover') || !hand.includes('drone')) throw new Error(`the 3D hand shows ${hand}`)
-      await page.locator('.sims-chip[data-face=""]').click()
+      await page.locator('#controller-filter').selectOption('')
       return `keyboard: ${only}; Wii: ${wii.length} sims; 3D hand: ${hand.join(', ')}`
     })
     await check('catalogue: category, search and controller combine in shareable URLs and browser history', async () => {
@@ -206,6 +217,35 @@ try {
       await page.locator('#clear-filters').click()
       if (new URL(page.url()).search) throw new Error('clear left URL filters')
     })
+    await check('catalogue: a far-right category restored from its URL stays fully visible', async () => {
+      await page.setViewportSize({ width: 1280, height: 800 })
+      await page.goto(`${ORIGIN}/sim/?category=music&face=keys&q=drums`)
+      await until('restored studio', () => page.evaluate(() => window.__sims?.cards().join() === 'studio'))
+      await page.evaluate(() => document.fonts.ready)
+      const bounds = await page.locator('#categories').evaluate(lane => {
+        const a = lane.getBoundingClientRect(), b = lane.querySelector('[aria-pressed="true"]').getBoundingClientRect()
+        return { left: b.left - a.left, right: a.right - b.right }
+      })
+      if (bounds.left < -1 || bounds.right < -1) throw new Error(`selected category is clipped: ${JSON.stringify(bounds)}`)
+    })
+    await check('catalogue: keyboard controller selection, empty counts and clearing work on a phone', async () => {
+      await page.setViewportSize({ width: 390, height: 844 })
+      await page.goto(`${ORIGIN}/sim/`)
+      const controller = page.getByRole('combobox', { name: 'Controller', exact: true })
+      await controller.focus()
+      await page.keyboard.press('End')
+      await page.keyboard.press('Enter')
+      await until('keyboard selected Keys', () => controller.inputValue().then(value => value === 'face.keys'))
+      if ((await page.evaluate(() => window.__sims.cards())).join() !== 'studio') throw new Error('keyboard selection did not filter')
+      await page.getByRole('searchbox', { name: 'Search sims' }).fill('no matching sim')
+      const empty = await controller.locator('option').evaluateAll(els => els.every(el => /\(0\)$/.test(el.textContent) && (el.value === '' || el.selected || el.disabled)))
+      if (!empty || await page.locator('#result-count').textContent() !== '0 sims') throw new Error('empty controller counts or disabled options are wrong')
+      const layout = await page.locator('.sims-bar').evaluate(el => ({ height: el.getBoundingClientRect().height, width: el.scrollWidth, viewport: innerWidth }))
+      if (layout.height > 126 || layout.width > layout.viewport) throw new Error(`active mobile filters: ${JSON.stringify(layout)}`)
+      await page.getByRole('button', { name: 'Clear filters', exact: true }).click()
+      if (await controller.inputValue() || await page.locator('#search').inputValue() || new URL(page.url()).search) throw new Error('clear did not reset the controls and URL')
+      await page.setViewportSize({ width: 1280, height: 900 })
+    })
     await check('catalogue: the studio is in Music, Featured and New, with searchable Drums and Keys filters', async () => {
       await page.goto(`${ORIGIN}/sim/?q=drums`)
       await until('drums finds the studio', () => page.evaluate(() => window.__sims?.cards().join() === 'studio'))
@@ -215,7 +255,7 @@ try {
       for (const category of ['music', 'featured', 'new']) {
         await page.locator(`[data-category="${category}"]`).click()
         for (const face of ['drums', 'keys']) {
-          await page.locator(`.sims-chip[data-face="face.${face}"]`).click()
+          await page.locator('#controller-filter').selectOption(`face.${face}`)
           await until('studio filters applied', () => page.evaluate(() => window.__sims.cards().join() === 'studio'))
           const params = new URL(page.url()).searchParams
           if (params.get('category') !== category || params.get('face') !== face || params.get('q') !== 'drums') throw new Error('studio filter URL lost state')
@@ -224,7 +264,7 @@ try {
       await page.reload()
       await until('studio filters restored', () => page.evaluate(() => window.__sims?.cards().join() === 'studio'))
       if (await page.locator('#search').inputValue() !== 'drums') throw new Error('studio search was not restored')
-      if (await page.locator('.sims-chip[data-face="face.keys"]').getAttribute('aria-pressed') !== 'true') throw new Error('Keys filter was not restored')
+      if (await page.locator('#controller-filter').inputValue() !== 'face.keys') throw new Error('Keys filter was not restored')
       await page.locator('#clear-filters').click()
       await page.locator('[data-category="music"]').click()
       if ((await page.evaluate(() => window.__sims.cards())).join() !== 'studio') throw new Error('Music category did not show the studio')
@@ -265,14 +305,14 @@ try {
       await page.emulateMedia({ reducedMotion: 'no-preference' })
     })
     await check('catalogue: each controller\'s count is the cards it shows; each kind of arm has a card, and its Try it opens the arm sim as that kind', async () => {
-      // Every chip's number is how many cards it leaves showing.
-      const chips = await page.evaluate(() => [...document.querySelectorAll('.sims-chip')].map((b) => ({ face: b.dataset.face, n: Number(b.querySelector('i').textContent) })))
-      for (const c of chips) {
-        await page.evaluate((f) => window.__sims.setFace(f || null), c.face)
+      // Every option's number is how many cards it leaves showing.
+      const options = await page.locator('#controller-filter option').evaluateAll(els => els.map(el => ({ face: el.value, n: Number(/\((\d+)\)$/.exec(el.textContent)?.[1]) })))
+      for (const c of options) {
+        await page.locator('#controller-filter').selectOption(c.face)
         const shown = (await page.evaluate(() => window.__sims.cards())).length
         if (shown !== c.n) throw new Error(`${c.face || 'All'} says ${c.n}, shows ${shown}`)
       }
-      await page.evaluate(() => window.__sims.setFace(null))
+      await page.locator('#controller-filter').selectOption('')
       const arms = (await page.evaluate(() => window.__sims.cards())).filter((id) => id.startsWith('arm-'))
       if (arms.length !== 6) throw new Error(`arm cards: ${arms}`)
       // The arm cards' previews play (each one as it scrolls into view).
@@ -285,7 +325,7 @@ try {
       if (kind !== 'scara') throw new Error(`opened ${kind}`)
       await page.goBack()
       await until('the catalogue again', () => page.evaluate(() => window.__sims?.cards().length), 10000)
-      return `${chips.map((c) => `${c.face ? c.face.slice(5) : 'all'} ${c.n}`).join(', ')}; ${arms.join(', ')}; Try it: ${href}`
+      return `${options.map((c) => `${c.face ? c.face.slice(5) : 'all'} ${c.n}`).join(', ')}; ${arms.join(', ')}; Try it: ${href}`
     })
     await check('catalogue: Try it opens the sim, its pairing chip waiting for a phone', async () => {
       await page.locator('.dcard[data-id="rover"] .dcard-go').click()
@@ -500,24 +540,23 @@ try {
       await until('teal', async () => { const l = await lamp(); return l.on && Math.abs(l.h - 174) < 1 }, 3000)
       return 'teal'
     })
-    await check('lamps, air mouse: pointing at another lamp and pressing Left takes it (CATALOGUE §5), the wheel dims it', async () => {
+    await check('lamps, air mouse: scene scope and Left take another lamp, then the wheel dims it', async () => {
       await p.page.keyboard.press('Escape')
+      await p.page.locator('#kbd-hide').click()
       await p.tab('point')
       await p.page.locator('#mouse-left').waitFor({ state: 'visible', timeout: 4000 })
       await p.page.locator('#mouse-home').click()
+      await p.page.locator('[data-id="control.scope"]').click()
       await sleep(400)
-      // Aim at the pendant: the pointer is where the phone points, x = cx + tan(yaw)·K (CATALOGUE §4).
-      const aim = await at(s, () => {
-        const q = window.__device.anchorOnScreen(2)
-        const K = innerWidth / 2 / Math.tan((16 * Math.PI) / 180)
-        return { yaw: (Math.atan((q.x - innerWidth / 2) / K) * 180) / Math.PI, pitch: (Math.atan((innerHeight / 2 - q.y) / K) * 180) / Math.PI }
-      })
-      for (let i = 1; i <= 8; i++) { await p.cdp.send('DeviceOrientation.setDeviceOrientationOverride', { alpha: 10 - (aim.yaw * i) / 8, beta: 70 + (aim.pitch * i) / 8, gamma: 0 }); await sleep(40) }
+      // Three scene cells span the comfortable reach; the pendant is the right-hand cell.
+      const aim = { yaw: 30 * 0.72, pitch: 0 }
+      for (let i = 1; i <= 8; i++) { await p.cdp.send('DeviceOrientation.setDeviceOrientationOverride', { alpha: (370 - (aim.yaw * i) / 8) % 360, beta: 70, gamma: 0 }); await sleep(40) }
       await sleep(600)
       await p.hold('#mouse-left', 120)
       await until('pendant taken', async () => (await heldBy(s, 'lamp3')) !== null, 4000).catch(async (e) => {
         throw new Error(`${e.message}: aimed ${aim.yaw.toFixed(1)}°, ${aim.pitch.toFixed(1)}°; the screen saw ${JSON.stringify(await at(s, () => window.__device.seen))}`)
       })
+      await until('object scope after take', () => p.page.locator('[data-id="control.scope"]').getAttribute('aria-pressed').then(v => v === 'false'))
       const v0 = await at(s, () => window.__device.logic.lamps[2].v)
       const w = await p.page.locator('#mouse-wheel').boundingBox()
       await p.touches('touchStart', [[w.x + w.width / 2, w.y + w.height / 2]])
@@ -566,8 +605,12 @@ try {
     await check('boat: the wheel powers the launch through the harbour', async () => {
       if (face !== 'face.wheel') throw new Error(`opened on ${face}`)
       const before = await state()
-      await p.hold('.gp-trig[data-trig="1"]', 1000)
-      if ((await state()).z >= before.z - 0.25) throw new Error('the launch did not move forward')
+      // A centre touch is a partial throttle; let the hull's acceleration and water drag settle.
+      await p.hold('.gp-trig[data-trig="1"]', 1500)
+      const after = await state()
+      const moved = before.z - after.z
+      if (moved < 0.25) throw new Error(`the launch moved only ${moved.toFixed(3)} m; speed ${after.v.toFixed(3)} m/s; input ${JSON.stringify(await at(s, () => window.__device.seen))}`)
+      return `${moved.toFixed(2)} m forward`
     })
     await check('boat: H sounds the horn and Guide returns to the dock', async () => {
       await p.page.keyboard.press('KeyH')

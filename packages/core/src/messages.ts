@@ -127,6 +127,8 @@ export type DeviceMsg =
   /** Claim a node listed in `scene` (null releases what this device holds). */
   | { t: 'claim'; node: string | null }
   | { t: 'ping'; t0: number }
+  /** This phone is using (true), or keeping idle (false), this connection alone. Older hosts ignore it. */
+  | { t: 'attention'; active: boolean }
   | { t: 'bye' }
 
 export type HostMsg =
@@ -138,7 +140,7 @@ export type HostMsg =
    * restart: the host takes ICE restarts, a later offer on this connection (PROTOCOL §1), so a device whose path went
    * can find a new one without building the connection again.
    */
-  | { t: 'welcome'; proto: number; name: string; layout: Layout; pair?: PairGrant; invite?: string; restart?: boolean }
+  | { t: 'welcome'; proto: number; name: string; layout: Layout; pair?: PairGrant; invite?: string; restart?: boolean; attention?: boolean; kind?: import('./store').ScreenKind }
   /** The short-code exchange (PROTOCOL §2b): the host's share and its confirmation. */
   | { t: 'pake'; y: string; mac: string }
   | { t: 'layout'; layout: Layout }

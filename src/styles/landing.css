@@ -26,7 +26,7 @@
 
 /* ---- The site's top bar (home, catalogue): full-width glass with the row centred in it. Nothing reaches past the
    screen's edge, so a phone never scrolls sideways. ---- */
-.top { position: sticky; top: 0; z-index: 20; background: rgb(var(--base-rgb) / 0.58); backdrop-filter: blur(18px) saturate(150%); -webkit-backdrop-filter: blur(18px) saturate(150%); border-bottom: 1px solid var(--line); }
+.top { position: sticky; top: 0; z-index: 20; background: var(--frost); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); border-bottom: 1px solid var(--frost-edge); box-shadow: var(--frost-shadow); }
 .top-in { display: flex; align-items: center; gap: 12px; width: min(1180px, 100% - 32px); min-height: 64px; margin: 0 auto; }
 .top .logo { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; }
 .top .mark-slot { display: inline-grid; width: 36px; height: 36px; }

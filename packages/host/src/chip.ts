@@ -285,7 +285,7 @@ export class PairingChip {
       this.setOpen(false)
       pill.focus()
     })
-    const on = <K extends 'status' | 'connect' | 'join' | 'leave' | 'disconnect' | 'code' | 'invite'>(ev: K, fn: () => void) => {
+    const on = <K extends 'status' | 'connect' | 'join' | 'leave' | 'disconnect' | 'code' | 'invite' | 'attention'>(ev: K, fn: () => void) => {
       this.remote.on(ev, fn)
       this.listeners.push([ev, fn])
     }
@@ -294,6 +294,7 @@ export class PairingChip {
     on('connect', () => { this.unfold = false; this.setOpen(false) })
     on('join', () => { this.unfold = false; this.setOpen(false); this.render() })
     on('leave', () => this.render())
+    on('attention', () => this.render())
     on('disconnect', () => { this.render(); this.syncCode() })
     on('code', () => this.renderCode())
     on('invite', () => this.drawQr())
@@ -337,7 +338,9 @@ export class PairingChip {
     w.dataset.s = s
     w.toggleAttribute('data-live', n > 0)
     this.$.badge.textContent = n > 1 ? String(n) : ''
-    const text = s === 'connected' ? (n > 1 ? `${n} connected` : `Connected${r.deviceName ? ` · ${r.deviceName}` : ''}`) : STATUS[s]
+    const paused = r.participants.filter((p) => p.paused).length
+    const text = s === 'connected' ? (paused === n ? 'Phone paused' : n > 1 ? `${n} connected${paused ? ` · ${paused} paused` : ''}` : `Connected${r.deviceName ? ` · ${r.deviceName}` : ''}`) : STATUS[s]
+    this.$.label.textContent = paused ? (paused === n ? 'Phone paused' : `${paused} paused`) : this.opts.label ?? 'Scan to control'
     this.$.status.textContent = text
     // Said once per change, open or not (the card's own line is hidden while it's closed).
     if (this.$.live.textContent !== text && s !== 'starting') this.$.live.textContent = text
@@ -352,7 +355,7 @@ export class PairingChip {
   private labelPill() {
     const r = this.remote
     const n = r.participants.length
-    const who = n > 1 ? `${n} connected` : `Connected${r.deviceName ? ` to ${r.deviceName}` : ''}`
+    const who = n && r.participants.every((p) => p.paused) ? 'Phone paused' : n > 1 ? `${n} connected` : `Connected${r.deviceName ? ` to ${r.deviceName}` : ''}`
     const how = this.links.length ? `: ${this.factSentence()}` : ''
     this.$.pill.setAttribute('aria-label', n ? `${who}${how}. Pair another phone` : this.opts.label ?? 'Scan to control')
   }
@@ -574,7 +577,7 @@ function pageScheme(el: Element): 'light' | 'dark' {
 const STYLE = `
 :host { display: contents; }
 .wrap {
-  --ox: var(--obpal-offset-x, var(--obpal-offset, 16px)); --oy: var(--obpal-offset-y, var(--obpal-offset, 16px)); --ease: cubic-bezier(.2, .8, .2, 1); --base: 18 20 26;
+  --ox: var(--obpal-offset-x, var(--obpal-offset, 16px)); --oy: var(--obpal-offset-y, var(--obpal-offset, 16px)); --ease: cubic-bezier(.2, .8, .2, 1); --base: 18 20 26; --frost-alpha: 1;
   position: fixed; z-index: 2147483000; display: flex; gap: 10px; box-sizing: border-box;
   max-width: calc(100vw - 2 * var(--ox)); color: var(--ink); pointer-events: none;
   font-size: 14px; line-height: 1.35; font-weight: 500; font-style: normal; letter-spacing: normal; text-align: left;
@@ -588,12 +591,14 @@ const STYLE = `
 .wrap[data-corner=top-left] { left: max(var(--ox), env(safe-area-inset-left)); top: max(var(--oy), env(safe-area-inset-top)); flex-direction: column; align-items: flex-start; }
 .wrap[data-corner=inline] { position: relative; display: inline-flex; flex-direction: column; align-items: flex-start; z-index: auto; }
 .wrap[data-scheme=dark] { --ink: #f3f5f8; --muted: rgb(243 245 248 / .66); --line: rgb(255 255 255 / .14); --hl: 255 255 255;
-  --glass: linear-gradient(150deg, rgb(var(--base) / .8), rgb(var(--base) / .62)); --shadow: 0 18px 46px rgb(0 0 0 / .38), inset 0 1px 0 rgb(255 255 255 / .12); }
+  --glass: rgb(var(--base) / var(--frost-alpha)); --shadow: 0 18px 46px rgb(0 0 0 / .38), inset 0 1px 0 rgb(255 255 255 / .12); }
 .wrap[data-scheme=light] { --ink: #14171c; --muted: rgb(20 23 28 / .62); --line: rgb(15 20 30 / .1); --hl: 0 0 0;
-  --glass: linear-gradient(150deg, rgb(255 255 255 / .86), rgb(255 255 255 / .72)); --shadow: 0 16px 40px rgb(15 20 30 / .16), inset 0 1px 0 rgb(255 255 255 / .8); }
+  --glass: rgb(255 255 255 / var(--frost-alpha)); --shadow: 0 16px 40px rgb(15 20 30 / .16), inset 0 1px 0 rgb(255 255 255 / .8); }
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) { .wrap { --frost-alpha: .96; } }
 
+/* Match the site's frost while respecting an explicitly chosen chip scheme. */
 .pill, .card { background: var(--glass); border: 1px solid var(--line); box-shadow: var(--shadow);
-  -webkit-backdrop-filter: blur(22px) saturate(160%); backdrop-filter: blur(22px) saturate(160%); }
+  -webkit-backdrop-filter: var(--frost-blur, blur(28px) saturate(150%)); backdrop-filter: var(--frost-blur, blur(28px) saturate(150%)); }
 /* Only the chip and the open card take the pointer (a closing card lets go at once): the page gets it everywhere else. */
 .pill, .wrap[data-open] .card { pointer-events: auto; }
 

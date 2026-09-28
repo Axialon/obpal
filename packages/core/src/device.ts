@@ -2,7 +2,7 @@ import type { Caps, DeviceMsg, HostMsg, PairGrant, SignalIn, SignalPayload } fro
 import { CodePake } from './code'
 import {
   b64url, bindMac, equalBytes, fromB64url, importPairKey, lanContext, lanIceCredentials, lanOfferSdp, mungeIce, parsePairing, roomIdFor, sdpFingerprint,
-  type LanPairing, type Pairing,
+  type LanPairing, type Pairing, type SavedInvite,
 } from './pairing'
 import { fetchIce, ICE_REFRESH_BEFORE_MS, linkInfo, roomSocketUrl, SignalClient, type IceSet, type LinkInfo } from './signal'
 import { PROTO } from './state'
@@ -58,6 +58,8 @@ interface Common {
 export type DeviceLinkOptions = Common & (
   /** Through the room service: the code from the host's screen. remember: keep the pairing the host offers. */
   | { service: string; pairing: Pairing; remember?: boolean }
+  /** An invite already verified by this phone, kept as a non-extractable key. The QR handshake is unchanged. */
+  | { service: string; saved: SavedInvite; remember?: boolean }
   /**
    * Through the room service by short code (PROTOCOL §2b): the code as typed, split into its handle and secret, and
    * the room and ticket its lookup gave. Once in, the host's invite makes this the pairing above.
@@ -167,7 +169,8 @@ export class DeviceLink {
     this.statsTimer = setInterval(() => this.poll(), 2000)
     if ('lan' in this.opts) return this.startLan()
     const { service } = this.opts
-    this.roomId = 'code' in this.opts ? this.opts.code.room : await roomIdFor(this.opts.pairing.secret)
+    this.roomId = 'code' in this.opts ? this.opts.code.room : 'saved' in this.opts ? this.opts.saved.room : await roomIdFor(this.opts.pairing.secret)
+    if (this.status === 'closed') return
     // The socket and the ICE server lookup race; neither waits for the other.
     this.iceReady = fetchIce(service, this.roomId).then((set) => this.takeIce(set))
     this.sig = new SignalClient(roomSocketUrl(service, this.roomId, 'device'))
@@ -247,7 +250,7 @@ export class DeviceLink {
       const fp = sdpFingerprint(d.answer.sdp)
       // The QR code pins the host's fingerprint. By short code there's nothing to pin yet: the first answer binds its
       // own, and the exchange proves it. Either way a later answer on this connection carries exactly that one.
-      const pin = 'pairing' in this.opts ? this.opts.pairing.fp : null
+      const pin = 'pairing' in this.opts ? this.opts.pairing.fp : 'saved' in this.opts ? this.opts.saved.fp : null
       if (!fp || (pin && !equalBytes(fp, pin)) || (this.hostFp && !equalBytes(fp, this.hostFp))) {
         this.teardown()
         this.setStatus('host-mismatch')
@@ -438,7 +441,8 @@ export class DeviceLink {
     }
     const [key, fpHost, context, pair] = 'lan' in o
       ? [o.pair.key, o.pair.peerFp, lanContext(o.lan.nonce), o.pair.id]
-      : [o.pairing.secret, o.pairing.fp, this.roomId, undefined]
+      : 'saved' in o ? [o.saved.key, o.saved.fp, this.roomId, undefined]
+        : [o.pairing.secret, o.pairing.fp, this.roomId, undefined]
     const [mac, name] = await Promise.all([bindMac(key, fpDevice, fpHost, context), o.name])
     this.sendCtl({ t: 'hello', proto: PROTO, caps: o.caps(), mac, name, pair })
   }
@@ -461,7 +465,7 @@ export class DeviceLink {
       const { pair, name } = m
       // By short code, the invite comes first: it is the pairing a grant is remembered with.
       void ('code' in this.opts ? this.takeInvite(m.invite) : Promise.resolve()).then(() => {
-        if (pair && 'pairing' in this.opts && this.opts.remember) void this.remember(pair, name)
+        if (pair && ('pairing' in this.opts || 'saved' in this.opts) && this.opts.remember && this.status !== 'closed') void this.remember(pair, name)
       })
     }
     if (m.t === 'lock' && m.reason === 'rejected' && 'code' in this.opts) {
@@ -516,13 +520,14 @@ export class DeviceLink {
 
   /** The host's pairing grant, kept: its key as a non-extractable key (importPairKey), and the bytes let go. */
   private async remember(grant: PairGrant, hostName: string) {
-    if (!('pairing' in this.opts)) return
+    if (!('pairing' in this.opts) && !('saved' in this.opts)) return
     try {
       const raw = fromB64url(grant.key)
       if (raw.length !== 32 || fromB64url(grant.id).length !== 16) return
       const key = await importPairKey(raw)
       raw.fill(0)
-      const p: StoredPair = { id: grant.id, key, peerFp: this.opts.pairing.fp, peerName: String(hostName || 'Screen').slice(0, 40), at: Date.now() }
+      if (this.status === 'closed') return
+      const p: StoredPair = { id: grant.id, key, peerFp: 'pairing' in this.opts ? this.opts.pairing.fp : this.opts.saved.fp, peerName: String(hostName || 'Screen').slice(0, 40), at: Date.now() }
       await putPair(p)
       this.emit('pair', p)
     } catch { /* malformed grant: ignore */ }
