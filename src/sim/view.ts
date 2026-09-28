@@ -19,6 +19,8 @@ import {
   type WebGLRendererParameters, type Light, type InstancedMesh,
 } from 'three'
 import { Governor, pickPixels, pixelLadder, type GpuSample, type Step } from '../landing/governor'
+import type { Experience } from './vr/experience'
+import { listenFrom } from './audio/context'
 
 /** Frames averaged into the still picture. */
 export const STILL_FRAMES = 32
@@ -90,6 +92,10 @@ export interface SimGfx {
 }
 
 export interface SimView {
+  presence: Experience | null
+  /** The rendered camera, including the XR array camera, for listeners such as spatial audio. */
+  readonly activeCamera: Camera | null
+  onCameraChange(listener: (camera: Camera) => void): () => void
   readonly renderer: WebGLRenderer
   /** The canvas's size (CSS px), for the camera. */
   readonly width: number
@@ -173,6 +179,7 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
 
   /** The drawing buffer at the step's density, counted from the device pixels so that at the screen's own density it matches them exactly. */
   function size() {
+    if (renderer.xr.isPresenting) return
     const dpr = devicePixelRatio || 1
     const exact = device && Math.abs(device[0] - W * dpr) < 1.5 && Math.abs(device[1] - H * dpr) < 1.5 ? device : null
     const [dw, dh] = exact ?? [Math.round(W * dpr), Math.round(H * dpr)]
@@ -251,12 +258,18 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
     } else renderScene(scene, camera)
   }
 
+  let activeCamera: Camera | null = null
+  const cameraListeners = new Set<(camera: Camera) => void>()
   const view: SimView = {
+    presence: null,
+    get activeCamera() { return view.presence?.activeCamera ?? activeCamera },
+    onCameraChange(listener) { cameraListeners.add(listener); return () => cameraListeners.delete(listener) },
     renderer,
     get width() { return W },
     get height() { return H },
     invalidate() { force = true },
     drawInset(scene, camera) {
+      if (view.presence?.immersive) return
       const start = performance.now()
       renderer.render(scene, camera)
       insetMs += performance.now() - start
@@ -264,6 +277,17 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
       insetCalls += renderer.info.render.calls
     },
     draw(scene, camera, dt) {
+      view.presence?.update(dt, performance.now())
+      if (view.presence?.immersive) camera = view.presence.camera
+      const current = view.presence?.activeCamera ?? camera
+      if (current !== activeCamera) { activeCamera = current; for (const listener of cameraListeners) listener(current) }
+      current.updateMatrixWorld(); listenFrom(current.matrixWorld.elements)
+      if (renderer.xr.isPresenting) {
+        still = 0; force = true
+        renderer.shadowMap.autoUpdate = true
+        renderScene(scene, camera)
+        return
+      }
       insetTriangles = insetCalls = insetMs = 0
       signature(scene, camera, sig)
       const moving = force || changed(sig, prev, EPS_FRAME) || changed(sig, ref, EPS_TOTAL)

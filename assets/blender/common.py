@@ -94,9 +94,38 @@ def status_slit(parent, cover, width, length, at):
     block(parent,(width,.001,length),(x,y-.0015,z),'lime',DETAIL)
 
 
+def access(parent, cover, size, at, axis='z'):
+    """A real pocket under a flush service panel; its face is 3 mm above at."""
+    w,h=size
+    cutter=plate(parent,(w,h,.012),at,'carbon',axis,edge=DETAIL)
+    mod=cover.modifiers.new('Recessed service pocket','BOOLEAN')
+    mod.operation='DIFFERENCE'; mod.solver='EXACT'; mod.object=cutter
+    apply(cover); bpy.data.objects.remove(cutter,do_unlink=True)
+    return service(parent,size,at,axis)
+
+
+def equipment(parent,size,at,taper=.14,material='gunmetal'):
+    """An angular equipment case within x/y/z bounds, with one top access inset."""
+    w,h,d=size; x,y,z=at
+    cover=plate(parent,(w,d,h),at,material,'z',taper=taper,shoulder=min(w,d)*.08,edge=HOUSING)
+    if w>.055 and d>.055:
+        access(parent,cover,(w*.65,d*.62),(x,y+h/2-.003,z),'z')
+    return cover
+
+
+def side_access(parent,cover,size,at,side=1):
+    """A flush pocket on a planar side, with the same seam as the top access panel."""
+    frame=pivot('Side access frame',parent,at)
+    frame.rotation_euler.y=side*math.pi/2
+    return access(frame,cover,size,(0,0,0),'y')
+
+
 def reset():
     bpy.ops.object.select_all(action='SELECT')
     bpy.ops.object.delete(use_global=False)
+    for material in list(bpy.data.materials):
+        bpy.data.materials.remove(material, do_unlink=True)
+    MATERIALS.clear()
     for name, color in {'ceramic': (.83, .82, .77), 'warmShell': (.40, .41, .38),
                         'titanium': (.26, .30, .32), 'polished': (.55, .60, .62),
                         'darkTitanium': (.12, .15, .17), 'gunmetal': (.045, .060, .068),

@@ -1,6 +1,9 @@
 /** A small rehearsal room made from the shared kit. Static shells batch; heads, cymbals and keys keep their pivots. */
 import * as THREE from 'three'
 import * as kit from '../kit'
+import { ceramic, darkTitanium, gunmetal, carbon } from '../kit/surfaces'
+import { pov, service, tiledDeck } from '../kit/precision'
+import { skinSlot, upgradeSkins } from '../kit/skins'
 import { previewScene, type DeviceView, type Preview } from './view'
 import type { Stage } from './stage'
 import { STATIONS, StudioLogic } from './studio'
@@ -10,19 +13,20 @@ import '../../styles/studio.css'
 const POS: [number, number][] = [[-0.8, -1.5], [-3.2, -0.2], [1.8, -1.7], [-3.1, 1.85], [-0.45, 2.05], [2.55, 1.65], [3.7, -0.15], [-3.55, -2.3]]
 interface Moving { mesh: THREE.Object3D; unit: number; n: number; kind: 'head' | 'cymbal' | 'key' | 'air'; y: number }
 
-function room() {
+function room(live?: () => void) {
   const root = new THREE.Group(), moving: Moving[] = [], glows: THREE.MeshStandardMaterial[] = []
-  const wood = kit.plastic('#71442f'), dark = kit.plastic(kit.palette.carbon), trim = kit.rubber
-  const skin = kit.plastic('#e5ddd0'), brass = new THREE.MeshStandardMaterial({ color: '#bda064', metalness: 0.8, roughness: 0.36 })
-  const red = kit.plastic('#704638'), ivory = kit.plastic('#dce5cf')
+  const wood = darkTitanium, dark = gunmetal, trim = carbon
+  const slots: Record<string, THREE.Object3D> = {}
+  const skin = ceramic, brass = new THREE.MeshStandardMaterial({ color: '#bda064', metalness: 0.8, roughness: 0.36 })
+  const red = gunmetal, ivory = ceramic
   const add = (mesh: THREE.Mesh, parent: THREE.Object3D, x: number, y: number, z: number) => {
     mesh.position.set(x, y, z); mesh.castShadow = true; parent.add(mesh); return mesh
   }
   const b = (p: THREE.Object3D, x: number, y: number, z: number, w: number, h: number, d: number, m: THREE.Material, r = 0.018) => add(kit.box(w, h, d, m, r), p, x, y, z)
   const c = (p: THREE.Object3D, x: number, y: number, z: number, radius: number, height: number, m: THREE.Material) => add(kit.cylinder(radius, height, m, 32), p, x, y, z)
   const animate = (mesh: THREE.Object3D, unit: number, n: number, kind: Moving['kind']) => { moving.push({ mesh, unit, n, kind, y: mesh.position.y }); return mesh }
-  b(root, 0, -0.13, 0, 10.4, 0.25, 7.4, kit.floorMaterial('#3d342e'))
-  for (let i = 0; i < 26; i++) b(root, -5 + i * 0.4, 0.005, 0, 0.008, 0.009, 7.1, wood, 0.002)
+  root.add(tiledDeck(10.4, 7.4, -.005, 1.3))
+  for (const x of [-4.6, -1.75, 1.75, 4.6]) { const panel = service(.55, 1.75); panel.position.set(x, 1.15, -3.475); root.add(panel) }
   b(root, 0, 1.05, -3.65, 10.4, 2.35, 0.16, dark)
   b(root, -5.12, 0.6, -1.8, 0.14, 1.45, 3.7, dark)
   for (let i = 0; i < 29; i++) b(root, -4.9 + i * 0.35, 1.16, -3.51, 0.09, 1.9, 0.075, wood)
@@ -30,11 +34,11 @@ function room() {
     b(root, x, 1.27, -3.36, 1.45, 1.25, 0.14, trim)
     for (let k = 0; k < 7; k++) b(root, x - 0.6 + k * 0.2, 1.27, -3.27, 0.04, 1.1, 0.03, dark)
   }
-  const light = new THREE.MeshBasicMaterial({ color: '#d8eaa0' })
+  const light = ceramic
   b(root, 0, 0.12, -3.47, 9.8, 0.025, 0.03, light)
   // The kick's tilted head remains one animated object, as do all horizontal drum heads.
   function drum(p: THREE.Group, unit: number, n: number, x: number, y: number, z: number, r: number, height: number, hand = false) {
-    c(p, x, y, z, r, height, hand ? wood : red)
+    const key = `drum_${unit}_${n}`; slots[key] = skinSlot(p, key, c(p, x, y, z, r, height, hand ? wood : red))
     c(p, x, y + height / 2, z, r + 0.025, 0.045, kit.metal)
     c(p, x, y - height / 2, z, r + 0.02, 0.035, kit.metal)
     animate(c(p, x, y + height / 2 + 0.025, z, r * 0.94, 0.022, skin), unit, n, 'head')
@@ -51,10 +55,11 @@ function room() {
   }
   POS.forEach(([x, z], unit) => {
     const p = new THREE.Group(); p.position.set(x, 0.03, z); p.userData.static = true; root.add(p)
+    pov(p, [0, 1.35, unit === 0 ? -.9 : .8], [0, -.55, unit === 0 ? 1 : -1])
     const glow = new THREE.MeshStandardMaterial({ color: '#343d29', emissive: '#b9ee6d', emissiveIntensity: 0.2, roughness: 0.5 })
     glows.push(glow)
-    b(p, 0, 0.013, 0, unit === 0 ? 2.6 : 1.9, 0.025, unit === 0 ? 2 : 1.5, kit.plastic('#282629'))
-    b(p, 0, 0.04, unit === 0 ? 1 : 0.76, unit === 0 ? 2.45 : 1.8, 0.025, 0.025, glow)
+    b(p, 0, 0.013, 0, unit === 0 ? 2.6 : 1.9, 0.025, unit === 0 ? 2 : 1.5, carbon)
+    b(p, 0, 0.04, unit === 0 ? 1 : 0.76, .12, 0.015, 0.025, glow)
     // Seat numbers and instrument names are generated, original artwork.
     const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 96
     const g = canvas.getContext('2d')!; g.fillStyle = '#dce6ce'; g.font = '600 31px sans-serif'; g.textAlign = 'center'; g.fillText(`${unit + 1}  ${STATIONS[unit]}`, 256, 58)
@@ -78,11 +83,11 @@ function room() {
       const cajon = b(p, -0.35, 0.26, 0.5, 0.35, 0.48, 0.32, wood)
       animate(cajon, unit, 11, 'head')
     } else if (unit === 2) {
-      b(p, 0, 0.8, 0, 1.4, 0.14, 0.95, dark)
+      slots[`case_${unit}`] = skinSlot(p, `case_${unit}`, b(p, 0, 0.8, 0, 1.4, 0.14, 0.95, dark))
       for (let n = 0; n < 9; n++) animate(b(p, (n % 3 - 1) * 0.42, 0.89, (Math.floor(n / 3) - 1) * 0.28, 0.36, 0.04, 0.23, n % 2 ? trim : ivory), unit, n, 'key')
       for (const x of [-0.55, 0.55]) b(p, x, 0.4, 0, 0.04, 0.8, 0.6, kit.metal)
     } else if (unit === 3 || unit === 4 || unit === 5) {
-      b(p, 0, 0.72, 0, 1.8, 0.18, 0.8, unit === 4 ? trim : wood)
+      slots[`case_${unit}`] = skinSlot(p, `case_${unit}`, b(p, 0, 0.72, 0, 1.8, 0.18, 0.8, unit === 4 ? trim : wood))
       for (let n = 0; n < 16; n++) {
         const key = b(p, (n - 7.5) * 0.102, 0.835, unit === 5 ? (n % 2) * 0.06 : 0.12, 0.092, 0.035, unit === 5 ? 0.62 - n * 0.019 : 0.45, unit === 5 ? wood : skin, 0.008)
         animate(key, unit, n, 'key')
@@ -113,6 +118,11 @@ function room() {
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); root.add(mesh)
     sources.forEach(s => { s.visible = false }); instances.push({ mesh, sources })
   }
+  if (live) upgradeSkins('studio', slots, () => {
+    for (const slot of Object.values(slots)) slot.userData.static = true
+    kit.batch(root, moving.map(m => m.mesh))
+    live()
+  })
   return { root, moving, glows, instances }
 }
 
@@ -132,7 +142,7 @@ function paint(model: ReturnType<typeof room>, logic: StudioLogic, colors: reado
 }
 
 export function createView(stage: Stage, logic: StudioLogic): DeviceView {
-  const model = room(); stage.scene.add(model.root)
+  const model = room(() => stage.view.invalidate()); stage.scene.add(model.root)
   document.body.classList.add('studio')
   const reduced = matchMedia('(prefers-reduced-motion: reduce)')
   stage.lights.hemi.intensity = 1.1
@@ -144,7 +154,7 @@ export function createView(stage: Stage, logic: StudioLogic): DeviceView {
     overview: { target: [0, 0.55, 0], wide: [10, 10.5, 14], tall: [9, 12, 16], radius: 6.4 },
     inspect: () => ({ target: [-0.8, 0.55, -1.5], wide: [1.8, 2.8, 3.8], tall: [1.8, 3.8, 4.8], radius: 1.8 }),
     anchor: n => new THREE.Vector3(POS[n][0], 0.8, POS[n][1]),
-    connect: sim => attachStudio(sim, logic, stage),
+    connect: sim => attachStudio(sim, logic, stage, n => [POS[n][0], 0.8, POS[n][1]]),
     update(colors, t) { paint(model, logic, colors, t, reduced.matches); if (logic.hits.some(h => h.some(v => v > 0.002))) stage.view.invalidate() },
   }
 }

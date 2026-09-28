@@ -13,7 +13,7 @@ import './options.css'
 import { ICONS, LOGO_WORD } from '../../../src/ui/icons'
 import { askFor, parseAnswers, parsePhone, type Answers, type Phone } from '../shared/access'
 import { DEFAULT_MODE, isTargetMode, type TargetMode } from '../shared/constants'
-import { DESKTOP_URL, EMPTY_PC, parsePcState, PC_PAGE_PORT_NAME, type PcProgramEntry, type PcState } from '../shared/native'
+import { DESKTOP_URL, MAC_ACCESSIBILITY, EMPTY_PC, parsePcState, PC_PAGE_PORT_NAME, type PcProgramEntry, type PcState } from '../shared/native'
 import { parseLink, type BgRequest } from '../shared/messages'
 import { LINK_ICONS } from '../popup/icons'
 import { askCard, showAsk } from '../ui/ask'
@@ -42,7 +42,7 @@ app.innerHTML = `
     <span class="ver" id="ver"></span>
   </header>
   <section class="hero rise" style="--i:1" aria-labelledby="title">
-    <p class="kicker">${LINK_ICONS.pc}<span>ob.Pal Desktop · Windows</span></p>
+    <p class="kicker">${LINK_ICONS.pc}<span>ob.Pal Desktop · Windows and macOS</span></p>
     <h1 id="title" tabindex="-1">PC control</h1>
     <p class="lede">Your phone as this computer’s mouse and keyboard: in every window, or only in the programs you allow.</p>
     <div class="helper" id="helper" hidden>
@@ -64,6 +64,12 @@ app.innerHTML = `
           <span class="row-t"><b>Pause all</b><small>Nothing reaches any program while paused</small></span>
           <span class="sw" aria-hidden="true"><i></i></span>
         </button>
+        <button class="row big" id="mac-shortcuts" type="button" role="switch" aria-checked="true" hidden>
+          <span class="row-ic">${LINK_ICONS.keys}</span>
+          <span class="row-t"><b>Use ⌘ for Ctrl shortcuts</b><small>Off uses Control for games. Alt is ⌥ Option.</small></span>
+          <span class="sw" aria-hidden="true"><i></i></span>
+        </button>
+        <p class="scope" id="mac-testing" hidden>macOS: awaiting a first Mac test.</p>
         <p class="scope" id="foot"></p>
       </section>
       <section class="card programs rise" style="--i:3" aria-labelledby="list-h">
@@ -204,6 +210,12 @@ function renderList(programs: PcProgramEntry[]) {
 
 function render() {
   const ready = pc.link === 'ready'
+  const mac = pc.platform
+  const shortcuts = $('mac-shortcuts') as HTMLButtonElement
+  shortcuts.hidden = !mac
+  shortcuts.disabled = !ready
+  shortcuts.setAttribute('aria-checked', String(mac?.ctrlToCmd !== false))
+  $('mac-testing').hidden = !mac
   const pause = $('pause') as HTMLButtonElement
   pause.setAttribute('aria-checked', String(!!pc.config?.paused))
   pause.disabled = !ready
@@ -256,14 +268,14 @@ function render() {
   const foot = $('foot')
   foot.hidden = !ready
   foot.textContent = desktop
-    ? 'Every window receives input, except those running as administrator: Windows keeps them out of reach.'
+    ? mac ? 'Every window receives input while Accessibility is allowed.' : 'Every window receives input, except those running as administrator: Windows keeps them out of reach.'
     : 'Only the program in front receives input, and only the kinds allowed here.'
 }
 
 function noticeFor(): { text: string; action?: { label: string; run: () => void } } | null {
   switch (pc.link) {
     case 'ready':
-      return null
+      return pc.platform?.accessibility === false ? { text: MAC_ACCESSIBILITY } : null
     case 'permission':
       return permission ? null : { text: 'PC control is off.', action: { label: 'Turn on', run: requestPermission } }
     case 'missing':
@@ -284,6 +296,7 @@ function requestPermission() {
   }, () => render())
 }
 
+$('mac-shortcuts').addEventListener('click', () => void send({ to: 'bg', type: 'pc-macshortcuts', ctrlToCmd: pc.platform?.ctrlToCmd === false }))
 $('pause').addEventListener('click', () => void send({ to: 'bg', type: 'pc-pause', on: !pc.config?.paused }))
 $('whole').addEventListener('click', () => void send({ to: 'bg', type: 'pc-desktop', on: !pc.config?.desktop, keyboard: true, mouse: true }))
 

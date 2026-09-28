@@ -371,6 +371,7 @@ export const ALLOWED_SENDERS: Record<BgRequestType, readonly SenderKind[]> = {
   'pc-scope': ['extension'],
   'pc-forget': ['extension'],
   'pc-desktop': ['extension'],
+  'pc-macshortcuts': ['extension'],
   'pc-pause': ['extension'],
   'pc-resume': ['extension'],
   'pc-stats': ['extension'],

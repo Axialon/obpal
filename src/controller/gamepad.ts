@@ -8,7 +8,7 @@ import {
 } from '@obpal/core'
 import { toUi, uiRect } from './uiframe'
 import { sheetExits } from './sheet'
-import { hapticsKind, tick } from './haptics'
+import { feedbackEnabled, gamepadFeedback, hapticsKind, tick } from './haptics'
 import { GyroSmoother, playerSpaceRates, TiltStick } from './gyro'
 import { screenAngle, type Motion } from './motion'
 import { WiiPointer } from './pointing'
@@ -525,9 +525,11 @@ export class GamepadMode {
 
   /** Host rumble (dual-rumble semantics). Android vibrates; iOS web pages can't vibrate outside a tap, so the layer's border pulses. */
   rumble(strong: number, weak: number, ms: number) {
+    if (!feedbackEnabled() || document.hidden) return
     const s = clamp(Number(strong) || 0, 0, 1)
     const w = clamp(Number(weak) || 0, 0, 1)
     const d = clamp(Number(ms) || 0, 0, MAX_RUMBLE_MS)
+    gamepadFeedback(s, w, d)
     if (hapticsKind() === 'vibrate') { navigator.vibrate(rumblePattern(s, w, d)); return }
     this.pulse(Math.max(s, w), d)
   }

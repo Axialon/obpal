@@ -147,6 +147,7 @@ export class PinballLogic extends Machine {
 
   private integrate(u: PinballTable, n: number, dt: number) {
     const M = PINBALL, r = M.ball
+    const vx = u.vx, vz = u.vz
     u.vz += 1.8 * dt
     const speed = Math.hypot(u.vx, u.vz)
     const scale = Math.min(1, M.maxSpeed / (speed || 1)) * Math.exp(-dt * 0.025)
@@ -181,6 +182,8 @@ export class PinballLogic extends Machine {
       } else { u.z = M.halfLength - r; u.vz = -Math.abs(u.vz) * 0.8 }
     }
     const endSpeed = Math.hypot(u.vx, u.vz)
+    const contactSpeed = Math.hypot(u.vx - vx, u.vz - vz) / 1.8
+    if (u.active && contactSpeed > 0.3) this.events.push({ unit: n, kind: 'bump', audio: { speed: contactSpeed, impulse: contactSpeed } })
     if (endSpeed > M.maxSpeed) { u.vx *= M.maxSpeed / endSpeed; u.vz *= M.maxSpeed / endSpeed }
     u.x = clamp(u.x, -M.halfWidth + r, M.halfWidth - r)
     u.z = clamp(u.z, -M.halfLength + r, M.halfLength - r)

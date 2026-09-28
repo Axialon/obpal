@@ -1,6 +1,8 @@
 /** A low camera above a full-size tabletop keeps both mallets, goals and the puck in view. */
 import * as THREE from 'three'
-import { batch, floorMaterial, maker, metal, plastic, rubber } from '../kit'
+import { ceramic, darkTitanium, gunmetal } from '../kit/surfaces'
+import { pov, service, tiledDeck } from '../kit/precision'
+import { batch, maker, metal, plastic, rubber } from '../kit'
 import { AIRHOCKEY, AirhockeyLogic } from './airhockey'
 import { block, disc, playFrame, rod, showcase } from './parts'
 import type { Stage } from './stage'
@@ -9,17 +11,18 @@ import { mats, wear, type DeviceView } from './view'
 function group(parent: THREE.Object3D, name: string) { const g = new THREE.Group(); g.name = name; parent.add(g); return g }
 function table(scene: THREE.Scene, logic: AirhockeyLogic) {
   const M = AIRHOCKEY, root = group(scene, 'air-hockey-table'), base = group(root, 'cabinet')
-  block(base, [3.1, 0.08, 4.1], [0, -0.05, 0], floorMaterial('#475451'))
-  block(base, [2.22, 0.28, 3.43], [0, 0.76, 0], plastic('#303c42'))
+  base.add(tiledDeck(3.1, 4.1, -.01, 1))
+  block(base, [2.22, 0.28, 3.43], [0, 0.76, 0], gunmetal)
   for (const x of [-0.84, 0.84]) for (const z of [-1.3, 1.3]) {
     rod(base, [x * 1.12, 0.07, z * 1.06], [x, 0.7, z], 0.07)
     disc(base, 0.12, 0.04, [x * 1.12, 0.04, z * 1.06], rubber)
   }
-  for (const side of [-1, 1]) block(base, [0.035, 0.055, 2.9], [side * 1.12, 0.79, 0], plastic('#aab9be'))
+  for (const side of [-1, 1]) block(base, [0.035, 0.055, 2.9], [side * 1.12, 0.79, 0], darkTitanium)
   maker(base, 0.82, 0.905, 1.61, 0.09)
+  for (const side of [-1, 1]) { const panel = service(1.8, .17); panel.rotation.y = side * Math.PI / 2; panel.position.set(side * 1.113, .75, 0); base.add(panel) }
   batch(base)
   const playfield = group(root, 'perforated-playfield')
-  block(playfield, [2, 0.045, 3.2], [0, M.height - 0.0225, 0], plastic('#dbe3d9'))
+  block(playfield, [2, 0.045, 3.2], [0, M.height - 0.0225, 0], ceramic)
   block(playfield, [1.99, 0.003, 0.02], [0, M.height + 0.003, 0], plastic('#7e98a2'))
   const lineMaterial = plastic('#7e98a2')
   const centre = new THREE.Mesh(new THREE.RingGeometry(0.28, 0.29, 48), lineMaterial)
@@ -50,6 +53,7 @@ function table(scene: THREE.Scene, logic: AirhockeyLogic) {
     disc(mallet, 0.076, 0.035, [0, 0.19, 0], paint)
     const light = mats.glow()
     disc(mallet, 0.055, 0.009, [0, 0.211, 0], light)
+    pov(mallet, [0, .3, 0], [0, -.15, n ? 1 : -1])
     batch(mallet)
     return { mallet, light }
   })

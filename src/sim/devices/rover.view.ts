@@ -8,6 +8,7 @@ import { Spring } from '../kit/motion'
 import { telescoping } from '../kit/mechanism'
 import { instanceCopies } from '../kit/instances'
 import { finishPrototype, loadPrototype, prototypeNodes, retirePrototype } from '../kit/prototype'
+import { pov } from '../kit/precision'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import type { Stage } from './stage'
 import type { Theme } from '../../ui/themes'
@@ -67,6 +68,7 @@ function buildRover(n: number): RoverModel {
     const axle = cylinder(.009, .11, titanium); axle.rotation.z = Math.PI / 2; axle.position.set(Math.sign(x) * .12, .068, z); root.add(axle)
   }
   const antenna = new THREE.Group(); antenna.position.set(.1, .135, .17); body.add(antenna)
+  pov(antenna, [0, .205, -.015])
   const mast = cylinder(.0035, .2, carbon, 8); mast.position.y = .1; antenna.add(mast)
   const collar = cylinder(.008, .019, titanium, 12); collar.position.y = .009; antenna.add(collar)
   const tip = new THREE.Mesh(new THREE.SphereGeometry(.012, 12, 8), accent); tip.position.y = .2; antenna.add(tip); batch(antenna)
@@ -209,6 +211,7 @@ export function createView(stage: Stage, logic: RoverLogic): DeviceView {
     copies.clear()
     rigs.forEach((rig, i) => {
       const m = models[i], body = rig!.body as THREE.Group
+      rig!.antenna.add(m.antenna.getObjectByName('pov')!)
       body.add(m.body.getObjectByName('number')!)
       const keep = [m.beam, m.honk, m.root.getObjectByName('shadow')]
       for (const old of [...m.root.children]) if (!keep.includes(old as THREE.Mesh)) retirePrototype(old)

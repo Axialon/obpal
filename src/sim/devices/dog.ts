@@ -102,7 +102,10 @@ export class DogLogic extends Machine {
         z = u.z - Math.cos(u.h) * u.v * dt
       u.x = clamp(x, -DOG_YARD.x, DOG_YARD.x)
       u.z = clamp(z, -DOG_YARD.z, DOG_YARD.z)
-      if (x !== u.x || z !== u.z) u.v = 0
+      if (x !== u.x || z !== u.z) {
+        if (Math.abs(u.v) > 0.3) this.events.push({ unit: n, kind: 'bump', audio: { speed: Math.abs(u.v) } })
+        u.v = 0
+      }
       u.sit = approach(u.sit, u.sitting ? 1 : 0, 3, dt)
       u.stride = approach(u.stride, Math.min(1, Math.abs(u.v) / 1.4 + Math.abs(u.turn) * 0.2), 5, dt)
       if (u.stride > 0.001) u.gait = (u.gait + dt * (5 + Math.abs(u.v) * 5)) % (Math.PI * 2)

@@ -65,6 +65,8 @@ export class SubmarineLogic extends Machine {
       u.x = clamp(u.x + u.vx * dt, -15, 15)
       u.y = clamp(u.y + u.vy * dt, 0.65, 8)
       u.z = clamp(u.z + u.vz * dt, -14, 14)
+      const contact = Math.max(Math.abs(u.x) === 15 ? Math.abs(u.vx) : 0, Math.abs(u.z) === 14 ? Math.abs(u.vz) : 0, u.y === 0.65 || u.y === 8 ? Math.abs(u.vy) : 0)
+      if (contact > 0.2) this.events.push({ unit: n, kind: 'bump', audio: { speed: contact, impulse: contact * 2 } })
       if (Math.abs(u.x) === 15) u.vx = 0
       if (Math.abs(u.z) === 14) u.vz = 0
       if (u.y === 0.65 || u.y === 8) u.vy = 0

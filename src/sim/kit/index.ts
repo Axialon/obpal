@@ -1,6 +1,6 @@
 /** Procedural parts shared by the sim family. Dimensions are metres; y is up. */
 import * as THREE from 'three'
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
+import { DETAIL, HOUSING, plateGeometry } from './precision'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 
@@ -17,12 +17,12 @@ export const rubber = new THREE.MeshStandardMaterial({ color: '#15191b', roughne
 export const glass = new THREE.MeshPhysicalMaterial({ color: '#7896aa', roughness: 0.09, metalness: 0.15, clearcoat: 1, transparent: true, opacity: 0.32, depthWrite: false })
 for (const material of [metal, rubber, glass]) material.userData.simShared = true
 
-/** Two bevel segments are sufficient at phone sizes, including in the catalogue. */
+/** Retained API for existing envelopes, now using the two physical chamfer sizes. */
 const roundedParts = new Map<string, THREE.BufferGeometry>()
 export function rounded(w: number, h: number, d: number, r = Math.min(w, h, d) * 0.18) {
   const key = [w, h, d, r].join(':')
   let geometry = roundedParts.get(key)
-  if (!geometry) { geometry = new RoundedBoxGeometry(w, h, d, 2, r); geometry.userData.simShared = true; roundedParts.set(key, geometry) }
+  if (!geometry) { geometry = plateGeometry(w, h, d, Math.min(w, h, d) < .02 ? DETAIL : HOUSING); geometry.userData.simShared = true; roundedParts.set(key, geometry) }
   return geometry
 }
 export function box(w: number, h: number, d: number, m: THREE.Material, r?: number) {
@@ -55,7 +55,7 @@ export function maker(parent: THREE.Object3D, x: number, y: number, z: number, s
   const mark = new THREE.Group()
   mark.userData.static = true
   mark.position.set(x, y, z)
-  const m = plastic(palette.lime)
+  const m = metal
   for (let i = 0; i < 2; i++) { const b = box(size * 0.2, size * 0.08, size * (i ? 0.6 : 1), m); b.position.x = (i - 0.5) * size * 0.32; mark.add(b) }
   parent.add(mark)
   return mark
@@ -74,12 +74,17 @@ export function batch(root: THREE.Object3D, keep: readonly THREE.Object3D[] = []
     const byMat = new Map<THREE.Material, THREE.Mesh[]>()
     for (const child of group.children) {
       const mesh = child as THREE.Mesh
-      if (!mesh.isMesh || mesh.type === 'InstancedMesh' || protectedObjects.has(mesh) || mesh.children.length || Array.isArray(mesh.material) || (mesh.material.transparent && !mergeTransparent)) continue
+      if (!mesh.isMesh || (mesh as THREE.InstancedMesh).isInstancedMesh || protectedObjects.has(mesh) || mesh.children.length || Array.isArray(mesh.material) || (mesh.material.transparent && !mergeTransparent)) continue
       const list = byMat.get(mesh.material) ?? []; list.push(mesh); byMat.set(mesh.material, list)
     }
     for (const [material, meshes] of byMat) {
       if (meshes.length < 2) continue
       const geometries = meshes.map(m => { m.updateMatrix(); const g = m.geometry.clone().applyMatrix4(m.matrix); return g.index ? g.toNonIndexed() : g })
+      // Authored metal skins omit texture coordinates. The kit's primitives include
+      // them even for solid finishes; pad that unused stream before joining both.
+      if (geometries.some(g => g.hasAttribute('uv'))) for (const g of geometries) {
+        if (!g.hasAttribute('uv')) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2))
+      }
       const geometry = mergeGeometries(geometries)
       geometries.forEach(g => g.dispose())
       if (!geometry) continue
@@ -94,18 +99,9 @@ export function batch(root: THREE.Object3D, keep: readonly THREE.Object3D[] = []
   visit(root)
 }
 
-/** Fine deterministic aggregate on a concrete floor, generated once for the family. */
-let concrete: THREE.CanvasTexture | null = null
+/** Clean satin surfaces carry reflections without procedural grain or noise. */
 export function floorMaterial(color = '#30373d') {
-  if (!concrete && typeof document !== 'undefined') {
-    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 128
-    const ctx = canvas.getContext('2d')!; const image = ctx.createImageData(128, 128)
-    let seed = 31
-    for (let i = 0; i < image.data.length; i += 4) { seed = (Math.imul(seed, 1664525) + 1013904223) | 0; const v = 215 + (seed >>> 27); image.data.set([v, v, v, 255], i) }
-    ctx.putImageData(image, 0, 0)
-    concrete = new THREE.CanvasTexture(canvas); concrete.wrapS = concrete.wrapT = THREE.RepeatWrapping; concrete.repeat.set(24, 24); concrete.colorSpace = THREE.SRGBColorSpace
-  }
-  return new THREE.MeshStandardMaterial({ color, map: concrete, roughness: 0.91, metalness: 0.04 })
+  return new THREE.MeshStandardMaterial({ color, roughness: 0.36, metalness: 0.68 })
 }
 
 /** One PMREM per renderer, with temporary generator resources released immediately. */

@@ -66,7 +66,7 @@ const SCENES: SimCard[] = [
 export const PROPOSED: SimCard[] = [
 ]
 
-/** Every sim to try, in the catalogue's order: the devices, the arms, then the arena and the Viewer. */
+/** The categories, in the order the catalogue shows them: Robotics first. */
 export const CATEGORIES = [
   { id: 'robotics', name: 'Robotics' },
   { id: 'vehicles', name: 'Vehicles' },
@@ -99,12 +99,16 @@ const categories: Record<string, CategoryId> = {
 const fresh = new Set(['football', 'marblerun', 'planetary', 'telescope', 'pendulum', 'trebuchet', 'slider', 'jib', 'dog', 'sorting', 'kart', 'helicopter', 'submarine', 'smarthome', 'pinball', 'airhockey', 'studio'])
 const featured = new Set(['dog', 'kart', 'pinball', 'drone', 'arm-so101', 'lamp', 'studio'])
 
-export const SIMS: SimCard[] = [...deviceCards, ...ARM_CARDS, ...SCENES].map(c => ({
+/** Where a category sits in the catalogue: its place in CATEGORIES, Robotics first (owner, 2026-09-28). */
+const rank = (id: CategoryId | undefined) => { const i = CATEGORIES.findIndex(c => c.id === id); return i < 0 ? CATEGORIES.length : i }
+
+/** Every sim, grouped by category in CATEGORIES' order (the robot arms lead Robotics), each group in its own order. */
+export const SIMS: SimCard[] = [...ARM_CARDS, ...deviceCards, ...SCENES].map(c => ({
   ...c,
   category: c.category ?? categories[c.id] ?? (c.id.startsWith('studio') ? 'music' : 'robotics'),
   fresh: c.fresh ?? fresh.has(c.id),
   featured: c.featured ?? featured.has(c.id),
-}))
+})).sort((a, b) => rank(a.category) - rank(b.category))
 
 export interface SimFilters { category: CollectionId | null; face: ControllerId | null; q: string }
 

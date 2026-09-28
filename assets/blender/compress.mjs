@@ -5,7 +5,7 @@ import { MeshoptDecoder } from 'meshoptimizer/decoder'
 
 await Promise.all([MeshoptEncoder.ready, MeshoptDecoder.ready])
 const [input, name] = process.argv.slice(2)
-if (!['drone', 'so101', 'rover'].includes(name)) throw new Error('Unknown prototype')
+if (!/^[a-z][a-z0-9-]*$/.test(name)) throw new Error('Invalid model name')
 const raw = await readFile(input), jsonLength = raw.readUInt32LE(12)
 const doc = JSON.parse(raw.subarray(20, 20 + jsonLength).toString())
 const binary = raw.subarray(28 + jsonLength)

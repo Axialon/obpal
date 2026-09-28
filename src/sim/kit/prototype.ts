@@ -3,7 +3,8 @@ import * as THREE from 'three'
 import * as finishes from './surfaces'
 import { rubber } from './index'
 
-type Prototype = 'drone' | 'so101' | 'rover'
+export type Prototype = 'drone' | 'so101' | 'rover' | 'arm5' | 'six' | 'scara' | 'delta' | 'desk' | 'helicopter' | 'plane'
+  | 'kart' | 'boat' | 'tank' | 'forklift' | 'excavator' | 'slotcars' | 'planetary' | 'submarine' | 'vacuum' | 'film-camera' | 'gimbal' | 'ptz' | 'dog' | 'studio'
 const pending = new Map<Prototype, Promise<THREE.Group | null>>()
 
 /** Wait until the procedural scene has painted before loading the decoder or model. */

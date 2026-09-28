@@ -93,6 +93,7 @@ export class PlaneLogic extends Machine {
       u.y = clamp(u.y + u.vy * dt, 0.23, 12)
     } else u.vy = 0
     if (u.y === 0.23 && u.vy < 0) {
+      if (u.vy < -0.2) this.events.push({ unit: 0, kind: 'bump', audio: { speed: -u.vy, materials: ['rubber', 'tile'] } })
       u.vy = 0
       u.bank *= 0.9
     }

@@ -28,6 +28,9 @@ pub struct Config {
     pub desktop: Option<Scope>,
     #[serde(default)]
     pub programs: Vec<ProgramEntry>,
+    /// Mac shortcut preference; absent means Command. Omitted on Windows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mac_ctrl_to_cmd: Option<bool>,
 }
 
 /// Program identity: the image path, compared case-insensitively with one separator style on Windows.
@@ -71,7 +74,7 @@ pub fn valid_path(path: &str) -> Result<(), &'static str> {
 
 impl Config {
     pub fn new() -> Config {
-        Config { v: CONFIG_VERSION, paused: false, desktop: None, programs: Vec::new() }
+        Config { v: CONFIG_VERSION, paused: false, desktop: None, programs: Vec::new(), mac_ctrl_to_cmd: None }
     }
 
     /// Whole-PC mode's scope while it is on and allows something.
@@ -141,6 +144,8 @@ impl Config {
     pub fn default_path() -> Option<PathBuf> {
         let dir = if cfg!(windows) {
             std::env::var_os("APPDATA").map(PathBuf::from)
+        } else if cfg!(target_os = "macos") {
+            std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support"))
         } else {
             std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
         }?;

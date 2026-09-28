@@ -3,6 +3,8 @@
  * glass orbs and cubes, the claw on its cable opening and closing, and the chute in the corner.
  */
 import * as THREE from 'three'
+import { darkTitanium, carbon } from '../kit/surfaces'
+import { pov, service, tiledDeck } from '../kit/precision'
 import { batch, bolt, cylinder, maker, plastic, rounded } from '../kit'
 import { CABINETS, CLAW, ClawLogic, type Claw, type Prize } from './claw'
 import type { Stage } from './stage'
@@ -25,11 +27,12 @@ interface ClawModel {
 function buildCabinet(n: number, prizes: readonly Prize[]): ClawModel {
   const root = new THREE.Group()
   const H = CLAW.half + 0.08
-  const baseMat = new THREE.MeshStandardMaterial({ color: '#232838', roughness: 0.55, metalness: 0.2 })
+  const baseMat = new THREE.MeshStandardMaterial({ color: '#3d484f', roughness: .24, metalness: .9 })
   const base = box(H * 2, CLAW.floor, H * 2, baseMat, 0.03)
   base.castShadow = true
   base.position.y = CLAW.floor / 2
   root.add(base)
+  for (const side of [-1, 1]) { const panel = service(H * 1.5, CLAW.floor * .6); panel.position.set(side * (H + .005), CLAW.floor / 2, 0); panel.rotation.y = side * Math.PI / 2; root.add(panel) }
   const dark = mats.dark(), metalTrim = mats.metal()
   const console = box(H * 1.65, 0.09, 0.2, dark); console.position.set(0, 0.58, H + 0.075); root.add(console)
   const joystick = cylinder(0.013, 0.09, metalTrim); joystick.position.set(-0.22, 0.665, H + 0.075); root.add(joystick)
@@ -45,11 +48,11 @@ function buildCabinet(n: number, prizes: readonly Prize[]): ClawModel {
   }
   const mark = maker(root, 0.3, 0.16, H + 0.017, 0.065); mark.rotation.x = Math.PI / 2
   const sign = mats.glow()
-  const trim = new THREE.Mesh(new THREE.BoxGeometry(H * 2 + 0.01, 0.02, H * 2 + 0.01), sign)
+  const trim = new THREE.Mesh(new THREE.BoxGeometry(H * 2 + 0.01, 0.02, H * 2 + 0.01), darkTitanium)
   trim.position.y = CLAW.floor
   root.add(trim)
   // The pit's floor, and the chute in its near left corner with a lit rim and a low glass guard.
-  const pit = new THREE.Mesh(new THREE.PlaneGeometry(CLAW.half * 2, CLAW.half * 2), new THREE.MeshStandardMaterial({ color: '#3b3470', roughness: 0.9 }))
+  const pit = new THREE.Mesh(new THREE.PlaneGeometry(CLAW.half * 2, CLAW.half * 2), carbon)
   pit.rotation.x = -Math.PI / 2
   pit.position.y = CLAW.floor + 0.001
   root.add(pit)
@@ -85,9 +88,10 @@ function buildCabinet(n: number, prizes: readonly Prize[]): ClawModel {
   const header = box(H * 2 + 0.04, 0.2, H * 2 + 0.04, baseMat, 0.03)
   header.position.y = 1.72
   root.add(header)
-  const band = new THREE.Mesh(new THREE.BoxGeometry(H * 2 + 0.05, 0.03, H * 2 + 0.05), sign)
+  const band = new THREE.Mesh(new THREE.BoxGeometry(H * 2 + 0.05, 0.03, H * 2 + 0.05), darkTitanium)
   band.position.y = 1.66
   root.add(band)
+  const status = box(.13, .015, .003, sign); status.position.set(0, 1.64, H + .028); root.add(status)
   const num = plate(n + 1, 0.13)
   num.position.set(0, 1.74, H + 0.022)
   root.add(num)
@@ -129,6 +133,7 @@ function buildCabinet(n: number, prizes: readonly Prize[]): ClawModel {
     fingers.push(f)
   }
   root.add(hub)
+  pov(hub, [0, -.03, 0], [0, -1, 0])
   // One instance buffer per shape and colour; every prize still moves independently.
   const buckets = new Map<string, { mesh: THREE.InstancedMesh; used: number }>()
   const prizeMeshes = prizes.map(p => {
@@ -171,6 +176,7 @@ function placeClaw(m: ClawModel, c: Claw, prizes: readonly Prize[], color: strin
 }
 
 export function createView(stage: Stage, logic: ClawLogic): DeviceView {
+  stage.scene.add(tiledDeck(4.5, 3.8, -.015, 1))
   const models = logic.claws.map((_, n) => {
     const m = buildCabinet(n, logic.prizes[n])
     const [x, z] = CABINETS[n] ?? [0, 0]
@@ -178,7 +184,7 @@ export function createView(stage: Stage, logic: ClawLogic): DeviceView {
     stage.scene.add(m.root)
     return m
   })
-  const setTheme = (t: Theme) => { for (const m of models) m.base.color.set(t.light ? '#dfe3ea' : '#232838') }
+  const setTheme = (t: Theme) => { for (const m of models) m.base.color.set(t.light ? '#8a9499' : '#3d484f') }
   setTheme(stage.theme)
   return {
     framing: (() => { const [x, z] = CABINETS[0]; return { target: [x, 1.1, z], wide: [x + 1.1, 2.1, z + 2.3], tall: [x + 0.8, 2.2, z + 2.5], radius: 1.25, min: 0.5, max: 12 } })(),
@@ -196,7 +202,7 @@ export function preview(): Preview {
   const scene = previewScene()
   const logic = new ClawLogic(1)
   const m = buildCabinet(0, logic.prizes[0])
-  m.base.color.set('#2b2358')
+  m.base.color.set('#3d484f')
   scene.add(m.root)
   const camera = new THREE.PerspectiveCamera(34, 16 / 10, 0.05, 20)
   camera.position.set(1.2, 2.1, 2.8)

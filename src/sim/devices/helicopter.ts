@@ -77,6 +77,8 @@ export class HelicopterLogic extends Machine {
       u.x = clamp(u.x + u.vx * dt, -11, 11)
       u.z = clamp(u.z + u.vz * dt, -10, 10)
       u.y = clamp(u.y + u.vy * dt, 0.22, 8)
+      const contact = Math.max(Math.abs(u.x) === 11 ? Math.abs(u.vx) : 0, Math.abs(u.z) === 10 ? Math.abs(u.vz) : 0, u.y === 0.22 || u.y === 8 ? Math.abs(u.vy) : 0)
+      if (contact > 0.3) this.events.push({ unit: n, kind: 'bump', audio: { speed: contact } })
       if (Math.abs(u.x) === 11) u.vx = 0
       if (Math.abs(u.z) === 10) u.vz = 0
       if (u.y === 8) u.vy = Math.min(0, u.vy)

@@ -66,6 +66,7 @@ export class FootballLogic extends Machine {
         for (const x of footballMen(r.count)) {
           if (Math.abs(b.x - rod.x - x) > 0.12 || Math.abs(b.z - r.z) > 0.105) continue
           const side = b.z >= r.z ? 1 : -1
+          this.events.push({ unit: inputs[r.seat] ? r.seat : (r.seat + 2) % 4, kind: 'bump', audio: { at: [b.x, FOOTBALL.height, b.z], speed: Math.max(Math.abs(b.vz), Math.abs(rod.spin) * 0.2), materials: ['plastic', 'wood'] } })
           b.z = r.z + side * 0.106
           b.vz = Math.abs(rod.spin) > 1 ? -Math.sign(rod.spin) * Math.min(6, 1.5 + Math.abs(rod.spin) * 0.3) : side * Math.abs(b.vz) * 0.8
           b.vx += (b.x - rod.x - x) * 4

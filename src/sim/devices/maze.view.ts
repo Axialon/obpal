@@ -3,7 +3,9 @@
  * its holes and the lit goal, and a glass marble with a core in its player's colour.
  */
 import * as THREE from 'three'
-import { batch, bolt, cylinder, floorMaterial, maker, plastic, rounded } from '../kit'
+import { ceramic, darkTitanium } from '../kit/surfaces'
+import { pov, tiledDeck } from '../kit/precision'
+import { batch, bolt, cylinder, maker, rounded } from '../kit'
 import { MAZE, MazeLogic, makeMaze, stepBoard, type Board, type Maze } from './maze'
 import type { Stage } from './stage'
 import type { Theme } from '../../ui/themes'
@@ -25,11 +27,11 @@ function buildBoard(m: Maze, n: number): BoardModel {
   const tray = new THREE.Group()
   tray.position.y = LIFT
   root.add(tray)
-  const baseMat = new THREE.MeshStandardMaterial({ color: '#2a3140', roughness: 0.75, metalness: 0.1 })
+  const baseMat = new THREE.MeshStandardMaterial({ color: '#3d484f', roughness: .24, metalness: .9 })
   const base = box(S + 0.08, 0.04, S + 0.08, baseMat, 0.02)
   base.position.y = -0.02
   tray.add(base)
-  const oak = plastic('#98734a')
+  const oak = darkTitanium
   for (const side of [-1, 1]) {
     const rail = box(S + 0.14, 0.07, 0.055, oak, 0.01); rail.position.set(0, 0.01, side * (S / 2 + 0.035)); tray.add(rail)
     const end = box(0.055, 0.07, S + 0.03, oak, 0.01); end.position.set(side * (S / 2 + 0.035), 0.01, 0); tray.add(end)
@@ -38,13 +40,15 @@ function buildBoard(m: Maze, n: number): BoardModel {
   }
   maker(tray, 0.2, 0.049, S / 2 + 0.036, 0.04)
   const rim = mats.glow()
-  const frame = new THREE.Mesh(new THREE.TorusGeometry(1, 0.006, 6, 4), rim)
+  const frame = new THREE.Mesh(new THREE.TorusGeometry(1, 0.006, 6, 4), darkTitanium)
   frame.rotation.set(Math.PI / 2, 0, Math.PI / 4)
   frame.scale.setScalar(((S + 0.08) / 2) * Math.SQRT2)
   frame.position.y = 0.002
   tray.add(frame)
+  const status = box(.09, .003, .015, rim); status.position.set(-.1, .049, S / 2 + .036); tray.add(status)
+  pov(tray, [0, .35, S / 2], [0, -.35, -1])
   // The walls: one instanced box per wall.
-  const wallMat = new THREE.MeshPhysicalMaterial({ color: '#e7ebf2', metalness: 0.2, roughness: 0.35, clearcoat: 0.5 })
+  const wallMat = ceramic
   const walls = new THREE.InstancedMesh(rounded(1, 1, 1, 0.08), wallMat, m.walls.length)
   const H = 0.045
   const mtx = new THREE.Matrix4()
@@ -111,8 +115,8 @@ export function createView(stage: Stage, logic: MazeLogic): DeviceView {
     stage.scene.add(m.root)
     return m
   })
-  const table = box(4.25, 0.13, 4.3, floorMaterial('#47443a'), 0.045); table.position.y = -0.085; stage.scene.add(table)
-  const setTheme = (t: Theme) => { for (const m of models) m.base.color.set(t.light ? '#cfd6e0' : '#2a3140') }
+  stage.scene.add(tiledDeck(4.25, 4.3, -.02, 1))
+  const setTheme = (t: Theme) => { for (const m of models) m.base.color.set(t.light ? '#8a9499' : '#3d484f') }
   setTheme(stage.theme)
   return {
     framing: (() => { const [x, z] = BOARD_AT[0]; return { target: [x, LIFT, z], wide: [x, 2.5, z + 2], tall: [x, 3, z + 1.6], radius: 0.92, min: 0.6, max: 12 } })(),
@@ -128,7 +132,7 @@ export function preview(): Preview {
   const scene = previewScene()
   const maze = makeMaze(7)
   const m = buildBoard(maze, 0)
-  m.base.color.set('#2b2358')
+  m.base.color.set('#3d484f')
   scene.add(m.root)
   const camera = new THREE.PerspectiveCamera(34, 16 / 10, 0.05, 20)
   camera.position.set(0, 2.3, 2.2)

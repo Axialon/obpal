@@ -16,6 +16,10 @@ import { mountMarks } from '../ui/icons'
 import { mountTopBar } from '../landing/topbar'
 import { startSimScene, type SimScene } from './scene'
 import { simView } from './view'
+import { Experience } from './vr/experience'
+import { SharedPresence } from './vr/presence'
+import { anchorPose } from './vr/rigs'
+import { mountSound } from './audio/session'
 
 applyTheme(initialTheme())
 mountMarks()
@@ -137,7 +141,24 @@ Object.assign(window, { __arena: { slots } })
 
 const layout: Layout = { v: 1, modes: [Mode.tilt, Mode.gamepad], tray: [{ id: 'dash', label: 'Dash', type: 'button', icon: 'spin' }] }
 let sim: SimScene | null = null
-void startSimScene({
+const sound = mountSound('arena', (strong, weak, ms, who) => sim?.remote.rumble(strong, weak, ms, who))
+let soundAt = 0
+const xrPads = new Map<string, { pad: PadState; at: number }>()
+const rides = () => slots.map(s => ({ id: s.id, name: s.name, pose: () => {
+  const anchor = s.group.getObjectByName('pov')
+  return anchor ? anchorPose(anchor) : { p: new THREE.Vector3(s.pos.x, 0.28, s.pos.y), q: new THREE.Quaternion() }
+} }))
+const shared = new SharedPresence({
+  rides,
+  capture: () => slots.map(s => ({ p: s.group.position.toArray(), visible: s.group.visible, color: (s.ring.material as THREE.MeshStandardMaterial).emissive.getHex() })),
+  apply: state => { (state as { p: [number, number, number]; visible: boolean; color: number }[]).forEach((r, i) => { const s = slots[i]; if (!s) return; s.group.position.set(...r.p); s.pos.set(r.p[0], r.p[2]); s.group.visible = r.visible; (s.ring.material as THREE.MeshStandardMaterial).emissive.setHex(r.color) }) },
+  drive(who, ride, pad) { if (!sim) return; if (!sim.claims.holder(ride)) sim.take(ride, who); if (sim.claims.holder(ride) === who) xrPads.set(who, { pad, at: performance.now() }) },
+  colliders: () => slots.filter(s => s.group.visible).map(s => ({ p: [s.pos.x, 0.15, s.pos.y], r: PUCK })),
+})
+scene.add(shared.group)
+view.presence = new Experience(renderer, scene, camera, rides, shared)
+if (!shared.guest) shared.world.add('ball', [0, 0.16, 0], 0.16)
+if (!shared.guest) void startSimScene({
   appName: 'ob.Pal faction arena',
   layout,
   nodes: slots.map((s) => ({ id: s.id, name: s.name, kind: 'slot', group: 'Players' })),
@@ -146,6 +167,7 @@ void startSimScene({
   changed: () => { spawnHeld(); renderScore() },
 }).then((s) => {
   sim = s
+  shared.connect(s.remote)
   s.remote.on('button', ({ id, ev }, who) => {
     const node = s.claims.held(who.id)
     if (!node) return
@@ -178,7 +200,7 @@ function dash(s: Slot, who: string) {
   const dir = s.vel.lengthSq() > 1e-4 ? s.vel.clone().normalize() : s.spawn.clone().negate().normalize()
   s.vel.addScaledVector(dir, 2.6)
   s.flash = Math.max(s.flash, 0.7)
-  sim?.remote.feedback({ haptic: 'tick' }, who)
+  sound.bus.emit({ kind: 'action', action: 'launch', source: s.id, at: [s.pos.x, 0.1, s.pos.y], strength: 0.6, who })
 }
 
 /** The direction a player steers, from whatever its device sends. */
@@ -194,6 +216,7 @@ let last = 0
 function loop(now: number) {
   const dt = last ? Math.min(0.033, (now - last) / 1000) : 0
   last = now
+  if (shared.guest) { view.draw(scene, camera, dt); return }
   const t = now / 1000
   const active = slots.filter((s) => s.group.visible)
   for (const s of active) {
@@ -201,7 +224,8 @@ function loop(now: number) {
     if (!who || !sim) continue
     if (s.falling) continue
     const f = sim.remote.consumeOf(who, now)
-    const pad = sim.remote.padOf(who)
+    const xrPad = xrPads.get(who)
+    const pad = xrPad && now - xrPad.at < 300 ? xrPad.pad : sim.remote.padOf(who)
     // A on a gamepad dashes, once per press.
     const a = pad ? pad.buttons & 1 : 0
     if (a && !padA.get(who)) dash(s, who)
@@ -241,8 +265,8 @@ function loop(now: number) {
         b.lastHitBy = ha ?? null
         a.lastHitAt = b.lastHitAt = t
         a.flash = b.flash = Math.max(0.5, Math.min(1, rel / 2))
-        if (ha) sim?.remote.rumble(Math.min(1, rel / 3), 0.4, 90, ha)
-        if (hb) sim?.remote.rumble(Math.min(1, rel / 3), 0.4, 90, hb)
+        sound.bus.emit({ kind: 'contact', source: a.id, at: [a.pos.x, 0.1, a.pos.y], strength: 1, speed: rel, impulse: imp, who: ha })
+        sound.bus.emit({ kind: 'contact', source: b.id, at: [b.pos.x, 0.1, b.pos.y], strength: 1, speed: rel, impulse: imp, who: hb })
       }
     }
   }
@@ -255,7 +279,7 @@ function loop(now: number) {
       if (scorer) { scorer.points++; scorer.flash = 1; sim?.log(`${sim.nameOf(by!)} knocked ${sim.nameOf(sim.claims.holder(s.id))} off`, sim.colorOf(by!)) }
       else sim?.log(`${sim.nameOf(sim.claims.holder(s.id))} rolled off`, sim.colorOf(sim.claims.holder(s.id)))
       const who = sim?.claims.holder(s.id)
-      if (who) sim?.remote.rumble(1, 1, 260, who)
+      sound.bus.emit({ kind: 'contact', source: s.id, at: [s.pos.x, 0.1, s.pos.y], strength: 0.9, who })
       renderScore()
     }
     if (s.falling) {
@@ -275,8 +299,12 @@ function loop(now: number) {
   }
   // The ring's edge breathes while anyone plays; with nobody here, it glows steady (and the still picture can settle).
   ;(edge.material as THREE.MeshStandardMaterial).emissiveIntensity = active.length ? 0.8 + 0.2 * Math.sin(t * 2) : 0.9
+  if (now - soundAt >= 50) {
+    soundAt = now
+    for (const s of active) if (!s.falling) sound.bus.emit({ kind: 'sustain', source: s.id, at: [s.pos.x, 0.1, s.pos.y], strength: s.vel.length() / 4, texture: 'roll', who: sim?.claims.holder(s.id) })
+  }
+  sound.tick(now)
   view.draw(scene, camera, dt)
-  requestAnimationFrame(loop)
 }
 
 function renderScore() {
@@ -312,4 +340,4 @@ function resize() {
 }
 resize()
 renderScore()
-requestAnimationFrame(loop)
+renderer.setAnimationLoop(loop)

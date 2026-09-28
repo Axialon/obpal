@@ -12,6 +12,33 @@ const pad = (over: Partial<PadInput> = {}): PadInput => ({ buttons: 0, axes: [0,
 const input = (over: Partial<KeysInput> = {}): KeysInput => ({ pad: null, tilt: null, aim: [0, 0], pad1: [0, 0], dtMs: 16, ...over })
 const bit = (...i: number[]) => i.reduce((m, b) => m | (1 << b), 0)
 
+describe('Mac permission and shortcuts', () => {
+  it('validates the Mac report and hides Type until Accessibility is granted', () => {
+    const platform = { os: 'macos' as const, accessibility: false, ctrlToCmd: true }
+    expect(parseHelperMessage({ t: 'platform', ...platform })).toEqual({ t: 'platform', ...platform })
+    for (const patch of [{ accessibility: 'yes' }, { ctrlToCmd: 1 }, { os: 'linux' }]) {
+      expect(parseHelperMessage({ t: 'platform', ...platform, ...patch })).toBeNull()
+    }
+    const state: PcState = { ...EMPTY_PC, link: 'ready', platform, config: { paused: false, desktop: { keyboard: true, mouse: true }, programs: [] }, status: { enabled: true, panic: false, held: false, front: { name: 'TextEdit', path: '/Applications/TextEdit.app/Contents/MacOS/TextEdit', pid: 1, title: '', browser: false, elevated: false, allowed: null }, program: null, text: 'secret' } }
+    expect(parsePcState(JSON.parse(JSON.stringify(state)))).toEqual(state)
+    expect(pcView(state)).toEqual({ kind: 'accessibility' })
+    expect(typingField(state)).toBeNull()
+    state.platform = { ...platform, accessibility: true }
+    expect(pcView(state).kind).toBe('desktop')
+    expect(typingField(state)).toBe('secret')
+  })
+
+  it('allows only extension UI to change the Mac shortcut setting', () => {
+    const request = { to: 'bg', type: 'pc-macshortcuts', ctrlToCmd: false }
+    expect(parseBgRequest(request)).toEqual(request)
+    expect(toHelperRequest(parsePcRequest(request)!)).toEqual({ t: 'macshortcuts', ctrlToCmd: false })
+    expect(parsePcRequest({ ...request, ctrlToCmd: 'no' })).toBeNull()
+    expect(allowedFrom('pc-macshortcuts', 'extension')).toBe(true)
+    expect(allowedFrom('pc-macshortcuts', 'page')).toBe(false)
+    expect(allowedFrom('pc-macshortcuts', 'offscreen')).toBe(false)
+  })
+})
+
 describe('PC target: frames carry the whole desired state from the Keys mapping', () => {
   it('holds what the mapper pressed and drops what it released; idle frames are empty', () => {
     const m = new KeyMapper()

@@ -1,5 +1,7 @@
 import * as THREE from 'three'
-import { batch, cable, floorMaterial, metal, plastic } from '../kit'
+import { darkTitanium, gunmetal, carbon } from '../kit/surfaces'
+import { pov, service, tiledDeck } from '../kit/precision'
+import { batch, cable, metal, plastic } from '../kit'
 import { SpotlightsLogic, LIGHT_COLOURS } from './spotlights'
 import { block, disc, playFrame, rod, showcase } from './parts'
 import type { Stage } from './stage'
@@ -33,8 +35,8 @@ function gobo(pattern: number) {
 function theatre(scene: THREE.Scene, logic: SpotlightsLogic) {
   const set = new THREE.Group()
   scene.add(set)
-  block(set, [12, 0.25, 8], [0, -0.025, 0], floorMaterial('#282332'))
-  block(set, [12, 4.8, 0.18], [0, 2.3, -3.8], plastic('#262033'))
+  set.add(tiledDeck(12, 8, .1, 1.5))
+  block(set, [12, 4.8, 0.18], [0, 2.3, -3.8], gunmetal)
   for (const x of [-5.5, 5.5]) {
     for (const z of [-1.8, -1.2]) rod(set, [x, 0, z], [x, 4.2, z], 0.055)
     for (let y = 0; y < 4; y += 0.5) rod(set, [x, y, -1.8], [x, y + 0.5, -1.2], 0.025)
@@ -45,9 +47,9 @@ function theatre(scene: THREE.Scene, logic: SpotlightsLogic) {
     rod(set, [x, 4.4, -1.8], [x + 0.5, 4, -1.8], 0.022)
   }
   for (const x of [-4.8, 4.8]) {
-    block(set, [0.7, 1.4, 0.6], [x, 0.85, 2], plastic('#171b22'))
+    block(set, [0.7, 1.4, 0.6], [x, 0.85, 2], carbon)
     for (const y of [0.55, 1.05]) {
-      const speaker = disc(set, 0.24, 0.02, [x, y, 2.32], plastic('#42434b'))
+      const speaker = disc(set, 0.24, 0.02, [x, y, 2.32], darkTitanium)
       speaker.rotation.x = Math.PI / 2
     }
   }
@@ -57,11 +59,13 @@ function theatre(scene: THREE.Scene, logic: SpotlightsLogic) {
     const root = new THREE.Group()
     root.position.set((n - 1.5) * 2, 3.65, -1.5)
     scene.add(root)
-    block(root, [0.72, 0.16, 0.45], [0, 0.42, 0], plastic('#1b2029'))
+    block(root, [0.72, 0.16, 0.45], [0, 0.42, 0], gunmetal)
     for (const x of [-0.32, 0.32]) block(root, [0.09, 0.5, 0.18], [x, 0.16, 0], metal)
     const head = new THREE.Group()
     root.add(head)
-    block(head, [0.5, 0.5, 0.64], [0, 0, 0], plastic('#252c38'))
+    pov(head, [0, 0, -.39])
+    for (const side of [-1, 1]) { const panel = service(.36, .4); panel.rotation.y = side * Math.PI / 2; panel.position.x = side * .253; head.add(panel) }
+    block(head, [0.5, 0.5, 0.64], [0, 0, 0], darkTitanium)
     for (let j = 0; j < 5; j++) block(head, [0.38, 0.025, 0.025], [0, 0.25, 0.17 - j * 0.065], metal)
     const lens = disc(head, 0.19, 0.07, [0, 0, -0.35], plastic('#e8eeff'))
     lens.rotation.x = Math.PI / 2

@@ -14,43 +14,46 @@ Copy each block as it is: the dashboard takes plain text, and line breaks are ke
 **Name** and **summary** come from the package (the manifest's `name` and `description`, in `extension/vite.config.ts`):
 
 - Name: `ob.Pal Link`
-- Summary (129 of 132 characters):
+- Summary (131 of 132 characters):
 
 ```text
-Use your phone as a controller for websites: games, 3D viewers and more. Add ob.Pal Desktop to control your whole PC. Pair by QR.
+Your phone is the controller for any website: gamepad, 3D mouse or keys. Add ob.Pal Desktop for your whole PC. No phone app needed.
 ```
 
 **Description:**
 
 ```text
-Your phone controls any website. ob.Pal Link turns it into a gamepad for browser games, a 3D mouse for model viewers and a keyboard for keyboard games. Scan a QR code to pair: the controller opens in your phone's browser, so there's no app to install.
+Your phone is the controller for any website. Scan a QR code and the controller opens in your phone's browser: no app, no account.
 
 What your phone becomes
-• Controller: a standard gamepad for any game that uses the Gamepad API, cloud gaming included. Rumble reaches your phone.
-• 3D: drag to rotate, two fingers to pan and pinch to zoom, on any 3D viewer in the page.
-• Keys: sticks become WASD and the arrow keys, buttons become Space, Enter and the rest, and the right stick moves the mouse.
-• Motion: aim by turning the phone, steer by tilting it, or point it at the screen like a remote, with a cursor where it points.
+• Controller: a standard gamepad for Gamepad API games, cloud gaming included, with rumble.
+• 3D: drag to rotate, two fingers to pan, pinch to zoom.
+• Keys: WASD on the left stick, arrow keys on the D-pad, Space, Enter and more on the buttons, the mouse on the right stick.
+• Motion: turn to aim, tilt to steer, or point at the screen like a remote.
+• Buttons: a headset, Bluetooth keyboard, clicker or gamepad can press the controller's buttons, and so can Back on Android.
 
-Your whole PC, with ob.Pal Desktop
-Add the free ob.Pal Desktop helper for Windows, and your phone becomes this computer's mouse and keyboard: in every window, or only in the programs you allow. Tap to click, hold to right-click, two fingers to scroll, pinch to zoom.
-• Type with your phone's own keyboard, autocorrect and predictions included. When a text field on the PC has the focus, the phone offers to type by itself. In a password field, nothing is suggested, learned or kept.
-• Ctrl + Alt + Backspace on the PC stops everything at once.
-• Before a new phone can control your PC, the PC asks you once. Change your answer any time in the options page.
-The helper is optional: the extension works on websites without it, and asks for permission to talk to it only when you choose PC.
+Your whole PC, with ob.Pal Desktop for Windows
+• Your phone is the mouse and keyboard, in every window or only the programs you allow: tap to click, two fingers to scroll, pinch to zoom.
+• Type with the phone's own keyboard. It offers to when a text field has the focus, and learns nothing from password fields.
+• The PC asks once before a new phone can control it: Allow or Deny, changeable in the options.
+• Ctrl + Alt + Backspace stops everything.
+The helper is optional; Link asks to talk to it only when you choose PC.
 
 How it works
 1. Click the ob.Pal Link icon on the page you want to control.
 2. Scan the QR code with your phone's camera.
-3. Turn on "This tab". Switch between Controller, 3D, Keys and PC in the popup or on your phone.
-A phone you've paired once connects straight over your Wi-Fi when the internet is down.
-The popup and the options page wear ob.Pal's look: pick one of six surfaces and eight accent shades, and both pages follow.
+3. Turn on "This tab" and pick Controller, 3D, Keys or PC.
+The popup shows the connection: a lock, direct or relayed, and the round trip. A paired phone connects over your Wi-Fi even when the internet is down.
 
 Private by design
-• No accounts, no analytics, no ads and no remote code.
-• Your phone and your computer talk over an encrypted WebRTC connection. The ob.Pal service only introduces them to each other, and doesn't keep what they send.
-• Each QR code pairs once: a new one shows as soon as a phone pairs, so an old photo of it can't connect.
-• The extension acts only in the tab you switch on, or with ob.Pal Desktop in the programs you allow. It doesn't read page content, your browsing history or what you type on the computer.
+• No accounts, analytics, ads or remote code.
+• Phone and computer talk over encrypted WebRTC; the ob.Pal service only introduces them.
+• Each QR code pairs once, so an old photo of it can't connect.
+• Pairing keys can't be read out, on the phone or in Link.
+• Link acts only in the tab you switch on, or on the PC where you allow it. It doesn't read pages, your history or what you type on the computer.
 Privacy policy: https://obpal.blackboxes.net/privacy/
+
+Try the phone controller without the extension in ob.Pal's sims, from robot arms to a music studio for eight phones: https://obpal.blackboxes.net/sim/
 
 Free and open source (MIT): https://github.com/Axialon/obpal
 ```
@@ -95,7 +98,7 @@ An MV3 service worker can't hold a WebRTC connection. An offscreen document (rea
 `storage`
 
 ```text
-chrome.storage.local remembers two settings: what the phone drives (Controller, 3D, Keys or PC), and the look the user picked for the popup and options page (a surface and an accent). chrome.storage.session, which the browser clears when it closes, holds the controlled tab, the connection status and pairing code shown in the popup, the frames from other sites in the controlled page (how many, and the host name of one, so the popup can suggest All sites), and, for the PC target, the state ob.Pal Desktop reports for the popup and options page. Nothing in it leaves the computer.
+chrome.storage.local remembers what the phone drives (Controller, 3D, Keys or PC), the look the user picked for the popup and options page (a surface and an accent), and the user's Allow or Deny for each phone that asked to control the PC (the phone's pairing key or certificate fingerprint, its name, the answer and when; the newest 64). chrome.storage.session, which the browser clears when it closes, holds the controlled tab, the connection status and pairing code shown in the popup, the connected phone (its key and name), the phone the PC is asking about and the target that phone had before it chose PC, the frames from other sites in the controlled page (how many, and the host name of one, so the popup can suggest All sites), and, for the PC target, the state ob.Pal Desktop reports for the popup and options page. Nothing in it leaves the computer.
 ```
 
 `activeTab`
@@ -169,7 +172,7 @@ Why none (and one judgement call, in UPLOAD.md):
 ```text
 No account or login is needed.
 
-Click the ob.Pal Link icon on any web page and scan the QR code with any phone's camera; the phone needs no app. Without a phone, open the link the QR code holds (any QR reader decodes it from a screenshot of the popup) in another browser window, in DevTools device mode. The ob.Pal controller opens and connects, and the popup shows the device as connected. Then turn on "This tab" in the popup.
+Click the ob.Pal Link icon on any web page and scan the QR code with any phone's camera; the phone needs no app. Without a phone, open the link the QR code holds (any QR reader decodes it from a screenshot of the popup) in another browser window, in DevTools device mode. The ob.Pal controller opens and connects, and the popup shows the device as connected. Then turn on "This tab" in the popup. Each code pairs once: after a pairing the popup shows a new one, so decode a fresh screenshot for each new try.
 - Controller: pick Controller in the popup and Gamepad on the phone. The page's navigator.getGamepads() shows "ob.Pal Controller", and a button tap on the phone presses it.
 - 3D: pick 3D in the popup and Rotate on the phone. A drag on the phone's trackpad rotates a 3D viewer, for example https://obpal.blackboxes.net/view/
 - Keys: pick Keys. A on the phone presses Space, and the D-pad presses the arrow keys.

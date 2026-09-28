@@ -1,8 +1,15 @@
-# ob-pal
+# ob.Pal
 
-Turn any phone into a remote for 3D and on-screen navigation. Scan a QR code and your phone steers the screen: turn it to rotate objects, point to aim, swipe to orbit. The phone needs no app: the controller opens in its browser.
+Your phone is the controller: robots, drones, games, music and your computer, with friends. Scan a code and it opens in your phone's browser. No app, no account.
 
-**Live:** https://obpal.blackboxes.net. Open [/view](https://obpal.blackboxes.net/view/) on a computer, then scan the code with your phone.
+- **Sims:** over 40 at [/sim](https://obpal.blackboxes.net/sim/), from robot arms and drones to a music studio.
+- **Together:** up to eight phones in one scene.
+- **Controllers:** gamepad, wheel, trackpad, pointer, air mouse, 3D hand, keyboard, drums and keys ([spec/CATALOGUE.md](spec/CATALOGUE.md)), and the buttons of a headset, clicker or Bluetooth pad.
+- **Any website:** [ob.Pal Link](https://obpal.blackboxes.net/link/), a browser extension; with ob.Pal Desktop (Windows), the whole PC.
+- **Your own page:** one tag, `<obpal-remote>`, or the host SDK ([below](#use-it-in-your-own-page)).
+- **Private and open:** encrypted, no accounts; the code is MIT licensed.
+
+**Live:** https://obpal.blackboxes.net. Open [/view](https://obpal.blackboxes.net/view/) or a [sim](https://obpal.blackboxes.net/sim/) on a computer, then scan the code with your phone.
 
 ## How it works
 

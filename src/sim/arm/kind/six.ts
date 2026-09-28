@@ -175,7 +175,7 @@ function buildSix(n: number, stuff: ReturnType<typeof stuffOf>): ArmModel {
   root.add(label)
   const fingerGeo = rounded(FINGER_W, 0.1, 0.055)
   const fingers = [new THREE.Mesh(fingerGeo, stuff.metal), new THREE.Mesh(fingerGeo, stuff.metal)]
-  for (const m of fingers) { m.position.y = FINGER_Y; roll.add(m) }
+  for (const m of fingers) { m.name = 'finger'; m.position.y = FINGER_Y; roll.add(m) }
   const apply = [
     (v: number) => { yaw.rotation.y = v * D2R },
     (v: number) => { shoulder.rotation.z = v * D2R },

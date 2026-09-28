@@ -1,6 +1,6 @@
 ﻿# ob.Pal in three dimensions
 
-Round four proposal: **precise edges, smooth metal**. Each cover explains the machine beneath it. Angular housings, restrained white insets and exposed mechanisms form one family with the surrounding scene. This is an original industrial language, not a reference character or vehicle.
+Confirmed round four: **precise edges, smooth metal**. Each cover explains the machine beneath it. Angular housings, restrained white insets and exposed mechanisms form one family with the surrounding scene. This is an original industrial language, not a reference character or vehicle.
 
 ## Edge rules
 
@@ -43,12 +43,16 @@ These are original construction drawings. Rendered details and the illustrated e
 
 Apply the same rules to floors, walls, pads, tables and props. Use flush modular floor tiles over a Carbon substrate, metal wall housings with recessed ceramic access strips, wedge ramp decks and chamfered gate columns. Cones retain their useful taper and footprint as clipped square markers with ceramic bands. Maintain all collision boundaries and traversable heights; a visual chamfer must not create an obstacle or change the course. Repeat floor seams as a construction grid. Limit Lime to a few status stations.
 
-Round four applies this to **the rover yard only**. Other scenes remain unchanged until the owner confirms the complete model-and-environment language. The later rollout must include each sim's scene area and props, not just its device.
+The confirmed language now applies to all six arm rigs and all 33 device scenes, including their furniture, targets, work surfaces and terrain. Water, sediment, upholstery, instrument membranes and playing fields retain the finishes needed to explain their function. Player, scoring, navigation and scientific trace colours retain their meanings.
 
 ## Motion and delivery
 
 Keep `src/sim/kit/motion.ts`: critically damped responses in seconds, continuous-input filtering, eased rotor spin-up and suspension settling. Mechanism sleeves stay rigid while rods slide; cable ends stay attached. Never smooth the collision gripper away from its authoritative joint, or weaken deadman, watchdog, limits or emergency stops. Verify starts, reversals and release at 30, 60 and 120 fps, and after a long frame.
 
-`assets/blender/` scripts are the source of truth. Export meshopt GLBs to `public/models/`, with named moving pivots and kit material names. Together the assets stay below 1.5 MB; complete scenes with four active units stay below about 250k submitted triangles and 150 draw calls. No textures are required. Procedural rigs draw immediately and remain functional on download failure. Catalogue models stay procedural. The existing WebAssembly permission remains confined to arm and device pages; Trusted Types and `obpal-templates` remain enforced.
+`assets/blender/` scripts are the source of truth. Export meshopt GLBs to `public/models/`, with named moving pivots or rigid appearance slots and kit material names. The original trio stays below its combined 1.5 MB budget; new hero assets target 400 KB or less each and load only in their own sim. Complete scenes with all available units (four arms) stay below about 250k submitted triangles and 150 draw calls. No model textures are required. Procedural rigs draw immediately and remain functional on download failure. Catalogue models stay procedural. The existing WebAssembly permission remains confined to arm and device pages; Trusted Types and `obpal-templates` remain enforced.
+
+Every unit has an Object3D named `pov`, with local +Z forward. Put it at the optical axis, wrist, cockpit or operator station and attach it to the corresponding live frame. Appearance swaps must preserve that anchor and all control pivots. `tests/sim-pov.test.ts`, `tests/sim-rollout.test.ts` and `tests/sim-skins.test.ts` cover the anchor, arm-frame, decoding and failure contracts.
+
+The rollout viewer is `artifacts/codex-rollout/index.html`. `scripts/rollout-review.mjs` captures each batch at 1280×800, 390×844 and 844×390 plus inspection and overview views. Its report includes submitted triangles, draw calls, unique model bytes, CPU render time and frame intervals; headless viewport emulation is not physical-phone performance evidence. All captures and reports remain ignored.
 
 Review `artifacts/codex-style/index.html`: original plus rounds one through four, desktop and phone stills, close-ups, motion, yard comparison and measured budgets. `rules.html` presents construction rules with prototype details. `scripts/style-review.mjs` and `scripts/style-scene.mjs` reproduce evidence; `scripts/style-prototypes.mjs` verifies optional loading and budgets in a temporary folder. Evidence is never committed.

@@ -1,36 +1,41 @@
 import * as THREE from 'three'
-import { batch, floorMaterial, maker, metal, plastic, rubber } from '../kit'
+import { ceramic, darkTitanium, gunmetal, carbon } from '../kit/surfaces'
+import { pov, service, tiledDeck } from '../kit/precision'
+import { skinSlot, upgradeSkins } from '../kit/skins'
+import { batch, maker, metal, plastic, rubber } from '../kit'
 import { VacuumLogic, DOCK, FURNITURE } from './vacuum'
 import { block, disc, playFrame, rod, showcase } from './parts'
 import type { Stage } from './stage'
 import { mats, wear, type DeviceView } from './view'
-function room(scene: THREE.Scene, logic: VacuumLogic) {
+function room(scene: THREE.Scene, logic: VacuumLogic, live?: () => void) {
   const set = new THREE.Group()
   scene.add(set)
-  block(set, [10, 0.12, 8], [0, -0.06, 0], floorMaterial('#967354'))
-  for (let x = -4.8; x < 5; x += 0.4) block(set, [0.008, 0.006, 8], [x, 0.003, 0], plastic('#725238'))
-  block(set, [10, 2.5, 0.12], [0, 1.25, -4], plastic('#a7afa4'))
-  block(set, [0.12, 2.5, 8], [-5, 1.25, 0], plastic('#a7afa4'))
+  set.add(tiledDeck(10, 8, 0, 1.25))
+  for (const x of [-3, 0, 3]) { const panel = service(.7, 1.8); panel.position.set(x, 1.3, -3.935); set.add(panel) }
+  block(set, [10, 2.5, 0.12], [0, 1.25, -4], darkTitanium)
+  block(set, [0.12, 2.5, 8], [-5, 1.25, 0], darkTitanium)
   const sofa = FURNITURE[0]
-  block(set, [sofa.w, 0.35, sofa.d], [sofa.x, 0.42, sofa.z], plastic('#697c81'))
-  block(set, [sofa.w, 0.65, 0.22], [sofa.x, 0.72, sofa.z - 0.5], plastic('#697c81'))
+  block(set, [sofa.w, 0.35, sofa.d], [sofa.x, 0.42, sofa.z], carbon)
+  block(set, [sofa.w, 0.65, 0.22], [sofa.x, 0.72, sofa.z - 0.5], carbon)
   for (let n = 0; n < 3; n++)
-    block(set, [0.96, 0.18, 0.92], [sofa.x + (n - 1) * 1.02, 0.66, sofa.z + 0.05], plastic('#8b9e9b'))
+    block(set, [0.96, 0.18, 0.92], [sofa.x + (n - 1) * 1.02, 0.66, sofa.z + 0.05], plastic('#879395'))
   for (const [n, b] of FURNITURE.entries()) {
     if (!n) continue
-    block(set, [b.w, 0.1, b.d], [b.x, 0.7, b.z], plastic('#c2a178'))
+    block(set, [b.w, 0.1, b.d], [b.x, 0.7, b.z], gunmetal)
     for (const x of [-1, 1])
       for (const z of [-1, 1])
         rod(set, [b.x + x * b.w * 0.4, 0, b.z + z * b.d * 0.4], [b.x + x * b.w * 0.4, 0.7, b.z + z * b.d * 0.4], 0.045)
   }
   block(set, [0.9, 0.13, 0.75], [DOCK[0], 0.06, DOCK[1]], rubber)
-  block(set, [0.9, 0.45, 0.15], [DOCK[0], 0.23, DOCK[1] + 0.3], plastic('#e8e6dc'))
+  block(set, [0.9, 0.45, 0.15], [DOCK[0], 0.23, DOCK[1] + 0.3], ceramic)
   block(set, [0.4, 0.05, 0.02], [DOCK[0], 0.3, DOCK[1] + 0.21], plastic('#8cf5be'))
   batch(set)
   const root = new THREE.Group()
   scene.add(root)
   disc(root, 0.38, 0.13, [0, 0.09, 0], rubber)
-  disc(root, 0.365, 0.095, [0, 0.18, 0], plastic('#eeeae0'))
+  const skin = skinSlot(root, 'bodySkin', disc(root, 0.365, 0.095, [0, 0.18, 0], gunmetal))
+  pov(root, [0, .23, -.365])
+  if (live) upgradeSkins('vacuum', { bodySkin: skin }, live)
   disc(root, 0.105, 0.08, [0, 0.265, 0.07], plastic('#394955'))
   disc(root, 0.078, 0.02, [0, 0.315, 0.07], metal)
   for (const x of [-0.07, 0.07]) disc(root, 0.025, 0.01, [x, 0.232, -0.16], metal)
@@ -74,7 +79,7 @@ function room(scene: THREE.Scene, logic: VacuumLogic) {
   }
 }
 export function createView(stage: Stage, logic: VacuumLogic): DeviceView {
-  const w = room(stage.scene, logic),
+  const w = room(stage.scene, logic, () => stage.view.invalidate()),
     at = (): [number, number, number] => [logic.units[0].x, 0.12, logic.units[0].z]
   return {
     framing: playFrame(at(), 0.5),

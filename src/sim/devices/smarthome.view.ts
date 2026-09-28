@@ -1,6 +1,8 @@
 /** An open-front living room keeps all four appliances legible from the play camera. */
 import * as THREE from 'three'
-import { batch, floorMaterial, maker, metal, plastic, rounded, rubber } from '../kit'
+import { ceramic, darkTitanium, gunmetal, carbon } from '../kit/surfaces'
+import { pov, service, tiledDeck } from '../kit/precision'
+import { batch, maker, metal, plastic, rounded, rubber } from '../kit'
 import { SmarthomeLogic, roomChannel, roomSetpoint } from './smarthome'
 import { block, disc, playFrame, rod, showcase } from './parts'
 import type { Stage } from './stage'
@@ -11,18 +13,18 @@ function group(parent: THREE.Object3D, name: string) { const g = new THREE.Group
 
 function room(scene: THREE.Scene, logic: SmarthomeLogic) {
   const root = group(scene, 'smart-home-room'), shell = group(root, 'room-shell'), furniture = group(root, 'furnishings')
-  const wood = plastic('#a27e59'), fabric = plastic('#7a9389'), trim = plastic('#343b40')
-  block(shell, [6.3, 0.16, 4.8], [0, -0.08, 0], floorMaterial('#97836a'))
-  block(shell, [6.3, 2.8, 0.12], [0, 1.4, -2.3], plastic('#c4c5b7'))
-  block(shell, [0.12, 2.8, 4.8], [-3.1, 1.4, 0], plastic('#a9b5ae'))
-  for (let x = -2.8; x < 3; x += 0.42) block(shell, [0.012, 0.008, 4.6], [x, 0.008, 0], wood)
+  const wood = gunmetal, fabric = plastic('#59636a'), trim = carbon
+  shell.add(tiledDeck(6.3, 4.8, 0, 1.2))
+  block(shell, [6.3, 2.8, 0.12], [0, 1.4, -2.3], darkTitanium)
+  block(shell, [0.12, 2.8, 4.8], [-3.1, 1.4, 0], darkTitanium)
+  const wallPanel = service(.45, 1.8); wallPanel.position.set(-.3, 1.5, -2.235); shell.add(wallPanel)
   block(shell, [6.1, 0.12, 0.035], [0, 0.06, -2.22], wood)
   batch(shell)
-  block(furniture, [2.8, 0.025, 2.25], [-0.3, 0.025, 0.3], plastic('#d2c7a4'))
+  block(furniture, [2.8, 0.025, 2.25], [-0.3, 0.025, 0.3], carbon)
   block(furniture, [2.5, 0.42, 0.95], [-0.6, 0.32, 1.25], fabric)
   block(furniture, [2.5, 0.7, 0.2], [-0.6, 0.67, 1.65], fabric)
   for (const x of [-1.82, 0.62]) block(furniture, [0.19, 0.56, 0.95], [x, 0.55, 1.25], fabric)
-  for (const x of [-1.38, -0.6, 0.18]) block(furniture, [0.71, 0.16, 0.72], [x, 0.58, 1.18], plastic('#9faf9e'))
+  for (const x of [-1.38, -0.6, 0.18]) block(furniture, [0.71, 0.16, 0.72], [x, 0.58, 1.18], plastic('#879395'))
   for (const x of [-1.64, 0.45]) for (const z of [0.92, 1.58]) rod(furniture, [x, 0, z], [x, 0.28, z], 0.035)
   block(furniture, [1.5, 0.075, 0.72], [-0.4, 0.48, 0], wood)
   for (const x of [-1.03, 0.23]) for (const z of [-0.25, 0.25]) rod(furniture, [x, 0.03, z], [x, 0.45, z], 0.025)
@@ -31,7 +33,7 @@ function room(scene: THREE.Scene, logic: SmarthomeLogic) {
   block(furniture, [2.3, 0.38, 0.48], [1, 0.3, -1.98], wood)
   for (const x of [0.35, 1, 1.65]) block(furniture, [0.61, 0.27, 0.03], [x, 0.3, -1.715], trim)
   const plant = group(furniture, 'plant')
-  disc(plant, 0.23, 0.4, [2.45, 0.2, 1.6], plastic('#e6d8bc'))
+  disc(plant, 0.23, 0.4, [2.45, 0.2, 1.6], ceramic)
   for (let n = 0; n < 6; n++) {
     const a = n * Math.PI / 3, leaf = block(plant, [0.15, 0.55, 0.055], [2.45 + Math.cos(a) * 0.17, 0.63, 1.6 + Math.sin(a) * 0.17], plastic('#5f7958'))
     leaf.rotation.set(Math.cos(a) * 0.4, a, Math.sin(a) * 0.4)
@@ -44,8 +46,8 @@ function room(scene: THREE.Scene, logic: SmarthomeLogic) {
   block(blinds, [1.85, 1.52, 0.05], [-1.65, 1.76, -2.13], sky)
   block(blinds, [0.04, 1.52, 0.06], [-1.65, 1.76, -2.08], wood)
   block(blinds, [1.85, 0.04, 0.06], [-1.65, 1.76, -2.08], wood)
-  block(blinds, [2, 0.1, 0.16], [-1.65, 2.59, -2.04], plastic())
-  const slats = new THREE.InstancedMesh(rounded(1.9, 0.09, 0.075), plastic('#e7dfc9'), 15)
+  block(blinds, [2, 0.1, 0.16], [-1.65, 2.59, -2.04], gunmetal)
+  const slats = new THREE.InstancedMesh(rounded(1.9, 0.09, 0.075), ceramic, 15)
   slats.name = 'blind-slats'; slats.castShadow = true; blinds.add(slats)
   batch(blinds, [slats])
   const sun = new THREE.Mesh(new THREE.PlaneGeometry(1.75, 2), new THREE.MeshBasicMaterial({ color: '#ffe1a0', transparent: true, opacity: 0.15, depthWrite: false }))
@@ -74,7 +76,8 @@ function room(scene: THREE.Scene, logic: SmarthomeLogic) {
   batch(picture); batch(television, [picture])
 
   const thermostat = group(root, 'thermostat')
-  block(thermostat, [0.51, 0.62, 0.11], [2.62, 1.67, -2.15], plastic())
+  block(thermostat, [0.51, 0.62, 0.11], [2.62, 1.67, -2.15], gunmetal)
+  const access = service(.36, .13); access.position.set(2.62, 1.45, -2.094); thermostat.add(access)
   block(thermostat, [0.39, 0.35, 0.025], [2.62, 1.76, -2.075], trim)
   const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 160
   const context = canvas.getContext('2d')!, texture = new THREE.CanvasTexture(canvas)
@@ -84,6 +87,7 @@ function room(scene: THREE.Scene, logic: SmarthomeLogic) {
   const gauge = block(thermostat, [0.36, 0.045, 0.025], [2.62, 1.47, -2.07], plastic('#c6ff34'))
   maker(thermostat, 2.62, 1.37, -2.065, 0.07)
   batch(thermostat, [display, gauge])
+  for (const [n, device] of [blinds, fan, television, thermostat].entries()) pov(device, APPLIANCES[n], n === 1 ? [0, -1, 0] : [0, 0, 1])
   const lights = APPLIANCES.map((at, n) => {
     const material = mats.glow(), dot = disc(root, 0.05, 0.02, [at[0], at[1] - (n === 1 ? 0.04 : 0.45), at[2] + 0.14], material)
     if (n !== 1) dot.rotation.x = Math.PI / 2

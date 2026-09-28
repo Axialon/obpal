@@ -108,7 +108,10 @@ export class ForkliftLogic extends Machine {
       if (n === u.load || p.stored) return
       p.vy -= dt * 4
       p.y = Math.max(0.12, p.y + p.vy * dt)
-      if (p.y === 0.12) p.vy = 0
+      if (p.y === 0.12) {
+        if (p.vy < -0.3) this.events.push({ unit: 0, kind: 'bump', audio: { at: [p.x, p.y, p.z], speed: -p.vy, materials: ['wood', 'tile'] } })
+        p.vy = 0
+      }
     })
   }
 }

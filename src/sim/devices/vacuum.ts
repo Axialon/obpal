@@ -110,6 +110,7 @@ export class VacuumLogic extends Machine {
     }
     const nx = clamp(u.x - Math.sin(u.h) * u.v * dt, -4.5, 4.5),
       nz = clamp(u.z - Math.cos(u.h) * u.v * dt, -3.5, 3.5)
+    if ((!clear(nx, u.z) || !clear(u.x, nz)) && Math.abs(u.v) > 0.2) this.events.push({ unit: 0, kind: 'bump', audio: { speed: Math.abs(u.v) } })
     if (clear(nx, u.z)) u.x = nx
     else u.v = 0
     if (clear(u.x, nz)) u.z = nz

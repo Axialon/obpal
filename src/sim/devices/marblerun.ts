@@ -79,8 +79,14 @@ export class MarblerunLogic extends Machine {
         u.time += h
         u.vx = clamp((u.vx + u.tiltX * 3 * h) * Math.exp(-1.2 * h), -RUN.speed, RUN.speed)
         u.vz = clamp((u.vz + u.tiltZ * 3 * h) * Math.exp(-1.2 * h), -RUN.speed, RUN.speed)
-        if (inChannel(u.track, u.x + u.vx * h, u.z)) u.x += u.vx * h; else u.vx *= -0.25
-        if (inChannel(u.track, u.x, u.z + u.vz * h)) u.z += u.vz * h; else u.vz *= -0.25
+        if (inChannel(u.track, u.x + u.vx * h, u.z)) u.x += u.vx * h; else {
+          if (Math.abs(u.vx) > 0.15) this.events.push({ unit: n, kind: 'bump', audio: { speed: Math.abs(u.vx) } })
+          u.vx *= -0.25
+        }
+        if (inChannel(u.track, u.x, u.z + u.vz * h)) u.z += u.vz * h; else {
+          if (Math.abs(u.vz) > 0.15) this.events.push({ unit: n, kind: 'bump', audio: { speed: Math.abs(u.vz) } })
+          u.vz *= -0.25
+        }
         if (Math.hypot(u.x - 1.16, u.z) < 0.13) {
           u.finished = true; u.running = false; u.vx = u.vz = 0
           u.best = u.best ? Math.min(u.best, u.time) : u.time

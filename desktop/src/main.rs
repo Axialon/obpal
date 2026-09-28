@@ -147,7 +147,11 @@ fn serve(args: &[String]) -> ExitCode {
     let mut session = Session::new(injector, foreground, cfg, cfg_path, hotkey);
     // Uninstalled while running (its manifest is gone): let go of everything and stop, so the folder can be
     // deleted without closing the browser. Only when it was there at the start (a development run has none).
+    #[cfg(not(target_os = "macos"))]
     let manifest = platform::manifest_path().filter(|p| p.exists());
+    // A Mac session always belongs to the installed copy, including during uninstall/startup races.
+    #[cfg(target_os = "macos")]
+    let manifest = platform::manifest_path();
     let mut checked = Instant::now();
     let mut out = io::stdout().lock();
     let send = |replies: Vec<Reply>, out: &mut io::StdoutLock| -> bool {
@@ -160,6 +164,8 @@ fn serve(args: &[String]) -> ExitCode {
     };
 
     loop {
+        #[cfg(target_os = "macos")]
+        obpal_desktop::mac::hotkey::poll();
         if checked.elapsed() >= INSTALLED_CHECK {
             checked = Instant::now();
             if manifest.as_ref().is_some_and(|m| !m.exists()) {
@@ -203,9 +209,15 @@ fn serve(args: &[String]) -> ExitCode {
 /// A small lifecycle log next to the config (`%APPDATA%\obpal\desktop.log`). Never input.
 struct Log(Option<std::fs::File>);
 
+fn log_path() -> Option<std::path::PathBuf> {
+    if cfg!(target_os = "macos") {
+        std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join("Library/Logs/obpal/desktop.log"))
+    } else { Config::default_path().map(|p| p.with_file_name("desktop.log")) }
+}
+
 impl Log {
     fn open() -> Log {
-        let Some(path) = Config::default_path().map(|p| p.with_file_name("desktop.log")) else { return Log(None) };
+        let Some(path) = log_path() else { return Log(None) };
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).ok();
         }
@@ -259,14 +271,14 @@ mod platform {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 mod platform {
     //! Other platforms: the session logic compiles and is tested; injectors (CGEventPost, uinput) are still to come.
     use obpal_desktop::keys::KeyDef;
     use obpal_desktop::protocol::MouseButton;
     use obpal_desktop::session::{Foreground, FrontWindow, Injector};
 
-    const UNSUPPORTED: &str = "ob.Pal Desktop supports Windows only for now";
+    const UNSUPPORTED: &str = "ob.Pal Desktop supports Windows and macOS";
 
     pub fn install(_: &[String]) -> Result<Vec<String>, String> {
         Err(UNSUPPORTED.into())
@@ -308,4 +320,22 @@ mod platform {
     pub fn inject_report() -> String {
         String::new()
     }
+}
+
+#[cfg(target_os = "macos")]
+mod platform {
+    use obpal_desktop::{mac, session::{Foreground, Injector}};
+    pub fn install(_: &[String]) -> Result<Vec<String>, String> { Err("Use install.command from the Mac package".into()) }
+    pub fn uninstall(_: bool) -> Result<Vec<String>, String> { Err("Use uninstall.command from the Mac package".into()) }
+    pub fn manifest_path() -> Option<std::path::PathBuf> {
+        obpal_desktop::scope::Config::default_path().map(|p| p.with_file_name("net.blackboxes.obpal.json"))
+    }
+    pub fn status() -> Result<Vec<String>, String> {
+        Ok(vec![format!("Installed: {}", manifest_path().is_some_and(|p| p.exists())), format!("Accessibility: {}", mac::foreground::trusted())])
+    }
+    pub fn origin_allowed(origin: &str) -> bool { origin == "chrome-extension://jnnpcnoilofjaffabnhecfokjjknlemg/" }
+    pub fn start_panic_hotkey(on_panic: impl Fn() + Send + 'static) -> Option<String> { mac::hotkey::start(on_panic) }
+    pub fn browser() -> Option<String> { mac::foreground::browser() }
+    pub fn backends(browser: Option<String>) -> (impl Injector, impl Foreground) { (mac::inject::MacInjector::default(), mac::foreground::MacForeground::new(browser)) }
+    pub fn inject_report() -> String { String::new() }
 }

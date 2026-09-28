@@ -11,7 +11,7 @@ import {
 import { formatCode, lookupCode, normalizeCode, splitCode } from '@obpal/core'
 import { Motion, motionSupported, requestMotionPermission, screenAngle } from './motion'
 import { Trackpad } from './trackpad'
-import { hapticsKind, tick } from './haptics'
+import { feedbackEnabled, setFeedbackEnabled, hapticsKind, tick } from './haptics'
 import { GyroSmoother, playerSpaceRates, TiltStick } from './gyro'
 import { GamepadMode } from './gamepad'
 import { Drums } from './drums'
@@ -1369,6 +1369,7 @@ async function boot(code: Join) {
         <p class="sheet-k">Colour${seatColor ? html`<small> · yours in this scene</small>` : ''}</p>
         <div class="accent-row" role="radiogroup" aria-label="Colour">${family.ACCENTS.map((a) => html`<button class="bb-accent${a.id === 'product' ? ' product' : ''}" role="radio" data-accent="${a.id}" aria-checked="${family.getAccent() === a.id}" aria-label="${a.id === 'product' ? 'ob.Pal lime (default)' : a.name}" style="--sw:${a.color ?? '#c6ff34'}">${family.icons.check}</button>`)}</div>
         <label class="row"><input type="checkbox" id="left"> Left-handed</label>
+        <label class="row"><input type="checkbox" id="feedback"> Feedback on phone and gamepad</label>
         <label class="row"><input type="checkbox" id="lockgyro"> Lock rotation while the gyro is on</label>
         <div class="row track3d" role="radiogroup" aria-label="3D follows"><span>3D follows</span>${(['motion', 'xr', 'glow'] as const).map((w) => html`<button class="way-opt" role="radio" data-way="${w}" aria-checked="${settings.track3d === w}"><span>${{ motion: 'The phone’s motion', xr: 'Its camera (Android)', glow: 'A glow for the screen’s camera' }[w]}</span></button>`)}</div>
         <button class="set-row glass" id="buttons-open">${BUTTONS_GLYPH}<span>Buttons<small>Headset, remote, clicker, pad</small></span><span class="set-srcs">${sourceStack(inputs)}</span>${ICONS.right}</button>
@@ -1384,6 +1385,9 @@ async function boot(code: Join) {
     const gain = sheet.querySelector<HTMLInputElement>('#gain')!
     const smooth = sheet.querySelector<HTMLInputElement>('#smooth')!
     const left = sheet.querySelector<HTMLInputElement>('#left')!
+    const feedback = sheet.querySelector<HTMLInputElement>('#feedback')!
+    feedback.checked = feedbackEnabled()
+    feedback.onchange = () => setFeedbackEnabled(feedback.checked)
     const show = () => {
       sheet.querySelector('#gv')!.textContent = `${Number(gain.value).toFixed(1)}×`
       sheet.querySelector('#sv')!.textContent = `${Math.round(Number(smooth.value) * 100)}%`

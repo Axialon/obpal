@@ -22,7 +22,7 @@ import { ICONS, LOGO_WORD } from '../../../src/ui/icons'
 import { accessOf, askFor, parseAnswers, parsePhone, type Answers, type Phone } from '../shared/access'
 import { DEFAULT_MODE, isTargetMode, TARGET_MODES, type TargetMode } from '../shared/constants'
 import { parseFacts, parseLink, workerStale, type BgRequest, type LinkFacts, type LinkState, type LinkStatus } from '../shared/messages'
-import { DESKTOP_URL, EMPTY_PC, parsePcState, pcView, scopeLabel, type PcState, type PcView } from '../shared/native'
+import { DESKTOP_URL, MAC_ACCESSIBILITY, EMPTY_PC, parsePcState, pcView, scopeLabel, type PcState, type PcView } from '../shared/native'
 import { askCard, showAsk } from '../ui/ask'
 import { lightCards, markContext, mountLogo, mountLook, settle, startLook, syncLook } from '../ui/look'
 import { radioGroup } from '../ui/radios'
@@ -467,6 +467,7 @@ function renderHelper() {
   brand.className = 'pc-brand'
   brand.textContent = 'ob.Pal '
   $('pc-ver').replaceChildren(brand, `Desktop${pc.version ? ` ${pc.version}` : ''}`)
+  $('pc-ver').title = pc.platform ? 'macOS: awaiting a first Mac test. Ctrl shortcuts use ' + (pc.platform.ctrlToCmd ? '⌘ Command' : 'Control') + '; Alt is ⌥ Option.' : ''
   const panic = $('pc-panic')
   panic.hidden = !pc.hotkey
   panic.replaceChildren()
@@ -490,6 +491,8 @@ function describe(v: PcView): PcCard {
       ? { label: primary ? 'Control the whole PC' : 'Whole PC', primary, run: () => setDesktop(true) }
       : { label: 'Update for whole PC', run: () => void chrome.tabs.create({ url: DESKTOP_URL }) }
   switch (v.kind) {
+    case 'accessibility':
+      return { icon: LINK_ICONS.shield, title: 'Allow Accessibility on this Mac', sub: MAC_ACCESSIBILITY, actions: [{ label: 'Mac setup', run: () => void chrome.tabs.create({ url: `${DESKTOP_URL.replace('#readme', '')}#install-on-a-mac` }) }], kinds: false, live: false, tone: 'warn' }
     case 'permission':
       return { icon: pc, title: 'PC', sub: 'This computer’s mouse and keyboard', actions: [{ label: 'Allow PC control', primary: true, run: requestNative }], kinds: false, live: false, tone: 'plain' }
     case 'connecting':

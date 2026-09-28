@@ -69,6 +69,7 @@ export class KartLogic extends Machine {
         u.x = nx * safe
         u.z = nz * safe
         const radial = u.vx * nx + u.vz * nz
+        if (Math.abs(radial) > 0.4) this.events.push({ unit: n, kind: 'bump', audio: { speed: Math.abs(radial), impulse: Math.abs(radial) * 1.2 } })
         u.vx -= radial * nx
         u.vz -= radial * nz
         u.v *= Math.exp(-dt * 8)

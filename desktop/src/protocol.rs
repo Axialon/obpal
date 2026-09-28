@@ -135,6 +135,8 @@ pub enum Request {
         #[serde(default = "yes")]
         mouse: bool,
     },
+    /// Mac only: map Control shortcuts to Command (default true).
+    Macshortcuts { #[serde(rename = "ctrlToCmd")] ctrl_to_cmd: bool },
     /// Pause or resume all injection (persisted).
     Pause { on: bool },
     /// Clear a panic stop (a person clicked Resume in the extension).
@@ -305,6 +307,8 @@ pub struct Refused {
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(tag = "t", rename_all = "lowercase")]
 pub enum Reply {
+    /// Mac permissions and shortcut preference, refreshed when either changes.
+    Platform { os: &'static str, accessibility: bool, #[serde(rename = "ctrlToCmd")] ctrl_to_cmd: bool },
     Hello {
         v: u32,
         version: &'static str,

@@ -4,34 +4,39 @@ import { BoatLogic, BUOYS } from './boat'
 import { block, disc, playFrame, rod, showcase } from './parts'
 import type { Stage } from './stage'
 import { wear, mats, type DeviceView } from './view'
+import { ceramic, darkTitanium, gunmetal } from '../kit/surfaces'
+import { pov, tiledDeck } from '../kit/precision'
+import { skinSlot, upgradeSkins } from '../kit/skins'
 
 function launch() {
   const root = new THREE.Group(),
     hull = new THREE.Shape()
+  const skin = skinSlot(root, 'hullSkin')
+  pov(root, [0, .59, -.44])
   hull.moveTo(-0.38, 0.8)
   hull.lineTo(0.38, 0.8)
   hull.lineTo(0.43, -0.35)
-  hull.quadraticCurveTo(0.28, -0.8, 0, -1)
-  hull.quadraticCurveTo(-0.28, -0.8, -0.43, -0.35)
+  hull.lineTo(.16, -.92); hull.lineTo(0, -1)
+  hull.lineTo(-.16, -.92); hull.lineTo(-.43, -.35)
   hull.closePath()
   const shell = new THREE.Mesh(
     new THREE.ExtrudeGeometry(hull, {
       depth: 0.28,
       bevelEnabled: true,
-      bevelSize: 0.05,
-      bevelThickness: 0.05,
-      bevelSegments: 2,
+      bevelSize: 0.002,
+      bevelThickness: 0.002,
+      bevelSegments: 1,
       steps: 1,
     }),
-    plastic('#e9ebe0'),
+    gunmetal,
   )
   shell.rotation.x = Math.PI / 2
   shell.position.y = 0.23
-  root.add(shell)
-  block(root, [0.63, 0.1, 0.65], [0, 0.27, 0.23], plastic('#b38e58'))
-  block(root, [0.58, 0.3, 0.53], [0, 0.43, -0.15], plastic('#234d69'))
-  block(root, [0.55, 0.2, 0.02], [0, 0.57, -0.43], glass)
-  block(root, [0.65, 0.05, 0.64], [0, 0.66, -0.17])
+  skin.add(shell)
+  block(skin, [0.63, 0.1, 0.65], [0, 0.27, 0.23], darkTitanium)
+  block(skin, [0.58, 0.3, 0.53], [0, 0.43, -0.15], gunmetal)
+  block(skin, [0.55, 0.2, 0.02], [0, 0.57, -0.43], glass)
+  block(skin, [0.65, 0.05, 0.64], [0, 0.66, -0.17], ceramic)
   block(root, [0.3, 0.25, 0.24], [0, 0.18, 0.9], rubber)
   const prop = new THREE.Group()
   prop.position.set(0, -0.08, 1.02)
@@ -49,13 +54,13 @@ function launch() {
   disc(root, 0.04, 0.04, [0, 0.72, -0.2], glow)
   batch(prop)
   batch(root, [prop])
-  return { root, prop, glow }
+  return { root, prop, glow, skin }
 }
-function harbour(scene: THREE.Scene, logic: BoatLogic) {
+function harbour(scene: THREE.Scene, logic: BoatLogic, live?: () => void) {
   const water = new THREE.Mesh(
     new THREE.PlaneGeometry(22, 20, 48, 44),
     new THREE.MeshPhysicalMaterial({
-      color: '#207c99',
+      color: '#385c68',
       roughness: 0.26,
       metalness: 0.3,
       clearcoat: 0.8,
@@ -67,11 +72,10 @@ function harbour(scene: THREE.Scene, logic: BoatLogic) {
   scene.add(water)
   const dock = new THREE.Group()
   scene.add(dock)
-  for (let i = 0; i < 30; i++)
-    block(dock, [6.8, 0.12, 0.09], [-2.1, 0.18, 3 + i * 0.1], plastic(i % 2 ? '#aa8053' : '#bd9362'))
+  const deck = tiledDeck(6.8, 3, .24, .6); deck.position.set(-2.1, 0, 4.45); dock.add(deck)
   for (const x of [-5.3, 1.1])
     for (const z of [3, 5.8]) {
-      disc(dock, 0.1, 0.8, [x, 0.28, z], plastic('#74533a'))
+      block(dock, [.2, .8, .2], [x, .28, z], darkTitanium)
       disc(dock, 0.14, 0.06, [x, 0.7, z], metal)
     }
   const buoys = BUOYS.map(([x, z], n) => {
@@ -88,6 +92,7 @@ function harbour(scene: THREE.Scene, logic: BoatLogic) {
   const boats = logic.units.map(() => {
     const b = launch()
     scene.add(b.root)
+    if (live) upgradeSkins('boat', { hullSkin: b.skin }, live)
     return b
   })
   const wakes = boats.map(() => {
@@ -129,7 +134,7 @@ function harbour(scene: THREE.Scene, logic: BoatLogic) {
 }
 export function createView(stage: Stage, logic: BoatLogic): DeviceView {
   stage.ground.visible = false
-  const world = harbour(stage.scene, logic)
+  const world = harbour(stage.scene, logic, () => stage.view.invalidate())
   const at = (n: number): [number, number, number] => [logic.units[n].x, 0.3, logic.units[n].z]
   return {
     framing: playFrame(at(0), 1.05),

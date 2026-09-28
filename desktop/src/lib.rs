@@ -2,6 +2,7 @@
 //! plus the Windows implementation. `main.rs` is the CLI and serve loop; `bin/harness.rs` the test window.
 
 pub mod keys;
+pub mod mac;
 pub mod protocol;
 pub mod scope;
 pub mod session;

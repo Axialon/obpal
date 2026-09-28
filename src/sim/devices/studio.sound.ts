@@ -1,5 +1,7 @@
 /** Original procedural voices. Each source has a stop time, an envelope and a bounded seat budget. */
 import { clamp, frequency } from '../../music'
+import { audioContext } from '../audio/context'
+import studioProfile from '../audio/profiles/studio'
 
 export const AUDIO_LIMITS = { seats: 8, voices: 8, gain: 0.16, master: 0.65, ceiling: 0.88, maxSeconds: 12 } as const
 export interface ToneSpec { hz: number; decay: number; noise: number; highpass: number; modes: readonly number[] }
@@ -37,7 +39,9 @@ export class StudioSound {
   private noise: AudioBuffer | null = null
   private voices: Voice[] = []
   private volume = AUDIO_LIMITS.master as number
+  private reduced = false
   private levels = new Float32Array(256)
+  constructor(private position: (seat: number) => readonly [number, number, number]) {}
   get active() { return this.voices.length }
   get running() { return this.context?.state === 'running' }
   async start() {
@@ -45,20 +49,23 @@ export class StudioSound {
     await this.context!.resume()
   }
   private build() {
-    const c = this.context = new AudioContext({ latencyHint: 'interactive' })
+    const c = this.context = audioContext()
     const sum = c.createGain(); sum.gain.value = AUDIO_LIMITS.gain
     const compressor = c.createDynamicsCompressor()
     compressor.threshold.value = -18; compressor.knee.value = 12; compressor.ratio.value = 4; compressor.attack.value = 0.003; compressor.release.value = 0.15
     const mix = c.createGain(); const wet = c.createGain(); wet.gain.value = 0.14
     const reverb = c.createConvolver(); reverb.buffer = this.impulse(c, 0.65)
     const limiter = c.createWaveShaper(); limiter.curve = limiterCurve(); limiter.oversample = 'none'
-    this.output = c.createGain(); this.output.gain.value = this.volume
+    this.output = c.createGain(); this.output.gain.value = this.volume * (this.reduced ? 0.4 : 1)
     this.analyser = c.createAnalyser(); this.analyser.fftSize = 512
     this.capture = c.createMediaStreamDestination()
     sum.connect(compressor); compressor.connect(mix); compressor.connect(reverb); reverb.connect(wet); wet.connect(mix)
     mix.connect(limiter); limiter.connect(this.output); this.output.connect(this.analyser); this.analyser.connect(c.destination); this.analyser.connect(this.capture)
     this.buses = Array.from({ length: 8 }, (_, n) => {
-      const bus = c.createGain(); const pan = c.createStereoPanner(); pan.pan.value = (n % 4 - 1.5) * 0.16
+      const bus = c.createGain(); const pan = c.createPanner()
+      const position = this.position(n)
+      pan.panningModel = 'HRTF'; pan.distanceModel = 'inverse'; pan.refDistance = studioProfile.distance; pan.rolloffFactor = 0.35
+      pan.positionX.value = position[0]; pan.positionY.value = position[1]; pan.positionZ.value = position[2]
       bus.connect(pan); pan.connect(sum); return bus
     })
     this.noise = c.createBuffer(1, c.sampleRate * 2, c.sampleRate)
@@ -75,7 +82,8 @@ export class StudioSound {
     }
     return b
   }
-  setVolume(v: number) { this.volume = clamp(v, 0, 0.8); this.output?.gain.setTargetAtTime(this.volume, this.context!.currentTime, 0.02) }
+  setVolume(v: number) { this.volume = clamp(v, 0, 0.8); this.output?.gain.setTargetAtTime(this.volume * (this.reduced ? 0.4 : 1), this.context!.currentTime, 0.02) }
+  setReduced(value: boolean) { this.reduced = value; this.setVolume(this.volume) }
   meter() {
     if (!this.analyser) return 0
     this.analyser.getFloatTimeDomainData(this.levels)

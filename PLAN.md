@@ -472,7 +472,9 @@ Scheduled 2026-09-27: phase B lands with step 5b (the controller hub, below), an
 
 - **Next:**
   1. Try it on real hardware: an SO-101, an Arduino arm, and a ROS 2 arm.
-  2. Per-model geometry, so the twin has the SO-101's proportions. **Done 2026-09-27:** six kinds of arm in the sim (`?kind=`, src/sim/arm/kind/), each with its own joints, IK, floor and parts for the blocks: the five-axis arm, the SO-101, a six-axis industrial arm (spherical wrist), a SCARA, a delta and a four-axis desk arm; `ARM_KINDS` (src/sim/arm/kinds.ts) lists them for the sims catalogue, with a moving preview.
+  2. Per-model geometry, so the twin has the SO-101's proportions. **Mac Desktop implementation, 2026-09-28 — awaiting a first Mac test:** `desktop/src/mac/` adds CoreGraphics mouse/keys/Unicode, AX text/password focus and permission reporting, NSWorkspace executable identity, and Ctrl+Option+Delete panic. Link offers the Accessibility step and a persisted Ctrl-to-Command preference; Windows backends are unchanged. Per-user scripts register six Chromium browsers including Arc, universal packaging and `codemagic.yaml` build both architectures. Cross-checks and pure unit tests run on Windows; a real Mac must still build/link and complete `desktop/README.md`'s Mac test checklist before the coordinator removes preview labels or publishes the zip.
+
+**Done 2026-09-27:** six kinds of arm in the sim (`?kind=`, src/sim/arm/kind/), each with its own joints, IK, floor and parts for the blocks: the five-axis arm, the SO-101, a six-axis industrial arm (spherical wrist), a SCARA, a delta and a four-axis desk arm; `ARM_KINDS` (src/sim/arm/kinds.ts) lists them for the sims catalogue, with a moving preview.
   3. A serial bridge in ob.Pal Desktop, for browsers without Web Serial and for a PC that bridges an arm without a page open.
   4. Arm-to-arm collision checks in the cell.
   5. A camera view of a remote arm, for physical spaces.

@@ -19,6 +19,8 @@ import '../../styles/sim.css'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { batch, box, environment, floorMaterial, metal, palette, plastic, softKey } from '../kit'
+import { tiledDeck } from '../kit/precision'
+import { carbon, ceramic, darkTitanium } from '../kit/surfaces'
 import { fixtures, payloadSpeed, STOCK } from './workspace'
 import { instanceCopies } from '../kit/instances'
 import { InputSmoother, servo } from '../kit/motion'
@@ -43,6 +45,11 @@ import { placement, turnBetween } from './layout'
 import type { ArmModel, JointSpec } from './model'
 import { GlowFollower, handMove, handTurn, headingOf } from '@obpal/host'
 import { ScreenPointer } from '../../viewer/pointer'
+import { Experience } from '../vr/experience'
+import { SharedPresence } from '../vr/presence'
+import { armRide } from '../vr/rigs'
+import type { SimValue } from '@obpal/core'
+import { mountSound } from '../audio/session'
 
 applyTheme(initialTheme())
 mountMarks()
@@ -57,6 +64,9 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 const KIND = kindFrom(new URLSearchParams(location.search).get('kind'))
 const KIN = KIND.kin
 const INFO = ARM_KINDS.find((k) => k.id === KIND.id)!
+const sound = mountSound(KIND.id, (strong, weak, ms, who) => sim?.remote.rumble(strong, weak, ms, who))
+const soundPosition = new THREE.Vector3()
+let soundAt = 0
 /** The gripper's joint, after the pose's. */
 const GRIP = KIN.keys.length
 
@@ -90,14 +100,12 @@ floor.rotation.x = -Math.PI / 2
 floor.position.y = -0.16
 floor.receiveShadow = true
 scene.add(floor)
-const bench = box(KIND.cell.fence * 2.8, 0.14, KIND.cell.fence * 2.8, floorMaterial('#273036'), 0.05)
+const bench = box(KIND.cell.fence * 2.8, 0.14, KIND.cell.fence * 2.8, carbon)
 bench.position.y = -0.074
 scene.add(bench)
-const grid = new THREE.PolarGridHelper(KIND.cell.fence * 1.3, 12, 6, 96, '#586166', '#454e54')
-grid.position.y = 0.001
-scene.add(grid)
+scene.add(tiledDeck(KIND.cell.fence * 2.8, KIND.cell.fence * 2.8, -.004, .48))
 // The cell's fence: the arms work inside it.
-const fence = new THREE.Mesh(new THREE.TorusGeometry(KIND.cell.fence * 1.3, 0.005, 6, 128), plastic('#c6ff34'))
+const fence = new THREE.Mesh(new THREE.TorusGeometry(KIND.cell.fence * 1.3, 0.005, 6, 128), ceramic)
 fence.rotation.x = Math.PI / 2
 fence.position.y = 0.004
 scene.add(fence)
@@ -107,7 +115,7 @@ const fixtureMeshes = new THREE.Group()
 for (const f of workholding) {
   const m = f.finish === 'peg'
     ? new THREE.Mesh(new THREE.CylinderGeometry(f.half[0], f.half[0], f.half[1] * 2, 16), metal)
-    : box(f.half[0] * 2, f.half[1] * 2, f.half[2] * 2, plastic(f.finish === 'shelf' ? '#818c91' : '#60746b'), 0.003)
+    : box(f.half[0] * 2, f.half[1] * 2, f.half[2] * 2, f.finish === 'shelf' ? darkTitanium : ceramic)
   m.position.set(f.x, f.y, f.z)
   m.castShadow = m.receiveShadow = true
   fixtureMeshes.add(m)
@@ -217,9 +225,9 @@ function nodesOf(a: Arm): SceneNode[] {
   return a.profile === 'arm' ? [whole] : a.profile === 'joints' ? joints : [whole, ...joints]
 }
 
-function addArm(): Arm | null {
+function addArm(number?: number): Arm | null {
   const used = new Set(arms.map((a) => a.n))
-  const n = [1, 2, 3, 4].find((k) => !used.has(k))
+  const n = [1, 2, 3, 4].find((k) => !used.has(k) && (number === undefined || number === k))
   if (!n) return null
   const model = KIND.build(n, mats)
   // Around the middle, facing it: the sector its base can't turn to faces out, behind it (./layout.ts).
@@ -309,6 +317,7 @@ interface Block {
   vy: number
   /** The opening its holder's fingers stopped at on it. */
   grip: number
+  lastHolder?: string
 }
 const blocks: Block[] = STOCK.map((stock, i) => {
   const [x, y, z] = stock.half
@@ -327,6 +336,7 @@ const bm = new THREE.Matrix4()
 const level = new THREE.Quaternion()
 const levelTurn = new THREE.Euler()
 function drop(b: Block) {
+  b.lastHolder = b.by ? sim?.claims.controller(b.by.joints[GRIP].node) : undefined
   scene.attach(b.mesh)
   b.by = null
   b.vy = 0
@@ -381,6 +391,10 @@ function updateBlocks(dt: number) {
       b.vy -= 9.8 * dt
       p.y = Math.max(y, p.y + b.vy * dt)
     } else {
+      if (b.vy < -0.15) {
+        sound.bus.emit({ kind: 'contact', source: 'block', at: [p.x, p.y, p.z], who: b.lastHolder, strength: 1, speed: -b.vy, impulse: -b.vy * b.mass, materials: ['plastic', 'metal'] })
+        b.lastHolder = undefined
+      }
       b.vy = 0
       p.y = y
     }
@@ -460,7 +474,8 @@ function blockStep(a: Arm, was: Pose, gripWas: number, following: boolean) {
   b.grip = r.open
   b.vy = 0
   const who = sim?.claims.controller(g.node)
-  if (who && who !== 'host') sim?.remote.feedback({ haptic: 'tick' }, who)
+  a.model.grasp.getWorldPosition(soundPosition)
+  sound.bus.emit({ kind: 'action', action: 'grab', source: a.id, at: [soundPosition.x, soundPosition.y, soundPosition.z], who, strength: 0.4 })
 }
 
 // ---- the shared scene ----
@@ -513,7 +528,31 @@ function resume() {
 
 for (let i = 0; i < 2; i++) addArm()
 
-void startSimScene({
+const rides = () => arms.map(a => armRide(a.id, `${a.name} wrist`, a.model.root, a.model.grasp))
+const shared = new SharedPresence({
+  rides,
+  capture: () => ({ arms: arms.map(a => ({ id: a.id, angles: a.joints.map(j => j.angle) })), blocks: blocks.map(b => ({ p: b.mesh.getWorldPosition(new THREE.Vector3()).toArray(), q: b.mesh.getWorldQuaternion(new THREE.Quaternion()).toArray() })) }),
+  apply(state: SimValue) {
+    const s = state as unknown as { arms: { id: string; angles: number[] }[]; blocks: { p: V3; q: [number, number, number, number] }[] }
+    if (!Array.isArray(s?.arms) || !Array.isArray(s.blocks)) return
+    for (const a of [...arms]) if (!s.arms.some(r => r.id === a.id)) void removeArm(a)
+    s.arms.forEach(r => {
+      const a = arms.find(a => a.id === r.id) ?? addArm(Number(r.id.slice(1)))
+      r.angles.forEach((angle, i) => { if (!a?.joints[i]) return; a.joints[i].angle = angle; a.model.apply[i](angle) })
+    })
+    s.blocks.forEach((r, i) => { if (blocks[i]) { blocks[i].mesh.position.set(...r.p); blocks[i].mesh.quaternion.set(...r.q) } })
+  },
+  allowed: who => who === 'host' || !!sim?.allowed(who),
+})
+scene.add(shared.group)
+view.presence = new Experience(renderer, scene, camera, rides, shared, controls)
+if (!shared.guest) blocks.forEach(b => shared.world.add('block', b.mesh.position.toArray(), b.half[1], {
+  read: () => b.mesh.getWorldPosition(new THREE.Vector3()).toArray(),
+  write: (p, v) => { if (!b.by) { b.mesh.position.set(...p); b.vy = v[1] } },
+  busy: () => !!b.by || arms.some(a => !!a.hw?.live),
+}))
+
+if (!shared.guest) void startSimScene({
   appName: 'ob.Pal robot arms',
   layout,
   nodes: arms.flatMap(nodesOf),
@@ -523,6 +562,7 @@ void startSimScene({
   changed: () => renderPanel(),
 }).then((s) => {
   sim = s
+  shared.connect(s.remote)
   s.remote.on('input', (who) => lastInput.set(who.id, performance.now()))
   s.remote.on('button', ({ id, ev }, who) => {
     if (id === 'estop') { estop(who.id); return }
@@ -1040,14 +1080,25 @@ let last = 0
 function loop(now: number) {
   const dt = last ? Math.min(0.05, (now - last) / 1000) : 0
   last = now
-  readInputs(now)
-  for (const a of arms) stepArm(a, now, dt)
-  updateBlocks(dt)
+  if (!shared.guest) {
+    readInputs(now)
+    for (const a of arms) stepArm(a, now, dt)
+    updateBlocks(dt)
+  }
+  if (now - soundAt >= 50) {
+    soundAt = now
+    for (const a of arms) for (let i = 0; i < a.joints.length; i++) {
+      const j = a.joints[i], speed = Math.min(1, Math.abs(j.vel) / Math.max(0.01, j.spec.vmax))
+      if (speed < 0.02) continue
+      a.model.rings[i].getWorldPosition(soundPosition)
+      sound.bus.emit({ kind: 'motor', texture: 'servo', source: j.node, at: [soundPosition.x, soundPosition.y, soundPosition.z], who: sim?.claims.controller(j.node), strength: speed, rpm: speed, load: a.blocked ? 1 : 0.4 })
+    }
+  }
+  sound.tick(now)
   controls.update()
   armInstances.update()
   view.draw(scene, camera, dt)
   if (Math.floor(now / 100) !== Math.floor((now - dt * 1000) / 100)) renderReadouts()
-  requestAnimationFrame(loop)
 }
 
 // ---- real arms: connect, calibrate, go live (./drivers.ts) ----
@@ -1250,6 +1301,11 @@ function renderPanel() {
   badge.textContent = live ? `${live} real arm${live > 1 ? 's' : ''} live` : connected ? `Twin of ${connected} real arm${connected > 1 ? 's' : ''}` : 'Simulated · no hardware connected'
   badge.classList.toggle('live', live > 0)
   renderReadouts()
+  disableGuestPanel()
+}
+
+function disableGuestPanel() {
+  if (view.presence?.shared?.guest) document.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('.sim-panel button, .sim-panel input, .sim-panel select').forEach(e => { if (!e.closest('.presence-controls, .sim-sound')) e.disabled = true })
 }
 
 function takeBack(node: string) { sim?.take(node, 'host', true); sim?.release('host') }
@@ -1403,7 +1459,8 @@ inspectArm.onclick = () => {
 resetView.after(inspectArm)
 resize()
 renderPanel()
-requestAnimationFrame(loop)
+renderer.setAnimationLoop(loop)
+disableGuestPanel()
 
 Object.assign(window, {
   __arm: {

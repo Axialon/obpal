@@ -1,20 +1,25 @@
 import * as THREE from 'three'
-import { batch, floorMaterial, glass, maker, metal, plastic, rubber } from '../kit'
+import { batch, maker, metal, plastic, rubber } from '../kit'
 import { HelicopterLogic, HELICOPTER_PADS, HELICOPTER_RINGS } from './helicopter'
 import { block, disc, playFrame, rod, showcase } from './parts'
 import type { Stage } from './stage'
 import { mats, plate, wear, type DeviceView } from './view'
+import { ceramic, darkTitanium, gunmetal, optic } from '../kit/surfaces'
+import { housing, pov, service, tiledDeck } from '../kit/precision'
+import { skinSlot, upgradeSkins } from '../kit/skins'
 
 function helicopter(n: number) {
   const root = new THREE.Group(), cabin = new THREE.Group(), tail = new THREE.Group(), skids = new THREE.Group()
   root.name = `helicopter-${n + 1}`; cabin.name = 'cabin'; tail.name = 'tail-boom'; skids.name = 'landing-skids'
   root.add(cabin, tail, skids)
-  const paint = plastic(n ? '#609bab' : '#d69b4b'), glow = mats.glow()
-  const shell = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), paint)
+  const paint = gunmetal, glow = mats.glow()
+  const shell = housing(2, 2, 2, paint, .22)
   shell.scale.set(0.42, 0.44, 0.8); shell.position.set(0, 0.5, -0.2); shell.castShadow = true; cabin.add(shell)
-  const window = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), glass)
+  const window = housing(2, 2, 2, optic, .18)
   window.scale.set(0.385, 0.35, 0.45); window.position.set(0, 0.58, -0.6); cabin.add(window)
-  block(cabin, [0.56, 0.24, 0.6], [0, 0.82, 0.15], plastic('#485058'))
+  const engine = block(cabin, [0.56, 0.24, 0.6], [0, 0.82, 0.15], darkTitanium)
+  const skin = skinSlot(cabin, 'cabinSkin', shell, window, engine)
+  pov(cabin, [0, .62, -1.085])
   for (const x of [-0.3, 0.3]) rod(cabin, [x, 0.88, -0.53], [x, 0.29, -0.73], 0.018, metal)
   rod(tail, [0, 0.52, 0.3], [0, 0.66, 2.05], 0.1, paint)
   block(tail, [0.7, 0.045, 0.3], [0, 0.65, 1.73], paint)
@@ -39,31 +44,31 @@ function helicopter(n: number) {
   const number = plate(n + 1, 0.25); number.position.set(0, 0.54, -0.99); cabin.add(number)
   maker(cabin, 0, 0.95, 0.08, 0.16)
   for (const part of [cabin, tail, skids, rotor, tailRotor]) batch(part)
-  return { root, rotor, tailRotor, glow }
+  return { root, rotor, tailRotor, glow, skin }
 }
-function trainingField(scene: THREE.Scene, logic: HelicopterLogic) {
+function trainingField(scene: THREE.Scene, logic: HelicopterLogic, live?: () => void) {
   const field = new THREE.Group(); field.name = 'training-field'; scene.add(field)
-  block(field, [25, 0.12, 23], [0, -0.12, 0], floorMaterial('#73846c'))
-  HELICOPTER_PADS.forEach(([x, z], n) => {
-    disc(field, 1.55, 0.07, [x, 0, z], floorMaterial('#495560'))
+  field.add(tiledDeck(25, 23, -.06, 2))
+  HELICOPTER_PADS.forEach(([x, z]) => {
+    const pad = housing(3.1, .07, 3.1); pad.position.set(x, 0, z); field.add(pad)
     for (const dx of [-0.35, 0.35]) block(field, [0.11, 0.02, 1.05], [x + dx, 0.046, z], plastic('#e2e5d9'))
     block(field, [0.7, 0.02, 0.11], [x, 0.046, z], plastic('#e2e5d9'))
-    for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4; disc(field, 0.055, 0.1, [x + Math.sin(a) * 1.4, 0.04, z + Math.cos(a) * 1.4], plastic(n ? '#79b3cb' : '#eac37a')) }
+    for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2; disc(field, 0.055, 0.1, [x + Math.sin(a) * 1.4, 0.04, z + Math.cos(a) * 1.4], ceramic) }
   })
   for (const x of [-11.8, 11.8]) {
     rod(field, [x, 0.3, -10.7], [x, 0.3, 10.7], 0.04)
     for (let z = -10; z <= 10; z += 2) rod(field, [x, 0, z], [x, 0.65, z], 0.035)
   }
-  block(field, [4, 2.2, 3], [-7, 1, 6], plastic('#8e9c98'))
+  block(field, [4, 2.2, 3], [-7, 1, 6], darkTitanium)
   block(field, [4.4, 0.13, 3.4], [-7, 2.2, 6], metal)
-  block(field, [3, 1.7, 0.06], [-7, 0.88, 7.53], plastic('#4c626b'))
+  const door = service(3, 1.7); door.position.set(-7, .88, 7.53); field.add(door)
   batch(field)
   const rings = HELICOPTER_RINGS.map((r, n) => {
     const mesh = new THREE.Mesh(new THREE.TorusGeometry(1.05, 0.055, 10, 48), mats.glow('#d1b976'))
     mesh.name = `training-ring-${n + 1}`; mesh.position.set(r.x, r.y, r.z); mesh.rotation.y = r.face; scene.add(mesh)
     return mesh
   })
-  const models = logic.units.map((_, n) => { const m = helicopter(n); scene.add(m.root); return m })
+  const models = logic.units.map((_, n) => { const m = helicopter(n); scene.add(m.root); if (live) upgradeSkins('helicopter', { cabinSkin: m.skin }, live); return m })
   return {
     step(colors: readonly (string | null)[] = []) {
       models.forEach((m, n) => {
@@ -78,7 +83,7 @@ function trainingField(scene: THREE.Scene, logic: HelicopterLogic) {
 }
 export function createView(stage: Stage, logic: HelicopterLogic): DeviceView {
   stage.ground.visible = false
-  const w = trainingField(stage.scene, logic), at = (n: number): [number, number, number] => [logic.units[n].x, logic.units[n].y + 0.5, logic.units[n].z]
+  const w = trainingField(stage.scene, logic, () => stage.view.invalidate()), at = (n: number): [number, number, number] => [logic.units[n].x, logic.units[n].y + 0.5, logic.units[n].z]
   return {
     framing: playFrame(at(0), 1.5), overview: playFrame([0, 1.5, 0], 11), inspect: () => playFrame(at(0), 1.15),
     follow: (n) => new THREE.Vector3(...at(n)), update: (colors) => w.step(colors),

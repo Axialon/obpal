@@ -1,6 +1,8 @@
 /** Two cabinet tables with exposed playfields, moving flippers and readable backbox scores. */
 import * as THREE from 'three'
-import { batch, floorMaterial, maker, metal, plastic, rubber } from '../kit'
+import { ceramic, darkTitanium, gunmetal, carbon } from '../kit/surfaces'
+import { pov, service, tiledDeck } from '../kit/precision'
+import { batch, maker, metal, plastic, rubber } from '../kit'
 import { PINBALL_BUMPERS, PinballLogic } from './pinball'
 import { block, disc, playFrame, rod, showcase } from './parts'
 import type { Stage } from './stage'
@@ -30,12 +32,12 @@ function scoreboard(parent: THREE.Object3D) {
 
 function arcade(scene: THREE.Scene, logic: PinballLogic) {
   const floor = group(scene, 'arcade-floor')
-  block(floor, [4.2, 0.09, 3.65], [0, -0.055, 0], floorMaterial('#45514e'))
+  floor.add(tiledDeck(4.2, 3.65, -.01, 1))
   batch(floor)
   const tables = logic.units.map((_, n) => {
     const root = group(scene, `pinball-table-${n + 1}`); root.position.x = tableX(n)
     const cabinet = group(root, 'cabinet'), accent = plastic(n ? '#81bad4' : '#c6ff34')
-    block(cabinet, [1.56, 0.37, 2.82], [0, 0.75, 0], plastic('#303b40'))
+    block(cabinet, [1.56, 0.37, 2.82], [0, 0.75, 0], gunmetal)
     for (const x of [-0.66, 0.66]) for (const z of [-1.16, 1.16]) {
       rod(cabinet, [x * 1.08, 0.07, z * 1.06], [x, 0.71, z], 0.045)
       disc(cabinet, 0.073, 0.035, [x * 1.08, 0.035, z * 1.06], rubber)
@@ -44,15 +46,18 @@ function arcade(scene: THREE.Scene, logic: PinballLogic) {
       block(cabinet, [0.025, 0.075, 2.35], [side * 0.785, 0.79, 0], accent)
       const button = disc(cabinet, 0.055, 0.035, [side * 0.805, 0.81, 0.96], accent); button.rotation.z = Math.PI / 2
     }
-    block(cabinet, [1.58, 0.66, 0.17], [0, 1.4, -1.52], plastic('#243136'))
+    block(cabinet, [1.58, 0.66, 0.17], [0, 1.4, -1.52], darkTitanium)
     block(cabinet, [1.43, 0.49, 0.025], [0, 1.43, -1.425], rubber)
     block(cabinet, [0.26, 0.16, 0.035], [-0.19, 0.72, 1.425], rubber)
     maker(cabinet, 0.13, 0.89, 1.39, 0.085)
     batch(cabinet)
+    for (const side of [-1, 1]) { const panel = service(1.2, .19); panel.rotation.y = side * Math.PI / 2; panel.position.set(side * .782, .7, -.15); cabinet.add(panel) }
+    batch(cabinet)
+    pov(root, [0, 1.5, 1.5], [0, -.3, -1])
     const score = scoreboard(root)
     const playfield = group(root, 'playfield'); playfield.position.y = 0.96; playfield.rotation.x = 0.1
     const deck = group(playfield, 'deck-and-rails')
-    block(deck, [1.43, 0.065, 2.65], [0, -0.035, 0], plastic('#42645b'))
+    block(deck, [1.43, 0.065, 2.65], [0, -0.035, 0], carbon)
     for (const x of [-0.73, 0.73]) block(deck, [0.065, 0.13, 2.72], [x, 0.04, 0], metal)
     block(deck, [1.46, 0.13, 0.055], [0, 0.04, -1.33], metal)
     for (const side of [-1, 1]) block(deck, [0.44, 0.1, 0.07], [side * 0.45, 0.02, 1.31], metal)
@@ -77,7 +82,7 @@ function arcade(scene: THREE.Scene, logic: PinballLogic) {
     })
     const flippers = [-1, 1].map((side) => {
       const pivot = group(playfield, side < 0 ? 'left-flipper' : 'right-flipper'); pivot.position.set(side * 0.43, 0.05, 0.91)
-      block(pivot, [0.4, 0.07, 0.075], [-side * 0.17, 0, 0], plastic('#efe8cd'))
+      block(pivot, [0.4, 0.07, 0.075], [-side * 0.17, 0, 0], ceramic)
       block(pivot, [0.3, 0.074, 0.025], [-side * 0.17, 0, 0], accent)
       disc(pivot, 0.045, 0.085, [0, 0, 0], metal)
       batch(pivot)

@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build, defineConfig, type Plugin } from 'vite'
 import { markupBuild } from './scripts/markup-build.mjs'
+import { pageWords, previewTags } from './scripts/lib/preview.mjs'
 import { cloudflare } from '@cloudflare/vite-plugin'
 import { checkProfile, CONTROLLER_ID, CONTROLLER_IDS, CONTROLLERS, MOTION_UTILITIES, PROFILE_IDS, PROFILE_LIMITS, PROFILES, ROUTES, utilityKey } from './packages/core/src/catalogue'
 import { APP_ACTIONS, BUTTON_TARGET, DEFAULT_BUTTONS, INPUT_ID, INPUT_OPTIONS, KEY_TARGETS, SMART_BUTTONS } from './packages/core/src/buttons'
@@ -212,7 +213,7 @@ function catalogueFiles(): Plugin {
   const modeName = new Map(Object.entries(Mode).map(([name, m]) => [m, name]))
   const catalogue = () => ({
     name: 'ob.Pal control catalogue',
-    about: 'Everything an ob.Pal phone can drive, and how: utilities, the controllers built from them, the routes motion takes, profiles, control systems and bridges, and the embed that puts ob.Pal on any page.',
+    about: 'ob.Pal makes any phone the controller for what’s on a screen, with no app. This is everything such a phone can drive, and how: utilities, the controllers built from them, the routes motion takes, profiles, control systems and bridges, and the embed that puts ob.Pal on any page.',
     spec: `${REPO}/blob/main/spec/CATALOGUE.md`,
     protocol: `${REPO}/blob/main/spec/PROTOCOL.md`,
     profileSchema: 'https://obpal.blackboxes.net/profile.schema.json',
@@ -265,8 +266,17 @@ function linkVersion(): Plugin {
   return { name: 'obpal-link-version', transformIndexHtml: (html) => html.replaceAll('%LINK_VERSION%', version) }
 }
 
+/**
+ * Link previews on every page (scripts/lib/preview.mjs): Open Graph and Twitter tags made from the page's own title
+ * and description (the home page's for a page without one), its address, and the preview image, public/og.png.
+ */
+function pagePreviews(): Plugin {
+  const fallback = () => pageWords(readFileSync(join(root, 'index.html'), 'utf8')).description
+  return { name: 'obpal-page-previews', transformIndexHtml: (html, ctx) => ({ html, tags: previewTags(html, ctx.path, { fallback: fallback(), origin: PUBLIC_ORIGIN }) }) }
+}
+
 export default defineConfig({
-  plugins: [markupBuild(root), cloudflare(), controllerServiceWorker(), embedScript(), catalogueFiles(), linkVersion(), pagePolicy()],
+  plugins: [markupBuild(root), cloudflare(), controllerServiceWorker(), embedScript(), catalogueFiles(), linkVersion(), pagePreviews(), pagePolicy()],
   server: { port: 5175, strictPort: true },
   environments: {
     client: {

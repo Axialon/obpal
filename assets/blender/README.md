@@ -7,6 +7,12 @@ Blender 5.2.2 runs headlessly, with `BLENDER` pointing to its executable:
 & $env:BLENDER -b --factory-startup --python-exit-code 1 --python assets/blender/drone.py
 & $env:BLENDER -b --factory-startup --python-exit-code 1 --python assets/blender/so101.py
 & $env:BLENDER -b --factory-startup --python-exit-code 1 --python assets/blender/rover.py
+& $env:BLENDER -b --factory-startup --python-exit-code 1 --python assets/blender/arms.py
+& $env:BLENDER -b --factory-startup --python-exit-code 1 --python assets/blender/flyers.py
+& $env:BLENDER -b --factory-startup --python-exit-code 1 --python assets/blender/vehicles.py
+& $env:BLENDER -b --factory-startup --python-exit-code 1 --python assets/blender/cameras.py
+& $env:BLENDER -b --factory-startup --python-exit-code 1 --python assets/blender/dog.py
+& $env:BLENDER -b --factory-startup --python-exit-code 1 --python assets/blender/studio.py
 ```
 
 `common.py` makes clipped component housings, tapered planar facets, metal-framed
@@ -27,10 +33,22 @@ The arm's elbow and wrist actuators and the rover's suspension have separate sle
 the authoritative kinematics or add another animation clock.
 
 The loader and production meshopt decoder load after the procedural scene's first paint, only in
-the live drone, SO-101 and rover views. Catalogue previews retain their lightweight procedural rigs.
+the live views that use authored assets. Catalogue previews retain their lightweight procedural rigs.
 The production decoder uses WebAssembly; only `/sim/arm/` and `/sim/device/` permit
 `'wasm-unsafe-eval'`. Trusted Types and the `obpal-templates` policy remain enforced everywhere.
 
 `scripts/style-prototypes.mjs` writes regression evidence to a fresh temporary folder and prints
 its path. Copy that folder's `loading/` and `stress.json` into the ignored review artifacts when
 assembling the viewer; the tests themselves never write evidence into the repository.
+
+The rollout uses `skins.ts` for explicitly named rigid appearance slots. These replace no control
+objects. The procedural scene owns the wheels, rotors, lenses, fingers, instrument heads and keys,
+and the `pov` camera anchors. Static authored details are joined with the kit by material after
+loading, with texture-coordinate streams made compatible. Repeated marble-run channels use
+instances so filling both boards does not multiply draw calls.
+
+`scripts/rollout-proof.mjs` checks every sim with all seats active, delayed and failed optional
+model loads, finite moving camera frames and full-scene render budgets. It uses the assigned
+`OBPAL_E2E_PORT`, `OBPAL_E2E_WORKER_PORT` and `OBPAL_E2E_CHROMIUM` environment variables.
+Its `stress.json` is written to a fresh temporary folder; copying it into the ignored rollout
+review folder adds the active-scene measurements to the viewer.

@@ -747,6 +747,48 @@ try {
     })
   }
 
+  if (!DESKTOP) {
+    await check('Mac (stub): Accessibility guidance, shortcut setting, panic chord and secret Type prompt', async () => {
+      await setTarget(popup, 'pc')
+      await helperReady(() => true)
+      const opts = await desk.newPage()
+      try {
+        await opts.goto(`chrome-extension://${id}/options.html`)
+        if (SHOTS) await opts.screenshot({ path: join(SHOTS, 'options-windows-before.png'), fullPage: true })
+        await stubFocus({ os: 'macos', accessibility: false, text: 'secret', front: 'game' })
+        await until('Mac permission instruction', () => popup.evaluate(() => document.getElementById('pc-sub')?.textContent?.includes('Privacy & Security')))
+        await until('no Type without Accessibility', () => phone.evaluate(() => document.getElementById('type-prompt')?.hidden))
+        await until('Mac panic chord', () => popup.evaluate(() => document.getElementById('pc-panic')?.textContent?.includes('⌥')))
+        await opts.locator('#mac-shortcuts:not([hidden])').waitFor()
+        if (SHOTS) {
+          await popup.screenshot({ path: join(SHOTS, 'popup-mac-accessibility.png'), fullPage: true })
+          await opts.screenshot({ path: join(SHOTS, 'options-mac-accessibility.png'), fullPage: true })
+        }
+        await opts.locator('#mac-shortcuts').click()
+        await until('physical Control preference reaches the helper', async () => (await pcState())?.platform?.ctrlToCmd === false)
+        await pcSend({ to: 'bg', type: 'pc-desktop', on: true, keyboard: true, mouse: true })
+        await stubFocus({ os: 'macos', accessibility: true, text: 'secret', front: 'game' })
+        await phone.locator('#type-prompt').waitFor({ state: 'visible', timeout: 8000 })
+        await tap('#type-prompt')
+        await phone.locator('#kbd').waitFor({ state: 'visible' })
+        await phone.locator('#kbd-pass').waitFor({ state: 'visible' })
+        if (!await phone.evaluate(() => document.activeElement?.id === 'kbd-pass' && document.activeElement.getAttribute('type') === 'password')) throw new Error('secret focus did not use a focused password field')
+        const typedAt = stubLog().length
+        await phone.keyboard.type('mac-test')
+        await until('Mac typing reaches the inert helper', () => stubLog().slice(typedAt).filter((e) => e.in?.t === 'text').map((e) => e.in.s).join('') === 'mac-test')
+        if (SHOTS) await phone.screenshot({ path: join(SHOTS, 'phone-mac-secret.png') })
+        await stubFocus({ os: 'macos', accessibility: false, text: 'secret', front: 'game' })
+        await until('revoking Accessibility closes Type', () => phone.evaluate(() => document.getElementById('kbd')?.hidden && document.getElementById('type-prompt')?.hidden))
+        await stubFocus({ text: null, front: 'browser' })
+        await until('Windows state restored', async () => !(await pcState())?.platform)
+        return 'permission loss hides Type; Mac setting, chord and password typing reach the stub'
+      } finally {
+        await opts.close()
+        await setTarget(popup, 'keys')
+      }
+    })
+  }
+
   // ---- the phone that paired comes back through its own room; an allowed phone stays allowed ----------------------
 
   if (!DESKTOP) {

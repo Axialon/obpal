@@ -1,5 +1,7 @@
 import * as THREE from 'three'
-import { batch, floorMaterial, maker, metal, plastic, rubber } from '../kit'
+import { ceramic, darkTitanium, gunmetal } from '../kit/surfaces'
+import { pov, service, tiledDeck } from '../kit/precision'
+import { batch, maker, metal, plastic } from '../kit'
 import { PainterLogic, INKS } from './painter'
 import { block, disc, playFrame, rod, showcase } from './parts'
 import type { Stage } from './stage'
@@ -7,19 +9,21 @@ import type { DeviceView } from './view'
 function studio(scene: THREE.Scene, logic: PainterLogic) {
   const set = new THREE.Group()
   scene.add(set)
-  block(set, [10, 0.12, 8], [0, -0.07, 0], floorMaterial('#1d2431'))
-  block(set, [10, 4.4, 0.12], [0, 2.2, -3], plastic('#1b2234'))
+  set.add(tiledDeck(10, 8, -.01, 1.5))
+  block(set, [10, 4.4, 0.12], [0, 2.2, -3], gunmetal)
   for (const x of [-4, 4]) {
     rod(set, [x, 0, -2.5], [x, 3.5, -2.5], 0.03)
-    block(set, [0.15, 1.2, 0.12], [x, 2.8, -2.5], plastic('#747891'))
+    block(set, [0.15, 1.2, 0.12], [x, 2.8, -2.5], ceramic)
   }
-  block(set, [1.7, 0.1, 0.7], [-3.4, 0.7, -2.3], plastic('#656a78'))
+  block(set, [1.7, 0.1, 0.7], [-3.4, 0.7, -2.3], darkTitanium)
   for (const x of [-4, -2.8]) rod(set, [x, 0, -2.3], [x, 0.7, -2.3], 0.025)
   for (const z of [-2, 0, 2]) block(set, [7, 0.007, 0.014], [0, 0.002, z], plastic('#414555'))
   batch(set)
   const root = new THREE.Group()
   scene.add(root)
-  disc(root, 0.075, 0.36, [0, 0, 0], rubber)
+  block(root, [.13, .36, .13], [0, 0, 0], gunmetal)
+  pov(root, [0, .34, -.2])
+  const panel = service(.06, .21); panel.position.z = .066; root.add(panel)
   disc(root, 0.084, 0.04, [0, -0.17, 0], metal)
   disc(root, 0.084, 0.04, [0, 0.15, 0], metal)
   maker(root, 0, 0.03, 0.076, 0.07)

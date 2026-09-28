@@ -1,0 +1,35 @@
+workflows:
+  desktop-macos:
+    name: ob.Pal Desktop for macOS (awaiting a first Mac test)
+    instance_type: mac_mini_m2
+    max_build_duration: 30
+    working_directory: desktop
+    environment:
+      node: 22
+      vars:
+        MACOSX_DEPLOYMENT_TARGET: "11.0"
+    scripts:
+      - name: Install the Rust toolchain
+        script: |
+          set -eu
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          fi
+          . "$HOME/.cargo/env"
+          rustup toolchain install stable --profile minimal
+          rustup target add --toolchain stable aarch64-apple-darwin x86_64-apple-darwin
+      - name: Test shared logic and build both architectures
+        script: |
+          set -eu
+          . "$HOME/.cargo/env"
+          cargo +stable test --locked
+          cargo +stable build --locked --release --target aarch64-apple-darwin
+          cargo +stable build --locked --release --target x86_64-apple-darwin
+      - name: Combine and package the helper
+        script: |
+          set -eu
+          mkdir -p target/universal
+          lipo -create target/aarch64-apple-darwin/release/obpal-desktop target/x86_64-apple-darwin/release/obpal-desktop -output target/universal/obpal-desktop
+          node pack-macos.mjs
+    artifacts:
+      - desktop/release/obpal-desktop-macos-universal.zip

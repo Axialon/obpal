@@ -1,5 +1,7 @@
 import * as THREE from 'three'
-import { batch, floorMaterial, metal, plastic } from '../kit'
+import { darkTitanium, gunmetal } from '../kit/surfaces'
+import { pov, service, tiledDeck } from '../kit/precision'
+import { batch, metal } from '../kit'
 import { PendulumLogic } from './pendulum'
 import { block, disc, playFrame, rod, showcase } from './parts'
 import { caption, part } from './optics.view'
@@ -8,15 +10,18 @@ import { mats, wear, type DeviceView } from './view'
 
 function lab(scene: THREE.Scene, logic: PendulumLogic) {
   const frame = part(scene, 'pendulum-laboratory')
-  block(frame, [5.7, 0.14, 2.5], [0, 0, 0], floorMaterial('#45525b'))
-  for (const x of [-2.6, 2.6]) { rod(frame, [x, 0.08, 0], [x, 3.1, 0], 0.065); block(frame, [0.65, 0.13, 0.9], [x, 0.15, 0], plastic('#7f9298')) }
+  frame.add(tiledDeck(5.7, 2.5, .07, .95))
+  block(frame, [5.05, 1.7, .065], [0, 1.85, -1], gunmetal)
+  for (const x of [-2.6, 2.6]) { rod(frame, [x, 0.08, 0], [x, 3.1, 0], 0.065); block(frame, [0.65, 0.13, 0.9], [x, 0.15, 0], darkTitanium) }
   rod(frame, [-2.6, 3.1, 0], [2.6, 3.1, 0], 0.075); batch(frame)
   const colors = ['#d5ad72', '#88b8c7', '#b3c88a']
   const models = logic.units.map((_, n) => {
     const mount = part(scene, `pendulum-${n + 1}`); mount.position.set((n - 1) * 1.65, 2.9, 0)
     disc(mount, 0.13, 0.16, [0, 0.075, 0], metal)
     const pivot = part(mount, 'swing-pivot'), line = rod(pivot, [0, 0, 0], [0, -1, 0], 0.012)
-    const bob = part(pivot, 'adjustable-bob'), sphere = new THREE.Mesh(new THREE.SphereGeometry(0.18, 28, 20), plastic(colors[n])); bob.add(sphere)
+    const bob = part(pivot, 'adjustable-bob'), sphere = new THREE.Mesh(new THREE.SphereGeometry(0.18, 28, 20), metal); bob.add(sphere)
+    const plate = service(.14, .1); plate.position.set(0, .076, .083); mount.add(plate)
+    pov(pivot, [0, -.04, .08], [0, -1, 0])
     const light = mats.glow(); disc(bob, 0.07, 0.01, [0, 0.181, 0], light)
     const number = caption(String(n + 1), colors[n], 0.35); number.position.set(0, 0.4, 0); mount.add(number)
     return { pivot, line, bob, light }

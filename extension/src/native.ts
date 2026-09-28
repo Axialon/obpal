@@ -158,11 +158,14 @@ export class NativeBridge {
     const m = parseHelperMessage(raw)
     if (!m) return
     switch (m.t) {
+      case 'platform':
+        this.set({ platform: { os: m.os, accessibility: m.accessibility, ctrlToCmd: m.ctrlToCmd } })
+        break
       case 'hello':
         this.ready = true
         this.retries = 0
         this.textCap = m.caps.text
-        this.set({ link: 'ready', version: m.version, desktopCap: m.caps.desktop, hotkey: m.hotkey, error: null })
+        this.set({ platform: m.os === 'macos' ? { os: 'macos', accessibility: false, ctrlToCmd: true } : undefined, link: 'ready', version: m.version, desktopCap: m.caps.desktop, hotkey: m.hotkey, error: null })
         // Armed once its config (every helper sends it right after hello) is through: see 'config'.
         break
       case 'config': {

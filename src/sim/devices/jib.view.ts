@@ -7,7 +7,7 @@ import { monitor, part } from './optics.view'
 import type { Stage } from './stage'
 import { mats, wear, type DeviceView } from './view'
 
-function cranes(scene: THREE.Scene, logic: JibLogic, count = 2) {
+function cranes(scene: THREE.Scene, logic: JibLogic, count = 2, live?: () => void) {
   const set = filmSet(scene)
   const models = logic.units.slice(0, count).map((_, n) => {
     const root = part(scene, `jib-crane-${n + 1}`); root.position.set(n ? 2.2 : -2.2, 0, 1)
@@ -28,7 +28,7 @@ function cranes(scene: THREE.Scene, logic: JibLogic, count = 2) {
     for (let j = 0; j < 4; j++) block(boom, [0.65, 0.12, 0.55], [0, -0.03 - j * 0.13, 1], rubber)
     rod(boom, [-0.4, 0, 1.3], [0.4, 0, 1.3], 0.035, rubber)
     const light = mats.glow(); block(boom, [0.18, 0.018, 0.12], [0, 0.25, 0.5], light); batch(boom)
-    const head = part(root, 'levelled-camera-platform'), camera = filmCamera(head)
+    const head = part(root, 'levelled-camera-platform'), camera = filmCamera(head, live)
     block(head, [0.5, 0.06, 0.45], [0, -0.09, 0], metal)
     return { root, swing, boom, camera, head, light }
   })
@@ -43,7 +43,7 @@ function cranes(scene: THREE.Scene, logic: JibLogic, count = 2) {
   } }
 }
 export function createView(stage: Stage, logic: JibLogic): DeviceView {
-  const m = cranes(stage.scene, logic); let viewed = 0
+  const m = cranes(stage.scene, logic, 2, () => stage.view.invalidate()); let viewed = 0
   return { framing: playFrame([-2.2, 1.5, -0.3], 2.5, [0.9, 0.65, 1.15]), overview: playFrame([0, 1.2, -1.5], 5.4), inspect: () => { const p = jibTip(logic.units[viewed].swing, logic.units[viewed].boom); return playFrame([p.x + (viewed ? 2.2 : -2.2), p.y + 0.2, p.z + 1], 0.65) }, follow: n => { viewed = n; return new THREE.Vector3(n ? 2.2 : -2.2, 1.5, -0.3) }, update: (colors, t) => m.step(t, colors), afterRender: monitor(stage, stage.scene, () => m.models[viewed].camera.eye, () => logic.units[viewed].recording ? `● REC ${logic.units[viewed].time.toFixed(1)} s` : `Jib ${viewed + 1} · camera`, m.models.map(m => m.root)) }
 }
 export function preview() {

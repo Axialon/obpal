@@ -65,6 +65,7 @@ export class BoatLogic extends Machine {
       b.x += b.vx * dt
       b.z += b.vz * dt
       if (Math.abs(b.x) > 10 || Math.abs(b.z) > 9 || (b.z > 2.6 && b.x < 1.3 && b.x > -5.5)) {
+        if (Math.abs(b.v) > 0.2) this.events.push({ unit: n, kind: 'bump', audio: { speed: Math.abs(b.v), materials: ['wood', 'water'], action: 'splash' } })
         b.x -= b.vx * dt
         b.z -= b.vz * dt
         b.v *= -0.2
@@ -76,7 +77,7 @@ export class BoatLogic extends Machine {
       b.horn = Math.max(0, b.horn - dt)
       if (action(i, 'horn')) {
         b.horn = 0.7
-        this.events.push({ unit: n, kind: 'tick', text: 'Ahoy!' })
+        this.events.push({ unit: n, kind: 'tick', text: 'Ahoy!', audio: { action: 'horn' } })
       }
       const buoy = BUOYS[b.next]
       if (Math.hypot(b.x - buoy[0], b.z - buoy[1]) < 1.2) {

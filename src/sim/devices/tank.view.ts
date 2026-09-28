@@ -1,14 +1,18 @@
 import * as THREE from 'three'
-import { batch, bolt, floorMaterial, maker, metal, plastic, rubber } from '../kit'
+import { batch, bolt, maker, metal, plastic, rubber } from '../kit'
 import { TankLogic } from './tank'
 import { block, disc, playFrame, rod, showcase, tracks } from './parts'
 import type { Stage } from './stage'
 import { mats, wear, type DeviceView } from './view'
+import { ceramic, darkTitanium, gunmetal } from '../kit/surfaces'
+import { pov, tiledDeck } from '../kit/precision'
+import { skinSlot, upgradeSkins } from '../kit/skins'
 function tank(n: number) {
   const root = new THREE.Group()
+  const skin = skinSlot(root, 'chassisSkin')
   tracks(root)
-  block(root, [1.15, 0.3, 1.7], [0, 0.5, 0], plastic('#447579'))
-  block(root, [1.5, 0.09, 1.9], [0, 0.62, 0], plastic('#bed6ca'))
+  block(skin, [1.15, 0.3, 1.7], [0, 0.5, 0], gunmetal)
+  block(skin, [1.5, 0.09, 1.9], [0, 0.62, 0], darkTitanium)
   for (const x of [-0.5, 0.5])
     for (const z of [-0.6, 0.6]) {
       const b = bolt(0.035)
@@ -19,8 +23,9 @@ function tank(n: number) {
   const turret = new THREE.Group()
   turret.position.y = 0.76
   root.add(turret)
-  disc(turret, 0.38, 0.2, [0, 0, 0], plastic('#447579'))
-  block(turret, [0.75, 0.25, 0.65], [0, 0.12, 0], plastic('#639592'))
+  disc(turret, 0.38, 0.2, [0, 0, 0], darkTitanium)
+  const turretSkin = skinSlot(turret, 'turretSkin', block(turret, [0.75, 0.25, 0.65], [0, 0.12, 0], gunmetal))
+  pov(turret, [0, .35, -.3])
   disc(turret, 0.17, 0.06, [0, 0.28, 0.08], metal)
   const gun = new THREE.Group()
   gun.position.set(0, 0.12, -0.25)
@@ -35,16 +40,16 @@ function tank(n: number) {
   batch(turret, [gun])
   batch(root, [turret])
   void n
-  return { root, turret, gun, glow }
+  return { root, turret, gun, glow, skin, turretSkin }
 }
-function range(scene: THREE.Scene, logic: TankLogic) {
+function range(scene: THREE.Scene, logic: TankLogic, live?: () => void) {
   const set = new THREE.Group()
   scene.add(set)
-  block(set, [18, 0.12, 16], [0, -0.07, 0], floorMaterial('#8d8167'))
-  for (const x of [-8.8, 8.8]) block(set, [0.2, 0.7, 16], [x, 0.3, 0], plastic('#626e67'))
+  set.add(tiledDeck(18, 16, -.01, 2))
+  for (const x of [-8.8, 8.8]) block(set, [0.2, 0.7, 16], [x, 0.3, 0], darkTitanium)
   for (let x = -8; x <= 8; x += 0.8)
     for (let y = 0; y < 3; y++)
-      block(set, [0.78, 0.3, 0.65], [x + (y % 2) * 0.2, 0.15 + y * 0.3, -7.8], plastic('#a49a78'))
+      block(set, [0.78, 0.3, 0.65], [x + (y % 2) * 0.2, 0.15 + y * 0.3, -7.8], y === 1 ? ceramic : gunmetal)
   batch(set)
   const targets = logic.targets.map((t) => {
     const root = new THREE.Group()
@@ -65,6 +70,7 @@ function range(scene: THREE.Scene, logic: TankLogic) {
   const models = logic.units.map((_, n) => {
     const m = tank(n)
     scene.add(m.root)
+    if (live) upgradeSkins('tank', { chassisSkin: m.skin, turretSkin: m.turretSkin }, live)
     return m
   })
   const balls = new THREE.InstancedMesh(new THREE.SphereGeometry(0.12, 12, 8), plastic('#ffb780'), 24)
@@ -93,7 +99,7 @@ function range(scene: THREE.Scene, logic: TankLogic) {
   }
 }
 export function createView(stage: Stage, logic: TankLogic): DeviceView {
-  const w = range(stage.scene, logic),
+  const w = range(stage.scene, logic, () => stage.view.invalidate()),
     at = (n: number): [number, number, number] => [logic.units[n].x, 0.55, logic.units[n].z]
   return {
     framing: playFrame(at(0), 1.25),

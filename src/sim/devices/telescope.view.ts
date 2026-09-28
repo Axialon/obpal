@@ -1,10 +1,12 @@
 import * as THREE from 'three'
-import { batch, floorMaterial, metal, plastic, rubber } from '../kit'
+import { batch, metal, plastic, rubber } from '../kit'
 import { SKY_OBJECTS, TelescopeLogic } from './telescope'
 import { block, disc, playFrame, rod, showcase } from './parts'
 import { caption, monitor, part } from './optics.view'
 import type { Stage } from './stage'
 import { mats, wear, type DeviceView } from './view'
+import { darkTitanium, gunmetal, optic } from '../kit/surfaces'
+import { pov, service, tiledDeck } from '../kit/precision'
 
 function sky() {
   const scene = new THREE.Scene(); scene.background = new THREE.Color('#080f21')
@@ -25,7 +27,7 @@ function sky() {
   return scene
 }
 function observatory(scene: THREE.Scene, logic: TelescopeLogic, count = 2) {
-  const floor = part(scene, 'observatory-platform'); disc(floor, 4.5, 0.1, [1.4, -0.06, 0], floorMaterial('#384457'))
+  const floor = part(scene, 'observatory-platform'); const deck = tiledDeck(9, 9, -.01, 1.5); deck.position.x = 1.4; floor.add(deck)
   for (const x of [-2.5, 5.3]) { rod(floor, [x, 0, -2], [x, 1.3, -2], 0.06); block(floor, [0.13, 0.03, 0.13], [x, 1.35, -2], plastic('#bac687')) }
   batch(floor)
   const models = logic.units.slice(0, count).map((_, n) => {
@@ -33,13 +35,15 @@ function observatory(scene: THREE.Scene, logic: TelescopeLogic, count = 2) {
     for (let j = 0; j < 3; j++) { const a = j * Math.PI * 2 / 3; rod(base, [0, 0.9, 0], [Math.sin(a) * 0.65, 0.04, Math.cos(a) * 0.65], 0.055); disc(base, 0.09, 0.05, [Math.sin(a) * 0.65, 0.03, Math.cos(a) * 0.65], rubber) }
     rod(base, [0, 0.8, 0], [0, 1.15, 0], 0.1); batch(base)
     const pan = part(base, 'azimuth-mount'); pan.position.y = 1.2
-    disc(pan, 0.2, 0.12, [0, 0, 0], plastic('#566477')); block(pan, [0.12, 0.6, 0.16], [0.32, 0.28, 0], metal)
+    disc(pan, 0.2, 0.12, [0, 0, 0], gunmetal); block(pan, [0.12, 0.6, 0.16], [0.32, 0.28, 0], darkTitanium)
     rod(pan, [0, 0.5, 0], [0.38, 0.5, 0], 0.045, metal)
     const light = mats.glow(); disc(pan, 0.08, 0.03, [0.32, 0.6, 0], light); batch(pan)
     const elevation = part(pan, 'elevation-tube'); elevation.position.y = 0.5
-    const tube = disc(elevation, 0.23, 1.25, [0, 0, -0.1], plastic(n ? '#a5b5c6' : '#e1d5bc')); tube.rotation.x = Math.PI / 2
+    const tube = disc(elevation, 0.23, 1.25, [0, 0, -0.1], darkTitanium); tube.rotation.x = Math.PI / 2
+    const cover = service(.24, .72); cover.rotation.x = -Math.PI/2; cover.position.set(0, .233, -.1); elevation.add(cover)
+    pov(elevation, [0, 0, -.79])
     for (const z of [-0.72, 0.48]) { const collar = disc(elevation, 0.24, 0.1, [0, 0, z], rubber); collar.rotation.x = Math.PI / 2 }
-    const lens = disc(elevation, 0.2, 0.015, [0, 0, -0.777], plastic('#2a4b69')); lens.rotation.x = Math.PI / 2
+    const lens = disc(elevation, 0.2, 0.015, [0, 0, -0.777], optic); lens.rotation.x = Math.PI / 2
     rod(elevation, [0.08, 0.2, 0], [0.08, 0.2, -0.45], 0.035); batch(elevation)
     return { pan, elevation, light }
   })

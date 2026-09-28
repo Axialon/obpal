@@ -4,7 +4,9 @@
  */
 import * as THREE from 'three'
 import type { Axis, Shape, Stuff } from './look'
-import { batch, bolt, box, cable, cylinder, maker, metal, plastic, rubber, palette } from '../kit'
+import { batch, bolt, box, cable, cylinder, metal, plastic, rubber } from '../kit'
+import { carbon, gunmetal, titanium } from '../kit/surfaces'
+import { service } from '../kit/precision'
 
 /** A joint's ring: dark, glowing in its holder's colour (the sim sets the colour and how bright). */
 export const accent = (c = '#5b6472') => new THREE.MeshStandardMaterial({ color: '#0b0f14', emissive: c, emissiveIntensity: 0.25, metalness: 0.2, roughness: 0.4 })
@@ -20,9 +22,9 @@ export function stuffOf(mats: { metal: THREE.Material; dark: THREE.Material }, s
   let s = byColour.get(shell)
   if (!s) {
     s = {
-      metal: mats.metal,
-      dark: mats.dark,
-      shell: plastic(shell),
+      metal: titanium,
+      dark: carbon,
+      shell: gunmetal,
       black: rubber,
     }
     byColour.set(shell, s)
@@ -70,7 +72,7 @@ export function machining(parent: THREE.Object3D, s: Shape) {
   } else if ('box' in s) {
     const [w, h, d] = s.box
     if (Math.min(w, h, d) < 0.035) return
-    const face = box(w * 0.68, h * 0.76, 0.003, s.stuff === 'black' ? plastic(palette.carbon) : plastic('#39434a'), 0.001)
+    const face = service(w * 0.68, h * 0.76)
     face.position.z = d / 2 - 0.002
     g.add(face)
     for (const x of [-1, 1]) for (const y of [-1, 1]) {
@@ -80,8 +82,6 @@ export function machining(parent: THREE.Object3D, s: Shape) {
     if (h > w * 1.8) {
       g.add(cable([[w * 0.35, -h * 0.4, d * 0.37], [w * 0.36, 0, d * 0.43], [w * 0.35, h * 0.4, d * 0.37]], Math.min(w, d) * 0.065))
     }
-    const mark = maker(g, 0, -h * 0.2, d / 2, Math.min(w, h) * 0.38)
-    mark.rotation.x = Math.PI / 2
   } else {
     if (s.cyl[0] < 0.06) return
     const r = Math.min(s.cyl[0], s.cyl[1]), h = s.cyl[2]
@@ -128,6 +128,7 @@ export function plateLabel(n: number): THREE.Object3D {
  * model doesn't have are skipped.
  */
 export function dress<G extends string>(parts: readonly (readonly [G, Shape])[], groups: Partial<Record<G, THREE.Object3D>>, stuff: Stuffs, joints: number): THREE.Mesh[] {
+  for (const [name, group] of Object.entries(groups)) (group as THREE.Object3D).name = name
   const rings: THREE.Mesh[] = []
   for (const [g, s] of parts) {
     const group = groups[g]

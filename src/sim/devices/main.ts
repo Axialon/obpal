@@ -21,6 +21,9 @@ import { Seats } from './seats'
 import { createStage } from './stage'
 import { layoutOf, type DeviceInput } from './types'
 import { spotRing, type DeviceView } from './view'
+import { devicePresence } from '../vr/devices'
+import { mountSound } from '../audio/session'
+import { DeviceSound } from '../audio/devices'
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 const params = new URLSearchParams(location.search)
@@ -45,8 +48,11 @@ const units = Array.from({ length: spec.units }, (_, n) => ({ id: `${spec.id}${n
 const unitOf = (node: string | undefined) => units.findIndex((u) => u.id === node)
 let view: DeviceView | null = null
 let sim: SimScene | null = null
+const sound = spec.id === 'studio' ? null : mountSound(spec.id, (strong, weak, ms, who) => sim?.remote.rumble(strong, weak, ms, who))
+const deviceSound = sound ? new DeviceSound(logic, sound, n => sim?.claims.holder(units[n].id)) : null
 let following = true
 let followedUnit = 0
+const presence = devicePresence(logic, stage, () => view, () => sim)
 
 addEventListener('bb-theme', (e) => {
   const t = themeById((e as CustomEvent<{ theme: string }>).detail.theme)
@@ -198,6 +204,7 @@ const upright = matchMedia('(orientation: portrait) and (max-width: 600px)')
 let nudged = false
 
 const layout = layoutOf(spec)
+layout.tray = [...(layout.tray ?? []), { id: 'scene-grab', label: 'Grab object', type: 'button' }]
 function howTo(node: string) {
   const n = unitOf(node)
   return `${units[n]?.name ?? spec.name} · ${spec.how[spec.controllers[0]] ?? ''}`
@@ -230,7 +237,7 @@ void entry.view().then((m) => {
   }
 })
 
-void startSimScene({
+if (!presence.shared.guest) void startSimScene({
   appName: `ob.Pal ${spec.name.toLowerCase()}`,
   layout,
   nodes: units.map((u) => ({ id: u.id, name: u.name, kind: spec.id, group: `${spec.name}s` })),
@@ -239,14 +246,16 @@ void startSimScene({
   changed: () => { renderUnits(); renderFaces() },
   // A phone that joins drives a free unit straight away.
   joined: (p: Participant) => {
+    if (p.caps?.platform === 'scene') return
     if (upright.matches && !nudged) { nudged = true; setTimeout(() => { if (upright.matches) sim?.note('Turn this screen sideways for a bigger view') }, 1200) }
     if (!sim || sim.claims.held(p.id)) return
     const free = units.find((u) => !sim!.claims.holder(u.id))
     if (free) sim.take(free.id, p.id)
   },
-  left: (p) => dropCursor(p.id),
+  left: (p) => { dropCursor(p.id); sound?.gate.drop(p.id) },
 }).then((s) => {
   sim = s
+  presence.connect(s)
   view?.connect?.(s)
   const seats = new Seats(s.remote, layout)
   s.remote.on('mode', () => { renderFaces(); renderUnits() })
@@ -271,6 +280,7 @@ void startSimScene({
       const who = s.claims.holder(u.id)
       return who ? inputs.get(who) ?? null : null
     })
+    presence.inputs(perUnit, inputs)
     for (const [who, inp] of inputs) if (pointToTake(who, inp)) inp.presses = inp.presses.filter((x) => x !== 'wii-a' && x !== 'mouse-left')
     // Home on every device: the tray's Home, or the gamepad's Guide.
     perUnit.forEach((inp, n) => {
@@ -283,15 +293,15 @@ void startSimScene({
       }
     })
     logic.step(perUnit, dt)
+    presence.afterStep()
     const events = logic.drain()
+    deviceSound?.update(now, events)
     // While anyone drives a unit, or something happened, the device moves: the still picture starts again (../view.ts).
     // Left alone, the stage settles into its supersampled still.
     if (events.length || perUnit.some((i) => i)) stage.view.invalidate()
     for (const e of events) {
       const who = s.claims.holder(units[e.unit]?.id)
-      if (e.kind === 'bump' && who) s.remote.rumble(Math.min(1, e.strength ?? 0.5), Math.min(1, (e.strength ?? 0.5) * 0.6), 90, who)
-      if (e.kind === 'fall' && who) s.remote.rumble(1, 1, 260, who)
-      if ((e.kind === 'tick' || e.kind === 'score') && who) s.remote.feedback({ haptic: 'tick', ...(e.text ? { toast: e.text } : {}) }, who)
+      if ((e.kind === 'tick' || e.kind === 'score') && who && e.text) s.remote.feedback({ toast: e.text }, who)
       if (e.text && (e.kind === 'score' || e.kind === 'fall')) s.log(`${who ? s.nameOf(who) : units[e.unit]?.name}: ${e.text}`, who ? s.colorOf(who) : undefined)
     }
     view?.update(units.map((u) => { const who = s.claims.holder(u.id); return who ? s.colorOf(who) : null }), t, dt)
@@ -307,6 +317,11 @@ void startSimScene({
 
 stage.onFrame = (t, dt) => {
   // Before the scene is up the device idles, so the stage never stands empty.
-  logic.step(units.map(() => null), dt)
-  view?.update(units.map(() => null), t, dt)
+  if (!presence.shared.guest) logic.step(units.map(() => null), dt)
+  deviceSound?.update(performance.now(), presence.shared.guest ? [] : logic.drain())
+  view?.update(presence.shared.guest ? presence.shared.colors : units.map(() => null), t, dt)
+}
+if (presence.shared.guest) {
+  document.querySelectorAll<HTMLButtonElement>('#home-all, #reset').forEach(b => { b.disabled = true })
+  Object.assign(window, { __device: { spec, logic, units, stage } })
 }

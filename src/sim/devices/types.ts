@@ -113,6 +113,14 @@ export interface DeviceEvent {
   strength?: number
   /** A toast for the holder, and a line for the record. */
   text?: string
+  /** Optional physical sound data, measured by the logic at contact or action time. */
+  audio?: {
+    at?: readonly [number, number, number]
+    speed?: number
+    impulse?: number
+    materials?: readonly [import('../audio/events').Material, import('../audio/events').Material]
+    action?: string
+  }
 }
 
 /** A device's behaviour: pure, stepped by the page once a frame. */

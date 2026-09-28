@@ -1,7 +1,7 @@
 /**
- * Node-side helpers for the dev-tool tests (tests/devtools.test.ts, tests/guard.test.ts), which are type-checked
- * without Node's types: files of this checkout, byte buffers, a throwaway browser store, and the guard hook run the
- * way .claude/settings.json runs it, through a real shell.
+ * Node-side helpers for the dev-tool tests (tests/devtools.test.ts, tests/guard.test.ts, tests/messaging.test.ts),
+ * which are type-checked without Node's types: files of this checkout (as text or bytes), byte buffers, a throwaway
+ * browser store, and the guard hook run the way .claude/settings.json runs it, through a real shell.
  */
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 
 export const root = fileURLToPath(new URL('..', import.meta.url))
 export const readText = (rel) => readFileSync(join(root, rel), 'utf8')
+export const readBytes = (rel) => new Uint8Array(readFileSync(join(root, rel)))
 export const bytes = (s) => Buffer.from(s)
 
 /** A temp folder laid out like Playwright's browser store, with a chrome.exe in each named revision folder. */

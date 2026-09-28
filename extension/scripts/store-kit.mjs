@@ -3,7 +3,7 @@
 // order, and a Copy path button for each file to upload. The dashboard can't be driven for you (Chrome keeps
 // extensions off the store's pages, and Google refuses sign-in in embedded browsers), so this makes the clicks quick.
 // Writes extension/release/store-kit.html (ignored by git). It never reads the key or the first-upload zip.
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -44,9 +44,16 @@ const blockers = [
 ]
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 const art = ['icon-128.png', ...[1, 2, 3, 4, 5].map((n) => `screenshot-${n}.png`), 'tile-440x280.png', 'marquee-1400x560.png']
-const files = [
+/** Where the listing stands (extension/store/status.json, kept up to date by hand), shown first. */
+const status = existsSync(join(store, 'status.json')) ? JSON.parse(readFileSync(join(store, 'status.json'), 'utf8')) : null
+// The first-upload zip (with the key) only matters until the item exists; it's listed only while one is on disk for
+// this version. Its path is shown, never read.
+const firstUpload = join(homedir(), '.obpal-keys', 'store', `obpal-link-${version}-store-first-upload.zip`)
+const packages = [
   { name: `Package, an update to the listed item (Package → Upload new package)`, path: join(root, 'extension', 'release', `obpal-link-${version}-store.zip`) },
-  { name: 'Package, only when creating the item (New item): it carries the key, so pick it yourself', path: join(homedir(), '.obpal-keys', 'store', `obpal-link-${version}-store-first-upload.zip`) },
+  ...(existsSync(firstUpload) ? [{ name: 'Package, only when creating the item (New item): it carries the key, so pick it yourself', path: firstUpload }] : []),
+]
+const images = [
   ...art.map((f) => ({ name: f.startsWith('icon') ? 'Store icon' : f.startsWith('screenshot') ? `Screenshot ${f.match(/\d/)[0]}` : f.startsWith('tile') ? 'Small promo tile' : 'Marquee promo tile', path: join(store, f) })),
 ]
 
@@ -78,15 +85,20 @@ button.done { background: transparent; color: var(--lime); box-shadow: inset 0 0
 <body><main>
 <h1>ob.Pal Link ${esc(version)} on the Chrome Web Store</h1>
 <p class="lead">Copy each field into the <a href="https://chrome.google.com/webstore/devconsole" style="color:var(--lime)">Developer Dashboard</a>, in this order. For a file, press Copy path, click the dashboard's upload button, paste into the dialog's File name box and press Enter.</p>
-<p class="lead">Once, on the Account page: verify the contact email, set the publisher name, and answer the trader question: <b>non-trader</b>.</p>
+<p class="lead">If you haven't yet, on the Account page: verify the contact email, set the publisher name, and answer the trader question: <b>non-trader</b>.</p>
+${status ? `<h2>Where it stands</h2>
+<p class="lead">Item <b>${esc(status.item)}</b>: ${esc(status.state)} (as of ${esc(status.updated)}).</p>
+<ul class="ticks">${status.done.map((d) => `<li>${esc(d)}</li>`).join('')}</ul>
+<p class="lead" style="margin-top:10px">Next, in order:</p>
+<ol>${status.next.map((n) => `<li>${esc(n)}</li>`).join('')}</ol>` : ''}
 <h2>What the dashboard says is missing</h2>
 <ul class="ticks">${blockers.map(([tab, what]) => `<li><a href="#${slug(tab)}" style="color:var(--lime)">${esc(tab)}</a>: ${esc(what)}.</li>`).join('')}<li>Save draft on each tab before moving to the next; the list only clears for saved fields.</li></ul>
 <h2>Package</h2>
-${files.slice(0, 2).map(fileRow).join('\n')}
+${packages.map(fileRow).join('\n')}
 ${tabs.filter((t) => t.fields.length || choices[t.title]).filter((t) => t.title !== 'Package').map((t) => `<h2 id="${slug(t.title)}">${esc(t.title)}</h2>
 ${choices[t.title] ? `<ul class="ticks">${choices[t.title].map((c) => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}
 ${t.fields.map((f) => copyable(f.name, f.text, count(f))).join('\n')}
-${t.title === 'Store listing tab' ? files.slice(2).map(fileRow).join('\n') : ''}`).join('\n')}
+${t.title === 'Store listing tab' ? images.map(fileRow).join('\n') : ''}`).join('\n')}
 <h2>Then</h2>
 <ul class="ticks"><li>Submit for review. Choose to publish by hand after approval if the site should link to the listing the same day.</li><li>Send Claude the listing's address.</li></ul>
 </main>

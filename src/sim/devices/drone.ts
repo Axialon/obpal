@@ -277,8 +277,8 @@ export class DroneLogic implements DeviceLogic {
       const before = d.phase
       const from: [number, number, number] = [d.x, d.y, d.z]
       stepDrone(d, intent, dt)
-      if (before === 'landed' && d.phase === 'takeoff') this.events.push({ unit: n, kind: 'tick', text: 'Taking off' })
-      if (before !== 'landed' && d.phase === 'landed') this.events.push({ unit: n, kind: 'tick', text: 'Landed' })
+      if (before === 'landed' && d.phase === 'takeoff') this.events.push({ unit: n, kind: 'tick', text: 'Taking off', audio: { action: 'launch' } })
+      if (before !== 'landed' && d.phase === 'landed') this.events.push({ unit: n, kind: 'tick', text: 'Landed', audio: { action: 'dock' } })
       const ring = this.rings[d.next]
       if (ring && d.phase !== 'landed' && throughRing(ring, from, [d.x, d.y, d.z])) {
         d.rings++
@@ -293,7 +293,7 @@ export class DroneLogic implements DeviceLogic {
   private bump(key: string, n: number, speed: number) {
     const known = this.touching.has(key)
     this.touching.set(key, 0.3)
-    if (!known && speed > 0.3) this.events.push({ unit: n, kind: 'bump', strength: Math.min(1, speed / DRONE.vh) })
+    if (!known && speed > 0.3) this.events.push({ unit: n, kind: 'bump', strength: Math.min(1, speed / DRONE.vh), audio: { speed, impulse: speed * 0.6 } })
   }
 
   private collide() {

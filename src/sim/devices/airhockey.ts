@@ -99,7 +99,7 @@ export class AirhockeyLogic extends Machine {
           p.ready = false
           if (!this.hitCooldown[n] && -into > 0.12) {
             u.hits++; this.hitCooldown[n] = 0.1
-            this.events.push({ unit: n, kind: 'bump', strength: Math.min(0.8, -into / 6) })
+            this.events.push({ unit: n, kind: 'bump', strength: Math.min(0.8, -into / 6), audio: { at: [p.x, M.height, p.z], speed: -into } })
           }
         }
       })

@@ -8,6 +8,7 @@ import {
 } from '@obpal/core'
 import { CODE_SECRET_DIGITS, CodePake, isCodeHandle, randomDigits, solveWork } from '@obpal/core'
 import { Stream, type Frame } from './stream'
+import { validSimMessage, type SimMessage } from '@obpal/core'
 
 export type { Frame } from './stream'
 
@@ -91,6 +92,7 @@ export interface PairSummary { id: string; name: string; at: number }
 export interface LinkDiag { status: HostStatus; connectedAt: number; firstInputAt: number; direct: boolean }
 
 interface RemoteEvents {
+  sim: (message: SimMessage, who: Participant) => void
   status: (s: HostStatus) => void
   /** A device connected to an empty scene (with one seat: every device that takes over). */
   connect: (info: { name: string; caps: Caps }) => void
@@ -236,7 +238,7 @@ export class Remote {
   private held: Record<string, string> = {}
   private scenePending = false
   private handlers: { [K in keyof RemoteEvents]: RemoteEvents[K][] } = {
-    status: [], connect: [], disconnect: [], join: [], leave: [], button: [], text: [], toss: [], value: [], mode: [], recenter: [], pad: [], input: [], claim: [], lan: [], code: [], invite: [],
+    status: [], connect: [], disconnect: [], join: [], leave: [], button: [], text: [], toss: [], value: [], mode: [], recenter: [], pad: [], input: [], claim: [], lan: [], code: [], invite: [], sim: [],
   }
   private cards: { el: HTMLElement; status: HTMLElement; qr: HTMLElement; link: HTMLAnchorElement | null; compact: boolean }[] = []
   /** The short code on show (PROTOCOL §2b): the room service's handle, this host's secret, and when it lapses. */
@@ -695,6 +697,7 @@ export class Remote {
 
   private async onCtl(peer: Peer, data: unknown) {
     if (typeof data !== 'string') return
+    if (data.length > 65536) return
     let m: DeviceMsg
     try { m = JSON.parse(data) } catch { return }
     if (!peer.bound) {
@@ -776,6 +779,7 @@ export class Remote {
     if (!this.listening(peer)) return
     const who = this.participant(peer)
     switch (m.t) {
+      case 'sim': if (m.kind !== 'frame' && validSimMessage(m)) this.emit('sim', m, who); break
       case 'btn': this.emit('button', { id: m.id, ev: m.ev }, who); break
       case 'text': {
         const del = m.del ?? 0
@@ -1082,6 +1086,12 @@ export class Remote {
 
   private send(peer: Peer, m: HostMsg) {
     if (peer.ctl.readyState === 'open') peer.ctl.send(JSON.stringify(m))
+  }
+
+  /** Optional shared-sim state, sent only to subscribers and dropped under backpressure. */
+  sendSim(m: SimMessage, who: string) {
+    const p = this.peers.get(who)
+    if (p?.bound && p.ctl.bufferedAmount < 65536 && validSimMessage(m)) this.send(p, m)
   }
 
   /**

@@ -39,6 +39,7 @@ export class TrebuchetLogic extends Machine {
       if (u.phase === 'winding') {
         u.clock += dt; u.arm = -0.65 + Math.min(1, u.clock / 0.65) * 1.8
         if (u.clock >= 0.65) {
+          this.events.push({ unit: n, kind: 'tick', audio: { action: 'launch' } })
           u.phase = 'flight'; u.y = 1.7; u.z = -1.8
           const speed = shotSpeed(u.power), a = u.release * Math.PI / 180
           u.vy = Math.sin(a) * speed; u.vz = -Math.cos(a) * speed
@@ -48,6 +49,7 @@ export class TrebuchetLogic extends Machine {
         u.y += u.vy * dt - 0.5 * 9.81 * dt * dt; u.vy -= 9.81 * dt; u.z += u.vz * dt
         if (u.arc.length < 240) u.arc.push([u.z, Math.max(0.12, u.y)])
         if (u.y <= 0.12 || u.z < -42) {
+          this.events.push({ unit: n, kind: 'bump', audio: { at: [n * 5, 0.12, u.z], speed: Math.abs(u.vy), materials: ['wood', 'tile'] } })
           u.y = 0.12; u.phase = 'ready'; u.vy = u.vz = 0; u.last = -u.z
           const target = RANGE_TARGETS.findIndex(d => Math.abs(d + u.z) < 1.25)
           if (target >= 0) { const points = (target + 1) * 10; u.score = Math.min(9999, u.score + points); if (!u.hits.includes(target)) u.hits.push(target); this.events.push({ unit: n, kind: 'score', text: `Target ${target + 1} · +${points}` }) }

@@ -1,6 +1,6 @@
 # ob.Pal Desktop
 
-The native helper behind the **PC** target of the ob.Pal Link browser extension: your phone becomes this PC's mouse and keyboard, in every window (**Whole PC**) or only in the programs you allow, with the scope you choose. Windows first (x86_64), built so macOS and Linux injectors can be added.
+The native helper behind the **PC** target of the ob.Pal Link browser extension: your phone becomes this computer's mouse and keyboard, in every window (**Whole PC**) or only in the programs you allow, with the scope you choose. Windows and macOS (Intel and Apple Silicon). **macOS is awaiting a first Mac test**: the code is cross-checked on Windows, not yet verified against a Mac's input system or permissions.
 
 ```
 phone ──WebRTC──▶ ob.Pal Link (extension) ──Chrome Native Messaging (stdio)──▶ obpal-desktop.exe ──SendInput──▶ the program in front
@@ -8,18 +8,95 @@ phone ──WebRTC──▶ ob.Pal Link (extension) ──Chrome Native Messagin
 
 There is no other way in. The helper has **no network listener, no socket, no file it watches**: Chrome starts it, hands it two pipes, and the only peer on them is the extension named in its manifest.
 
-## Build
+## Build on Windows
 
 ```sh
 cd desktop
 cargo build --release          # target/release/obpal-desktop.exe (and obpal-harness.exe, see Tests)
 cargo test                     # codec, key table, allowlist/scope, the session state machine, registration
-cargo test -- --include-ignored  # also the Windows injection test (it creates a window and takes the foreground)
 ```
 
 Rust 1.85 or later. The only Windows dependency is the `windows` crate (no C toolchain, no cgo). `build.rs` links the icon (`obpal-desktop.ico`) and the version information into `obpal-desktop.exe` as a resource file it writes itself, so no resource compiler is needed either; `node desktop/icon.mjs` redraws the icon from the site's mark (`public/favicon.svg`, `public/logo-mark.svg`) with Playwright's Chromium.
 
-## Install (per user, no admin)
+## Build on a Mac
+
+Use a Mac with the Xcode command-line tools (`xcode-select --install`), stable Rust via rustup, and Node.js 22 or later. The deployment target is macOS 11 or later. From the repository root:
+
+```sh
+cd desktop
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+export MACOSX_DEPLOYMENT_TARGET=11.0
+cargo test --locked
+cargo build --release --target aarch64-apple-darwin
+cargo build --release --target x86_64-apple-darwin
+mkdir -p target/universal
+lipo -create target/aarch64-apple-darwin/release/obpal-desktop \
+  target/x86_64-apple-darwin/release/obpal-desktop \
+  -output target/universal/obpal-desktop
+lipo -verify_arch arm64 x86_64 target/universal/obpal-desktop
+node pack-macos.mjs
+```
+
+This produces `desktop/release/obpal-desktop-macos-universal.zip`. The zip contains one `obpal-desktop/` folder with the executable, executable `.command` scripts, this guide and the licence. The packer normalizes the scripts to LF and uses macOS `ditto` to preserve their modes. The staging directory stays under `desktop/release/` for inspection. No Windows binary is packaged.
+
+`codemagic.yaml` at the repository root runs the same tests and both builds on a Mac mini M2, then exposes the zip as an artifact. Connect the repository and select **desktop-macos** in Codemagic; no signing secrets or publishing actions are configured. Artifact paths follow [Codemagic's clone-relative paths](https://docs.codemagic.io/yaml-basic-configuration/yaml-getting-started/). A second Azure pipeline is intentionally omitted to keep one build recipe to maintain.
+
+This is an unsigned preview: no Developer ID signing or notarization. Later, a release service can use `rcodesign sign` with a Developer ID Application certificate supplied through its secret store, after `lipo` and before packaging, followed by notarization. Do not put the certificate, password or Apple account details in the repository. Signing and notarization must be tested separately before removing the preview label.
+
+Windows can check Rust code for both targets, without linking Apple's frameworks:
+
+```sh
+cargo check --target aarch64-apple-darwin
+cargo check --target x86_64-apple-darwin
+```
+
+These checks cannot prove framework linkage, event delivery, Accessibility behavior, the registered hotkey, Finder installation or the universal zip. `cargo test` on Windows covers Mac key mappings, Unicode chunk boundaries, focus-role classification, and the permission and shortcut state machine as pure logic. Never include the ignored Windows injection tests on a maintainer's workstation.
+
+## Install on a Mac
+
+**Awaiting a first Mac test.** Use the universal zip from the Mac build artifact until the coordinator has tested and published a release. Install ob.Pal Link with its fixed extension ID `jnnpcnoilofjaffabnhecfokjjknlemg`.
+
+1. Unzip the package and double-click **install.command**. If Gatekeeper blocks the unsigned script, use **System Settings → Privacy & Security → Open Anyway** after reviewing the downloaded package; alternatively run `bash /path/to/obpal-desktop/install.command` in Terminal. Do not use sudo.
+2. The script copies the helper into `~/Library/Application Support/obpal/`, clears its quarantine attribute, registers the host and opens Accessibility settings. It never launches the helper itself.
+3. **Allow ob.Pal Desktop in System Settings, then Privacy & Security, then Accessibility.** If it is not listed, click **+**, press **⌘⇧G**, enter `~/Library/Application Support/obpal/`, and select `obpal-desktop`. Enable its switch. No Screen Recording, Automation or Input Monitoring permission is requested.
+4. Pick **PC** in Link, grant the extension's native messaging permission, pair the phone and allow it. Choose **Control the whole PC**, or switch to an app and back to Link to allow only that app. Link's permission notice clears when the helper sees the grant; if macOS requires it, switch away from PC and close Link's options, then reconnect.
+
+Registration is per user, with only Link's fixed ID in `allowed_origins`. Manifests are `net.blackboxes.obpal.json` in these folders under `~/Library/Application Support/`:
+
+| Browser | Folder |
+| --- | --- |
+| Chrome | `Google/Chrome/NativeMessagingHosts` |
+| Chromium | `Chromium/NativeMessagingHosts` |
+| Edge | `Microsoft Edge/NativeMessagingHosts` |
+| Brave | `BraveSoftware/Brave-Browser/NativeMessagingHosts` |
+| Vivaldi | `Vivaldi/NativeMessagingHosts` |
+| Arc | `Arc/User Data/NativeMessagingHosts` |
+
+The helper uses CoreGraphics events for motion, clicks, dragging, wheel input and physical keys. Logical Ctrl maps to **⌘ Command** by default (for example Ctrl+C becomes ⌘C); **Use ⌘ for Ctrl shortcuts** in Link's options can be turned off for games that need physical Control. Alt maps to **⌥ Option**, Shift to Shift. Changing the setting releases held keys using the old mapping first. Link's Ctrl+wheel zoom is translated to ⌘+ and ⌘− steps, since Mac apps do not generally use Command+wheel to zoom.
+
+Typing uses `CGEventKeyboardSetUnicodeString` in at most 20 UTF-16-unit chunks, never splitting a surrogate pair. Delete-before-text, Enter and Tab are physical key events. As on Windows, the helper refuses typing while a mapped modifier is held. Accessibility reads only role, subrole, enabled state and whether the value is writable; it never reads values or selected text. `AXSecureTextField` reports a password field so the phone's **Type** prompt opens a password input. Apps that omit Accessibility roles may require opening Keyboard from the phone's tray manually.
+
+**Panic key: Control+Option+Delete (Ctrl+⌥+Delete)**, using the backward-delete key above Return, without Fn. It is independent of the Ctrl-to-Command setting. It releases held input and stays stopped until **Resume** in Link. Carbon registers it on the helper's main thread; if the chord is already taken, Link reports no panic key. Accessibility is checked without prompting and gates both per-app and whole-PC input; revoking it releases the helper's held state and removes the Type prompt.
+
+The allow list uses the frontmost executable's canonical path, preserving case. Config is `~/Library/Application Support/obpal/desktop.json`; the bounded lifecycle log is `~/Library/Logs/obpal/desktop.log`. The log contains no keystrokes, typed text or field contents. Re-running the installer updates the binary and preserves settings; an unsigned update may need a fresh Accessibility grant.
+
+To remove it, double-click **uninstall.command**, either from the package or the installed folder. Browsers can stay open: their manifests are removed first, running helpers notice the missing installation marker within one second and stop, then the script removes the executable, settings, log and its installed uninstaller. Only named files are removed; unrelated files are kept. Delete the downloaded package yourself, and remove any stale Accessibility entry manually in System Settings (the script does not modify macOS's permission database).
+
+## Mac test checklist
+
+Record macOS version, CPU architecture, browser/version, helper commit and results under `artifacts/`. Use both an Apple Silicon and an Intel Mac before declaring both architectures tested. The coordinator removes the preview labels only after confirming these checks:
+
+- [ ] Build both architectures, run `cargo test`, verify the universal architectures with `lipo`, and unzip the artifact in Finder; confirm helper and scripts retain executable permission.
+- [ ] Install without sudo; confirm all six manifest paths and the single allowed extension ID. Test native messaging in each installed supported browser, especially Arc. A different extension ID must be refused.
+- [ ] Before granting Accessibility, Link shows the settings instructions and no input is delivered. Grant it, pair and allow the phone; no repeated permission prompts appear. Revoke it during a held drag, confirm Type disappears and control stops, then grant it again.
+- [ ] Enable Whole PC; move across displays, click and double-click, right/middle-click, drag between windows, scroll vertically/horizontally, and pinch or use +/− to zoom in a browser and Preview. Check direction, click count and pointer feel.
+- [ ] In TextEdit, use Type to enter accents, emoji, a long paste, deletion, Enter and Tab. Check caret navigation and chords with ⌘, ⌥ and Shift, plus the whole-PC gamepad’s back/forward, Spotlight and app-switch buttons. Toggle **Use ⌘ for Ctrl shortcuts**, verify physical Ctrl in a suitable app, reconnect and verify the setting persisted.
+- [ ] Focus a password field: Type opens a password input on the phone. Confirm typing and deletion without saving password contents or screenshots. No Type for buttons, disabled or read-only fields; test browser inputs and contenteditable as well as native controls.
+- [ ] Turn Whole PC off. Allow only TextEdit and verify another app receives nothing; independently disable its keyboard and mouse scopes, then forget it. Switching apps releases held input in per-app mode.
+- [ ] Press physical Ctrl+⌥+Delete while keys or a drag are held. Everything releases, the popup says Stopped, and input stays off until Resume. Check occupied-chord reporting, disconnect and the 500 ms watchdog too.
+- [ ] Update and uninstall while the browser and Link options remain open. Verify helpers exit, manifests/settings/log/binary are removed, Link reports the missing helper, and reinstall works. Check no unrelated files are removed.
+
+## Install on Windows (per user, no admin)
 
 ```sh
 obpal-desktop.exe install      # writes net.blackboxes.obpal.json next to the exe and registers it for
@@ -49,7 +126,7 @@ The extension's options page turns **Whole PC** on and off, lists every allowed 
 **What the phone does on the PC**
 - Trackpad (the Rotate tab): drag to move the pointer · tap to click · tap again to double-click · hold, then lift, to right-click · hold, then move, to drag · two fingers to scroll (a flick carries on) · pinch to zoom · turn the wheel along its edge to scroll (turned fast, it spins on).
 - Point: on a PC its face is the top of a mouse, held like a remote. Aim to move the pointer · Left clicks and Right right-clicks where they went down (the pointer holds still while one is down) · press one and aim away to drag · the wheel between them: turn it to scroll (turned fast, it spins on), tap it to middle-click, hold it and aim to scroll · zoom out, centre the pointer and zoom in, above them. Where the phone's browser passes them on, its volume keys work too: up is Left, down holds the wheel.
-- Gamepad, with Whole PC: a desktop controller that types no letters. Left stick the pointer · right stick scroll · A or RT click (held, it drags) · X or LT right-click · left stick press middle-click · B Esc · Y Enter · D-pad arrows · LB and RB back and forward (Alt + ← and →) · Menu the Start menu (Ctrl + Esc) · View the last app (Alt + Tab).
+- Gamepad, with Whole PC: a desktop controller that types no letters. Left stick the pointer · right stick scroll · A or RT click (held, it drags) · X or LT right-click · left stick press middle-click · B Esc · Y Enter · D-pad arrows · LB and RB back and forward (Alt + ← and →) · Menu the Start menu (Ctrl + Esc) · View the last app (Alt + Tab). On a Mac, LB/RB use ⌘[/⌘], Menu opens Spotlight (⌘Space), and View switches apps (⌘Tab).
 - Gamepad, one program: the Keys mapping, for games: sticks, buttons as keys, the triggers as mouse buttons.
 - Keyboard: **Keyboard** in the phone's tray opens the phone's own keyboard (autocorrect, predictions, swipe typing), which types into whatever has the focus, with Esc, Tab, the arrows, Backspace and Enter on a key row. While a text field has the focus, the phone offers **Type** by itself; in a password field it types into a password field of its own, so nothing is suggested, learned or kept. Typing needs ob.Pal Desktop 0.3 or later.
 
@@ -125,6 +202,7 @@ Length-prefixed JSON on stdin/stdout (spec/PROTOCOL.md § Native messaging frame
 | `src/keys.rs` | the key table |
 | `src/scope.rs` | the allowlist and its file |
 | `src/session.rs` | the state machine: gating, diffing, typing, watchdog, rate limits, status reports; OS access behind `Injector` and `Foreground` traits |
+| `src/mac/` | macOS: CoreGraphics injection, key mapping and Unicode chunks, NSWorkspace foreground, AX focus/permission, Carbon panic key |
 | `src/win/` | Windows: `inject.rs` (SendInput: keys, mouse, typing), `foreground.rs` (front process, integrity level), `focus.rs` (UI Automation: does a text field have the focus), `hotkey.rs`, `process.rs` (the parent browser), `install.rs` (manifest and registry), `inject_test.rs` |
 | `src/bin/harness.rs` | a test window (an EDIT control) that reports every key, character, button, motion and wheel event it receives as JSON lines, plus what its low-level keyboard hook saw (`ll`), and answers `text`, `clear`, `front` and `quit` on stdin (`--stay` keeps it open without stdin). Key events carry the injector's tag (`extra`), so a person's own typing is told apart from the helper's |
 | `build.rs`, `icon.mjs`, `obpal-desktop.ico` | the exe's icon and version information, written as a resource file and linked in; the icon, and the script that draws it |
@@ -137,7 +215,7 @@ Length-prefixed JSON on stdin/stdout (spec/PROTOCOL.md § Native messaging frame
 
 ## Limits and next steps
 
-- Windows only. The session logic is platform-neutral; macOS (`CGEventPost`, Accessibility permission) and Linux (`uinput`, a udev rule, or the libei portal) need injectors and foreground lookups behind the same traits.
+- Windows and macOS; macOS awaits its first real Mac test. Linux (`uinput`, a udev rule, or the libei portal) still needs an injector and foreground lookup behind the same traits.
 - No virtual gamepad: it needs a driver (ViGEmBus is archived; HIDMaestro is the user-mode candidate). The scope model already carries `gamepad`.
 - The mouse is relative only (what games with raw input expect). An absolute path for desktop pointing is a later option.
 - Not code-signed: SmartScreen will warn on first run until a signing identity exists. The extension ID it allows is fixed by the manifest key; a Chrome Web Store build gets its ID from the key uploaded with it (see `extension/scripts/key.mjs`).

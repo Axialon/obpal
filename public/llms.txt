@@ -1,6 +1,6 @@
 # ob.Pal
 
-> ob.Pal turns any phone into a controller for web pages: 3D scenes, browser games, robot arms and the computer in front of you. A page shows a QR code, a phone scans it, and the phone's browser becomes the controller: no app, no account. Phone and page talk peer to peer over WebRTC. Open source (MIT): https://github.com/Axialon/obpal
+> ob.Pal makes any phone the controller for what's on a screen: 3D scenes, browser games, over 40 sims (robot arms, drones, vehicles, a music studio) and the computer itself. A page shows a QR code and a short code; the phone that scans or types it opens the controller that suits the page (gamepad, wheel, pointer, 3D hand, keyboard, drums) in its browser: no app, no account. Up to eight phones share a scene, peer to peer over encrypted WebRTC. Open source (MIT): https://github.com/Axialon/obpal
 
 ## Put it on any page: one tag
 
@@ -28,7 +28,7 @@ Copy this into a page. The element shows a "Scan to control" chip in a corner; a
 
 - Attributes:
   - `app`: the name the phone shows;
-  - `modes`: what the phone offers, in order, the first opening on it: mode names (`point`, `hold`, `tilt`, `pad`, `gamepad`, `track`) and catalogue controller ids (`face.gamepad`, `face.wheel`, `face.wii`, `face.mouse`, `face.trackpad`, `face.hand`, `face.keyboard`; `controllers` in /catalogue.json);
+  - `modes`: what the phone offers, in order, the first opening on it: mode names (`point`, `hold`, `tilt`, `pad`, `gamepad`, `track`) and catalogue controller ids (`face.gamepad`, `face.wheel`, `face.wii`, `face.mouse`, `face.trackpad`, `face.hand`, `face.keyboard`, `face.drums`, `face.keys`; `controllers` in /catalogue.json);
   - `seats`: 1 (a new phone takes over, the default) to 8 (a shared scene);
   - `profile`: a catalogue profile to suggest;
   - the chip: `corner` (`bottom-right`, `bottom-left`, `top-right`, `top-left` or `inline`), `accent`, `open`, `label`, `scheme` (`auto`, `light`, `dark`), `code` (`false` hides the short code), `test-link`.
@@ -84,8 +84,8 @@ The SDK is `@obpal/host`, in the repo at packages/host (its README has typed exa
 
 - [Viewer](https://obpal.blackboxes.net/view/): open it on a screen and scan the code with a phone.
 - [Embed demo](https://obpal.blackboxes.net/embed/): a plain three.js page with `<obpal-remote>`; each phone takes over a shape.
-- [Sims](https://obpal.blackboxes.net/sim/): robot arms and a four-player arena, for several phones at once.
-- [ob.Pal Link](https://obpal.blackboxes.net/link/): a browser extension that lets the phone control any website, and the computer through ob.Pal Desktop.
+- [Sims](https://obpal.blackboxes.net/sim/): over 40 for several phones at once, from robot arms and drones to a music studio for eight. Each lists the controllers that suit it; `?category=`, `?face=` and `?q=` filter them (`/sim/?category=vehicles&face=wheel`).
+- [ob.Pal Link](https://obpal.blackboxes.net/link/): a browser extension that makes the phone a gamepad, 3D mouse or keys for any website; with ob.Pal Desktop (Windows), the whole PC's mouse and keyboard, typing included.
 
 ## Optional
 

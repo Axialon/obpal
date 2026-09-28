@@ -175,3 +175,6 @@ body.stopped #stage { filter: saturate(0.4) brightness(0.8); transition: filter 
   :root { --sim-sheet: clamp(24%, calc(100% - 432px), 44%); --obpal-qr: 120px; }
 }
 @media (prefers-reduced-motion: reduce) { .note, body.stopped #stage { transition: none; } }
+.sim-sound { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
+.sim-sound label { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.sim-sound small { flex-basis: 100%; }

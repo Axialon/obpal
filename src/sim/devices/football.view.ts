@@ -1,5 +1,7 @@
 import * as THREE from 'three'
-import { batch, floorMaterial, metal, plastic, rubber } from '../kit'
+import { darkTitanium, gunmetal } from '../kit/surfaces'
+import { pov, service, tiledDeck } from '../kit/precision'
+import { batch, metal, plastic, rubber } from '../kit'
 import { FOOTBALL, FootballLogic, RODS, footballMen } from './football'
 import { block, disc, playFrame, rod, showcase } from './parts'
 import type { Stage } from './stage'
@@ -7,13 +9,15 @@ import { mats, wear, type DeviceView } from './view'
 
 function table(scene: THREE.Scene, logic: FootballLogic) {
   const root = new THREE.Group(); root.name = 'football-cabinet'; scene.add(root)
-  block(root, [3.7, 0.06, 4.2], [0, -0.04, 0], floorMaterial('#43504b'))
-  block(root, [2.24, 0.3, 3.62], [0, 0.82, 0], plastic('#8b6243'))
+  root.add(tiledDeck(3.7, 4.2, -.01, 1))
+  block(root, [2.24, 0.3, 3.62], [0, 0.82, 0], gunmetal)
   for (const x of [-0.85, 0.85]) for (const z of [-1.4, 1.4]) rod(root, [x * 1.1, 0, z], [x, 0.8, z], 0.08, rubber)
-  block(root, [2, 0.04, 3.4], [0, 1, 0], plastic('#397369'))
-  for (const x of [-1.06, 1.06]) block(root, [0.12, 0.17, 3.62], [x, 1.08, 0], plastic('#c8aa7c'))
-  for (const z of [-1.76, 1.76]) for (const x of [-0.69, 0.69]) block(root, [0.73, 0.17, 0.12], [x, 1.08, z], plastic('#c8aa7c'))
+  block(root, [2, 0.04, 3.4], [0, 1, 0], plastic('#425b59'))
+  for (const x of [-1.06, 1.06]) block(root, [0.12, 0.17, 3.62], [x, 1.08, 0], darkTitanium)
+  for (const z of [-1.76, 1.76]) for (const x of [-0.69, 0.69]) block(root, [0.73, 0.17, 0.12], [x, 1.08, z], darkTitanium)
   for (const z of [-1.82, 1.82]) { block(root, [0.65, 0.17, 0.06], [0, 1.02, z], rubber); rod(root, [-0.36, 1.19, z], [0.36, 1.19, z], 0.028) }
+  for (const side of [-1, 1]) { const panel = service(2.2, .17); panel.rotation.y = side * Math.PI / 2; panel.position.set(side * 1.123, .82, 0); root.add(panel) }
+  for (let n = 0; n < 4; n++) pov(root, [n % 2 ? 1.65 : -1.65, 1.65, n < 2 ? -.8 : .8], [n % 2 ? -1 : 1, -.3, 0])
   const lines = new THREE.Group(); lines.name = 'pitch-markings'; root.add(lines)
   block(lines, [1.95, 0.002, 0.018], [0, 1.023, 0], plastic('#dce8c9'))
   for (const z of [-1.32, 1.32]) block(lines, [1.1, 0.002, 0.02], [0, 1.023, z], plastic('#dce8c9'))

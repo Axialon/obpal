@@ -1,5 +1,7 @@
 import * as THREE from 'three'
-import { batch, floorMaterial, metal, plastic, rubber } from '../kit'
+import { darkTitanium, gunmetal } from '../kit/surfaces'
+import { pov, service, tiledDeck } from '../kit/precision'
+import { batch, metal, plastic, rubber } from '../kit'
 import { RANGE_TARGETS, TrebuchetLogic } from './trebuchet'
 import { block, disc, playFrame, rod, showcase } from './parts'
 import { caption, part } from './optics.view'
@@ -7,12 +9,12 @@ import type { Stage } from './stage'
 import { mats, wear, type DeviceView } from './view'
 
 function range(scene: THREE.Scene, logic: TrebuchetLogic, count = 2) {
-  const floor = part(scene, 'launch-range'); block(floor, [12, 0.08, 44], [2.4, -0.05, -18], floorMaterial('#637363'))
+  const floor = part(scene, 'launch-range'); const deck = tiledDeck(12, 44, -.01, 3); deck.position.set(2.4, 0, -18); floor.add(deck)
   for (const x of [-2, 2, 3, 7]) block(floor, [0.04, 0.012, 35], [x, 0.003, -14], plastic('#bac3a5'))
   batch(floor)
   const models = logic.units.slice(0, count).map((_, n) => {
     const root = part(scene, `trebuchet-${n + 1}`); root.position.x = n * 5
-    const timber = plastic('#a18054'), trim = plastic('#6b5943')
+    const timber = gunmetal, trim = darkTitanium
     for (const x of [-0.65, 0.65]) {
       block(root, [0.16, 0.18, 2.6], [x, 0.22, 0], timber)
       rod(root, [x, 0.25, -0.95], [x, 1.85, 0], 0.065, timber); rod(root, [x, 0.25, 0.95], [x, 1.85, 0], 0.065, timber)
@@ -22,9 +24,10 @@ function range(scene: THREE.Scene, logic: TrebuchetLogic, count = 2) {
     for (const z of [-0.9, 0.9]) block(root, [1.4, 0.12, 0.12], [0, 0.25, z], timber)
     const light = mats.glow(); block(root, [0.22, 0.025, 0.1], [0, 0.33, 0.9], light); batch(root)
     const arm = part(root, 'throwing-arm'); arm.position.y = 1.85
+    pov(root, [0, 2.03, .32], [0, -.15, -1])
     rod(arm, [0, 0, 0.65], [0, 0, -1.65], 0.065, timber)
     const weight = part(arm, 'counterweight'); weight.position.z = 0.65
-    rod(weight, [0, 0, 0], [0, -0.3, 0], 0.025); block(weight, [0.62, 0.55, 0.5], [0, -0.52, 0], trim); batch(weight)
+    rod(weight, [0, 0, 0], [0, -0.3, 0], 0.025); block(weight, [0.62, 0.55, 0.5], [0, -0.52, 0], trim); const panel = service(.42, .3); panel.position.set(0, -.52, .253); weight.add(panel); batch(weight)
     const sling = part(arm, 'sling'); rod(sling, [0, 0, -1.6], [0, -0.38, -2.12], 0.018, rubber); disc(sling, 0.13, 0.06, [0, -0.4, -2.12], rubber); batch(sling)
     const projectile = new THREE.Mesh(new THREE.SphereGeometry(0.12, 18, 12), plastic('#d5d8be')); projectile.name = 'projectile'; scene.add(projectile)
     const lineGeo = new THREE.BufferGeometry(); lineGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(240 * 3), 3)); lineGeo.setDrawRange(0, 0)

@@ -1,29 +1,34 @@
 import * as THREE from 'three'
-import { batch, floorMaterial, glass, maker, metal, plastic, rubber } from '../kit'
+import { batch, maker, metal, plastic, rubber } from '../kit'
 import { PlaneLogic, FLIGHT_RINGS } from './plane'
 import { block, disc, playFrame, rod, showcase, wheel } from './parts'
 import type { Stage } from './stage'
 import type { DeviceView } from './view'
+import { ceramic, darkTitanium, gunmetal, optic } from '../kit/surfaces'
+import { housing, pov, service, tiledDeck } from '../kit/precision'
+import { skinSlot, upgradeSkins } from '../kit/skins'
 function trainer() {
   const root = new THREE.Group(),
-    blue = plastic('#4b8aa8')
-  const fuselage = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), plastic('#edeada'))
+    blue = darkTitanium
+  const skin = skinSlot(root, 'airframe')
+  const fuselage = housing(2, 2, 2, gunmetal, .3)
   fuselage.scale.set(0.2, 0.22, 0.97)
   fuselage.position.y = 0.15
-  root.add(fuselage)
-  block(root, [2.55, 0.075, 0.43], [0, 0.23, -0.05])
-  block(root, [1.02, 0.045, 0.26], [0, 0.3, 0.77], blue)
-  block(root, [0.05, 0.42, 0.38], [0, 0.45, 0.7], blue)
+  skin.add(fuselage)
+  block(skin, [2.55, 0.075, 0.43], [0, 0.23, -0.05], gunmetal)
+  block(skin, [1.02, 0.045, 0.26], [0, 0.3, 0.77], blue)
+  block(skin, [0.05, 0.42, 0.38], [0, 0.45, 0.7], blue)
   for (const x of [-1, 1]) {
-    block(root, [0.16, 0.012, 0.43], [x, 0.275, -0.05], blue)
-    block(root, [0.045, 0.012, 0.4], [x * 1.18, 0.275, -0.05], plastic('#ed9866'))
+    block(skin, [0.16, 0.012, 0.43], [x, 0.275, -0.05], ceramic)
+    block(skin, [0.045, 0.012, 0.4], [x * 1.18, 0.275, -0.05], ceramic)
     rod(root, [0, 0, 0], [x * 0.4, -0.12, -0.2], 0.022)
     wheel(root, x * 0.4, -0.12, -0.2, 0.1).userData.static = true
   }
-  const canopy = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12), glass)
+  const canopy = housing(2, 2, 2, optic, .2)
   canopy.scale.set(0.16, 0.18, 0.32)
   canopy.position.set(0, 0.31, -0.12)
-  root.add(canopy)
+  skin.add(canopy)
+  pov(root, [0, .42, -.46])
   const spinner = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.23, 24), blue)
   spinner.rotation.x = -Math.PI / 2
   spinner.position.set(0, 0.15, -1.04)
@@ -36,17 +41,17 @@ function trainer() {
   maker(root, 0.55, 0.275, -0.05, 0.16)
   batch(prop)
   batch(root, [prop])
-  return { root, prop }
+  return { root, prop, skin }
 }
-function airfield(scene: THREE.Scene, logic: PlaneLogic) {
+function airfield(scene: THREE.Scene, logic: PlaneLogic, live?: () => void) {
   const set = new THREE.Group()
   scene.add(set)
-  block(set, [72, 0.1, 88], [0, -0.14, 0], floorMaterial('#708260'))
-  block(set, [5, 0.05, 42], [0, -0.06, 3], floorMaterial('#4d5860'))
+  set.add(tiledDeck(72, 88, -.09, 8))
+  const runway = tiledDeck(5, 42, -.035, 3); runway.position.z = 3; set.add(runway)
   for (let z = -16; z < 24; z += 3) block(set, [0.16, 0.012, 1.5], [0, -0.025, z], plastic('#ece6d8'))
   for (const x of [-2.6, 2.6]) for (let z = -16; z <= 24; z += 4) disc(set, 0.09, 0.06, [x, 0, z], plastic('#bbdbef'))
-  block(set, [5, 2.7, 5], [-9, 1.25, 8], plastic('#a6b3af'))
-  block(set, [4, 2.2, 0.08], [-9, 1.02, 10.55], plastic('#65777e'))
+  block(set, [5, 2.7, 5], [-9, 1.25, 8], darkTitanium)
+  const door = service(4, 2.2); door.position.set(-9, 1.02, 10.55); set.add(door)
   block(set, [5.5, 0.14, 5.5], [-9, 2.65, 8], metal)
   rod(set, [7, 0, 6], [7, 3, 6], 0.045)
   const sock = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.3, 1.2, 16, 1, true), plastic('#e69b6c'))
@@ -62,6 +67,7 @@ function airfield(scene: THREE.Scene, logic: PlaneLogic) {
   })
   const m = trainer()
   scene.add(m.root)
+  if (live) upgradeSkins('plane', { airframe: m.skin }, live)
   return {
     step() {
       const u = logic.units[0]
@@ -74,7 +80,7 @@ function airfield(scene: THREE.Scene, logic: PlaneLogic) {
 }
 export function createView(stage: Stage, logic: PlaneLogic): DeviceView {
   stage.ground.visible = false
-  const w = airfield(stage.scene, logic),
+  const w = airfield(stage.scene, logic, () => stage.view.invalidate()),
     at = (): [number, number, number] => [logic.units[0].x, logic.units[0].y + 0.2, logic.units[0].z]
   return {
     framing: playFrame(at(), 1.3, [1, 0.65, 1.3]),

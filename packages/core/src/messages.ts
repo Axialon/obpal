@@ -102,6 +102,7 @@ export const MAX_NODE_ID = 64
 
 /** Reliable control-channel messages (JSON on the "ctl" DataChannel). Unknown fields are ignored. */
 export type DeviceMsg =
+  | import('./sim').SimMessage
   /** pair: the pairing id when connecting through a direct LAN code. */
   | { t: 'hello'; proto: number; caps: Caps; mac: string; name: string; pair?: string }
   /**
@@ -129,6 +130,7 @@ export type DeviceMsg =
   | { t: 'bye' }
 
 export type HostMsg =
+  | import('./sim').SimMessage
   /**
    * pair: present when the host remembers this device (it can reconnect over the LAN without the room service).
    * invite: for a device that joined by short code, the online pairing code (as in the QR link's fragment), so it can

@@ -4,6 +4,9 @@ import '../styles/base.css'
 import '../styles/viewer.css'
 import * as THREE from 'three'
 import CameraControls from 'camera-controls'
+import { mountSound } from '../sim/audio/session'
+import { ObjectSound } from '../sim/audio/objects'
+import { listenFrom } from '../sim/audio/context'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
@@ -22,6 +25,9 @@ import { ICONS, logo, settleMotion } from '../ui/icons'
 import { dismissHint, hint } from '../ui/hints'
 import { initTips } from '../ui/tips'
 import { applyTheme, initialTheme, THEMES, themeById, type Theme } from '../ui/themes'
+import { Experience } from '../sim/vr/experience'
+import { SharedPresence } from '../sim/vr/presence'
+import { anchorPose } from '../sim/vr/rigs'
 
 CameraControls.install({ THREE })
 
@@ -867,6 +873,8 @@ function syncPhoneModels() {
 const MODE_LABEL: Partial<Record<ModeId, string>> = { [Mode.tilt]: 'Tilt', [Mode.hold]: '1:1', [Mode.point]: 'Point', [Mode.orbit]: 'Gyro', [Mode.gamepad]: 'Gamepad' }
 const emptyPadState: PadState = { flags: 0, seq: 0, t: 0, buttons: 0, axes: [0, 0, 0, 0], triggers: [0, 0] }
 let remote: Remote | null = null
+const sound = mountSound('viewer', (strong, weak, ms, who) => remote?.rumble(strong, weak, ms, who), document.getElementById('catalog'))
+const objectSound = new ObjectSound(sound)
 /** The pairing chip: the QR code and the short code, in the bottom-right corner. */
 let pairChip: PairingChip | null = null
 
@@ -987,12 +995,13 @@ function drawCursor(s: Seat, px: number, py: number, vx: number, vy: number, off
 
 async function startRemote() {
   remote = await Remote.create({ appName: 'ob.Pal Viewer', layout, seats: 8 })
+  sharedPresence.connect(remote)
   remote.setHostPerson({ name: 'Screen', color: family.accentColor() })
   Object.assign(window, { __obpal: remote, __viewer: { holder, camera, controls, view, seats, parts } })
   // Open while nobody is here; it closes by itself as a phone comes in, and the + in the people chip opens it again.
   // It folds while a panel is where it opens, and on narrow screens the caption makes way for it.
   pairChip = new PairingChip({
-    remote, open: true, testLink: true, avoid: '#lighting, #themes, #more, #switcher, #people, #catalog',
+    remote, open: true, testLink: true, avoid: '#lighting, #themes, #more, #switcher, #people, #catalog, .presence-controls',
     onToggle: (open) => { $('chip-invite').setAttribute('aria-pressed', String(open)); $('caption').classList.toggle('pair-open', open) },
   })
   remote.on('connect', () => {
@@ -1432,9 +1441,18 @@ const REST_AFTER_MS = 3000
 const REST_FRAME_MS = 100
 
 function loop(now: number) {
-  if (now - lastActive > REST_AFTER_MS && lastFrame && now - lastFrame < REST_FRAME_MS) { requestAnimationFrame(loop); return }
+  if (!experience.immersive && !sharedPresence.guest && !sharedPresence.people.size && now - lastActive > REST_AFTER_MS && lastFrame && now - lastFrame < REST_FRAME_MS) return
   const dt = lastFrame ? Math.min((now - lastFrame) / 1000, 0.1) : 0
   lastFrame = now
+  if (sharedPresence.guest) {
+    controls.update(dt)
+    experience.update(dt, now)
+    const ear = experience.activeCamera; ear.updateMatrixWorld(); listenFrom(ear.matrixWorld.elements)
+    objectSound.update(holder, 'scene', undefined, now); objectSound.prune(now); sound.tick(now)
+    if (experience.immersive) renderer.render(scene, experience.camera)
+    else composer.render(dt)
+    return
+  }
   if (remote) {
     // Read every seat's input once; phones glowing for the camera (3D without their own tracking) get a pose from it.
     const frames = new Map<string, Frame>()
@@ -1482,11 +1500,15 @@ function loop(now: number) {
     }
   }
   parts.update(dt)
+  for (const s of seats.values()) if (s.hand.selected) objectSound.update(s.hand.selected.object, s.who.id, s.who.id, now)
+  objectSound.update(holder, 'scene', remote?.participants.find(p => p.lead)?.id, now)
+  objectSound.prune(now); sound.tick(now)
   easeInset(now, dt)
   if (controls.update(dt) || view.spin || pop < 1 || stageInset !== insetTarget || sceneObjects.some((e) => e.mixer || e.pop < 1)) markActive()
-  composer.render(dt)
-  adaptQuality(dt)
-  requestAnimationFrame(loop)
+  experience.update(dt, now)
+  const ear = experience.activeCamera; ear.updateMatrixWorld(); listenFrom(ear.matrixWorld.elements)
+  if (experience.immersive) renderer.render(scene, experience.camera)
+  else { composer.render(dt); adaptQuality(dt) }
 }
 
 /** Reopen the last scene: every catalogue object that was in it (local files can't come back by themselves). */
@@ -1499,6 +1521,37 @@ async function restoreScene(fallback: CatalogItem) {
 }
 
 // ---- boot -------------------------------------------------------------------
+
+let presenceLoading = ''
+const viewerRides = () => sceneObjects.map((e, i) => ({ id: `object${i + 1}`, name: e.name, pose: () => {
+  const anchor = e.obj.getObjectByName('pov')
+  if (anchor) return anchorPose(anchor)
+  const p = e.wrap.getWorldPosition(new THREE.Vector3()); p.y += 0.35; p.z += 0.6
+  return { p, q: new THREE.Quaternion() }
+} }))
+const sharedPresence = new SharedPresence({
+  rides: viewerRides,
+  capture: () => ({ models: sceneObjects.map(e => e.item?.id ?? ''), holder: [...holder.position.toArray(), ...holder.quaternion.toArray()], parts: parts.listable().map(p => [...p.object.position.toArray(), ...p.object.quaternion.toArray(), ...p.object.scale.toArray()]) }),
+  apply(state) {
+    const s = state as unknown as { models: string[]; holder: number[]; parts: number[][] }
+    if (!Array.isArray(s?.models) || !Array.isArray(s.parts)) return
+    const wanted = s.models.join(',')
+    if (sceneObjects.map(e => e.item?.id ?? '').join(',') !== wanted) {
+      if (presenceLoading !== wanted) {
+        presenceLoading = wanted
+        void (async () => { for (const [i, id] of s.models.entries()) { const item = CATALOG.find(c => c.id === id && !c.load); if (item) await selectItem(item, i > 0) } })()
+      }
+      return
+    }
+    holder.position.fromArray(s.holder); holder.quaternion.fromArray(s.holder, 3)
+    parts.listable().forEach((p, i) => { const a = s.parts[i]; if (a?.length === 10) { p.object.position.fromArray(a); p.object.quaternion.fromArray(a, 3); p.object.scale.fromArray(a, 7) } })
+  },
+})
+scene.add(sharedPresence.group)
+if (!sharedPresence.guest) { sharedPresence.world.add('ball', [0.7, 0.18, 0.8], 0.18); sharedPresence.world.add('block', [-0.6, 0.18, 0.8], 0.18) }
+const experience = new Experience(renderer, scene, camera, viewerRides, sharedPresence, controls)
+experience.addEventListener('camerachange', () => { if (experience.immersive) pairChip?.collapse() })
+Object.assign(window, { __activeSceneCamera: () => experience.activeCamera })
 
 setTheme(theme, false)
 buildMore()
@@ -1515,10 +1568,10 @@ applyView()
 // Local folder catalogue: offers a remembered folder again (never prompts on load); keeps the Local panel and the phone in sync.
 void localFolder.init({ note, changed: (items) => { if (activeCat === LOCAL_CATEGORY) renderTiles(); if (items) syncPhoneModels() } })
 void restoreScene(saved)
-requestAnimationFrame(loop)
+renderer.setAnimationLoop(loop)
 hint('catalog', () => $('catalog'), 'Choose a model, or drop in your own file', { place: 'right', delay: 3800 })
 hint('tools', () => $('tools'), 'Grid, glow, spin, frame and reset', { place: 'bottom', delay: 7000 })
-startRemote().catch((e) => {
+if (!sharedPresence.guest) startRemote().catch((e) => {
   console.error(e)
   note('Could not start pairing. Check your connection and reload.')
 })

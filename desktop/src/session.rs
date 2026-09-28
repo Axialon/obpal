@@ -40,6 +40,10 @@ pub const OS: &str = std::env::consts::OS;
 
 /// The OS input injector.
 pub trait Injector {
+    /// None on platforms without an Accessibility permission gate.
+    fn accessibility(&self) -> Option<bool> { None }
+    fn set_shortcuts(&mut self, _ctrl_to_cmd: bool) {}
+    fn set_desktop(&mut self, _desktop: bool) {}
     fn key(&mut self, key: &'static KeyDef, down: bool);
     fn button(&mut self, button: MouseButton, down: bool);
     fn mouse_move(&mut self, dx: i32, dy: i32);
@@ -79,6 +83,7 @@ pub enum Refusal {
     NotAllowed,
     Elevated,
     NoWindow,
+    Accessibility,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -113,10 +118,12 @@ pub struct Session<I: Injector, F: Foreground> {
     text: Option<TextFocus>,
     stats: Stats,
     last_status: Option<Reply>,
+    last_platform: Option<Reply>,
 }
 
 impl<I: Injector, F: Foreground> Session<I, F> {
-    pub fn new(inj: I, fg: F, cfg: Config, cfg_path: Option<PathBuf>, hotkey: Option<String>) -> Self {
+    pub fn new(mut inj: I, fg: F, cfg: Config, cfg_path: Option<PathBuf>, hotkey: Option<String>) -> Self {
+        inj.set_shortcuts(cfg.mac_ctrl_to_cmd.unwrap_or(true));
         Session {
             inj,
             fg,
@@ -139,6 +146,7 @@ impl<I: Injector, F: Foreground> Session<I, F> {
             text: None,
             stats: Stats::default(),
             last_status: None,
+            last_platform: None,
         }
     }
 
@@ -170,10 +178,11 @@ impl<I: Injector, F: Foreground> Session<I, F> {
                     version: VERSION,
                     os: OS,
                     hotkey: self.hotkey.clone(),
-                    caps: Caps { keyboard: true, mouse: true, gamepad: false, desktop: true, text: cfg!(windows) },
+                    caps: Caps { keyboard: true, mouse: true, gamepad: false, desktop: true, text: cfg!(any(windows, target_os = "macos")) },
                 });
                 out.push(self.config_reply());
                 self.refresh_front(now, true);
+                self.last_platform = None;
                 self.last_status = None; // a fresh extension side wants the full picture
             }
             Request::Enable { on } => {
@@ -227,6 +236,16 @@ impl<I: Injector, F: Foreground> Session<I, F> {
                     self.persist(&mut out);
                 }
                 out.push(self.config_reply());
+            }
+            Request::Macshortcuts { ctrl_to_cmd } => {
+                if self.inj.accessibility().is_some() {
+                    self.release_all();
+                    self.cfg.mac_ctrl_to_cmd = Some(ctrl_to_cmd);
+                    self.inj.set_shortcuts(ctrl_to_cmd);
+                    self.persist(&mut out);
+                } else {
+                    out.push(Reply::error("unsupported", "Mac shortcuts are only available on macOS"));
+                }
             }
             Request::Pause { on } => {
                 if self.cfg.paused != on {
@@ -356,7 +375,7 @@ impl<I: Injector, F: Foreground> Session<I, F> {
             Refusal::Panic => r.panic += 1,
             Refusal::NotAllowed => r.not_allowed += 1,
             Refusal::Elevated => r.elevated += 1,
-            Refusal::NoWindow => r.no_window += 1,
+            Refusal::NoWindow | Refusal::Accessibility => r.no_window += 1,
         }
     }
 
@@ -371,6 +390,7 @@ impl<I: Injector, F: Foreground> Session<I, F> {
         if self.cfg.paused {
             return Err(Refusal::Paused);
         }
+        if self.inj.accessibility() == Some(false) { self.release_all(); return Err(Refusal::Accessibility); }
         self.refresh_front(now, false);
         // Whole PC: whatever is in front, the browser included. Windows itself drops input to an elevated window
         // (UIPI); the status reports it, and the pointer can still move off it and click another window.
@@ -390,6 +410,7 @@ impl<I: Injector, F: Foreground> Session<I, F> {
 
     /// Bring the held state to the frame's desired state within the scope, then apply the motion.
     fn apply(&mut self, v: &Validated, scope: Scope) {
+        self.inj.set_desktop(self.cfg.desktop_scope().is_some());
         let want_keys: BTreeSet<&'static KeyDef> = if scope.keyboard { v.keys.clone() } else { BTreeSet::new() };
         self.sync_keys(&want_keys);
         let want_buttons: BTreeSet<MouseButton> = if scope.mouse { v.buttons.clone() } else { BTreeSet::new() };
@@ -454,7 +475,7 @@ impl<I: Injector, F: Foreground> Session<I, F> {
         }
         self.front_at = Some(now);
         let next = self.fg.front();
-        self.text = self.fg.text_focus();
+        self.text = if self.inj.accessibility() == Some(false) { self.release_all(); None } else { self.fg.text_focus() };
         let same = match (&self.front, &next) {
             (Some(a), Some(b)) => a.pid == b.pid && normalize(&a.path) == normalize(&b.path),
             (None, None) => true,
@@ -501,6 +522,13 @@ impl<I: Injector, F: Foreground> Session<I, F> {
     }
 
     fn push_status(&mut self, out: &mut Vec<Reply>) {
+        if let Some(accessibility) = self.inj.accessibility() {
+            let platform = Reply::Platform { os: "macos", accessibility, ctrl_to_cmd: self.cfg.mac_ctrl_to_cmd.unwrap_or(true) };
+            if self.last_platform.as_ref() != Some(&platform) {
+                self.last_platform = Some(platform.clone());
+                out.push(platform);
+            }
+        }
         let s = self.status();
         if self.last_status.as_ref() != Some(&s) {
             self.last_status = Some(s.clone());
@@ -633,7 +661,7 @@ mod tests {
     fn hello_answers_with_hello_config_and_status() {
         let mut t = T::new();
         let out = t.s.handle(Request::Hello { v: 1 }, t.at(0));
-        assert!(matches!(&out[0], Reply::Hello { v: PROTO, caps, .. } if *caps == Caps { keyboard: true, mouse: true, gamepad: false, desktop: true, text: cfg!(windows) }));
+        assert!(matches!(&out[0], Reply::Hello { v: PROTO, caps, .. } if *caps == Caps { keyboard: true, mouse: true, gamepad: false, desktop: true, text: cfg!(any(windows, target_os = "macos")) }));
         assert!(matches!(out[1], Reply::Config { paused: false, .. }));
         assert!(matches!(out[2], Reply::Status { enabled: false, panic: false, held: false, front: None, program: None, text: None }));
         assert_eq!(out.len(), 3);
@@ -1046,4 +1074,54 @@ mod tests {
         *t.focus.borrow_mut() = None;
         assert!(t.s.poll(t.at(180)).iter().any(|r| matches!(r, Reply::Status { text: None, .. })));
     }
+    #[test]
+    fn mac_permission_gates_whole_desktop_and_releases_on_revocation() {
+        use std::cell::Cell;
+        struct MacMock { mock: Mock, trust: Rc<Cell<bool>>, shortcuts: Rc<Cell<bool>> }
+        impl Injector for MacMock {
+            fn accessibility(&self) -> Option<bool> { Some(self.trust.get()) }
+            fn set_shortcuts(&mut self, on: bool) { self.shortcuts.set(on); }
+            fn key(&mut self, k: &'static KeyDef, down: bool) { self.mock.key(k, down); }
+            fn button(&mut self, b: MouseButton, down: bool) { self.mock.button(b, down); }
+            fn mouse_move(&mut self, x: i32, y: i32) { self.mock.mouse_move(x, y); }
+            fn wheel(&mut self, x: i32, y: i32) { self.mock.wheel(x, y); }
+            fn text(&mut self, del: u32, s: &str) { self.mock.text(del, s); }
+        }
+        let trust = Rc::new(Cell::new(false));
+        let shortcuts = Rc::new(Cell::new(false));
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let fg = Fg(Rc::new(RefCell::new(Some(win(&abs("editor"))))), Rc::new(RefCell::new(Some(TextFocus::Secret))));
+        let inj = MacMock { mock: Mock { log: log.clone() }, trust: trust.clone(), shortcuts: shortcuts.clone() };
+        let mut cfg = Config::new();
+        cfg.set_desktop(Some(Scope { keyboard: true, mouse: true, gamepad: false }));
+        let mut s = Session::new(inj, fg, cfg, None, Some("Ctrl+Option+Delete".into()));
+        let now = Instant::now();
+        assert!(shortcuts.get(), "Control maps to Command by default");
+        let replies = s.handle(Request::Hello { v: PROTO }, now);
+        assert!(replies.contains(&Reply::Platform { os: "macos", accessibility: false, ctrl_to_cmd: true }));
+        s.handle(Request::Enable { on: true }, now);
+        s.handle(frame(&["ControlLeft", "KeyC"]), now);
+        assert!(log.borrow().is_empty());
+        assert!(s.handle(Request::Text { s: "hello".into(), del: 0 }, now).iter().any(|r| matches!(r, Reply::Error { code: "not-typed", .. })));
+        trust.set(true);
+        s.handle(frame(&["ControlLeft", "KeyC"]), now);
+        assert!(s.is_holding());
+        s.handle(Request::Macshortcuts { ctrl_to_cmd: false }, now);
+        assert!(!s.is_holding(), "release with the old mapping before changing it");
+        assert!(!shortcuts.get());
+        assert_eq!(s.config().mac_ctrl_to_cmd, Some(false));
+        s.handle(frame(&["KeyA"]), now);
+        trust.set(false);
+        let replies = s.poll(now);
+        assert!(!s.is_holding());
+        assert!(replies.contains(&Reply::Platform { os: "macos", accessibility: false, ctrl_to_cmd: false }));
+        assert!(replies.iter().any(|r| matches!(r, Reply::Status { text: None, .. })));
+        assert!(log.borrow().contains(&"KeyA-".into()));
+        trust.set(true);
+        s.handle(frame(&["KeyB"]), now);
+        trust.set(false);
+        s.handle(Request::Text { s: "x".into(), del: 0 }, now);
+        assert!(!s.is_holding(), "typing after permission loss also releases without waiting for a poll");
+    }
+
 }

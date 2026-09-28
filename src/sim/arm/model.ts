@@ -129,6 +129,8 @@ export function buildArm(n: number, mats: ArmMaterials): ArmModel {
   gripRing.rotation.x = Math.PI / 2
   roll.add(gripRing)
   const grasp = new THREE.Object3D()
+  for (const [name, group] of Object.entries({ root, yaw, shoulder, elbow, wrist, roll })) group.name = name
+  for (const f of fingers) f.name = 'finger'
   grasp.position.y = ARM.LT - 0.12
   roll.add(grasp)
 

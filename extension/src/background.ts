@@ -316,7 +316,7 @@ async function handle(msg: BgRequest, sender: chrome.runtime.MessageSender): Pro
     case 'mode':
       // The link asks on behalf of the phone (its tray); a page of Link's, for the person at the PC.
       return setMode(msg.mode, senderKind({ id: sender.id, url: sender.url, tabId: sender.tab?.id }, SELF) === 'offscreen')
-    case 'pc-connect': case 'pc-allow': case 'pc-scope': case 'pc-forget': case 'pc-desktop': case 'pc-pause': case 'pc-resume': case 'pc-stats':
+    case 'pc-connect': case 'pc-allow': case 'pc-scope': case 'pc-forget': case 'pc-desktop': case 'pc-macshortcuts': case 'pc-pause': case 'pc-resume': case 'pc-stats':
       return native.handle(msg)
     case 'unpair':
       await toOffscreen({ to: 'offscreen', type: 'unpair' })

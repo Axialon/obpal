@@ -212,6 +212,7 @@ const asDelta = (p: Pose) => p as DeltaPose
  */
 function buildDelta(n: number, stuff: ReturnType<typeof stuffOf>): ArmModel {
   const root = new THREE.Group()
+  root.name = 'root'
   const plate = new THREE.Group()
   const hand = new THREE.Group()
   const turn = new THREE.Group()
@@ -229,6 +230,7 @@ function buildDelta(n: number, stuff: ReturnType<typeof stuffOf>): ArmModel {
   const rings: THREE.Mesh[] = []
   const uppers = OUT.map((u, i) => {
     const mount = new THREE.Group()
+    mount.name = `mount${i}`
     mount.position.set(u[0] * RB, HB, u[2] * RB)
     mount.rotation.y = MOTORS[i] * D2R
     root.add(mount)
@@ -238,6 +240,7 @@ function buildDelta(n: number, stuff: ReturnType<typeof stuffOf>): ArmModel {
     mount.add(ring)
     rings.push(ring)
     const arm = new THREE.Group()
+    arm.name = `upper${i}`
     mount.add(arm)
     arm.add(meshOf({ box: [RF, 0.05, 0.07], at: [-RF / 2, 0, 0], stuff: 'shell' }, stuff))
     arm.add(meshOf({ cyl: [0.03, 0.03, 2 * PAIR + 0.03], axis: 'z', at: [-RF, 0, 0], stuff: 'dark' }, stuff))
@@ -246,7 +249,7 @@ function buildDelta(n: number, stuff: ReturnType<typeof stuffOf>): ArmModel {
   rings.push(...handRings.filter(Boolean))
   // The rods: unit cylinders, stretched and turned into place.
   const rodGeo = new THREE.CylinderGeometry(0.011, 0.011, 1, 12)
-  const rods = Array.from({ length: 6 }, () => { const m = new THREE.Mesh(rodGeo, stuff.metal); root.add(m); return m })
+  const rods = Array.from({ length: 6 }, () => { const m = new THREE.Mesh(rodGeo, stuff.metal); m.name = 'rod'; root.add(m); return m })
   const ringPlate = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.01, 8, 48), accent())
   ringPlate.rotation.x = Math.PI / 2
   ringPlate.position.set(POST, 0.05, 0)
@@ -256,7 +259,7 @@ function buildDelta(n: number, stuff: ReturnType<typeof stuffOf>): ArmModel {
   root.add(label)
   const fingerGeo = rounded(FINGER_W, 0.1, 0.055)
   const fingers = [new THREE.Mesh(fingerGeo, stuff.metal), new THREE.Mesh(fingerGeo, stuff.metal)]
-  for (const m of fingers) { m.position.y = FINGER_Y; hand.add(m) }
+  for (const m of fingers) { m.name = 'finger'; m.position.y = FINGER_Y; hand.add(m) }
   const pose: DeltaPose = { a1: HOME[0], a2: HOME[1], a3: HOME[2], roll: 0 }
   const up = new THREE.Vector3(0, 1, 0), dir = new THREE.Vector3()
   /** Place the platform and the rods for the arms as they are (as they were, if they can't be). */

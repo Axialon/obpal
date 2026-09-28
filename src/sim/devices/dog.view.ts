@@ -1,25 +1,30 @@
 import * as THREE from 'three'
-import { batch, floorMaterial, maker, metal, plastic, rubber } from '../kit'
+import { ceramic, darkTitanium, gunmetal } from '../kit/surfaces'
+import { pov, tiledDeck } from '../kit/precision'
+import { skinSlot, upgradeSkins } from '../kit/skins'
+import { batch, maker, metal, plastic, rubber } from '../kit'
 import { DogLogic, DOG_YARD } from './dog'
 import { block, disc, playFrame, rod, showcase } from './parts'
 import type { Stage } from './stage'
 import { mats, wear, type DeviceView } from './view'
 
-function robot(n: number) {
+function robot(n: number, live?: () => void) {
   const root = new THREE.Group(), body = new THREE.Group(), head = new THREE.Group()
   root.name = `dog-${n + 1}`
   body.name = 'torso'
   head.name = 'head'
   root.add(body)
   body.add(head)
-  const paint = plastic(n ? '#81b6c4' : '#e6d9ad'), trim = plastic('#303940'), glow = mats.glow()
-  block(body, [0.52, 0.27, 1.03], [0, 0, 0], paint)
+  const paint = gunmetal, trim = darkTitanium, glow = mats.glow()
+  const slots: Record<string, THREE.Object3D> = {}
+  slots.bodySkin = skinSlot(body, 'bodySkin', block(body, [0.52, 0.27, 1.03], [0, 0, 0], paint))
   block(body, [0.43, 0.05, 0.77], [0, 0.16, 0.02], trim)
   block(body, [0.25, 0.06, 0.4], [0, 0.2, 0.08], metal)
   maker(body, 0, 0.238, 0.08, 0.16)
   block(body, [0.06, 0.025, 0.27], [0.21, 0.18, 0.06], glow)
   head.position.set(0, 0.09, -0.62)
-  block(head, [0.43, 0.3, 0.36], [0, 0.03, 0], paint)
+  slots.headSkin = skinSlot(head, 'headSkin', block(head, [0.43, 0.3, 0.36], [0, 0.03, 0], paint))
+  pov(head, [0, .06, -.242])
   block(head, [0.33, 0.16, 0.05], [0, 0.045, -0.2], rubber)
   for (const x of [-0.105, 0.105]) {
     block(head, [0.065, 0.04, 0.017], [x, 0.06, -0.23], glow)
@@ -38,12 +43,12 @@ function robot(n: number) {
     knee.position.y = -0.34
     body.add(hip)
     hip.add(knee)
-    const joint = disc(hip, 0.095, 0.11, [0, 0, 0], metal)
+    const joint = disc(hip, 0.095, 0.11, [0, 0, 0], darkTitanium)
     joint.rotation.z = Math.PI / 2
-    block(hip, [0.115, 0.32, 0.14], [0, -0.17, 0], paint)
-    const joint2 = disc(knee, 0.07, 0.12, [0, 0, 0], metal)
+    slots[`hipSkin${k}`] = skinSlot(hip, `hipSkin${k}`, block(hip, [0.115, 0.32, 0.14], [0, -0.17, 0], paint))
+    const joint2 = disc(knee, 0.07, 0.12, [0, 0, 0], darkTitanium)
     joint2.rotation.z = Math.PI / 2
-    block(knee, [0.078, 0.32, 0.1], [0, -0.17, 0], trim)
+    slots[`kneeSkin${k}`] = skinSlot(knee, `kneeSkin${k}`, block(knee, [0.078, 0.32, 0.1], [0, -0.17, 0], trim))
     block(knee, [0.14, 0.08, 0.2], [0, -0.34, -0.025], rubber)
     batch(knee)
     batch(hip, [knee])
@@ -52,31 +57,38 @@ function robot(n: number) {
   batch(head)
   batch(tail)
   batch(body, [head, tail, ...legs.map((l) => l.hip)])
+  if (live) upgradeSkins('dog', slots, () => {
+    for (const slot of Object.values(slots)) slot.userData.static = true
+    batch(head)
+    for (const leg of legs) { batch(leg.knee); batch(leg.hip, [leg.knee]) }
+    batch(body, [head, tail, ...legs.map(leg => leg.hip)])
+    live()
+  })
   return { root, body, head, legs, tail, glow }
 }
 
-function yard(scene: THREE.Scene, logic: DogLogic) {
+function yard(scene: THREE.Scene, logic: DogLogic, live?: () => void) {
   const ground = new THREE.Group(), fence = new THREE.Group(), pads = new THREE.Group()
   ground.name = 'yard'
   fence.name = 'fence'
   pads.name = 'charging-pads'
   scene.add(ground, fence, pads)
-  block(ground, [13.4, 0.14, 11.4], [0, -0.12, 0], floorMaterial('#516355'))
+  ground.add(tiledDeck(13.4, 11.4, -.05, 2))
   for (const z of [-5.5, 5.5]) {
     for (let x = -6.5; x <= 6.5; x += 1.3) rod(fence, [x, 0, z], [x, 0.7, z], 0.04, metal)
-    for (const y of [0.3, 0.64]) rod(fence, [-6.5, y, z], [6.5, y, z], 0.027, plastic('#b9c6bb'))
+    for (const y of [0.3, 0.64]) rod(fence, [-6.5, y, z], [6.5, y, z], 0.027, metal)
   }
   for (const x of [-6.5, 6.5]) {
     for (let z = -4.2; z < 5.5; z += 1.3) rod(fence, [x, 0, z], [x, 0.7, z], 0.04, metal)
-    for (const y of [0.3, 0.64]) rod(fence, [x, y, -5.5], [x, y, 5.5], 0.027, plastic('#b9c6bb'))
+    for (const y of [0.3, 0.64]) rod(fence, [x, y, -5.5], [x, y, 5.5], 0.027, metal)
   }
   for (const u of logic.units) {
     block(pads, [1.25, 0.05, 1.55], [u.x, 0, u.z], rubber)
-    for (const x of [-0.5, 0.5]) block(pads, [0.025, 0.015, 1.3], [u.x + x, 0.035, u.z], plastic('#c6ff34'))
+    for (const x of [-0.5, 0.5]) block(pads, [0.025, 0.015, 1.3], [u.x + x, 0.035, u.z], ceramic)
   }
   batch(ground); batch(fence); batch(pads)
   const dogs = logic.units.map((_, n) => {
-    const model = robot(n)
+    const model = robot(n, live)
     scene.add(model.root)
     return model
   })
@@ -112,7 +124,7 @@ function yard(scene: THREE.Scene, logic: DogLogic) {
 }
 
 export function createView(stage: Stage, logic: DogLogic): DeviceView {
-  const world = yard(stage.scene, logic),
+  const world = yard(stage.scene, logic, () => stage.view.invalidate()),
     at = (n: number): [number, number, number] => [logic.units[n].x, 0.55, logic.units[n].z]
   world.step(0)
   return {

@@ -671,6 +671,7 @@ export class DeviceLink {
   }
 
   sendCtl(m: DeviceMsg) {
+    if (m.t === 'sim' && (this.ctl?.bufferedAmount ?? 0) > 65536) return
     if (this.ctl?.readyState === 'open') this.ctl.send(JSON.stringify(m))
   }
 

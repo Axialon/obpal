@@ -1,0 +1,14 @@
+{
+  "item": "jnnpcnoilofjaffabnhecfokjjknlemg",
+  "state": "Draft, not submitted yet",
+  "updated": "2026-09-28",
+  "done": [
+    "The item exists with Link's fixed ID, from the first upload that carried the key",
+    "The package, description, screenshots and tiles below are the final set for 1.6.1"
+  ],
+  "next": [
+    "Package, then Upload new package: obpal-link-1.6.1-store.zip (the new summary and the bold icons; no key needed)",
+    "Store listing, Privacy practices, Distribution and Test instructions: fill each tab from this kit, then Save draft",
+    "Submit for review, and send Claude the listing's address once it's live"
+  ]
+}

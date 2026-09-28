@@ -189,7 +189,6 @@ export function createStage(canvas: HTMLCanvasElement, theme: Theme): Stage {
 
   let last = 0
   const loop = (now: number) => {
-    requestAnimationFrame(loop)
     if (document.hidden) { last = 0; return }
     const dt = last ? Math.min(0.05, (now - last) / 1000) : 1 / 60
     last = now
@@ -198,8 +197,8 @@ export function createStage(canvas: HTMLCanvasElement, theme: Theme): Stage {
     // Insets drawn over the stage need it drawn under them each frame, not kept as a still picture.
     if (stage.afterRender) view.invalidate()
     view.draw(scene, camera, dt)
-    stage.afterRender?.()
+    if (!view.presence?.immersive) stage.afterRender?.()
   }
-  requestAnimationFrame(loop)
+  renderer.setAnimationLoop(loop)
   return stage
 }

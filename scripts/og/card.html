@@ -1,0 +1,95 @@
+<!doctype html>
+<!-- ob.Pal's link preview, 1200 × 630, for Open Graph and Twitter: the home hero's night, its eyebrow, headline and
+     sub-line, with the lime marble resting on the full stop; on the right, a phone held as a controller, in the 3D
+     design language (./phone.js). Rendered by scripts/og-image.mjs into public/og.png, which serves the repository at
+     one origin: the fonts come from public/fonts, three.js from node_modules and the mark from /mark/<px>.svg. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ob.Pal · link preview</title>
+    <script type="importmap">{ "imports": { "three": "/node_modules/three/build/three.module.js", "three/addons/": "/node_modules/three/examples/jsm/" } }</script>
+    <style>
+      @font-face { font-family: 'Plus Jakarta Sans'; src: url('/public/fonts/plus-jakarta-sans-latin.woff2') format('woff2'); font-weight: 200 800; font-display: block; }
+      @font-face { font-family: 'Inter'; src: url('/public/fonts/inter-latin.woff2') format('woff2'); font-weight: 400 800; font-display: block; }
+      /* The site's palette (src/styles/site.css): ultraviolet night, lime light, lavender haze. */
+      :root { --page: #0a0718; --ink: #f5f2ff; --ink-2: #cdc5f0; --ink-3: #968fbd; --lime: #c6ff34; --lime-rgb: 198 255 52; --haze-rgb: 179 164 255; --uv-rgb: 92 62 245; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; }
+      body {
+        position: relative; width: 1200px; height: 630px; overflow: hidden; color: var(--ink);
+        font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased;
+        background:
+          radial-gradient(60% 55% at 80% 12%, rgb(var(--uv-rgb) / 0.5), transparent 70%),
+          radial-gradient(45% 45% at 8% 92%, rgb(var(--haze-rgb) / 0.16), transparent 70%),
+          linear-gradient(180deg, #0f0a28 0%, var(--page) 88%);
+      }
+      /* The hero's floor of points, fading toward the edges. */
+      .dots { position: absolute; inset: 0; background-image: radial-gradient(rgb(var(--haze-rgb) / 0.2) 1px, transparent 1.3px); background-size: 30px 30px;
+        -webkit-mask-image: radial-gradient(75% 65% at 50% 45%, #000 25%, transparent 78%); mask-image: radial-gradient(75% 65% at 50% 45%, #000 25%, transparent 78%); }
+      /* The one light: lime, soft, from behind the phone. */
+      .light { position: absolute; left: 640px; top: 110px; width: 560px; height: 460px; border-radius: 50%;
+        background: radial-gradient(closest-side, rgb(var(--lime-rgb) / 0.2), rgb(var(--lime-rgb) / 0.06) 55%, transparent); }
+      #phone { position: absolute; left: 600px; top: 0; width: 600px; height: 630px; }
+
+      .brand { position: absolute; left: 64px; top: 46px; display: flex; align-items: center; gap: 12px; }
+      .brand img { width: 56px; height: 56px; margin: -4px -4px -4px -6px; }
+      .word { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 34px; font-weight: 800; letter-spacing: -0.035em; line-height: 1; white-space: nowrap; }
+      .word .ob { font-weight: 600; opacity: 0.86; }
+      .word .pt { color: var(--lime); margin: 0 -0.02em; }
+
+      .copy { position: absolute; left: 72px; top: 0; bottom: 0; width: 600px; display: flex; flex-direction: column; justify-content: center; padding-top: 30px; }
+      .eyebrow { display: flex; align-items: center; gap: 12px; margin: 0 0 22px; color: var(--lime); font: 700 16px/1 'Inter', sans-serif; letter-spacing: 0.16em; text-transform: uppercase; }
+      .eyebrow i { width: 10px; height: 10px; border-radius: 50%; background: var(--lime); box-shadow: 0 0 0 5px rgb(var(--lime-rgb) / 0.18), 0 0 14px rgb(var(--lime-rgb) / 0.7); }
+      /* The headline as the hero's letters stand: a lavender top over violet sides. */
+      h1 { margin: 0; max-width: 11.5ch; color: #f1edff; font: 800 88px/0.98 'Plus Jakarta Sans', sans-serif; letter-spacing: -0.045em; text-wrap: balance;
+        text-shadow: 0 1px 0 #8d7cff, 0 2px 0 #8474ff, 0 3px 0 #7b6afb, 0 4px 0 #7160f6, 0 5px 0 #6856f0, 0 6px 0 #5f4be9, 0 7px 0 #5641e2,
+          0 8px 0 #4d37da, 0 24px 30px rgb(4 2 14 / 0.75); }
+      h1 .keep { white-space: nowrap; }
+      .sub { margin: 30px 0 0; max-width: 520px; color: var(--ink-2); font: 500 25px/1.42 'Inter', sans-serif; }
+      .url { position: absolute; left: 72px; bottom: 44px; margin: 0; color: var(--ink-3); font: 600 19px/1 'Inter', sans-serif; letter-spacing: 0.01em; }
+      /* The lime marble, resting on the full stop (placed by the script below). */
+      .marble { position: absolute; width: 30px; height: 30px; border-radius: 50%;
+        background: radial-gradient(circle at 34% 30%, #ffffff 0 7%, rgb(244 255 214 / 0.95) 14%, rgb(198 255 52 / 0.9) 36%, rgb(110 160 18 / 0.95) 74%, #2c4400 100%);
+        box-shadow: 0 0 26px rgb(var(--lime-rgb) / 0.7), 0 0 60px rgb(var(--lime-rgb) / 0.3), 0 8px 12px rgb(4 2 14 / 0.55); }
+    </style>
+  </head>
+  <body>
+    <div class="dots"></div>
+    <div class="light"></div>
+    <canvas id="phone"></canvas>
+    <div class="brand"><img src="/mark/56.svg" alt="" /><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span></div>
+    <div class="copy">
+      <p class="eyebrow"><i></i>Open source · no app · no account</p>
+      <h1 id="headline"></h1>
+      <p class="sub" id="sub"></p>
+    </div>
+    <p class="url">obpal.blackboxes.net</p>
+    <script type="module">
+      // The words are the home page's hero (the renderer reads them from index.html), so the card says what it says:
+      // ?h= the headline, ?keep= its part that stays on one line, ?sub= the sub-line.
+      const q = new URLSearchParams(location.search)
+      const h = document.getElementById('headline')
+      const keep = document.createElement('span')
+      keep.className = 'keep'
+      keep.textContent = q.get('keep') ?? ''
+      h.append(q.get('h') ?? '', keep)
+      document.getElementById('sub').textContent = q.get('sub') ?? ''
+      await document.fonts.ready
+      // The marble sits on the full stop, as the hero's comes to rest there.
+      const walker = document.createTreeWalker(h, NodeFilter.SHOW_TEXT)
+      let text = null
+      while (walker.nextNode()) if (walker.currentNode.data.trim()) text = walker.currentNode
+      const r = document.createRange()
+      r.setStart(text, text.data.trimEnd().length - 1)
+      r.setEnd(text, text.data.trimEnd().length)
+      const dot = r.getBoundingClientRect()
+      const m = document.createElement('div')
+      m.className = 'marble'
+      m.style.left = `${dot.left + dot.width / 2 - 15}px`
+      m.style.top = `${dot.bottom - 0.2 * 88 - 30}px`
+      document.body.appendChild(m)
+      window.__laidOut = true
+    </script>
+    <script type="module" src="phone.js"></script>
+  </body>
+</html>

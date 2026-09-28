@@ -213,13 +213,13 @@ export class RoverLogic implements DeviceLogic {
 
   horn(n: number) {
     this.rovers[n].honk = 0.45
-    this.events.push({ unit: n, kind: 'tick' })
+    this.events.push({ unit: n, kind: 'tick', audio: { action: 'horn' } })
   }
 
   private bump(key: string, n: number, speed: number) {
     if (this.touching.has(key)) { this.touching.set(key, 0.3); return }
     this.touching.set(key, 0.3)
-    if (speed > 0.4) this.events.push({ unit: n, kind: 'bump', strength: Math.min(1, speed / ROVER.vmax) })
+    if (speed > 0.4) this.events.push({ unit: n, kind: 'bump', strength: Math.min(1, speed / ROVER.vmax), audio: { speed, impulse: speed, materials: key.includes('cone') ? ['rubber', 'plastic'] : ['rubber', 'metal'] } })
   }
 
   private collide(dt: number) {
@@ -278,7 +278,10 @@ export class RoverLogic implements DeviceLogic {
         c.z = r.z + nz * (R + CONE_R)
         const [fx, fz] = fwd(r)
         const into = (fx * nx + fz * nz) * r.v
-        if (into > 0) { c.vx += nx * into * 1.4; c.vz += nz * into * 1.4; r.v *= 0.92 }
+        if (into > 0) {
+          this.bump(`cone${this.cones.indexOf(c)}-${this.rovers.indexOf(r)}`, this.rovers.indexOf(r), into)
+          c.vx += nx * into * 1.4; c.vz += nz * into * 1.4; r.v *= 0.92
+        }
       }
       const sp = Math.hypot(c.vx, c.vz)
       if (sp > 0) {

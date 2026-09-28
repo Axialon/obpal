@@ -4,6 +4,9 @@
  * in its holder's colour, flashing as it takes one.
  */
 import * as THREE from 'three'
+import { darkTitanium, gunmetal } from '../kit/surfaces'
+import { pov, tiledDeck } from '../kit/precision'
+import { skinSlot, upgradeSkins } from '../kit/skins'
 import { batch, bolt, cable, cylinder, floorMaterial, maker, plastic } from '../kit'
 import { offCentre, PTZ, PtzLogic, TRACK, trainAt, type Cam } from './ptz'
 import type { Stage } from './stage'
@@ -12,7 +15,7 @@ import { blobShadow, box, mats, plate, previewScene, wear, type DeviceView, type
 
 interface CamModel { root: THREE.Group; head: THREE.Group; body: THREE.Group; lens: THREE.Mesh; tally: THREE.MeshStandardMaterial; eye: THREE.PerspectiveCamera }
 
-function buildCam(n: number): CamModel {
+function buildCam(n: number, live?: () => void): CamModel {
   const root = new THREE.Group()
   const dark = mats.dark()
   // A tripod up to the head.
@@ -46,7 +49,8 @@ function buildCam(n: number): CamModel {
   head.add(body)
   const shell = box(0.18, 0.13, 0.26, mats.body(), 0.03)
   shell.castShadow = true
-  body.add(shell)
+  const skin = skinSlot(body, 'cameraSkin', shell)
+  if (live) upgradeSkins('ptz', { cameraSkin: skin }, live)
   for (let i = 0; i < 5; i++) { const vent = box(0.11, 0.004, 0.006, dark); vent.position.set(0, 0.066, 0.01 + i * 0.018); body.add(vent) }
   maker(body, 0, 0.067, -0.06, 0.035)
   const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.055, 0.12, 32), dark)
@@ -60,6 +64,7 @@ function buildCam(n: number): CamModel {
   const bezel = new THREE.Mesh(new THREE.TorusGeometry(0.046, 0.005, 8, 32), mats.metal()); bezel.rotation.x = Math.PI / 2; bezel.position.y = -0.06; lens.add(bezel)
   const iris = new THREE.Mesh(new THREE.CircleGeometry(0.022, 20), plastic('#080f18')); iris.rotation.x = Math.PI / 2; iris.position.y = -0.062; lens.add(iris)
   body.add(lens)
+  pov(lens, [0, -.064, 0], [0, -1, 0], [0, 0, -1])
   const tally = mats.glow('#3b1016')
   const light = new THREE.Mesh(new THREE.SphereGeometry(0.014, 12, 8), tally)
   light.position.set(0.05, 0.075, -0.09)
@@ -94,11 +99,12 @@ function buildTrain() {
   const cars = colors.map((c, i) => {
     const g = new THREE.Group()
     const paint = new THREE.MeshPhysicalMaterial({ color: c, metalness: 0.2, roughness: 0.35, clearcoat: 0.8 })
-    const bodyBox = box(0.16, 0.12, 0.32, i ? paint : mats.body(), 0.03)
+    const bodyBox = box(0.16, 0.12, 0.32, gunmetal, 0.03)
     bodyBox.position.y = 0.1
     g.add(bodyBox)
+    const stripe = box(.025, .006, .24, paint); stripe.position.y = .164; g.add(stripe)
     if (i === 0) {
-      const boiler = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.2, 24), paint)
+      const boiler = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.2, 24), gunmetal)
       boiler.rotation.x = Math.PI / 2
       boiler.position.set(0, 0.2, -0.05)
       const cab = box(0.15, 0.1, 0.1, mats.dark(), 0.02)
@@ -114,6 +120,7 @@ function buildTrain() {
       g.add(axle)
     }
     g.add(blobShadow(0.2, 0.4))
+    batch(g)
     return g
   })
   const place = (t: number) => cars.forEach((g, i) => {
@@ -130,10 +137,11 @@ function buildSet() {
   const g = new THREE.Group()
   const floorMat = floorMaterial()
   const floor = box(10, 0.06, 8, floorMat, 0.03)
-  floor.position.y = -0.02
+  floor.position.y = -0.028
+  g.add(tiledDeck(10, 8, .01, 1.25))
   g.add(floor)
   const architecture = new THREE.Group()
-  const wall = plastic('#57616a'), trim = mats.dark()
+  const wall = darkTitanium, trim = mats.dark()
   const back = box(10, 2.5, 0.12, wall); back.position.set(0, 1.25, -4); architecture.add(back)
   for (let i = 0; i < 5; i++) {
     const x = -4 + i * 2
@@ -175,6 +183,7 @@ function buildSet() {
   const top = new THREE.Mesh(new THREE.SphereGeometry(0.09, 32, 20), new THREE.MeshStandardMaterial({ color: '#0b0f14', emissive: '#c6ff34', emissiveIntensity: 1.4 }))
   top.position.y = 1.08
   sculpture.add(top)
+  batch(sculpture)
   g.add(sculpture)
   for (const [x, z, c] of [[-1.2, 1.2, '#fb7185'], [1.4, 1.1, '#fcd34d'], [0.9, -2.1, '#6ee7b7']] as const) {
     const b = box(0.24, 0.24, 0.24, new THREE.MeshStandardMaterial({ color: c, roughness: 0.4 }), 0.04)
@@ -214,7 +223,7 @@ export function createView(stage: Stage, logic: PtzLogic): DeviceView {
   const train = buildTrain()
   stage.scene.add(...train.cars)
   const models = logic.cams.map((c, n) => {
-    const m = buildCam(n)
+    const m = buildCam(n, () => stage.view.invalidate())
     m.root.position.set(c.at[0], 0, c.at[2])
     m.head.position.y = c.at[1]
     stage.scene.add(m.root)

@@ -25,6 +25,7 @@ export const PC_PAGE_PORT_NAME = 'obpal-link/pc-page'
 /** The helper releases everything after 500 ms without frames; idle frames go at least this often. */
 export const NATIVE_HEARTBEAT_MS = 250
 /** Where to get the helper. */
+export const MAC_ACCESSIBILITY = 'Allow ob.Pal Desktop in System Settings, then Privacy & Security, then Accessibility.'
 export const DESKTOP_URL = 'https://github.com/Axialon/obpal-link/tree/main/desktop#readme'
 
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x)
@@ -180,6 +181,7 @@ export type HelperRequest =
   | { t: 'scope'; path: string; keyboard: boolean; mouse: boolean }
   | { t: 'forget'; path: string }
   | { t: 'desktop'; on: boolean; keyboard: boolean; mouse: boolean }
+  | { t: 'macshortcuts'; ctrlToCmd: boolean }
   | { t: 'pause'; on: boolean }
   | { t: 'resume' }
   | { t: 'stats' }
@@ -218,7 +220,15 @@ export interface PcStatus {
 }
 export interface PcStats { frames: number; injected: number; refused: Record<string, number> }
 
+export interface MacPlatform { os: 'macos'; accessibility: boolean; ctrlToCmd: boolean }
+
+function parseMacPlatform(x: unknown): MacPlatform | null {
+  return isObj(x) && x.os === 'macos' && bool(x.accessibility) && bool(x.ctrlToCmd)
+    ? { os: 'macos', accessibility: x.accessibility, ctrlToCmd: x.ctrlToCmd } : null
+}
+
 export type HelperMessage =
+  | ({ t: 'platform' } & MacPlatform)
   /** caps.text: the helper types (text requests) and reports the focused field (status.text), 0.3 and later. */
   | { t: 'hello'; v: number; version: string; os: string; hotkey: string | null; caps: { keyboard: boolean; mouse: boolean; gamepad: boolean; desktop: boolean; text: boolean } }
   | ({ t: 'config' } & PcConfig)
@@ -269,6 +279,10 @@ export function parsePcStatus(x: unknown): PcStatus | null {
 export function parseHelperMessage(x: unknown): HelperMessage | null {
   if (!isObj(x)) return null
   switch (x.t) {
+    case 'platform': {
+      const platform = parseMacPlatform(x)
+      return platform ? { t: 'platform', ...platform } : null
+    }
     case 'hello': {
       if (!Number.isInteger(x.v) || !str(x.version, 32) || !str(x.os, 16) || !isObj(x.caps)) return null
       if (x.hotkey !== null && !str(x.hotkey, 40)) return null
@@ -304,6 +318,8 @@ export type PcLink = 'off' | 'permission' | 'connecting' | 'missing' | 'error' |
 const PC_LINKS: readonly PcLink[] = ['off', 'permission', 'connecting', 'missing', 'error', 'ready']
 
 export interface PcState {
+  /** Present only for a Mac helper, after its permission report. */
+  platform?: MacPlatform
   link: PcLink
   version: string | null
   /** The helper can control the whole PC (0.2 and later). */
@@ -328,15 +344,18 @@ export function parsePcStats(x: unknown): PcStats | null {
 export function parsePcState(x: unknown): PcState | null {
   if (!isObj(x) || !PC_LINKS.includes(x.link as PcLink)) return null
   if ((x.version !== null && !str(x.version, 32)) || (x.hotkey !== null && !str(x.hotkey, 40)) || (x.error !== null && !str(x.error, 300))) return null
+  const platform = x.platform === undefined ? undefined : parseMacPlatform(x.platform)
+  if (platform === null) return null
   const config = x.config === null ? null : parsePcConfig(x.config)
   const status = x.status === null ? null : parsePcStatus(x.status)
   const stats = x.stats === null || x.stats === undefined ? null : parsePcStats(x.stats)
   if ((config === null && x.config !== null) || (status === null && x.status !== null)) return null
-  return { link: x.link as PcLink, version: x.version as string | null, desktopCap: x.desktopCap === true, hotkey: x.hotkey as string | null, error: x.error as string | null, config, status, stats }
+  return { ...(platform ? { platform } : {}), link: x.link as PcLink, version: x.version as string | null, desktopCap: x.desktopCap === true, hotkey: x.hotkey as string | null, error: x.error as string | null, config, status, stats }
 }
 
 /** What the popup's PC card shows. */
 export type PcView =
+  | { kind: 'accessibility' }
   | { kind: 'permission' }
   | { kind: 'connecting' }
   | { kind: 'missing' }
@@ -363,6 +382,7 @@ export function pcView(s: PcState): PcView {
     case 'error':
       return { kind: 'error', error: s.error ?? 'The helper stopped.' }
   }
+  if (s.platform?.accessibility === false) return { kind: 'accessibility' }
   if (s.config?.paused) return { kind: 'paused' }
   if (s.status?.panic) return { kind: 'panic', hotkey: s.hotkey }
   const st = s.status
@@ -386,6 +406,7 @@ export function pcView(s: PcState): PcView {
  */
 export function typingField(s: PcState): TextField | null {
   const st = s.status
+  if (s.platform?.accessibility === false) return null
   if (s.link !== 'ready' || !st?.text || !st.enabled || st.panic || s.config?.paused) return null
   const front = st.front
   if (!front || front.elevated) return null
@@ -408,11 +429,12 @@ export type PcRequest =
   | { to: 'bg'; type: 'pc-scope'; path: string; keyboard: boolean; mouse: boolean }
   | { to: 'bg'; type: 'pc-forget'; path: string }
   | { to: 'bg'; type: 'pc-desktop'; on: boolean; keyboard: boolean; mouse: boolean }
+  | { to: 'bg'; type: 'pc-macshortcuts'; ctrlToCmd: boolean }
   | { to: 'bg'; type: 'pc-pause'; on: boolean }
   | { to: 'bg'; type: 'pc-resume' }
   | { to: 'bg'; type: 'pc-stats' }
 export type PcRequestType = PcRequest['type']
-export const PC_REQUEST_TYPES: readonly PcRequestType[] = ['pc-connect', 'pc-allow', 'pc-scope', 'pc-forget', 'pc-desktop', 'pc-pause', 'pc-resume', 'pc-stats']
+export const PC_REQUEST_TYPES: readonly PcRequestType[] = ['pc-macshortcuts', 'pc-connect', 'pc-allow', 'pc-scope', 'pc-forget', 'pc-desktop', 'pc-pause', 'pc-resume', 'pc-stats']
 
 export function parsePcRequest(x: unknown): PcRequest | null {
   if (!isObj(x) || x.to !== 'bg') return null
@@ -428,6 +450,8 @@ export function parsePcRequest(x: unknown): PcRequest | null {
       return str(x.path, MAX_PATH) && x.path !== '' ? { to: 'bg', type: 'pc-forget', path: x.path } : null
     case 'pc-desktop':
       return bool(x.on) && bool(x.keyboard) && bool(x.mouse) ? { to: 'bg', type: 'pc-desktop', on: x.on, keyboard: x.keyboard, mouse: x.mouse } : null
+    case 'pc-macshortcuts':
+      return bool(x.ctrlToCmd) ? { to: 'bg', type: 'pc-macshortcuts', ctrlToCmd: x.ctrlToCmd } : null
     case 'pc-pause':
       return bool(x.on) ? { to: 'bg', type: 'pc-pause', on: x.on } : null
   }
@@ -445,6 +469,8 @@ export function toHelperRequest(r: PcRequest): HelperRequest | null {
       return { t: 'forget', path: r.path }
     case 'pc-desktop':
       return { t: 'desktop', on: r.on, keyboard: r.keyboard, mouse: r.mouse }
+    case 'pc-macshortcuts':
+      return { t: 'macshortcuts', ctrlToCmd: r.ctrlToCmd }
     case 'pc-pause':
       return { t: 'pause', on: r.on }
     case 'pc-resume':

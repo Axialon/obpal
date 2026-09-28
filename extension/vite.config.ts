@@ -61,7 +61,7 @@ const manifest = {
   short_name: 'ob.Pal Link',
   version: pkg.version,
   // Also the Chrome Web Store summary: 132 characters at most (extension/store/listing.md).
-  description: 'Use your phone as a controller for websites: games, 3D viewers and more. Add ob.Pal Desktop to control your whole PC. Pair by QR.',
+  description: 'Your phone is the controller for any website: gamepad, 3D mouse or keys. Add ob.Pal Desktop for your whole PC. No phone app needed.',
   minimum_chrome_version: '120',
   homepage_url: 'https://obpal.blackboxes.net',
   key: EXTENSION_KEY,

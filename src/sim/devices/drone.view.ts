@@ -4,11 +4,13 @@
  */
 import * as THREE from 'three'
 import { DRONE, DroneLogic, PYLONS, RINGS, stepDrone, type Drone, type DroneIntent } from './drone'
-import { batch, cable, cylinder, floorMaterial, plastic } from '../kit'
+import { batch, cable, cylinder, floorMaterial } from '../kit'
 import { carbon, ceramic, duct, lime, optic, polished, ring, shell, titanium, warmShell } from '../kit/surfaces'
 import { Spring } from '../kit/motion'
 import { instanceCopies } from '../kit/instances'
 import { finishPrototype, loadPrototype, prototypeNodes, retirePrototype } from '../kit/prototype'
+import { pov, tiledDeck } from '../kit/precision'
+import { darkTitanium, gunmetal } from '../kit/surfaces'
 import type { Stage } from './stage'
 import type { Theme } from '../../ui/themes'
 import { blobShadow, box, mats, plate, previewScene, wear, type DeviceView, type Preview } from './view'
@@ -36,6 +38,7 @@ function buildDrone(n: number): DroneModel {
     const seam = box(.028, .003, .006, lime, .001); seam.position.set(side * .045, .155, -.07); body.add(seam)
   }
   const gimbal = new THREE.Group(); gimbal.position.set(0, .065, -.132); body.add(gimbal)
+  pov(gimbal, [0, 0, -.032])
   const camera = shell(.067, .041, .049, carbon); gimbal.add(camera)
   const window = shell(.043, .021, .008, optic); window.position.z = -.026; gimbal.add(window)
   const eye = box(.022, .003, .009, lime, .001); eye.position.set(0, -.012, -.027); gimbal.add(eye)
@@ -98,8 +101,9 @@ function placeDrone(m: DroneModel, d: Drone, color: string | null, dt: number) {
 function buildRing(r: typeof RINGS[number]) {
   const g = new THREE.Group()
   const mat = new THREE.MeshStandardMaterial({ color: '#0b0f14', emissive: '#b3a4ff', emissiveIntensity: 1.6 })
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(r.r, 0.035, 16, 96), mat)
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(r.r, 0.035, 8, 64), titanium)
   g.add(ring)
+  const status = box(.12, .014, .006, mat); status.position.y = r.r; g.add(status)
   g.position.set(r.x, r.y, r.z)
   g.rotation.y = r.face
   // A slim stand down to the floor.
@@ -113,11 +117,16 @@ function buildRing(r: typeof RINGS[number]) {
 function buildCage(hx: number, hz: number, h: number) {
   const g = new THREE.Group()
   const floor = box(hx * 2 + 0.3, 0.04, hz * 2 + 0.3, floorMaterial(), 0.02)
-  floor.position.y = -0.02
+  floor.position.y = -0.028
   g.add(floor)
-  const edge = new THREE.MeshStandardMaterial({ color: '#0b0f14', emissive: '#c6ff34', emissiveIntensity: 0.9 })
+  g.add(tiledDeck(hx * 2, hz * 2, 0, 1.5))
+  const edge = darkTitanium.clone()
   const bar = (w: number, hh: number, d: number, x: number, y: number, z: number) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, hh, d), edge); b.position.set(x, y, z); g.add(b) }
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) bar(0.03, h, 0.03, sx * hx, h / 2, sz * hz)
+  for (const sx of [-1, 1]) {
+    const station = box(.12, .24, .06, gunmetal); station.position.set(sx*hx, .65, -hz); g.add(station)
+    const slit = box(.07, .008, .003, lime); slit.position.set(sx*hx, .69, -hz+.031); g.add(slit)
+  }
   for (const y of [0.01, h]) {
     bar(hx * 2, 0.02, 0.02, 0, y, -hz); bar(hx * 2, 0.02, 0.02, 0, y, hz)
     bar(0.02, 0.02, hz * 2, -hx, y, 0); bar(0.02, 0.02, hz * 2, hx, y, 0)
@@ -149,16 +158,17 @@ function buildCage(hx: number, hz: number, h: number) {
 
 function buildPad(n: number) {
   const g = new THREE.Group()
-  const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.48, 0.02, 48), new THREE.MeshStandardMaterial({ color: '#2f3642', roughness: 0.7 }))
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.48, 0.02, 8), gunmetal)
   disc.position.y = 0.01
   const glow = mats.glow()
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.014, 8, 64), glow)
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.41, 0.43, 8), ceramic)
   ring.rotation.x = Math.PI / 2
   ring.position.y = 0.022
   const num = plate(n + 1, 0.18)
   num.rotation.x = -Math.PI / 2
   num.position.set(0, 0.022, 0.3)
   g.add(disc, ring, num)
+  const status = box(.12, .004, .016, glow); status.position.set(0, .023, -.3); g.add(status)
   return { group: g, glow }
 }
 
@@ -168,8 +178,8 @@ export function createView(stage: Stage, logic: DroneLogic): DeviceView {
   stage.scene.add(cage.group)
   const obstacles = new THREE.Group()
   for (const p of PYLONS) {
-    const body = cylinder(p.radius, p.height, mats.dark()); body.position.set(p.x, p.height / 2, p.z); obstacles.add(body)
-    for (let i = 0; i < 3; i++) { const band = cylinder(p.radius + 0.006, 0.07, plastic('#c6ff34')); band.position.set(p.x, p.height - 0.1 - i * 0.2, p.z); obstacles.add(band) }
+    const body = cylinder(p.radius, p.height, darkTitanium, 8); body.position.set(p.x, p.height / 2, p.z); obstacles.add(body)
+    for (let i = 0; i < 3; i++) { const band = cylinder(p.radius + 0.006, 0.07, ceramic, 8); band.position.set(p.x, p.height - 0.1 - i * 0.2, p.z); obstacles.add(band) }
   }
   batch(obstacles); stage.scene.add(obstacles)
   const rings = logic.rings.map((r) => { const m = buildRing(r); stage.scene.add(m.group); return m })
@@ -192,6 +202,7 @@ export function createView(stage: Stage, logic: DroneLogic): DeviceView {
       body.add(...m.blurs, old.getObjectByName('number')!)
       m.root.add(body); m.body = body
       m.gimbal = rig!.gimbal as THREE.Group; m.leads = rig!.leads as THREE.Group
+      m.gimbal.add(old.getObjectByName('pov')!)
       m.props = [rig!.prop0, rig!.prop1, rig!.prop2, rig!.prop3] as THREE.Group[]
       retirePrototype(old)
       m.root.userData.prototype = 'blender'
@@ -203,7 +214,7 @@ export function createView(stage: Stage, logic: DroneLogic): DeviceView {
   let ringColor = '#b3a4ff'
   const setTheme = (t: Theme) => {
     cage.floor.color.set(t.light ? '#dde2ea' : '#232833')
-    cage.edge.emissive.set(t.light ? '#7cb518' : '#c6ff34')
+    cage.edge.color.set(t.light ? '#68767d' : '#3d484f')
     ringColor = t.light ? '#6d4dff' : '#b3a4ff'
   }
   setTheme(stage.theme)

@@ -7,8 +7,8 @@ import { StudioSound } from './studio.sound'
 import { StudioPlayers } from './studio.players'
 import { html, setMarkup } from '../../ui/markup'
 
-export function attachStudio(sim: SimScene, logic: StudioLogic, stage: Stage) {
-  const sound = new StudioSound()
+export function attachStudio(sim: SimScene, logic: StudioLogic, stage: Stage, position: (seat: number) => readonly [number, number, number]) {
+  const sound = new StudioSound(position)
   const players = new StudioPlayers(n => sound.stop(n))
   const samples: { ms: number; uncertainty: number; seat: number; seq: number }[] = []
   const frameTimes: number[] = []
@@ -16,6 +16,12 @@ export function attachStudio(sim: SimScene, logic: StudioLogic, stage: Stage) {
   const panel = document.createElement('div'); panel.className = 'studio-audio'
   setMarkup(panel, html`<button type="button" id="studio-start">Start sound</button><meter min="0" max="1" value="0" aria-label="Studio output"></meter><label>Volume<input type="range" min="0" max="80" value="65" aria-label="Studio volume"></label><small role="status">Tap here to hear the room. Start with your speakers low.</small>`)
   document.getElementById('dev-blurb')!.after(panel)
+  const reducedLabel = document.createElement('label'), reduced = document.createElement('input')
+  reduced.type = 'checkbox'
+  try { reduced.checked = localStorage.getItem('obpal.sim.reduced') === '1' } catch { /* private browsing */ }
+  sound.setReduced(reduced.checked)
+  reducedLabel.append(reduced, ' Reduced sound'); panel.append(reducedLabel)
+  reduced.onchange = () => { sound.setReduced(reduced.checked); try { localStorage.setItem('obpal.sim.reduced', reduced.checked ? '1' : '0') } catch { /* private browsing */ } }
   const start = panel.querySelector<HTMLButtonElement>('button')!, status = panel.querySelector('small')!, meter = panel.querySelector('meter')!
   let muted = false, starting = false
   const startSound = async () => {

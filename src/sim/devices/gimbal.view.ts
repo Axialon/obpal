@@ -1,25 +1,28 @@
 import * as THREE from 'three'
-import { batch, floorMaterial, maker, metal, plastic, rubber } from '../kit'
+import { darkTitanium, gunmetal, optic } from '../kit/surfaces'
+import { pov, tiledDeck } from '../kit/precision'
+import { skinSlot, upgradeSkins } from '../kit/skins'
+import { batch, maker, metal, plastic, rubber } from '../kit'
 import { GimbalLogic } from './gimbal'
 import { block, disc, playFrame, rod, showcase } from './parts'
 import type { Stage } from './stage'
 import type { DeviceView } from './view'
-function filming(scene: THREE.Scene, logic: GimbalLogic) {
+function filming(scene: THREE.Scene, logic: GimbalLogic, live?: () => void) {
   const set = new THREE.Group()
   scene.add(set)
-  block(set, [10, 0.1, 12], [0, -0.06, -2], floorMaterial('#374857'))
-  block(set, [9, 4, 0.12], [0, 2, -6], plastic('#778b98'))
+  const deck = tiledDeck(10, 12, -.01, 1.5); deck.position.z = -2; set.add(deck)
+  block(set, [9, 4, 0.12], [0, 2, -6], darkTitanium)
   for (const x of [-3.5, 3.5]) {
     rod(set, [x, 0, -3], [x, 3.3, -3], 0.035)
     block(set, [0.8, 1.1, 0.12], [x, 3.1, -3], plastic('#eee9d9'))
     for (const z of [-0.3, 0.3]) rod(set, [x, 0.6, -3], [x + z, 0, -3.25], 0.03)
   }
-  disc(set, 0.9, 0.22, [0, 0.1, -3.6], plastic('#637786'))
+  disc(set, 0.9, 0.22, [0, 0.1, -3.6], gunmetal)
   batch(set)
   const subject = new THREE.Group()
   subject.position.set(0, 1.4, -3.6)
   scene.add(subject)
-  const knot = new THREE.Mesh(new THREE.TorusKnotGeometry(0.5, 0.13, 72, 12), plastic('#e0a56e'))
+  const knot = new THREE.Mesh(new THREE.TorusKnotGeometry(0.5, 0.13, 72, 12), metal)
   subject.add(knot)
   rod(scene, [0, 0.2, -3.6], [0, 0.9, -3.6], 0.08)
   const root = new THREE.Group()
@@ -33,7 +36,7 @@ function filming(scene: THREE.Scene, logic: GimbalLogic) {
   const yaw = new THREE.Group()
   yaw.position.y = 1.35
   root.add(yaw)
-  disc(yaw, 0.16, 0.18, [0, 0, 0], plastic('#4c5b69'))
+  disc(yaw, 0.16, 0.18, [0, 0, 0], darkTitanium)
   block(yaw, [0.12, 0.7, 0.14], [0.31, 0.24, 0], metal)
   block(yaw, [0.42, 0.1, 0.14], [0.16, -0.06, 0], metal)
   const pitch = new THREE.Group()
@@ -43,14 +46,16 @@ function filming(scene: THREE.Scene, logic: GimbalLogic) {
   block(pitch, [0.08, 0.43, 0.18], [-0.34, 0, 0.1], metal)
   const roll = new THREE.Group()
   pitch.add(roll)
-  block(roll, [0.52, 0.35, 0.3], [0, 0, 0], plastic('#242d36'))
-  block(roll, [0.46, 0.27, 0.025], [0, 0, 0.165], plastic('#617c8d'))
+  const skin = skinSlot(roll, 'cameraSkin', block(roll, [0.52, 0.35, 0.3], [0, 0, 0], gunmetal))
+  pov(roll, [0, 0, -.535])
+  if (live) upgradeSkins('gimbal', { cameraSkin: skin }, live)
+  block(roll, [0.46, 0.27, 0.025], [0, 0, 0.165], optic)
   for (const [r, z] of [
     [0.15, -0.25],
     [0.17, -0.4],
     [0.12, -0.46],
   ]) {
-    const d = disc(roll, r, 0.13, [0, 0, z], z === -0.46 ? plastic('#255566') : rubber)
+    const d = disc(roll, r, 0.13, [0, 0, z], z === -0.46 ? optic : rubber)
     d.rotation.x = Math.PI / 2
   }
   maker(roll, 0, 0.185, 0, 0.13)
@@ -76,7 +81,7 @@ function filming(scene: THREE.Scene, logic: GimbalLogic) {
   }
 }
 export function createView(stage: Stage, logic: GimbalLogic): DeviceView {
-  const w = filming(stage.scene, logic),
+  const w = filming(stage.scene, logic, () => stage.view.invalidate()),
     size = new THREE.Vector2(),
     clear = new THREE.Color()
   const label = document.createElement('div')

@@ -22,6 +22,14 @@ const GAME = { name: 'stubgame.exe', path: 'C:\\Stub\\stubgame.exe', title: 'Stu
 const config = { paused: false, desktop: null, programs: [] }
 let enabled = false
 let panic = false
+let mac = false
+let accessibility = true
+let ctrlToCmd = true
+const platform = () => { if (mac) send({ t: 'platform', os: 'macos', accessibility, ctrlToCmd }) }
+const hello = () => {
+  send({ t: 'hello', v: 1, version: 'stub', os: mac ? 'macos' : 'stub', hotkey: mac ? 'Ctrl+⌥+Delete' : 'Ctrl+Alt+Backspace', caps: { keyboard: true, mouse: true, gamepad: false, desktop: true, text: true } })
+  platform()
+}
 /** What the test says has the focus: a text or password field (or none), and in which window. */
 let focus = { text: null, front: 'browser' }
 
@@ -44,7 +52,7 @@ function handle(m) {
   log({ in: m })
   switch (m.t) {
     case 'hello':
-      send({ t: 'hello', v: 1, version: 'stub', os: 'stub', hotkey: 'Ctrl+Alt+Backspace', caps: { keyboard: true, mouse: true, gamepad: false, desktop: true, text: true } })
+      hello()
       configReply()
       status()
       break
@@ -88,6 +96,10 @@ function handle(m) {
       config.paused = m.on
       configReply()
       break
+    case 'macshortcuts':
+      ctrlToCmd = m.ctrlToCmd
+      platform()
+      break
     case 'resume':
       panic = false
       status()
@@ -111,6 +123,10 @@ if (CTL) {
     seen = raw
     try {
       const c = JSON.parse(raw)
+      const changed = mac !== (c.os === 'macos')
+      mac = c.os === 'macos'
+      accessibility = c.accessibility !== false
+      if (changed) { hello(); configReply() } else platform()
       focus = { text: c.text === 'text' || c.text === 'secret' ? c.text : null, front: c.front === 'game' ? 'game' : 'browser' }
       log({ focus })
       status()

@@ -1,5 +1,7 @@
 import * as THREE from 'three'
-import { batch, floorMaterial, maker, metal, plastic, rounded, rubber } from '../kit'
+import { ceramic, darkTitanium, gunmetal } from '../kit/surfaces'
+import { pov, service, tiledDeck } from '../kit/precision'
+import { batch, maker, metal, plastic, rounded, rubber } from '../kit'
 import { block, disc, playFrame, rod, showcase } from './parts'
 import { SORTING, SortingLogic } from './sorting'
 import type { Stage } from './stage'
@@ -14,7 +16,7 @@ function cell(n: number) {
   bins.name = 'colour-bins'
   root.position.x = SORTING.centres[n]
   root.add(frame, pusher, bins)
-  const trim = plastic('#344149'), glow = mats.glow()
+  const trim = gunmetal, glow = mats.glow()
   for (const x of [-0.55, 0.55]) {
     block(frame, [0.09, 0.18, 3], [x, 0.76, -0.95], metal)
     for (const z of [-2.2, 0.3]) {
@@ -36,9 +38,11 @@ function cell(n: number) {
     bin.position.set(SORTING.lanes[k], 0, SORTING.bin)
     bins.add(bin)
     const colour = plastic(SORTING.colours[k])
-    block(bin, [0.82, 0.08, 0.88], [0, 0.15, 0], colour)
-    for (const x of [-0.39, 0.39]) block(bin, [0.055, 0.48, 0.88], [x, 0.39, 0], colour)
-    block(bin, [0.82, 0.48, 0.055], [0, 0.39, 0.415], colour)
+    block(bin, [0.82, 0.08, 0.88], [0, 0.15, 0], darkTitanium)
+    for (const x of [-0.39, 0.39]) block(bin, [0.055, 0.48, 0.88], [x, 0.39, 0], gunmetal)
+    block(bin, [0.82, 0.48, 0.055], [0, 0.39, 0.415], gunmetal)
+    block(bin, [.65, .07, .012], [0, .5, .45], colour)
+    const panel = service(.5, .2); panel.position.set(0, .31, .446); bin.add(panel)
     block(bin, [0.82, 0.28, 0.055], [0, 0.29, -0.415], colour)
     const chute = block(bin, [0.73, 0.045, 0.78], [0, 0.7, -0.54], metal)
     chute.rotation.x = 0.26
@@ -48,7 +52,8 @@ function cell(n: number) {
   const ram = new THREE.Group()
   ram.name = 'pusher-ram'
   pusher.add(ram)
-  block(ram, [0.45, 0.3, 0.06], [0, 1.04, -0.12], plastic('#e5e9e5'))
+  pov(ram, [0, 1.23, -.15], [0, -.3, 1])
+  block(ram, [0.45, 0.3, 0.06], [0, 1.04, -0.12], ceramic)
   rod(ram, [0, 0.98, -0.6], [0, 0.98, -0.14], 0.035, metal)
   batch(ram)
   batch(pusher, [ram])
@@ -79,7 +84,7 @@ function cell(n: number) {
 function workshop(scene: THREE.Scene, logic: SortingLogic) {
   const floor = new THREE.Group()
   floor.name = 'workshop-floor'
-  block(floor, [8.7, 0.1, 6.4], [0, -0.07, -0.2], floorMaterial('#485456'))
+  const deck = tiledDeck(8.7, 6.4, -.02, 1.2); deck.position.z = -.2; floor.add(deck)
   scene.add(floor)
   const cells = logic.units.map((_, n) => { const model = cell(n); scene.add(model.root); return model }),
     transform = new THREE.Object3D()
