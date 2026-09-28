@@ -2,7 +2,8 @@
  * ob.Pal themes are the Blackboxes family surfaces (src/family). The theme only picks what the UI sits on;
  * ob.Pal's identity accent stays lime on every surface. UI colours come from the family CSS tokens, while
  * the 3D stage colours (backdrop gradient and ground grid) live here because three.js needs them as values.
- */import { html } from './markup'
+ */
+import { html } from './markup'
 
 import { family, type FamilyThemeId } from '../family'
 
@@ -73,6 +74,9 @@ export function applyTheme(t: Theme, remember = false) {
 }
 const SITE_PAGE = '#0a0718'
 
-/** Two-tone swatch markup for theme pickers: the surface with ob.Pal's accent. */
+/**
+ * Two-tone swatch markup for theme pickers: the surface with the accent in effect (the visitor's own pick, else ob.Pal's
+ * lime), which follows a new pick at once, so each surface previews the pairing it would make.
+ */
 export const swatch = (t: Theme) =>
-  html`<span class="swatch" style="--sw-a:${t.surface};--sw-b:${t.accent}" aria-hidden="true"><i></i><i></i></span>`
+  html`<span class="swatch" style="--sw-a:${t.surface}" aria-hidden="true"><i></i><i></i></span>`

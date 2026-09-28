@@ -79,7 +79,7 @@ a { color: var(--accent-text); }
 .swatch { position: relative; width: 34px; height: 34px; flex: none; display: block; }
 .swatch i { position: absolute; width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid rgb(var(--hl-rgb) / 0.22); }
 .swatch i:first-child { left: 0; top: 0; background: var(--sw-a); }
-.swatch i:last-child { right: 0; bottom: 0; background: var(--sw-b); box-shadow: 0 0 12px color-mix(in srgb, var(--sw-b) 45%, transparent); }
+.swatch i:last-child { right: 0; bottom: 0; background: var(--sw-b, var(--bb-accent)); box-shadow: 0 0 12px color-mix(in srgb, var(--sw-b, var(--bb-accent)) 45%, transparent); }
 
 /* floating tooltips (src/ui/tips.ts) */
 .tip { position: fixed; left: 0; top: 0; z-index: 60; padding: 6px 10px; border-radius: 10px; background: var(--frost); border: 1px solid var(--frost-edge); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); box-shadow: var(--frost-shadow); font-size: 12px; font-weight: 600; letter-spacing: -0.005em; color: var(--ink); white-space: nowrap; pointer-events: none; opacity: 0; transform: translate3d(0, 3px, 0); transition: opacity 0.14s var(--ease), transform 0.14s var(--ease); will-change: transform, opacity; }

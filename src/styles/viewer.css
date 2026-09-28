@@ -206,8 +206,12 @@ body.multi .pointer .pt-name { display: block; }
 }
 @media (max-width: 600px) {
   .topbar { padding: 0 12px; height: 68px; }
-  body:not(.presence-active) .presence-floating { width: calc(100vw - 16px); height: 56px; flex-wrap: nowrap; gap: 4px; padding: 6px; overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--frost-edge) transparent; }
+  /* One row that fits, never a sideways scroll: the ride's select gives up width first, and Enter VR, when this
+     browser can't, steps out. */
+  body:not(.presence-active) .presence-floating { width: calc(100vw - 16px); height: 56px; flex-wrap: nowrap; gap: 4px; padding: 6px; overflow: hidden; }
   body:not(.presence-active) .presence-floating > * { flex-shrink: 0; white-space: nowrap; }
+  body:not(.presence-active) .presence-floating > .kit-select { flex: 1 1 auto; min-width: 72px; max-width: none; }
+  body:not(.presence-active) .presence-floating > button:disabled { display: none; }
   body:not(.presence-active) .catalog { top: 144px; }
   .logo .mark { width: 34px; height: 34px; }
   .logo .word { font-size: 19px; }

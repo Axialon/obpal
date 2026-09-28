@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { resolve, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { startLocal } from '../extension/e2e/local.mjs'
+import { chooseFace } from './lib/catalogue-ui.mjs'
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const assert = (ok, message) => { if (!ok) throw new Error(message) }
@@ -30,7 +31,7 @@ export async function runMusic(local, check) {
       await screen.goto(`${local.origin}/sim/?face=drums`)
       await screen.locator('.dcard[data-id="studio"] .dcard-stage.live').waitFor({ timeout: 20000 })
       assert((await screen.evaluate(() => window.__sims.cards())).join() === 'studio', 'Drums filter')
-      await screen.locator('#controller-filter').selectOption('face.keys')
+      await chooseFace(screen, 'face.keys')
       assert((await screen.evaluate(() => window.__sims.cards())).join() === 'studio', 'Keys filter')
       assert(await screen.locator('.dcard[data-id="studio"] .dcard-go').getAttribute('href') === '/sim/device/?d=studio', 'Studio card route')
       assert(!contextId, 'The preview started audio')

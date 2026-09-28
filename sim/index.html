@@ -2,7 +2,7 @@
 <html lang="en" class="site sim-catalogue">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#0a0718" />
     <meta name="description" content="Over 40 sims to drive with your phone: robot arms, drones, vehicles, games, science and a music studio. Scan and bring friends." />
     <title>Sims · ob.Pal</title>
@@ -15,7 +15,6 @@
     <link rel="stylesheet" href="/src/styles/base.css" />
     <link rel="stylesheet" href="/src/styles/site.css" />
     <link rel="stylesheet" href="/src/styles/landing.css" />
-    <link rel="stylesheet" href="/src/styles/sims.css" />
     <script type="module" src="/src/sim/hub.ts"></script>
   </head>
   <body>
@@ -44,37 +43,77 @@
       <a class="bb-menu-item" href="/#build">Build with it</a>
       <a class="bb-menu-item" href="/donate/">Donate</a>
     </nav>
-    <main class="land sims-land">
-      <section class="hero sims-hero">
-        <p class="eyebrow">The playground</p>
-        <h1>Pick a sim. Grab your phone.</h1>
-        <p class="lede">Scan its code, take the controls, bring friends.</p>
-      </section>
 
-      <div class="sims-bar" role="region" aria-label="Filter sims">
-        <div class="sims-categories" id="categories" role="group" aria-label="Sim categories"></div>
-        <div class="sims-tools">
-          <label class="sims-search"><span class="sims-label">Search sims</span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4 4" /></svg><input id="search" type="search" placeholder="Search sims" maxlength="160" autocomplete="off" /></label>
-          <label class="sims-controller"><span class="sims-label">Controller</span><select id="controller-filter" aria-label="Controller"></select><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg></label>
-          <span id="result-count" role="status" aria-live="polite"></span>
-          <button id="clear-filters" type="button" aria-label="Clear filters" title="Clear filters" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg></button>
+    <div class="sims-app">
+      <!-- Browse and filter: a docked sidebar (or its rail) on a computer, a drawer on a tablet, a sheet on a phone. -->
+      <aside class="kit-side sims-side" id="sims-side" aria-label="Browse sims" data-mode="docked" data-state="expanded">
+        <div class="kit-sheet-head sims-sheet-head">
+          <span class="kit-grabber" aria-hidden="true"></span>
+          <h2 class="kit-sheet-title">Filters</h2>
+          <button class="kit-icon-btn" id="sheet-close" type="button" aria-label="Close filters"></button>
         </div>
-      </div>
+        <div class="kit-side-head sims-side-head">
+          <h2 class="sims-side-title">Filters</h2>
+          <div class="sims-search-slot" id="side-search-slot"></div>
+          <button class="kit-icon-btn sims-rail-search" id="rail-search" type="button" aria-label="Search sims" data-rail-tip="Search · /"></button>
+          <button class="kit-icon-btn kit-side-toggle" id="side-toggle" type="button" aria-label="Collapse the sidebar" data-label-open="Collapse the sidebar" data-label-closed="Expand the sidebar" data-rail-tip="Expand"></button>
+        </div>
+        <div class="kit-side-body">
+          <p class="kit-side-label" id="l-browse"><b>01</b> Browse</p>
+          <ul class="kit-side-list sims-collections" id="collections" aria-labelledby="l-browse"></ul>
+          <p class="kit-side-label" id="l-categories"><b>02</b> Categories</p>
+          <ul class="kit-side-list sims-categories" id="categories" aria-labelledby="l-categories"></ul>
+          <p class="kit-side-label" id="l-controller"><b>03</b> Controller</p>
+          <div class="sims-controller" id="controller-slot"></div>
+        </div>
+        <div class="kit-sheet-foot sims-sheet-foot">
+          <button class="sims-sheet-clear" id="sheet-clear" type="button">Clear</button>
+          <button class="kit-cta sims-sheet-done" id="sheet-done" type="button"><span id="sheet-done-text">Show sims</span></button>
+        </div>
+      </aside>
 
-      <section class="sims-grid" id="sims" aria-label="Sims"></section>
-      <p class="sims-none" id="none" hidden>No sims match this view. Try another search or clear the filters.</p>
+      <main class="sims-main">
+        <section class="sims-hero">
+          <p class="eyebrow">The playground</p>
+          <h1>Pick a sim. <span>Grab your phone.</span></h1>
+          <p class="lede">Scan its code, take the controls, bring friends.</p>
+        </section>
 
-      <section class="sims-next" aria-labelledby="h-next">
-        <h2 id="h-next">Next in the catalogue</h2>
-        <div class="sims-soon" id="soon"></div>
-      </section>
+        <!-- On a tablet or phone: search, and the button that opens the filters. -->
+        <div class="sims-bar" id="sims-bar" role="region" aria-label="Search and filter sims">
+          <div class="sims-search-slot" id="bar-search-slot">
+            <label class="sims-search" id="sims-search"><span class="kit-sr">Search sims</span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4 4" /></svg><input id="search" type="search" placeholder="Search sims" maxlength="160" autocomplete="off" enterkeyhint="search" /><kbd class="sims-key" aria-hidden="true">/</kbd></label>
+          </div>
+          <button class="sims-filters" id="filters-open" type="button" aria-label="Filters" data-label-open="Close filters" data-label-closed="Filters"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5h9M17 7.5h3M4 16.5h3M11 16.5h9" /><circle cx="15" cy="7.5" r="2.2" /><circle cx="9" cy="16.5" r="2.2" /></svg><span>Filters</span><b class="sims-filters-n" id="filters-n" hidden></b></button>
+        </div>
 
-      <section class="note-card sims-how">
-        <h2>How to play</h2>
-        <p>Open a sim on a computer or TV and scan its code with your phone's camera, or type the code at <b>obpal.blackboxes.net</b>. No app needed. Your phone opens the controller that suits it best; pick another from its tabs.</p>
-      </section>
+        <div class="sims-head">
+          <div class="sims-title">
+            <h2 id="view-title">All sims</h2>
+            <span class="sims-count" id="count-readout" aria-hidden="true"></span>
+            <span class="kit-sr" id="result-count" role="status" aria-live="polite"></span>
+          </div>
+          <div class="sims-chips" id="chips" hidden>
+            <span class="sims-chip-list" id="chip-list"></span>
+            <button class="sims-clear" id="clear-filters" type="button" aria-label="Clear filters">Clear all</button>
+          </div>
+        </div>
 
-      <footer class="foot">Part of <a href="/">ob.Pal</a> and the <a href="https://ecosystem.blackboxes.net">Blackboxes</a> ecosystem. <a href="/catalogue/">Control catalogue</a> · <a href="https://github.com/Axialon/obpal/blob/main/spec/CATALOGUE.md">Spec</a> · <a href="/privacy/">Privacy</a></footer>
-    </main>
+        <section class="sims-grid" id="sims" aria-label="Sims"></section>
+        <p class="sims-none" id="none" hidden>No sims match this view. Try another search or clear the filters.</p>
+
+        <section class="sims-next" aria-labelledby="h-next">
+          <h2 id="h-next">Next in the catalogue</h2>
+          <div class="sims-soon" id="soon"></div>
+        </section>
+
+        <section class="note-card sims-how">
+          <h2>How to play</h2>
+          <p>Open a sim on a computer or TV and scan its code with your phone's camera, or type the code at <b>obpal.blackboxes.net</b>. No app needed. Your phone opens the controller that suits it best; pick another from its tabs.</p>
+        </section>
+
+        <footer class="foot">Part of <a href="/">ob.Pal</a> and the <a href="https://ecosystem.blackboxes.net">Blackboxes</a> ecosystem. <a href="/catalogue/">Control catalogue</a> · <a href="https://github.com/Axialon/obpal/blob/main/spec/CATALOGUE.md">Spec</a> · <a href="/privacy/">Privacy</a></footer>
+      </main>
+    </div>
   </body>
 </html>

@@ -91,7 +91,7 @@ export class Drums {
     const key = `${scope}:${this.seat}`
     if (key !== this.mapKey) {
       this.mapKey = key; this.marks.clear(); this.highlight = null
-      const svg = this.el.querySelector('svg')!
+      const svg = this.el.querySelector<SVGSVGElement>('svg.strike-map')!
       svg.replaceChildren()
       for (const t of scope === 'scene' ? STUDIO_TARGETS : instrumentTargets(this.seat)) {
         const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle')

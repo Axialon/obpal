@@ -7,7 +7,10 @@
 .music-part { font-size: 12px; color: var(--muted); text-align: right; }
 .music-options { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
 .music-options label { flex: 1; min-width: 0; color: var(--muted); font-size: 11px; display: grid; gap: 4px; }
-.music-options select, .music-toggle, .music-options button, .sustain { min-height: 44px; border: 1px solid var(--glass-edge); border-radius: 12px; background: var(--glass); color: var(--ink); padding: 8px 12px; font: inherit; }
+/* Its selects are the kit's glass ones (../ui/kit/select.ts), at the phone's touch size. */
+.music-options { --kit-select-h: 44px; --kit-select-size: 14px; }
+.music-options .kit-select { width: 100%; }
+.music-toggle, .music-options > button, .sustain { min-height: 44px; border: 1px solid var(--glass-edge); border-radius: 12px; background: var(--glass); color: var(--ink); padding: 8px 12px; font: inherit; }
 .music-toggle[aria-pressed=true], .sustain.playing { color: var(--accent); border-color: var(--accent); }
 .drum-pads { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, minmax(58px, 1fr)); gap: 9px; }
 .drum-pads.hand-drums { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); }
@@ -22,7 +25,7 @@
 .strike-map { width: min(100%, 260px); height: min(24vh, 190px); flex-shrink: 1; min-height: 60px; overflow: visible; pointer-events: none; }
 .strike-map circle { fill: var(--muted); opacity: .45; }.strike-map circle.aimed { fill: #c6ff34; opacity: 1; stroke: #c6ff34; stroke-width: 2; }
 .strike-map text { fill: var(--muted); font-size: 7px; text-anchor: middle; }
-.music-face button:focus-visible, .music-face select:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.music-face button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .tone-keys { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(2, 1fr); gap: 8px; }
 .tone-key { display: flex; flex-direction: column; justify-content: space-between; align-items: center; padding: 16px 8px; border-radius: 10px 10px 24px 24px; background: linear-gradient(#e7ece2, #adb4a4); color: #182012; border: 1px solid #eef4e8; touch-action: none; user-select: none; }
 .tone-key small { opacity: .45; }.tone-key span { font-size: 22px; font-weight: 750; }.tone-key.playing { background: var(--accent); }

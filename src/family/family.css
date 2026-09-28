@@ -384,7 +384,7 @@
 .bb-field > output { font: 600 12px/1.3 var(--bb-font-data); color: var(--bb-ink-3); font-variant-numeric: tabular-nums; }
 .bb-field > .bb-range { grid-column: 1 / -1; }
 
-/* ---- scrollbars: thin, on a clear track, in the surface's own ink; the accent while dragged -------------------
+/* ---- scrollbars: thin, on a clear track, in the surface's own ink; the accent when pointed at or dragged -------
  * For mouse and trackpad only: phones keep their own overlay scrollbars. Chromium and Safari draw these. Chromium
  * drops ::-webkit-scrollbar styling wherever scrollbar-width or scrollbar-color is set, and its thin standard
  * scrollbar keeps its arrow buttons, so the standard properties are for Firefox alone. A rounded box that scrolls
@@ -396,9 +396,9 @@
   ::-webkit-scrollbar-track:vertical { margin: var(--bb-scroll-inset, 0px) 0; }
   ::-webkit-scrollbar-track:horizontal { margin: 0 var(--bb-scroll-inset, 0px); }
   ::-webkit-scrollbar-button { display: none; }
-  ::-webkit-scrollbar-thumb { min-height: 36px; border: 3px solid transparent; border-radius: 999px; background: rgb(var(--bb-hl-rgb) / 0.16) padding-box; }
-  ::-webkit-scrollbar-thumb:hover { background-color: rgb(var(--bb-hl-rgb) / 0.3); }
-  ::-webkit-scrollbar-thumb:active { background-color: rgb(var(--bb-accent-rgb) / 0.65); }
+  ::-webkit-scrollbar-thumb { min-height: 36px; border: 3px solid transparent; border-radius: 999px; background: rgb(var(--bb-hl-rgb) / 0.18) padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background-color: rgb(var(--bb-accent-rgb) / 0.5); }
+  ::-webkit-scrollbar-thumb:active { background-color: rgb(var(--bb-accent-rgb) / 0.8); }
 }
 @supports not selector(::-webkit-scrollbar) {
   :root { scrollbar-color: rgb(var(--bb-hl-rgb) / 0.3) transparent; }
@@ -445,30 +445,41 @@
   font: 600 14px/1.2 var(--bb-font-ui);
 }
 .bb-menu-item:hover, .bb-menu-item:focus-visible { background: var(--bb-wash); }
+.bb-menu-item:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: -2px; box-shadow: none; }
 .bb-menu-item[aria-current='page'] { background: rgb(var(--bb-item-rgb, var(--bb-accent-rgb)) / 0.14); }
 .bb-menu-item .bb-mark { width: 30px; height: 30px; flex: none; }
 .bb-menu-item b { display: block; font: 750 14px/1.2 var(--bb-font-display); letter-spacing: -0.01em; }
 .bb-menu-item small { display: block; margin-top: 2px; font: 500 12px/1.2 var(--bb-font-ui); color: var(--bb-ink-3); }
 .bb-menu-group { padding: 8px 10px 4px; }
 
-.bb-themes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; min-width: 300px; }
-.bb-accents { display: flex; flex-wrap: wrap; gap: 5px; padding: 2px 2px 4px; }
+/* Every pairing can be judged before it's picked: a surface card previews its surface with the accent in effect, and
+ * an accent swatch previews its colour on the surface in effect. Both follow the visitor's picks as they change. */
+.bb-themes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; min-width: min(300px, 100%); }
+.bb-accents { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 4px; padding: 4px 4px 6px; }
 .bb-accent {
-  display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; padding: 0; cursor: pointer;
-  border: 2px solid transparent; background: var(--sw); box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.25);
-  color: #0b0b0c; transition: transform var(--bb-dur-1) var(--bb-ease);
+  position: relative; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; padding: 0; cursor: pointer;
+  border: 0; background: linear-gradient(135deg, rgb(var(--bb-surface-rgb)), var(--bb-page)); box-shadow: inset 0 0 0 1px var(--bb-line-strong);
+  color: #0b0b0c; transition: transform var(--bb-dur-1) var(--bb-ease), box-shadow var(--bb-dur-2) var(--bb-ease);
 }
+.bb-accent::before { content: ''; position: absolute; inset: 6px; border-radius: 50%; background: var(--sw); box-shadow: 0 0 10px -2px var(--sw); }
 .bb-accent:hover { transform: scale(1.08); }
-.bb-accent[aria-checked='true'] { border-color: var(--bb-ink); box-shadow: 0 0 0 3px var(--bb-page), inset 0 0 0 1px rgb(0 0 0 / 0.25); }
-.bb-accent .bb-ic { width: 14px; height: 14px; opacity: 0; }
+.bb-accent[aria-checked='true'] { box-shadow: 0 0 0 2px var(--bb-page), 0 0 0 3.5px var(--sw), inset 0 0 0 1px var(--bb-line-strong); }
+.bb-accent:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: 4px; }
+.bb-accent .bb-ic { position: relative; width: 12px; height: 12px; opacity: 0; }
 .bb-accent[aria-checked='true'] .bb-ic { opacity: 1; }
-.bb-accent.product { background: conic-gradient(from 210deg, var(--sw), color-mix(in srgb, var(--sw) 55%, white), var(--sw)); }
+.bb-accent.product::before { background: conic-gradient(from 210deg, var(--sw), color-mix(in srgb, var(--sw) 55%, white), var(--sw)); }
 .bb-theme {
-  display: grid; justify-items: center; gap: 6px; padding: 10px 6px; border-radius: var(--bb-r-md);
-  border: 1px solid var(--bb-line); background: transparent; color: var(--bb-ink-2); cursor: pointer; font: 600 12px/1 var(--bb-font-ui);
+  display: grid; justify-items: center; gap: 7px; padding: 8px 6px 9px; border-radius: var(--bb-r-md);
+  border: 1px solid var(--bb-line); background: var(--bb-wash); color: var(--bb-ink-2); cursor: pointer; font: 600 12px/1 var(--bb-font-ui);
+  transition: border-color var(--bb-dur-2) var(--bb-ease), box-shadow var(--bb-dur-2), background var(--bb-dur-2);
 }
-.bb-theme i { width: 40px; height: 28px; border-radius: 9px; border: 1px solid rgb(255 255 255 / 0.18); box-shadow: inset -10px -8px 0 -4px rgb(var(--bb-accent-rgb) / 0.95); }
-.bb-theme[aria-checked='true'] { border-color: rgb(var(--bb-accent-rgb) / 0.8); color: var(--bb-ink); background: rgb(var(--bb-accent-rgb) / 0.1); }
+.bb-theme:hover { border-color: var(--bb-line-strong); }
+.bb-theme:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: 2px; }
+/* The surface as a small window: a glass bar across its top and a pill in the accent. */
+.bb-theme i { position: relative; display: block; width: 100%; max-width: 64px; height: 36px; border-radius: 10px; overflow: hidden; border: 1px solid rgb(255 255 255 / 0.16); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1); }
+.bb-theme i::before { content: ''; position: absolute; left: 6px; right: 6px; top: 6px; height: 6px; border-radius: 3px; background: rgb(128 128 128 / 0.32); }
+.bb-theme i::after { content: ''; position: absolute; right: 6px; bottom: 6px; width: 22px; height: 10px; border-radius: 5px; background: var(--bb-accent); box-shadow: 0 0 10px rgb(var(--bb-accent-rgb) / 0.6); }
+.bb-theme[aria-checked='true'] { border-color: rgb(var(--bb-accent-rgb) / 0.85); color: var(--bb-ink); background: rgb(var(--bb-accent-rgb) / 0.1); box-shadow: 0 0 16px -4px rgb(var(--bb-accent-rgb) / 0.55); }
 
 /* ---- tooltips and coach-mark hints ------------------------------------------------------------------------ */
 
@@ -508,5 +519,5 @@
   .bb-hint, .bb-menu { animation: none; }
   .bb-range::-webkit-slider-thumb { transition: none; }
   .bb-range::-moz-range-thumb { transition: none; }
-  .bb-btn, .bb-tool, .bb-tip, .bb-switch .bb-ic { transition: none; }
+  .bb-btn, .bb-tool, .bb-tip, .bb-switch .bb-ic, .bb-accent, .bb-theme { transition: none; }
 }

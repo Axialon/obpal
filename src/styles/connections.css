@@ -23,7 +23,8 @@
 .connection-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
 .connection-actions .btn { flex: 1; min-height: 46px; white-space: nowrap; }
 .connection-limit { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; color: var(--muted); font-size: 13px; }
-.connection-limit select { min-width: 70px; min-height: 44px; border: 1px solid var(--glass-edge); border-radius: 12px; padding: 8px; color: inherit; background: var(--sheet); }
+.connection-limit { --kit-select-h: 44px; --kit-select-size: 15px; }
+.connection-limit .kit-select { min-width: 84px; }
 .connection-say { min-height: 20px; margin: 10px 0 0; font-size: 13px; color: var(--secondary); line-height: 1.4; }
 .connection-say:empty { display: none; }
 .connection-empty { padding: 20px 0; color: var(--muted); }

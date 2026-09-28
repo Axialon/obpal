@@ -89,18 +89,22 @@ try {
         await page.goto(worker.origin + '/sim/')
         await page.waitForFunction(() => window.__sims?.cards().length)
         await page.evaluate(() => scrollTo(0, 1050))
+        const phone = viewport.width < 600
         for (const theme of ['carbon', 'light']) {
           await setSurface(page, theme)
           await checkFrost(page, '.top', { text: ['.top-nav a'] })
-          await checkFrost(page, '.sims-bar', { maxHeight: viewport.width < 600 ? 126 : 64, text: ['.sims-category', '#search', '#controller-filter', '#result-count', '#clear-filters'] })
-          const layout = await page.evaluate(() => ({
+          // A computer browses from the sidebar; a phone has its search bar over the cards.
+          if (phone) await checkFrost(page, '.sims-bar', { maxHeight: 64, text: ['#search', '.sims-filters'] })
+          else await checkFrost(page, '.sims-side', { text: ['.kit-side-text', '.kit-side-label', '#search', '.kit-select-v'] })
+          const layout = await page.evaluate((phone) => ({
             top: document.querySelector('.top').getBoundingClientRect().bottom,
-            bar: document.querySelector('.sims-bar').getBoundingClientRect().top,
+            under: document.querySelector(phone ? '.sims-bar' : '.sims-side').getBoundingClientRect().top,
             overflow: document.documentElement.scrollWidth - innerWidth,
-          }))
-          if (Math.abs(layout.top - layout.bar) > 1 || layout.overflow > 0) throw new Error(`sticky layout: ${JSON.stringify(layout)}`)
+          }), phone)
+          const gap = layout.under - layout.top
+          if (gap < 0 || gap > 16 || layout.overflow > 0) throw new Error(`sticky layout: ${JSON.stringify(layout)}`)
         }
-        return `${viewport.width < 600 ? 126 : 64}px limit; both themes; AA over black and white`
+        return `${phone ? 'search bar at most 64px' : 'the sidebar'} held under the bar; both themes; AA over black and white`
       } finally { await ctx.close() }
     })
   }
@@ -119,7 +123,7 @@ try {
       await page.waitForFunction(() => window.__sims?.cards().length)
       if (!replaced) throw new Error('no backdrop support query was exercised')
       await checkFrost(page, '.top', { solid: true })
-      await checkFrost(page, '.sims-bar', { solid: true })
+      await checkFrost(page, '.sims-side', { solid: true })
       await page.goto(worker.origin + '/')
       await page.locator('.cta-alt').hover()
       await checkFrost(page, '.cta-alt', { solid: true })

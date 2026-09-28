@@ -6,7 +6,8 @@
  * checkout's own worker with --local-worker (scripts/local-worker.mjs, on OBPAL_E2E_WORKER_PORT), or from
  * OBPAL_E2E_ORIGIN (a dev server) when that's set.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch. OBPAL_SHOTS=<dir> saves
- * screens. --only=<name,name> runs some: catalogue, rover, drone, maze, ptz, lamp, claw.
+ * screens. --only=<name,name> runs some: catalogue, ui (the sidebar, drawer, glass select and sheet at five sizes:
+ * ./lib/catalogue-ui.mjs), rover, drone, maze, ptz, lamp, claw.
  */
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -16,6 +17,7 @@ import { cspCheck } from './csp-watch.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
 import { startWorker } from './local-worker.mjs'
 import { deviceExercises, exerciseDevice } from './lib/catalogue-devices.mjs'
+import { chooseFace, faceOf, faceOptions, runCatalogueUi } from './lib/catalogue-ui.mjs'
 
 const HEADED = process.argv.includes('--headed')
 const ONLY = (process.argv.find((a) => a.startsWith('--only='))?.slice(7) ?? '').split(',').filter(Boolean)
@@ -184,20 +186,20 @@ try {
         await until(`${id} preview`, () => card.locator('.dcard-stage.live').count(), 15000)
         if (await card.locator('.dcard-go').getAttribute('href') !== `/sim/device/?d=${id}`) throw new Error(`${id} link`)
       }
-      await page.locator('#controller-filter').scrollIntoViewIfNeeded()
     })
     await check('catalogue: a controller filters the cards, and the address keeps it', async () => {
-      await page.locator('#controller-filter').selectOption('face.keyboard')
+      await chooseFace(page, 'face.keyboard')
       const only = await page.evaluate(() => window.__sims.cards())
       if (only.join() !== 'lamp') throw new Error(`the keyboard shows ${only}`)
       if (!page.url().endsWith('?face=keyboard')) throw new Error(page.url())
-      await page.locator('#controller-filter').selectOption('face.wii')
+      await chooseFace(page, 'face.wii')
       const wii = await page.evaluate(() => window.__sims.cards())
       if (wii.includes('maze') || !wii.includes('ptz')) throw new Error(`the Wii remote shows ${wii}`)
       await page.goto(`${ORIGIN}/sim/?face=hand`)
       const hand = await until('filtered on load', () => page.evaluate(() => window.__sims?.cards()), 8000)
       if (hand.includes('rover') || !hand.includes('drone')) throw new Error(`the 3D hand shows ${hand}`)
-      await page.locator('#controller-filter').selectOption('')
+      if (await faceOf(page) !== 'face.hand') throw new Error(`the select shows ${await faceOf(page)}`)
+      await chooseFace(page, '')
       return `keyboard: ${only}; Wii: ${wii.length} sims; 3D hand: ${hand.join(', ')}`
     })
     await check('catalogue: category, search and controller combine in shareable URLs and browser history', async () => {
@@ -218,33 +220,39 @@ try {
       await page.locator('#clear-filters').click()
       if (new URL(page.url()).search) throw new Error('clear left URL filters')
     })
-    await check('catalogue: a far-right category restored from its URL stays fully visible', async () => {
-      await page.setViewportSize({ width: 1280, height: 800 })
-      await page.goto(`${ORIGIN}/sim/?category=music&face=keys&q=drums`)
-      await until('restored studio', () => page.evaluate(() => window.__sims?.cards().join() === 'studio'))
+    await check('catalogue: a category restored from its URL is chosen and in view in the sidebar, on a short screen too', async () => {
+      await page.setViewportSize({ width: 1280, height: 620 })
+      await page.goto(`${ORIGIN}/sim/?category=space-science&face=hand&q=planet`)
+      await until('restored', () => page.evaluate(() => document.querySelector('[data-category="space-science"]')?.getAttribute('aria-pressed') === 'true'))
       await page.evaluate(() => document.fonts.ready)
-      const bounds = await page.locator('#categories').evaluate(lane => {
-        const a = lane.getBoundingClientRect(), b = lane.querySelector('[aria-pressed="true"]').getBoundingClientRect()
-        return { left: b.left - a.left, right: a.right - b.right }
+      const bounds = await page.locator('#sims-side .kit-side-body').evaluate(body => {
+        const a = body.getBoundingClientRect(), b = body.querySelector('[aria-pressed="true"]').getBoundingClientRect()
+        return { top: b.top - a.top, bottom: a.bottom - b.bottom }
       })
-      if (bounds.left < -1 || bounds.right < -1) throw new Error(`selected category is clipped: ${JSON.stringify(bounds)}`)
+      if (bounds.top < -1 || bounds.bottom < -1) throw new Error(`the chosen category is out of view: ${JSON.stringify(bounds)}`)
+      await page.setViewportSize({ width: 1280, height: 900 })
     })
-    await check('catalogue: keyboard controller selection, empty counts and clearing work on a phone', async () => {
+    await check('catalogue: on a phone the controller tiles choose by keyboard, show empty counts, and Clear resets them and the address', async () => {
       await page.setViewportSize({ width: 390, height: 844 })
       await page.goto(`${ORIGIN}/sim/`)
-      const controller = page.getByRole('combobox', { name: 'Controller', exact: true })
-      await controller.focus()
+      await until('the sheet layout', () => page.evaluate(() => window.__sims?.side().mode === 'sheet'))
+      const filters = page.locator('#filters-open')
+      const tiles = page.getByRole('radiogroup', { name: 'Controller', exact: true })
+      await filters.click()
+      await tiles.locator('[aria-checked="true"]').focus()
       await page.keyboard.press('End')
-      await page.keyboard.press('Enter')
-      await until('keyboard selected Keys', () => controller.inputValue().then(value => value === 'face.keys'))
+      await until('keyboard chose Keys', async () => (await tiles.locator('[aria-checked="true"]').getAttribute('data-value')) === 'face.keys')
       if ((await page.evaluate(() => window.__sims.cards())).join() !== 'studio') throw new Error('keyboard selection did not filter')
+      await page.keyboard.press('Escape')
       await page.getByRole('searchbox', { name: 'Search sims' }).fill('no matching sim')
-      const empty = await controller.locator('option').evaluateAll(els => els.every(el => /\(0\)$/.test(el.textContent) && (el.value === '' || el.selected || el.disabled)))
-      if (!empty || await page.locator('#result-count').textContent() !== '0 sims') throw new Error('empty controller counts or disabled options are wrong')
+      await filters.click()
+      const empty = await tiles.locator('[role="radio"]').evaluateAll(els => els.every(el => el.querySelector('.kit-seg-badge').textContent === '0' && (el.dataset.value === '' || el.getAttribute('aria-checked') === 'true' || el.disabled)))
+      if (!empty || await page.locator('#result-count').textContent() !== '0 sims') throw new Error('empty controller counts or disabled tiles are wrong')
+      await page.getByRole('button', { name: 'Clear', exact: true }).click()
+      await page.keyboard.press('Escape')
+      if (await tiles.locator('[aria-checked="true"]').getAttribute('data-value') || await page.locator('#search').inputValue() || new URL(page.url()).search) throw new Error('clear did not reset the controls and URL')
       const layout = await page.locator('.sims-bar').evaluate(el => ({ height: el.getBoundingClientRect().height, width: el.scrollWidth, viewport: innerWidth }))
-      if (layout.height > 126 || layout.width > layout.viewport) throw new Error(`active mobile filters: ${JSON.stringify(layout)}`)
-      await page.getByRole('button', { name: 'Clear filters', exact: true }).click()
-      if (await controller.inputValue() || await page.locator('#search').inputValue() || new URL(page.url()).search) throw new Error('clear did not reset the controls and URL')
+      if (layout.height > 64 || layout.width > layout.viewport) throw new Error(`mobile search bar: ${JSON.stringify(layout)}`)
       await page.setViewportSize({ width: 1280, height: 900 })
     })
     await check('catalogue: the studio is in Music, Featured and New, with searchable Drums and Keys filters', async () => {
@@ -256,7 +264,7 @@ try {
       for (const category of ['music', 'featured', 'new']) {
         await page.locator(`[data-category="${category}"]`).click()
         for (const face of ['drums', 'keys']) {
-          await page.locator('#controller-filter').selectOption(`face.${face}`)
+          await chooseFace(page, `face.${face}`)
           await until('studio filters applied', () => page.evaluate(() => window.__sims.cards().join() === 'studio'))
           const params = new URL(page.url()).searchParams
           if (params.get('category') !== category || params.get('face') !== face || params.get('q') !== 'drums') throw new Error('studio filter URL lost state')
@@ -265,7 +273,7 @@ try {
       await page.reload()
       await until('studio filters restored', () => page.evaluate(() => window.__sims?.cards().join() === 'studio'))
       if (await page.locator('#search').inputValue() !== 'drums') throw new Error('studio search was not restored')
-      if (await page.locator('#controller-filter').inputValue() !== 'face.keys') throw new Error('Keys filter was not restored')
+      if (await faceOf(page) !== 'face.keys') throw new Error('Keys filter was not restored')
       await page.locator('#clear-filters').click()
       await page.locator('[data-category="music"]').click()
       if ((await page.evaluate(() => window.__sims.cards())).join() !== 'studio') throw new Error('Music category did not show the studio')
@@ -307,13 +315,13 @@ try {
     })
     await check('catalogue: each controller\'s count is the cards it shows; each kind of arm has a card, and its Try it opens the arm sim as that kind', async () => {
       // Every option's number is how many cards it leaves showing.
-      const options = await page.locator('#controller-filter option').evaluateAll(els => els.map(el => ({ face: el.value, n: Number(/\((\d+)\)$/.exec(el.textContent)?.[1]) })))
+      const options = await faceOptions(page)
       for (const c of options) {
-        await page.locator('#controller-filter').selectOption(c.face)
+        await chooseFace(page, c.face)
         const shown = (await page.evaluate(() => window.__sims.cards())).length
         if (shown !== c.n) throw new Error(`${c.face || 'All'} says ${c.n}, shows ${shown}`)
       }
-      await page.locator('#controller-filter').selectOption('')
+      await chooseFace(page, '')
       const arms = (await page.evaluate(() => window.__sims.cards())).filter((id) => id.startsWith('arm-'))
       if (arms.length !== 6) throw new Error(`arm cards: ${arms}`)
       // The arm cards' previews play (each one as it scrolls into view).
@@ -335,6 +343,14 @@ try {
       return page.url().replace(ORIGIN, '')
     })
     await check('catalogue: no errors', async () => { if (pageErrors.length) throw new Error(pageErrors.join(' | ')) })
+    await b.close()
+  }
+
+  // ---- the catalogue's glass UI at five sizes: the sidebar and its rail, the drawer, the glass select, the sheet ----
+  if (wanted('ui')) {
+    const b = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
+    closers.push(b)
+    await runCatalogueUi({ browser: b, origin: ORIGIN, check, until })
     await b.close()
   }
 

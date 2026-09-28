@@ -1,0 +1,25 @@
+/* The kit's components sheet (src/ui/kit/demo.ts, /sim/?kit=sheet): a review page, not part of the kit. */
+.kd { max-width: 1400px; margin: 0 auto; padding: 36px 28px 80px; }
+.kd-head { max-width: 760px; margin-bottom: 28px; }
+.kd-eyebrow { margin: 0 0 12px; color: var(--accent-text); font: 700 11.5px/1 var(--font-data); letter-spacing: 0.14em; text-transform: uppercase; }
+.kd-head h1 { margin: 0 0 12px; font: 800 44px/1.04 var(--font-display); letter-spacing: -0.04em; }
+.kd-head h1 span { display: block; color: var(--accent-text); }
+.kd-head p { margin: 0; color: var(--secondary); }
+.kd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; align-items: start; }
+.kd-wide { grid-column: span 2; }
+.kd-stack { display: grid; gap: 12px; justify-items: start; }
+.kd-stack > .kit-select { width: 100%; }
+.kd-row { display: flex; align-items: center; gap: 16px; }
+.kd-top { align-items: flex-start; }
+.kd-wrap { flex-wrap: wrap; gap: 8px; }
+.kd-around { justify-content: space-around; }
+.kd-between { justify-content: space-between; }
+.kd-grow { flex: 1; min-width: 0; }
+.kd-cap { color: var(--muted); font-size: 12px; }
+.kd-side { position: relative; top: 0; height: auto; }
+.kd-side[data-state='expanded'] { width: 250px; }
+.kit-pop.kd-static { position: static; max-height: none !important; width: 100%; max-width: none; }
+.kd-feed { position: relative; height: 150px; border-radius: 14px; overflow: hidden; background: radial-gradient(120% 90% at 30% 20%, #2f3a35, #0e1311 70%); }
+.kd-feed-rec { position: absolute; top: 14px; right: 16px; }
+.kd-feed-cap { position: absolute; left: 16px; bottom: 14px; color: var(--secondary); font: 600 11px/1 var(--font-data); letter-spacing: 0.08em; }
+@media (max-width: 700px) { .kd-wide { grid-column: auto; } .kd-row { flex-wrap: wrap; } }

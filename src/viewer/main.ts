@@ -25,6 +25,7 @@ import { LIGHT_CONTROLS, LIGHT_PRESETS, loadLighting, saveLighting, type Lightin
 import { ICONS, logo, settleMotion } from '../ui/icons'
 import { dismissHint, hint } from '../ui/hints'
 import { initTips } from '../ui/tips'
+import { enhanceSelects } from '../ui/kit/select'
 import { applyTheme, initialTheme, THEMES, themeById, type Theme } from '../ui/themes'
 import { Experience } from '../sim/vr/experience'
 import { SharedPresence } from '../sim/vr/presence'
@@ -789,6 +790,8 @@ $('t-light').onclick = (e) => { e.stopPropagation(); toggleLighting() }
 // ---- ecosystem switcher: every Blackboxes site, one tap away ----
 setMarkup($('t-switch'), family.icons.chevron)
 family.mountSwitcher($('t-switch'), $('switcher'), 'obpal')
+// The scene's selects (the viewpoint's ride) are the kit's glass ones, never the system's list.
+enhanceSelects()
 
 // ---- overflow: secondary tools fold into a glass tile menu on narrower screens ----
 function buildMore() {

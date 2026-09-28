@@ -1,51 +1,91 @@
-/* The sim catalogue (/sim/): a bar of controllers to filter by, and a card per sim with a live preview, the
-   controllers that suit it and Try it. Site palette (site.css): ultraviolet night, lime light, lavender haze. */
-.site.sim-catalogue { --bb-page: #101316; --bb-base-rgb: 16 19 22; --bb-surface-rgb: 34 39 43; --bb-sheet: #171c20; --bb-ink: #f0f3ed; --bb-ink-2: #c6cec4; --bb-ink-3: #97a39b; --bb-line: rgb(207 225 213 / 0.14); --bb-hl-rgb: 228 240 228; --haze-rgb: 172 197 175; --uv-rgb: 29 39 33; }
-.sims-land { max-width: 1200px; padding-top: 8px; }
-.sims-hero { padding: 30px 0 12px; max-width: none; }
-.sims-hero h1 { font-size: clamp(28px, 3.5vw, 44px); margin-bottom: 10px; }
-.sims-hero .lede { margin-bottom: 8px; }
+/* The sim catalogue (/sim/): a sidebar to browse and filter by (../ui/kit/sidebar.ts: docked or its rail on a
+   computer, a rail and drawer on a tablet, a bottom sheet on a phone) beside a card per sim with a live preview, the
+   controllers that suit it and Try it. Lime on Carbon; the kit's glass (kit.css). Nothing scrolls sideways. */
+.site.sim-catalogue { --bb-page: #101316; --bb-base-rgb: 16 19 22; --bb-surface-rgb: 34 39 43; --bb-sheet: #171c20; --bb-ink: #f0f3ed; --bb-ink-2: #c6cec4; --bb-ink-3: #97a39b; --bb-line: rgb(207 225 213 / 0.14); --bb-line-strong: rgb(207 225 213 / 0.24); --bb-hi: rgb(228 240 228 / 0.08); --bb-hl-rgb: 228 240 228; --haze-rgb: 172 197 175; --uv-rgb: 29 39 33; }
+/* The bar spans the page, as the sidebar and the cards do. */
+.sim-catalogue .top-in { width: auto; margin: 0 24px; }
 
-/* A single frosted bar: categories scroll within their lane, leaving search and controller selection in view. */
-.sims-bar { position: sticky; top: 65px; z-index: 12; display: flex; align-items: center; gap: 16px; margin: 0 calc(50% - 50vw); padding: 6px max(20px, calc((100vw - 1160px) / 2)); background: var(--frost); border-bottom: 1px solid var(--frost-edge); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); box-shadow: var(--frost-shadow); }
-.sims-categories { display: flex; flex: 1; min-width: 0; gap: 2px; overflow-x: auto; scrollbar-width: thin; scrollbar-color: rgb(var(--accent-rgb) / 0.45) transparent; overscroll-behavior-x: contain; padding: 2px; }
-.sims-categories::-webkit-scrollbar { height: 4px; }
-.sims-categories::-webkit-scrollbar-thumb { background: rgb(var(--accent-rgb) / 0.45); border-radius: 4px; }
-.sims-category { flex: none; min-height: 40px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--secondary); font: 650 13px var(--font); cursor: pointer; white-space: nowrap; transition: background 0.15s, color 0.15s; }
-.sims-category:hover { background: rgb(var(--hl-rgb) / 0.07); color: var(--ink); }
-.sims-category[aria-pressed='true'] { color: var(--accent-text); background: rgb(var(--accent-rgb) / 0.1); box-shadow: inset 0 -2px var(--accent-text); }
-.sims-tools { display: flex; flex: none; align-items: center; gap: 8px; }
-.sims-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.sims-search, .sims-controller { position: relative; display: flex; align-items: center; }
-.sims-search { width: 180px; }
-.sims-search > .ic { position: absolute; left: 10px; width: 16px; height: 16px; color: var(--secondary); pointer-events: none; }
-.sims-search input, .sims-controller select { width: 100%; min-width: 0; height: 40px; border-radius: 10px; border: 1px solid var(--frost-edge); color: var(--ink); background: rgb(var(--hl-rgb) / 0.04); font: 500 13px var(--font); }
-.sims-search input { padding: 0 8px 0 32px; }
-.sims-search input::placeholder { color: var(--secondary); opacity: 1; }
-.sims-controller { width: 178px; }
-.sims-controller select { appearance: none; padding: 0 28px 0 10px; cursor: pointer; text-overflow: ellipsis; }
-.sims-controller select option { color: var(--ink); background: var(--frost-solid); }
-.sims-controller > .ic { position: absolute; right: 8px; width: 16px; height: 16px; color: var(--secondary); pointer-events: none; }
-#result-count { color: var(--secondary); font: 500 11px var(--font); font-variant-numeric: tabular-nums; white-space: nowrap; }
-#clear-filters { display: grid; place-items: center; width: 32px; height: 40px; flex: none; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--secondary); cursor: pointer; }
-#clear-filters:hover { background: rgb(var(--hl-rgb) / 0.07); color: var(--ink); }
-#clear-filters .ic { width: 16px; height: 16px; }
-.sims-category:focus-visible { outline-offset: -2px; }
-.sims-search:focus-within, .sims-controller:focus-within { border-radius: 10px; outline: 2px solid var(--accent-text); outline-offset: 2px; }
-.sims-search input:focus-visible, .sims-controller select:focus-visible { outline: none; }
+/* ---- the layout: a sidebar column and the cards' column ---------------------------------------------------------------- */
 
-/* The cards. */
-.sims-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 18px; padding: 10px 0 8px; }
+.sims-app { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; column-gap: 28px; padding: 0 28px 0 12px; }
+.sims-side { --side-top: 76px; grid-column: 1; grid-row: 1; margin-top: 12px; }
+.sims-side[data-mode='sheet'] { margin: 0; }
+.sims-main { grid-column: 2; grid-row: 1; min-width: 0; width: 100%; max-width: 1680px; padding: 0 0 48px; }
+
+/* Only a phone's sheet has a sheet's head and foot; only a tablet and a phone have the bar above the cards. */
+.sims-sheet-head, .sims-sheet-foot, .sims-bar, .sims-filters, button.sims-rail-search { display: none; }
+.sims-side[data-mode='sheet'] :is(.sims-sheet-head, .sims-sheet-foot) { display: flex; }
+.sims-side[data-mode='sheet'] .sims-side-head { display: none; }
+.sims-side[data-mode='docked'][data-state='collapsed'] .sims-rail-search { display: grid; }
+.sims-side[data-state='collapsed'] .sims-search-slot { display: none; }
+.sims-side:not([data-mode='sheet']) .sims-controller-tiles, .sims-side[data-mode='sheet'] .sims-controller-select { display: none; }
+
+/* ---- the hero ---------------------------------------------------------------------------------------------------------- */
+
+.sims-hero { padding: 42px 0 22px; }
+.sims-hero .eyebrow { display: inline-flex; align-items: center; gap: 8px; margin: 0 0 14px; color: var(--accent-text); font: 700 11.5px/1 var(--font-data); letter-spacing: 0.14em; text-transform: uppercase; }
+.sims-hero .eyebrow::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px rgb(var(--accent-rgb) / 0.8); }
+.sims-hero h1 { margin: 0 0 14px; font: 800 clamp(32px, 3.6vw, 56px)/1.02 var(--font-display); letter-spacing: -0.04em; }
+.sims-hero h1 span { display: block; color: var(--accent-text); }
+.sims-hero .lede { max-width: 520px; margin: 0; color: var(--secondary); font-size: 16.5px; line-height: 1.5; }
+
+/* ---- the sidebar's own parts ----------------------------------------------------------------------------------------- */
+
+.sims-side-head { min-height: 64px; }
+/* A drawer names itself where a docked sidebar has its search (search is above the cards on a tablet). */
+.sims-side-title { display: none; flex: 1; margin: 0 0 0 8px; font: 750 18px/1.2 var(--font-display); letter-spacing: -0.02em; }
+.sims-side[data-mode='drawer'][data-open='true'] .sims-side-title { display: block; }
+.sims-side[data-mode='drawer'] .sims-search-slot { display: none; }
+.sims-search-slot { display: flex; flex: 1; min-width: 0; }
+.sims-search { position: relative; display: flex; flex: 1; align-items: center; min-width: 0; }
+.sims-search > .ic { position: absolute; left: 12px; width: 17px; height: 17px; color: var(--muted); pointer-events: none; }
+.sims-search input { width: 100%; min-width: 0; height: 42px; padding: 0 36px 0 38px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(180deg, rgb(var(--hl-rgb) / 0.075), rgb(var(--hl-rgb) / 0.03)); box-shadow: inset 0 1px 0 var(--bb-hi); color: var(--ink); font: 500 14px var(--font); transition: border-color 0.2s, box-shadow 0.2s; }
+.sims-search input::placeholder { color: var(--muted); opacity: 1; }
+.sims-search input:focus { outline: none; border-color: rgb(var(--accent-rgb) / 0.75); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.14); }
+.sims-search input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; margin-right: -4px; border-radius: 50%; background: rgb(var(--hl-rgb) / 0.3) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M5 5l6 6M11 5l-6 6' stroke='%23101316' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E") center / 12px no-repeat; cursor: pointer; }
+.sims-key { position: absolute; right: 9px; display: grid; place-items: center; min-width: 22px; height: 22px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); font: 600 11px/1 var(--font-data); pointer-events: none; }
+.sims-search:focus-within .sims-key, .sims-search:has(input:not(:placeholder-shown)) .sims-key { display: none; }
+@media (hover: none), (pointer: coarse) { .sims-key { display: none; } .sims-search input { padding-right: 12px; font-size: 16px; } }
+.sims-controller { padding: 0 2px; }
+.sims-controller-select { width: 100%; }
+.sims-controller-select .kit-select-ic { width: 28px; height: 28px; margin-left: -5px; border-radius: 50%; background: rgb(var(--hl-rgb) / 0.05); box-shadow: inset 0 0 0 1px var(--line); }
+.sims-controller.on .sims-controller-select .kit-select-ic { background: rgb(var(--accent-rgb) / 0.14); box-shadow: var(--kit-ring); }
+
+/* The rail: the controller is its icon in a ring, lit when one is chosen; its list opens beside it. */
+.sims-side[data-state='collapsed'] .sims-controller { display: grid; justify-items: center; padding: 0; }
+.sims-side[data-state='collapsed'] button.sims-controller-select[role='combobox'] { justify-content: center; width: calc(var(--rail-item) + 4px); height: var(--rail-item); padding: 0; border: 0; border-radius: 50%; background: transparent; box-shadow: none; }
+.sims-side[data-state='collapsed'] .sims-controller-select :is(.kit-select-v, .kit-select-badge, .kit-select-chev) { display: none; }
+.sims-side[data-state='collapsed'] .sims-controller-select .kit-select-ic { width: calc(var(--rail-item) - 8px); height: calc(var(--rail-item) - 8px); margin: 0; color: var(--secondary); }
+.sims-side[data-state='collapsed'] .sims-controller.on .sims-controller-select .kit-select-ic { color: var(--accent-text); }
+.sims-side[data-state='collapsed'] button.sims-controller-select[aria-expanded='true'] .kit-select-ic { box-shadow: var(--kit-ring); }
+
+/* ---- above the cards: what's showing, and the chips that take a filter away ---------------------------------------------- */
+
+.sims-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; padding: 18px 0 16px; border-top: 1px solid var(--line); }
+.sims-title { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.sims-title h2 { margin: 0; font: 750 24px/1.1 var(--font-display); letter-spacing: -0.025em; white-space: nowrap; }
+/* The count as an instrument: lime dots on a dark inset panel, and its unit. */
+.sims-count { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px 6px 9px; border-radius: 10px; background: rgb(0 0 0 / 0.34); box-shadow: inset 0 0 0 1px var(--line), inset 0 2px 8px rgb(0 0 0 / 0.35); }
+.sims-count::after { content: 'Sims'; color: var(--muted); font: 600 10px/1 var(--font-data); letter-spacing: 0.14em; text-transform: uppercase; }
+.sims-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+.sims-chip-list { display: contents; }
+.sims-clear { height: 32px; padding: 0 6px; border: 0; background: none; color: var(--secondary); font: 600 13px var(--font); text-decoration: underline; text-decoration-color: rgb(var(--hl-rgb) / 0.3); text-underline-offset: 4px; cursor: pointer; }
+.sims-clear:hover { color: var(--ink); text-decoration-color: currentColor; }
+
+/* ---- the cards --------------------------------------------------------------------------------------------------------- */
+
+.sims-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 18px; }
 .dcard { position: relative; display: flex; flex-direction: column; min-width: 0; padding: 0; border-radius: 26px; overflow: hidden; transition: transform 0.25s var(--ease), border-color 0.25s, box-shadow 0.25s; }
 .dcard[hidden] { display: none; }
-.dcard:hover { transform: translateY(-3px); border-color: rgb(var(--accent-rgb) / 0.5); box-shadow: 0 26px 60px -24px rgb(var(--uv-rgb) / 0.7), 0 0 0 1px rgb(var(--accent-rgb) / 0.18), inset 0 1px 0 rgb(255 255 255 / 0.1); }
-.dcard-stage { position: relative; display: block; aspect-ratio: 16 / 10; overflow: hidden; background: linear-gradient(180deg, #28322e, #161d1b); }
+.dcard:hover { transform: translateY(-3px); border-color: rgb(var(--accent-rgb) / 0.5); box-shadow: 0 26px 60px -24px rgb(0 0 0 / 0.7), 0 0 0 1px rgb(var(--accent-rgb) / 0.18), inset 0 1px 0 rgb(255 255 255 / 0.1); }
+.dcard-stage { position: relative; display: block; aspect-ratio: 16 / 10; overflow: hidden; background: radial-gradient(120% 90% at 50% 0%, #2c3632, #151b19 70%); }
 .dcard-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; opacity: 0; transition: opacity 0.6s var(--ease); }
 .dcard-stage.live canvas { opacity: 1; }
 .dcard-ph { position: absolute; inset: 0; display: grid; place-items: center; color: rgb(var(--haze-rgb) / 0.35); transition: opacity 0.4s; }
 .dcard-ph .ic { width: 64px; height: 64px; stroke-width: 1.2; }
 .dcard-stage.live .dcard-ph { opacity: 0; }
-.dcard-kind { position: absolute; left: 12px; top: 12px; padding: 4px 10px; border-radius: 999px; background: var(--frost); border: 1px solid var(--frost-edge); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); box-shadow: var(--frost-shadow); color: var(--secondary); font: 700 11px var(--font); letter-spacing: 0.08em; text-transform: uppercase; }
+.dcard-kind { position: absolute; left: 12px; top: 12px; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px 0 7px; border-radius: 999px; background: var(--frost); border: 1px solid var(--frost-edge); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); box-shadow: var(--frost-shadow); color: var(--secondary); font: 700 10.5px/1 var(--font-data); letter-spacing: 0.1em; text-transform: uppercase; }
+.dcard-kind .ic { width: 14px; height: 14px; color: var(--accent-text); }
 .dcard-body { flex: 1; display: flex; flex-direction: column; gap: 10px; padding: 16px 18px 18px; }
 .dcard-body h2 { margin: 0; font-family: var(--font-display); font-size: 21px; letter-spacing: -0.02em; }
 .dcard-body p { margin: -4px 0 0; color: var(--muted); font-size: 14px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -57,13 +97,18 @@
 .dcard-faces li.match { background: var(--glass-light); border-color: rgb(255 255 255 / 0.3); color: var(--accent-ink); }
 .dcard-faces li.match .ic { color: var(--accent-ink); }
 .dcard-foot { display: flex; align-items: center; gap: 12px; margin-top: auto; padding-top: 4px; }
-.dcard-go { flex: none; min-height: 40px; height: 40px; padding: 0 18px; text-decoration: none; }
-.sims-none { margin: 18px 0; color: var(--muted); text-align: center; }
+/* Try it: the accent pill with its arrow in a dark disc. */
+.dcard-go { display: inline-flex; align-items: center; gap: 10px; height: 42px; padding: 0 5px 0 18px; border: 1px solid rgb(255 255 255 / 0.25); border-radius: 999px; background: var(--glass-light); box-shadow: 0 12px 28px -14px rgb(var(--accent-rgb) / 0.9), inset 0 1px 0 rgb(255 255 255 / 0.45); color: var(--accent-ink); font: 700 14px/1 var(--font); letter-spacing: -0.01em; text-decoration: none; transition: filter 0.15s, transform 0.12s var(--ease); }
+.dcard-go:hover { filter: brightness(1.05); }
+.dcard-go:active { transform: scale(0.98); }
+.dcard-go .ic { width: 32px; height: 32px; padding: 7px; box-sizing: border-box; border-radius: 50%; background: rgb(0 0 0 / 0.82); color: var(--accent); stroke-width: 2; transition: transform 0.2s var(--ease); }
+.dcard:hover .dcard-go .ic { transform: translateX(2px); }
+.sims-none { margin: 4px 0 18px; padding: 36px 20px; border: 1px dashed rgb(var(--hl-rgb) / 0.2); border-radius: 24px; background: rgb(var(--hl-rgb) / 0.025); color: var(--muted); text-align: center; }
 
 /* What's next: proposed devices, quieter. */
 .sims-next { padding: 34px 0 10px; }
 .sims-next h2 { margin: 0 0 14px; font-family: var(--font-display); font-size: clamp(22px, 2.6vw, 28px); letter-spacing: -0.03em; }
-.sims-soon { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.sims-soon { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 10px; }
 .dsoon { display: flex; gap: 12px; padding: 14px; border-radius: 20px; border: 1px dashed rgb(var(--haze-rgb) / 0.25); background: rgb(var(--hl-rgb) / 0.025); transition: opacity 0.3s var(--ease); }
 .dsoon.dim { opacity: 0.35; }
 .dsoon-ic { flex: none; width: 42px; height: 42px; display: grid; place-items: center; border-radius: 14px; background: rgb(var(--uv-rgb) / 0.22); color: var(--accent-soft); }
@@ -73,21 +118,74 @@
 .dsoon p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.4; }
 .dsoon .dcard-faces { margin-top: 4px; }
 .dsoon .dcard-faces li { height: 26px; font-size: 11.5px; }
-.sims-how { margin-top: 28px; }
 
-@media (max-width: 860px) {
-  .sims-bar { flex-direction: column; align-items: stretch; gap: 4px; }
-  .sims-categories { flex: auto; }
-  .sims-search { flex: 1; width: auto; min-width: 0; }
+.sims-how { margin-top: 34px; padding: 22px 24px; border-radius: 24px; border: 1px solid var(--line); background: linear-gradient(180deg, rgb(var(--bb-surface-rgb) / 0.5), rgb(var(--bb-base-rgb) / 0.72)); box-shadow: inset 0 1px 0 var(--bb-hi); }
+.sims-how h2 { display: flex; align-items: center; gap: 9px; margin: 0 0 8px; color: var(--secondary); font: 600 11px/1 var(--font-data); letter-spacing: 0.1em; text-transform: uppercase; }
+.sims-how h2::before { content: '04'; color: var(--muted); }
+.sims-how p { max-width: 760px; margin: 0; color: var(--secondary); font-size: 15px; line-height: 1.6; }
+.sims-main .foot { margin-top: 28px; }
+
+/* ---- a tablet: the rail, the drawer over the cards, and search above them ------------------------------------------------ */
+
+/* One frosted field: the search inside it borderless, the bar lit when it has the focus. */
+.sims-bar { position: sticky; top: 72px; z-index: 12; align-items: center; gap: 6px; margin: 0 0 6px; padding: 5px; border-radius: 18px; background: var(--frost); border: 1px solid var(--frost-edge); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); box-shadow: var(--frost-shadow); transition: border-color 0.2s, box-shadow 0.2s; }
+.sims-bar:has(input:focus) { border-color: rgb(var(--accent-rgb) / 0.7); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.14), var(--frost-shadow); }
+.sims-bar .sims-search input, .sims-bar .sims-search input:focus { border-color: transparent; background: transparent; box-shadow: none; }
+@media (min-width: 701px) and (max-width: 1199.98px) and (min-height: 501px) {
+  .sims-app { grid-template-columns: 76px minmax(0, 1fr); column-gap: 22px; padding-right: 22px; }
+  .sims-side[data-mode='docked'] { width: var(--rail-w); }
+  .sims-bar { display: flex; }
+  .sims-hero { padding-top: 30px; }
+  .sims-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 256px), 1fr)); gap: 16px; }
 }
-@media (max-width: 600px) {
-  .sims-hero { padding: 20px 0 8px; }
+
+/* ---- a phone: search and Filters above the cards; the filters in a sheet -------------------------------------------------- */
+
+@media (max-width: 700px), (max-height: 500px) {
+  .sim-catalogue .top-in { margin: 0 16px; }
+  .sims-app { display: block; padding: 0 16px; }
+  /* Until the sheet takes it, the sidebar keeps out of the way. */
+  .sims-side:not([data-mode='sheet']) { position: fixed; visibility: hidden; }
+  .sims-bar { display: flex; top: 70px; margin: 0 -6px 4px; }
+  .sims-filters { display: inline-flex; align-items: center; gap: 8px; flex: none; height: 44px; padding: 0 14px 0 12px; border: 0; border-radius: 13px; background: rgb(var(--hl-rgb) / 0.08); color: var(--ink); font: 650 14px var(--font); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .sims-filters[aria-expanded='true'] { background: rgb(var(--accent-rgb) / 0.16); }
+  .sims-filters .ic { width: 18px; height: 18px; color: var(--accent-text); }
+  .sims-filters-n { display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font: 700 11px/1 var(--font-data); }
+  .sims-filters-n[hidden] { display: none; }
+  .sims-search input { height: 44px; }
+  .sims-hero { padding: 24px 0 14px; }
+  .sims-hero h1 { font-size: clamp(30px, 8.4vw, 40px); }
   .sims-hero .lede { font-size: 15px; }
-  .sims-tools { gap: 6px; }
-  .sims-controller { width: 145px; flex: none; }
-  .sims-search input { font-size: 16px; }
+  .sims-head { padding: 14px 0 12px; border-top: 0; }
+  .sims-title h2 { font-size: 20px; }
+  .sims-chips { margin-left: 0; }
   .sims-grid { grid-template-columns: 1fr; gap: 14px; }
   .dcard-body { padding: 14px 16px 16px; }
+  /* The sheet: the lists wrap as chips, the controllers are tiles, and its foot says what it shows. */
+  .sims-side[data-mode='sheet'] .kit-side-body { padding: 0 16px 16px; }
+  .sims-side[data-mode='sheet'] .kit-side-label { margin: 16px 2px 10px; }
+  .sims-side[data-mode='sheet'] .kit-side-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .sims-side[data-mode='sheet'] button.kit-side-item { width: auto; min-height: 42px; gap: 8px; padding: 3px 13px 3px 3px; border-radius: 999px; background: rgb(var(--hl-rgb) / 0.045); box-shadow: inset 0 0 0 1px var(--line); font-size: 13.5px; }
+  .sims-side[data-mode='sheet'] button.kit-side-item .kit-side-ic { width: 34px; height: 34px; }
+  .sims-side[data-mode='sheet'] button.kit-side-item[aria-pressed='true'] { background: rgb(var(--accent-rgb) / 0.12); box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / 0.6); }
+  .sims-side[data-mode='sheet'] .kit-side-n { min-width: 0; }
+  .sims-sheet-foot { gap: 12px; }
+  .sims-sheet-clear { height: 44px; padding: 0 12px; border: 0; background: none; color: var(--secondary); font: 650 14px var(--font); text-decoration: underline; text-decoration-color: rgb(var(--hl-rgb) / 0.3); text-underline-offset: 4px; cursor: pointer; }
+  .sims-sheet-clear:disabled { opacity: 0.4; cursor: default; }
+  .sims-sheet-done { flex: 1; justify-content: space-between; }
 }
-@media (max-height: 500px) { .sims-hero { padding: 8px 0 0; } .sims-hero .eyebrow, .sims-hero .lede { display: none; } .sims-bar { position: static; } }
-@media (prefers-reduced-motion: reduce) { .dcard, .dcard-stage canvas, .sims-category { transition: none; } }
+/* A phone held sideways: the bar stays in the page, the hero says less, and the sheet's lists sit side by side. */
+@media (max-height: 500px) {
+  .sims-side[data-mode='sheet'] .kit-side-body { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); grid-auto-rows: min-content; column-gap: 22px; }
+  .sims-side[data-mode='sheet'] .kit-side-body > * { grid-column: 1; }
+  .sims-side[data-mode='sheet'] .kit-side-body > #l-controller { grid-column: 2; grid-row: 1; }
+  .sims-side[data-mode='sheet'] .kit-side-body > #controller-slot { grid-column: 2; grid-row: 2 / span 3; }
+  .sims-side[data-mode='sheet'] .kit-tiles { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); }
+  .sims-bar { position: static; margin-top: 8px; }
+  .sims-hero { padding: 14px 0 4px; }
+  .sims-hero .eyebrow, .sims-hero .lede { display: none; }
+  .sims-hero h1 { font-size: 30px; }
+  .sims-hero h1 span { display: inline; }
+  .sims-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) { .dcard, .dcard-stage canvas, .dcard-go, .dcard-go .ic { transition: none; } }

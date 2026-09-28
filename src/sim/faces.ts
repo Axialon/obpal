@@ -7,8 +7,8 @@ import { ICONS } from '../ui/icons'
 
 /** Each controller's glyph, from the phone's own icon set: what its tab or tray button shows. */
 const GLYPH: Record<ControllerId, string> = {
-  'face.drums': 'tap',
-  'face.keys': 'keyboard',
+  'face.drums': 'drum',
+  'face.keys': 'piano',
   'face.gamepad': 'gamepad',
   'face.wheel': 'wheel',
   'face.wii': 'point',

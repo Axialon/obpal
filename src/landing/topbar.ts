@@ -1,9 +1,11 @@
 import { setMarkup } from '../ui/markup'
 /**
- * The site's top bar (home, catalogue): the family's app switcher by the logo, and on a narrow screen a menu for the
- * links that don't fit. Both are the family's glass popovers.
+ * The site's top bar (home, catalogue, the sims): the family's app switcher by the logo, and on a narrow screen a menu
+ * for the links that don't fit. Both are the family's glass popovers. The page's selects become the kit's glass ones
+ * (../ui/kit/select.ts), never the system's list, including those its code adds later.
  */
 import { family } from '../family'
+import { enhanceSelects } from '../ui/kit/select'
 
 export function mountTopBar() {
   const sw = document.getElementById('t-switch')
@@ -19,4 +21,5 @@ export function mountTopBar() {
     // A link to a section of this page closes the menu on the way.
     links.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('a')) pop.close() })
   }
+  enhanceSelects()
 }

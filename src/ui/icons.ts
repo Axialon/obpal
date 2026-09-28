@@ -73,6 +73,19 @@ export const ICONS: Record<string, string> = {
   'arrow-right': s('<path d="M5 12h13.6M13 6.4l5.6 5.6-5.6 5.6"/>'),
   'arrow-up': s('<path d="M12 19V5.4M6.4 11 12 5.4l5.6 5.6"/>'),
   'arrow-down': s('<path d="M12 5v13.6M6.4 13l5.6 5.6 5.6-5.6"/>'),
+  // the glass kit (./kit) and the sim catalogue's categories and controllers
+  search: s('<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>'),
+  check: s('<path d="m5.5 12.5 4.2 4.2 8.8-9.4"/>'),
+  sidebar: s('<rect x="3.5" y="4.5" width="17" height="15" rx="3.2"/><path d="M9.5 4.5v15"/><path class="ic-flip" d="m15.4 9.6-2.4 2.4 2.4 2.4"/>'),
+  star: s('<path d="m12 3.8 2.45 5 5.5.8-3.98 3.88.94 5.47L12 16.37l-4.91 2.58.94-5.47L4.05 9.6l5.5-.8Z"/>'),
+  arm: s('<path d="M4.5 20.5h10"/><path d="M6.8 20.5v-2.1a1.4 1.4 0 0 1 1.4-1.4h2.6a1.4 1.4 0 0 1 1.4 1.4v2.1"/><path d="m9.6 17 3.5-8.1"/><circle cx="14" cy="6.9" r="2.1"/><path d="m16 7.8 3.4 3.3"/><path d="m17.4 14.2 1.9-2.9 2.2 1.6"/>'),
+  car: s('<path d="M3.8 16.2V13a1.8 1.8 0 0 1 1.3-1.7l2-.6 2.3-3.2a1.9 1.9 0 0 1 1.5-.8h2.7a1.9 1.9 0 0 1 1.5.7l2.7 3.3 1.3.4a1.8 1.8 0 0 1 1.3 1.7v3.4"/><path d="M5.3 16.2h.5M9.6 16.2h4.8M18.2 16.2h.5"/><circle cx="7.7" cy="16.4" r="1.9"/><circle cx="16.3" cy="16.4" r="1.9"/><path d="M7.3 10.8h10"/>'),
+  drone: s('<rect x="9.6" y="9.6" width="4.8" height="4.8" rx="1.4"/><path d="M9.7 9.7 7.6 7.6M14.3 9.7l2.1-2.1M9.7 14.3l-2.1 2.1M14.3 14.3l2.1 2.1"/><circle cx="5.9" cy="5.9" r="2.4"/><circle cx="18.1" cy="5.9" r="2.4"/><circle cx="5.9" cy="18.1" r="2.4"/><circle cx="18.1" cy="18.1" r="2.4"/>'),
+  camera: s('<path d="M4.8 8.2h2.7l1.5-2h6l1.5 2h2.7a1.6 1.6 0 0 1 1.6 1.6v7.6a1.6 1.6 0 0 1-1.6 1.6H4.8a1.6 1.6 0 0 1-1.6-1.6V9.8a1.6 1.6 0 0 1 1.6-1.6Z"/><circle cx="12" cy="13.2" r="3.3"/>'),
+  factory: s('<path d="M3.5 20.5h17"/><path d="M4.6 20.5V11.2l4.8 3.1v-3.1l4.8 3.1V5.8h4v14.7"/><path d="M7.6 17.4h1.8M11.9 17.4h1.8"/>'),
+  note: s('<path d="M9 17.4V6l10-2.2v11.6"/><path d="M9 9.3l10-2.2"/><circle cx="6.8" cy="17.4" r="2.3"/><circle cx="16.8" cy="15.4" r="2.3"/>'),
+  piano: s('<rect x="3.5" y="5" width="17" height="14" rx="2.4"/><path d="M12 5v14M8.1 12.6V19M15.9 12.6V19"/><path d="M7 5h2.2v7.6H7ZM14.8 5H17v7.6h-2.2Z" fill="currentColor"/>'),
+  drum: s('<ellipse cx="12" cy="10.2" rx="7.6" ry="2.9"/><path d="M4.4 10.2v5.6c0 1.6 3.4 2.9 7.6 2.9s7.6-1.3 7.6-2.9v-5.6"/><path d="M7.6 12.7v5.1M12 13.1v5.6M16.4 12.7v5.1"/><path d="m9.2 3.6 3.2 4.9M18.4 4.2l-4.9 4.4"/>'),
 }
 
 export const icon = (name: string | undefined) => (name && ICONS[name]) || ''

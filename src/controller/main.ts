@@ -30,6 +30,8 @@ import { ConnectionSheet } from './connection-sheet'
 import '../styles/connections.css'
 import { calmMarks, icon, ICONS, logo, logoMark } from '../ui/icons'
 import { dismissHint, hint, repositionHints, setHintFrame } from '../ui/hints'
+import { enhanceSelects } from '../ui/kit/select'
+import { setPopoverFrame } from '../ui/kit/place'
 import { PhysicalInputs } from './inputs'
 import { Buttons, BUTTONS_GLYPH, sourceStack } from './buttons'
 import { Tracker } from './track'
@@ -245,6 +247,9 @@ async function boot(code?: Join) {
   /** Whether the lock came from turning the gyro on (and so goes with it). */
   let lockFromGyro = false
   setHintFrame({ rect: uiRect, size: () => { const s = uiSize(); return { w: s.w, h: s.h } } })
+  // The glass selects' lists open in the UI's own frame too, and every select on the phone is one.
+  setPopoverFrame({ rect: uiRect, size: () => { const s = uiSize(); return { width: s.w, height: s.h } } })
+  enhanceSelects()
   lock.onChange = (reanchor) => {
     motion.refreshScreen()
     applyLayout()
