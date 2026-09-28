@@ -46,7 +46,7 @@ const CHIP_ATTRS = new Set(['corner', 'accent', 'label', 'scheme', 'code', 'test
 /** What counts as a person being here. */
 const PRESENCE = ['pointermove', 'pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll'] as const
 
-const CSS = ':host{display:contents}:host([corner=inline]){display:inline-block;vertical-align:middle}:host([hidden]){display:none!important}'
+const CSS = ':host{display:contents}:host([corner=inline]){display:inline-block;vertical-align:middle}:host([hidden]){display:none!important}.retry{position:fixed;right:16px;bottom:16px;z-index:2147483647;padding:10px 14px;border:0;border-radius:8px;background:#c6ff34;color:#172009;font:600 14px system-ui;cursor:pointer}:host([corner=inline]) .retry{position:static}'
 
 /**
  * The element's own styles, in its shadow root: a constructed stylesheet shared by every instance (a Content Security
@@ -72,6 +72,7 @@ const idleFrame = (): Frame => ({
 
 /** Where remotes pair unless an element's `service` says otherwise (the hosted script sets its own origin). */
 let serviceDefault: string | undefined
+let loadHost: () => Promise<HostModule> = () => import('./element-host')
 
 // Server-side rendering has no HTMLElement: the class still loads there, and is defined only in a browser.
 const Base = (typeof HTMLElement === 'undefined' ? class {} : HTMLElement) as typeof HTMLElement
@@ -88,6 +89,7 @@ export class ObpalRemote extends Base {
   private extra: Partial<Layout> = {}
   private scene: { nodes?: SceneNode[]; held?: Record<string, string> } | null = null
   private present: (() => void) | null = null
+  private retry: HTMLButtonElement | null = null
 
   constructor() {
     super()
@@ -195,9 +197,11 @@ export class ObpalRemote extends Base {
 
   private async boot(gen: number): Promise<Remote | null> {
     this.stopWaiting()
+    this.retry?.remove()
+    this.retry = null
     this.setStatus('starting')
     try {
-      const mod = await import('./element-host')
+      const mod = await loadHost()
       if (gen !== this.gen) return null
       this.mod = mod
       const r = await mod.startHost({
@@ -225,12 +229,21 @@ export class ObpalRemote extends Base {
       if (gen !== this.gen) return null
       console.warn('<obpal-remote>: it could not start.', e)
       this.setStatus('error', String((e as Error)?.message ?? e))
+      const retry = document.createElement('button')
+      retry.className = 'retry'
+      retry.type = 'button'
+      retry.textContent = 'Retry ob.Pal'
+      retry.addEventListener('click', () => { this.starting = null; void this.start() })
+      this.shadowRoot!.appendChild(retry)
+      this.retry = retry
       return null
     }
   }
 
   private teardown() {
     this.gen++
+    this.retry?.remove()
+    this.retry = null
     this.host?.destroy()
     this.host = null
     this.starting = null
@@ -274,7 +287,8 @@ declare global {
  * Define <obpal-remote> (once: a second copy of the script leaves the first in place). `service`: the room service
  * its remotes pair through unless an element's own `service` attribute says otherwise.
  */
-export function defineObpalRemote(o: { service?: string } = {}) {
+export function defineObpalRemote(o: { service?: string; loadHost?: () => Promise<HostModule> } = {}) {
   if (o.service) serviceDefault = o.service
+  if (o.loadHost) loadHost = o.loadHost
   if (typeof customElements !== 'undefined' && !customElements.get('obpal-remote')) customElements.define('obpal-remote', ObpalRemote)
 }

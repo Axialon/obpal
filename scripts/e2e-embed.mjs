@@ -14,6 +14,7 @@
  * --headed to watch. OBPAL_SHOTS=<dir> saves screenshots of the demo and the phone.
  */
 import { join } from 'node:path'
+import { readFile } from 'node:fs/promises'
 import { chromium, devices } from 'playwright'
 import { cspCheck } from './csp-watch.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
@@ -369,6 +370,51 @@ try {
     if (!r.kept) throw new Error('moving it restarted it')
     if (r.after !== 'idle' || r.remote) throw new Error(`still ${r.after}`)
     return 'moved: kept; removed: idle'
+  })
+
+  await check('an element loaded before a deploy gets the new lazy chunk on first input', async () => {
+    const entry = await readFile(new URL('../dist/client/embed.js', import.meta.url), 'utf8')
+    const oldChunk = entry.match(/assets\/embed\/element-host-[\w-]+\.js/)?.[0]
+    if (!oldChunk) throw new Error('the embed entry has no lazy host chunk')
+    const newChunk = 'assets/embed/element-host-deployed.js'
+    const chunk = await readFile(new URL(`../dist/client/${oldChunk}`, import.meta.url))
+    for (const failRefresh of [false, true]) {
+      const ctx = await browser.newContext({ ignoreHTTPSErrors: true })
+      const p = await ctx.newPage()
+      const fetched = []
+      let deployed = false
+      let refreshUnavailable = false
+      try {
+        p.on('request', (r) => { if (r.url().startsWith(local.origin)) fetched.push(r.url()) })
+        await p.route(`${SITE}/**`, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: `<!doctype html><title>Deploy test</title><script type="module" src="${local.origin}/embed.js"></script><obpal-remote></obpal-remote>` }))
+        await p.route((url) => url.origin === local.origin && (url.pathname === '/embed.js' || url.pathname.startsWith('/assets/embed/')), (route) => {
+          const path = route.request().url().split('?')[0].slice(local.origin.length + 1)
+          const headers = { 'access-control-allow-origin': '*' }
+          if (path === 'embed.js') return route.fulfill({ status: refreshUnavailable ? 503 : 200, contentType: 'text/javascript', headers, body: deployed ? entry.replaceAll(oldChunk, newChunk) : entry })
+          if (path === newChunk && deployed) return route.fulfill({ status: 200, contentType: 'text/javascript', headers, body: chunk })
+          if (path === oldChunk && deployed) return route.fulfill({ status: 404, contentType: 'text/plain', headers, body: 'old build removed' })
+          return route.continue()
+        })
+        await p.goto(`${SITE}/`)
+        await p.waitForFunction(() => customElements.get('obpal-remote'))
+        if (fetched.some((url) => url.includes('/assets/embed/'))) throw new Error('the chunk loaded before input')
+        deployed = true
+        refreshUnavailable = failRefresh
+        await p.evaluate(() => document.querySelector('obpal-remote').start())
+        const element = p.locator('obpal-remote')
+        if (failRefresh) {
+          const retry = element.locator('button.retry')
+          if (await element.evaluate((el) => el.status) !== 'error' || !(await retry.count())) throw new Error('failed refresh did not show Retry')
+          if (fetched.filter((url) => url.includes('/embed.js?')).length !== 1) throw new Error('the failed load refreshed more than once')
+          refreshUnavailable = false
+          await retry.click()
+        }
+        await until('the element ready after the deploy', () => element.evaluate((el) => el.status === 'ready'), 10000)
+        if (!fetched.some((url) => url.includes(oldChunk)) || !fetched.some((url) => url.includes(newChunk))) throw new Error(`did not switch chunks: ${fetched.join(', ')}`)
+        if (!fetched.some((url) => url.includes('/embed.js?'))) throw new Error('the fresh entry was not cache-busted')
+      } finally { await ctx.close() }
+    }
+    return 'old chunk 404, fresh entry and chunk loaded; failed refresh showed Retry and recovered'
   })
 
   // ---- no WebRTC ----

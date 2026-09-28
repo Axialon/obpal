@@ -4,6 +4,7 @@
  * the SDK and the QR code load from beside it, relative to this script, only when they're needed.
  */
 import { defineObpalRemote, ObpalRemote } from './element'
+import type * as HostModule from './element-host'
 import type { Remote, RemoteOptions } from './remote'
 
 declare const __OBPAL_VERSION__: string
@@ -23,12 +24,25 @@ declare global {
   interface Window { obpal?: ObpalGlobal }
 }
 
-defineObpalRemote({ service })
+/** A removed chunk means the site deployed while this page was open. Fetch its current entry once. */
+export async function loadHost(recover = true): Promise<typeof HostModule> {
+  try {
+    return await import('./element-host')
+  } catch (error) {
+    if (!recover) throw error
+    const url = new URL(import.meta.url)
+    url.searchParams.set('retry', `${Date.now()}-${Math.random()}`)
+    const fresh = await import(/* @vite-ignore */ url.href) as typeof import('./embed')
+    return fresh.loadHost(false)
+  }
+}
+
+defineObpalRemote({ service, loadHost })
 if (typeof window !== 'undefined' && !window.obpal) {
   window.obpal = {
     async remote(opts) {
       // The element's own lazy part: one download for either way in.
-      const { Remote } = await import('./element-host')
+      const { Remote } = await loadHost()
       return Remote.create({ service, ...opts })
     },
     Element: ObpalRemote,
