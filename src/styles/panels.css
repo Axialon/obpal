@@ -31,14 +31,14 @@
 
 .panel-header { display: flex; align-items: center; flex: 0 0 auto; gap: 4px; min-height: 46px; box-sizing: border-box; padding: 6px 8px 2px 7px; }
 .panel-header .panel-handle {
-  display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; height: 38px; margin: 0; padding: 0 8px 0 3px;
+  display: flex; align-items: center; gap: 10px; flex: 0 1 auto; min-width: 0; height: 38px; margin: 0 auto 0 0; padding: 0 6px;
   border: 0; border-radius: 14px; background: transparent; color: var(--bb-ink);
   font: 600 11px/1 var(--bb-font-data); letter-spacing: 0.1em; text-transform: uppercase; text-align: left;
   cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
 }
 .panel-header .panel-handle:hover { background: rgb(var(--bb-hl-rgb) / 0.05); }
 .panel-dragging .panel-handle { cursor: grabbing; }
-.panel-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel-title { flex: 0 1 auto; min-width: 0; text-align: center; white-space: normal; text-wrap: balance; }
 /* The badge: the window's icon in a disc, ringed in the accent while the window is in front. */
 .panel-badge { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%; background: rgb(var(--bb-hl-rgb) / 0.06); box-shadow: inset 0 0 0 1px var(--bb-line); color: var(--bb-ink-2); transition: box-shadow var(--bb-dur-2), color var(--bb-dur-2), background var(--bb-dur-2); }
 .panel-badge svg { width: 16px; height: 16px; }
@@ -98,7 +98,7 @@
 .sim-panel .kit-card-n:empty, .sim-panel [data-sound-home]:empty, .sim-presence:empty, .sim-actions:empty { display: none; }
 /* Actions: an icon and a word each, sharing a row. */
 .sim-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.sim-actions .kit-action { flex: 1 1 auto; gap: 6px; padding: 0 9px 0 7px; }
+.sim-actions .kit-action { flex: 1 1 auto; gap: 6px; padding: 0 8px; }
 /* A short screen keeps the controls: the description gives way. */
 @media (max-height: 560px) { .sim-id .sim-lede { display: none; } .sim-panel .sim-id h1 { font-size: 20px; } }
 

@@ -8,6 +8,7 @@ import type { SharedPresence, Pose } from './presence'
 import type { V3 } from './world'
 import '../../styles/presence.css'
 import { simPanels } from '../ui/panels'
+import { iconAction } from '../../ui/kit/action'
 
 export type ViewMode = 'overview' | 'first-person' | 'xr'
 const UP = new THREE.Vector3(0, 1, 0)
@@ -109,6 +110,12 @@ export class Experience extends EventTarget {
     if (stop) button('Stop arms', () => shared?.guest ? shared.stopArms() : stop.click())
     this.info = document.createElement('small'); this.info.setAttribute('role', 'status'); this.controls.append(this.info)
     for (const child of this.controls.children) if (!['SELECT'].includes(child.tagName) && !['Overview', 'View', 'Recenter', 'Options', 'Stop arms', 'First person'].includes(child.textContent ?? '')) child.classList.add('presence-secondary')
+    // The changing View label names the current viewpoint, so it keeps its words.
+    const actions: Record<string, string> = { Overview: 'orbit', Recenter: 'center', Options: 'settings', '↶': 'left', '↷': 'right', 'Grab / release': 'grip' }
+    for (const child of this.controls.querySelectorAll('button')) {
+      const label = child.textContent ?? '', glyph = actions[label]
+      if (glyph) iconAction(child, glyph, child.getAttribute('aria-label') || label)
+    }
     this.controlsHome.prepend(this.controls)
     this.bindLook()
     for (let n = 0; n < 2; n++) {

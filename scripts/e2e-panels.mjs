@@ -117,7 +117,9 @@ export async function runPanels(local, check) {
         await drag(page, p.locator('.panel-handle'), -100, 120)
         await panel(page).locator('.panel-handle').click()
         assert(await page.evaluate(() => document.elementFromPoint(340, 260)?.closest('[data-panel]')?.getAttribute('data-panel')) === 'controls', 'control focus did not raise it above the camera')
-        await p.locator('.panel-handle').click({ position: { x: 140, y: 18 } })
+        // The title handle hugs its ink; click its exposed end above the overlapping control window.
+        const cameraHandle = p.locator('.panel-handle')
+        await cameraHandle.click({ position: { x: (await box(cameraHandle)).width - 8, y: 18 } })
         assert(await page.evaluate(() => document.elementFromPoint(340, 260)?.closest('[data-panel]')?.getAttribute('data-panel')) === 'camera-1', 'camera focus did not raise it above controls')
         await page.screenshot({ path: join(out, 'camera-overlap.png') })
         const pixels = await canvas.evaluate(c => [...c.getContext('2d').getImageData(0, 0, c.width, c.height).data].filter((_, i) => i % 4 !== 3))

@@ -7,6 +7,7 @@ import { CONTROLLERS, layoutControllers, type SceneNode } from '@obpal/core'
 import { Claims, PairingChip, PartFocus, Remote, type Layout, type Participant } from '@obpal/host'
 import { family } from '../family'
 import { ICONS } from '../ui/icons'
+import { iconAction, SIM_ACTION_ICONS } from '../ui/kit/action'
 import { holdForPhone } from '../ui/recover'
 import { ControlSession } from './control-space'
 import { quickAction } from '../ui/quick-actions'
@@ -268,6 +269,12 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   $('chip-who').onclick = () => { const p = $('people'); p.hidden = !p.hidden; if (!p.hidden) chip.collapse() }
   $('invite-new').onclick = async () => { await remote.resetInvite(); note('New invite link: the old code no longer works') }
   document.querySelectorAll<HTMLElement>('[data-icon]').forEach((el) => el.insertAdjacentHTML('afterbegin', ICONS[el.dataset.icon!] ?? ''))
+  for (const button of document.querySelectorAll<HTMLButtonElement>('button.kit-action, button.btn')) {
+    // Device views may give Home a scene-specific meaning before their shared shell finishes loading.
+    if (button.id === 'home-all' && document.body.classList.contains('dev')) continue
+    const label = button.textContent?.trim() ?? '', glyph = SIM_ACTION_ICONS[label]
+    if (glyph) iconAction(button, glyph, label)
+  }
 
   const setNodes = (next: SceneNode[]) => {
     for (const n of nodes) {

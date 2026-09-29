@@ -11,6 +11,7 @@ import { CONTROLLERS, type ControllerId } from '@obpal/core'
 import { html, setMarkup } from '../ui/markup'
 import { ICONS } from '../ui/icons'
 import { initTips } from '../ui/tips'
+import { fitControlInk } from '../ui/kit/ink'
 import { GlassSelect, type SelectItem } from '../ui/kit/select'
 import { Segmented, type SegmentItem } from '../ui/kit/segmented'
 import { Sidebar, type SidebarMode } from '../ui/kit/sidebar'
@@ -261,6 +262,7 @@ addEventListener('keydown', (e) => {
 
 setFilters(filters, false, 'replace')
 initTips()
+fitControlInk()
 // The kit's components sheet, for review: /sim/?kit=sheet.
 if (new URLSearchParams(location.search).get('kit') === 'sheet') void import('../ui/kit/demo').then((m) => m.mountSheet())
 Object.assign(window, {

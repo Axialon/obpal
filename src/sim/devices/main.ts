@@ -30,8 +30,7 @@ import { routeParts, sceneParts } from './focus'
 import { PartHalos } from './halo'
 import { mountSimPanels, numberSections } from '../ui/panels'
 import { Telemetry } from '../../ui/kit/telemetry'
-import { ICONS } from '../../ui/icons'
-import { html, setMarkup } from '../../ui/markup'
+import { iconAction } from '../../ui/kit/action'
 import { mountQuick, quickAction, quickViews } from '../../ui/quick'
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
@@ -277,19 +276,19 @@ function howTo(node: string) {
 
 void entry.view().then((m) => {
   view = m.createView(stage, logic)
+  const home = $<HTMLButtonElement>('home-all')
+  if (home.textContent?.trim() === 'Home all') iconAction(home, 'reset', 'Home all')
   if (sim) view.connect?.(sim)
   numberSections(document.querySelector('.dev-panel')!)
   stage.resize()
   stage.frame(view.framing)
   if (view.afterRender) stage.afterRender = () => view!.afterRender!()
-  // The view's framings, as icon actions in the View section. A short word shows where the whole name doesn't fit
-  // beside the others; the whole name is still the button's.
-  const action = (label: string, glyph: string, onclick: () => void, shown = label) => {
+  // Familiar view actions share their spoken name with the glass tooltip.
+  const action = (label: string, glyph: string, onclick: () => void) => {
     const b = document.createElement('button')
     b.type = 'button'
     b.className = 'kit-action'
-    setMarkup(b, html`${ICONS[glyph]}<span>${shown}</span>`)
-    if (shown !== label) { b.setAttribute('aria-label', label); b.title = label }
+    iconAction(b, glyph, label)
     b.onclick = onclick
     $('dev-view').append(b)
     return b
@@ -298,7 +297,7 @@ void entry.view().then((m) => {
   const close = () => { following = false; stage.frame(view!.inspect!()) }
   const wide = () => { following = false; stage.frame(view!.overview!) }
   action('Reset view', 'center', play)
-  if (view.inspect) action('Inspect model', 'zoom-in', close, 'Inspect')
+  if (view.inspect) action('Inspect model', 'zoom-in', close)
   if (view.overview) action('Overview', 'orbit', wide)
   // The tray's camera steps through the same framings and first person (the viewpoint row's own button; on a phone,
   // right after the play view), and a framing brings the scene back from first person first.

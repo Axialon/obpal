@@ -6,7 +6,7 @@
 import { SimSound, type Rumble } from './engine'
 import { profileOf } from './profiles'
 import { DetentSlider } from '../../ui/kit/slider'
-import { ICONS } from '../../ui/icons'
+import { iconAction } from '../../ui/kit/action'
 import { html, setMarkup } from '../../ui/markup'
 import { quickAction } from '../../ui/quick-actions'
 import '../../styles/sound.css'
@@ -39,7 +39,7 @@ export function mountSound(id: string, rumble: Rumble, panel = document.querySel
   ;(panel?.querySelector('[data-sound-home]') ?? panel)?.append(row)
   const refresh = () => {
     const words = sound.muted ? 'Unmute sound' : sound.running ? 'Mute sound' : 'Start sound'
-    setMarkup(mute, html`${ICONS[sound.muted ? 'mute' : 'sound']}<span>${words}</span>`)
+    iconAction(mute, sound.muted ? 'mute' : 'sound', words)
     mute.setAttribute('aria-pressed', String(sound.muted))
     slider.value = level()
     // The same switch in the quick-actions tray: on while the sound plays.

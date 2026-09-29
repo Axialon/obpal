@@ -23,6 +23,18 @@
 .kit-sr { position: absolute !important; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 /* A native <select> behind its glass one. */
 .kit-native { display: none !important; }
+/* Visible glyph edges, including descenders and side bearings, supplied by kit/ink.ts. */
+/* Geometry is immediate even when the page's reduced-motion rule assigns a short transition to every element. */
+.kit-ink { display: inline-block; flex: none; text-box: trim-both cap alphabetic; margin-block: calc(var(--ink-ascent, 1cap) - 1cap) var(--ink-descent, 0px); margin-inline: var(--ink-left, 0px) var(--ink-right, 0px); transition-property: none; }
+.kit-ink[data-ink-lines] { flex: none; inline-size: var(--ink-width); }
+@supports not (text-box: trim-both cap alphabetic) {
+  .kit-ink { line-height: 1; margin-block: var(--ink-top, 0px) var(--ink-bottom, 0px); }
+}
+
+/* Icon actions retain the same target as a labelled action; the glyph has no inline baseline. */
+button.kit-icon-action { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 36px; min-width: 36px; padding: 0; }
+button.kit-icon-action > .ic { display: block; flex: none; width: 18px; height: 18px; }
+@media (pointer: coarse) { button.kit-icon-action { width: 44px; min-width: 44px; min-height: 44px; } }
 /* A drawer or sheet is open: the page behind holds still (its scrollbar's room kept, so nothing shifts). */
 html.kit-locked { overflow: hidden; scrollbar-gutter: stable; }
 
@@ -41,7 +53,7 @@ button.kit-icon-btn .ic { width: 18px; height: 18px; }
 
 button.kit-select[role='combobox'] {
   display: inline-flex; align-items: center; gap: 10px; box-sizing: border-box; min-width: 0; max-width: 100%;
-  height: var(--kit-select-h, var(--kit-h)); margin: 0; padding: 0 10px 0 12px;
+  height: var(--kit-select-h, var(--kit-h)); margin: 0; padding: 0 12px;
   border: 1px solid var(--bb-line); border-radius: var(--kit-select-r, 12px); background: var(--kit-fill); box-shadow: inset 0 1px 0 var(--bb-hi);
   color: var(--bb-ink); font: 600 var(--kit-select-size, 13.5px)/1.2 var(--bb-font-ui); letter-spacing: -0.005em; text-align: left; text-transform: none;
   cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
@@ -57,7 +69,7 @@ button.kit-select[role='combobox'][hidden] { display: none; }
 .kit-select-ic .ic { width: 17px; height: 17px; }
 .kit-select-v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kit-select-badge { flex: none; padding: 4px 7px; border-radius: 999px; background: rgb(var(--bb-hl-rgb) / 0.08); color: var(--bb-ink-2); font: 600 11px/1 var(--bb-font-data); font-variant-numeric: tabular-nums; }
-.kit-select-chev { display: grid; flex: none; margin-left: -2px; color: var(--bb-ink-3); }
+.kit-select-chev { display: grid; flex: none; color: var(--bb-ink-3); }
 .kit-select-chev .ic { width: 16px; height: 16px; transition: transform var(--bb-dur-2) var(--bb-ease); }
 button.kit-select[aria-expanded='true'] .kit-select-chev { color: var(--bb-accent-text); }
 button.kit-select[aria-expanded='true'] .kit-select-chev .ic { transform: rotate(180deg); }
@@ -96,7 +108,7 @@ button.kit-select[aria-expanded='true'] .kit-select-chev .ic { transform: rotate
 
 /* ---- chips and the call to action ------------------------------------------------------------------------------------ */
 
-.kit-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 32px; padding: 0 4px 0 11px; border: 1px solid rgb(var(--bb-accent-rgb) / 0.42); border-radius: 999px; background: rgb(var(--bb-accent-rgb) / 0.1); color: var(--bb-ink); font: 600 12.5px/1 var(--bb-font-ui); white-space: nowrap; }
+.kit-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 32px; padding: 0 7.5px; border: 1px solid rgb(var(--bb-accent-rgb) / 0.42); border-radius: 999px; background: rgb(var(--bb-accent-rgb) / 0.1); color: var(--bb-ink); font: 600 12.5px/1 var(--bb-font-ui); white-space: nowrap; }
 .kit-chip > .ic { width: 14px; height: 14px; color: var(--bb-accent-text); }
 .kit-chip > span { overflow: hidden; text-overflow: ellipsis; }
 .kit-chip > button { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; background: rgb(var(--bb-hl-rgb) / 0.08); color: var(--bb-ink-2); cursor: pointer; }
@@ -104,11 +116,11 @@ button.kit-select[aria-expanded='true'] .kit-select-chev .ic { transform: rotate
 .kit-chip > button .ic { width: 12px; height: 12px; stroke-width: 2.4; }
 
 /* The accent pill with its arrow in a dark disc: the one thing to do next. */
-.kit-cta { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; padding: 0 6px 0 20px; border: 1px solid rgb(255 255 255 / 0.25); border-radius: 999px; background: var(--bb-glass-accent); box-shadow: 0 12px 30px -12px rgb(var(--bb-accent-rgb) / 0.8), inset 0 1px 0 rgb(255 255 255 / 0.45); color: var(--bb-accent-ink); font: 700 14px/1 var(--bb-font-ui); letter-spacing: -0.01em; text-decoration: none; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: filter var(--bb-dur-2), transform var(--bb-dur-1) var(--bb-ease); }
+.kit-cta { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; padding: 0 13px; border: 1px solid rgb(255 255 255 / 0.25); border-radius: 999px; background: var(--bb-glass-accent); box-shadow: 0 12px 30px -12px rgb(var(--bb-accent-rgb) / 0.8), inset 0 1px 0 rgb(255 255 255 / 0.45); color: var(--bb-accent-ink); font: 700 14px/1 var(--bb-font-ui); letter-spacing: -0.01em; text-decoration: none; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: filter var(--bb-dur-2), transform var(--bb-dur-1) var(--bb-ease); }
 .kit-cta:hover { filter: brightness(1.05); }
 .kit-cta:active { transform: scale(0.98); }
 .kit-cta > .ic { width: 32px; height: 32px; padding: 7px; box-sizing: border-box; border-radius: 50%; background: rgb(0 0 0 / 0.82); color: var(--bb-accent); stroke-width: 2; transition: transform var(--bb-dur-2) var(--bb-ease); }
-.kit-cta:hover > .ic { transform: translateX(2px); }
+
 
 /* ---- the sidebar, its rail, the drawer and the sheet ------------------------------------------------------------------ */
 /* A page sets --side-top (where it sits under the page's own bar), and may set --side-w and --rail-w. */
@@ -132,7 +144,7 @@ button.kit-select[aria-expanded='true'] .kit-select-chev .ic { transform: rotate
 .kit-side-label { display: flex; align-items: center; gap: 8px; margin: 14px 8px 6px; color: var(--bb-ink-3); font: 600 10.5px/1 var(--bb-font-data); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
 .kit-side-label b { color: var(--bb-ink-2); font-weight: 600; }
 .kit-side-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
-button.kit-side-item { position: relative; display: flex; align-items: center; gap: 12px; box-sizing: border-box; width: 100%; min-height: 44px; margin: 0; padding: 4px 10px 4px 5px; border: 0; border-radius: 16px; background: transparent; color: var(--bb-ink-2); font: 600 14px/1.2 var(--bb-font-ui); letter-spacing: -0.01em; text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: background var(--bb-dur-2) var(--bb-ease), color var(--bb-dur-2); }
+button.kit-side-item { position: relative; display: flex; align-items: center; gap: 12px; box-sizing: border-box; width: 100%; min-height: 44px; margin: 0; padding: 4px 10px; border: 0; border-radius: 16px; background: transparent; color: var(--bb-ink-2); font: 600 14px/1.2 var(--bb-font-ui); letter-spacing: -0.01em; text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: background var(--bb-dur-2) var(--bb-ease), color var(--bb-dur-2); }
 button.kit-side-item:hover { background: rgb(var(--bb-hl-rgb) / 0.06); color: var(--bb-ink); }
 button.kit-side-item:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: -2px; }
 .kit-side-ic { display: grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: 50%; background: rgb(var(--bb-hl-rgb) / 0.05); box-shadow: inset 0 0 0 1px var(--bb-line); color: var(--bb-ink-2); transition: box-shadow var(--bb-dur-2) var(--bb-ease), color var(--bb-dur-2), background var(--bb-dur-2); }
@@ -206,7 +218,7 @@ button.kit-seg-item[role='radio']:disabled { opacity: 0.38; cursor: default; }
 @media (pointer: coarse) { button.kit-seg-item[role='radio'] { height: 40px; } }
 
 .kit-seg.kit-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 8px; padding: 0; border: 0; background: none; box-shadow: none; }
-.kit-tiles button.kit-seg-item[role='radio'] { flex-direction: column; gap: 6px; height: auto; min-height: 84px; padding: 11px 6px 9px; border-radius: 18px; background: rgb(var(--bb-hl-rgb) / 0.04); box-shadow: inset 0 0 0 1px var(--bb-line); color: var(--bb-ink-2); font-size: 12px; white-space: normal; text-align: center; }
+.kit-tiles button.kit-seg-item[role='radio'] { flex-direction: column; gap: 6px; height: auto; min-height: 84px; padding: 10px 6px; border-radius: 18px; background: rgb(var(--bb-hl-rgb) / 0.04); box-shadow: inset 0 0 0 1px var(--bb-line); color: var(--bb-ink-2); font-size: 12px; white-space: normal; text-align: center; }
 .kit-tiles .kit-seg-ic { width: 36px; height: 36px; border-radius: 50%; background: rgb(var(--bb-hl-rgb) / 0.05); box-shadow: inset 0 0 0 1px var(--bb-line); transition: box-shadow var(--bb-dur-2), color var(--bb-dur-2), background var(--bb-dur-2); }
 .kit-tiles button.kit-seg-item[role='radio'][aria-checked='true'] { color: var(--bb-ink); background: linear-gradient(180deg, rgb(var(--bb-accent-rgb) / 0.14), rgb(var(--bb-accent-rgb) / 0.04)); box-shadow: inset 0 0 0 1px rgb(var(--bb-accent-rgb) / 0.55); }
 .kit-tiles button.kit-seg-item[role='radio'][aria-checked='true'] .kit-seg-ic { color: var(--bb-accent-text); background: rgb(var(--bb-accent-rgb) / 0.14); box-shadow: var(--kit-ring); }
@@ -315,7 +327,7 @@ input.kit-switch:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* ---- actions: an icon and a word, for what a panel can do ------------------------------------------------------------ */
 
-button.kit-action, a.kit-action { display: inline-flex; align-items: center; justify-content: center; gap: 7px; box-sizing: border-box; min-width: 0; height: 36px; margin: 0; padding: 0 12px 0 10px; border: 1px solid var(--bb-line); border-radius: 12px; background: var(--kit-fill); box-shadow: inset 0 1px 0 var(--bb-hi); color: var(--bb-ink); font: 650 12.5px/1 var(--bb-font-ui); letter-spacing: -0.005em; text-decoration: none; white-space: nowrap; cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; transition: background var(--bb-dur-2) var(--bb-ease), border-color var(--bb-dur-2), box-shadow var(--bb-dur-2), transform var(--bb-dur-1) var(--bb-ease); }
+button.kit-action, a.kit-action { display: inline-flex; align-items: center; justify-content: center; gap: 7px; box-sizing: border-box; min-width: 0; height: 36px; margin: 0; padding: 0 12px; border: 1px solid var(--bb-line); border-radius: 12px; background: var(--kit-fill); box-shadow: inset 0 1px 0 var(--bb-hi); color: var(--bb-ink); font: 650 12.5px/1 var(--bb-font-ui); letter-spacing: -0.005em; text-decoration: none; white-space: nowrap; cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; transition: background var(--bb-dur-2) var(--bb-ease), border-color var(--bb-dur-2), box-shadow var(--bb-dur-2), transform var(--bb-dur-1) var(--bb-ease); }
 button.kit-action:hover, a.kit-action:hover { background: var(--kit-fill-hover); border-color: var(--bb-line-strong); }
 button.kit-action:active { transform: scale(0.97); }
 button.kit-action:focus-visible, a.kit-action:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: 2px; }

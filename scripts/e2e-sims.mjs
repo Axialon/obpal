@@ -14,6 +14,7 @@
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch. OBPAL_SHOTS=<dir> saves screens.
  * --only=tracking (or OBPAL_E2E_SIMS_ONLY=tracking) runs the arm's tracking checks and their pairing/claim setup.
  * --only=panels (or OBPAL_E2E_SIMS_ONLY=panels) runs just the window checks, also through e2e:all's guard.
+ * --only=buttons (or OBPAL_E2E_SIMS_ONLY=buttons) checks rendered control ink and accessible icon names at three sizes.
  */
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -29,6 +30,7 @@ import { runTemporal } from './e2e-temporal.mjs'
 import { runLoad } from './e2e-load.mjs'
 import { simsStrip } from './sims-strip.mjs'
 import { runPanels } from './e2e-panels.mjs'
+import { runSimButtons } from './e2e-sim-buttons.mjs'
 import { runArmLive } from './e2e-arm-live.mjs'
 import { runHumanoid } from './e2e-humanoid.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
@@ -36,6 +38,7 @@ import { startLocal } from '../extension/e2e/local.mjs'
 const HEADED = process.argv.includes('--headed')
 const ONLY_TRACKING = process.argv.includes('--only=tracking') || process.env.OBPAL_E2E_SIMS_ONLY === 'tracking'
 const ONLY_PANELS = process.argv.includes('--only=panels') || process.env.OBPAL_E2E_SIMS_ONLY === 'panels'
+const ONLY_BUTTONS = process.argv.includes('--only=buttons') || process.env.OBPAL_E2E_SIMS_ONLY === 'buttons'
 const SHOTS = process.env.OBPAL_SHOTS || ''
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
 const RTC_ARGS = ['--disable-features=WebRtcHideLocalIpsWithMdns', '--ignore-certificate-errors']
@@ -157,7 +160,8 @@ async function phone(invite, { xr = true, way = 'motion' } = {}) {
 }
 
 try {
-  if (process.env.OBPAL_E2E_SIMS_ONLY === 'humanoid') await runHumanoid(local, check)
+  if (ONLY_BUTTONS) await runSimButtons(local, check)
+  else if (process.env.OBPAL_E2E_SIMS_ONLY === 'humanoid') await runHumanoid(local, check)
   else if (ONLY_PANELS) await runPanels(local, check)
   else {
   console.log('ob.Pal sims e2e')
@@ -529,6 +533,7 @@ try {
   await runPanels(local, check)
   await runArmLive(local, check)
   await runHumanoid(local, check)
+  await runSimButtons(local, check)
   }
   }
   await check('no Content Security Policy violations on any page', cspCheck)

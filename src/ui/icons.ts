@@ -4,6 +4,13 @@ import { type Content, html, setMarkup } from './markup'
 const s = (d: string) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`
 
 export const ICONS: Record<string, string> = {
+  play: s('<path d="m8 4 12 8-12 8Z"/>'),
+  pause: s('<path d="M8 5v14M16 5v14"/>'),
+  record: s('<circle cx="12" cy="12" r="7"/>'),
+  speed: s('<path d="M4 18a9 9 0 1 1 16 0M12 13l4-5"/><circle cx="12" cy="13" r="1.4"/>'),
+  help: s('<circle cx="12" cy="12" r="9"/><path d="M9 8.5a3 3 0 0 1 6 0c0 2-3 2-3 4.5M12 16.5v.1"/>'),
+  'grip-open': s('<path d="M12 20v-4M5 16h14M5 16V9L3 5M19 16V9l2-4"/>'),
+  'grip-close': s('<path d="M12 20v-4M7 16h10M7 16V9l3-4M17 16V9l-3-4"/>'),
   stop: s('<rect x="5" y="5" width="14" height="14" rx="3"/>'),
   link: s('<path d="m9 15 6-6M8 16l-1 1a3.5 3.5 0 0 1-5-5l4-4a3.5 3.5 0 0 1 5 0M16 8l1-1a3.5 3.5 0 0 1 5 5l-4 4a3.5 3.5 0 0 1-5 0"/>'),
   rotate: s('<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/>'),

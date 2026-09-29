@@ -34,6 +34,8 @@ import '../styles/connections.css'
 import { calmMarks, icon, ICONS, logo, logoMark } from '../ui/icons'
 import { dismissHint, hint, repositionHints, setHintFrame } from '../ui/hints'
 import { enhanceSelects } from '../ui/kit/select'
+import { iconAction, SIM_ACTION_ICONS } from '../ui/kit/action'
+import { fitControlInk } from '../ui/kit/ink'
 import { Segmented } from '../ui/kit/segmented'
 import { setPopoverFrame } from '../ui/kit/place'
 import { PhysicalInputs } from './inputs'
@@ -495,6 +497,7 @@ async function boot(code?: Join) {
   /** The person disconnected: nothing reconnects or covers the Disconnected screen. */
   let hungUp = false
   let surface: HTMLElement | null = null
+  let inkTray: HTMLElement | null = null, releaseTrayInk: (() => void) | undefined
   let pad: Trackpad | null = null
   let hostName = 'Screen'
   let layout: Layout = { v: 1, tray: [] }
@@ -1494,6 +1497,7 @@ async function boot(code?: Join) {
   function renderTray() {
     const tray = document.getElementById('tray')
     if (!tray) return
+    if (tray !== inkTray) { releaseTrayInk?.(); inkTray = tray; releaseTrayInk = fitControlInk(tray) }
     tray.replaceChildren()
     if (control.sim) {
       /** A tool of the calibrated sim space: an icon and a word, with its full name for the ear. */
@@ -1506,6 +1510,7 @@ async function boot(code?: Join) {
         return b
       }
       const position = tool('control.position', 'Set position', 'center', 'Position')
+      iconAction(position, 'center', 'Set position')
       position.onclick = () => { void requestMotionPermission(); tick(); recenterHere() }
       // Object or scene scope: one toggle, lit for the scene, drawn as what it reaches.
       const wide = control.scope === 'scene'
@@ -1556,6 +1561,7 @@ async function boot(code?: Join) {
         b.querySelector('.tray-label')!.textContent = c.label
         if (!ic) b.classList.add('text')
         else b.title = c.label
+        if (control.sim && SIM_ACTION_ICONS[c.label]) iconAction(b, SIM_ACTION_ICONS[c.label], c.label)
       }
       if (c.type === 'toggle') b.setAttribute('aria-pressed', String(!!values[c.id]))
       if (c.type === 'keyboard') b.setAttribute('aria-expanded', String(keyboard.open))

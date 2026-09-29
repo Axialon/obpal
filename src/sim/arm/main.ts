@@ -61,8 +61,7 @@ import { mountSimPanels, numberSections } from '../ui/panels'
 import { CapsuleGauge, RingGauge } from '../../ui/kit/gauge'
 import { Telemetry } from '../../ui/kit/telemetry'
 import { Readout } from '../../ui/kit/readout'
-import { ICONS } from '../../ui/icons'
-import { html, setMarkup } from '../../ui/markup'
+import { iconAction } from '../../ui/kit/action'
 import { mountQuick, quickAction, quickViews } from '../../ui/quick'
 import { HandCursor } from '../../ui/hand-cursor'
 import { holdReload } from '../../ui/recover'
@@ -1801,19 +1800,18 @@ function resize() {
   controls.update()
   camera.updateProjectionMatrix()
 }
-/** The view's framings, as icon actions in the View section; a short word where the whole name doesn't fit. */
-function viewAction(label: string, glyph: string, shown = label) {
+/** Familiar view actions share their spoken name with the glass tooltip. */
+function viewAction(label: string, glyph: string) {
   const b = document.createElement('button')
   b.type = 'button'
   b.className = 'kit-action'
-  setMarkup(b, html`${ICONS[glyph]}<span>${shown}</span>`)
-  if (shown !== label) { b.setAttribute('aria-label', label); b.title = label }
+  iconAction(b, glyph, label)
   $('arm-view').append(b)
   return b
 }
 const resetView = viewAction('Reset view', 'center')
 resetView.onclick = () => { overview = false; resize() }
-const inspectArm = viewAction('Inspect arm', 'zoom-in', 'Inspect')
+const inspectArm = viewAction('Inspect arm', 'zoom-in')
 const overviewView = viewAction('Overview', 'orbit')
 overviewView.onclick = () => { overview = true; resize() }
 inspectArm.onclick = () => {

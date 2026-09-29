@@ -7,6 +7,7 @@
  */
 import '../../styles/kit.css'
 import '../../styles/panels.css'
+import { fitControlInk } from '../../ui/kit/ink'
 import { clampRect, clearLayout, defaultPlacement, fitHeight, layoutKey, LIMITS, readLayout, resizeRect, screenClass, snapMove, writeLayout, type Anchor, type Edge, type Layout, type LayoutStorage, type Limits, type PanelState, type Placement, type Rect } from './layout'
 
 export type PanelIcon = 'controls' | 'camera' | 'scores' | 'arm' | 'station' | 'record' | 'view' | 'sound'
@@ -204,6 +205,7 @@ export class Panels {
   private saved: Layout
   private frame = 0
   constructor(readonly sim: string) {
+    fitControlInk()
     try { this.storage = localStorage } catch { /* Storage can be blocked before getItem. */ }
     this.saved = readLayout(this.storage, layoutKey(sim, this.kind))
     document.body.classList.add('has-sim-panels')

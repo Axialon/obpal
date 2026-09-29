@@ -8,6 +8,7 @@ import { LOCKS_VALUE, MAX_PARTS, MAX_SETS, PART_VALUE, type SceneNode } from '@o
 import { icon, ICONS } from '../ui/icons'
 import { html, setMarkup } from '../ui/markup'
 import { toUi, uiRect } from './uiframe'
+import { fitControlInk } from '../ui/kit/ink'
 
 export interface StripItem {
   /** '' for the whole node, else a set's or a part's id. */
@@ -79,6 +80,7 @@ export class NodeStrip {
   private tagTimer: ReturnType<typeof setTimeout> | undefined
   private press: { id: number; item: string; at: number; moved: boolean; locked: boolean; timer: ReturnType<typeof setTimeout>; x: number; y: number } | null = null
   private edge = 0
+  private releaseInk: (() => void) | undefined
 
   constructor(private deps: StripDeps) {}
 
@@ -92,7 +94,9 @@ export class NodeStrip {
     this.tag = root.querySelector<HTMLElement>('#ns-tag')
     this.drawn = ''
     const el = this.el
+    this.releaseInk?.(); this.releaseInk = undefined
     if (!el) return
+    this.releaseInk = fitControlInk(el)
     this.list?.addEventListener('scroll', () => this.edges(), { passive: true })
     // A turn or a resize changes what fits as much as a scroll does.
     if (this.list && typeof ResizeObserver !== 'undefined') new ResizeObserver(() => this.edges()).observe(this.list)

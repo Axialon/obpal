@@ -602,7 +602,7 @@ const STYLE = `
 /* Only the chip and the open card take the pointer (a closing card lets go at once): the page gets it everywhere else. */
 .pill, .wrap[data-open] .card { pointer-events: auto; }
 
-.pill { position: relative; display: inline-flex; align-items: center; gap: 9px; height: 44px; margin: 0; padding: 0 16px 0 6px;
+.pill { position: relative; display: inline-flex; align-items: center; gap: 9px; height: 44px; margin: 0; padding: 0 11px;
   border-radius: var(--pill-r, 999px); color: inherit; font: inherit; font-weight: 650; cursor: pointer; touch-action: manipulation;
   transition: border-color .2s var(--ease), transform .12s var(--ease), padding .24s var(--ease); }
 .pill:hover { border-color: rgb(var(--a-rgb) / .55); }
@@ -613,7 +613,7 @@ const STYLE = `
 .mark svg { width: 32px; height: 32px; overflow: visible; display: block; }
 .label { white-space: nowrap; }
 .wrap[data-live]:not([data-open]) .label { display: none; }
-.wrap[data-live]:not([data-open]) .pill { padding: 0 12px 0 6px; }
+.wrap[data-live]:not([data-open]) .pill { padding: 0 9px; }
 .badge:empty { display: none; }
 .badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
   background: rgb(var(--hl) / .12); font-variant-numeric: tabular-nums; }

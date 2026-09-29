@@ -48,7 +48,7 @@
 @media (hover: none), (pointer: coarse) { .sims-key { display: none; } .sims-search input { padding-right: 12px; font-size: 16px; } }
 .sims-controller { padding: 0 2px; }
 .sims-controller-select { width: 100%; }
-.sims-controller-select .kit-select-ic { width: 28px; height: 28px; margin-left: -5px; border-radius: 50%; background: rgb(var(--hl-rgb) / 0.05); box-shadow: inset 0 0 0 1px var(--line); }
+.sims-controller-select .kit-select-ic { width: 28px; height: 28px; border-radius: 50%; background: rgb(var(--hl-rgb) / 0.05); box-shadow: inset 0 0 0 1px var(--line); }
 .sims-controller.on .sims-controller-select .kit-select-ic { background: rgb(var(--accent-rgb) / 0.14); box-shadow: var(--kit-ring); }
 
 /* The rail: the controller is its icon in a ring, lit when one is chosen; its list opens beside it. */
@@ -71,6 +71,7 @@
 .sims-chip-list { display: contents; }
 .sims-clear { height: 32px; padding: 0 6px; border: 0; background: none; color: var(--secondary); font: 600 13px var(--font); text-decoration: underline; text-decoration-color: rgb(var(--hl-rgb) / 0.3); text-underline-offset: 4px; cursor: pointer; }
 .sims-clear:hover { color: var(--ink); text-decoration-color: currentColor; }
+.sims-clear, .sims-sheet-clear { display: inline-flex; align-items: center; justify-content: center; }
 
 /* ---- the cards --------------------------------------------------------------------------------------------------------- */
 
@@ -98,11 +99,11 @@
 .dcard-faces li.match .ic { color: var(--accent-ink); }
 .dcard-foot { display: flex; align-items: center; gap: 12px; margin-top: auto; padding-top: 4px; }
 /* Try it: the accent pill with its arrow in a dark disc. */
-.dcard-go { display: inline-flex; align-items: center; gap: 10px; height: 42px; padding: 0 5px 0 18px; border: 1px solid rgb(255 255 255 / 0.25); border-radius: 999px; background: var(--glass-light); box-shadow: 0 12px 28px -14px rgb(var(--accent-rgb) / 0.9), inset 0 1px 0 rgb(255 255 255 / 0.45); color: var(--accent-ink); font: 700 14px/1 var(--font); letter-spacing: -0.01em; text-decoration: none; transition: filter 0.15s, transform 0.12s var(--ease); }
+.dcard-go { display: inline-flex; align-items: center; gap: 10px; height: 42px; padding: 0 12px; border: 1px solid rgb(255 255 255 / 0.25); border-radius: 999px; background: var(--glass-light); box-shadow: 0 12px 28px -14px rgb(var(--accent-rgb) / 0.9), inset 0 1px 0 rgb(255 255 255 / 0.45); color: var(--accent-ink); font: 700 14px/1 var(--font); letter-spacing: -0.01em; text-decoration: none; transition: filter 0.15s, transform 0.12s var(--ease); }
 .dcard-go:hover { filter: brightness(1.05); }
 .dcard-go:active { transform: scale(0.98); }
 .dcard-go .ic { width: 32px; height: 32px; padding: 7px; box-sizing: border-box; border-radius: 50%; background: rgb(0 0 0 / 0.82); color: var(--accent); stroke-width: 2; transition: transform 0.2s var(--ease); }
-.dcard:hover .dcard-go .ic { transform: translateX(2px); }
+
 .sims-none { margin: 4px 0 18px; padding: 36px 20px; border: 1px dashed rgb(var(--hl-rgb) / 0.2); border-radius: 24px; background: rgb(var(--hl-rgb) / 0.025); color: var(--muted); text-align: center; }
 
 /* What's next: proposed devices, quieter. */
@@ -154,7 +155,7 @@
   /* Until the sheet takes it, the sidebar keeps out of the way. */
   .sims-side:not([data-mode='sheet']) { position: fixed; visibility: hidden; }
   .sims-bar { display: flex; top: 70px; margin: 0 -6px 4px; }
-  .sims-filters { display: inline-flex; align-items: center; gap: 8px; flex: none; height: 44px; padding: 0 14px 0 12px; border: 0; border-radius: 13px; background: rgb(var(--hl-rgb) / 0.08); color: var(--ink); font: 650 14px var(--font); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .sims-filters { display: inline-flex; align-items: center; gap: 8px; flex: none; height: 44px; padding: 0 13px; border: 0; border-radius: 13px; background: rgb(var(--hl-rgb) / 0.08); color: var(--ink); font: 650 14px var(--font); cursor: pointer; -webkit-tap-highlight-color: transparent; }
   .sims-filters[aria-expanded='true'] { background: rgb(var(--accent-rgb) / 0.16); }
   .sims-filters .ic { width: 18px; height: 18px; color: var(--accent-text); }
   .sims-filters-n { display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font: 700 11px/1 var(--font-data); }
@@ -172,7 +173,7 @@
   .sims-side[data-mode='sheet'] .kit-side-body { padding: 0 16px 16px; }
   .sims-side[data-mode='sheet'] .kit-side-label { margin: 16px 2px 10px; }
   .sims-side[data-mode='sheet'] .kit-side-list { display: flex; flex-wrap: wrap; gap: 8px; }
-  .sims-side[data-mode='sheet'] button.kit-side-item { width: auto; min-height: 42px; gap: 8px; padding: 3px 13px 3px 3px; border-radius: 999px; background: rgb(var(--hl-rgb) / 0.045); box-shadow: inset 0 0 0 1px var(--line); font-size: 13.5px; }
+  .sims-side[data-mode='sheet'] button.kit-side-item { width: auto; min-height: 42px; gap: 8px; padding: 3px 8px; border-radius: 999px; background: rgb(var(--hl-rgb) / 0.045); box-shadow: inset 0 0 0 1px var(--line); font-size: 13.5px; }
   .sims-side[data-mode='sheet'] button.kit-side-item .kit-side-ic { width: 34px; height: 34px; }
   .sims-side[data-mode='sheet'] button.kit-side-item[aria-pressed='true'] { background: rgb(var(--accent-rgb) / 0.12); box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / 0.6); }
   .sims-side[data-mode='sheet'] .kit-side-n { min-width: 0; }

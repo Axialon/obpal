@@ -10,7 +10,7 @@
 .sim-sound > small { color: var(--bb-ink-2); font: 500 12px/1.4 var(--bb-font-ui); }
 .sim-sound > small:empty { display: none; }
 /* The button: the kit's action at the card's size, wherever the card sits. */
-.sim-sound button.kit-action { height: 32px; min-height: 32px; padding: 0 11px 0 9px; border: 1px solid var(--bb-line); border-radius: 11px; background: var(--kit-fill); box-shadow: inset 0 1px 0 var(--bb-hi); color: var(--bb-ink); font: 650 12px/1 var(--bb-font-ui); }
+.sim-sound button.kit-action { height: 32px; min-height: 32px; padding: 0 10px; border: 1px solid var(--bb-line); border-radius: 11px; background: var(--kit-fill); box-shadow: inset 0 1px 0 var(--bb-hi); color: var(--bb-ink); font: 650 12px/1 var(--bb-font-ui); }
 /* Muted is a state to notice, not a choice to light: the speaker crossed out, and no accent ring. */
 .sim-sound button.kit-action[aria-pressed='true'] { border-color: var(--bb-line-strong); background: var(--kit-fill); box-shadow: inset 0 1px 0 var(--bb-hi); }
 .sim-sound button.kit-action[aria-pressed='true'] > .ic { color: var(--bb-ink-2); }
