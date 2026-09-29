@@ -240,7 +240,7 @@ export const CONTROLLERS: Record<ControllerId, ControllerSpec> = {
     utilities: [Utility.trackpad, Utility.hold, Utility.tilt], modes: [Mode.tilt, Mode.hold], controls: CONTROLS['face.trackpad'],
   },
   'face.hand': {
-    id: 'face.hand', name: '3D hand', category: '3D', for: 'Hold the pad and move the phone: what you hold follows your hand',
+    id: 'face.hand', name: '3D hand', category: '3D', for: 'Hold the pad and move the phone: what you hold moves with it',
     utilities: [Utility.track], modes: [Mode.track], controls: CONTROLS['face.hand'],
   },
   'face.keyboard': {

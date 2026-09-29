@@ -1,10 +1,10 @@
 # ob.Pal
 
-> ob.Pal makes any phone the controller for what's on a screen: 3D scenes, browser games, over 40 sims (robot arms, drones, vehicles, a music studio) and the computer itself. A page shows a QR code and a short code; the phone that scans or types it opens the controller that suits the page (gamepad, wheel, pointer, 3D hand, keyboard, drums) in its browser: no app, no account. Up to eight phones share a scene, peer to peer over encrypted WebRTC. Open source (MIT): https://github.com/Axialon/obpal
+> ob.Pal makes any phone the controller for what's on a screen: 3D scenes, browser games that read the Gamepad API, over 40 sims (robot arms, drones, vehicles, a music studio) and, on Windows, the computer itself. A page shows a QR code and a short code; the phone that scans or types it opens the controller that suits the page (gamepad, wheel, pointer, 3D hand, keyboard, drums) in its browser: no app, no account. Up to eight phones share a scene, peer to peer over encrypted WebRTC. Open source (MIT): https://github.com/Axialon/obpal
 
 ## Put it on any page: one tag
 
-Copy this into a page. The element shows a "Scan to control" chip in a corner; a phone that scans its QR code, or types its short code at obpal.blackboxes.net/p (for a TV, a headset or a phone across the room), controls the page. It draws only in its shadow root, needs no inline scripts or styles, and several can share a page.
+Copy this into a page. The element shows a "Scan to control" chip in a corner; a phone that scans its QR code, or types its short code at obpal.blackboxes.net/p (for a headset or a phone across the room), controls the page. It draws only in its shadow root, needs no inline scripts or styles, and several can share a page.
 
 ```html
 <script type="module" src="https://obpal.blackboxes.net/embed.js"></script>
@@ -51,12 +51,12 @@ The SDK is `@obpal/host`, in the repo at packages/host (its README has typed exa
   - `tilt`: a stick from tilting;
   - `pad1`, `pad2`, `zoom`, `twist`: trackpad gestures;
   - `aim`: Wii-style pointing;
-  - `pose`: where the phone is, in metres, while a thumb is on its pad (mode 6, from its own sensors).
+  - `pose`: where the phone is, while a thumb is on its pad (mode 6): from its camera in the camera mode, or estimated from its motion without one.
 - `remote.padOf(id)` gives a standard gamepad, and `remote.on('button', …)` gives tray and hardware buttons.
 - `remote.on('text', ({ s, del }) => …)` gives typing from the phone's own keyboard (a `keyboard` tray control): delete `del` characters, then type `s` (`\n` is Enter). Its key row comes as buttons `key-Escape`, `key-Tab`, `key-ArrowLeft` and so on. While one of your text fields has the focus, `remote.setValues({ textField: 'text' })` (or `'secret'` for a password, `false` after) makes the phone offer Type.
 - Shared scenes: `Remote.create({ …, seats: 8 })`, then `remote.setScene({ nodes, held })`. `Claims` keeps one person per node, and nodes can nest (an arm and its joints).
 - The layout says:
-  - `tray`: buttons (`tone: 'stop'` makes a safety stop), toggles, pickers, and the phone's keyboard (`type: 'keyboard'`);
+  - `tray`: buttons (`tone: 'stop'` draws a red Stop button; on a robot arm that is a software hold, not an emergency stop), toggles, pickers, and the phone's keyboard (`type: 'keyboard'`);
   - `controllers`: the catalogue controllers the page suggests, in order (`face.wii`, `face.gamepad`, …); the first opens on the phone, and the SDK fills in `modes` for older phones;
   - `modes`: which modes the page takes;
   - `profile`: a suggested controller profile;
@@ -66,7 +66,7 @@ The SDK is `@obpal/host`, in the repo at packages/host (its README has typed exa
 ## Specs
 
 - [PROTOCOL.md](https://github.com/Axialon/obpal/blob/main/spec/PROTOCOL.md): pairing, the control messages, and the STATE, PAD, POINTER and POSE packets.
-- [CATALOGUE.md](https://github.com/Axialon/obpal/blob/main/spec/CATALOGUE.md): utilities, the routes motion takes, profiles, shared scenes, bridges, and control systems. For robot arms it covers the safety envelope: deadman, limits, watchdog, e-stop and approval.
+- [CATALOGUE.md](https://github.com/Axialon/obpal/blob/main/spec/CATALOGUE.md): utilities, the routes motion takes, profiles, shared scenes, bridges, and control systems. For robot arms it covers the safety envelope: deadman, limits, watchdog, Stop (a software hold, not an emergency stop) and approval.
 
 ## The catalogue, machine-readable
 
@@ -85,7 +85,7 @@ The SDK is `@obpal/host`, in the repo at packages/host (its README has typed exa
 - [Viewer](https://obpal.blackboxes.net/view/): open it on a screen and scan the code with a phone.
 - [Embed demo](https://obpal.blackboxes.net/embed/): a plain three.js page with `<obpal-remote>`; each phone takes over a shape.
 - [Sims](https://obpal.blackboxes.net/sim/): over 40 for several phones at once, from robot arms and drones to a music studio for eight. Each lists the controllers that suit it; `?category=`, `?face=` and `?q=` filter them (`/sim/?category=vehicles&face=wheel`).
-- [ob.Pal Link](https://obpal.blackboxes.net/link/): a browser extension that makes the phone a gamepad, 3D mouse or keys for any website; with ob.Pal Desktop (Windows), the whole PC's mouse and keyboard, typing included.
+- [ob.Pal Link](https://obpal.blackboxes.net/link/): a browser extension that makes the phone a gamepad (for games that read the Gamepad API), 3D mouse or keys for websites, tested in Chrome, Edge, Brave and Vivaldi (limits: https://github.com/Axialon/obpal/blob/main/extension/README.md#limitations); with ob.Pal Desktop (Windows only for now), the whole PC's mouse and keyboard, typing included.
 
 ## Optional
 

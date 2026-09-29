@@ -8,7 +8,7 @@ Tools for developing ob.Pal with parallel Claude Code agents. A coordinator sess
 | `pnpm run e2e:all [-- <suites>]` | You run any e2e suite. It waits for the suite's ports and gives every suite a fresh local worker (production only with `OBPAL_E2E_UPSTREAM`). It finds the full Chromium, stops the run if a test browser reaches the installed ob.Pal Desktop, and prints one table. |
 | `pnpm run check` | You want typecheck and vitest together, for example after resolving a merge. |
 | `node scripts/merge-lane.mjs <branch> [-m …] [--dry-run]` | You merge a lane (coordinator, main checkout only). It reviews, scans for secrets and private data, merges with `--no-ff` under the repo's identity, then installs, typechecks and runs vitest. It never pushes. |
-| `pnpm run check:live [-- --origin …] [--only …]` | You've deployed. It checks every page at two widths, the pairing code, the /api/code rules, the TURN relay, the security headers and security.txt, read only. |
+| `pnpm run check:live [-- --origin …] [--only …]` | You've deployed. It checks every page at two widths, the pairing code, the /api/code rules, the TURN relay, the security headers and security.txt, and that /link/ shows the release it downloads, read only. |
 
 ## Agents, skills and hooks
 | file | use it when |

@@ -11,7 +11,7 @@ export const UTILITY_ROWS: CatalogueRow[] = [
   { id: 'motion.aim', name: 'Aim', what: 'Turning the phone turns a view, by the gyro’s rate', status: 'Shipped' },
   { id: 'motion.steer', name: 'Steer', what: 'Tilting the phone holds a stick over', status: 'Shipped' },
   { id: 'motion.point', name: 'Point', what: 'Wii-style: the cursor is where the phone points', status: 'Shipped' },
-  { id: 'motion.track', name: '3D', what: 'Where the phone is in space, from its own sensors, Wii-style', status: 'Shipped' },
+  { id: 'motion.track', name: '3D', what: 'Where the phone is in space: from a camera, or estimated from its own motion', status: 'Shipped' },
   { id: 'motion.hold', name: '1:1', what: 'What you hold turns exactly as the phone does', status: 'Shipped' },
   { id: 'motion.tilt', name: 'Tilt', what: 'A racing-style tilt stick', status: 'Shipped' },
   { id: 'touch.trackpad', name: 'Trackpad', what: 'Drag, two-finger pan, pinch and twist', status: 'Shipped' },
@@ -20,8 +20,8 @@ export const UTILITY_ROWS: CatalogueRow[] = [
 export const SYSTEM_ROWS: CatalogueRow[] = [
   { id: 'system.scene3d', name: 'Shared 3D scenes', what: 'Each object and part in the Viewer, one person each', status: 'Shipped', link: '/view/' },
   { id: 'system.gamepad-slots', name: 'Gamepad slots', what: 'Players 1 to 4 in a browser game, one phone each', status: 'Public sim', link: '/sim/arena/' },
-  { id: 'system.desktop', name: 'Your computer', what: 'Keys and the mouse for the program in front (ob.Pal Desktop)', status: 'Shipped', link: '/link/' },
-  { id: 'system.robot-arm', name: 'Robot arms', what: 'Whole arms or single joints, simulated or real (Feetech, serial, ROS 2)', status: 'Public sim', link: '/sim/arm/' },
+  { id: 'system.desktop', name: 'Your computer', what: 'Keys and the mouse for the program in front (ob.Pal Desktop, Windows; macOS coming soon)', status: 'Shipped', link: '/link/' },
+  { id: 'system.robot-arm', name: 'Robot arms', what: 'Whole arms or single joints in the sim; real arms (Feetech, serial, ROS 2) are experimental, untested on hardware', status: 'Public sim', link: '/sim/arm/' },
 ]
 
 export const BRIDGE_ROWS: CatalogueRow[] = [

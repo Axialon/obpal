@@ -16,7 +16,7 @@ export interface TrayControl {
   options?: { value: string; label: string; group?: string; detail?: string; image?: string; glyph?: string; color?: string }[]
   /** select: options can also be added alongside the current choice; the device offers "add" and sends value{…, add: true}. */
   add?: boolean
-  /** stop: a safety stop (a robot's e-stop). The device draws it in red, as words, never as an icon alone. */
+  /** stop: a Stop button (for a robot, a software hold, not an emergency stop). The device draws it in red, as words, never as an icon alone. */
   tone?: 'stop'
 }
 

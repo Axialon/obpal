@@ -1,6 +1,6 @@
 ---
 name: deploy-and-verify
-description: Deploy ob.Pal to production, then verify the live site in one command. The check covers pages at two widths, the Viewer's pairing code, the /api/code rules, the TURN relay, the security headers and security.txt, using pnpm run deploy and pnpm run check:live. Use when merged work is green and the plan calls for a deploy, or to re-check the live site.
+description: Deploy ob.Pal to production, then verify the live site in one command. The check covers pages at two widths, the Viewer's pairing code, the /api/code rules, the TURN relay, the security headers and security.txt, and that /link/ shows the release it downloads, using pnpm run deploy and pnpm run check:live. Use when merged work is green and the plan calls for a deploy, or to re-check the live site.
 ---
 
 # Deploy and verify
@@ -12,7 +12,7 @@ description: Deploy ob.Pal to production, then verify the live site in one comma
 
 1. **Deploy:** `pnpm run deploy`. It runs vitest, builds and runs `wrangler deploy`. Note the version id it prints.
 2. **Verify:** `pnpm run check:live` (about 1.5 min, read only, prints no credentials). It exits 1 on any FAIL. A WARN, such as security.txt expiring within 30 days, doesn't fail it.
-   - Rerun one part with `-- --only pages|api|turn|headers`.
+   - Rerun one part with `-- --only pages|api|turn|headers|release`.
    - Check another deployment with `-- --origin https://…`.
 3. **Record** in the brief: the deployed sha, the version id and check:live's last line. Tell the owner what to test on real devices.
 

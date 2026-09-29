@@ -467,7 +467,7 @@ function renderHelper() {
   brand.className = 'pc-brand'
   brand.textContent = 'ob.Pal '
   $('pc-ver').replaceChildren(brand, `Desktop${pc.version ? ` ${pc.version}` : ''}`)
-  $('pc-ver').title = pc.platform ? 'macOS: awaiting a first Mac test. Ctrl shortcuts use ' + (pc.platform.ctrlToCmd ? '⌘ Command' : 'Control') + '; Alt is ⌥ Option.' : ''
+  $('pc-ver').title = pc.platform ? 'macOS preview: awaiting a first Mac test. Ctrl shortcuts use ' + (pc.platform.ctrlToCmd ? '⌘ Command' : 'Control') + '; Alt is ⌥ Option.' : ''
   const panic = $('pc-panic')
   panic.hidden = !pc.hotkey
   panic.replaceChildren()

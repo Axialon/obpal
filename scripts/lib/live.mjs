@@ -1,6 +1,7 @@
 /**
- * The pure parts of the live check (scripts/check-live.mjs): which pages it loads, and what the site's headers,
- * security.txt and the Viewer's code must look like. Each check is a row: { check, status: 'pass' | 'FAIL' | 'WARN', detail }.
+ * The pure parts of the live check (scripts/check-live.mjs): which pages it loads, what the site's headers,
+ * security.txt and the Viewer's code must look like, and whether the version /link/ shows is the release it downloads.
+ * Each check is a row: { check, status: 'pass' | 'FAIL' | 'WARN', detail }.
  */
 
 /** Every page of the site, loaded at a desktop and a phone width. */
@@ -68,5 +69,48 @@ export function turnChecks({ hostTurn, check, relay }) {
     relay?.opened
       ? row('relay-only DataChannel', relay.localType === 'relay', `opened in ${relay.openMs} ms, echo ${relay.echoMs} ms, ${relay.localType ?? '?'}/${relay.relayProtocol ?? '?'}`)
       : row('relay-only DataChannel', false, relay ? 'did not open in 15 s' : 'not tried'),
+  ]
+}
+
+/** The public repo whose latest release the /link/ buttons download. */
+export const LINK_REPO = 'Axialon/obpal-link'
+
+/** The files a Link release carries (.claude/skills/release/reference.md): the extension under two names, and the helper. */
+export const RELEASE_ASSETS = (version) => ['obpal-link.zip', `obpal-link-${version}.zip`, 'obpal-desktop-windows-x64.zip']
+
+/**
+ * The version /link/ shows ("Version 1.6.1 · free, …"), or null. The build writes it from extension/package.json
+ * (vite.config.ts), while the download is GitHub's latest release, so the two can differ.
+ */
+export function linkVersionLabel(html) {
+  return /\bVersion\s+(\d+\.\d+\.\d+)\b/.exec(html)?.[1] ?? null
+}
+
+/**
+ * The tag and the file names in GitHub's answer for a repo's latest release (GET /repos/<repo>/releases/latest), or
+ * null when it isn't one.
+ * @returns {{ tag: string, assets: string[] } | null}
+ */
+export function latestRelease(json) {
+  const tag = json?.tag_name
+  if (typeof tag !== 'string' || !Array.isArray(json.assets)) return null
+  return { tag, assets: json.assets.map((a) => String(a?.name)) }
+}
+
+/**
+ * Release truth: /link/ names a version, and its download buttons fetch the latest release. The label must be that
+ * release's tag, and the release must carry all its files. Without a release there is nothing to compare.
+ * @param {{ label: string | null, release: { tag: string, assets: string[] } | null, http?: number }} r the label /link/ shows,
+ *   the latest release, and the status GitHub answered with (named when there is no release)
+ */
+export function releaseChecks({ label, release, http }) {
+  if (!release) return [row('latest release', false, `GitHub gave no release${http ? ` (HTTP ${http})` : ''}`)]
+  const version = release.tag.replace(/^v/, '')
+  const wanted = RELEASE_ASSETS(version)
+  const missing = wanted.filter((name) => !release.assets.includes(name))
+  return [
+    row('latest release', true, `${release.tag}, ${release.assets.length} files`),
+    row('/link/ label', label === version, label ? `shows ${label}, latest release is ${release.tag}` : 'no version on the page'),
+    row('release files', !missing.length, missing.length ? `missing ${missing.join(', ')}` : `all ${wanted.length} present`),
   ]
 }

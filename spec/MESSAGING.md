@@ -27,7 +27,7 @@ The eyebrow stays: **Open source · no app · no account**. Each sub-line is 12 
 - **A music studio** for eight phones: drum pads, the phone as a drumstick, keys locked to a scale.
 - **Together:** up to eight phones in one scene, each holding its own part.
 - **The right controller:** gamepad, wheel, trackpad, pointer, air mouse, 3D hand, keyboard, drums and tone keys. A headset, clicker or Bluetooth pad can press them (a phone's volume keys never reach a browser page).
-- **Any website** with ob.Pal Link; **the whole PC** with ob.Pal Desktop (Windows), typing included.
+- **Any website**, said with what is tested (Chrome, Edge, Brave and Vivaldi) and a link to the limits: a gamepad for games that read the Gamepad API, a 3D mouse or keys, with ob.Pal Link. **The whole PC** with ob.Pal Desktop (Windows only, macOS coming soon), typing included.
 - **Your own site:** one tag, `<obpal-remote>`.
 - **The viewer:** your own 3D models, turned, pointed at and moved from the phone.
 - **Private:** encrypted, and the ob.Pal service only introduces the devices. No accounts, no analytics.
@@ -39,7 +39,15 @@ The eyebrow stays: **Open source · no app · no account**. Each sub-line is 12 
 2. **Show it, then name it.** A live scene, an icon or a picture carries the idea; words label it.
 3. **Plain and direct:** you, your phone; present tense; short sentences.
 4. **No hype:** not revolutionary, seamless, magic, instantly, effortless, powerful, ultimate, unlock, simply or just. No exclamation marks, no emoji.
-5. **Only what ships.** VR, first-person views, TVs and watches: "coming", or leave them out. No arm has been driven on real hardware yet: "built for real arms", not "real arms too". The Chrome Web Store, npm and macOS once they're live.
+5. **Only what ships.** tests/overclaims.test.ts fails when one of these comes back:
+   - VR, first-person views and watches: "coming", or left out. A sim opens on a computer, not a TV.
+   - Real arms are experimental and untested on hardware: never "built for real arms". Stop is a software hold, not an emergency stop, and the arm's own stop stays within reach.
+   - "Any website" and "any browser game" come with what is tested (Chrome, Edge, Brave and Vivaldi; games that read the Gamepad API) and a link to the limits in extension/README.md.
+   - ob.Pal Desktop is Windows only; macOS is "coming soon".
+   - The Chrome Web Store and npm once they're live. Until `@obpal/host` is on npm, the page shows the embed snippet (`<script type="module" src="https://obpal.blackboxes.net/embed.js">` and `<obpal-remote>`), not the import.
+   - The 3D position comes from the camera mode, or is estimated from the phone's own motion without it. No precision such as "in metres".
+   - Offline claims only what the extension's tests cover: a phone paired once, on a network that lets devices reach each other.
+   - Telemetry is off by default; feedback is opt-in only.
 6. **Numbers that stay true:** "up to eight phones", "over 40 sims".
 7. **Say "no app"**, not "nothing to install" (Link and Desktop are installed).
 8. **One spelling for UK and US readers.** Avoid colour, centre, grey, favourite, metre, analogue, behaviour, travelling, licence and -ise or -ize verbs. Names keep theirs (the Catalogue page, catalogue.json). tests/messaging.test.ts checks every page's description.
@@ -54,27 +62,9 @@ public/og.png (1200 × 630): the hero's night, eyebrow, headline, sub-line and m
 
 The summary is the manifest's `description` (extension/vite.config.ts), 132 characters at most, and ships in the package. The description, the permission justifications and the reviewer's notes are in extension/store/listing.md. Every claim there must hold for the version being uploaded; it stays Windows-only until a real Mac test passes.
 
-## Drafts for the coordinator (not applied)
+## The public repositories
 
-The obpal-link README's opening, replacing everything above "What's new":
+The obpal-link README carries the same qualifiers as the site (extension/README.md has them too): websites "in your browser", games that "read the Gamepad API", PC control marked "(Windows)", the browsers that are tested, and a Limitations section. The repositories' About lines, in the same words:
 
-```md
-# ob.Pal Link
-
-Your phone is the controller for any website. Scan a code and the controller opens in your phone's browser: no app, no account.
-
-- **Controller**: a standard gamepad for Gamepad API games, cloud gaming included, with rumble.
-- **3D**: drag to rotate, two fingers to pan, pinch to zoom.
-- **Keys**: WASD on the left stick, arrow keys on the D-pad, the mouse on the right stick.
-- **PC** (Windows): with ob.Pal Desktop, your phone is the mouse and keyboard, typing included. The PC asks you once for each new phone.
-
-A paired phone connects over your Wi-Fi even when the internet is down. Chrome, Edge, Brave, Opera, Vivaldi and Arc (Chromium 120 or later).
-
-Part of [ob.Pal](https://obpal.blackboxes.net): [its sims](https://obpal.blackboxes.net/sim/) need no extension. Open source (MIT).
-
-Website: [obpal.blackboxes.net/link](https://obpal.blackboxes.net/link/) · Source: [github.com/Axialon/obpal](https://github.com/Axialon/obpal) (this repository carries the releases)
-```
-
-The repositories' About lines:
 - Axialon/obpal: `Your phone is the controller: robots, drones, games, music and your computer. Scan a code, no app. Open protocol.`
-- Axialon/obpal-link: `Your phone is the controller for any website: gamepad, 3D mouse or keys, and your whole PC with ob.Pal Desktop. No phone app.`
+- Axialon/obpal-link: `Your phone as a controller for websites in your browser: a gamepad for games that read the Gamepad API, a 3D mouse or keys, and on Windows your whole PC. No phone app.`

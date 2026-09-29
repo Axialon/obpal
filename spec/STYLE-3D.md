@@ -47,7 +47,7 @@ The confirmed language now applies to all six arm rigs and all 33 device scenes,
 
 ## Motion and delivery
 
-Keep `src/sim/kit/motion.ts`: critically damped responses in seconds, continuous-input filtering, eased rotor spin-up and suspension settling. Mechanism sleeves stay rigid while rods slide; cable ends stay attached. Never smooth the collision gripper away from its authoritative joint, or weaken deadman, watchdog, limits or emergency stops. Verify starts, reversals and release at 30, 60 and 120 fps, and after a long frame.
+Keep `src/sim/kit/motion.ts`: critically damped responses in seconds, continuous-input filtering, eased rotor spin-up and suspension settling. Mechanism sleeves stay rigid while rods slide; cable ends stay attached. Never smooth the collision gripper away from its authoritative joint, or weaken deadman, watchdog, limits or Stop. Verify starts, reversals and release at 30, 60 and 120 fps, and after a long frame.
 
 `assets/blender/` scripts are the source of truth. Export meshopt GLBs to `public/models/`, with named moving pivots or rigid appearance slots and kit material names. The original trio stays below its combined 1.5 MB budget; new hero assets target 400 KB or less each and load only in their own sim. Complete scenes with all available units (four arms) stay below about 250k submitted triangles and 150 draw calls. No model textures are required. Procedural rigs draw immediately and remain functional on download failure. Catalogue models stay procedural. The existing WebAssembly permission remains confined to arm and device pages; Trusted Types and `obpal-templates` remain enforced.
 

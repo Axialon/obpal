@@ -14,19 +14,19 @@ Copy each block as it is: the dashboard takes plain text, and line breaks are ke
 **Name** and **summary** come from the package (the manifest's `name` and `description`, in `extension/vite.config.ts`):
 
 - Name: `ob.Pal Link`
-- Summary (131 of 132 characters):
+- Summary (128 of 132 characters):
 
 ```text
-Your phone is the controller for any website: gamepad, 3D mouse or keys. Add ob.Pal Desktop for your whole PC. No phone app needed.
+Your phone as a controller for websites: gamepad, 3D mouse or keys. Add ob.Pal Desktop for your Windows PC. No phone app needed.
 ```
 
 **Description:**
 
 ```text
-Your phone is the controller for any website. Scan a QR code and the controller opens in your phone's browser: no app, no account.
+Your phone as a controller for websites in your browser. Scan a QR code and the controller opens in your phone's browser: no app, no account.
 
 What your phone becomes
-• Controller: a standard gamepad for Gamepad API games, cloud gaming included, with rumble.
+• Controller: a standard gamepad for browser games that read the Gamepad API, with rumble.
 • 3D: drag to rotate, two fingers to pan, pinch to zoom.
 • Keys: WASD on the left stick, arrow keys on the D-pad, Space, Enter and more on the buttons, the mouse on the right stick.
 • Motion: turn to aim, tilt to steer, or point at the screen like a remote.
@@ -37,13 +37,14 @@ Your whole PC, with ob.Pal Desktop for Windows
 • Type with the phone's own keyboard. It offers to when a text field has the focus, and learns nothing from password fields.
 • The PC asks once before a new phone can control it: Allow or Deny, changeable in the options.
 • Ctrl + Alt + Backspace stops everything.
-The helper is optional; Link asks to talk to it only when you choose PC.
+The helper is optional; Link asks to talk to it only when you choose PC. It isn't code-signed yet, so Windows may warn about it.
 
 How it works
 1. Click the ob.Pal Link icon on the page you want to control.
 2. Scan the QR code with your phone's camera.
 3. Turn on "This tab" and pick Controller, 3D, Keys or PC.
-The popup shows the connection: a lock, direct or relayed, and the round trip. A paired phone connects over your Wi-Fi even when the internet is down.
+The popup shows the connection: a lock, direct or relayed, and the round trip. A phone you've paired once can also connect directly over your Wi-Fi when the internet is down, if your network lets devices reach each other.
+Works in Chrome, Edge, Brave and Vivaldi (Chromium 120 or later). Other Chromium browsers may work, but aren't tested.
 
 Private by design
 • No accounts, analytics, ads or remote code.

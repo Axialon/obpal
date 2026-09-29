@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "license": "MIT",
-  "description": "ob.Pal Link: a Chromium MV3 extension that lets a phone paired through ob.Pal control any website.",
+  "description": "ob.Pal Link: a Chromium MV3 extension that makes a phone paired through ob.Pal a controller for websites in your browser.",
   "scripts": {
     "build": "vite build",
     "icons": "node scripts/icons.mjs",

@@ -1,6 +1,26 @@
 # ob-pal: phone as a 3D remote (plan, 2026-09-25)
 
-> **Status (2026-09-25):** decided: solo build, web-3D-first launch, MIT license (matching Blackboxes). The MVP vertical slice is live at https://obpal.blackboxes.net: pairing, the Rotate and Point modes, the trackpad, trays, and the hosted viewer. Still to do before relay coverage: a TURN key. The wire protocol is written up in [spec/PROTOCOL.md](spec/PROTOCOL.md).
+## Current state (2026-09-29)
+
+What ships, what is a preview and what is only planned. The dated notes below are the history: where one of them disagrees with this block, this block is right.
+
+- **Shipped.**
+  - The phone controller (a web app, opened from a QR code or a short code): gamepad, trackpad, Wii pointer, 3D hand, button trays and the phone's keyboard, for several phones at once.
+  - The hosted Viewer, the embed (`<script type="module" src="https://obpal.blackboxes.net/embed.js">` and `<obpal-remote>`), the public sims and the catalogue.
+  - **ob.Pal Link 1.6.1**, a Chromium extension: a standard gamepad for browser games that read the Gamepad API, and the phone as a 3D mouse or keys. Tested in Chrome, Edge, Brave and Vivaldi. It is the latest release of Axialon/obpal-link on GitHub (published 2026-09-29) and is in review on the Chrome Web Store, not yet published there.
+  - **ob.Pal Desktop 0.3.0**, Windows only: keys and the mouse for the program in front. It isn't code-signed, so Windows may warn about it.
+  - 3D position comes from the camera mode, or is estimated from the phone's motion without it.
+- **Preview.**
+  - macOS: the Desktop code exists and awaits a first Mac test.
+  - Real robot arms (Feetech, serial, ROS 2): experimental, and untested on hardware. Stop is a software hold, not an emergency stop, and the arm's own stop must stay within reach.
+  - Offline: a phone paired once connects straight over Wi-Fi when the internet is down, if the network lets devices reach each other. The tests cover that flow, not every network.
+- **Planned.**
+  - `@obpal/host` and `@obpal/core` on npm (npm answers 404 for them today, so pages use the embed).
+  - A signed Desktop, and macOS and Linux builds.
+  - TVs, headsets and watches as screens or controllers: research only (step 8b).
+- **Privacy.** No accounts and no analytics. Telemetry is off by default, and feedback is opt-in only.
+
+> **Status (2026-09-25):** decided: solo build, web-3D-first launch, MIT license (matching Blackboxes). The MVP vertical slice is live at https://obpal.blackboxes.net: pairing, the Rotate and Point modes, the trackpad, trays, and the hosted viewer. A TURN relay was still to do then; production has one now. The wire protocol is written up in [spec/PROTOCOL.md](spec/PROTOCOL.md).
 >
 > **2026-09-26:** the controller is an offline-capable PWA (service worker, versioned cache), and a phone that paired once with ob.Pal Link reconnects over the LAN through a **direct code** with no server involved (PROTOCOL.md §2a). Connecting is front-loaded: the phone's offer is built while signaling connects, the extension keeps its link warm from browser start, and both sides give the service 1.5 s before switching to the direct path.
 
@@ -8,18 +28,18 @@
 
 ## TL;DR: the easiest path with the widest reach
 
-1. **Phone = a web app (PWA) on one public HTTPS origin, opened by scanning a QR code.** Nothing to install.
+1. **Phone = a web app (PWA) on one public HTTPS origin, opened by scanning a QR code.** Nothing to install on the phone.
    - Full support: iOS/iPadOS 16.4+ and Android 10+. That is about 98% of active phones.
    - Best-effort: iOS 15 and Android 7–9.
 2. **Link = WebRTC DataChannel.** An unreliable channel carries motion at 60 Hz, and a reliable channel carries buttons.
    - Signaling goes through a Cloudflare Worker + Durable Object.
-   - Cloudflare TURN (UDP/TCP/TLS 443) is always configured. Sessions therefore work on home Wi-Fi, guest Wi-Fi with client isolation, cellular and UDP-blocked networks.
+   - Cloudflare TURN (UDP/TCP/TLS 443) is configured in production (a self-hosted copy sets its own). Sessions should therefore work on home Wi-Fi, guest Wi-Fi with client isolation, cellular and UDP-blocked networks.
 3. **Why not a LAN web server:**
    - Motion sensors need HTTPS (WebKit and Chromium).
    - An HTTPS page can't open `ws://` to a LAN IP in Safari, and Chrome 147+ puts a permission prompt in front of it.
    - WebRTC is the one prompt-free path from a public page to a LAN host today.
 4. **Hosts, three tiers, one protocol:**
-   - (a) **JS SDK** for browser 3D apps (three.js, model-viewer, Babylon). Zero install. Also covers ChromeOS, Quest, Vision Pro and modern TVs.
+   - (a) **JS SDK** for browser 3D apps (three.js, model-viewer, Babylon). Zero install for the people using the page. Meant for ChromeOS, Quest and Vision Pro browsers too, untested for now; TVs are research (step 8b). The packages aren't on npm yet, so pages use the embed.
    - (b) **Small native bridge** (Go + pion) for desktop apps. It injects OS mouse/keyboard input and sends OSC to a Blender add-on for exact 1:1 rotation.
    - (c) **Later:** legacy protocol emitters (VRPN, opentrack, DSU, TUIO, MIDI), virtual HID devices, and an Android-only Bluetooth-HID "Direct mode".
 5. **Input:**
@@ -369,7 +389,7 @@ TVs, headsets, AR glasses and watches, as hosts and as controllers: [spec/RESEAR
 | 2 | QR pairing (S + fpH + HMAC binding), `/api/ice` TURN credentials, reconnect on visibilitychange |
 | 3 | Controller PWA: permission/Start gate, gyro and touch tiers, Hold + Air pointer, trackpad, tray presets, handedness |
 | 4 | SDK (`sample()`, three.js / camera-controls / model-viewer adapters, pairing widget) + Hosted Viewer |
-| 5 | Short code + approval, telemetry (glass-to-receive, path, tier), matrix QA on 4 network types, netem loss/jitter smoke test, beta |
+| 5 | Short code + approval, telemetry (glass-to-receive, path, tier; off by default, §13 item 7), matrix QA on 4 network types, netem loss/jitter smoke test, beta |
 
 **MVP exit:** the §1 targets are met on the device lab across home, AP-isolated, cellular and UDP-blocked networks.
 
@@ -382,7 +402,7 @@ TVs, headsets, AR glasses and watches, as hosts and as controllers: [spec/RESEAR
 - VRPN JsonNet emitter if sci-vis is a target.
 - External pen test.
 
-**v2 (each item only on demand or telemetry):**
+**v2 (each item only on demand or opt-in feedback):**
 - opentrack / DSU / TUIO / MIDI emitters.
 - Virtual HID (HIDMaestro, spacenavd).
 - Android Direct mode.
@@ -396,7 +416,7 @@ TVs, headsets, AR glasses and watches, as hosts and as controllers: [spec/RESEAR
 | A | Shared scenes in the Viewer (`system.scene3d`): invites, participants with colours, one claim per node, a cursor per participant, a scene list on the phone, and remove / new link on the screen |
 | B | `system.gamepad-slots` in ob.Pal Link (one pad per phone, Player 1–4) and `bridge.gamepad` (Gamepad API controllers through a phone or PC, one participant each) |
 | C | `bridge.xr` (WebXR controllers and hands, one participant per hand), then `bridge.joycon` and `bridge.wiimote` over WebHID |
-| D | `system.robot-arm`: a reference bridge (ROS 2 through rosbridge, against a simulated arm first), with host approval, deadman, limits in the bridge, a 200 ms watchdog, e-stop on every device, and a claim log |
+| D | `system.robot-arm`: a reference bridge (ROS 2 through rosbridge, against a simulated arm first), with host approval, deadman, limits in the bridge, a 200 ms watchdog, a Stop on every device (a software hold, not an emergency stop), and a claim log |
 
 Public sims (2026-09-26): [/sim/](https://obpal.blackboxes.net/sim/) hosts the robot arm (phase D's envelope, simulated) and the faction arena (phase B's slots), so the public can try both before the bridges ship.
 
@@ -597,7 +617,7 @@ Scheduled 2026-09-27: phase B lands with step 5b (the controller hub, below), an
 7. Arms.
 8. Bluetooth research.
 8b. **Research: TVs, headsets, AR glasses and watches, with controller profiles** (owner, 2026-09-27; added here, see below). The quick scan is [spec/RESEARCH-DEVICES.md](spec/RESEARCH-DEVICES.md).
-9. Chrome Web Store: **the package is ready** (extension/store/UPLOAD.md); the owner uploads it.
+9. Chrome Web Store: **Link 1.6.1 is in review** (extension/store/UPLOAD.md), not yet published there. Until it is, Link installs from GitHub's latest release.
 
 **Next, in this order (owner OK'd 2026-09-27: "go ahead in that order"):**
 
@@ -794,7 +814,7 @@ addons/blender      OSC add-on (v1)
 4. **Licensing.** Recommended: open-source the protocol and SDK at minimum.
 5. **Name and domain.** Must be fixed before beta.
 6. **Bridge stack.** Go + pion (recommended; its TURN-over-TLS support was checked) or Electron reusing the TS SDK.
-7. **Telemetry default.** Recommended: anonymous, no input data, on with opt-out, because the v1/v2 gates depend on it.
+7. **Telemetry default.** DECIDED 2026-09-29, owner: off by default, and feedback is opt-in only. This replaces the earlier recommendation (anonymous, on with opt-out). The v1 and v2 gates rest on our own device-lab runs, on requests, and on feedback people choose to send.
 8. **The controller catalogue's place (step 5b, 2026-09-27).** DECIDED 2026-09-27, owner: "approve 5b before music room". Between the shared view and the music room (§10).
 9. **Native apps for watches and Apple devices.** Every watch needs a native watch app. An Apple Watch also needs a native iPhone app, and an Apple TV a tvOS app, each with Apple Developer enrollment and App Store review. DECIDED 2026-09-27 (the owner left the rest to Claude's judgement, "for the end UX as we envision for the project"): a Wear OS app first, in step 8b, which covers Pixel and Galaxy watches; Apple only on demand.
 10. **Which TVs first.** DECIDED 2026-09-27 (Claude's judgement, as above): Samsung (a Tizen web app) and a Google Cast receiver, then LG through the relay. WebRTC on LG needs an LG partnership.

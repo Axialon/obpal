@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { newestInstalled, shortPath } from '../scripts/lib/browser.mjs'
 import { countSessionLines, failures, knownSuites, listeningPids, newSessionLines, parseArgs, parseResult, suitePorts } from '../scripts/lib/e2e.mjs'
-import { pageHeaderChecks, securityTxtCheck, shownCode, turnChecks } from '../scripts/lib/live.mjs'
+import { latestRelease, linkVersionLabel, pageHeaderChecks, RELEASE_ASSETS, releaseChecks, securityTxtCheck, shownCode, turnChecks } from '../scripts/lib/live.mjs'
 import { applyAllow, DEFAULT_CO_AUTHOR, parseArgs as mergeArgs, parseVitest, pickCoAuthor, summarizeNumstat } from '../scripts/lib/merge.mjs'
 import { formatDuration, formatTable } from '../scripts/lib/report.mjs'
 import { addedLines, isLocalOnly, mask, PRIVATE_RULES, riskyPath, scanText, SECRET_RULES } from '../scripts/lib/scan.mjs'
@@ -277,6 +277,45 @@ describe('check:live: headers, security.txt, the pairing code, TURN', () => {
     ])
     expect(turnChecks({ hostTurn: [], check: null, relay: null })).toEqual([{ check: 'TURN offered', status: 'FAIL', detail: 'the Viewer made no /api/ice request' }])
     expect(turnChecks({ hostTurn: [false], check: { turn: false, creds: false, urls: [] }, relay: null }).map((r) => r.status)).toEqual(['FAIL', 'FAIL'])
+  })
+})
+
+describe('check:live: release truth, the /link/ label against the download', () => {
+  const files = (v: string) => ['obpal-link.zip', `obpal-link-${v}.zip`, 'obpal-desktop-windows-x64.zip']
+  const page = (v: string) => `<p class="fine">Version ${v} · free, MIT licensed · in review on the Chrome Web Store</p>`
+
+  it('reads the version /link/ shows, and the tag and files of GitHub\'s latest release', () => {
+    expect(linkVersionLabel(page('1.6.1'))).toBe('1.6.1')
+    expect(linkVersionLabel('<p>Get ob.Pal Link</p>')).toBeNull()
+    expect(latestRelease({ tag_name: 'v1.6.1', assets: files('1.6.1').map((name) => ({ name, size: 1 })) })).toEqual({ tag: 'v1.6.1', assets: files('1.6.1') })
+    expect(latestRelease({ message: 'Not Found' })).toBeNull()
+    expect(latestRelease(null)).toBeNull()
+  })
+
+  it('passes when the label is the latest release and all three files are there', () => {
+    expect(releaseChecks({ label: '1.6.1', release: { tag: 'v1.6.1', assets: files('1.6.1') } })).toEqual([
+      { check: 'latest release', status: 'pass', detail: 'v1.6.1, 3 files' },
+      { check: '/link/ label', status: 'pass', detail: 'shows 1.6.1, latest release is v1.6.1' },
+      { check: 'release files', status: 'pass', detail: 'all 3 present' },
+    ])
+    expect(RELEASE_ASSETS('1.6.1')).toEqual(files('1.6.1'))
+  })
+
+  it('fails when /link/ shows 1.6.1 and the latest release is v1.6.0', () => {
+    const rows = releaseChecks({ label: '1.6.1', release: { tag: 'v1.6.0', assets: files('1.6.0') } })
+    expect(rows.map((r) => r.status)).toEqual(['pass', 'FAIL', 'pass'])
+    expect(rows[1].detail).toBe('shows 1.6.1, latest release is v1.6.0')
+  })
+
+  it('fails when a file is missing, or belongs to another version', () => {
+    const rows = releaseChecks({ label: '1.6.1', release: { tag: 'v1.6.1', assets: ['obpal-link.zip', 'obpal-link-1.6.1.zip'] } })
+    expect(rows[2]).toEqual({ check: 'release files', status: 'FAIL', detail: 'missing obpal-desktop-windows-x64.zip' })
+    expect(releaseChecks({ label: '1.6.1', release: { tag: 'v1.6.1', assets: files('1.6.0') } })[2].detail).toBe('missing obpal-link-1.6.1.zip')
+  })
+
+  it('fails without a release to compare with, or a version on the page', () => {
+    expect(releaseChecks({ label: '1.6.1', release: null, http: 403 })).toEqual([{ check: 'latest release', status: 'FAIL', detail: 'GitHub gave no release (HTTP 403)' }])
+    expect(releaseChecks({ label: null, release: { tag: 'v1.6.1', assets: files('1.6.1') } })[1]).toMatchObject({ status: 'FAIL', detail: 'no version on the page' })
   })
 })
 

@@ -123,7 +123,7 @@ if (desk) {
   const label = send.textContent
   send.addEventListener('click', async () => {
     const url = `${location.origin}/view/`
-    const text = 'Open this on a computer or TV, then scan its code with your phone.'
+    const text = 'Open this on a computer, then scan its code with your phone.'
     try {
       if (navigator.share) { await navigator.share({ title: 'ob.Pal', text, url }); return }
       await navigator.clipboard.writeText(url)

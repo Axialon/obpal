@@ -94,7 +94,7 @@
             <div class="scene-text">
               <div class="scene-cap"><span class="scene-k">Move</span></div>
               <h3>Move it through the air</h3>
-              <p>Robot arms follow your hand, from the phone’s own sensors. Built for real arms.</p>
+              <p>Robot arms follow your hand, from the phone’s own sensors. Real arms are experimental.</p>
               <a href="/sim/arm/">Try the robot arms →</a>
             </div>
           </article>
@@ -121,7 +121,7 @@
             <div class="scene-text">
               <div class="scene-cap"><span class="scene-k">Play</span></div>
               <h3>Play, four at once</h3>
-              <p>Four phones, four players. Any browser game gets a gamepad.</p>
+              <p>Four phones, four players. With Link, any browser game that reads the Gamepad API gets a gamepad. Tested in Chrome, Edge, Brave and Vivaldi. <a href="https://github.com/Axialon/obpal/blob/main/extension/README.md#limitations">See the limits</a>.</p>
               <a href="/sim/arena/">Play the arena →</a>
             </div>
           </article>
@@ -139,8 +139,8 @@
             <div class="scene-text">
               <div class="scene-cap"><span class="scene-k">Computer</span></div>
               <h3>Run your computer</h3>
-              <p>A trackpad and keys for whatever is in front.</p>
-              <a href="/link/">Get ob.Pal Link →</a>
+              <p>On Windows, a trackpad and keys for whatever is in front. It takes two installs: Link and Desktop.</p>
+              <a href="/link/">Get Link and Desktop →</a>
             </div>
           </article>
         </div>
@@ -154,18 +154,12 @@
         <div class="build-grid">
           <article class="build-card code-card">
             <h3>Build with it</h3>
-            <p>Any web page can take a phone as its controller. This page does, with the same SDK.</p>
-            <pre><code><span class="k">import</span> { Remote, PairingChip } <span class="k">from</span> <span class="s">'@obpal/host'</span>
-
-<span class="k">const</span> remote = <span class="k">await</span> Remote.<span class="f">create</span>({ appName: <span class="s">'My scene'</span> })
-<span class="k">new</span> <span class="f">PairingChip</span>({ remote }) <span class="c">// the code, in a corner</span>
-
-<span class="f">requestAnimationFrame</span>(<span class="k">function</span> <span class="f">frame</span>(now) {
-  <span class="k">const</span> f = remote.<span class="f">consume</span>(now)
-  <span class="k">if</span> (f.pose?.touching) <span class="f">follow</span>(f.pose.p) <span class="c">// the hand, in metres</span>
-  <span class="f">requestAnimationFrame</span>(frame)
-})</code></pre>
-            <a href="https://github.com/Axialon/obpal/tree/main/packages/host">The host SDK →</a>
+            <p>One script and one tag let a web page take a phone as its controller. This page does, with the same SDK.</p>
+            <pre><code><span class="k">&lt;script</span> type=<span class="s">"module"</span>
+  src=<span class="s">"https://obpal.blackboxes.net/embed.js"</span><span class="k">&gt;&lt;/script&gt;</span>
+<span class="k">&lt;obpal-remote</span> app=<span class="s">"My scene"</span> seats=<span class="s">"4"</span>
+  modes=<span class="s">"face.trackpad face.wii"</span><span class="k">&gt;&lt;/obpal-remote&gt;</span></code></pre>
+            <a href="/embed/">Try the embed →</a>
           </article>
           <article class="build-card">
             <h3>Your own controller</h3>

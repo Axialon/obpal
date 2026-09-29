@@ -1,6 +1,6 @@
 # ob.Pal Desktop
 
-The native helper behind the **PC** target of the ob.Pal Link browser extension: your phone becomes this computer's mouse and keyboard, in every window (**Whole PC**) or only in the programs you allow, with the scope you choose. Windows and macOS (Intel and Apple Silicon). **macOS is awaiting a first Mac test**: the code is cross-checked on Windows, not yet verified against a Mac's input system or permissions.
+The native helper behind the **PC** target of the ob.Pal Link browser extension: your phone becomes this computer's mouse and keyboard, in every window (**Whole PC**) or only in the programs you allow, with the scope you choose. Windows only for now. A macOS preview (Intel and Apple Silicon) is coming soon: **it is awaiting a first Mac test**, and its code is cross-checked on Windows but not yet verified against a Mac's input system or permissions.
 
 ```
 phone ──WebRTC──▶ ob.Pal Link (extension) ──Chrome Native Messaging (stdio)──▶ obpal-desktop.exe ──SendInput──▶ the program in front
@@ -215,7 +215,7 @@ Length-prefixed JSON on stdin/stdout (spec/PROTOCOL.md § Native messaging frame
 
 ## Limits and next steps
 
-- Windows and macOS; macOS awaits its first real Mac test. Linux (`uinput`, a udev rule, or the libei portal) still needs an injector and foreground lookup behind the same traits.
+- Windows only for now; the macOS preview is coming soon and awaits its first real Mac test. Linux (`uinput`, a udev rule, or the libei portal) still needs an injector and foreground lookup behind the same traits.
 - No virtual gamepad: it needs a driver (ViGEmBus is archived; HIDMaestro is the user-mode candidate). The scope model already carries `gamepad`.
 - The mouse is relative only (what games with raw input expect). An absolute path for desktop pointing is a later option.
 - Not code-signed: SmartScreen will warn on first run until a signing identity exists. The extension ID it allows is fixed by the manifest key; a Chrome Web Store build gets its ID from the key uploaded with it (see `extension/scripts/key.mjs`).

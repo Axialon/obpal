@@ -18,7 +18,7 @@ It does not become a one-off mode. The wire formats are in [PROTOCOL.md](PROTOCO
 | `motion.aim` | Motion | Gyro **turn rate** drives a look output. Moving the phone turns; holding it still stops. | Mixed into PAD axes, or a relative POINTER 0x14 (the `mouse` route) |
 | `motion.steer` | Motion | Tilt **angle** drives a stick. The tilt is held while the phone is held tilted. | Mixed into PAD axes |
 | `motion.point` | Pointer | Wii-style absolute pointing (PROTOCOL §4, Point mode): the cursor is where the phone points | POINTER 0x14 |
-| `motion.track` | 3D | 6-DOF: the phone's position and orientation in space (mode 6). By default from the phone's own sensors, Wii-style (no camera): the gyro's orientation through an arm model gives where the hand is, and the accelerometer adds pushes and pulls along where the phone points (`src/controller/imu3d.ts`). In settings, the camera instead (Android WebXR), or a glow for the host's camera. Hosts move what's held as the hand moves. In the Viewer, a held part moves and turns with the phone, a live value drags, and the lead with nothing held moves the scene. `handMove`, `handTurn` and `headingOf` in `@obpal/host` put a pose in the hand's terms | POSE 0x15 |
+| `motion.track` | 3D | 6-DOF: the phone's position and orientation in space (mode 6). By default the position is an estimate from the phone's own motion, Wii-style (no camera): the gyro's orientation through an arm model gives where the hand is, and the accelerometer adds pushes and pulls along where the phone points (`src/controller/imu3d.ts`). In settings, the camera instead (Android WebXR), or a glow for the host's camera. Hosts move what's held as the hand moves. In the Viewer, a held part moves and turns with the phone, a live value drags, and the lead with nothing held moves the scene. `handMove`, `handTurn` and `headingOf` in `@obpal/host` put a pose in the hand's terms | POSE 0x15 |
 | `touch.trackpad` | Touch | One-finger drag, two-finger pan, pinch, twist | STATE 0x11 |
 | `motion.hold` | 3D | 1:1 orientation while held | STATE 0x11 (qRel) |
 | `motion.tilt` | 3D | Racing-style tilt stick | STATE 0x11 (tilt) |
@@ -182,11 +182,11 @@ A control system is a kind of host. It decides what its nodes are, which utiliti
 - a serial servo controller;
 - MQTT or OSC.
 
-Nodes map to the arm: one participant can steer the tool while another works the gripper, but never two on the same joint. The safety envelope is part of the item, not an option:
+Nodes map to the arm: one participant can steer the tool while another works the gripper, but never two on the same joint. The safety envelope is part of the item, not an option. It is software, and real arms are experimental and untested on hardware, so the arm's own stop or power switch must stay within reach:
 - **Deadman:** a node moves only while its participant holds the grab control. Letting go stops it.
 - **Limits:** joint ranges, velocity and acceleration caps, and a workspace box are enforced in the bridge, never on the phone.
 - **Watchdog:** 200 ms without input stops the node, as the desktop helper releases everything when frames stop.
-- **E-stop:** every participant's device and the host show a stop control that halts every node at once.
+- **Stop:** every participant's device and the host show a Stop control that halts every node at once. It is a software hold, not an emergency stop.
 - **Approval:** the host approves each participant before its first claim. Having the link isn't enough.
 - **Record:** the bridge logs who held which node, and when.
 
@@ -201,7 +201,7 @@ Nodes map to the arm: one participant can steer the tool while another works the
 - **Deadman:** a finger on the trackpad, or a stick deflected. For a joint, the 1:1 grab held also counts.
 - **Limits:** speed and acceleration caps, and joint limits.
 - **Watchdog:** 200 ms without input stops the joint.
-- **E-stop:** a Stop button on every phone's tray and on the screen (Space). It holds position rather than cutting power, and only the screen resumes. The screen going to the background while an arm is live also stops everything.
+- **Stop:** a Stop button on every phone's tray and on the screen (Space). It is a software hold, not an emergency stop: it holds position rather than cutting power, and only the screen resumes. The screen going to the background while an arm is live also stops everything.
 - **Approval:** the screen lets each person in before their first claim.
 - **Real arms** (`drivers.ts`):
   - **Connect:** the screen connects a driver, and the twin then follows the real arm.

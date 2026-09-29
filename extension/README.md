@@ -1,13 +1,13 @@
 # ob.Pal Link
 
-A Chromium (Manifest V3) extension that lets a phone paired through ob.Pal control any website:
+A Chromium (Manifest V3) extension that makes a phone paired through ob.Pal a controller for websites in your browser:
 
-- **Controller**: a virtual gamepad for Gamepad API games.
+- **Controller**: a virtual gamepad for browser games that read the Gamepad API (see [Limitations](#limitations)).
 - **3D**: drag, pan and zoom for 3D viewers.
 - **Keys**: keyboard and mouse input for keyboard games.
-- **PC**: the phone as this computer's mouse and keyboard, through the ob.Pal Desktop helper: in every window (**Whole PC**), or per program with the scope you allow.
+- **PC** (Windows): the phone as this computer's mouse and keyboard, through the ob.Pal Desktop helper: in every window (**Whole PC**), or per program with the scope you allow.
 
-It works in Chrome, Edge, Brave, Opera, Vivaldi and Arc (Chromium 120 or later). The phone needs no app: it opens the ob.Pal controller in its browser.
+It works in Chrome, Edge, Brave and Vivaldi (Chromium 120 or later). Other Chromium browsers may work, but aren't tested. The phone needs no app: it opens the ob.Pal controller in its browser.
 
 ## Install (unpacked)
 
@@ -20,9 +20,7 @@ pnpm run build:extension   # writes extension/dist
    - Chrome: `chrome://extensions`
    - Edge: `edge://extensions`
    - Brave: `brave://extensions`
-   - Opera: `opera://extensions`
    - Vivaldi: `vivaldi://extensions`
-   - Arc: `arc://extensions`
 2. Turn on **Developer mode**.
 3. Click **Load unpacked** and select `extension/dist`.
 4. Pin **ob.Pal Link** to the toolbar.
@@ -231,6 +229,9 @@ Link talks only to the service it was built for: its host permission, its pages'
 
 ## Limitations
 
+**Browsers**
+- **Tested in Chrome, Edge, Brave and Vivaldi.** Other Chromium browsers may work, but aren't tested. ob.Pal Desktop registers itself for Chrome, Chromium, Edge, Brave and Vivaldi only, so PC control isn't available in Opera or Arc.
+
 **Browser limits**
 - **Synthetic events are untrusted** (`isTrusted` is false).
   - Sites that check it ignore them: some games, anti-cheat, many login and payment forms.
@@ -242,13 +243,15 @@ Link talks only to the service it was built for: its host permission, its pages'
 - **Some pages can't be controlled**: browser pages such as `chrome://`, extension stores, and other extensions' pages. `file://` pages work only after you turn on "Allow access to file URLs".
 
 **Games**
-- **Cloud gaming in the browser works through Controller mode.** Xbox Cloud Gaming, GeForce NOW and similar services read the Gamepad API, which has no `isTrusted`.
-- A game that saved a reference to `navigator.getGamepads` before the page script arrived won't see the pad. Reload with control on: with All sites, the bridge loads at page start.
+- **Only games that read the Gamepad API see the pad.** A game that saved a reference to `navigator.getGamepads` before the page script arrived won't see it. Reload with control on: with All sites, the bridge loads at page start.
+- **Cloud gaming services aren't tested.** They read the Gamepad API, so Controller mode may work there, but it hasn't been tried.
 
 **Everything else**
 - If the browser window isn't focused, keys go to the top frame.
 - Canvases inside closed shadow roots can't be found. For those pages, the element under the viewport centre is used.
 - One phone and one controlled tab at a time.
+- **PC control is Windows only for now**, with keyboard and relative mouse (no virtual gamepad yet). Windows' pointer speed and *Enhance pointer precision* apply to the phone as to a mouse. The helper isn't code-signed yet, so Windows may warn about it.
+- **The direct code needs both devices on the same network**, with local network names (mDNS) working. Some Chrome builds are phasing out what the phone side needs ("SDP munging", see above), so it can fall back to online-only.
 
 ## How it works
 

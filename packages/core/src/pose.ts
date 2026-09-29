@@ -1,7 +1,8 @@
 /**
  * POSE packet (type 5): where the device is in space, sent on the unreliable "st" channel while 3D tracking is on
- * (catalogue `motion.track`, mode 6). The device tracks itself with its camera and motion sensors (WebXR on
- * Android), so position doesn't drift the way integrating an accelerometer does.
+ * (catalogue `motion.track`, mode 6). In the camera mode the device tracks itself with its camera and motion sensors
+ * (WebXR on Android), so position doesn't drift the way integrating an accelerometer does. Without it, position is
+ * estimated from the phone's own motion (a gyro through an arm model, an accelerometer for push and pull).
  *
  * Layout (32 bytes, little-endian):
  *   0 u8  header 0x15 (version 1, type 5)    1 u8  flags (b0 tracked, b1 touching: the deadman, in the same frame)

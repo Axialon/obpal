@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#0a0a0a" />
-    <meta name="description" content="Control robot arm sims with your phone, alone or with friends. Take an arm or a joint; point, move and pick up. Built for real arm twins." />
+    <meta name="description" content="Control robot arm sims with your phone, alone or with friends. Take an arm or a joint; point, move and pick up. Real arms are experimental." />
     <title>Robot arms · ob.Pal</title>
     <link rel="icon" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -36,7 +36,7 @@
       <header class="sim-id">
         <p class="eyebrow">system.robot-arm</p>
         <h1>Robot arms</h1>
-        <p class="sim-lede">Scan to join, then take a whole arm or one joint. <b>Point</b>: aim at a spot and hold B; A picks up. <b>3D</b>: hold the pad and move your phone, and the gripper follows your hand.</p>
+        <p class="sim-lede">Scan to join, then take a whole arm or one joint. <b>Point</b>: aim at a spot and hold B; A picks up. <b>3D</b>: hold the pad and move your phone, and the gripper follows the phone.</p>
       </header>
       <section class="sim-sec" aria-labelledby="arm-view-h">
         <header class="kit-card-head"><span class="kit-card-n">01</span><h2 class="kit-card-title" id="arm-view-h">View</h2></header>
@@ -56,7 +56,7 @@
       </section>
       <div data-sound-home></div>
       <div class="safety">
-        <button class="estop" id="estop">Stop<kbd>Space</kbd></button>
+        <button class="estop" id="estop" title="Holds every arm where it is: a software hold, not an emergency stop">Stop<kbd>Space</kbd></button>
         <button class="kit-action" id="home-all" data-icon="guide">Home</button>
       </div>
       <details class="log-wrap" open><summary>Record: who held what</summary><ol class="log" id="log"></ol></details>
@@ -72,7 +72,7 @@
 
     <dialog class="hw glass" id="hw" aria-labelledby="hw-title">
       <h2 id="hw-title">Connect a real arm</h2>
-      <p class="hw-lede">The sim becomes the arm's twin: it follows the real arm until you put it live.</p>
+      <p class="hw-lede">Experimental, and untested on hardware. The sim becomes the arm's twin: it follows the real arm until you put it live.</p>
       <fieldset class="hw-kinds" id="hw-kinds">
         <label><input type="radio" name="kind" value="feetech" checked /><span><b>Feetech bus servos</b><small>SO-100, SO-101 · USB</small></span></label>
         <label><input type="radio" name="kind" value="serial" /><span><b>ob.Pal serial</b><small>A board running the ob.Pal arm sketch · USB</small></span></label>
@@ -87,7 +87,7 @@
         <p class="hw-note">From this page, <code>ws://localhost</code> works. A rosbridge on another computer needs <code>wss://</code>.</p>
       </div>
       <div class="hw-cal" id="hw-cal" hidden>
-        <p>Pose the real arm like the twin's home, then set home: base straight, upper arm leaning forward a little, forearm level, gripper pointing down and open.</p>
+        <p>Pose your arm like the twin's home, then set home: base straight, upper arm leaning forward a little, forearm level, gripper pointing down and open.</p>
         <div class="hw-row"><button type="button" class="btn sm" id="cal-home">Set home here</button><button type="button" class="btn sm" id="cal-closed">Set gripper closed</button><button type="button" class="btn sm" id="hw-limp">Let go (limp)</button></div>
         <p class="hw-sub">Joints that turn the wrong way:</p>
         <div class="hw-dirs" id="hw-dirs"></div>
@@ -105,7 +105,7 @@
     <dialog class="hw glass" id="live" aria-labelledby="live-title">
       <form method="dialog">
         <h2 id="live-title">Put the arm live?</h2>
-        <p class="hw-lede">The real arm will move as its twin moves. Keep people and things out of its reach, and keep a hand near its power switch. The e-stop holds it where it is.</p>
+        <p class="hw-lede">Experimental, and untested on hardware. The real arm will move as its twin moves. Keep people and things out of its reach, and the arm's own stop or power switch within reach. Stop here is a software hold, not an emergency stop.</p>
         <label class="hw-cap">Speed <select id="live-cap"><option value="0.1">10%</option><option value="0.25" selected>25%</option><option value="0.5">50%</option><option value="1">Full</option></select></label>
         <div class="hw-actions"><span class="grow"></span><button class="btn sm" value="cancel">Cancel</button><button class="btn sm danger" id="live-go" value="go">Go live</button></div>
       </form>

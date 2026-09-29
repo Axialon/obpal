@@ -5,7 +5,7 @@ Your phone is the controller: robots, drones, games, music and your computer, wi
 - **Sims:** over 40 at [/sim](https://obpal.blackboxes.net/sim/), from robot arms and drones to a music studio.
 - **Together:** up to eight phones in one scene.
 - **Controllers:** gamepad, wheel, trackpad, pointer, air mouse, 3D hand, keyboard, drums and keys ([spec/CATALOGUE.md](spec/CATALOGUE.md)), and the buttons of a headset, clicker or Bluetooth pad.
-- **Any website:** [ob.Pal Link](https://obpal.blackboxes.net/link/), a browser extension; with ob.Pal Desktop (Windows), the whole PC.
+- **Websites:** [ob.Pal Link](https://obpal.blackboxes.net/link/), a browser extension, gives a page a gamepad (for games that read the Gamepad API), a 3D mouse or keys. Tested in Chrome, Edge, Brave and Vivaldi; [the limits](extension/README.md#limitations). With ob.Pal Desktop (Windows only, macOS coming soon), the whole PC.
 - **Your own page:** one tag, `<obpal-remote>`, or the host SDK ([below](#use-it-in-your-own-page)).
 - **Private and open:** encrypted, no accounts; the code is MIT licensed.
 
@@ -21,7 +21,7 @@ Phone (HTTPS web app)  ──WebRTC DataChannels──▶  Host (web page with @
 
 - **Phone** (`/p`): reads the W3C motion sensors and runs a multi-touch trackpad and host-defined button trays. It streams a 76-byte state packet at 60 Hz over an unreliable DataChannel and sends buttons over a reliable one.
 - **Pairing:** the QR carries a 128-bit secret and the host's DTLS certificate fingerprint, in the URL fragment so it never reaches a server. The phone checks that the host's certificate matches the QR fingerprint. It then proves it knows the secret with an HMAC bound to both certificates. The signaling server only sees a hash of the secret.
-- **No internet:** the controller page works offline after one visit (service worker), and a phone that paired once with the ob.Pal Link extension reconnects over the LAN through a direct code, with no server at all (see [spec/PROTOCOL.md §2a](spec/PROTOCOL.md)).
+- **No internet:** the controller page works offline after one visit (service worker), and a phone that paired once with the ob.Pal Link extension can reconnect over the LAN through a direct code, with no server at all, if the network lets devices reach each other (see [spec/PROTOCOL.md §2a](spec/PROTOCOL.md) and [the limits](extension/README.md#limitations)).
 - **Host SDK** (`packages/host`): `Remote.create()`, `new PairingChip({ remote })` (the QR code and a short code to type, in a corner, in the page's look), and `consume()` once per frame, which returns interpolated rotation, pointer, orbit, pan, zoom and twist.
 - **Short code:** beside the QR code, ten digits to type at obpal.blackboxes.net/p. The service keeps only the first five; the last five are the secret of a PAKE the two devices run over their DTLS channel, one attempt per code (see [spec/PROTOCOL.md §2b](spec/PROTOCOL.md)).
 
@@ -36,7 +36,7 @@ One tag, no build step ([demo](https://obpal.blackboxes.net/embed/); attributes,
 <obpal-remote app="My scene" seats="4" modes="face.trackpad face.wii"></obpal-remote>
 ```
 
-Or the SDK itself:
+Or the SDK itself. `@obpal/host` isn't on npm yet, so build it from this repository first (`pnpm build:packages`, below):
 
 ```js
 import { Remote, Mode, PairingChip } from '@obpal/host'
@@ -66,7 +66,7 @@ pnpm test         # protocol math, codec and pairing tests
 pnpm run check    # typecheck + tests
 pnpm run e2e:all  # every end-to-end suite against a local worker, one table (-- phone shared for some)
 pnpm run deploy   # test, build, deploy to obpal.blackboxes.net
-pnpm run check:live  # after a deploy: pages, pairing code, API rules, TURN, security headers (-- --origin for yours)
+pnpm run check:live  # after a deploy: pages, pairing code, API rules, TURN, security headers, and that /link/ shows the release it downloads (-- --origin for yours)
 ```
 
 Working with Claude Code agents: `.claude/README.md` lists the lane agent, the skills, the guard hook and the merge tool.
@@ -77,7 +77,7 @@ Optional TURN relay, for guest Wi-Fi, cellular and corporate networks: set the `
 
 The embed: `pnpm build` writes `/embed.js` and its lazy part (`/assets/embed/`) beside the site; `pnpm e2e:embed` tests it end to end (the /embed/ demo, another site under a strict CSP, no WebRTC).
 
-npm: `pnpm build:packages` builds `packages/core/dist` and `packages/host/dist` (ES modules, type declarations and the licence; `pnpm pack` does it first). Publishing needs the `@obpal` scope on npm: `pnpm --filter @obpal/core publish`, then `pnpm --filter @obpal/host publish` (host depends on core's version).
+npm: the packages aren't published yet. `pnpm build:packages` builds `packages/core/dist` and `packages/host/dist` (ES modules, type declarations and the licence; `pnpm pack` does it first). Publishing needs the `@obpal` scope on npm: `pnpm --filter @obpal/core publish`, then `pnpm --filter @obpal/host publish` (host depends on core's version).
 
 ## Layout
 

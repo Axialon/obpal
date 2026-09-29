@@ -1,6 +1,6 @@
 /**
  * The camera in the controller's settings, for e2e:phone. Settings has two cameras: the pairing scanner (Scan a code)
- * and the 3D hand's camera tracking (The 3D hand follows: Camera). The scanner is Settings' first control, and one tap
+ * and the 3D hand's camera tracking (3D position comes from: Camera). The scanner is Settings' first control, and one tap
  * opens it with its camera started inside that tap; closing it, by its × or by Back, leaves no dead Back step behind.
  * The 3D hand's Camera says when this phone can't follow with its camera, and a camera start that fails can be tried
  * again. Camera frames come from the browser harness (a painted canvas), with no production hook.

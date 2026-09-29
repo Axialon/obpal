@@ -1,7 +1,7 @@
 /**
  * Drone: quadcopters in a netted cage with rings to fly through, one per phone. The gamepad flies it as a real drone's
  * transmitter does (Mode 2: the left stick climbs and turns, the right stick flies), with the Flight profile suggested:
- * it switches Steer on, which tilts the right stick, so tilting the phone flies it. The 3D hand makes it follow your hand;
+ * it switches Steer on, which tilts the right stick, so tilting the phone flies it. The 3D hand makes it follow the phone;
  * the trackpad tilts it and drags it up and down.
  *
  * It flies by velocity: the sticks ask for a speed and it eases toward it (a drone's inertia), holding its height when
@@ -27,7 +27,7 @@ export const DRONE_SPEC: DeviceSpec = {
   profile: 'flight',
   how: {
     'face.gamepad': 'Left stick climbs and turns · tilt the phone or the right stick to fly · A takes off, lands',
-    'face.hand': 'Hold the pad and move your phone: it follows your hand',
+    'face.hand': 'Hold the pad and move your phone: the drone follows it',
     'face.trackpad': 'Tilt to fly · drag up to climb, sideways to turn · tap: take off',
   },
   tray: [{ id: 'fly', label: 'Take off', type: 'button', icon: 'plane' }],

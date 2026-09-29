@@ -82,7 +82,7 @@ requestAnimationFrame(loop)
 | `test-link` | off | Adds "Open on this device", to try it without a phone |
 | `service` | where embed.js came from | The room service |
 
-**Controllers** (`modes` and `layout.controllers`; catalogue §9.1): `face.gamepad`, `face.wheel` (the gamepad with the Driving profile), `face.wii` (point, A and B), `face.mouse` (point, Left, Right and a wheel), `face.trackpad` (drag, pinch, twist, and the gyro 1:1 or tilt), `face.hand` (3D: what you hold follows your hand), `face.keyboard` (the phone's keyboard). Phones that predate them get the matching modes.
+**Controllers** (`modes` and `layout.controllers`; catalogue §9.1): `face.gamepad`, `face.wheel` (the gamepad with the Driving profile), `face.wii` (point, A and B), `face.mouse` (point, Left, Right and a wheel), `face.trackpad` (drag, pinch, twist, and the gyro 1:1 or tilt), `face.hand` (3D: what you hold moves with the phone), `face.keyboard` (the phone's keyboard). Phones that predate them get the matching modes.
 
 **Events** (they bubble; `detail.participant` is `{ id, name, color, lead, caps, controller, profile }`)
 

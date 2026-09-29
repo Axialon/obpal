@@ -12,8 +12,8 @@ import { contactPart, contactSurface } from '../contact'
  * Each arm is a digital twin. Connect a real one (./drivers.ts) and the twin follows it; once the screen puts it
  * live, the twin's joints drive the hardware at a capped speed. The safety envelope runs here, in the bridge: a
  * deadman, joint limits with speed and acceleration caps, the floor (no part of the arm goes below it, whatever it's
- * asked), a 200 ms watchdog, an e-stop on every device and the screen that holds position, approval before a first
- * claim, a check that a real arm keeps up, and a record of who held what.
+ * asked), a 200 ms watchdog, a Stop on every device (a software hold, not an emergency stop) and the screen that holds
+ * position, approval before a first claim, a check that a real arm keeps up, and a record of who held what.
  */
 import '../../styles/base.css'
 import '../../styles/sim.css'
@@ -554,7 +554,7 @@ function estop(by: string, why = '') {
   const who = sim?.nameOf(by) ?? 'The screen'
   $('stop-by').textContent = why || `Stopped by ${who}`
   const live = arms.filter((a) => a.hw?.live).length
-  sim?.log(`${why || `E-stop by ${who}`}: every arm halted${live ? ', real arms holding where they are' : ''}`, '#fb7185')
+  sim?.log(`${why || `Stopped by ${who}`}: every arm halted${live ? ', real arms holding where they are' : ''}`, '#fb7185')
   sim?.remote.feedback({ haptic: 'bump', toast: 'Stopped: the screen resumes' }, by === 'host' ? undefined : by)
   for (const p of sim?.remote.participants ?? []) if (p.id !== by) sim?.remote.feedback({ haptic: 'bump', toast: why || `${who} stopped the arms` }, p.id)
   renderPanel()
@@ -1233,7 +1233,7 @@ function stepArm(a: Arm, now: number, dt: number) {
     }
     const vmax = j.spec.vmax * cap
     v = clamp(v, -vmax, vmax)
-    // Acceleration cap; an e-stop brakes four times harder.
+    // Acceleration cap; a Stop brakes four times harder.
     const acc = (stopped ? 4 : 1) * j.spec.amax * cap * dt
     j.vel += clamp(v - j.vel, -acc, acc)
     let next = j.angle + j.vel * dt
@@ -1564,7 +1564,7 @@ function armCard(a: Arm, held: Record<string, string>): HTMLElement {
   const hwBtn = sec.querySelector<HTMLButtonElement>('.arm-hw')!
   // Only an arm with a real one's joints can be its twin (./drivers.ts).
   hwBtn.hidden = !KIND.hardware
-  hwBtn.textContent = hw ? 'Hardware' : 'Connect a real arm'
+  hwBtn.textContent = hw ? 'Hardware' : 'Connect a real arm (experimental)'
   hwBtn.onclick = () => openHardware(a)
   const liveBtn = sec.querySelector<HTMLButtonElement>('.arm-live')!
   liveBtn.hidden = !hw

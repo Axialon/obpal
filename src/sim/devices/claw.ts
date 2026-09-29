@@ -1,7 +1,7 @@
 /**
  * Claw machine: two cabinets full of prizes, a claw each. The Wii remote suits it best: point over a prize and the claw
  * rides there, A drops it. The gamepad's left stick moves it and A drops; the trackpad drags it and a tap drops; the 3D
- * hand makes it follow your hand. Down it goes, closes, lifts, and carries what it caught to the chute, as a real one
+ * hand makes it follow the phone. Down it goes, closes, lifts, and carries what it caught to the chute, as a real one
  * does; a prize caught off centre may slip on the way up.
  */
 import { Controller, Mode, PadButton } from '@obpal/core'
@@ -24,7 +24,7 @@ export const CLAW_SPEC: DeviceSpec = {
     'face.wii': 'Point over a prize: the claw rides there · A drops it',
     'face.gamepad': 'Left stick moves the claw · A drops it',
     'face.trackpad': 'Drag to move the claw · tap to drop it',
-    'face.hand': 'Hold the pad and move: it follows your hand · tap to drop',
+    'face.hand': 'Hold the pad and move the phone: the claw follows it · tap to drop',
   },
   tray: [{ id: 'drop', label: 'Drop', type: 'button', icon: 'grip' }],
   // A headset press or a keyboard's Space drops the claw, on every controller.

@@ -1062,7 +1062,7 @@ async function boot(code?: Join) {
     document.getElementById('track-start')!.addEventListener('pointerdown', (e) => e.stopPropagation())
     document.getElementById('glow-end')!.addEventListener('pointerdown', (e) => e.stopPropagation())
     document.getElementById('glow-end')!.addEventListener('click', () => { tick(); glowing = false; render() })
-    // The host's safety stop stays within reach while the screen glows.
+    // The host's Stop button stays within reach while the screen glows.
     document.getElementById('glow-stop')!.addEventListener('pointerdown', (e) => e.stopPropagation())
     document.getElementById('glow-stop')!.addEventListener('click', () => {
       const stop = layout.tray.find((c) => c.tone === 'stop')
@@ -1586,7 +1586,7 @@ async function boot(code?: Join) {
         <p class="sheet-k"><b>04</b>Holding it</p>
         <label class="row sw-row"><span>Left-handed</span><input type="checkbox" class="kit-switch" role="switch" id="left"></label>
         <label class="row sw-row"><span>Lock rotation while motion steers</span><input type="checkbox" class="kit-switch" role="switch" id="lockgyro"></label>
-        <div class="row track3d" role="radiogroup" aria-label="3D follows"><span>The 3D hand follows</span>${(['motion', 'xr', 'glow'] as const).map((w) => html`<button class="way-opt" role="radio" data-way="${w}" aria-checked="${shownWay() === w}" aria-disabled="${w === 'xr' && !trackOk}" title="${{ motion: 'The phone’s own motion sensors', xr: 'Its camera, through space (Android)', glow: 'A glow for the screen’s camera' }[w]}">${ICONS[{ motion: 'gyro', xr: 'camera', glow: 'glow' }[w]]}<span>${{ motion: 'Motion', xr: 'Camera', glow: 'Glow' }[w]}</span></button>`)}${trackOk ? '' : html`<small class="way-why">${CAMERA_3D_NEEDS}</small>`}</div>
+        <div class="row track3d" role="radiogroup" aria-label="3D position comes from"><span>3D position comes from</span>${(['motion', 'xr', 'glow'] as const).map((w) => html`<button class="way-opt" role="radio" data-way="${w}" aria-checked="${shownWay() === w}" aria-disabled="${w === 'xr' && !trackOk}" title="${{ motion: 'Estimated from the phone’s own motion', xr: 'Its camera, through space (Android)', glow: 'A glow for the screen’s camera' }[w]}">${ICONS[{ motion: 'gyro', xr: 'camera', glow: 'glow' }[w]]}<span>${{ motion: 'Motion', xr: 'Camera', glow: 'Glow' }[w]}</span></button>`)}${trackOk ? '' : html`<small class="way-why">${CAMERA_3D_NEEDS}</small>`}</div>
         <p class="sheet-k"><b>05</b>More</p>
         <button class="set-row glass" id="buttons-open">${BUTTONS_GLYPH}<span>Buttons<small>Headset, remote, clicker, pad</small></span><span class="set-srcs">${sourceStack(inputs)}</span>${ICONS.right}</button>
         <button class="set-row glass" id="connections-open">${ICONS.phone}<span>Connections<small>Switch, rename or forget a screen</small></span>${ICONS.right}</button>

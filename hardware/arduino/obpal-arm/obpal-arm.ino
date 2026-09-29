@@ -10,8 +10,10 @@
     T0 / T1         let go of the servos (limp) / hold them again
   On start it prints "obpal-arm 1 joints=6".
 
-  The page runs the safety envelope (deadman, limits, speed caps, 200 ms watchdog, e-stop). This sketch keeps a
-  second line of its own: joint limits, a speed cap per joint, and a hold when commands stop for half a second.
+  The page runs the safety envelope (deadman, limits, speed caps, 200 ms watchdog, Stop). Stop is a software hold, not
+  an emergency stop, and this sketch is experimental and untested on hardware: keep the arm's own stop or power switch
+  within reach. The sketch keeps a second line of its own: joint limits, a speed cap per joint, and a hold when commands
+  stop for half a second.
   Hobby servos can't report where they are, so "P" is where this sketch last put them.
 
   Calibrate below: CENTER_US is the pulse that puts each joint at the sim's 0 degrees, US_PER_DEG its pulse per
