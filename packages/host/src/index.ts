@@ -1,10 +1,11 @@
 export { Remote, DEFAULT_LAYOUT, PARTICIPANT_COLORS, type DeviceLinkInfo, type Frame, type HostStatus, type Participant, type RemoteOptions } from './remote'
 export { Claims } from './claims'
+export { BodyInput, BODY_STALE_MS, type BodyFrame } from './body'
 export { GAMEPAD_ID, installGamepadShim, toStandardGamepad, type VirtualGamepad } from './gamepad'
 export {
-  Mode, Tier, PadButton, PadFlag, PointerFlag, HandFlag, HandGesture, pointerDelta, PROFILES, PROFILE_IDS, isProfileId,
+  Mode, Tier, PadButton, PadFlag, PointerFlag, HandFlag, HandGesture, BodyFlag, pointerDelta, PROFILES, PROFILE_IDS, isProfileId,
   Controller, CONTROLLERS, CONTROLLER_IDS, isControllerId, controllerOf, layoutControllers, withControllers,
-  type Layout, type TrayControl, type ModeId, type TierId, type Quat, type PadState, type PointerState, type HandState, type Handedness, type Profile, type ProfileId,
+  type Layout, type TrayControl, type ModeId, type TierId, type Quat, type PadState, type PointerState, type HandState, type BodyState, type Handedness, type Profile, type ProfileId,
   type ControllerId, type ControllerSpec, type Caps, type SceneNode, type ScenePerson, type ScenePart, type SceneSet,
   PART_VALUE, LOCKS_VALUE, MAX_PARTS, MAX_SETS,
 } from '@obpal/core'

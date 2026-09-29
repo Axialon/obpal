@@ -6,6 +6,9 @@ import {
 } from './pairing'
 import { fetchIce, ICE_REFRESH_BEFORE_MS, linkInfo, roomSocketUrl, SignalClient, type IceSet, type LinkInfo } from './signal'
 import { PROTO } from './state'
+import { BODY_BYTES, BODY_HEADER } from './body'
+import { HAND_BYTES, HAND_HEADER } from './hand'
+import { packetType } from './pad'
 import { putPair, type StoredPair } from './store'
 
 export type LinkStatus =
@@ -681,7 +684,11 @@ export class DeviceLink {
   sendState(buf: ArrayBuffer) {
     const st = this.st
     if (!st || st.readyState !== 'open' || this.status !== 'connected') return false
-    if (st.bufferedAmount > 256) return false // newest wins; never queue stale motion
+    const type = packetType(buf)
+    // One BODY and its optional HAND may share a capture. Never queue a second camera snapshot.
+    if (type === BODY_HEADER || type === HAND_HEADER) {
+      if (st.bufferedAmount + buf.byteLength > BODY_BYTES + HAND_BYTES) return false
+    } else if (st.bufferedAmount > 256) return false
     st.send(buf)
     return true
   }

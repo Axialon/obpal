@@ -5,6 +5,8 @@ export type CodeCorner = { x: number; y: number }
 type Code = { text: string; corners?: CodeCorner[] }
 type CameraOptions = {
   scan?: boolean
+  fps?: 30 | 60
+  ended?: () => void
   zoom?: HTMLButtonElement
   ready?: (video: HTMLVideoElement) => void
   state?: (state: CameraState) => void
@@ -65,7 +67,7 @@ export class Scanner {
     let stream: MediaStream
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: this.options.scan === false
-        ? { facingMode: { ideal: this.front ? 'user' : 'environment' }, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60, max: 120 } }
+        ? { facingMode: { ideal: this.front ? 'user' : 'environment' }, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: this.options.fps ?? 60, max: this.options.fps ?? 120 } }
         : { facingMode: { ideal: this.front ? 'user' : 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } })
     } catch (e) {
       if (!alive()) return
@@ -85,6 +87,7 @@ export class Scanner {
     }
     if (!alive()) { stream.getTracks().forEach((t) => t.stop()); return }
     this.stream = stream
+    if (this.options.ended) stream.getVideoTracks().forEach(t => t.addEventListener('ended', () => { if (alive()) this.options.ended?.() }, { once: true }))
     this.video.srcObject = stream
     const facing = stream.getVideoTracks()[0]?.getSettings?.().facingMode
     if (facing) this.front = facing === 'user'
@@ -94,7 +97,8 @@ export class Scanner {
     this.options.facing?.(this.front, inputs.filter(d => d.kind === 'videoinput').length > 1)
     const caps = this.capabilities()
     if (this.options.scan === false && caps.frameRate?.max) {
-      await stream.getVideoTracks()[0]?.applyConstraints({ frameRate: { ideal: Math.min(120, caps.frameRate.max), max: 120 } }).catch(() => {})
+      const fps = this.options.fps ?? 120
+      await stream.getVideoTracks()[0]?.applyConstraints({ frameRate: { ideal: Math.min(fps, caps.frameRate.max), max: fps } }).catch(() => {})
       if (!alive()) return
     }
     this.torch.hidden = !caps.torch

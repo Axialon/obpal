@@ -155,7 +155,7 @@ export async function phoneControllers({ browser, origin, check, shots }) {
 
     await check('the controller bar: a slot per controller the Viewer takes, each an icon, the one in use named; the catalogue rates them all and says why one is out', async () => {
       const s = await v.slots()
-      const want = [['rotate', 'face.trackpad'], ['point', 'face.wii'], ['track', 'face.hand'], ['gamepad', 'face.gamepad'], ['camera-hand', undefined]]
+      const want = [['rotate', 'face.trackpad'], ['point', 'face.wii'], ['track', 'face.hand'], ['gamepad', 'face.gamepad'], ['camera-hand', undefined], ['camera-body', undefined]]
       if (JSON.stringify(s.map((x) => [x.face, x.id])) !== JSON.stringify(want)) throw new Error(`slots ${JSON.stringify(s)}`)
       const on = s.filter((x) => x.on)
       if (on.length !== 1 || on[0].face !== 'rotate' || !on[0].named) throw new Error(`in use: ${JSON.stringify(on)}`)

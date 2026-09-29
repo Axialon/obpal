@@ -5,9 +5,9 @@
  * whether or not the page mounts the tray.
  */
 
-export type QuickId = 'scan' | 'pair' | 'open' | 'switch' | 'stop' | 'next1' | 'next2' | 'next3' | 'camera' | 'fullscreen' | 'sound' | 'theme' | 'reset'
+export type QuickId = 'scan' | 'pair' | 'open' | 'switch' | 'stop' | 'next1' | 'next2' | 'next3' | 'camera' | 'body' | 'fullscreen' | 'sound' | 'theme' | 'reset'
 /** The tray's order, whatever order a page offers them in. */
-export const QUICK_ORDER: readonly QuickId[] = ['scan', 'pair', 'open', 'switch', 'reset', 'camera', 'stop', 'next1', 'next2', 'next3', 'fullscreen', 'sound', 'theme']
+export const QUICK_ORDER: readonly QuickId[] = ['scan', 'pair', 'open', 'switch', 'reset', 'camera', 'stop', 'body', 'next1', 'next2', 'next3', 'fullscreen', 'sound', 'theme']
 const KEYS: Partial<Record<QuickId, string>> = { pair: 'P', open: 'O', switch: 'K', reset: 'R', camera: 'C', stop: 'Space', next1: '1', next2: '2', next3: '3', fullscreen: 'F', sound: 'M', theme: 'T' }
 
 export interface QuickAction {

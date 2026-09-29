@@ -17,6 +17,12 @@
 /p/sw.js
   Cache-Control: no-cache
 
+# Body webcam can reopen offline: the worker is content-hashed; these loader copies are versioned.
+/assets/body-worker-*
+  Cache-Control: public, max-age=31536000, immutable
+/models/vision-1.0.1/*
+  Cache-Control: public, max-age=31536000, immutable
+
 # The embed: other sites load it as a module script, and it loads its lazy parts from beside it, so both need CORS.
 /embed.js
   Access-Control-Allow-Origin: *

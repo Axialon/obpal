@@ -4,6 +4,7 @@ import '../styles/base.css'
 import '../styles/viewer.css'
 import * as THREE from 'three'
 import CameraControls from 'camera-controls'
+import { mountBodyCapture } from '../ui/body-capture'
 import { mountSound } from '../sim/audio/session'
 import { ObjectSound } from '../sim/audio/objects'
 import { listenFrom } from '../sim/audio/context'
@@ -38,6 +39,7 @@ import { looking, type Ride } from '../sim/vr/rigs'
 import { ControlSession } from '../sim/control-space'
 
 CameraControls.install({ THREE })
+mountBodyCapture()
 
 const D2R = Math.PI / 180
 const GROUND_Y = -1.62
@@ -865,7 +867,7 @@ const modelOptions = () => CATALOG.map((i) => ({
 const layout: Layout = {
   v: 1,
   modes: [Mode.tilt, Mode.hold, Mode.point, Mode.track, Mode.gamepad],
-  utilities: ['pad', 'motion.aim', 'motion.steer', 'motion.point', 'motion.track', 'touch.trackpad', 'motion.hold', 'motion.tilt', 'camera.hand'],
+  utilities: ['pad', 'motion.aim', 'motion.steer', 'motion.point', 'motion.track', 'touch.trackpad', 'motion.hold', 'motion.tilt', 'camera.hand', 'camera.body'],
   tray: [
     { id: 'model', label: 'Models', type: 'select', icon: 'models', add: true, options: modelOptions() },
     { id: 'light', label: 'Lighting', type: 'select', icon: 'sun', options: LIGHT_PRESETS.map((p) => ({ value: p.id, label: p.name, glyph: '☀' })) },
@@ -1022,7 +1024,7 @@ async function startRemote() {
   // Open while nobody is here; it closes by itself as a phone comes in, and the + in the people chip opens it again.
   // It folds while a panel is where it opens, and on narrow screens the caption makes way for it.
   pairChip = new PairingChip({
-    remote, open: true, testLink: true, avoid: '#lighting, #themes, #more, #switcher, #people, #catalog, .presence-controls, .quick-panel',
+    remote, open: true, testLink: true, avoid: '#lighting, #themes, #more, #switcher, #people, #catalog, .presence-controls, .quick-panel, .obpal-camera',
     onToggle: (open) => { $('chip-invite').setAttribute('aria-pressed', String(open)); $('caption').classList.toggle('pair-open', open) },
   })
   remote.on('connect', () => {
@@ -1239,7 +1241,7 @@ function ownGamepad(s: Seat): GamepadContext {
 
 /** Apply one seat's frame: what it holds follows its phone; the lead, holding nothing, moves the view and the scene. */
 function applySeat(s: Seat, f: Frame, dt: number) {
-  const cursor = s.cameraCursor.step(f.connected ? f.hand : null)
+  const cursor = s.cameraCursor.step(f.connected && !f.body ? f.hand : null)
   if (!f.connected) { s.cameraHand.reset(); s.track = null; return }
   const calibrated = controlSpace?.aim(s.who.id)
   if (calibrated) f = { ...f, tilt: calibrated.tilt }
@@ -1256,7 +1258,7 @@ function applySeat(s: Seat, f: Frame, dt: number) {
   if (sel && (f.clutch || f.touching || (f.mode === Mode.tilt && (f.tilt[0] || f.tilt[1])) || f.aim[0] || f.aim[1] || f.twist || f.zoom)) parts.active(h)
   // 1:1 match: while the gyro is on, what the seat drives copies the phone's rotation since it was turned on.
   const target = sel && !parts.live_(sel) ? sel.object : lead && !sel ? holder : null
-  if (f.hand) {
+  if (f.hand && !f.body) {
     s.track = null; s.wasClutch = false
     if (cursor && !s.grabbing && !(f.hand.gestures & 4)) parts.hover(cursor.x, cursor.y, h)
     const pinch = f.hand.tracked && !!(f.hand.gestures & 1) && !(f.hand.gestures & 2)

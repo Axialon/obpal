@@ -16,6 +16,7 @@ import { cspCheck } from './csp-watch.mjs'
 import { setSurface } from './lib/frost.mjs'
 import { startWorker } from './local-worker.mjs'
 import { cameraDesign } from './e2e-camera-design.mjs'
+import { cameraBody } from './e2e-body.mjs'
 
 const headed = process.argv.includes('--headed')
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
@@ -465,6 +466,7 @@ try {
   })
 
   await cameraDesign({ check, need, until, sleep, directory, origin, screen, phone, cameraBrowser, mobile, probeCamera, handResult, emptyHand, qrFile, report })
+  await cameraBody({ check, need, until, sleep, directory, origin, screen, phone, cameraBrowser, mobile, probeCamera, handResult, report, yuv420, watch, qrFile })
 
   await check('all hand model and WASM requests stay on this origin and pages have no script errors', async () => {
     need(modelRequests.some(url => url.includes('hand_landmarker.task')), 'The real model was never requested')

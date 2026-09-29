@@ -23,6 +23,19 @@
   animation: camera-open 200ms var(--bb-ease-out);
 }
 .obpal-camera::backdrop { background: #050505; }
+.obpal-camera[data-mode='body'] .camera-video { object-fit: contain; }
+.camera-body-guide { margin: 0; font-size: 13px; color: var(--bb-ink-2); }
+.obpal-camera[data-mode='body'] .camera-island { flex-direction: column; align-items: flex-start; max-width: min(440px, calc(100vw - 32px)); gap: 10px; }
+.obpal-camera[data-mode='body'] .camera-privacy small { white-space: normal; }
+.camera-fingers { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 13px; }
+.camera-fingers input { width: 18px; height: 18px; accent-color: var(--bb-accent); }
+.obpal-camera[data-local='true'] { inset: auto 20px 84px auto; width: min(360px, calc(100vw - 40px)); height: min(440px, calc(100dvh - 112px)); border: 1px solid var(--bb-frost-edge); border-radius: 20px; z-index: 100; box-shadow: 0 12px 48px rgb(0 0 0 / .35); }
+.obpal-camera[data-local='true'] .camera-head { padding: 12px; }
+.obpal-camera[data-local='true'] .camera-brand { font-size: 18px; }
+.obpal-camera[data-local='true'] .camera-foot { padding: 12px; left: 0; }
+.obpal-camera[data-local='true'] .camera-island { width: 100%; }
+.obpal-camera[data-local='true'] :is(.camera-video, .camera-overlay) { inset: 64px 0 154px; height: calc(100% - 218px); }
+.obpal-camera[data-local='true'] .camera-head-tools [data-camera-zoom], .obpal-camera[data-local='true'] .camera-head-tools [data-camera-torch] { display: none; }
 @keyframes camera-open { from { opacity: 0; } }
 .camera-video, .camera-overlay, .camera-shade { position: absolute; inset: 0; width: 100%; height: 100%; }
 .camera-video { object-fit: cover; cursor: crosshair; opacity: 0; transition: opacity 160ms var(--bb-ease-out); }

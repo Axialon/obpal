@@ -1,7 +1,7 @@
 import {
   b64url, bindMac, candidatesOf, certFingerprint, controllerOf, CONTROLLERS, DEFAULT_SERVICE, encodeLanPairing, encodePairing, equalBytes,
   fetchIce, forgetPair, ICE_REFRESH_BEFORE_MS, iceRefreshIn, fromB64url, importPairKey, isControllerId, lanAnswerSdp, lanContext, lanIceCredentials, linkInfo, listPairs, loadCertificate, MAX_NODE_ID, MAX_TEXT, MAX_TOSS, Mode, newSecret, PAD_HEADER,
-  packetType, HAND_HEADER, POINTER_HEADER, POSE_HEADER, PROTO, putPair, randomBytes, REACH_TIMEOUT_MS, readLocalIce, readMode, roomIdFor, roomSocketUrl, sdpFingerprint, sdpSession, SignalClient,
+  packetType, BODY_HEADER, HAND_HEADER, POINTER_HEADER, POSE_HEADER, PROTO, putPair, randomBytes, REACH_TIMEOUT_MS, readLocalIce, readMode, roomIdFor, roomSocketUrl, sdpFingerprint, sdpSession, SignalClient,
   withControllers,
   type Caps, type DeviceMsg, type HostMsg, type Layout, type ModeId, type PadState, type PairGrant, type PointerState, type SceneNode,
   type ScenePerson, type SignalIn, type SignalPayload, type StoredPair, type IceSet, type LinkInfo, type VerifiedBy, type ScreenKind,
@@ -606,6 +606,7 @@ export class Remote {
       else if (type === POINTER_HEADER) peer.stream.onPointer(e.data)
       else if (type === POSE_HEADER) peer.stream.onPose(e.data)
       else if (type === HAND_HEADER) peer.stream.onHand(e.data)
+      else if (type === BODY_HEADER) peer.stream.onBody(e.data)
       else peer.stream.onState(e.data)
     }
     return peer

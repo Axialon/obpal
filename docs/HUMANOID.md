@@ -1,0 +1,168 @@
+# Humanoid: full-body capture and robot following
+
+Approved Phase 0 plan, researched 2026-09-30 against master `be50c71`. Phase 1 implementation and measured evidence are recorded below; all other numbers remain proposed targets, not hardware safety ratings. Each phase ends with coordinator review, merge and deployment.
+
+## Capture and transport
+
+Extend the branded camera with Body, advertised through an additive `camera.body` capability. Reuse its permission, download, progress, privacy and close/background lifecycle. Keep POSE for the device's existing tracking source; BODY describes a person.
+
+[Pose Landmarker](https://developers.google.com/edge/mediapipe/solutions/vision/pose_landmarker) produces 33 landmarks, image coordinates, hip-centred world coordinates and optional segmentation. Start with Lite, one person, VIDEO mode, segmentation disabled. The [synchronous web API](https://developers.google.com/edge/mediapipe/solutions/vision/pose_landmarker/web_js) runs in a shared phone/host worker service: one inference in flight, close bitmaps, discard superseded frames. GPU failure falls back to CPU with reduced cadence/resolution.
+
+| Capture location | Framing, latency and CPU trade-off |
+|---|---|
+| Propped phone, facing the user | Front preview guides head-to-feet framing around 2–3 m. Inference heats the phone; authenticated WebRTC adds jitter but leaves the Viewer free. Start at 640×480/30 fps; 60 is optional. |
+| Computer webcam, Viewer or sim | Direct local input, without pairing/network hop; works offline after model caching. Desktop framing often crops feet: offer upper-body mode. Inference competes with rendering. |
+
+Camera → landmarks/confidence → one-euro filter → BODY or local adapter → seat → retargeting → control arbitration → constrained joints → sim. A separately armed driver receives only validated targets. Local webcam input does not masquerade as a remote connection.
+
+Privacy: “Camera frames stay on this device. Phone mode sends body landmarks to your paired screen.” Host capture stays local. Cache same-origin models/WASM, never frames/landmarks. Record model revision, SHA-256 and credits in `public/models/README.md` and `src/support/open-source.json`. The [runtime](https://github.com/google-ai-edge/mediapipe/blob/master/LICENSE) and [BlazePose model card](https://storage.googleapis.com/mediapipe-assets/Model%20Card%20BlazePose%20GHUM%203D.pdf) specify Apache-2.0. The card excludes metrically accurate depth and life-critical decisions; safety must remain independent of vision.
+
+### BODY v1
+
+Reserve unused `0x17` on unreliable `st`; older receivers ignore it. Preserve existing layouts and authentication/attention gates; send only to advertising peers. Exactly 276 bytes, little-endian, complete snapshots:
+
+| Byte offset | Bytes/type | Meaning |
+|---|---|---|
+| 0 | 1/u8 | Version 1, type 7 (`0x17`) |
+| 1 | 1/u8 | Bit 0: torso tracked; other bits zero |
+| 2–3 | 2/u16 | Independent BODY sequence, continuous across generations |
+| 4–7 | 4/u32 | Capture microseconds on device session clock, wrapping |
+| 8 | 1/u8 | Tracking generation, wrapping |
+| 9 | 1/u8 | Landmark count, exactly 33 |
+| 10–11 | 2/u16 | Reserved, zero |
+| `12+8i` | 6/i16×3 | Landmark `i` x/y/z, metres ×2000 |
+| `18+8i` | 1/u8 | Visibility ×255 |
+| `19+8i` | 1/u8 | Presence ×255; `i=0…32` |
+
+Keep MediaPipe ordering. Axes match HAND: x camera-right, y up, z toward camera; negate MediaPipe y/z. Origin is the hip midpoint, not arena position. In Body mode, BODY and optional HAND use the same unmirrored source; existing Hand mode stays unchanged. Preview mirroring is presentation only.
+
+Resolution is 0.5 mm, range −16.384…16.3835 m, rounding error ≤0.25 mm/axis; optical accuracy is poorer. Reject non-finite/out-of-range inputs, wrong lengths/counts and reserved bits. Missing/out-of-image points have zero confidence; missing coordinates are finite zeros.
+
+| BODY cadence | BODY payload | With 2,000 B/s control reserve |
+|---|---|---|
+| 30 fps | 8,280 B/s; 66.24 kbit/s | 10,280 B/s |
+| 60 fps | 16,560 B/s; 132.48 kbit/s | 18,560 B/s |
+
+Transport overhead is additional. Share the existing 18,000 B/s camera bucket: BODY30 + HAND30 costs 12,600 B/s; BODY60 + HAND10 costs 18,000 B/s. Cap bursts at two BODY-sized packets, drop queued work on backpressure, and send a final untracked snapshot even at the budget boundary. Never run independent full-rate buckets.
+
+`Frame.body` is nullable: `{tracked, gen, t, receivedAt, landmarks, visibility, presence}`. Match [HAND](../spec/PROTOCOL.md#hand-packet-type-6-a-camera-tracked-hand): sequence-first rejection, 250 ms expiry, retained sequence after expiry, monotonically increasing host generation on acquisition, wire-generation change or reset. Late/duplicate packets cannot refresh freshness. Unwrap BODY time independently; reset anchors/filters on loss/source change. Local input shares these rules. Estimate capture age through stream clock offsets; uncertain age disallows hardware following.
+
+HAND supplies one hand's curls/orientation at BODY's wrist. Add optional capture `t` to `Frame.hand`; fusion requires it, matching source/side and ≤50 ms skew. Clear pairing on generation changes. No alternating sides for bilateral tracking. Missing fingers relax visually, hold on hardware. Body mode suppresses Hand-mode Viewer gestures. Phase 1 ships BODY only by default; its optional Fingers toggle is off each session. The pinned JS API lacks per-point presence, so the [implemented protocol](PROTOCOL.md) specifies conservative effective presence from visibility and image bounds.
+
+## Retargeting
+
+Reference rig: 31 rotational DoF plus visual finger curls. Table angles are degrees; solver/driver values are radians. Rest: upright, arms down, knees straight. Profiles store ordered axes, rest transforms, sign/zero mappings and limits; paired abduction is outward-positive.
+
+| Chain | Landmark anchors | DoF and proposed sim limits |
+|---|---|---|
+| Pelvis/spine | Hips 23/24, shoulders 11/12 | Spine yaw ±35, pitch −20…30, roll ±20 (3) |
+| Head | Nose 0, ears 7/8 | Yaw ±60, pitch −35…45 (2) |
+| Each arm | Shoulder 11/12, elbow 13/14, wrist 15/16 | Shoulder pitch −80…140, roll −15…110, yaw ±70; elbow 0…140; wrist roll ±90, pitch ±45, yaw ±35 (7×2) |
+| Each leg | Hip 23/24, knee 25/26, ankle 27/28; heel 29/30, toe 31/32 | Hip pitch −35…100, roll −25…45, yaw ±35; knee 0…130; ankle pitch −35…25, roll ±20 (6×2) |
+
+Hardware profiles replace these artistic limits with verified manufacturer/controller limits and smaller working envelopes; unsupported axes remain uncommanded.
+
+Let `P=(p23+p24)/2`, `S=(p11+p12)/2`. Pelvis right is `r=normalize(p24-p23)`; orthogonalise calibrated vertical against `r` to obtain `u`; back is `b=r×u`. Thus `[r,u,b]` is right-handed, forward is `−b`. Build torso orientation similarly from shoulder span and `S−P`; relative rotation `Rpelvisᵀ Rtorso` drives spine. Pelvis pitch and axial twists are poorly observed: regularise toward neutral rather than manufacture certainty. Ears/nose estimate head orientation; wrists use palm landmarks when reliable, otherwise neutral twist.
+
+Measure median user segment lengths during one second standing, arms apart. Normalise segment vectors by those lengths, then multiply by robot lengths to form targets. Freeze scale; reject implausible changes. Calibration never moves hardware.
+
+For shoulder–elbow–wrist or hip–knee–ankle, robot lengths `a,b` and target distance `d` give flexion `acos(clamp((d²−a²−b²)/(2ab),−1,1))`, with zero straight. Clamp reach to `|a−b|+ε … a+b−ε`. Proximal offset is `acos(clamp((a²+d²−b²)/(2ad),−1,1))`; place the middle joint in the observed bend plane. Retain the previous pole near straightness, preventing elbow/knee flips. Decompose into the profile's joint axes, clamp, recompute forward kinematics and report unreachable residuals. Heel-to-toe direction sets foot pitch/yaw; ground normal sets ankle roll.
+
+Mirror reflects calibrated x and swaps left/right landmark pairs before solving; rebuild proper rotation frames, never reflect quaternion components. Switching mirror resets calibration and cannot occur while hardware is live.
+
+Sim contact engages after 80 ms with sole height <2 cm and speed <0.1 m/s; release above 4 cm or 0.2 m/s. Lock soles, adjust pelvis height, keep approximate centre of mass inside the support polygon with 2 cm margin. Blend incompatible poses toward support. This visual heuristic cannot stabilise real legs.
+
+Use the existing [one-euro filter](https://gery.casiez.net/1euro/): cutoff 1.5 Hz, beta 35, derivative cutoff 2 Hz, seconds/metres; tune against fixtures. Filter once before transport. Confidence is `min(visibility,presence)`: enter ≥0.7 for three samples, leave <0.5 immediately. Occluded chains hold without extrapolation; sim eases to rest after 250 ms. Torso requires hips/shoulders; losing it holds everything. Cropped feet permit procedural legs; cropped hips require classical controls. Reacquisition resets anchors; hardware requires rearming.
+
+At 30 fps: capture wait 33 ms + inference 25 + transport 15 + filter 20 + retarget/render 17 = 110 ms target; webcam removes transport. Measure p50/p95 and stationary jitter; target p95 ≤120 ms on reference LAN. Label frame-availability timestamps as proxies when exposure time is unavailable. Lower cadence before accumulating backlog.
+
+## Sim experience
+
+`/sim/humanoid/` opens into robot/arena, with Pair, Camera and Switch controller in the shortcuts dock. Dark frost, ob.Pal typography and lime status marks frame the scene; one strip shows seat/input/quality. Body opens on a tap with head/feet guides. Default: standing auto-calibration; optional one-second T-pose refines shoulders. Classical play needs no calibration.
+
+Reuse `Remote` participants/claims and `src/sim/devices/seats.ts`: two seats, one actor per claim, host-authoritative contacts/scoring. Webcam reserves one local seat; phones track one person each. Source changes release claims/anchors; disconnect holds its actor. Spectators cannot drive or arm hardware.
+
+Priority: Stop/fault → held-deadman gate for hardware → joint/contact constraints → selected control source. Gamepad sticks, tilt or trackpad command root travel/yaw; BODY commands articulation. Procedural stepping owns legs while locomoting, blending back over 150 ms when stopped. An explicit preset takes its affected joints until completion/cancel, blending over 120 ms; manual input cancels it. Tracking loss never silently switches to another controller.
+
+Presets: guard brings both forearms up; jab extends/retracts the lead arm; cross adds rear-arm extension and torso turn; uppercut arcs upward; block covers the targeted side; wave opens and oscillates a raised hand. Use bounded joint curves, common limits and interruptible recovery. Physical-driver mode excludes strikes and sparring.
+
+Swept fist capsules against torso/guard volumes register one hit per stroke with a 150 ms cooldown. Show a brief contact ring, small score tick and optional seat haptic; block produces a muted rim flash. Floor contacts trigger footfalls. Reuse the audio event/budget engine with synthesised servo movement and existing credited CC0 impacts; sound requires activation and respects mute. Reduced motion removes shake/flashes.
+
+Camera fits both actors/feet with 15% margin; retain orbit/recentre, no forced shake. Target 60 fps on a measured mid-range phone Viewer: two actors, p95 CPU+GPU work ≤16.7 ms over five warm minutes, retarget/contact ≤2 ms, ≤120 draws, DPR ≤1.5. Reduce shadows/reflections/DPR first; measure webcam contention separately.
+
+## Original models
+
+**Keel**, 1.8 m: 0.30 m pelvis, 0.52 m shoulders; inverted shield chest with a vertical void. Tapered obsidian rails flank smoked-glass sternum panels; recessed lime filament follows the left rail. Wedge head, glass brow, long chamfered forearms, three segmented fingers, split soles with heel pistons. Shoulder rings, elbow drums and layered knee caps expose articulation.
+
+**Morrow**, 1.65 m: 0.42 m shoulders, 0.36 m pelvis, crescent shins. Open oval thorax holds offset glass ribs around a lime core; hexagonal head sits inside a collar. Short faceted arms, crescent forearm guards, four short fingers. Obsidian shells, satin edges, dark joints and open waist distinguish its silhouette from Keel even in flat black.
+
+Script both from bevelled prisms, lathed rings and extruded profiles using `assets/blender/common.py`; no borrowed robot meshes. Named rigid pivots match the joint map, with 8–12 mm shell clearances and separate covers at flexing joints. Use shared kit materials; fake smoked glass with opaque tinted surfaces on mobile, optional transmission on desktop.
+
+Arena: an 8×8 m clipped-square obsidian training floor, fine etched distance marks, two luminous seat corners and low glass perimeter fins. No crowd or advertising. Export meshopt GLBs through the existing compressor and clean-load/reveal path; validate every pivot before swapping meshes.
+
+Budget: ≤25k triangles per hero, 10k fallback LOD, arena ≤15k; scene ≤65k. Each hero ≤1.5 MB compressed, arena ≤0.75 MB, optional shared 1024² atlas ≤1 MB and ≤8 MB decoded textures. Prefer procedural materials. Author geometry and sounds ourselves under the repository licence, or use CC0 assets only; credit all assets in `open-source.json` and retain build scripts.
+
+## Real humanoids and safety
+
+Extend the [arm driver](../src/sim/arm/drivers.ts) pattern with named joints. `HumanoidDriver`: `connect/profile/read/send/hold/close/onLost`; `hold(reason)` is mandatory. Profile declares units, limits, speed/acceleration caps, feedback type, body groups and stop strategy. Readings carry advancing per-joint measurement timestamps, faults and mode; receipt alone cannot refresh stale measurements. Commands carry session/sequence, deadline, targets and deadman lease. Initially observe-only, the twin follows reported joints.
+
+ROS transport uses [rosbridge advertise/subscribe/publish](https://github.com/RobotWebTools/rosbridge_suite/blob/ros2/ROSBRIDGE_PROTOCOL.md). Map ordered names to [`JointTrajectory`](https://github.com/ros2/common_interfaces/blob/jazzy/trajectory_msgs/msg/JointTrajectory.msg), with positions in radians and bounded velocities, at 30 Hz. A local guardian forwards a validated point 100 ms ahead to `<controller>/joint_trajectory`, using its ROS clock. Subscribe to [`sensor_msgs/msg/JointState`](https://github.com/ros2/common_interfaces/blob/jazzy/sensor_msgs/msg/JointState.msg) on `/joint_states`; map by name, never array position. Missing names remain unknown, not zero. Translate camera/rig coordinates explicitly to [ROS conventions](https://github.com/ros-infrastructure/rep/blob/master/rep-0103.rst).
+
+Use a dedicated upper-body controller: [joint_trajectory_controller](https://control.ros.org/jazzy/doc/ros2_controllers/joint_trajectory_controller/doc/userdoc.html) normally requires all its configured joints, and topic submission supplies no action completion result. Read controller state too. The guardian independently watches feedback/leases, cancels/replaces pending motion and performs the configured measured-position hold or controlled damping. Generic rosbridge alone cannot establish a safe stop.
+
+Unitree design: a local C++ `unitree_sdk2` bridge owns DDS and the servo cadence, interpolating browser targets. Official [G1 arm7](https://github.com/unitreerobotics/unitree_sdk2/blob/main/example/g1/high_level/g1_arm7_sdk_dds_example.cpp) and [H1 arm](https://github.com/unitreerobotics/unitree_sdk2/blob/main/example/h1/high_level/h1_arm_sdk_dds_example.cpp) examples publish `rt/arm_sdk` and read `rt/lowstate`; their joint indices, message types and takeover weights differ. Pin SDK/firmware/model variants; never reuse a G1 map for H1 or assume all G1s have wrists. Preserve the vendor locomotion controller. Raw `rt/lowcmd` whole-body control is outside this release. The SDK's [BSD-3-Clause licence](https://github.com/unitreerobotics/unitree_sdk2/blob/main/LICENSE) needs attribution if distributed.
+
+| Hazard | Required mitigation |
+|---|---|
+| Wrong mapping, stale/partial state, jumps | Verified profile; fresh measured feedback for every enabled joint; twin alignment; finite/range checks on both sides |
+| Collision, excessive speed, entanglement | Smaller working envelopes, self-collision capsules, speed/acceleration caps, cleared workspace and reachable physical emergency stop |
+| Browser/connection/bridge failure | Independent guardian and robot watchdog; expiring leases; bounded queues; driver-specific hold/damp, never assumed torque-off |
+| Replay, competing writers, unexpected resume | Authenticated local bridge, origin restriction, exclusive ownership, session/sequence/deadline checks; latched Stop and fresh rearm |
+| Fall or unstable support | Upper body only; vendor stance control, conservative torso envelope; no physical sparring; supported commissioning for legs |
+
+Go-live requires profile/mapping verification, all enabled measured joints ≤100 ms old and inside limits, stable controller mode, healthy guardian/robot watchdog, working stop acknowledgement, clear workspace, aligned twin and fresh held deadman. Initial proposed caps are 0.5 rad/s and 1 rad/s², further reduced by the robot profile; they require hardware-specific commissioning.
+
+Use a held gamepad trigger, keyboard control or approved physical pedal, never a pose gesture or toggle. Sample/renew at 50 Hz; release/blur/hidden sends immediate hold. Require capture age ≤150 ms while following BODY, feedback age ≤100 ms, and lease expiry ≤100 ms; guardian checks at ≤10 ms intervals, issuing hold within 110 ms of missing renewal. A 50 ms missing stop acknowledgement latches a fault. These bound command issuance, not physical stopping distance. Bridge death requires a verified robot-side watchdog; otherwise refuse live.
+
+Stop cancels presets and latched targets, invokes the driver's own hold/damp and blocks all goals. Resume requires released-then-held deadman and a new go-live check. Leg enable is separate, local, explicit and session-only: require supported mounting or a commissioned balance controller, contact/IMU feedback and verified recovery. Unsupported profiles refuse it. Camera-only foot contact cannot authorise real leg motion.
+
+Phase 4 proves contracts against fake drivers only. No hardware readiness claim follows from those tests; commissioning remains separate work.
+
+## Phases and proof
+
+Each phase merges master, runs `pnpm run check`, then affected e2e suites. Tests write temporary files; copy evidence to ignored `artifacts/humanoid/phase-N/`. Use assigned ports, Playwright Chromium and guarded Link copies; require “no new sessions”. Separate fake-camera integration from actual-model/device measurements.
+
+| Phase | Files and work | Tests and acceptance | E2e suites |
+|---|---|---|---|
+| 1. Capture — implemented | New `packages/core/src/body.ts`, exports, `packages/host/src/{stream,remote,element}.ts`; `src/controller/body-{worker,tracker,signal}.ts`; shared `src/ui/body-capture.ts`, camera/controller/Viewer entry points; capability catalogue, model credits, protocol/privacy docs | `tests/body-{protocol,stream,tracker}.test.ts`: quantisation bounds, seq/time/gen wrap, loss/reacquisition, malformed packets, budget and HAND compatibility. Fake Y4M camera plus synthetic landmark seam: permission/close/background, host offline capture, no image traffic, source switching. ≥30 processed fps on reference device remains a device acceptance target; measured PC results below | camera, phone, embed, shared, catalogue; extension for Frame consumers |
+| 2. Sim | New `sim/humanoid/index.html`, `src/sim/humanoid/{main,rig,retarget,controls,contacts}.ts`; seats adapter, catalogue, Vite route/CSP/early entry, audio integration | `tests/humanoid-{ik,controls,contacts}.test.ts`: FK/IK roundtrip ≤1° or 1 cm on reachable fixtures, mirror twice identity, singularities finite, every joint bounded. Add `scripts/e2e-humanoid.mjs` to sims: two seats, calibration/loss, classical-only play, every preset and cancellation. Meet frame budget with procedural rigs | sims, shared, phone, catalogue, pages |
+| 3. Models | `assets/blender/humanoids.py`, arena script, `public/models/*.glb`, kit model/material registrations and credits | Extend prototype/reveal tests: named pivots, joint sweeps, compressed bytes/triangles, cold/warm/failure reveal. Before/after screenshots at phone/desktop sizes; five-minute two-actor performance within budgets | sims, pages |
+| 4. Drivers | `src/sim/humanoid/{drivers,safety,live}.ts`, fake drivers; `hardware/humanoid/README.md` specifies guardian and Unitree bridge contract | Unit fault matrix and `scripts/e2e-humanoid-live.mjs` under sims: stale single joint amid fresh others, unknown/out-of-limit/NaN state, swapped mappings, caps, replay, deadman release/loss, browser freeze, socket/bridge death, stop acknowledgement, leg refusal, reconnect requiring rearm. Zero motion goals after Stop; fake guardian holds within 110 ms. No real robot endpoints | sims, phone, shared |
+| 5. Review | Relevant humanoid/UI files, `docs/DEVICE-CHECKLIST.md`, this plan, camera/help documentation | One bounded Opus design review: ≤30 minutes, ≤10 findings, one polish pass, then focused verification. Device checklist covers lighting/occlusion, seated use, permissions, thermal cadence, 60 fps Viewer and measured latency. Record unavailable devices as unverified; no invented passes | sims, camera, phone, shared, pages; catalogue/extension only if changed |
+
+## Phase 1 capture — done (2026-09-30)
+
+Capture is implemented with Lite only, 640×480/30 requested, one person, no masks and Fingers off by default. BODY is 276 bytes and `Frame.body` expires after 250 ms. Unit fixtures verify ≤0.25 mm coordinate quantisation error, confidence gating, counter wrap, late rejection, filter resets, GPU/CPU recovery and shared 18 kB/s budgeting. Optical accuracy is not implied. The detailed implemented contract is [PROTOCOL.md](PROTOCOL.md).
+
+Measured on PC headless Chromium with NVIDIA RTX 4090, an original synthetic full-body image and real Pose Lite inference (short warm runs, not a thermal test):
+
+| Local route | Processed fps | Mean inference | Fake capture-to-local-input p95 | BODY payload |
+|---|---|---|---|---|
+| Viewer | 29.97 | 11.17 ms | 25.5 ms | 8,271 B/s |
+| Arm sim | 30.08 | 15.45 ms | 22.7 ms | 8,303 B/s |
+
+The camera suite also detects the real model fixture through the phone UI and sends BODY over real WebRTC. Synthetic landmarks separately prove default zero HAND, optional Fingers without legacy gestures, partial feet/torso loss, reacquisition, camera flip and source switching. Local Viewer/sim tests observe zero outbound RTC messages, no capture storage writes or HTTP payloads, continuing offline inference and explicit offline restart after caching. Hide/blur/close release tracks and workers; activation never persists. Browser cache eviction can require a fresh static-asset download. Hashed worker and versioned JS loader cache headers are included for offline restart; existing Hand assets keep their paths.
+
+Evidence is under ignored `artifacts/humanoid/phase-1/`: `camera-results.json`, before/after body screenshots, check and suite logs. The model is 5,777,746 bytes with revision/SHA-256 in the asset manifest. The runtime exposes visibility only; effective presence is documented, not presented as an independent model score.
+
+After merging master `04f60bf`, all four typechecks pass and Vitest reports 2,071 passed, 14 skipped. The integrated e2e run passes camera 20/20, phone 35/35, embed 19/19, shared 7/7, catalogue 134/134 and extension 23/23. The Desktop guard reports 19 test-browser lines before and after, with no new sessions.
+
+**Unverified on real devices:** phone processed FPS and thermals, 60 fps capture, moving-person/occlusion accuracy, physical exposure-to-display/network latency, Safari/iOS lifecycle behaviour, and simultaneous mid-phone Viewer performance. No humanoid retargeting, models or real drivers ship in this phase. Phases 2–5 and the owner's decisions remain pending.
+
+## Open decisions for the owner
+
+1. Approve Keel and Morrow as the initial designs and working names?
+2. Accept standing auto-calibration with optional T-pose, and mirror on by default in the sim?
+3. Begin with cooperative practice/contact scoring, or competitive timed rounds? Proposed default: practice.
+4. Prioritise a guarded ROS 2 upper-body target or a specific Unitree variant for later commissioning? Proposed default: ROS contract first, both fake adapters.
+5. Keep real legs unavailable until separate commissioning evidence exists? Proposed default: yes; retain the explicit capability-gated enable design.

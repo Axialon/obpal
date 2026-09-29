@@ -10,6 +10,7 @@ import { ICONS } from '../ui/icons'
 import { holdForPhone } from '../ui/recover'
 import { ControlSession } from './control-space'
 import { quickAction } from '../ui/quick-actions'
+import { mountBodyCapture } from '../ui/body-capture'
 
 export interface SimScene {
   remote: Remote
@@ -68,6 +69,7 @@ const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2)
 const clock = () => new Date().toLocaleTimeString('en-GB', { hour12: false })
 
 export async function startSimScene(o: SimOptions): Promise<SimScene> {
+  mountBodyCapture()
   const remote = await Remote.create({ appName: o.appName, layout: o.layout, seats: 8 })
   holdForPhone(remote)
   const query = new URLSearchParams(location.search)
@@ -84,7 +86,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   // Its card never covers the panel (the e-stop), the people list, the stop banner, the menus, a camera's picture (the
   // device sims) or the open quick-actions tray: it folds while one is in the way.
   const chip = new PairingChip({
-    remote, open: true, testLink: true, avoid: '.sim-window, #people, .stopped-banner, #switcher, #themes, .quick-panel',
+    remote, open: true, testLink: true, avoid: '.sim-window, #people, .stopped-banner, #switcher, #themes, .quick-panel, .obpal-camera',
     onToggle: (open) => $('chip-invite').setAttribute('aria-pressed', String(open)),
   })
   addEventListener('obpal:viewmode', e => { if ((e as CustomEvent<string>).detail !== 'overview') chip.collapse() })

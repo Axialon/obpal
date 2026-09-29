@@ -2,6 +2,7 @@ import {
   accumDelta, decodeHand, decodePad, decodePointer, decodePose, decodeState, emptyPad, Flag, HandFlag, Mode, PadFlag, PointerFlag, PoseFlag, qIdentity, qSlerp, seqNewer, Tier,
   type Handedness, type ModeId, type PadState, type PointerState, type PoseSource, type Quat, type TierId, type Vec3, type WireState,
 } from '@obpal/core'
+import { BodyInput, type BodyFrame } from './body'
 
 /** Everything a host needs per rendered frame. Deltas are since the previous consume() call. */
 export interface Frame {
@@ -30,7 +31,9 @@ export interface Frame {
    * A camera-tracked hand, else null. Palm p is a monocular estimate in camera metres; landmarks are hand-centred
    * world metres, x right, y up, z toward the camera. A new gen requires a new anchor and is never reused.
    */
-  hand: { tracked: boolean; gen: number; handedness: Handedness; confidence: number; gestures: number; p: Vec3; landmarks: Vec3[] } | null
+  hand: { tracked: boolean; gen: number; t?: number; handedness: Handedness; confidence: number; gestures: number; p: Vec3; landmarks: Vec3[] } | null
+  /** Hip-centred camera landmarks, else null after 250 ms. Independent of device POSE and STATE. */
+  body: BodyFrame | null
 }
 
 /** A pointer stream that stops (the utility was switched off, the phone went away) is gone after this long. */
@@ -79,6 +82,7 @@ export class Stream {
   private hand: ReturnType<typeof decodeHand> = null
   private handAt = 0
   private handGen = 0
+  private body = new BodyInput()
   private stateAt = 0
   private latestAcc: Acc | null = null
   private outAcc: Acc | null = null
@@ -101,6 +105,7 @@ export class Stream {
     this.poseAt = 0
     this.hand = null
     this.handAt = 0
+    this.body.reset()
     this.stateAt = 0
     this.latest = null
     this.latestAcc = null
@@ -177,6 +182,8 @@ export class Stream {
     this.hooks.input()
   }
 
+  onBody(data: ArrayBuffer) { if (this.body.receive(data)) this.hooks.input() }
+
   private get padLive() { return !!this.padState && performance.now() - this.padAt < 1500 }
 
   /** Latest controller state, neutral after a short silence, null once the pad expires. */
@@ -208,9 +215,10 @@ export class Stream {
       aim: [0, 0], tilt: [0, 0], pad1: [0, 0], pad2: [0, 0], zoom: 0, twist: 0,
       pose: this.pose && now - this.poseAt < POSE_STALE_MS ? { p: this.pose.p, q: this.pose.q, tracked: (this.pose.flags & PoseFlag.tracked) !== 0, touching: (this.pose.flags & PoseFlag.touching) !== 0, gen: this.poseGen, source: this.pose.source } : null,
       hand: this.hand && now - this.handAt < HAND_STALE_MS ? {
-        tracked: (this.hand.flags & HandFlag.tracked) !== 0, gen: this.handGen, handedness: this.hand.handedness,
+        tracked: (this.hand.flags & HandFlag.tracked) !== 0, gen: this.handGen, t: this.hand.t, handedness: this.hand.handedness,
         confidence: this.hand.confidence, gestures: this.hand.gestures, p: this.hand.p, landmarks: this.hand.landmarks,
       } : null,
+      body: this.body.read(now),
     }
     // Gamepad mode: PAD packets replace STATE, so the last STATE (a held tilt, a gyro grab) must not keep driving
     // the view even if every hand-off STATE was lost on the unreliable channel. A first PAD also stands alone,

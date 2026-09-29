@@ -29,6 +29,7 @@ import { Connections, type Connection, type Join } from './connections'
 import { ConnectionSheet } from './connection-sheet'
 import { CameraView } from '../ui/camera'
 import { HandTracker } from './hand-tracker'
+import { BodyTracker } from './body-tracker'
 import '../styles/connections.css'
 import { calmMarks, icon, ICONS, logo, logoMark } from '../ui/icons'
 import { dismissHint, hint, repositionHints, setHintFrame } from '../ui/hints'
@@ -593,7 +594,7 @@ async function boot(code?: Join) {
     controllers: () => switcher.open(),
   })
   /** The controller bar and the catalogue (./switcher.ts). */
-  const switcher = new Switcher({ pick, hand: openHands, feel: (strong) => tick(strong), toast: (text) => toast(text) })
+  const switcher = new Switcher({ pick, hand: openHands, body: openBody, feel: (strong) => tick(strong), toast: (text) => toast(text) })
   /** The node strip along the trackpad's edge: which part of what you hold the pad drives (./strip.ts). */
   const strip = new NodeStrip({ send: (id, v) => { if (link.ready) link.sendCtl({ t: 'value', id, v }) }, feel: (strong) => tick(strong), changed: () => render() })
 
@@ -605,6 +606,45 @@ async function boot(code?: Join) {
   let handHold = false
   let handSeq = 0
   let handGen = 0
+  let bodyCamera: CameraView | null = null
+  let bodyTracker: BodyTracker | null = null
+  let bodySeq = 0, bodyGen = 0
+  function stopBody() {
+    bodyTracker?.stop(); bodyTracker = null
+    const camera = bodyCamera; bodyCamera = null
+    camera?.close()
+  }
+  function openBody() {
+    if (!link.ready || !layout.utilities?.includes('camera.body')) return
+    releaseControls()
+    keyboard.close(true)
+    const camera = new CameraView({ mode: 'body', measurements: cameraTest,
+      typed: stopBody,
+      reset: () => { bodyTracker?.stop(); bodyTracker = null },
+      fingers: layout.utilities?.includes('camera.hand') ? enabled => bodyTracker?.setFingers(enabled) : undefined,
+      close: () => { bodyTracker?.stop(); bodyTracker = null; bodyCamera = null; syncMotion(); render(); lastSend = 0; pump(16.7) },
+      ready: (video, overlay) => {
+        if (bodyCamera !== camera) return
+        bodyTracker?.stop()
+        const tracker = new BodyTracker(video, overlay, {
+          send: packet => link.sendState(packet), timeOrigin: t0,
+          sequence: () => (bodySeq = (bodySeq + 1) & 65535), generation: () => (bodyGen = (bodyGen + 1) & 255),
+          hand: layout.utilities?.includes('camera.hand') ? { send: packet => link.sendState(packet), sequence: () => (handSeq = (handSeq + 1) & 65535), generation: () => (handGen = (handGen + 1) & 255) } : undefined,
+          say: text => camera.say(text), loading: p => camera.loading(p), error: text => camera.unavailable(text), fingersOff: () => camera.fingersOff(),
+          metrics: m => { if (cameraTest) camera.setMetrics(`${m.trackingFps.toFixed(0)} fps · ${m.latencyP95Ms.toFixed(0)} ms`) },
+        })
+        bodyTracker = tracker
+        void camera.prepareBody(() => { if (bodyTracker === tracker && bodyCamera === camera) tracker.start() })
+      },
+    })
+    bodyCamera = camera
+    render(); syncMotion(); camera.open()
+    void keepAwake()
+  }
+  if (cameraTest) Object.assign(window, { __cameraBody: {
+    stats: () => bodyTracker?.stats ?? null,
+    inject: (...args: Parameters<BodyTracker['injectForTest']>) => bodyTracker?.injectForTest(...args),
+  } })
   function stopHands() {
     handHold = false
     handTracker?.stop(); handTracker = null
@@ -649,12 +689,12 @@ async function boot(code?: Join) {
     stats: () => handTracker?.stats ?? null,
     inject: (result: Parameters<HandTracker['injectForTest']>[0]) => handTracker?.injectForTest(result),
   } })
-  document.addEventListener('visibilitychange', () => { if (document.hidden) stopHands() })
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { stopHands(); stopBody() } })
   // The keyboard's dock hands its Back step to the sheet that opens over it (./sheet.ts).
   openConnections = (scan = false) => { keyboard.close(true); tick(); connections.open(scan) }
   connectTo = async (join) => { hungUp = false; await link.connect(join) }
   link.setLimit(Number(store.get('obpal.connections.limit') ?? 3))
-  addEventListener('pagehide', () => { stopHands(); connections.close(); link.destroy() })
+  addEventListener('pagehide', () => { stopHands(); stopBody(); connections.close(); link.destroy() })
   if (code) {
     screenMessage({ title: 'Connecting', body: code.v === 2 ? 'Reaching your screen over Wi-Fi…' : 'Finding your screen…', spinner: true })
     void connectTo(code).catch((e: Error) => screenMessage({ title: 'Scan again', body: e.message, art: ICONS.phone }))
@@ -671,6 +711,7 @@ async function boot(code?: Join) {
 
   function releaseControls() {
     stopHands()
+    stopBody()
     buttons.releaseAll()
     buttonHold = false
     wiiA(false); wiiB(false)
@@ -775,7 +816,7 @@ async function boot(code?: Join) {
   // is driven; and after two minutes untouched the screen rests (black, and free to sleep) until a touch.
   function motionWanted() {
     // A screen that takes tosses listens for a flick in any mode, gyro on or not.
-    return !!link.active && !handCamera && document.visibilityState === 'visible' && !resting && (!tierSettled || gyroOn || mode === Mode.point || mode === Mode.track || mode === Mode.gamepad || tab === 'drums' || tab === 'keys' || !!layout.toss)
+    return !!link.active && !handCamera && !bodyCamera && document.visibilityState === 'visible' && !resting && (!tierSettled || gyroOn || mode === Mode.point || mode === Mode.track || mode === Mode.gamepad || tab === 'drums' || tab === 'keys' || !!layout.toss)
   }
   /** Start or stop the sensors to match what's needed; true if they just started. */
   function syncMotion(): boolean {
@@ -787,7 +828,7 @@ async function boot(code?: Join) {
     control.defer()
     return want
   }
-  function busy() { return !!handCamera || gyroOn || mode === Mode.point || mode === Mode.track || mode === Mode.gamepad || (pad?.touches ?? 0) > 0 || buttonHold }
+  function busy() { return !!handCamera || !!bodyCamera || gyroOn || mode === Mode.point || mode === Mode.track || mode === Mode.gamepad || (pad?.touches ?? 0) > 0 || buttonHold }
   function rest(on: boolean) {
     if (on === resting) return
     resting = on
@@ -1234,7 +1275,7 @@ async function boot(code?: Join) {
       if (sentController === was) toast(`${CONTROLLERS[was].name} isn’t on ${screenName()} now`)
       queueMicrotask(setMode)
     }
-    switcher.render(sorted, controllerNow(), screenName(), keyboard.open, !!layout.utilities?.includes('camera.hand'), !!handCamera)
+    switcher.render(sorted, controllerNow(), screenName(), keyboard.open, !!layout.utilities?.includes('camera.hand'), !!handCamera, !!layout.utilities?.includes('camera.body'), !!bodyCamera)
     const isMusic = tab === 'drums' || tab === 'keys'
     if (isMusic !== musicActive) { musicActive = isMusic; musicWire.use(isMusic) }
     surface.classList.toggle('music-on', isMusic)
@@ -1645,6 +1686,7 @@ async function boot(code?: Join) {
         <div class="sheet-head"><div class="grip" aria-hidden="true"></div><button class="icon-btn glass sheet-x" id="set-close" aria-label="Close">${ICONS.close}</button></div>
         <button class="set-row set-cam glass" id="scan-open">${ICONS.camera}<span>Scan a code<small>Connect another screen</small></span>${ICONS.right}</button>
         ${layout.utilities?.includes('camera.hand') ? html`<button class="set-row glass" id="hand-settings">${ICONS.hand}<span>Hand camera<small>Control with your other hand</small></span>${ICONS.right}</button>` : ''}
+        ${layout.utilities?.includes('camera.body') ? html`<button class="set-row glass" id="body-settings">${ICONS.camera}<span>Body camera<small>Prop the phone facing you</small></span>${ICONS.right}</button>` : ''}
         <p class="sheet-k"><b>01</b>Feel</p>
         <label class="bb-field"><span>Sensitivity</span><output id="gv"></output><input class="bb-range" type="range" id="gain" min="0.5" max="3" step="0.1"></label>
         <label class="bb-field"><span>Steadiness</span><output id="sv"></output><input class="bb-range" type="range" id="smooth" min="0" max="1" step="0.05"></label>
@@ -1671,6 +1713,8 @@ async function boot(code?: Join) {
     sheet.querySelector<HTMLButtonElement>('#scan-open')!.onclick = () => { close(true); openConnections(true) }
     const handSettings = sheet.querySelector<HTMLButtonElement>('#hand-settings')
     if (handSettings) handSettings.onclick = () => { close(true); openHands() }
+    const bodySettings = sheet.querySelector<HTMLButtonElement>('#body-settings')
+    if (bodySettings) bodySettings.onclick = () => { close(true); openBody() }
     const gain = sheet.querySelector<HTMLInputElement>('#gain')!
     const smooth = sheet.querySelector<HTMLInputElement>('#smooth')!
     const left = sheet.querySelector<HTMLInputElement>('#left')!
@@ -1759,7 +1803,7 @@ async function boot(code?: Join) {
 
   function pump(dt: number) {
     if (!surface || !link.ready) return
-    if (handCamera) {
+    if (handCamera || bodyCamera) {
       const now = performance.now()
       if (now - lastSend < 66) return
       const neutral = emptyState()

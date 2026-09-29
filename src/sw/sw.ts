@@ -6,6 +6,7 @@
  */
 import { cacheName, FONT_CACHE, route, staleCaches } from './routes'
 import { cacheHandAsset } from '../controller/hand-assets'
+import { cacheBodyAsset } from '../controller/body-assets'
 
 declare const __PRECACHE__: string[]
 declare const __VERSION__: string
@@ -33,6 +34,7 @@ sw.addEventListener('fetch', (e) => {
     case 'precache': e.respondWith(cacheFirst(req)); break
     case 'fonts': e.respondWith(staleWhileRevalidate(req)); break
     case 'models': e.respondWith(cacheHandAsset(new URL(req.url).pathname)); break
+    case 'body-model': e.respondWith(cacheBodyAsset(new URL(req.url).pathname)); break
   }
 })
 

@@ -7,10 +7,15 @@ import { ICONS } from './icons'
 import { setMarkup } from './markup'
 import { coverPoint } from './camera-space'
 import { constrainedDownload, handAssetsCached } from '../controller/hand-assets'
+import { bodyAssetsCached } from '../controller/body-assets'
 import type { Vec3 } from '@obpal/core'
 
 type CameraOptions = {
-  mode: 'scan' | 'hand'
+  mode: 'scan' | 'hand' | 'body'
+  local?: boolean
+  changed?: () => void
+  fingers?: (enabled: boolean) => void
+  reset?: () => void
   found?: (text: string) => void
   typed: () => void
   close?: (reason: 'close' | 'type' | 'found') => void
@@ -55,14 +60,16 @@ export class CameraView {
   private preparation = 0
   private readonly onHidden = () => { if (document.hidden) this.close() }
   private readonly onExit = () => this.close()
-  private readonly onBlur = () => this.hold(false)
+  private readonly onBlur = () => { if (this.options.mode === 'body') this.close(); else this.hold(false) }
 
   constructor(private options: CameraOptions) {
     const hand = options.mode === 'hand'
+    const body = options.mode === 'body'
     this.dialog.dataset.mode = options.mode
     this.dialog.dataset.state = 'opening'
-    this.dialog.setAttribute('aria-label', hand ? 'Hand camera' : 'Scan an ob.Pal code')
-    this.dialog.setAttribute('aria-modal', 'true')
+    this.dialog.dataset.local = String(!!options.local)
+    this.dialog.setAttribute('aria-label', body ? 'Body camera' : hand ? 'Hand camera' : 'Scan an ob.Pal code')
+    this.dialog.setAttribute('aria-modal', String(!options.local))
     this.dialog.addEventListener('cancel', (e) => { e.preventDefault(); this.close() })
     this.video.setAttribute('aria-label', 'Camera preview')
     this.video.setAttribute('playsinline', '')
@@ -90,14 +97,17 @@ export class CameraView {
     const found = element('span', 'camera-lock')
     setMarkup(found, ICONS.check)
     this.guide.append(found)
-    this.guide.hidden = hand
+    this.guide.hidden = hand || body
     const foot = element('footer', 'camera-foot')
     const privacy = element('span', 'camera-privacy')
     const lock = element('span', 'camera-privacy-lock')
     lock.setAttribute('role', 'img'); lock.setAttribute('aria-label', 'Camera stays on this phone')
     setMarkup(lock, ICONS.lock)
     privacy.append(lock)
-    try {
+    if (body) {
+      lock.setAttribute('aria-label', 'Camera frames stay on this device')
+      privacy.append(element('small', '', options.local ? 'Camera frames stay on this device.' : 'Camera frames stay on this device. Body landmarks go to your paired screen.'))
+    } else try {
       if (!sessionStorage.getItem('obpal.camera.privacy')) {
         privacy.append(element('small', '', 'On this phone only'))
         sessionStorage.setItem('obpal.camera.privacy', '1')
@@ -117,10 +127,10 @@ export class CameraView {
     const zoom = this.control('Change camera zoom', '', () => {})
     zoom.textContent = '1×'
     zoom.dataset.cameraZoom = ''
-    const typed = element('button', 'camera-type glass', hand ? 'Use phone motion' : 'Enter a code')
+    const typed = element('button', 'camera-type glass', body ? 'Close camera' : hand ? 'Use phone motion' : 'Enter a code')
     typed.type = 'button'
     typed.dataset.cameraType = ''
-    typed.dataset.tip = hand ? 'Close the camera and use the phone sensors' : 'Type the ten digits shown on your screen'
+    typed.dataset.tip = body ? 'Close the camera' : hand ? 'Close the camera and use the phone sensors' : 'Type the ten digits shown on your screen'
     typed.onclick = () => { this.close('type'); options.typed() }
     headTools.prepend(torch, zoom)
     if (hand) {
@@ -134,6 +144,20 @@ export class CameraView {
       }
       this.chips.dataset.lost = 'true'
       this.island.append(this.chips)
+    } else if (body) {
+      const framing = element('p', 'camera-body-guide', 'Prop the camera facing you. Keep your head and feet in view.')
+      this.island.prepend(framing)
+      if (options.fingers) {
+        const label = element('label', 'camera-fingers')
+        const toggle = element('input')
+        toggle.type = 'checkbox'; toggle.dataset.cameraFingers = ''; toggle.disabled = true
+        toggle.onchange = () => {
+          if (!toggle.checked) { options.fingers?.(false); this.dialog.querySelector('[data-camera-download]')?.remove(); return }
+          void this.prepareHands(() => { if (toggle.checked) options.fingers?.(true) })
+        }
+        label.append(toggle, document.createTextNode('Fingers · uses more power'))
+        this.island.append(label)
+      }
     } else this.island.append(typed)
     const deadman = element('div', 'camera-deadman')
     this.dialog.dataset.arm = String(!!options.hold)
@@ -170,11 +194,13 @@ export class CameraView {
     }
     foot.append(deadman, tools, this.island)
     this.dialog.append(this.video, this.overlay, shade, head, this.guide, foot, this.metrics)
-    this.scanner = new Scanner(this.video, torch, (text) => this.say(text), (text, corners) => this.found(text, corners), {
-      scan: !hand, zoom,
+    this.scanner = new Scanner(this.video, torch, (text) => this.say(body ? text.replace(/Show your hand/g, 'Keep your shoulders and hips in view').replace(/[Uu]se phone motion/g, 'close the camera') : text), (text, corners) => this.found(text, corners), {
+      scan: !hand && !body, zoom, fps: body ? 30 : undefined, ended: body ? () => this.close() : undefined,
       facing: (mirrored, canFlip) => { this.dialog.dataset.mirrored = String(mirrored); flip.hidden = !canFlip },
       state: (state) => {
-        if (!this.locked) this.dialog.dataset.state = state === 'ready' ? (hand ? 'tracking' : 'scanning') : state
+        if (body && state !== 'ready') { this.preparation++; this.fingersOff(); options.reset?.() }
+        if (!this.locked) this.dialog.dataset.state = state === 'ready' ? (hand || body ? 'tracking' : 'scanning') : state
+        options.changed?.()
       },
       ready: (video) => {
         if (!this.opened) return
@@ -182,7 +208,7 @@ export class CameraView {
         if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(reveal)
         else reveal()
         options.ready?.(video, this.overlay)
-        if (!hand) hint('camera.scan', () => this.opened ? this.guide : null,
+        if (!hand && !body) hint('camera.scan', () => this.opened ? this.guide : null,
           'Fit the screen’s code inside the corners. Or type its ten digits.',
           { place: 'bottom', delay: 350, mount: this.dialog })
       },
@@ -199,7 +225,8 @@ export class CameraView {
     this.locked = false
     this.overlay.width = this.overlay.height = 0
     document.body.append(this.dialog)
-    this.dialog.showModal()
+    if (this.options.local) this.dialog.show()
+    else this.dialog.showModal()
     document.addEventListener('visibilitychange', this.onHidden)
     addEventListener('pagehide', this.onExit)
     addEventListener('popstate', this.onExit)
@@ -219,7 +246,7 @@ export class CameraView {
     this.hold(false)
     this.scanner.stop()
     this.overlay.width = this.overlay.height = 0
-    dismissHint(`camera.${this.options.mode}`)
+    if (this.options.mode !== 'body') dismissHint(`camera.${this.options.mode}`)
     document.removeEventListener('visibilitychange', this.onHidden)
     removeEventListener('pagehide', this.onExit)
     removeEventListener('popstate', this.onExit)
@@ -227,36 +254,53 @@ export class CameraView {
     this.dialog.close()
     this.dialog.remove()
     this.options.close?.(reason)
+    this.options.changed?.()
     if (this.returnFocus?.isConnected) this.returnFocus.focus({ preventScroll: true })
   }
 
   say(text: string) { if (this.status.textContent !== text) this.status.textContent = text }
-  unavailable(text: string) { this.dialog.dataset.state = 'unavailable'; this.hold(false); dismissHint('camera.hand'); this.say(text) }
+  unavailable(text: string) {
+    this.dialog.dataset.state = 'unavailable'; this.hold(false); this.say(text)
+    if (this.options.mode === 'hand') dismissHint('camera.hand')
+    if (this.options.mode === 'body') { this.scanner.stop(); this.options.changed?.() }
+  }
+  get capturing() { return (this.video.srcObject as MediaStream | null)?.getVideoTracks().some(t => t.readyState === 'live') ?? false }
+  fingersOff() { const toggle = this.dialog.querySelector<HTMLInputElement>('[data-camera-fingers]'); if (toggle) toggle.checked = false }
   setMetrics(text: string) { this.metrics.textContent = text; this.metrics.hidden = !this.options.measurements || !text }
 
   loading(progress: number | null) {
+    if (this.options.mode === 'body') {
+      const toggle = this.dialog.querySelector<HTMLInputElement>('[data-camera-fingers]')
+      if (toggle) toggle.disabled = progress !== null
+    }
     this.dialog.dataset.state = progress === null ? 'tracking' : 'loading'
     this.dialog.style.setProperty('--camera-progress', String(progress ?? 1))
-    this.say(progress === null ? 'Show your hand' : '')
-    if (progress === null) hint('camera.hand', () => this.opened ? this.island : null,
+    this.say(progress === null ? (this.options.mode === 'body' ? 'Keep your shoulders and hips in view' : 'Show your hand') : '')
+    if (progress === null && this.options.mode === 'hand') hint('camera.hand', () => this.opened ? this.island : null,
       this.options.hold ? 'Hold to move · pinch for the gripper' : 'Fist to turn · pinch to grab',
       { place: 'top', delay: 350, mount: this.dialog, gap: 4 })
   }
 
   /** Consent precedes model/WASM traffic unless a connection is known to be unmetered. */
   async prepareHands(start: () => void) {
+    return this.prepareModel(start, false)
+  }
+
+  async prepareBody(start: () => void) { return this.prepareModel(start, true) }
+
+  private async prepareModel(start: () => void, body: boolean) {
     const preparation = ++this.preparation
     this.dialog.querySelector('[data-camera-download]')?.remove()
     const connection = (navigator as Navigator & { connection?: { saveData?: boolean; type?: string } }).connection
-    const ask = constrainedDownload(connection) && !await handAssetsCached()
+    const ask = constrainedDownload(connection) && !await (body ? bodyAssetsCached() : handAssetsCached())
     if (!this.opened || preparation !== this.preparation) return
     if (ask) {
-      const confirm = element('button', 'camera-download glass', 'Download hand controls · 19.5 MB')
+      const confirm = element('button', 'camera-download glass', body ? 'Download body tracking · 18 MB' : 'Download hand controls · 19.5 MB')
       confirm.type = 'button'; confirm.dataset.cameraDownload = ''
       confirm.append(element('small', '', 'Saved on this phone for next time'))
       this.island.before(confirm)
       this.say('Ready when you are')
-      confirm.onclick = () => { confirm.remove(); if (this.opened) start() }
+      confirm.onclick = () => { confirm.remove(); if (this.opened && preparation === this.preparation) start() }
     } else start()
   }
 

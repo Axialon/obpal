@@ -4,6 +4,8 @@ An open protocol for pairing a **control device** (phone, tablet, custom hardwar
 
 Status: draft, implemented by `packages/core` and `packages/host`. Keywords follow RFC 2119. The controls built on these packets, their routes and profiles are in [CATALOGUE.md](CATALOGUE.md).
 
+The additive [BODY packet (type 7)](../docs/PROTOCOL.md#body-packet-type-7-a-camera-tracked-body) carries 33 camera landmarks. Its framing, confidence, independent sequence, expiry and optional HAND composition are specified there; existing packet layouts are unchanged.
+
 ### Optional calibrated sim space
 
 The existing `state{values}` / `value{id,v}` envelopes carry the optional

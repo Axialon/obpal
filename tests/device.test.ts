@@ -149,6 +149,25 @@ async function hostAnswers(ctl: FakeChannel, fpHost = FP_HOST) {
 }
 
 describe('joining by short code, the phone’s side', () => {
+  it('admits one BODY plus optional HAND under backpressure, never a second capture', async () => {
+    const { link, pc, statuses } = await join({ media: FP_HOST })
+    const ctl = pc.channels.ctl
+    ctl.open(); await until('hello', () => ctl.sent.length > 0); await hostAnswers(ctl)
+    await until('confirmation', () => ctl.sent.slice(1).map(s => JSON.parse(s)).some(m => m.t === 'pake'))
+    ctl.receive({ t: 'welcome', proto: 1, name: 'Screen', layout: { v: 1, tray: [] }, invite: encodePairing({ secret: S, fp: FP_HOST }) })
+    await until('connected', () => statuses.includes('connected'))
+    const st = pc.channels.st; st.open()
+    const body = new Uint8Array(276), hand = new Uint8Array(144)
+    body[0] = 0x17; hand[0] = 0x16
+    expect(link.sendState(body.buffer)).toBe(true)
+    st.bufferedAmount = 276
+    expect(link.sendState(hand.buffer)).toBe(true)
+    expect(link.sendState(body.buffer)).toBe(false)
+    st.bufferedAmount = 420
+    expect(link.sendState(hand.buffer)).toBe(false)
+    expect(link.sendState(new ArrayBuffer(76))).toBe(false)
+    link.close()
+  })
   it('a host that proves the code gets the phone, and hands it the QR link’s code', async () => {
     const { link, pc, statuses, invites } = await join({ media: FP_HOST })
     const ctl = pc.channels.ctl
