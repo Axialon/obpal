@@ -103,7 +103,6 @@ export function buildSO101(spec: SerialSpec, n: number, _mats: ArmMaterials) {
       }
       model.root.userData.prototype = 'blender'
       contactFrame(model.root, 'arm-so101-base')
-      performance.mark('obpal:so101:visible')
     }
   }
   return model

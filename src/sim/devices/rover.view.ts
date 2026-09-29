@@ -9,6 +9,7 @@ import { Spring } from '../kit/motion'
 import { telescoping } from '../kit/mechanism'
 import { instanceCopies } from '../kit/instances'
 import { finishPrototype, loadPrototype, prototypeNodes, retirePrototype } from '../kit/prototype'
+import { holdRig } from '../kit/reveal'
 import { pov } from '../kit/precision'
 import { seat, supportVertices } from '../kit/support'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
@@ -213,8 +214,9 @@ export function createView(stage: Stage, logic: RoverLogic): DeviceView {
   stage.scene.add(yard.group)
   stage.scene.add(buildCourse())
   const models = logic.rovers.map((r, n) => { const m = buildRover(n); stage.scene.add(m.root, bay(r.home[0], r.home[1])); return m })
-  const copies = instanceCopies(stage.scene); copies.set(models.map(m => m.root))
-  models.forEach(m => { m.root.userData.prototype = 'procedural' })
+  const copies = instanceCopies(stage.scene)
+  // The procedural rovers stay out of view until the Blender ones are in (or cannot come).
+  const hold = holdRig('rover', models.map(m => m.root), { shown: () => { copies.set(models.map(m => m.root)); stage.view.invalidate() } })
   void Promise.all(models.map(async m => {
     const scene = await loadPrototype('rover')
     if (!scene) return null
@@ -223,9 +225,9 @@ export function createView(stage: Stage, logic: RoverLogic): DeviceView {
     finishPrototype(scene, { owner: m.accent, head: m.head, tail: m.tail })
     return rig
   })).then(rigs => {
-    if (rigs.some(r => !r) || !models.every(m => m.root.parent === stage.scene)) return
+    if (rigs.some(r => !r) || !models.every(m => m.root.parent === stage.scene)) return hold.fallback()
     copies.clear()
-    rigs.forEach((rig, i) => {
+    hold.install(() => rigs.forEach((rig, i) => {
       const m = models[i], body = rig!.body as THREE.Group
       rig!.antenna.add(m.antenna.getObjectByName('pov')!)
       body.add(m.body.getObjectByName('number')!)
@@ -241,10 +243,9 @@ export function createView(stage: Stage, logic: RoverLogic): DeviceView {
         m.shockBases[j], new THREE.Vector3(shock.position.x, .14, shock.position.z), .026, .05))
       m.mechanisms.forEach(update => update())
       m.root.userData.prototype = 'blender'
-    })
+    }))
     copies.set(models.map(m => m.root)); stage.view.invalidate()
-    performance.mark('obpal:rover:visible')
-  }).catch(() => { /* The procedural rig remains available if an optional mesh cannot load. */ })
+  }).catch(() => hold.fallback()) // The procedural rig remains available if an optional mesh cannot load.
   const cones = coneInstances(logic.cones.length)
   stage.scene.add(cones.group)
   const setTheme = (t: Theme) => {

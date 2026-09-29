@@ -42,7 +42,6 @@ export function armAppearance(name: ArmKindId, model: ArmModel): ArmModel {
       }
       contactFrame(model.root, `arm-${name}-base`)
       model.root.userData.prototype = 'blender'
-      performance.mark(`obpal:${name}:visible`)
     }
   }
   return model

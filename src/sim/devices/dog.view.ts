@@ -62,14 +62,14 @@ function robot(n: number, logic: DogLogic, live?: () => void) {
   batch(head)
   batch(tail)
   batch(body, [head, tail, ...legs.map((l) => l.hip)])
-  if (live) upgradeSkins('dog', slots, () => {
+  const hold = live ? upgradeSkins('dog', slots, () => {
     for (const slot of Object.values(slots)) slot.userData.static = true
     batch(head)
     for (const leg of legs) { batch(leg.knee); batch(leg.hip, [leg.knee]) }
     batch(body, [head, tail, ...legs.map(leg => leg.hip)])
     live()
-  })
-  return { root, body, head, legs, tail, glow }
+  }) : null
+  return { root, body, head, legs, tail, glow, hold }
 }
 
 function yard(scene: THREE.Scene, logic: DogLogic, live?: () => void) {
@@ -96,6 +96,7 @@ function yard(scene: THREE.Scene, logic: DogLogic, live?: () => void) {
     const model = robot(n, logic, live)
     const shadows = Array.from({ length: 4 }, () => { const shadow = blobShadow(.105, .5); shadow.scale.y = 1.4; scene.add(shadow); return shadow })
     scene.add(model.root)
+    model.hold?.alongside(...shadows)
     return { ...model, shadows }
   })
   const balls = logic.units.map((_, n) => {

@@ -60,7 +60,11 @@ it.each(names)('%s decodes within its payload budget and changes only declared r
   const before = anchors.map(anchor => anchor.matrixWorld.clone())
   loader.mockResolvedValueOnce(source)
   const invalidate = vi.fn(); upgradeSkins(name, slots, invalidate)
+  // The unit stays out of view until its skins are in.
+  expect(rig.visible).toBe(false)
   await vi.waitFor(() => expect(invalidate).toHaveBeenCalledOnce())
+  expect(rig.visible).toBe(true)
+  expect(rig.userData.prototype).toBe('blender')
   rig.updateMatrixWorld(true)
   anchors.forEach((anchor, n) => expect(anchor.matrixWorld.equals(before[n])).toBe(true))
   for (const slot of Object.values(slots)) {
@@ -81,4 +85,7 @@ it.each([null, new THREE.Group()])('retains a working placeholder on download fa
   await new Promise(resolve => setTimeout(resolve, 0))
   expect(slot.children).toEqual([placeholder]); expect(anchor.parent).toBe(rig)
   expect(invalidate).not.toHaveBeenCalled()
+  // The placeholder is then what the unit shows.
+  expect(rig.visible).toBe(true)
+  expect(rig.userData.prototype).toBe('procedural')
 })

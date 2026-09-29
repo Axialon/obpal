@@ -52,7 +52,11 @@ export function catalogueMarkup(cards, controllerName) {
   return `<section id="seo-list" class="seo-list" aria-label="All sims"><h2>All phone-controlled sims</h2><ul>${cards.filter(c => c.href).map(c => `<li><h3><a href="${escapeHtml(c.href.startsWith('/sim/device/') ? simUrl(c) : c.href)}">${escapeHtml(c.name)}</a></h3><p>${escapeHtml(c.kind)} · ${escapeHtml(c.blurb)}</p><p>Controllers: ${c.controllers.map(controllerName).map(escapeHtml).join(', ')}</p></li>`).join('')}</ul></section>`
 }
 
-export function deviceMarkup(html, card, controllerName) {
+/**
+ * The static page of one device (/sim/<id>/), made from the device page. `models` are the URLs of the meshes the device
+ * loads: each is named in a preload, so the browser starts the download while it reads the page.
+ */
+export function deviceMarkup(html, card, controllerName, models = []) {
   const path = simUrl(card)
   const title = `${card.name} sim · ob.Pal`
   const description = `${card.blurb} Control it with your phone in ob.Pal.`
@@ -65,6 +69,11 @@ export function deviceMarkup(html, card, controllerName) {
     .replace('<p class="sim-lede" id="dev-blurb"></p>', `<p class="sim-lede" id="dev-blurb">${escapeHtml(card.blurb)}</p>`)
     .replace('<div class="dev-faces" id="dev-faces" role="group" aria-label="Controllers that suit it"></div>', `<div class="dev-faces" id="dev-faces" role="group" aria-label="Controllers that suit it"></div><section class="seo-device" id="seo-device"><h2>Control this sim with your phone</h2><p>${escapeHtml(card.teaches ?? card.blurb)}</p><ul>${card.controllers.map(id => `<li><strong>${escapeHtml(controllerName(id))}:</strong> ${escapeHtml(card.how?.[id] ?? 'Control the sim from your phone')}</li>`).join('')}</ul><p><a href="/sim/">Explore all phone-controlled sims</a></p></section>`)
   out = out.replace('</head>', `    <script type="application/ld+json">${jsonLd(structuredData(path, [card]))}</script>\n  </head>`)
+  // As a fetch, in the mode the page's own request has (the same origin, no credentials beyond it), so that request finds
+  // it; ahead of the page's scripts, so it is asked for first.
+  const preloads = models.map(url => `<link rel="preload" href="${escapeHtml(url)}" as="fetch" crossorigin fetchpriority="low" />\n    `).join('')
+  const before = out.search(/<link rel="modulepreload"|<script type="module"/), at = before >= 0 ? before : out.indexOf('</head>')
+  if (preloads && at >= 0) out = out.slice(0, at) + preloads + out.slice(at)
   for (const key of ['og:url', 'og:title', 'og:description', 'twitter:title', 'twitter:description']) {
     const content = key.endsWith('url') ? pageUrl(path) : key.endsWith('title') ? title : description
     out = out.replace(new RegExp(`(<meta (?:property|name)="${key}" content=")[^"]*`), `$1${escapeHtml(content)}`)

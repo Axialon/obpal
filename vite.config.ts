@@ -13,6 +13,7 @@ import { checkProfile, CONTROLLER_ID, CONTROLLER_IDS, CONTROLLERS, MOTION_UTILIT
 import { APP_ACTIONS, BUTTON_TARGET, DEFAULT_BUTTONS, INPUT_ID, INPUT_OPTIONS, KEY_TARGETS, SMART_BUTTONS } from './packages/core/src/buttons'
 import { Mode } from './packages/core/src/state'
 import { BRIDGE_ROWS, EMBED, REPO, SYSTEM_ROWS, UTILITY_ROWS } from './src/catalogue/data'
+import { DEVICE_MODELS, prototypeUrl } from './src/sim/kit/models'
 
 const root = fileURLToPath(new URL('.', import.meta.url))
 const { SIMS, DEVICE_IDS } = await loadSims(root, build)
@@ -91,6 +92,43 @@ function deployRecovery(): Plugin {
     transformIndexHtml: {
       order: 'pre',
       handler: (_html, ctx) => NO_RECOVERY.includes(ctx.path) ? [] : [{ tag: 'script', attrs: { type: 'module', src: '/src/ui/recover.ts' }, injectTo: 'head' }],
+    },
+  }
+}
+
+/**
+ * The sims that wear a Blender mesh (the arm sim and the device sims) open with src/sim/kit/early.ts, ahead of their own
+ * scripts: it starts the mesh's download and decoder, and shows the loading pill, while the rest of the page is still
+ * arriving. A page's own scripts are one module graph that runs only when all of it has come, so this one is an entry
+ * of its own (simEarly), named in the page just before them; its few imports are preloaded beside it.
+ */
+const EARLY_PAGES = ['/sim/device/index.html', '/sim/arm/index.html']
+function simEarly(): Plugin {
+  return {
+    name: 'obpal-sim-early',
+    transformIndexHtml: {
+      order: 'post',
+      handler(html, ctx) {
+        if (!EARLY_PAGES.includes(ctx.path)) return
+        let tags = '<script type="module" src="/src/sim/kit/early.ts"></script>\n    '
+        if (ctx.bundle) {
+          const early = Object.values(ctx.bundle).find((c) => c.type === 'chunk' && c.isEntry && c.facadeModuleId?.endsWith('/src/sim/kit/early.ts'))
+          if (!early || early.type !== 'chunk') throw new Error('The sims\' early script was not built')
+          const files = new Set<string>()
+          const walk = (name: string) => {
+            const chunk = ctx.bundle![name]
+            if (chunk?.type !== 'chunk' || files.has(name)) return
+            files.add(name)
+            chunk.imports.forEach(walk)
+          }
+          early.imports.forEach(walk)
+          tags = [...files].map((f) => `<link rel="modulepreload" crossorigin href="/${f}">`).join('\n    ') + (files.size ? '\n    ' : '')
+            + `<script type="module" crossorigin src="/${early.fileName}"></script>\n    `
+        }
+        const first = html.indexOf('<script type="module"')
+        if (first < 0) throw new Error(`${ctx.path} has no module script to run the early script before`)
+        return html.slice(0, first) + tags + html.slice(first)
+      },
     },
   }
 }
@@ -335,7 +373,7 @@ function searchPages(): Plugin {
       for (const card of SIMS.filter(c => deviceIds.has(c.id))) {
         const target = join(options.dir, 'sim', card.id, 'index.html')
         mkdirSync(join(options.dir, 'sim', card.id), { recursive: true })
-        writeFileSync(target, deviceMarkup(String(template.source), card, controllerName))
+        writeFileSync(target, deviceMarkup(String(template.source), card, controllerName, (DEVICE_MODELS[card.id] ?? []).map(prototypeUrl)))
       }
       writeFileSync(join(options.dir, 'robots.txt'), robotsTxt())
       writeFileSync(join(options.dir, 'sitemap.xml'), sitemapXml(SIMS, gitDate))
@@ -344,7 +382,7 @@ function searchPages(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [markupBuild(root), cloudflare(), deployRecovery(), controllerServiceWorker(), embedScript(), catalogueFiles(), linkVersion(), pagePreviews(), searchPages(), pagePolicy()],
+  plugins: [markupBuild(root), cloudflare(), deployRecovery(), controllerServiceWorker(), embedScript(), catalogueFiles(), linkVersion(), pagePreviews(), searchPages(), simEarly(), pagePolicy()],
   server: { port: 5175, strictPort: true },
   environments: {
     client: {
@@ -352,7 +390,7 @@ export default defineConfig({
         // Controller floor from PLAN.md: Safari 15, Chromium 95, Firefox 115.
         target: ['safari15', 'chrome95', 'firefox115', 'edge95'],
         rollupOptions: {
-          input: { index: 'index.html', controller: 'p/index.html', viewer: 'view/index.html', sponsor: 'sponsor/index.html', donate: 'donate/index.html', link: 'link/index.html', privacy: 'privacy/index.html', sims: 'sim/index.html', simArm: 'sim/arm/index.html', simArena: 'sim/arena/index.html', simDevice: 'sim/device/index.html', catalogue: 'catalogue/index.html', embed: 'embed/index.html', buttons: 'buttons/index.html' },
+          input: { index: 'index.html', controller: 'p/index.html', viewer: 'view/index.html', sponsor: 'sponsor/index.html', donate: 'donate/index.html', link: 'link/index.html', privacy: 'privacy/index.html', sims: 'sim/index.html', simArm: 'sim/arm/index.html', simArena: 'sim/arena/index.html', simDevice: 'sim/device/index.html', simEarly: 'src/sim/kit/early.ts', catalogue: 'catalogue/index.html', embed: 'embed/index.html', buttons: 'buttons/index.html' },
         },
       },
     },

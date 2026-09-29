@@ -48,5 +48,13 @@ describe('search pages', () => {
     expect(html).toContain(rover.blurb)
     expect(html).toContain('application/ld+json')
     expect(html).not.toContain('noindex')
+    expect(html).not.toContain('rel="preload"')
+  })
+  it('names a device\'s meshes in preloads, fetched as its own request will', () => {
+    const rover = SIMS.find(c => c.id === 'rover')!
+    const html = deviceMarkup('<head><title>Device</title><link rel="modulepreload" href="/assets/a.js"><script type="module" src="/assets/b.js"></script></head><h1 id="dev-name">Device</h1>', rover, id => id, ['/models/rover.glb'])
+    expect(html).toContain('<link rel="preload" href="/models/rover.glb" as="fetch" crossorigin fetchpriority="low" />')
+    // Ahead of the page's own scripts.
+    expect(html.indexOf('rel="preload"')).toBeLessThan(html.indexOf('rel="modulepreload"'))
   })
 })

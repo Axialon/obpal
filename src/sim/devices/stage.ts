@@ -10,6 +10,7 @@ import { environment, softKey } from '../kit'
 import type { Theme } from '../../ui/themes'
 import { simView, type SimView } from '../view'
 import { simPanels } from '../ui/panels'
+import { placeLoading } from '../kit/loading'
 
 export type V3 = [number, number, number]
 
@@ -179,6 +180,8 @@ export function createStage(canvas: HTMLCanvasElement, theme: Theme): Stage {
       const top = 64
       if (panel && panel.x < 80 && panel.w < w / 2) { camera.setViewOffset(w, h, -(panel.x + panel.w) / 2, 0, w, h); free = { w: w - panel.x - panel.w, h: h - top } }
       else { camera.clearViewOffset(); free = { w, h: h - top } }
+      // The loading pill stands where the device will: in the middle of what the panel leaves free.
+      placeLoading(w - free.w + free.w / 2)
       camera.updateProjectionMatrix()
     },
   }

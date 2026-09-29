@@ -24,6 +24,8 @@ import { tiledDeck } from '../kit/precision'
 import { ceramic, darkTitanium } from '../kit/surfaces'
 import { fixtures, payloadSpeed, STOCK } from './workspace'
 import { instanceCopies } from '../kit/instances'
+import { placeLoading } from '../kit/loading'
+import { holdRig, isHeld, type RigHold } from '../kit/reveal'
 import { InputSmoother, servo } from '../kit/motion'
 import type { SceneNode, SceneSet } from '@obpal/core'
 import { Mode, PadButton, type Frame, type Layout, type PadState, type Quat } from '@obpal/host'
@@ -41,7 +43,7 @@ import { holding, type GripBox, type V3 } from './grasp'
 import { reachDown, solveNear, within, type Pose } from './kin'
 import type { ToolTarget } from './kinematics'
 import { kindFrom } from './kind'
-import { ARM_KINDS } from './kinds'
+import { ARM_KINDS, type ArmKindId } from './kinds'
 import { placement, turnBetween } from './layout'
 import type { ArmModel, JointSpec } from './model'
 import { GlowFollower, handMove, handTurn, headingOf } from '@obpal/host'
@@ -226,6 +228,9 @@ interface Claw {
 const MAX_ARMS = 4
 const arms: Arm[] = []
 const armInstances = instanceCopies(scene)
+/** Each arm's hold on its procedural model until its Blender mesh is in (../kit/reveal.ts), and the roots shared draws may take. */
+const holds = new Map<ArmModel, RigHold>()
+const shownRoots = () => arms.map(a => a.model.root).filter(root => !isHeld(root))
 /** The panel: who held what when it was last drawn (to flash changes), and which arms have their settings open. */
 let heldBefore: Record<string, string> = {}
 const openTools = new Set<string>()
@@ -281,13 +286,18 @@ function addArm(number?: number): Arm | null {
   const joints: Joint[] = KIN.joints.map((spec) => ({ spec, node: `${id}.${spec.key}`, angle: spec.home, vel: 0, target: null, state: '', flash: 0 }))
   joints.forEach((j, i) => model.apply[i](j.angle))
   const arm: Arm = { n, id, name: `Arm ${n}`, model, joints, profile: 'both', drive: null, edge: false, state: '', homing: false, flash: 0, hw: null, hover: KIND.drive.hover[0], claw: null, track: null, scale: KIND.drive.scale, goal: null, blocked: false, chosen: 0, jog: new Map() }
+  // The procedural arm stays out of view until its Blender mesh is in (or cannot come).
+  const hold = model.upgrade ? holdRig(KIND.id as ArmKindId, [model.root], { shown: () => { armInstances.set(shownRoots()); view.invalidate() } }) : null
+  if (hold) holds.set(model, hold)
   arms.push(arm)
   arms.sort((a, b) => a.n - b.n)
-  armInstances.set(arms.map(a => a.model.root))
+  armInstances.set(shownRoots())
   void model.upgrade?.().then(install => {
-    if (!install || !arms.some(a => a.model === model)) return
-    armInstances.clear(); install(); armInstances.set(arms.map(a => a.model.root)); view.invalidate()
-  }).catch(() => { /* Optional meshes must never prevent an arm from running. */ })
+    if (!install || !arms.some(a => a.model === model)) return hold?.fallback()
+    armInstances.clear()
+    if (hold) hold.install(install); else install()
+    armInstances.set(shownRoots()); view.invalidate()
+  }).catch(() => hold?.fallback()) // Optional meshes must never prevent an arm from running.
   refreshNodes()
   return arm
 }
@@ -297,9 +307,10 @@ async function removeArm(a: Arm) {
   if (a.hw) await disconnect(a)
   for (const b of blocks) if (b.by === a) drop(b)
   armInstances.clear()
+  holds.get(a.model)?.cancel(); holds.delete(a.model)
   a.model.dispose()
   arms.splice(arms.indexOf(a), 1)
-  armInstances.set(arms.map(a => a.model.root))
+  armInstances.set(shownRoots())
   for (const n of [a.id, ...a.joints.map((j) => j.node)]) sim?.claims.unnest(n)
   sim?.log(`The screen removed ${a.name}`)
   refreshNodes()
@@ -1720,6 +1731,7 @@ function resize() {
   const left = control.visible && panel.x < 80 && panel.w < w / 2 ? panel.x + panel.w : 0
   if (left) camera.setViewOffset(w, h, -left / 2, 0, w, h)
   else camera.clearViewOffset()
+  placeLoading(w / 2 + left / 2)
   const free = Math.min(w - left, h - 90)
   const height = arms.length ? new THREE.Box3().setFromObject(arms[0].model.root).getSize(new THREE.Vector3()).y : 0
   const radius = Math.max(KIND.cell.fence * (overview ? 0.95 : 0.48), height * 0.6)

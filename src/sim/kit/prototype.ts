@@ -2,39 +2,16 @@
 import * as THREE from 'three'
 import * as finishes from './surfaces'
 import { rubber } from './index'
+import { downloadPrototype, type Prototype } from './models'
 
-export type Prototype = 'drone' | 'so101' | 'rover' | 'arm5' | 'six' | 'scara' | 'delta' | 'desk' | 'helicopter' | 'plane'
-  | 'kart' | 'boat' | 'tank' | 'forklift' | 'excavator' | 'slotcars' | 'planetary' | 'submarine' | 'vacuum' | 'film-camera' | 'gimbal' | 'ptz' | 'dog' | 'studio'
-const pending = new Map<Prototype, Promise<THREE.Group | null>>()
+export type { Prototype }
 
-/** Wait until the procedural scene has painted before loading the decoder or model. */
+/**
+ * The mesh for this caller: a clone of the shared scene, whose download and decoder began the moment the page first
+ * asked for the mesh (./models.ts; the page's early script asks before anything is drawn). Null where it could not be had.
+ */
 export function loadPrototype(name: Prototype): Promise<THREE.Group | null> {
-  let promise = pending.get(name)
-  if (!promise) {
-    promise = new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
-      .then(async () => {
-        performance.mark(`obpal:${name}:load`)
-        const [{ GLTFLoader }, { MeshoptDecoder }] = await Promise.all([
-          import('three/addons/loaders/GLTFLoader.js'),
-          import('three/addons/libs/meshopt_decoder.module.js'),
-        ])
-        await MeshoptDecoder.ready
-        const gltf = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(`/models/${name}.glb`)
-        gltf.scene.traverse(o => {
-          const m = o as THREE.Mesh
-          if (!m.isMesh) return
-          m.geometry.userData.simShared = true
-          const materials = Array.isArray(m.material) ? m.material : [m.material]
-          m.castShadow = materials.some(mat => ['ceramic', 'warmShell', 'carbon', 'darkTitanium', 'gunmetal'].includes(mat.name))
-          m.receiveShadow = true
-        })
-        performance.mark(`obpal:${name}:decoded`)
-        performance.measure(`obpal:${name}:load`, `obpal:${name}:load`, `obpal:${name}:decoded`)
-        return gltf.scene
-      }).catch(() => null)
-    pending.set(name, promise)
-  }
-  return promise.then(scene => scene?.clone(true) ?? null)
+  return downloadPrototype(name).then(scene => scene?.clone(true) ?? null)
 }
 
 /** Map named export materials to the live kit and the device's independently animated accents. */

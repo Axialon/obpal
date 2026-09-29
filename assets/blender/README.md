@@ -32,8 +32,12 @@ The arm's elbow and wrist actuators and the rover's suspension have separate sle
 `src/sim/kit/mechanism.ts` solves their attachment points from the live joints; it does not change
 the authoritative kinematics or add another animation clock.
 
-The loader and production meshopt decoder load after the procedural scene's first paint, only in
-the live views that use authored assets. Catalogue previews retain their lightweight procedural rigs.
+The mesh's download and the production meshopt decoder start at once, beside the page's own scripts
+(`src/sim/kit/early.ts`, and a preload in each built device page), only in the live views that use
+authored assets. Until the mesh is in, the device's procedural rig is built (it carries the device's
+state) but kept out of view, and a small loading pill shows (`src/sim/kit/reveal.ts`, `loading.ts`);
+the finished device then eases in. The procedural rig is shown instead only if the mesh fails or
+is still missing after four seconds. Catalogue previews retain their lightweight procedural rigs.
 The production decoder uses WebAssembly; only `/sim/arm/` and `/sim/device/` permit
 `'wasm-unsafe-eval'`. Trusted Types and the `obpal-templates` policy remain enforced everywhere.
 

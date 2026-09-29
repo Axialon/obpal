@@ -10,6 +10,7 @@ import { carbon, ceramic, duct, lime, optic, polished, ring, shell, titanium, wa
 import { Spring } from '../kit/motion'
 import { instanceCopies } from '../kit/instances'
 import { finishPrototype, loadPrototype, prototypeNodes, retirePrototype } from '../kit/prototype'
+import { holdRig } from '../kit/reveal'
 import { pov, tiledDeck } from '../kit/precision'
 import { seat, supportVertices } from '../kit/support'
 import { darkTitanium, gunmetal } from '../kit/surfaces'
@@ -198,8 +199,9 @@ export function createView(stage: Stage, logic: DroneLogic): DeviceView {
     return height
   }
   const models = logic.drones.map((_, n) => { const m = buildDrone(n); stage.scene.add(m.root, m.shadow); return m })
-  const copies = instanceCopies(stage.scene); copies.set(models.map(m => m.root))
-  models.forEach(m => { m.root.userData.prototype = 'procedural' })
+  const copies = instanceCopies(stage.scene)
+  // The procedural drones stay out of view until the Blender ones are in (or cannot come).
+  const hold = holdRig('drone', models.map(m => m.root), { also: models.map(m => m.shadow), shown: () => { copies.set(models.map(m => m.root)); stage.view.invalidate() } })
   void Promise.all(models.map(async m => {
     const scene = await loadPrototype('drone')
     if (!scene) return null
@@ -207,9 +209,9 @@ export function createView(stage: Stage, logic: DroneLogic): DeviceView {
     finishPrototype(scene, { owner: m.light, rotor: m.blades })
     return nodes
   })).then(rigs => {
-    if (rigs.some(r => !r) || !models.every(m => m.root.parent === stage.scene)) return
+    if (rigs.some(r => !r) || !models.every(m => m.root.parent === stage.scene)) return hold.fallback()
     copies.clear()
-    rigs.forEach((rig, i) => {
+    hold.install(() => rigs.forEach((rig, i) => {
       const m = models[i], old = m.body, body = rig!.body as THREE.Group
       body.scale.copy(old.scale)
       body.add(...m.blurs, old.getObjectByName('number')!)
@@ -219,10 +221,9 @@ export function createView(stage: Stage, logic: DroneLogic): DeviceView {
       m.props = [rig!.prop0, rig!.prop1, rig!.prop2, rig!.prop3] as THREE.Group[]
       retirePrototype(old)
       m.root.userData.prototype = 'blender'
-    })
+    }))
     copies.set(models.map(m => m.root)); stage.view.invalidate()
-    performance.mark('obpal:drone:visible')
-  }).catch(() => { /* A malformed optional asset leaves the procedural models in place. */ })
+  }).catch(() => hold.fallback()) // A malformed optional asset leaves the procedural models in place.
   // The rings glow lavender on a dark surface, ultraviolet on the light one.
   let ringColor = '#b3a4ff'
   const setTheme = (t: Theme) => {

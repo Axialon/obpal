@@ -7,6 +7,8 @@
  *   Arena: two phones claim slots and roll their pucks.
  *   The node strip (./sims-strip.mjs): on an arm and on the excavator, a part switched mid-drag holds, the new one
  *   starts from where it was, and the same finger carries on with it.
+ *   First load (./e2e-load.mjs): a sim that wears a Blender mesh never draws its procedural rig while the mesh comes, shows
+ *   it at once if the mesh cannot come or is past the budget, and finds what a phone did meanwhile in the model.
  *   The arm's live path, with a fake driver in place of hardware (./e2e-arm-live.mjs): going live refused for a joint that
  *   is unreported or out of its limits, Stop holding the pose and reaching the driver, every automatic stop saying why.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch. OBPAL_SHOTS=<dir> saves screens.
@@ -23,6 +25,7 @@ import { runVR } from './e2e-vr.mjs'
 import { runControlViews } from './e2e-control-views.mjs'
 import { runAudio } from './e2e-audio.mjs'
 import { runTemporal } from './e2e-temporal.mjs'
+import { runLoad } from './e2e-load.mjs'
 import { simsStrip } from './sims-strip.mjs'
 import { runPanels } from './e2e-panels.mjs'
 import { runArmLive } from './e2e-arm-live.mjs'
@@ -511,6 +514,7 @@ try {
   // The node strip on an arm and the excavator: switching parts mid-drag (./sims-strip.mjs), with its own browser.
   await simsStrip({ origin: local.origin, check, executablePath, headed: HEADED, shots: SHOTS })
   await runTemporal(local, check)
+  await runLoad(local, check)
   await runControl(local, check)
   await runMusic(local, check)
   await runVR(local, check)

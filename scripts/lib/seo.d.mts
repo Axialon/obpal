@@ -11,4 +11,4 @@ export const FAQ: { question: string; answer: string }[]
 export function faqMarkup(): string
 export function structuredData(path: string, cards: readonly SimCard[]): Record<string, unknown>
 export function catalogueMarkup(cards: readonly SimCard[], controllerName: (id: string) => string): string
-export function deviceMarkup(html: string, card: SimCard, controllerName: (id: string) => string): string
+export function deviceMarkup(html: string, card: SimCard, controllerName: (id: string) => string, models?: readonly string[]): string
