@@ -7,9 +7,11 @@ import type { Group, Mesh } from 'three'
 
 export type Prototype = 'drone' | 'so101' | 'rover' | 'arm5' | 'six' | 'scara' | 'delta' | 'desk' | 'helicopter' | 'plane'
   | 'kart' | 'boat' | 'tank' | 'forklift' | 'excavator' | 'slotcars' | 'planetary' | 'submarine' | 'vacuum' | 'film-camera' | 'gimbal' | 'ptz' | 'dog' | 'studio'
+  | 'keel' | 'morrow' | 'keel-lod' | 'morrow-lod' | 'humanoid-arena'
 
 /** The mesh each robot arm kind wears (?kind=): its own id. The five-axis arm is the page's default. */
 export const ARM_MODELS: readonly Prototype[] = ['arm5', 'so101', 'six', 'scara', 'delta', 'desk']
+export const HUMANOID_MODELS: readonly Prototype[] = ['keel', 'morrow', 'humanoid-arena']
 
 /** The meshes each device sim loads, by device id. A device that draws only procedurally has no row. */
 export const DEVICE_MODELS: Readonly<Record<string, readonly Prototype[]>> = {
@@ -23,6 +25,7 @@ export const prototypeUrl = (name: Prototype) => `/models/${name}.glb`
 /** The meshes the page at this address will ask for: none for a page that draws only procedurally. */
 export function pageModels(pathname: string, search: string): readonly Prototype[] {
   const params = new URLSearchParams(search)
+  if (pathname.startsWith('/sim/humanoid/')) return HUMANOID_MODELS
   if (pathname.startsWith('/sim/arm')) {
     const kind = params.get('kind')
     return [ARM_MODELS.find(k => k === kind) ?? 'arm5']

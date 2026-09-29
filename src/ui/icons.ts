@@ -26,6 +26,7 @@ export const ICONS: Record<string, string> = {
   glow: s('<path d="M11 3.5l1.7 4.8 4.8 1.7-4.8 1.7L11 16.5l-1.7-4.8L4.5 10l4.8-1.7Z"/><path d="M18 14.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8Z"/>'),
   upload: s('<path d="M12 15.5V4.5M7.5 9 12 4.5 16.5 9M5 19.5h14"/>'),
   close: s('<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>'),
+  skip: s('<path d="m6 5 9 7-9 7Z"/><path d="M18 5v14"/>'),
   plus: s('<path d="M12 5.5v13M5.5 12h13"/>'),
   arrange: s('<rect x="2.8" y="8" width="5" height="8" rx="1.6"/><rect x="9.5" y="8" width="5" height="8" rx="1.6"/><rect x="16.2" y="8" width="5" height="8" rx="1.6"/>'),
   solo: s('<rect x="8" y="6.5" width="8" height="11" rx="2.2"/><path d="M3.6 9v6M20.4 9v6" stroke-dasharray="1.6 2.2"/>'),

@@ -90,6 +90,7 @@ export interface Pointing {
 export interface DeviceInput {
   /** Optional camera snapshots, read once with this seat's other input. */
   body?: import('@obpal/host').BodyFrame | null
+  hand?: import('@obpal/host').Frame['hand']
   /** The active view's frame, applied once to spatial intent after the controller is read. */
   controlFrame?: import('../vr/intent').InputFrame
   /** Calibrated motion from a current phone; absent for legacy and touch-only clients. */

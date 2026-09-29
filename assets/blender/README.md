@@ -13,6 +13,8 @@ Blender 5.2.2 runs headlessly, with `BLENDER` pointing to its executable:
 & $env:BLENDER -b --factory-startup --python-exit-code 1 --python assets/blender/cameras.py
 & $env:BLENDER -b --factory-startup --python-exit-code 1 --python assets/blender/dog.py
 & $env:BLENDER -b --factory-startup --python-exit-code 1 --python assets/blender/studio.py
+& $env:BLENDER -b --factory-startup --python-exit-code 1 --python assets/blender/humanoids.py
+& $env:BLENDER -b --factory-startup --python-exit-code 1 --python assets/blender/humanoid_arena.py
 ```
 
 `common.py` makes clipped component housings, tapered planar facets, metal-framed
@@ -23,6 +25,21 @@ Each rigid frame is merged by material. `compress.mjs` compresses the exported s
 meshoptimizer 1.1.1 (MIT), validates them by decoding, and writes `public/models/*.glb`.
 Positions retain 18 bits of exponential precision; normals retain 12. No textures are needed.
 Intermediate exports stay under ignored `artifacts/codex-style/authored/`.
+
+`render_humanoids.py` produces the eight 3840×2160 turntable stills and the pair in
+the arena under `artifacts/humanoid/phase-3/renders/`. Add `-- --draft` for 1280×720
+iterations. These are original Cycles studio renders, with the same opaque kit
+finishes as the runtime; no downloaded environment or textures are used.
+
+Keel and Morrow retain the profile's complete pivot hierarchy at both LODs. A dot
+in an anatomical joint ID becomes an underscore in glTF, whose animation binding
+names exclude dots. `tests/humanoid-models.test.ts` compares every translation and
+parent to the live profile, sweeps each joint through both limits and checks all
+geometry, material, triangle and byte contracts. The lower LOD removes bearing
+segments and service details. The live rig uses 5.5/6.5 m hysteresis and preserves
+all angles during swaps. The arena has no separate LOD: its 4,972 triangles and
+four draws already fit its 15k budget. These visual shells are not manufacturing
+geometry or a physical self-collision model.
 
 Coordinates are metres, Y up, in the original procedural model's local frame. The export disables
 Blender's axis conversion intentionally. Named empty objects are the moving pivots; material names

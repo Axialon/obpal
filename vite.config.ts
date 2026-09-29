@@ -43,8 +43,9 @@ const CSP_EXTRA: Record<string, Record<string, string[]>> = {
   // The arm sim drives a real arm through a rosbridge wherever the person points it, and shows the Blender models (next entry).
   '/sim/arm/index.html': { 'connect-src': ['ws:', 'wss:'], 'script-src': ["'wasm-unsafe-eval'"] },
   // The Blender models (src/sim/kit/prototype.ts) are meshopt-compressed, and their decoder compiles WebAssembly. Only
-  // the arm and device sims load them, so only these two pages allow it.
+  // the arm, device and humanoid sims load them, so only these pages allow it.
   '/sim/device/index.html': { 'script-src': ["'wasm-unsafe-eval'"] },
+  '/sim/humanoid/index.html': { 'script-src': ["'wasm-unsafe-eval'"] },
 }
 function contentSecurityPolicy(page: string): string {
   const d: Record<string, string[]> = {

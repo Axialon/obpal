@@ -103,7 +103,7 @@ try {
     const html = await readFile(new URL(`../dist/client/${file.replaceAll('\\', '/')}`, import.meta.url), 'utf8')
     if (html.includes('wasm-unsafe-eval')) wasmPages.push(file.replaceAll('\\', '/'))
   }
-  assert.deepEqual(wasmPages.sort(), ['sim/arm/index.html', 'sim/device/index.html'])
+  assert.deepEqual(wasmPages.sort(), ['sim/arm/index.html', 'sim/device/index.html', 'sim/humanoid/index.html'])
   await writeFile(new URL('report.json', out), JSON.stringify({ report, budget, wasmPages, catalogueModels: 0 }, null, 2))
   await writeFile(new URL('../stress.json', out), JSON.stringify(budget, null, 2))
   console.log(`Review evidence: ${evidence}`)

@@ -136,7 +136,7 @@ Each phase merges master, runs `pnpm run check`, then affected e2e suites. Tests
 |---|---|---|---|
 | 1. Capture — implemented | New `packages/core/src/body.ts`, exports, `packages/host/src/{stream,remote,element}.ts`; `src/controller/body-{worker,tracker,signal}.ts`; shared `src/ui/body-capture.ts`, camera/controller/Viewer entry points; capability catalogue, model credits, protocol/privacy docs | `tests/body-{protocol,stream,tracker}.test.ts`: quantisation bounds, seq/time/gen wrap, loss/reacquisition, malformed packets, budget and HAND compatibility. Fake Y4M camera plus synthetic landmark seam: permission/close/background, host offline capture, no image traffic, source switching. ≥30 processed fps on reference device remains a device acceptance target; measured PC results below | camera, phone, embed, shared, catalogue; extension for Frame consumers |
 | 2. Sim — implemented | New `sim/humanoid/index.html`, `src/sim/humanoid/{main,profile,ik,rig,retarget,calibration,walkthrough,controls,contacts}.ts`; seats adapter, catalogue, Vite route/early entry, audio integration | `tests/humanoid-{ik,calibration,controls,contacts}.test.ts`: FK/IK roundtrip ≤1° or 1 cm, mirror identity, finite singularities, bounded joints, monotonic/clamped/identity range mapping. `scripts/e2e-humanoid.mjs` under sims: two seats, loss, classical controls, presets, complete/skip/redo/persist/reset walkthrough and screenshots. Five-minute procedural-rig PC budget; physical phone acceptance remains unverified | sims, shared, phone, catalogue, pages |
-| 3. Models | `assets/blender/humanoids.py`, arena script, `public/models/*.glb`, kit model/material registrations and credits | Extend prototype/reveal tests: named pivots, joint sweeps, compressed bytes/triangles, cold/warm/failure reveal. Before/after screenshots at phone/desktop sizes; five-minute two-actor performance within budgets | sims, pages |
+| 3. Models — implemented | `assets/blender/{humanoids,humanoid_arena,render_humanoids}.py`, five meshopt GLBs, `humanoid/{models,rig,range-figure,walkthrough,fingers}.ts`, kit registrations and credits | Full-limit pivot sweeps at both LODs; geometry/material/byte contracts; cold/warm/failed/late reveal and LOD switching. Selected-robot walkthrough, reduced-motion pixels, optional BODY/HAND finger fusion, phone/desktop screenshots and five-minute two-hero performance | sims, pages |
 | 4. Drivers | `src/sim/humanoid/{drivers,safety,live}.ts`, fake drivers; `hardware/humanoid/README.md` specifies guardian and Unitree bridge contract | Unit fault matrix and `scripts/e2e-humanoid-live.mjs` under sims: stale single joint amid fresh others, unknown/out-of-limit/NaN state, swapped mappings, caps, replay, deadman release/loss, browser freeze, socket/bridge death, stop acknowledgement, leg refusal, reconnect requiring rearm. Zero motion goals after Stop; fake guardian holds within 110 ms. No real robot endpoints | sims, phone, shared |
 | 5. Review | Relevant humanoid/UI files, `docs/DEVICE-CHECKLIST.md`, this plan, camera/help documentation | One bounded Opus design review: ≤30 minutes, ≤10 findings, one polish pass, then focused verification. Device checklist covers lighting/occlusion, seated use, permissions, thermal cadence, 60 fps Viewer and measured latency. Record unavailable devices as unverified; no invented passes | sims, camera, phone, shared, pages; catalogue/extension only if changed |
 
@@ -183,6 +183,74 @@ Measured on PC headless Chromium (Playwright build 1237), NVIDIA RTX 4090 throug
 | Draw calls / triangles / DPR | 53 / 3,060 / 1 |
 
 Evidence lives in ignored `artifacts/humanoid/phase-2/`: `final/results.json`, raw `final/frame-times.json`, desktop/phone sim screenshots, all eight walkthrough steps at both sizes, check logs and guarded suite logs. Phone screenshots use an emulated Pixel 7 viewport, not phone hardware. Physical phone Viewer frame rate, camera/render contention, thermals, moving-person accuracy and real motion-to-display latency remain **unverified**. Procedural silhouettes are phase 2 stand-ins; approved Blender models and physical-driver safety work remain phases 3 and 4.
+
+## Phase 3 implementation and validation (2026-09-30)
+
+Keel and Morrow now wear original Blender-scripted shells. Keel has paired shield rails,
+a smoked sternum, asymmetric lime filament and three segmented fingers per hand.
+Morrow has an open oval thorax, offset smoked ribs, crescent forearms/shins and four
+short fingers. Its shoulder/hip frames now use the approved 0.42/0.36 m spacing;
+the limb lengths, limits and named retargeting chains retain the reference contract.
+The clipped eight-metre arena uses inlaid marks and low opaque glass fins. All
+materials come from the existing kit; no texture, HDRI or outside mesh was used.
+Scripts and assets are MIT, credited in the open-source inventory.
+
+| Asset | Compressed bytes | Triangles | Draws |
+|---|---:|---:|---:|
+| Keel | 149,888 | 7,088 | 36 |
+| Keel low LOD | 121,904 | 4,580 | 34 |
+| Morrow | 164,272 | 8,080 | 37 |
+| Morrow low LOD | 132,992 | 5,188 | 35 |
+| Arena | 51,300 | 4,972 | 4 |
+
+Every asset has zero textures. Both hero meshes plus the arena total 365,460 bytes
+and 20,140 triangles before scene effects. The lower LOD removes service details
+and bearing segments while retaining the silhouette and every pivot. A 5.5/6.5 m
+hysteresis prevents repeated switching. The arena already costs four draws and
+does not need a second mesh. All 32 body frames and the four collective finger
+frames are checked before replacing a rig. Invalid, failed or delayed downloads
+use the shared clean-reveal fallback; late arrival keeps the current joint pose.
+The 18 model contract tests include 2,176 independent joint-sweep poses across both robots and
+both LODs, comparing each pivot to independent forward kinematics within 0.01 mm.
+These are visual shells with exposed bearings and assembly gaps, not manufacturing
+clearance certification or a physical self-collision model.
+
+The range walkthrough now has a slim eight-segment redo rail, the selected robot
+in glass finishes, lime on the active chain and an arc centred on its moving joint.
+Close, skip and redo use shared icon buttons with accessible names and tooltips;
+Done is the only worded primary action. Reset sits quietly below. Reduced motion
+holds the figure still; browser tests compare its pixels. Shared button CSS was
+not changed. The formatting-only cleanup independently passed the original 38
+humanoid unit tests and 11 guarded browser checks before feature edits.
+
+Optional phone Fingers now controls collective curl at BODY's wrist. Only a known
+side with confidence ≥0.65 and capture skew ≤50 ms can pair. Source, side, mirror
+or generation changes require fresh samples from both producers. Missing input
+opens the visual hand; Stop holds its current pose. Presets close the fingers,
+except wave. No arm angles come from HAND. The phone toggle remains off by default;
+host webcam capture remains BODY only. Unit tests cover rejection, wrap and mirror;
+fake-camera e2e crosses real WebRTC and proves opt-in, seat isolation and relaxation.
+
+The five-minute PC sample used **both hero meshes**, synthetic BODY at camera
+cadence, DPR 1 and Chromium/ANGLE on an RTX 4090. In 300.211 seconds it recorded
+17,984 frames: raw frame-interval p95 **16.90 ms**, retarget/contact logic p95
+**0.50 ms**, render submission p95 **0.60 ms**, GPU timer p95 **1.93 ms**, **78 draws**
+and **20,236 rendered triangles**. Logic and the combined CPU/GPU workload fit
+their 2/16.7 ms budgets; the raw interval tail includes frame scheduling jitter
+and is reported separately. This does not establish the 60 fps physical-phone
+target or include simultaneous camera inference. All four typechecks and 2,144
+unit tests passed (14 skipped); the full sims suite passed 222/222 and pages
+passed 59/59 after merging master `da31450`. The guard reported “no new sessions”
+(19 test-browser lines before and after). No final-suite flake needed a rerun.
+
+The evidence directory is `artifacts/humanoid/phase-3/`. `before/` holds all 16
+phase-2 walkthrough baselines. Final browser evidence includes every redesigned
+step at phone/desktop sizes, the sim, load states and the raw five-minute timings.
+`renders/` holds 3840×2160 front, three-quarter, side and back stills of both robots
+and `pair-arena.png`; `render-contact-sheet.png` is a review index. Phone screenshots
+are emulated. Physical-phone fps, camera/render contention, thermals and real
+motion-to-display latency remain **unverified**. Hardware and real leg enable are
+still phase 4; no physical-driver support is implied by the meshes.
 
 ## Open decisions — decided by the owner (2026-09-30)
 
