@@ -6,8 +6,10 @@ import { setMarkup } from '../ui/markup'
  */
 import { family } from '../family'
 import { enhanceSelects } from '../ui/kit/select'
+import { mountPairCameraActions } from '../ui/camera'
 
 export function mountTopBar() {
+  mountPairCameraActions()
   const sw = document.getElementById('t-switch')
   const menu = document.getElementById('switcher')
   if (sw && menu) {

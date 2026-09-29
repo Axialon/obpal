@@ -14,6 +14,7 @@ export const Utility = {
   steer: 'motion.steer',
   point: 'motion.point',
   track: 'motion.track',
+  cameraHand: 'camera.hand',
   trackpad: 'touch.trackpad',
   hold: 'motion.hold',
   tilt: 'motion.tilt',

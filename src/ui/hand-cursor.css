@@ -1,0 +1,6 @@
+html [data-camera-cursor] { position: fixed; z-index: 6; left: -14px; top: -14px; width: 28px; height: 28px; box-sizing: border-box; border: 2px solid var(--accent); border-radius: 50%; background: transparent; box-shadow: none !important; pointer-events: none; opacity: 1; }
+html [data-camera-cursor='grip'] { width: 20px; height: 20px; left: -10px; top: -10px; background: var(--accent); opacity: .9; }
+html [data-camera-cursor='pinch'] { width: 12px; height: 12px; left: -6px; top: -6px; }
+html [data-camera-cursor]::before { display: none; }
+html [data-camera-cursor='pinch']::after { content: ''; position: absolute; width: 3px; height: 3px; top: 50%; left: 50%; transform: translate(-50%, -50%); border-radius: 50%; background: var(--accent); }
+html [data-camera-cursor='lost'] { border-style: dashed; opacity: .4; }

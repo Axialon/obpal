@@ -7,9 +7,10 @@
  */
 export const CACHE_PREFIX = 'obpal-p-'
 export const FONT_CACHE = 'obpal-fonts-v1'
+import { handAsset } from '../controller/hand-assets'
 export const cacheName = (version: string) => `${CACHE_PREFIX}${version}`
 
-export type Route = 'shell' | 'precache' | 'fonts' | 'network'
+export type Route = 'shell' | 'precache' | 'fonts' | 'models' | 'network'
 
 export function route(req: { url: string; method: string; mode: string }, origin: string, precached: ReadonlySet<string>): Route {
   if (req.method !== 'GET') return 'network'
@@ -19,6 +20,7 @@ export function route(req: { url: string; method: string; mode: string }, origin
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/r/')) return 'network'
   if (req.mode === 'navigate') return url.pathname === '/p' || url.pathname.startsWith('/p/') ? 'shell' : 'network'
   if (precached.has(url.pathname)) return 'precache'
+  if (handAsset(url.pathname)) return 'models'
   return url.pathname.startsWith('/fonts/') && url.pathname.endsWith('.woff2') ? 'fonts' : 'network'
 }
 

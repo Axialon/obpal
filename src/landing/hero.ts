@@ -141,7 +141,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   const unlock = (e: Event) => {
     const t = e.target as Element | null
     if (t?.closest?.('[data-sound], [data-quick="sound"]')) return
-    if (coarse && (!t || !hero.contains(t) || t.closest('a, [data-send]'))) return
+    if (coarse && (!t || !hero.contains(t) || t.closest('a, [data-send], [data-scan]'))) return
     glass.gesture()
   }
   for (const type of ['pointerdown', 'pointerup', 'touchend', 'keydown', 'click']) addEventListener(type, unlock, { capture: true, passive: true })

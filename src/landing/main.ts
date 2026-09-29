@@ -3,6 +3,7 @@ import { applyTheme, initialTheme } from '../ui/themes'
 import { calmMarks, mountMarks } from '../ui/icons'
 import { mountTopBar } from './topbar'
 import { dropQuickAction, mountQuick, quickAction } from '../ui/quick'
+import { openPairCamera, phoneCamera } from '../ui/camera'
 import { mountHero } from './hero'
 import { onPresence, startPairing } from './pair'
 import { addActor, wake } from './ticker'
@@ -21,7 +22,7 @@ mountTopBar()
 
 const still = matchMedia('(prefers-reduced-motion: reduce)').matches
 /** A phone is the controller itself; anything bigger (a computer, a tablet) can be the screen and show a code. */
-const phoneLike = matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 600
+const phoneLike = phoneCamera()
 const desk = !phoneLike
 document.documentElement.classList.toggle('phone', phoneLike)
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T
@@ -60,20 +61,19 @@ hero.onSound = (s) => {
   soundBtn.title = s === 'on' ? 'Sound on' : s === 'off' ? 'Sound off' : 'Your browser starts sound after a click or a tap'
 }
 soundBtn.addEventListener('click', () => hero.toggleSound())
-// The quick-actions tray: the marbles' sound, and pairing through the hero's own card (or, on a phone, sending the
-// link to a computer); fullscreen comes with the tray.
+// The quick-actions tray: sound, and the code on a computer or the scanner on a phone.
 let soundState = 'none'
 const offerSound = () => {
   if (soundState === 'none') { dropQuickAction('sound'); return }
   quickAction({
-    id: 'sound', label: soundState === 'on' ? 'Sound on' : 'Sound off', hint: 'The marbles’ sound', icon: soundState === 'on' ? 'sound' : 'mute', stay: true,
+    id: 'sound', group: 'system', label: soundState === 'on' ? 'Sound on' : 'Sound off', hint: 'The marbles’ sound', icon: soundState === 'on' ? 'sound' : 'mute', stay: true,
     pressed: () => soundState === 'on', run: () => hero.toggleSound(),
   })
 }
 const heard = hero.onSound
 hero.onSound = (s) => { heard?.(s); soundState = s; offerSound() }
 quickAction(desk ? {
-  id: 'pair', label: 'Pair a phone', hint: 'The code to scan is on this page', icon: 'phone',
+  id: 'pair', group: 'primary', label: 'Pair a phone', hint: 'The code to scan is on this page', icon: 'phone',
   run: () => {
     const card = $('[data-pair]')
     card.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'center' })
@@ -82,8 +82,8 @@ quickAction(desk ? {
     card.classList.remove('pair-called'); void card.offsetWidth; card.classList.add('pair-called')
   },
 } : {
-  id: 'pair', label: 'Pair a phone', hint: 'Send this to a computer, then scan its code', icon: 'phone',
-  run: () => $<HTMLButtonElement>('[data-send]').click(),
+  id: 'scan', group: 'primary', label: 'Scan a code', hint: 'Connect to the screen in front of you', icon: 'frame',
+  run: openPairCamera,
 })
 mountQuick()
 // For the end-to-end test (scripts/e2e-home.mjs), as the viewer exposes its own.
@@ -116,8 +116,11 @@ if (desk) {
   })
   hint.addEventListener('click', () => hint.classList.add('gone'))
 } else {
-  // On a phone: the way in is a screen elsewhere, so send the link there; meanwhile the phone paints by tilting.
+  // On a phone the first action scans a screen. Sharing its viewer link remains available beside it.
   $('[data-open]').hidden = true
+  const scan = $<HTMLButtonElement>('[data-scan]')
+  scan.hidden = false
+  scan.addEventListener('click', openPairCamera)
   const send = $<HTMLButtonElement>('[data-send]')
   send.hidden = false
   const label = send.textContent

@@ -87,7 +87,7 @@ export async function phoneCamera({ browser, origin, check, shots }) {
       if (first.id !== 'scan-open') throw new Error(`Settings opens on "${first.label}", not the camera`)
       if (shots) await phone.screenshot({ path: `${shots}/settings-camera-390x844.png` })
       await phone.locator('#scan-open').click()
-      await until('the scanner', () => phone.evaluate(() => document.querySelector('dialog[open] h2')?.textContent === 'Scan a code'))
+      await phone.locator('.obpal-camera[data-mode="scan"]').waitFor()
       const cam = await until('the camera', () => phone.evaluate(() => window.__cameras.at(-1) && { during: window.__cameras.at(-1).during, live: window.__cameras.at(-1).stream?.getVideoTracks()[0]?.readyState }))
       if (cam.during !== 'click') throw new Error(`the camera started ${cam.during ? `in a ${cam.during}` : 'from a timer, after the tap'}`)
       if (cam.live !== 'live') throw new Error(`camera ${cam.live}`)
@@ -95,15 +95,15 @@ export async function phoneCamera({ browser, origin, check, shots }) {
     })
 
     await check('closing the scanner by Back or its ×, or Settings by its ×, leaves no dead Back step behind', async () => {
-      if (!(await phone.locator('dialog[open]').count())) { await calm(phone); await settings(phone); await phone.locator('#scan-open').click() }
-      await phone.locator('dialog[open]').waitFor()
+      if (!(await phone.locator('.obpal-camera[open]').count())) { await calm(phone); await settings(phone); await phone.locator('#scan-open').click() }
+      await phone.locator('.obpal-camera[open]').waitFor()
       await phone.goBack()
       await shut(phone, 'Back')
       if (await step(phone)) throw new Error('after Back from the scanner, Back lands on a closed sheet’s step')
       await settings(phone)
       await phone.locator('#scan-open').click()
-      await phone.locator('dialog[open]').waitFor()
-      await phone.getByRole('button', { name: 'Close connections' }).click()
+      await phone.locator('.obpal-camera[open]').waitFor()
+      await phone.locator('[data-camera-close]').click()
       await shut(phone, 'the scanner’s ×')
       if (await step(phone)) throw new Error('after the scanner’s ×, Back lands on a closed sheet’s step')
       const stopped = await phone.evaluate(() => window.__cameras.every((c) => c.stream.getTracks().every((t) => t.readyState === 'ended')))

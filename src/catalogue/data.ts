@@ -12,6 +12,7 @@ export const UTILITY_ROWS: CatalogueRow[] = [
   { id: 'motion.steer', name: 'Steer', what: 'Tilting the phone holds a stick over', status: 'Shipped' },
   { id: 'motion.point', name: 'Point', what: 'Wii-style: the cursor is where the phone points', status: 'Shipped' },
   { id: 'motion.track', name: '3D', what: 'Where the phone is in space: from a camera, or estimated from its own motion', status: 'Shipped' },
+  { id: 'camera.hand', name: 'Hand camera', what: '21 hand landmarks, pinch, grip and point, processed on the phone', status: 'Shipped' },
   { id: 'motion.hold', name: '1:1', what: 'What you hold turns exactly as the phone does', status: 'Shipped' },
   { id: 'motion.tilt', name: 'Tilt', what: 'A racing-style tilt stick', status: 'Shipped' },
   { id: 'touch.trackpad', name: 'Trackpad', what: 'Drag, two-finger pan, pinch and twist', status: 'Shipped' },

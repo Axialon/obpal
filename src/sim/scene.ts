@@ -3,12 +3,13 @@
  * one claim per node, approval before a first claim where the system asks for it, and a record of who held what.
  * Each sim supplies its nodes and what their input does.
  */
-import type { SceneNode } from '@obpal/core'
+import { CONTROLLERS, layoutControllers, type SceneNode } from '@obpal/core'
 import { Claims, PairingChip, PartFocus, Remote, type Layout, type Participant } from '@obpal/host'
 import { family } from '../family'
 import { ICONS } from '../ui/icons'
 import { holdForPhone } from '../ui/recover'
 import { ControlSession } from './control-space'
+import { quickAction } from '../ui/quick-actions'
 
 export interface SimScene {
   remote: Remote
@@ -114,6 +115,19 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
     clearTimeout(noteTimer)
     noteTimer = setTimeout(() => n.classList.remove('in'), 2600)
   }
+  const controllers = layoutControllers(o.layout)
+  if (controllers.length > 1) quickAction({
+    id: 'switch', group: 'page', label: 'Switch controller', icon: 'phone',
+    hint: 'Cycle the lead phone’s controller',
+    run: () => {
+      const lead = remote.participants.find(p => p.lead)
+      if (!lead) { chip.expand(); return }
+      const at = controllers.findIndex(c => c === lead.controller)
+      const next = controllers[(at + 1) % controllers.length]
+      remote.setLayout({ ...o.layout, controllers: [next], modes: [...CONTROLLERS[next].modes] }, lead.id)
+      note(`${lead.name}: ${CONTROLLERS[next].name}`)
+    },
+  })
   const nameOf = (id: string | undefined) => (!id ? '' : id === 'host' ? 'The screen' : people.get(id)?.name ?? 'Someone')
   const colorOf = (id: string | undefined) => (!id ? '' : id === 'host' ? family.accentColor() : people.get(id)?.color ?? '')
 

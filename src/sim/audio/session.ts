@@ -43,7 +43,7 @@ export function mountSound(id: string, rumble: Rumble, panel = document.querySel
     mute.setAttribute('aria-pressed', String(sound.muted))
     slider.value = level()
     // The same switch in the quick-actions tray: on while the sound plays.
-    quickAction({ id: 'sound', label: words, hint: 'The sim’s sound', icon: sound.muted || !sound.running ? 'mute' : 'sound', stay: true, pressed: () => sound.running && !sound.muted, run: () => mute.click() })
+    quickAction({ id: 'sound', group: 'system', label: words, hint: 'The sim’s sound', icon: sound.muted || !sound.running ? 'mute' : 'sound', stay: true, pressed: () => sound.running && !sound.muted, run: () => mute.click() })
   }
   const persist = () => { try { localStorage.setItem('obpal.sim.muted', sound.muted ? '1' : '0'); localStorage.setItem('obpal.sim.reduced', sound.reduced ? '1' : '0') } catch { /* private browsing */ } }
   const start = async () => { try { await sound.start(); status.textContent = ''; refresh() } catch { status.textContent = 'Tap Start sound to try again.' } }

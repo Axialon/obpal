@@ -393,7 +393,7 @@ See [MUSIC.md](MUSIC.md) for synthesis, budgets and measurement limits.
 - New device classes (wheels, pedals, knobs, custom hardware) declare `caps` and reuse the STATE fields they need. Anything else goes in new ctl messages.
 - Shared scenes (CATALOGUE §5) use `scene` and `claim`. Input packets need no change: the host knows which participant each connection belongs to. A device that bridges several controllers (CATALOGUE §6) will open sub-participants with a `seat{op, seat, name, kind}` message, and their packets will carry the seat index.
 - New kinds of control go into the catalogue (CATALOGUE §8) with a stable id, and reuse PAD, STATE or POINTER fields where they can; a new packet type is the last resort.
-- The high nibble of byte 0 carries the packet version and the low nibble the type (`0x11` STATE, `0x12` PAD, `0x14` POINTER), so a batched v2 STATE or a native 200 Hz variant can use `0x21`. Receivers MUST ignore packet types they don't know.
+- The high nibble of byte 0 carries the packet version and the low nibble the type (`0x11` STATE, `0x12` PAD, `0x14` POINTER, `0x15` POSE, `0x16` HAND), so a batched v2 STATE or a native 200 Hz variant can use `0x21`. Receivers MUST ignore packet types they don't know.
 - Future work: resume without rescanning over the room service (the direct code of §2a already covers the LAN), a WSS relay fallback, and a registry of controller profiles.
 
 ## POSE packet (type 5): the device in space
@@ -417,4 +417,29 @@ The packet remains 32 bytes. Older phones leave byte 29 at zero; older hosts ign
 Hosts read it as `Frame.pose` (`@obpal/host`), stale after 250 ms, with `source: 'camera' | 'model' | 'unknown' | 'glow'`. `glow` is assigned locally by the host's camera follower, not sent in POSE. Camera and motion origins share one counter on the phone. The host stream compares sequence numbers across all origins, ignores older or duplicate packets without refreshing expiry, and exposes a monotonic `Frame.pose.gen` for each observed origin or source change, including after a stream reset; it is not the raw wrapping byte.
 
 A pose is absolute within a generation. Hosts anchor a drive when the person's deadman goes down, and re-anchor when the generation changes. When `tracked` is false, hosts hold still and discard their drive anchor; when tracking returns they anchor at the returned pose so movement during tracking loss causes no jump.
+
+## HAND packet (type 6): a camera-tracked hand
+
+While hand tracking is on, the device sends one hand per HAND packet on the unreliable `st` channel. This is an additive packet type: STATE, PAD, POINTER and POSE retain their layouts, and older receivers ignore HAND. It follows the same authenticated connection and attention-pause gates as other input.
+
+| Offset | Type | Field |
+|---|---|---|
+| 0 | u8 | header `0x16` (version 1, type 6) |
+| 1 | u8 | flags: bit 0 tracked; bits 1–7 reserved, zero |
+| 2 | u16 | seq, continuous across tracking identities and generations (wraps) |
+| 4 | u32 | capture time, microseconds on the device session clock (wraps) |
+| 8 | u8 | generation: a new tracking identity or origin (wraps) |
+| 9 | u8 | handedness: 0 unknown, 1 left, 2 right |
+| 10 | u8 | confidence, 0–1 as /255 |
+| 11 | u8 | gesture bits: bit 0 pinch, bit 1 grip, bit 2 point; bits 3–7 reserved, zero |
+| 12 | i16×3 | estimated palm translation `p`, camera metres ×2000 |
+| 18 | i16×63 | 21 hand-centred world landmarks, each x/y/z in metres ×2000 |
+
+The packet is exactly 144 bytes, little-endian. Every coordinate has 0.5 mm resolution and a representable range of −16.384 to 16.3835 m; rounding adds at most ±0.25 mm quantization error. Encoders reject non-finite values, out-of-range fields, reserved bits and anything other than 21 complete three-coordinate landmarks. Counters are unsigned integers in their wire ranges. Decoders reject an incorrect length, header, handedness or reserved flag/gesture bits.
+
+Coordinates are x right, y up and z toward the camera. Producers negate MediaPipe y and z before packing. The 21 landmarks keep MediaPipe's order: wrist; thumb CMC/MCP/IP/tip; index, middle, ring and little finger MCP/PIP/DIP/tip. They are world-landmark metre offsets about the hand's centre with camera-aligned axes, not image coordinates. `p` is a monocular estimate of palm translation using a fixed approximate camera field of view. It is not measured absolute world position, and its apparent scale and depth depend on that approximation.
+
+Hosts expose `Frame.hand` as `{tracked, gen, handedness, confidence, gestures, p, landmarks}` or null, stale 250 ms after the last accepted packet. They compare sequence numbers before generation or handedness, reject duplicates and older packets without refreshing expiry, and retain the sequence after timeout so a late packet cannot revive an old hand. `Frame.hand.gen` is a host counter, monotonically increasing across wire-byte wrap, new tracking identities, handedness changes, reacquisition after tracking loss or expiry, and stream resets; it is not the raw generation byte. Consumers discard drive anchors while untracked or absent and establish a fresh anchor for each new host generation. Gestures are usable only while tracked.
+
+At 60 Hz the HAND payload is `144 × 60 = 8,640 B/s`; at 120 Hz it is `144 × 120 = 17,280 B/s`, before transport overhead. The controller caps HAND at 18 kB/s (two-packet burst), reserving 2 kB/s for its neutral STATE and held arm control, within a 20 kB/s input payload budget. The normal camera limit is 120 fps. Producers send the newest available sample and drop frames instead of queueing when the channel is backed up. A final untracked packet is sent on close even at the budget boundary. Images and video do not travel in this packet.
 

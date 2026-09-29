@@ -48,7 +48,8 @@ import { startLocal } from '../extension/e2e/local.mjs'
 import { trayReading } from './lib/orientation.mjs'
 
 const HEADED = process.argv.includes('--headed')
-const ONLY = process.argv.find((arg) => arg.startsWith('--only='))?.slice(7) || ''
+// The environment form also works through e2e:all, preserving its Desktop guard for an isolated check.
+const ONLY = process.argv.find((arg) => arg.startsWith('--only='))?.slice(7) || process.env.OBPAL_E2E_HOME_ONLY || ''
 const ONLY_DONE = Symbol('only test finished')
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
 // Software WebGL for the hero's 3D field in headless runs.
@@ -748,7 +749,8 @@ try {
               for (let y = 90; y <= innerHeight - 40; y += 1) if (free(x - m, y - m, x + m, innerHeight)) { col = x; down = y; break }
             }
           }
-          return [['left', innerWidth / 2, row, 0, -16], ['right', innerWidth / 2, row, 0, 16], ['bottom', col, down, 16, 0]]
+          // Start the downward press on the same open row: higher taps can land among the step labels and their raised icons.
+          return [['left', innerWidth / 2, row, 0, -16], ['right', innerWidth / 2, row, 0, 16], ['bottom', col, Math.max(down, row), 16, 0]]
         })
         if (ways.some((w) => Number.isNaN(w[1]) || Number.isNaN(w[2]))) throw new Error(`${name}: no clear way to an edge: ${JSON.stringify(ways)}`)
         for (const [wall, x, y, down, right] of ways) {
@@ -854,12 +856,12 @@ try {
     await tilt.on()
     await sleep(250)
     const pads = await page.evaluate(() => window.__home.pads())
-    const send = 1000 + pads.findIndex((p) => /send it/i.test(p)), see = 1000 + pads.findIndex((p) => /see what/i.test(p))
+    const send = 1000 + pads.findIndex((p) => /scan a code/i.test(p)), see = 1000 + pads.findIndex((p) => /see what/i.test(p))
     // Hopped onto open floor below the buttons (below the steps' icons, clear of everything raised).
     const open = await page.evaluate(() => { const q = document.querySelector('.quick').getBoundingClientRect(), h = document.querySelector('[data-hint]').getBoundingClientRect(); return { x: innerWidth / 2, y: (q.bottom + h.top) / 2 } })
     await page.touchscreen.tap(open.x, open.y)
     await simWait(page, 1.6)
-    const top = await page.evaluate(() => document.querySelector('[data-send]').getBoundingClientRect().top)
+    const top = await page.evaluate(() => document.querySelector('[data-scan]').getBoundingClientRect().top)
     const path = []
     const t0 = (await sim(page)).t, end = Date.now() + 60000
     // (A clear tilt, 16°: a raised thing takes more than 13° to climb.)
@@ -893,7 +895,7 @@ try {
     await page.evaluate(() => scrollTo(0, 0))
     // The raised things: the buttons, the hint, the sound control and the three steps' icons.
     const pads = await page.evaluate(() => window.__home.pads())
-    if (pads.length !== 8 || pads.filter((t) => t === '').length !== 3 || !pads.some((t) => /sound/i.test(t))) throw new Error(`raised things: ${JSON.stringify(pads)}`)
+    if (pads.length !== 9 || pads.filter((t) => t === '').length !== 3 || !pads.includes('Scan a code') || !pads.includes('Share viewer link') || !pads.some((t) => /sound/i.test(t))) throw new Error(`raised things: ${JSON.stringify(pads)}`)
     // A hand holding the phone: 60 readings a second, each a little off (±1°), and now and then a stray one (6° off).
     await page.evaluate(() => {
       let seed = 7
@@ -1084,12 +1086,14 @@ try {
   })
 
   await check('the marble rolls up onto a button, lights and presses it, and rolls off it again; the button does nothing', async () => {
+    await field3d(screen)
+    await until('the local marble', () => me(screen))
     await screen.evaluate(() => { window.__acted = 0; document.addEventListener('click', (e) => { if (e.target.closest?.('a, button')) window.__acted++ }, true); addEventListener('hashchange', () => window.__acted++) })
     const url = screen.url()
     const pads = await screen.evaluate(() => window.__home.pads())
     const i = pads.findIndex((p) => /see what it does/i.test(p))
     if (i < 0) throw new Error(`no "See what it does" among the buttons: ${pads.join(', ')}`)
-    const b = await screen.locator('.cta-alt').boundingBox()
+    const b = await screen.locator('.cta-alt[href="#see"]').boundingBox()
     const tip = () => screen.evaluate(() => window.__home.tips().find((t) => t.id === 'me'))
     // From the open floor beside it (a click hops the marble there: rolling, it can't get past the headline's letters)...
     const beside = { x: b.x + b.width + 130, y: b.y + b.height / 2 }
@@ -1105,7 +1109,7 @@ try {
       const t = (last = await tip())
       return t.on === 1000 + i && t.x > b.x + 4 && t.x < b.x + b.width - 4 && t.y > b.y - 25 && t.y < b.y + b.height ? t : null
     }, 12, 200).catch((e) => { throw new Error(`${e.message}: the marble is at ${last?.x.toFixed(0)},${last?.y.toFixed(0)} on ${last?.on}`) })
-    const lit = await until('the button lit under it', () => screen.evaluate(() => { const s = document.querySelector('.cta-alt').style; const g = parseFloat(s.getPropertyValue('--orb-glow') || '0'); return g > 0.5 ? { glow: g, press: s.translate } : null }), 4000)
+    const lit = await until('the button lit under it', () => screen.evaluate(() => { const s = document.querySelector('.cta-alt[href="#see"]').style; const g = parseFloat(s.getPropertyValue('--orb-glow') || '0'); return g > 0.5 ? { glow: g, press: s.translate } : null }), 4000)
     const up = await simUntil(screen, 'the marble resting on its top', async () => { const t = await tip(); return t.on === 1000 + i && Math.abs(t.h - 0.3) < 0.02 ? t : null }, 4, 100)
     // Pointing below it: the marble rolls off its edge and drops to the floor.
     const below = b.y + b.height + 110

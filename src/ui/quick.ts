@@ -1,12 +1,12 @@
 /**
  * Quick actions: a slim glass tab on the right edge of every ob.Pal page (not the phone controller, which has its own
  * UI, nor the embed, which lives in other sites) that slides out a column of round icon actions, each with a glass
- * tooltip: pair a phone, camera view, fullscreen, sound, theme and reset, in that order, where they apply.
+ * tooltip: the primary action, page shortcuts, then fullscreen, sound and theme where they apply.
  *
  * One registry (./quick-actions.ts): a page offers what it has with quickAction() (quickViews() for a camera that
  * steps through views), and mountQuick() adds what the tray can do itself: fullscreen; pairing, through the page's own
- * people chip where there is one, else by opening the viewer; and the surface picker where the page follows the
- * visitor's surface (site pages wear their own palette). The tab keeps clear of the page's bar, the pairing chip and
+ * people chip where there is one, else by opening the viewer; and the visitor's surface picker. The tab keeps clear
+ * of the page's bar, the pairing chip and
  * its card, and anything else fixed on that edge; sim windows keep clear of it (styles/panels.css), as does the chip
  * on a phone on its side (styles/quick.css), whose card folds while the open column is over it. Esc, a click outside
  * or a swipe back to the edge closes it; it's a toolbar for the keyboard; reduced motion shows it without the slide.
@@ -17,7 +17,9 @@ import { family } from '../family'
 import { ICONS } from './icons'
 import { html, setMarkup } from './markup'
 import { edgeSpot, freeSpans, placePopover } from './kit/place'
-import { onQuickChange, QUICK_ORDER, quickActions, quickDefault, type QuickId } from './quick-actions'
+import { mountPairCameraActions, openPairCamera, phoneCamera } from './camera'
+import { onQuickChange, orderedQuickActions, quickKey, quickActions, quickDefault, type QuickId } from './quick-actions'
+import { hint, dismissHint } from './hints'
 
 export { dropQuickAction, quickAction, quickChanged, quickViews, type QuickAction, type QuickId, type QuickView } from './quick-actions'
 
@@ -28,26 +30,34 @@ onQuickChange((what) => { if (what === 'actions') tray?.render(); else tray?.syn
 /** The tray on this page, once, with what the tray does itself. */
 export function mountQuick() {
   if (tray) return tray
+  mountPairCameraActions()
   if (document.fullscreenEnabled) quickDefault({
-    id: 'fullscreen', label: 'Full screen', hint: 'Fill the screen; Esc comes back', stay: true,
+    id: 'fullscreen', group: 'system', label: 'Full screen', hint: 'Fill the screen; Esc comes back', stay: true,
     icon: () => (document.fullscreenElement ? 'fullscreen-exit' : 'fullscreen'),
     pressed: () => !!document.fullscreenElement,
     run: () => { if (document.fullscreenElement) void document.exitFullscreen().catch(() => {}); else void document.documentElement.requestFullscreen?.().catch(() => {}) },
   })
   const invite = document.getElementById('chip-invite')
-  quickDefault(invite ? {
+  quickDefault(phoneCamera() ? {
+    id: 'scan', group: 'primary', label: 'Scan a code', hint: 'Connect to the screen in front of you', icon: 'frame',
+    run: openPairCamera,
+  } : invite ? {
     // The page's people chip opens its pairing card (@obpal/host's PairingChip).
-    id: 'pair', label: 'Pair a phone', hint: 'Show the code to scan', icon: 'phone',
-    pressed: () => invite.getAttribute('aria-pressed') === 'true',
-    run: () => { if (invite.getAttribute('aria-pressed') !== 'true') invite.click() },
+    id: 'pair', group: 'primary', label: 'Pair a phone', hint: 'Show the code to scan', icon: 'phone',
+    expanded: () => invite.getAttribute('aria-pressed') === 'true',
+    run: () => invite.click(),
   } : {
-    id: 'pair', label: 'Pair a phone', hint: 'Open the viewer and scan its code', icon: 'phone',
+    id: 'pair', group: 'primary', label: 'Pair a phone', hint: 'Open the viewer and scan its code', icon: 'phone',
     run: () => { location.href = '/view/' },
   })
-  if (!document.documentElement.classList.contains('site')) quickDefault({
-    id: 'theme', label: 'Theme', hint: 'Surface and accent', icon: 'palette', stay: true,
+  quickDefault({
+    id: 'theme', group: 'system', label: 'Theme', hint: 'Surface and accent', icon: 'palette', stay: true,
     run: () => tray?.themes(),
   })
+  if (!location.pathname.startsWith('/view') && (!location.pathname.startsWith('/sim/') || location.pathname === '/sim/')) {
+    const next = [['Viewer', '/view/', 'cube'], ['Sims', '/sim/', 'gamepad'], ['Link', '/link/', 'link']]
+    next.forEach(([label, href, icon], i) => quickDefault({ id: `next${i + 1}` as QuickId, group: 'page', label, icon, hint: `Open ${label}`, run: () => { location.href = href } }))
+  }
   tray = new QuickTray()
   return tray
 }
@@ -71,10 +81,9 @@ class QuickTray {
     this.el.dataset.open = 'false'
     this.tab.type = 'button'
     this.tab.className = 'quick-tab'
-    this.tab.setAttribute('aria-label', 'Quick actions')
+    this.tab.setAttribute('aria-label', 'Shortcuts')
     this.tab.setAttribute('aria-expanded', 'false')
     this.tab.setAttribute('aria-controls', 'quick-actions')
-    setMarkup(this.tab, html`${ICONS.left}`)
     this.panel.className = 'quick-panel'
     this.panel.id = 'quick-actions'
     this.panel.setAttribute('role', 'toolbar')
@@ -92,6 +101,18 @@ class QuickTray {
     // Keyboard: a press on the tab from the keyboard lands on the first action.
     this.tab.addEventListener('click', (e) => this.toggle(e.detail === 0))
     this.panel.addEventListener('keydown', (e) => this.key(e))
+    document.addEventListener('keydown', e => {
+      if (document.querySelector('dialog[open], .sheet-wrap')) return
+      const id = quickKey(e)
+      if (!id) return
+      e.preventDefault()
+      e.stopPropagation()
+      if (id === 'shortcuts') {
+        if (!this.open) this.toggle(false)
+        const first = orderedQuickActions()[0]?.id
+        if (first) { this.roving(first); this.buttons.get(first)?.focus() }
+      } else this.buttons.get(id)?.click()
+    })
     this.el.addEventListener('keydown', (e) => { if (e.key === 'Escape' && this.open) { e.stopPropagation(); this.close(true) } })
     // Leaving it (a click elsewhere, or focus moving on) closes it; its own surface picker is part of it.
     document.addEventListener('pointerdown', (e) => { if (this.open && !this.owns(e.target as Node)) this.close(false) }, true)
@@ -134,6 +155,7 @@ class QuickTray {
     }
     this.render()
     place()
+    hint('quick.shortcuts', () => this.open ? null : this.tab, 'Shortcuts', { place: 'left', delay: 1200 })
   }
 
   get open() { return this.el.dataset.open === 'true' }
@@ -141,8 +163,16 @@ class QuickTray {
 
   /** The page's actions, in the tray's order; a button each, kept between renders so focus stays. */
   render() {
-    const shown = QUICK_ORDER.filter((id) => actions.has(id))
+    const ordered = orderedQuickActions()
+    const shown = ordered.map(a => a.id)
+    const primary = ordered.find(a => a.group === 'primary')
+    const glyph = primary && (typeof primary.icon === 'function' ? primary.icon() : primary.icon)
+    if (glyph && this.tab.dataset.glyph !== glyph) {
+      this.tab.dataset.glyph = glyph
+      setMarkup(this.tab, ICONS[glyph] ?? ICONS.phone)
+    }
     for (const [id, b] of this.buttons) if (!shown.includes(id)) { b.remove(); this.buttons.delete(id) }
+    let previous = ''
     for (const id of shown) {
       let b = this.buttons.get(id)
       if (!b) {
@@ -161,6 +191,10 @@ class QuickTray {
         // The surface picker is the family's popover on this button: it opens and closes with the button's clicks.
         if (id === 'theme') this.mountPicker(b)
       }
+      const group = actions.get(id)!.group
+      b.dataset.group = group
+      b.classList.toggle('quick-divider', !!previous && previous !== group)
+      previous = group
       this.panel.append(b)
     }
     this.tab.hidden = !shown.length
@@ -180,6 +214,8 @@ class QuickTray {
       b.setAttribute('aria-label', a.label)
       if (a.pressed) b.setAttribute('aria-pressed', String(a.pressed()))
       else b.removeAttribute('aria-pressed')
+      if (a.expanded) b.setAttribute('aria-expanded', String(a.expanded()))
+      else b.removeAttribute('aria-expanded')
     }
     if (!this.tip.hidden && this.tip.dataset.for) this.showTip(this.tip.dataset.for as QuickId)
   }
@@ -202,6 +238,7 @@ class QuickTray {
   }
 
   toggle(fromKeyboard: boolean) {
+    dismissHint('quick.shortcuts')
     if (this.open) { this.close(true); return }
     this.el.dataset.open = 'true'
     this.tab.setAttribute('aria-expanded', 'true')
@@ -240,7 +277,7 @@ class QuickTray {
 
   /** The column is one tab stop: the arrow keys move through it, Home and End jump. */
   private key(e: KeyboardEvent) {
-    const ids = [...this.buttons.keys()]
+    const ids = orderedQuickActions().map(a => a.id)
     const at = ids.indexOf(this.focused() ?? ids[0])
     const to = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? at + 1 : e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? at - 1
       : e.key === 'Home' ? 0 : e.key === 'End' ? ids.length - 1 : null
@@ -256,7 +293,7 @@ class QuickTray {
   }
   private focusable() {
     for (const [id, b] of this.buttons) if (b.tabIndex === 0) return id
-    return [...this.buttons.keys()][0]
+    return orderedQuickActions()[0]?.id
   }
   private roving(id: QuickId | undefined) { for (const [k, b] of this.buttons) b.tabIndex = k === id ? 0 : -1 }
 
@@ -268,6 +305,9 @@ class QuickTray {
     name.textContent = a.label
     what.textContent = a.hint ?? ''
     this.tip.replaceChildren(name, ...(a.hint ? [what] : []))
+    if (a.key && matchMedia('(hover: hover)').matches) {
+      const key = document.createElement('kbd'); key.textContent = a.key; name.append(key)
+    }
     this.tip.dataset.for = id
     this.tip.hidden = false
     const r = b.getBoundingClientRect(), t = this.tip.getBoundingClientRect()

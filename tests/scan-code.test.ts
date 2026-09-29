@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { b64url, encodeLanPairing, encodePairing, parsePairing } from '@obpal/core'
-import { readScan } from '../src/controller/scan-code'
+import { readScan, scanDestination } from '../src/controller/scan-code'
 
 const origin = 'https://obpal.example'
 const fragment = encodePairing({ secret: new Uint8Array(16).fill(7), fp: new Uint8Array(32).fill(8) })
@@ -40,5 +40,12 @@ describe('QR input is pairing data, never a navigation', () => {
     expect(parsePairing(fragment + '.extra')).toBeNull()
     const secret = b64url(new Uint8Array(16))
     expect(parsePairing(`1.${secret.slice(0, -1)}B.${b64url(new Uint8Array(32))}`)).toBeNull()
+  })
+  it('rebuilds only internal controller destinations from valid scanned data', () => {
+    expect(scanDestination(link, origin)).toBe(`/p/#${fragment}`)
+    expect(scanDestination('123 456 7890', origin)).toBe('/p/#code=1234567890')
+    expect(scanDestination('https://evil.example/p/#' + fragment, origin)).toBeNull()
+    expect(scanDestination(`${origin}/p/?next=https://evil.example#${fragment}`, origin)).toBeNull()
+    expect(scanDestination('javascript:alert(1)', origin)).toBeNull()
   })
 })

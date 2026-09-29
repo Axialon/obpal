@@ -193,7 +193,7 @@ quickViews([
   { name: 'Overview', show: () => { void view.presence?.leave() } },
   { name: 'First person', show: () => document.querySelector<HTMLButtonElement>('.presence-controls .presence-enter')?.click(), current: () => view.presence?.mode === 'first-person', phone: true },
 ])
-if (!shared.guest) quickAction({ id: 'reset', label: 'Reset', hint: 'The scores back to nothing', icon: 'reset', run: () => $('reset-scores').click() })
+if (!shared.guest) quickAction({ id: 'reset', group: 'page', label: 'Reset', hint: 'The scores back to nothing', icon: 'reset', run: () => $('reset-scores').click() })
 
 /** A slot that just got a player enters at its spawn point; an empty one leaves the ring. */
 function spawnHeld() {

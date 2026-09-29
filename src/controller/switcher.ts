@@ -25,6 +25,7 @@ export interface SwitcherDeps {
   feel: (strong?: boolean) => void
   /** Something to say in a toast. */
   toast: (text: string) => void
+  hand?: () => void
 }
 
 /**
@@ -111,26 +112,34 @@ export class Switcher {
    * The screen's ratings (best first) and the controller in use changed, or might have: redraw the bar's slots when
    * they differ, mark the one in use, and refresh an open catalogue.
    */
-  render(sorted: Rating[], current: ControllerId, host: string, typing: boolean) {
+  render(sorted: Rating[], current: ControllerId, host: string, typing: boolean, camera = false, handActive = false) {
     this.sorted = sorted
     this.current = current
     this.host = host
     this.typing = typing
     const slots = barSlots(sorted, current)
     const best = sorted.find((r) => r.best)?.id ?? ''
-    const signature = `${slots.map((s) => `${s.face}:${s.id}`).join(',')}|${best}`
+    const signature = `${slots.map((s) => `${s.face}:${s.id}`).join(',')}|${best}|${camera}`
     if (this.tabs && signature !== this.signature) {
       this.signature = signature
-      this.bar!.dataset.slots = String(slots.length)
+      this.bar!.dataset.slots = String(slots.length + Number(camera))
       setMarkup(this.tabs, slots.map((s) => html`<button type="button" role="tab" class="ctl-tab" data-tab="${s.face}" data-c="${s.id}" aria-selected="false" aria-label="${CONTROLLERS[s.id].name}">
         <span class="ctl-tab-ic">${ICONS[CONTROLLER_ICON[s.id]]}${s.id === best ? html`<i class="ctl-tab-best"></i>` : ''}</span><span class="ctl-tab-t">${SHORT_NAME[s.id]}</span></button>`))
       this.tabs.querySelectorAll<HTMLButtonElement>('.ctl-tab').forEach((b) => {
         const id = b.dataset.c as ControllerId
         pressable(b, () => { this.deps.feel(); this.deps.pick(id) }, () => { this.deps.feel(true); this.say(id) })
       })
+      if (camera) {
+        const button = document.createElement('button')
+        button.type = 'button'; button.className = 'ctl-tab'; button.dataset.tab = 'camera-hand'
+        button.setAttribute('role', 'tab'); button.setAttribute('aria-label', 'Hand camera')
+        setMarkup(button, html`<span class="ctl-tab-ic">${ICONS.hand}</span><span class="ctl-tab-t">Hand</span>`)
+        button.onclick = () => { this.deps.feel(); this.deps.hand?.() }
+        this.tabs.append(button)
+      }
     }
     const face: Face | null = FACE_OF[current]
-    this.tabs?.querySelectorAll<HTMLElement>('.ctl-tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === face)))
+    this.tabs?.querySelectorAll<HTMLElement>('.ctl-tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === (handActive ? 'camera-hand' : face))))
     if (this.sheet) this.paintCards()
   }
 

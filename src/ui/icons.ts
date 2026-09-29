@@ -4,6 +4,8 @@ import { type Content, html, setMarkup } from './markup'
 const s = (d: string) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`
 
 export const ICONS: Record<string, string> = {
+  stop: s('<rect x="5" y="5" width="14" height="14" rx="3"/>'),
+  link: s('<path d="m9 15 6-6M8 16l-1 1a3.5 3.5 0 0 1-5-5l4-4a3.5 3.5 0 0 1 5 0M16 8l1-1a3.5 3.5 0 0 1 5 5l-4 4a3.5 3.5 0 0 1-5 0"/>'),
   rotate: s('<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/>'),
   lock: s('<rect x="5.5" y="10.5" width="13" height="9.5" rx="2.6"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/><path d="M12 14.4v2" stroke-width="2.2"/>'),
   unlock: s('<rect x="5.5" y="10.5" width="13" height="9.5" rx="2.6"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 6.6-1.6"/><path d="M12 14.4v2" stroke-width="2.2"/>'),

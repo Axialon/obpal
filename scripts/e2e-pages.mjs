@@ -115,7 +115,7 @@ try {
         }
         if (cspViolations.length > seen) throw new Error(`violations: ${JSON.stringify(cspViolations.slice(seen, seen + 2))}`)
         if (!/script-src 'self'/.test(found.meta) || !/object-src 'none'/.test(found.meta)) throw new Error(`no page policy: "${found.meta.slice(0, 80)}"`)
-        if (!/require-trusted-types-for 'script'(;|$)/.test(found.meta) || !/trusted-types obpal-templates(;|$)/.test(found.meta)) throw new Error('Trusted Types must be enforced with only the site template policy')
+        if (!/require-trusted-types-for 'script'(;|$)/.test(found.meta) || !/(?:^|;)\s*trusted-types obpal-templates obpal-camera(;|$)/.test(found.meta)) throw new Error('Trusted Types must be enforced with only the site template and camera worker policies')
         if (!/frame-ancestors 'self'/.test(headers['content-security-policy'] ?? '')) throw new Error(`no frame-ancestors header: ${headers['content-security-policy']}`)
         if (elsewhere.length) throw new Error(`requests elsewhere: ${elsewhere.slice(0, 3).join(', ')}`)
         if (found.fonts.some((f) => !f.startsWith(`${worker.origin}/fonts/`))) throw new Error(`fonts from elsewhere: ${found.fonts.join(', ')}`)
@@ -170,8 +170,8 @@ try {
       await checkFrost(page, '.top', { solid: true })
       await checkFrost(page, '.sims-side', { solid: true })
       await page.goto(worker.origin + '/')
-      await page.locator('.cta-alt').hover()
-      await checkFrost(page, '.cta-alt', { solid: true })
+      await page.locator('.cta-alt[href="#see"]').hover()
+      await checkFrost(page, '.cta-alt[href="#see"]', { solid: true })
     } finally { await ctx.close() }
   })
   for (const [path, surfaces] of [
@@ -194,8 +194,8 @@ try {
           await setSurface(page, theme)
           for (const selector of surfaces) await checkFrost(page, selector, { text: ['p', 'small', 'label', 'h1', 'h2', '.top-nav a', '.presence-controls button', '.k', '.status'] })
           if (path === '/') {
-            await page.locator('.cta-alt').hover()
-            await checkFrost(page, '.cta-alt')
+            await page.locator('.cta-alt[href="#see"]').hover()
+            await checkFrost(page, '.cta-alt[href="#see"]')
           }
           if (path === '/view/') {
             const overlap = await page.evaluate(() => document.querySelector('.topbar').getBoundingClientRect().bottom - document.querySelector('.presence-floating').getBoundingClientRect().top)

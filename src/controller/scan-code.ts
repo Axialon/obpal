@@ -1,5 +1,5 @@
 /** Only this deployment's pairing links, or a complete short code. A scan is data, never a navigation. */
-import { encodeLanPairing, parsePairingCode, splitCode, type PairingCode } from '@obpal/core'
+import { encodeLanPairing, encodePairing, parsePairingCode, splitCode, type PairingCode } from '@obpal/core'
 
 export type ScanCode = { kind: 'pairing'; code: PairingCode } | { kind: 'short'; digits: string }
 
@@ -21,4 +21,15 @@ export function readScan(text: string, origin: string): ScanCode | null {
     if (!code || (code.v === 2 && encodeLanPairing(code.lan) !== u.hash.slice(1))) return null
     return { kind: 'pairing', code }
   } catch { return null }
+}
+
+/** Site navigation is reconstructed from parsed data, never copied from a QR value. */
+export function scanDestination(text: string, origin: string): string | null {
+  const result = readScan(text, origin)
+  if (!result) return null
+  if (result.kind === 'short') return `/p/#code=${result.digits}`
+  const code = result.code
+  if (code.v === 1) return `/p/#${encodePairing(code.pairing)}`
+  if (code.v === 2) return `/p/#${encodeLanPairing(code.lan)}`
+  return null
 }

@@ -4,7 +4,7 @@
  * restart. Against stand-ins for WebSocket and RTCPeerConnection; the test plays the phones.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { b64url, bindMac, DeviceLink, emptyPad, emptyState, encodePad, encodePose, encodeState, fingerprintHex, Flag, fromB64url, listPairs, Mode, parsePairing, PoseFlag, roomIdFor, type LinkStatus } from '@obpal/core'
+import { b64url, bindMac, DeviceLink, emptyPad, emptyState, encodeHand, encodePad, encodePose, encodeState, fingerprintHex, Flag, fromB64url, HandFlag, listPairs, Mode, parsePairing, PoseFlag, roomIdFor, type LinkStatus, type Vec3 } from '@obpal/core'
 import { Remote } from '../packages/host/src/remote'
 import { Stream } from '../packages/host/src/stream'
 
@@ -158,7 +158,7 @@ describe('input must bind to the invite first', () => {
     } finally { r.destroy() }
   })
 
-  it.each(['STATE', 'PAD', 'POSE'] as const)('%s before binding never enters the stream or reaches consumers', async (kind) => {
+  it.each(['STATE', 'PAD', 'POSE', 'HAND'] as const)('%s before binding never enters the stream or reaches consumers', async (kind) => {
     const { r, ws } = await screen()
     try {
       const p = await invite(r)
@@ -166,20 +166,21 @@ describe('input must bind to the invite first', () => {
       const state = encodeState({ ...emptyState(), seq: 1, mode: Mode.tilt, flags: Flag.touching, tilt: [1, -1] })
       const pad = encodePad({ ...emptyPad(), seq: 1, buttons: 1 })
       const pose = encodePose({ seq: 1, t: 0, flags: PoseFlag.tracked | PoseFlag.touching, p: [1, 2, 3], q: [0, 0, 0, 1], gen: 1 })
-      const packet = { STATE: state, PAD: pad, POSE: pose }[kind]
-      const received = vi.spyOn(Stream.prototype, { STATE: 'onState', PAD: 'onPad', POSE: 'onPose' }[kind] as 'onState' | 'onPad' | 'onPose')
+      const hand = encodeHand({ seq: 1, t: 0, flags: HandFlag.tracked, gen: 1, handedness: 'left', confidence: 1, gestures: 0, p: [1, 2, 3], landmarks: Array.from({ length: 21 }, (): Vec3 => [0, 0, 0]) })
+      const packet = { STATE: state, PAD: pad, POSE: pose, HAND: hand }[kind]
+      const received = vi.spyOn(Stream.prototype, { STATE: 'onState', PAD: 'onPad', POSE: 'onPose', HAND: 'onHand' }[kind] as 'onState' | 'onPad' | 'onPose' | 'onHand')
       const input = vi.fn()
       r.on('input', input)
       pc.channels.st.onmessage?.({ data: packet })
       expect(received).not.toHaveBeenCalled()
       expect(input).not.toHaveBeenCalled()
-      expect(r.consume()).toMatchObject({ connected: false, touching: false, tilt: [0, 0], pose: null })
-      expect(r.consumeOf('early')).toMatchObject({ connected: false, touching: false, pose: null })
+      expect(r.consume()).toMatchObject({ connected: false, touching: false, tilt: [0, 0], pose: null, hand: null })
+      expect(r.consumeOf('early')).toMatchObject({ connected: false, touching: false, pose: null, hand: null })
       expect(r.pad).toBeNull()
       expect(r.padOf('early')).toBeNull()
       pc.channels.ctl.receive({ t: 'hello', proto: 1, caps: CAPS, mac: await bindMac(p.secret, FP_A, FP_HOST, p.room) })
       await until('welcome', () => pc.channels.ctl.messages().find((m) => m.t === 'welcome'))
-      expect(r.consume()).toMatchObject({ touching: false, tilt: [0, 0], pose: null })
+      expect(r.consume()).toMatchObject({ touching: false, tilt: [0, 0], pose: null, hand: null })
       expect(r.padOf('early')).toBeNull()
       pc.channels.st.onmessage?.({ data: packet })
       expect(received).toHaveBeenCalledTimes(1)
@@ -187,6 +188,32 @@ describe('input must bind to the invite first', () => {
       if (kind === 'STATE') expect(r.consume()).toMatchObject({ touching: true, tilt: [1, -1] })
       if (kind === 'PAD') expect(r.padOf('early')?.buttons).toBe(1)
       if (kind === 'POSE') expect(r.consume().pose).toMatchObject({ p: [1, 2, 3], tracked: true, touching: true })
+      if (kind === 'HAND') expect(r.consume().hand).toMatchObject({ p: [1, 2, 3], tracked: true, handedness: 'left' })
+    } finally { r.destroy() }
+  })
+
+  it('clears HAND on attention pause and ignores it until the phone resumes', async () => {
+    const { r, ws } = await screen()
+    try {
+      const { pc } = await pair(ws, { from: 'hand', fp: FP_A, session: '13', ...(await invite(r)) })
+      const packet = encodeHand({ seq: 1, t: 0, flags: HandFlag.tracked, gen: 1, handedness: 'right', confidence: 1, gestures: 0, p: [0, 0, -0.5], landmarks: Array.from({ length: 21 }, (): Vec3 => [0, 0, 0]) })
+      const received = vi.spyOn(Stream.prototype, 'onHand'), input = vi.fn()
+      r.on('input', input)
+      pc.channels.st.onmessage?.({ data: packet })
+      const generation = r.consume().hand!.gen
+      expect(received).toHaveBeenCalledTimes(1)
+      pc.channels.ctl.receive({ t: 'attention', active: false })
+      expect(r.consume()).toMatchObject({ connected: false, hand: null })
+      pc.channels.st.onmessage?.({ data: packet })
+      expect(received).toHaveBeenCalledTimes(1)
+      expect(input).toHaveBeenCalledTimes(1)
+      expect(r.consumeOf('hand').hand).toBeNull()
+      pc.channels.ctl.receive({ t: 'attention', active: true })
+      expect(r.consume().hand).toBeNull()
+      pc.channels.st.onmessage?.({ data: packet })
+      expect(r.consume().hand!.gen).toBeGreaterThan(generation)
+      expect(received).toHaveBeenCalledTimes(2)
+      expect(input).toHaveBeenCalledTimes(2)
     } finally { r.destroy() }
   })
 })

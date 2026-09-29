@@ -18,6 +18,8 @@ import { poseRelativeInView } from '@obpal/core'
 import { CATALOG, CATEGORIES, DEFAULT_ITEM, LOCAL_CATEGORY, type CatalogItem } from './catalog'
 import { localFolder } from './local-folder'
 import { applyGamepad, type GamepadContext } from './gamepad-input'
+import { ViewerHandInput } from './hand-input'
+import { handGrabs } from '../ui/hand-control'
 import { ENGINE_OF, Parts, type Hand, type Part } from './nodes'
 import { ScreenPointer } from './pointer'
 import { Tradeoff } from './tradeoff'
@@ -28,6 +30,7 @@ import { initTips } from '../ui/tips'
 import { holdForPhone } from '../ui/recover'
 import { enhanceSelects } from '../ui/kit/select'
 import { mountQuick, quickAction, quickViews } from '../ui/quick'
+import { HandCursor } from '../ui/hand-cursor'
 import { applyTheme, initialTheme, THEMES, themeById, type Theme } from '../ui/themes'
 import { Experience } from '../sim/vr/experience'
 import { SharedPresence } from '../sim/vr/presence'
@@ -832,7 +835,7 @@ addEventListener('pointerdown', (e) => {
   if (!$('more').hidden && !(e.target as Element).closest('#more, #t-more')) toggleMore(false)
 })
 addEventListener('keydown', (e) => {
-  if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey || e.altKey) return
+  if (e.defaultPrevented || (e.target as Element | null)?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])') || e.metaKey || e.ctrlKey || e.altKey) return
   const k = e.key.toLowerCase()
   if (k === 'g') { view.grid = !view.grid; applyView() }
   else if (k === 'b') { view.glow = !view.glow; applyView() }
@@ -862,6 +865,7 @@ const modelOptions = () => CATALOG.map((i) => ({
 const layout: Layout = {
   v: 1,
   modes: [Mode.tilt, Mode.hold, Mode.point, Mode.track, Mode.gamepad],
+  utilities: ['pad', 'motion.aim', 'motion.steer', 'motion.point', 'motion.track', 'touch.trackpad', 'motion.hold', 'motion.tilt', 'camera.hand'],
   tray: [
     { id: 'model', label: 'Models', type: 'select', icon: 'models', add: true, options: modelOptions() },
     { id: 'light', label: 'Lighting', type: 'select', icon: 'sun', options: LIGHT_PRESETS.map((p) => ({ value: p.id, label: p.name, glyph: '☀' })) },
@@ -906,6 +910,8 @@ interface Seat {
   lastGrab: number
   /** 3D (mode 6): where the phone and what it moves were when the thumb went down. */
   track: { gen: number; p0: [number, number, number]; q0: [number, number, number, number]; heading: number; pos0: THREE.Vector3; quat0: THREE.Quaternion; last: THREE.Vector3 } | null
+  cameraHand: ViewerHandInput
+  cameraCursor: HandCursor
   lastHoverObj: THREE.Object3D | null
   padPointing: boolean
   padAB: number
@@ -936,7 +942,7 @@ function addSeat(who: Participant): Seat {
   document.body.appendChild(el)
   const s = {
     who, hand: parts.hand(who.id, who.color), el, aim: new ScreenPointer(), pointerOn: false, x: innerWidth / 2, y: innerHeight / 2,
-    grabbing: false, wasClutch: false, base: new THREE.Quaternion(), lastGrab: -1, track: null, lastHoverObj: null, padPointing: false, padAB: 0,
+    grabbing: false, wasClutch: false, base: new THREE.Quaternion(), lastGrab: -1, track: null, cameraHand: new ViewerHandInput(), cameraCursor: new HandCursor(el), lastHoverObj: null, padPointing: false, padAB: 0,
   } as Seat
   s.gpLead = leadGamepad(s)
   s.gpOwn = ownGamepad(s)
@@ -952,12 +958,13 @@ function removeSeat(id: string) {
   seats.delete(id)
 }
 
-function recenterSeat(s: Seat) { s.aim.recenter(); s.x = innerWidth / 2; s.y = innerHeight / 2; s.track = null; controlBounds.delete(s.who.id) }
+function recenterSeat(s: Seat) { s.aim.recenter(); s.x = innerWidth / 2; s.y = innerHeight / 2; s.track = null; s.cameraHand.reset(); controlBounds.delete(s.who.id) }
 
 function setSeatPointer(s: Seat, on: boolean) {
   s.pointerOn = on
   s.el.hidden = !on && !s.padPointing
   s.grabbing = false
+  s.cameraHand.reset()
   if (on) recenterSeat(s)
   else if (!s.padPointing) parts.hover(null, null, s.hand)
 }
@@ -1232,7 +1239,8 @@ function ownGamepad(s: Seat): GamepadContext {
 
 /** Apply one seat's frame: what it holds follows its phone; the lead, holding nothing, moves the view and the scene. */
 function applySeat(s: Seat, f: Frame, dt: number) {
-  if (!f.connected) return
+  const cursor = s.cameraCursor.step(f.connected ? f.hand : null)
+  if (!f.connected) { s.cameraHand.reset(); s.track = null; return }
   const calibrated = controlSpace?.aim(s.who.id)
   if (calibrated) f = { ...f, tilt: calibrated.tilt }
   experience.motionControl(!!calibrated)
@@ -1248,6 +1256,23 @@ function applySeat(s: Seat, f: Frame, dt: number) {
   if (sel && (f.clutch || f.touching || (f.mode === Mode.tilt && (f.tilt[0] || f.tilt[1])) || f.aim[0] || f.aim[1] || f.twist || f.zoom)) parts.active(h)
   // 1:1 match: while the gyro is on, what the seat drives copies the phone's rotation since it was turned on.
   const target = sel && !parts.live_(sel) ? sel.object : lead && !sel ? holder : null
+  if (f.hand) {
+    s.track = null; s.wasClutch = false
+    if (cursor && !s.grabbing && !(f.hand.gestures & 4)) parts.hover(cursor.x, cursor.y, h)
+    const pinch = f.hand.tracked && !!(f.hand.gestures & 1) && !(f.hand.gestures & 2)
+    if (pinch && !s.grabbing && h.hovered?.movable) seatGrab(s, true)
+    if (!pinch) s.grabbing = false
+    const grabbed = h.selected?.movable ? h.selected : null
+    const active = s.cameraHand.step(f.hand, {
+      controls, camera: experience.activeCamera, target: pinch && s.grabbing ? grabbed?.object ?? null : null, orbit: lead,
+      live: grabbed && parts.live_(grabbed) ? { width: innerWidth, height: innerHeight, move: (dx, dy) => parts.move(dx, dy, h) } : undefined,
+    })
+    if (active && sel) parts.active(h)
+    s.wasClutch = active && handGrabs(f.hand)
+    experience.motionControl(active)
+    return
+  }
+  s.cameraHand.reset()
   const matching = f.clutch && f.mode === Mode.hold && !!target
   if (matching && target) {
     if (!s.wasClutch || f.grab !== s.lastGrab) { s.base.copy(target.quaternion); s.lastGrab = f.grab }
@@ -1507,7 +1532,7 @@ function loop(now: number) {
     for (const [id, pose] of follower.step(now, [...seats.values()].map((s) => ({ id: s.who.id, color: s.who.color, frame: frames.get(s.who.id)! })))) frames.set(id, { ...frames.get(id)!, pose })
     if (follower.cam.on) follower.draw(glowCtx, (id) => seats.get(id)?.who.color ?? '')
     for (const f of frames.values()) {
-      if (f.touching || f.clutch || f.aim[0] || f.aim[1] || f.pad1[0] || f.pad1[1] || f.pad2[0] || f.pad2[1] || f.zoom || f.twist || f.tilt[0] || f.tilt[1] || f.pose) markActive()
+      if (f.touching || f.clutch || f.aim[0] || f.aim[1] || f.pad1[0] || f.pad1[1] || f.pad2[0] || f.pad2[1] || f.zoom || f.twist || f.tilt[0] || f.tilt[1] || f.pose || f.hand?.tracked) markActive()
     }
     for (const seat of seats.values()) {
       const id = seat.who.id
@@ -1610,7 +1635,8 @@ quickViews([
   { name: 'Framed', show: inOverview(frameModel) },
   { name: 'First person', show: () => document.querySelector<HTMLButtonElement>('.presence-controls .presence-enter')?.click(), current: () => experience.mode === 'first-person', phone: true },
 ])
-quickAction({ id: 'reset', label: 'Reset the view', hint: 'The model upright, the camera home', icon: 'reset', run: inOverview(resetView) })
+quickAction({ id: 'open', group: 'page', label: 'Open a model', icon: 'folder', run: () => fileInput.click() })
+quickAction({ id: 'reset', group: 'page', label: 'Reset the view', hint: 'The model upright, the camera home', icon: 'reset', run: inOverview(resetView) })
 mountQuick()
 
 setTheme(theme, false)

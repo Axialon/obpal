@@ -67,7 +67,7 @@ function style(root: ShadowRoot) {
 /** A frame with nothing in it: before the element starts, and where it can't. */
 const idleFrame = (): Frame => ({
   connected: false, mode: 0, tier: 0, clutch: false, grab: 0, qRel: [0, 0, 0, 1], touching: false,
-  aim: [0, 0], tilt: [0, 0], pad1: [0, 0], pad2: [0, 0], zoom: 0, twist: 0, pose: null,
+  aim: [0, 0], tilt: [0, 0], pad1: [0, 0], pad2: [0, 0], zoom: 0, twist: 0, pose: null, hand: null,
 })
 
 /** Where remotes pair unless an element's `service` says otherwise (the hosted script sets its own origin). */

@@ -1,7 +1,7 @@
 /** The phone's private list and scanner, built with DOM text under the controller's Trusted Types policy. */
 import { formatCode, lookupCode, splitCode, type StoredConnection } from '@obpal/core'
 import { Connections, type Join } from './connections'
-import { Scanner } from './scanner'
+import { CameraView } from '../ui/camera'
 import { readScan } from './scan-code'
 import { sheetExits } from './sheet'
 import { tick } from './haptics'
@@ -29,7 +29,8 @@ const ago = (at: number) => {
 export class ConnectionSheet {
   private dialog: HTMLDialogElement | null = null
   private body: HTMLElement | null = null
-  private scanner: Scanner | null = null
+  private scanner: CameraView | null = null
+  private scanOnly = false
   private exits = () => {}
   private view: 'list' | 'scan' | 'code' | 'rename' = 'list'
   private busy = false
@@ -47,6 +48,7 @@ export class ConnectionSheet {
   }
 
   open(scan = false) {
+    this.scanOnly = scan
     if (!this.dialog) {
       this.returnFocus = document.activeElement as HTMLElement | null
       const dialog = h('dialog', 'sheet-wrap connection-wrap')
@@ -78,14 +80,13 @@ export class ConnectionSheet {
     }
     this.view = scan ? 'scan' : 'list'
     if (scan) this.scan()
-    else { this.signature = ''; this.list() }
+    else { this.stopCamera(); this.signature = ''; this.list() }
   }
 
   close() {
     if (!this.dialog) return
     ++this.generation
-    this.scanner?.stop()
-    this.scanner = null
+    this.stopCamera()
     this.busy = false
     this.exits()
     this.dialog.close()
@@ -104,6 +105,12 @@ export class ConnectionSheet {
   }
 
   private tell(s: string) { if (this.say) this.say.textContent = s }
+
+  private stopCamera() {
+    const camera = this.scanner
+    this.scanner = null
+    camera?.close()
+  }
 
   private list() {
     if (!this.body) return
@@ -206,35 +213,38 @@ export class ConnectionSheet {
   private scan() {
     if (!this.body) return
     ++this.generation
-    this.scanner?.stop()
+    this.stopCamera()
     this.view = 'scan'
     this.dialog!.querySelector('h2')!.textContent = 'Scan a code'
     this.signature = ''
     this.busy = false
-    const frame = h('div', 'scan-frame')
-    const video = h('video')
-    video.setAttribute('aria-label', 'Camera preview')
-    frame.append(video, h('div', 'scan-guide'))
-    const torch = button('Torch', () => {})
-    torch.setAttribute('aria-label', 'Toggle torch')
-    const actions = h('div', 'connection-actions')
-    actions.append(torch, button('Enter a code', () => this.code()), button('Connections', () => { this.scanner?.stop(); this.view = 'list'; this.tell(''); this.list() }))
-    this.body.replaceChildren(frame, actions)
-    this.scanner = new Scanner(video, torch, (s) => this.tell(s), (text) => {
-      const result = readScan(text, location.origin)
-      if (!result) { tick(true); this.tell('That isn’t an ob.Pal code for this site.'); return }
-      this.scanner?.stop()
-      tick()
-      if (result.kind === 'short') { this.code(result.digits); void this.short(result.digits) }
-      else void this.join(result.code)
+    const camera = new CameraView({
+      mode: 'scan', typed: () => this.code(),
+      close: (reason) => {
+        if (this.scanner !== camera) return
+        this.scanner = null
+        if (reason === 'close' && this.scanOnly) { this.close(); return }
+        this.view = 'list'
+        this.signature = ''
+        this.tell('')
+        this.list()
+      },
+      found: (text) => {
+        const result = readScan(text, location.origin)
+        if (!result) return
+        tick()
+        if (result.kind === 'short') { this.code(result.digits); void this.short(result.digits) }
+        else void this.join(result.code)
+      },
     })
-    void this.scanner.start()
+    this.scanner = camera
+    camera.open()
   }
 
   private code(digits = '') {
     if (!this.body) return
     ++this.generation
-    this.scanner?.stop()
+    this.stopCamera()
     this.view = 'code'
     this.dialog!.querySelector('h2')!.textContent = 'Enter a code'
     this.busy = false

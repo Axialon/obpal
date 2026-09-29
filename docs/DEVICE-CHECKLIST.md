@@ -44,6 +44,22 @@ If a setup gives a badge you did not expect, keep the session under the badge an
 
 ## Situations
 
+### Branded camera and hand control
+
+Run on both the iPhone/Safari and Android/Chrome rows above. Headless PC figures are development evidence only and do not satisfy this checklist.
+
+1. On the landing page, Viewer, catalogue and a sim, tap the phone icon in the right tab and the pairing icon in the top bar where present. It must open the ob.Pal camera. The desktop counterpart must still show a QR code. Share/copy remains a separate action.
+2. Scan the screen's ob.Pal QR in normal light and dim light. Check native decoding where available and worker fallback on Safari; record time to pair and ten attempts per phone. Try an unrelated URL, an altered origin/path and an incomplete code: all stay in the scanner. Test the torch and focus/zoom when the camera offers them.
+3. Deny permission, remove permission in browser settings, and open the link in an in-app browser. Each fallback must lead to the same ten-digit entry. Close during the permission prompt, permit later, lock the phone, switch apps, and leave the page: the camera indicator must stop.
+4. Pair to the Viewer, open Hand camera and show the other hand, first propped and then held. Hover with an open palm; hold a fist to orbit and move closer/further to zoom. Release/re-grab to ratchet. Pinch the part under the cursor; point must freeze. Try either hand, partial occlusion, hand replacement, fast movement and leaving/re-entering frame; reacquisition must not jump. The skeleton must align with the camera in portrait and landscape.
+5. After a 5-second warm-up, record 30 seconds of camera fps, processed fps, sent fps, mean/p95 frame-to-send latency, inference time, delegate, resolution, dropped packets and payload bytes/s. The meter is hidden normally; a local camera-test session shows fps and mean ms. The complete numeric snapshot is on `[data-camera-metrics].dataset.measurements` for remote Web Inspector/DevTools; it contains no images or landmarks. Record whether `clock` says capture or presentation; presentation is a frame-availability proxy, not sensor exposure time. Repeat after 5 minutes and with Low Power mode, reporting any resolution adaptation and heat. Aim for processed fps matching camera fps; do not infer this from a display's refresh rate.
+6. In the approved, claimed robot arm, keep Hold to move pressed and move the tracked hand. Pinch closes the gripper. Hand loss, network loss, backgrounding, release and Stop must hold both tool and gripper. Stop must require releasing the held control before motion can resume; hand visibility alone must never grant approval.
+7. Inspect camera UI at 390×844 and 430×932, Lime on Carbon and from a light surface (the camera itself stays dark), enlarged text and reduced motion. Check dismissal, focus return, labels and session hints. Capture screenshots under the ignored artifacts directory. Confirm network traffic carries no images/video, all model requests stay on this origin, and only HAND/neutral STATE continues during hand control.
+
+8. With the front camera, confirm the skeleton follows the mirrored preview and the handedness label swaps. Rotate the palm 60 degrees and check depth stability. Test both camera sides, all three live chips, the 200 ms skeleton fade, the dashed screen cursor and its 1.5 s timeout.
+9. On cellular, Save-Data and unknown networks (including Safari), clear only the hand asset cache and verify the 19.5 MB confirmation precedes all model traffic. Confirm one download is reused on the next opening. Check download interruption and storage denial.
+10. Hold the arm control with the hand opposite the tracked one; verify Hold and Stop remain reachable at both viewport sizes. Confirm losing the tracked hand while Hold stays pressed holds tool and gripper. Capture all four cursor states and test dock keys, editing exclusions and Stop (Space) only on the arm.
+
 ### First scan to control
 
 Target: the median of first scan to the object moving, at most 10 s, motion prompt included.

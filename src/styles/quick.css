@@ -24,7 +24,7 @@ html.quick-on { --quick-reserve: 46px; }
 .quick-tray[hidden] { display: none; }
 .quick-tab, .quick-panel { position: fixed; right: env(safe-area-inset-right, 0px); top: var(--quick-y); box-sizing: border-box; touch-action: none; -webkit-tap-highlight-color: transparent; }
 
-/* The tab: a sliver of glass at the edge, faint until pointed at; its chevron says which way the tray comes out. */
+/* The tab: a sliver of glass at the edge, carrying the primary action's glyph. */
 .quick-tab {
   display: grid; place-items: center; width: var(--quick-tab-w); height: 56px; margin: 0; padding: 0; transform: translateY(-50%);
   border: 1px solid var(--bb-frost-edge); border-right: 0; border-radius: 14px 0 0 14px; background: var(--bb-frost);
@@ -83,3 +83,11 @@ button.quick-btn[aria-pressed='true'], button.quick-btn[aria-expanded='true'] { 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .quick-tab, .quick-panel, .quick-tip { background: var(--bb-frost-solid); }
 }
+
+/* Group boundaries share the column's gutter and stay intact when it wraps. */
+.quick-btn.quick-divider::before { content: ''; position: absolute; top: -9px; left: 50%; width: 20px; height: 1px; margin: 4px 0; transform: translateX(-50%); background: var(--bb-line); pointer-events: none; }
+button.quick-btn[data-group='primary'] { background: var(--bb-accent); color: var(--bb-accent-ink); }
+button.quick-btn[data-quick='stop'] { background: color-mix(in srgb, var(--bad, #fb7185) 16%, transparent); color: var(--bad, #fb7185); }
+.quick-tip b { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.quick-tip kbd { font: 500 11px/1.4 var(--bb-font-data); padding: 2px 6px; border-radius: 6px; border: 1px solid var(--bb-line-strong); background: var(--bb-wash); }
+@media (hover: none) { .quick-tip kbd { display: none; } }

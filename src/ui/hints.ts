@@ -23,12 +23,12 @@ const markSeen = (id: string) => { try { sessionStorage.setItem(KEY + id, '1') }
  * for the rest of this browser session. Only one shows at a time; while its element is hidden
  * (another mode, a closed panel) it steps out of the way and comes back with it.
  */
-export function hint(id: string, anchor: () => Element | null, text: string, opts: { place?: Place; delay?: number } = {}) {
+export function hint(id: string, anchor: () => Element | null, text: string, opts: { place?: Place; delay?: number; mount?: HTMLElement; gap?: number } = {}) {
   if (seen(id) || live.has(id)) return
   const show = () => {
     const target = anchor()
     if (seen(id) || live.has(id) || !visible(target)) return
-    if (live.size) { if (!queue.some((q) => q.id === id)) queue.push({ id, show }); return }
+    if ([...live.values()].some((h) => h.el.parentElement === (opts.mount ?? document.body))) { if (!queue.some((q) => q.id === id)) queue.push({ id, show }); return }
     const place = opts.place ?? 'bottom'
     const el = document.createElement('div')
     el.className = `hint hint-${place}`
@@ -36,15 +36,15 @@ export function hint(id: string, anchor: () => Element | null, text: string, opt
     setMarkup(el, html`<span class="hint-text"></span><button class="hint-x" aria-label="Dismiss hint">${ICONS.close}</button>`)
     el.querySelector('.hint-text')!.textContent = text
     el.querySelector('button')!.onclick = (e) => { e.stopPropagation(); dismissHint(id) }
-    document.body.appendChild(el)
+    ;(opts.mount ?? document.body).appendChild(el)
     const position = () => {
       const t = anchor()
       el.classList.toggle('away', !visible(t))
       if (!t || !visible(t)) return
-      const r = frame.rect(t)
-      const b = frame.rect(el)
-      const { w: vw, h: vh } = frame.size()
-      const gap = 12
+      const r = opts.mount ? t.getBoundingClientRect() : frame.rect(t)
+      const b = opts.mount ? el.getBoundingClientRect() : frame.rect(el)
+      const { w: vw, h: vh } = opts.mount ? { w: innerWidth, h: innerHeight } : frame.size()
+      const gap = opts.gap ?? 12
       let x = 0
       let y = 0
       if (place === 'top' || place === 'bottom') {

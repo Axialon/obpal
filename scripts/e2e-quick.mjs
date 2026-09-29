@@ -8,7 +8,7 @@
  */
 const assert = (ok, message) => { if (!ok) throw new Error(message) }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-const ORDER = ['pair', 'camera', 'fullscreen', 'sound', 'theme', 'reset']
+const ORDER = ['scan', 'pair', 'open', 'switch', 'reset', 'camera', 'stop', 'next1', 'next2', 'next3', 'fullscreen', 'sound', 'theme']
 
 /** A page at a size; its fullscreen requests counted, since a headless screen may not grant them. */
 async function open(browser, origin, path, { width = 1440, height = 900, phone = false } = {}) {
@@ -66,7 +66,7 @@ export async function runQuick(browser, origin, checkIt) {
       // From the keyboard: the tab, then the first action.
       await page.locator('.quick-tab').focus(); await page.keyboard.press('Enter'); await sleep(150)
       const ids = await offered(page)
-      assert(ids.includes('pair') && ids.includes('fullscreen') && !ids.includes('theme') && !ids.includes('reset') && inOrder(ids), `home offers ${ids}`)
+      assert(ids.includes('pair') && ids.includes('fullscreen') && ids.includes('theme') && !ids.includes('reset') && inOrder(ids), `home offers ${ids}`)
       assert(await action(page, ids[0]).evaluate((el) => el === document.activeElement), 'the keyboard did not land on the first action')
       await page.keyboard.press('ArrowDown')
       assert(await action(page, ids[1]).evaluate((el) => el === document.activeElement), 'the arrow keys did not move through the actions')
@@ -94,7 +94,7 @@ export async function runQuick(browser, origin, checkIt) {
     try {
       await openTray(page)
       const ids = await offered(page)
-      assert(ids.join() === 'pair,fullscreen', `the hub offers ${ids}`)
+      assert(ids.join() === 'pair,next1,next2,next3,fullscreen,theme', `the hub offers ${ids}`)
       clear('open tray', await box(page, '.quick-panel'), { 'the sidebar': await box(page, '.sims-side') })
       await action(page, 'fullscreen').click()
       assert(await page.evaluate(() => window.__fullscreenCalls) === 1, 'fullscreen was not asked for')
@@ -117,7 +117,7 @@ export async function runQuick(browser, origin, checkIt) {
       clear('tab', await box(page, '.quick-tab'), { 'the dock': await box(page, '.panel-dock'), 'a window': windows, 'the pairing pill': pairing.pill, 'the pairing card': pairing.card })
       await openTray(page)
       const ids = await offered(page)
-      assert(ids.join() === ORDER.join(), `the sim offers ${ids}`)
+      assert(ids.join() === 'pair,switch,reset,camera,fullscreen,sound,theme', `the sim offers ${ids}`)
       clear('open tray', await box(page, '.quick-panel'), { 'the dock': await box(page, '.panel-dock'), 'a window': windows, 'the pairing pill': pairing.pill, 'the pairing card': pairing.card })
       at('camera')
       const camera = () => page.evaluate(() => window.__device.stage.camera.position.toArray().map((v) => +v.toFixed(3)).join())
@@ -179,7 +179,7 @@ export async function runQuick(browser, origin, checkIt) {
       await page.waitForFunction(() => window.__arena && document.querySelector('.quick-tray [data-quick="reset"]'), null, { timeout: 20000 })
       await openTray(page)
       const ids = await offered(page)
-      assert(ids.join() === ORDER.join(), `the arena offers ${ids}`)
+      assert(ids.join() === 'pair,switch,reset,camera,fullscreen,sound,theme', `the arena offers ${ids}`)
       await action(page, 'camera').click()
       await page.waitForFunction(() => document.body.classList.contains('presence-active'), null, { timeout: 5000 })
       await openTray(page)
@@ -200,7 +200,7 @@ export async function runQuick(browser, origin, checkIt) {
       await page.waitForFunction(() => window.__viewer && document.querySelector('.quick-tray [data-quick="sound"]'), null, { timeout: 20000 })
       await openTray(page)
       const ids = await offered(page)
-      assert(ids.join() === ORDER.join(), `the viewer offers ${ids}`)
+      assert(ids.join() === 'pair,open,reset,camera,fullscreen,sound,theme', `the viewer offers ${ids}`)
       clear('open tray', await box(page, '.quick-panel'), { 'the catalogue': await box(page, '#catalog') })
       // Reset brings the camera home; the camera's next view moves it; reset brings it back to the same place.
       const camera = () => page.evaluate(() => window.__viewer.camera.position.toArray().map((v) => +v.toFixed(2)).join())

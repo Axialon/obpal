@@ -85,7 +85,10 @@ export async function phoneConnections({ browser, origin, check, shots }) {
   const stopped = () => phone.evaluate(() => window.__cameras.every((s) => s.getTracks().every((t) => t.readyState === 'ended')))
   const saved = (page = phone) => page.locator('.connection-list[aria-busy="false"]').waitFor()
   const open = async () => { await clear(); await phone.getByRole('button', { name: 'Connections', exact: true }).click(); await saved() }
-  const close = () => phone.getByRole('button', { name: 'Close connections' }).click()
+  const close = async () => {
+    if (await phone.locator('.obpal-camera[open]').count()) await phone.locator('[data-camera-close]').click()
+    await phone.getByRole('button', { name: 'Close connections' }).click()
+  }
   const row = (name) => phone.locator('.connection-row').filter({ has: phone.getByText(name, { exact: true }) })
   const rename = async (from, to) => {
     await row(from).getByRole('button', { name: `Rename ${from}`, exact: true }).click()
@@ -124,7 +127,7 @@ export async function phoneConnections({ browser, origin, check, shots }) {
       await phone.getByRole('button', { name: 'Toggle torch' }).click()
       await until('torch', () => phone.evaluate(() => window.__torch))
       await phone.evaluate(() => { window.__nativeQr = 'https://not-obpal.example/p/#1.not.a.pairing' })
-      await until('refusal', async () => (await phone.locator('.connection-say').textContent()).includes('isn’t an ob.Pal code'))
+      await until('refusal', async () => /not an ob\.Pal code/i.test(await phone.locator('[data-camera-status]').textContent()))
       if (!phone.url().startsWith(`${origin}/p/`)) throw new Error('a scan navigated away')
       await shot('refused-390x844')
       await close()
@@ -133,7 +136,7 @@ export async function phoneConnections({ browser, origin, check, shots }) {
     })
 
     await check('real injected camera pixels decode with the lazy fallback and pair a second screen', async () => {
-      const fallbackBefore = await phone.evaluate(() => performance.getEntriesByType('resource').filter((r) => /jsQR|jsqr/.test(r.name)).length)
+      const fallbackBefore = await phone.evaluate(() => performance.getEntriesByType('resource').filter((r) => /qr-worker/.test(r.name)).length)
       if (fallbackBefore) throw new Error('fallback was loaded before it was needed')
       await phone.evaluate(() => { window.BarcodeDetector = undefined; window.__nativeQr = '' })
       await open(); await phone.getByRole('button', { name: 'Scan another code', exact: true }).click()
@@ -146,7 +149,7 @@ export async function phoneConnections({ browser, origin, check, shots }) {
       const png = await sharp(Buffer.from(renderSVG(inviteB, { ecc: 'M', border: 4 }))).resize(520, 520).png().toBuffer()
       await phone.evaluate((data) => window.__cameraFrame(data), `data:image/png;base64,${png.toString('base64')}`)
       await until('second active', async () => (await phone.locator('.host-name').textContent()) === 'ob.Pal Viewer').catch(async error => {
-        throw new Error(`${error.message}; scanner: ${await phone.locator('.connection-say').allTextContents()}; page errors: ${errors.join(' | ') || 'none'}`)
+        throw new Error(`${error.message}; scanner: ${await phone.locator('[data-camera-status], .connection-say').allTextContents()}; page errors: ${errors.join(' | ') || 'none'}`)
       })
       if (!(await stopped())) throw new Error('camera survived pairing')
       await until('first paused', () => a.evaluate(() => window.__obpal.participants[0]?.paused))
@@ -217,7 +220,7 @@ export async function phoneConnections({ browser, origin, check, shots }) {
       if (await row('Living room').count() !== 1) throw new Error('a new tab lost the list')
       await phone.locator('dialog').getByRole('button', { name: 'Scan another code', exact: true }).click()
       await phone.getByRole('button', { name: 'Toggle torch' }).waitFor()
-      await phone.getByRole('button', { name: 'Enter a code', exact: true }).click()
+      await phone.locator('[data-camera-type]').click()
       if (!(await stopped())) throw new Error('code entry left camera running')
       await phone.getByRole('button', { name: 'Scan instead', exact: true }).click()
       await phone.getByRole('button', { name: 'Toggle torch' }).waitFor()
@@ -233,7 +236,7 @@ export async function phoneConnections({ browser, origin, check, shots }) {
       const code = await until('short code', () => b.evaluate(() => window.__obpal.code))
       await phone.getByRole('button', { name: 'Scan a code', exact: true }).click()
       await phone.getByRole('button', { name: 'Toggle torch' }).waitFor()
-      await phone.getByRole('button', { name: 'Enter a code', exact: true }).click()
+      await phone.locator('[data-camera-type]').click()
       await phone.locator('dialog').getByRole('textbox', { name: 'Code from your screen' }).fill(code)
       await phone.locator('dialog').getByRole('button', { name: 'Connect', exact: true }).click()
       await phone.locator('.modes').waitFor({ timeout: 25000 })

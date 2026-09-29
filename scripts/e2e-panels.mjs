@@ -14,7 +14,11 @@ const toggle = (page, id = 'controls') => page.locator(`[data-panel-toggle="${id
 const box = locator => locator.evaluate(el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } })
 async function dockClick(page, id) { const b = toggle(page, id); await b.focus(); await b.click() }
 async function open(page, id = 'controls') { if (!(await panel(page, id).isVisible())) await dockClick(page, id) }
-async function foldPairing(page) { const chip = page.locator('.obpal-chip .pill[aria-expanded="true"]'); if (await chip.count()) await chip.click() }
+async function foldPairing(page) {
+  const chip = page.locator('.obpal-chip .pill[aria-expanded="true"]')
+  // A phone's primary click now opens its scanner. Escape dismisses the already-open QR on every screen.
+  if (await chip.count()) { await chip.focus(); await chip.press('Escape') }
+}
 async function reset(page) { const b = page.getByRole('button', { name: 'Reset layout', exact: true }); await b.focus(); await b.click() }
 async function drag(page, locator, dx, dy) {
   const b = await box(locator), x = b.x + b.width / 2, y = b.y + b.height / 2

@@ -51,7 +51,7 @@ function contentSecurityPolicy(page: string): string {
     'default-src': ["'self'"],
     'script-src': ["'self'"],
     'require-trusted-types-for': ["'script'"],
-    'trusted-types': ['obpal-templates'],
+    'trusted-types': ['obpal-templates', 'obpal-camera'],
     'style-src': ["'self'", "'unsafe-inline'"],
     'img-src': ["'self'", 'data:', 'blob:'],
     'font-src': ["'self'"],

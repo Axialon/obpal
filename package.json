@@ -34,6 +34,7 @@
     "perf:connect": "vite build && node scripts/perf-connect.mjs",
     "oss:audit": "node scripts/oss-audit.mjs",
     "e2e:phone": "vite build && node scripts/e2e-phone.mjs",
+    "e2e:camera": "vite build && node scripts/e2e-camera.mjs",
     "e2e:home": "vite build && node scripts/e2e-home.mjs",
     "e2e:orientation": "vite build && node scripts/e2e-orientation.mjs",
     "e2e:embed": "vite build && node scripts/e2e-embed.mjs",
@@ -44,6 +45,7 @@
     "icons": "node scripts/brand-icons.mjs"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "1.0.1",
     "@obpal/core": "workspace:*",
     "@obpal/host": "workspace:*",
     "camera-controls": "^3.1.2",

@@ -43,7 +43,7 @@ export function attachStudio(sim: SimScene, logic: StudioLogic, stage: Stage, po
   const start = panel.querySelector<HTMLButtonElement>('#studio-start')!, status = panel.querySelector('small')!
   // The same switch in the quick-actions tray: on while the room plays.
   const offer = () => quickAction({
-    id: 'sound', label: !sound.running ? 'Start sound' : muted ? 'Unmute sound' : 'Mute sound', hint: 'The studio’s sound', icon: sound.running && !muted ? 'sound' : 'mute',
+    id: 'sound', group: 'system', label: !sound.running ? 'Start sound' : muted ? 'Unmute sound' : 'Mute sound', hint: 'The studio’s sound', icon: sound.running && !muted ? 'sound' : 'mute',
     stay: true, pressed: () => sound.running && !muted, run: () => start.click(),
   })
   const startSound = async () => {

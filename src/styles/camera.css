@@ -1,0 +1,109 @@
+/* The camera owns a dark glass surface; its accent still belongs to the visitor. */
+.obpal-camera {
+  --camera-void: #050505;
+  --camera-guide: min(66vw, 38dvh, 310px);
+  --ui-vw: 1vw;
+  --bb-frost: rgb(18 20 22 / .90);
+  --bb-frost-solid: #121416;
+  --bb-frost-edge: rgb(255 255 255 / .18);
+  --bb-frost-blur: blur(24px) saturate(1.25);
+  --bb-ink: #f5f5f5;
+  --bb-ink-2: #d0d2d3;
+  --ink: var(--bb-ink);
+  --frost: var(--bb-frost);
+  --frost-solid: var(--bb-frost-solid);
+  --frost-edge: var(--bb-frost-edge);
+  --frost-blur: var(--bb-frost-blur);
+  --frost-accent: rgb(var(--bb-accent-rgb) / .18);
+  --bad: #fb7185;
+  color-scheme: dark;
+  position: fixed; inset: 0; width: 100%; height: 100dvh; max-width: none; max-height: none;
+  margin: 0; padding: 0; overflow: hidden; border: 0; background: var(--camera-void);
+  color: var(--bb-ink); font: 15px/1.45 var(--bb-font-ui); overscroll-behavior: none;
+  animation: camera-open 200ms var(--bb-ease-out);
+}
+.obpal-camera::backdrop { background: #050505; }
+@keyframes camera-open { from { opacity: 0; } }
+.camera-video, .camera-overlay, .camera-shade { position: absolute; inset: 0; width: 100%; height: 100%; }
+.camera-video { object-fit: cover; cursor: crosshair; opacity: 0; transition: opacity 160ms var(--bb-ease-out); }
+.camera-video.has-frame { opacity: 1; }
+.camera-video[data-mirrored='true'] { transform: scaleX(-1); }
+.obpal-camera[data-mode='scan'] .camera-overlay { object-fit: cover; }
+.obpal-camera[data-mode='scan'][data-mirrored='true'] .camera-overlay { transform: scaleX(-1); }
+.camera-overlay { color: var(--bb-accent); transition: opacity 200ms linear; }
+.camera-overlay[data-lost='true'] { opacity: 0; }
+.camera-overlay, .camera-shade { pointer-events: none; }
+.camera-shade { background: linear-gradient(180deg, rgb(0 0 0 / .45), transparent 18%, transparent 70%, rgb(0 0 0 / .55)); }
+.camera-head { z-index: 1; position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: max(18px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) 0 max(20px, env(safe-area-inset-left)); }
+.camera-head-tools { display: flex; gap: 8px; }
+.camera-brand { display: inline-flex; align-items: center; gap: 9px; font: 700 23px/1 var(--font-display); letter-spacing: -.035em; }
+.camera-logo { position: relative; width: 37px; height: 37px; display: grid; place-items: center; }
+.camera-logo img { width: 29px; height: 29px; }
+.camera-logo::after { content: ''; position: absolute; inset: 0; border-radius: 50%; border: 2px solid transparent; }
+.obpal-camera:is([data-state='opening'], [data-state='loading']) .camera-logo::after {
+  border-color: rgb(var(--bb-accent-rgb) / .18); border-top-color: var(--bb-accent); animation: camera-loading 1.2s linear infinite;
+}
+.camera-logo::before { content: ''; position: absolute; inset: -3px; border-radius: 50%; background: conic-gradient(var(--bb-accent) calc(var(--camera-progress, 0) * 1turn), transparent 0); mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 0); }
+@keyframes camera-loading { to { transform: rotate(1turn); } }
+.camera-control, .camera-type { color: var(--bb-ink); -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+.camera-control { position: relative; display: grid; place-items: center; flex: none; width: 44px; height: 44px; padding: 0; border-radius: 50%; font: 700 14px/1 var(--bb-font-data); }
+.camera-control[aria-pressed='true'] { background: var(--bb-accent); color: var(--bb-accent-ink); }
+.camera-control:active, .camera-type:active { transform: scale(.96); }
+.camera-guide { position: absolute; left: 50%; top: 43%; width: var(--camera-guide); height: var(--camera-guide); transform: translate(-50%, -50%); border-radius: 22px; box-shadow: 0 0 0 100vmax rgb(0 0 0 / .38); color: var(--bb-accent); pointer-events: none; transition: left 180ms var(--bb-ease-out), top 180ms var(--bb-ease-out), width 180ms var(--bb-ease-out), height 180ms var(--bb-ease-out); }
+.camera-guide > i { position: absolute; width: 32px; height: 32px; border: 4px solid currentColor; transition: left 180ms var(--bb-ease-out), top 180ms var(--bb-ease-out), color 120ms; }
+.camera-guide > i:nth-child(1) { top: 0; left: 0; border-right: 0; border-bottom: 0; border-radius: 14px 0 0; transform-origin: bottom right; }
+.camera-guide > i:nth-child(2) { top: 0; left: calc(100% - 32px); border-left: 0; border-bottom: 0; border-radius: 0 14px 0 0; transform-origin: bottom left; }
+.camera-guide > i:nth-child(3) { top: calc(100% - 32px); left: calc(100% - 32px); border-top: 0; border-left: 0; border-radius: 0 0 14px; transform-origin: top left; }
+.camera-guide > i:nth-child(4) { top: calc(100% - 32px); left: 0; border-top: 0; border-right: 0; border-radius: 0 0 0 14px; transform-origin: top right; }
+.obpal-camera[data-state='scanning'] .camera-guide { animation: camera-breathe 2.4s ease-in-out infinite alternate; }
+@keyframes camera-breathe { to { transform: translate(-50%, -50%) scale(.975); } }
+.obpal-camera[data-state='rejected'] .camera-guide { color: var(--bad); }
+.camera-lock { display: none; position: absolute; inset: 0; place-items: center; }
+.camera-lock .ic { width: 56px; height: 56px; padding: 13px; background: var(--bb-accent); color: var(--bb-accent-ink); border-radius: 50%; animation: camera-found 160ms var(--bb-ease-out) 100ms both; }
+@keyframes camera-found { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: scale(1); } }
+.obpal-camera[data-state='locked'] .camera-lock { display: grid; }
+.obpal-camera[data-state='unavailable'] .camera-guide { opacity: .2; }
+.camera-foot { z-index: 1; position: absolute; bottom: calc(20px + env(safe-area-inset-bottom)); left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+.camera-island { box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 8px; width: min(360px, calc(100% - 32px)); min-height: 56px; padding: 8px 8px 8px 16px; border-radius: var(--bb-r-2xl, 28px); border: 1px solid var(--bb-frost-edge); background: var(--bb-frost); -webkit-backdrop-filter: var(--bb-frost-blur); backdrop-filter: var(--bb-frost-blur); text-align: left; }
+.camera-words { min-width: 0; flex: 1; }
+.camera-privacy { display: flex; align-items: center; gap: 5px; min-height: 16px; }
+.camera-privacy .ic { width: 16px; height: 16px; display: block; }
+.camera-privacy small { font-size: 11px; line-height: 16px; }
+.camera-status { margin: 0; font-size: 15px; line-height: 1.3; font-weight: 600; text-wrap: balance; }
+.camera-status:empty { display: none; }
+.camera-metrics { position: absolute; top: calc(76px + env(safe-area-inset-top)); right: 20px; z-index: 1; font: 12px/1.5 var(--bb-font-data); color: #f5f5f5; background: var(--bb-frost); padding: 3px 8px; border-radius: 8px; }
+.camera-chips { display: flex; gap: 4px; }
+.camera-chip { position: relative; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; color: var(--bb-ink); transition: color var(--bb-dur-1), background var(--bb-dur-1), opacity var(--bb-dur-1); }
+.camera-chip .ic { width: 20px; height: 20px; }
+.camera-chip[data-active='true'] { color: var(--bb-accent-ink); background: var(--bb-accent); }
+.camera-chips[data-lost='true'] .camera-chip { opacity: .4; }
+.camera-tools { display: flex; max-width: 100%; justify-content: center; gap: 12px; }
+.obpal-camera[data-mode='hand']:not([data-state='unavailable']) .camera-tools, .camera-tools:empty, .camera-deadman:empty { display: none; }
+.camera-type { min-height: 44px; flex: none; padding: 0 15px; border-radius: 22px; font-size: 12px; font-weight: 650; }
+.camera-deadman { align-self: flex-start; margin: 0 16px 76px; display: flex; flex-direction: row-reverse; gap: 10px; align-items: center; }
+.obpal-camera[data-handedness='left'] .camera-deadman { align-self: flex-end; flex-direction: row; }
+.camera-hold { height: 64px; width: min(240px, 60vw); border: 1px solid var(--bb-frost-edge); border-radius: 20px; background: var(--frost-accent); color: var(--bb-accent); backdrop-filter: var(--bb-frost-blur); font: 700 17px/1.4 var(--bb-font-ui); touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.camera-hold[aria-pressed='true'] { background: var(--bb-accent); color: var(--bb-accent-ink); box-shadow: var(--kit-ring); }
+.camera-stop { width: 56px; height: 56px; padding: 0; border: 0; border-radius: 14px; background: var(--bad); color: #2a0610; font-weight: 750; touch-action: manipulation; }
+.camera-download { max-width: calc(100% - 32px); min-height: 64px; padding: 12px 20px; border-radius: 20px; color: var(--bb-ink); font-weight: 600; }
+.camera-download small { display: block; margin-top: 4px; font-weight: 400; }
+.obpal-camera .hint { z-index: 2; font-family: var(--bb-font-ui); }
+body:has(.sheet-wrap) .obpal-camera .hint { visibility: visible; }
+.obpal-camera .hint.in { animation: none; }
+.obpal-camera .hint-x { width: 44px; height: 44px; }
+@media (hover: hover) {
+  .obpal-camera [data-tip]:is(:hover, :focus-visible)::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); width: max-content; max-width: 200px; padding: 7px 10px; border: 1px solid var(--bb-frost-edge); border-radius: 10px; background: var(--bb-frost-solid); color: var(--bb-ink); font: 12px/1.4 var(--bb-font-ui); pointer-events: none; }
+  .camera-head [data-tip]::after { top: calc(100% + 8px); bottom: auto; left: auto; right: 0; transform: none; }
+}
+@media (orientation: landscape) and (max-height: 600px) {
+  .obpal-camera { --camera-guide: min(44dvh, 230px); }
+  .camera-head { padding-top: max(12px, env(safe-area-inset-top)); }
+  .camera-guide { left: 28%; top: 52%; }
+  .camera-foot { left: 50%; bottom: calc(12px + env(safe-area-inset-bottom)); gap: 8px; }
+  .camera-deadman { margin: 0 8px; }
+  .camera-hold { width: min(180px, 28vw); }
+  .obpal-camera .hint { max-width: 260px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .obpal-camera, .obpal-camera *, .obpal-camera *::before, .obpal-camera *::after { animation: none !important; transition: none !important; }
+}

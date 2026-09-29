@@ -49,6 +49,7 @@ import type { ArmModel, JointSpec } from './model'
 import { GlowFollower, handMove, handTurn, headingOf } from '@obpal/host'
 import { ScreenPointer } from '../../viewer/pointer'
 import { armWorkspace, armHeight } from './control-space'
+import { ArmHandInput } from './hand-input'
 import { sceneCells, nearest } from '../../control-space'
 import { Experience } from '../vr/experience'
 import { SharedPresence } from '../vr/presence'
@@ -63,6 +64,7 @@ import { Readout } from '../../ui/kit/readout'
 import { ICONS } from '../../ui/icons'
 import { html, setMarkup } from '../../ui/markup'
 import { mountQuick, quickAction, quickViews } from '../../ui/quick'
+import { HandCursor } from '../../ui/hand-cursor'
 import { holdReload } from '../../ui/recover'
 
 applyTheme(initialTheme())
@@ -198,6 +200,8 @@ interface Arm {
   claw: Claw | null
   /** 3D: where the phone and the gripper were when the thumb went down, and how far the gripper goes per metre of hand. */
   track: Track3 | null
+  cameraHand: ArmHandInput
+  cameraTrack: { tool: THREE.Vector3; delta: THREE.Vector3; pitch: number; roll: number } | null
   scale: number
   /** The tool target a 3D drive last asked for (for the record and tests). */
   goal: ToolTarget | null
@@ -285,7 +289,7 @@ function addArm(number?: number): Arm | null {
   model.root.userData.contactName = id
   const joints: Joint[] = KIN.joints.map((spec) => ({ spec, node: `${id}.${spec.key}`, angle: spec.home, vel: 0, target: null, state: '', flash: 0 }))
   joints.forEach((j, i) => model.apply[i](j.angle))
-  const arm: Arm = { n, id, name: `Arm ${n}`, model, joints, profile: 'both', drive: null, edge: false, state: '', homing: false, flash: 0, hw: null, hover: KIND.drive.hover[0], claw: null, track: null, scale: KIND.drive.scale, goal: null, blocked: false, chosen: 0, jog: new Map() }
+  const arm: Arm = { n, id, name: `Arm ${n}`, model, joints, profile: 'both', drive: null, edge: false, state: '', homing: false, flash: 0, hw: null, hover: KIND.drive.hover[0], claw: null, track: null, cameraHand: new ArmHandInput(), cameraTrack: null, scale: KIND.drive.scale, goal: null, blocked: false, chosen: 0, jog: new Map() }
   // The procedural arm stays out of view until its Blender mesh is in (or cannot come).
   const hold = model.upgrade ? holdRig(KIND.id as ArmKindId, [model.root], { shown: () => { armInstances.set(shownRoots()); view.invalidate() } }) : null
   if (hold) holds.set(model, hold)
@@ -339,11 +343,17 @@ function poseOf(a: Arm): Pose {
   return p
 }
 function setPose(a: Arm, p: Pose) { KIN.keys.forEach((k, i) => { a.joints[i].target = p[k] }) }
+/** A released camera hand holds its gripper too; a tray Grip remains an independent command. */
+function releaseCameraHand(a: Arm) {
+  a.cameraHand.reset()
+  if (a.cameraTrack) { a.cameraTrack = null; for (const j of a.joints) j.target = null }
+}
 /** The whole arm stops where it is (the gripper keeps what it was told). */
 function settle(a: Arm) {
   a.drive = null
   a.claw = null
   a.track = null
+  releaseCameraHand(a)
   if (!a.homing) for (let i = 0; i < GRIP; i++) a.joints[i].target = null
 }
 function toggleGrip(a: Arm) {
@@ -355,6 +365,7 @@ function toggleGrip(a: Arm) {
 function homeArm(a: Arm, by: string) {
   a.drive = null
   a.claw = null
+  releaseCameraHand(a)
   a.homing = true
   for (const j of a.joints) j.target = j.spec.home
   sim?.log(`${sim.nameOf(by)} sent ${a.name} home`, sim.colorOf(by))
@@ -537,6 +548,7 @@ const layout: Layout = {
   v: 1,
   modes: [Mode.point, Mode.track, Mode.hold, Mode.tilt, Mode.gamepad],
   controllers: ['face.trackpad', 'face.hand', 'face.wii', 'face.gamepad'],
+  utilities: ['pad', 'motion.aim', 'motion.steer', 'motion.point', 'motion.track', 'touch.trackpad', 'motion.hold', 'motion.tilt', 'camera.hand'],
   tray: [
     { id: 'estop', label: 'Stop', type: 'button', tone: 'stop' },
     { id: 'grip', label: 'Grip', type: 'button', icon: 'grip' },
@@ -547,7 +559,7 @@ const layout: Layout = {
 }
 function howTo(node: string) {
   const f = findNode(node)
-  if (!f?.joint) return 'Point at a spot and hold B: the arm goes there · A picks up or drops · + and − height · 3D: hold the pad and move'
+  if (!f?.joint) return 'Point: hold B to move · A picks up or drops · 3D: hold the pad and move · Camera hand: Hold to move, pinch to close'
   if (f.joint.spec.key === 'gripper') return 'Hold a finger on the pad: tilt or drag to open and close, tap to toggle'
   return 'Hold a finger on the pad: tilt or drag to move it. 1:1: turn the phone like a dial'
 }
@@ -562,7 +574,7 @@ function estop(by: string, why = '') {
   if (stopped) return
   stopped = { by, why }
   // A live arm's driver stops it where it is, and liveStep sends it nothing more: a goal already sent would be carried out.
-  for (const a of arms) { a.homing = false; a.drive = null; a.claw = null; for (const j of a.joints) j.target = null; if (a.hw?.live) void holdDriver(a.hw.driver) }
+  for (const a of arms) { a.homing = false; a.drive = null; a.claw = null; a.track = null; a.cameraTrack = null; a.cameraHand.stop(); for (const j of a.joints) j.target = null; if (a.hw?.live) void holdDriver(a.hw.driver) }
   document.body.classList.add('stopped')
   const who = sim?.nameOf(by) ?? 'The screen'
   $('stop-by').textContent = why || `Stopped by ${who}`
@@ -679,7 +691,7 @@ if (!shared.guest) void startSimScene({
   s.remote.on('recenter', (who) => {
     aims.get(who.id)?.pointer.recenter()
     const a = armOf(s.claims.held(who.id) ?? '')
-    if (a) { a.track = null; a.drive = null }
+    if (a) { a.track = null; a.drive = null; releaseCameraHand(a) }
   })
   s.remote.on('leave', (p) => { xrDrives.delete(p.id); dropAim(p.id); renderPanel() })
   refreshNodes()
@@ -695,9 +707,7 @@ $('estop').onclick = () => estop('host')
 $('resume').onclick = resume
 $('home-all').onclick = () => { if (!stopped) for (const a of arms) if (!a.hw || a.hw.live) homeArm(a, 'host') }
 $('add-arm').onclick = () => { const a = addArm(); if (a) sim?.log(`The screen added ${a.name}`) }
-addEventListener('keydown', (e) => {
-  if (e.code === 'Space' && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLButtonElement)) { e.preventDefault(); estop('host') }
-})
+quickAction({ id: 'stop', group: 'page', label: 'Stop', icon: 'stop', hint: 'Stop every arm', run: () => estop('host') })
 // A live arm never runs unwatched: the screen going to the background stops everything.
 document.addEventListener('visibilitychange', () => { if (document.hidden && arms.some((a) => a.hw?.live)) estop('host', 'The screen went to the background') })
 addEventListener('beforeunload', (e) => { if (arms.some((a) => a.hw?.live)) e.preventDefault() })
@@ -748,6 +758,7 @@ function jogSigns(a: Arm, j: Joint, who: string): [number, number] {
 function commanded(a: Arm, j: Joint, who: string, f: Frame, pad: PadState | null, dt: number, slot: Slot = 'solo', chosen = false): number | null {
   const span = j.spec.max - j.spec.min
   if (sim?.control.scope(who) === 'scene') return null
+  if (!pad && f.hand) return null // Camera hands drive a claimed whole arm, never a separately held joint.
   const space = sim?.control.aim(who)
   // A degree of the phone's turn: a degree, 1/6 cm of a joint that slides, 1/120 of the gripper's opening.
   const scale = j.spec.unit === '°' ? 1 : j.spec.unit === 'm' ? 1 / 600 : 1 / 120
@@ -817,6 +828,8 @@ function driveWhole(a: Arm, who: string, now: number, dt: number): string {
   const pad = xr?.pad ?? s.remote.padOf(who)
   if (now - (lastInput.get(who) ?? 0) > 200) { settle(a); return 'watchdog' }
   if (s.control.scope(who) === 'scene') { settle(a); return 'deadman' }
+  if (!pad && f.hand) return driveCameraHand(a, who, f)
+  releaseCameraHand(a)
   if (!pad && f.mode === Mode.point) return drivePoint(a, who, now)
   if (!pad && f.mode === Mode.track) return driveTrack(a, who, f)
   const grip = a.joints[GRIP]
@@ -929,12 +942,22 @@ function dropAim(id: string) {
 }
 
 /** Once a frame: take every participant's input, and move the pointers of those in Point. */
+const handCursors = new Map<string, HandCursor>()
 function readInputs(now: number) {
   frames.clear()
   const s = sim
   if (!s) return
+  for (const [id, cursor] of handCursors) if (!s.remote.participants.some(p => p.id === id)) { cursor.el.remove(); handCursors.delete(id) }
   for (const p of s.remote.participants) {
     const f = s.remote.consumeOf(p.id, now)
+    if (f.hand || handCursors.has(p.id)) {
+      let cursor = handCursors.get(p.id)
+      if (!cursor) {
+        const el = document.createElement('div'); el.style.setProperty('--accent', p.color); document.body.append(el)
+        cursor = new HandCursor(el); handCursors.set(p.id, cursor)
+      }
+      cursor.step(f.connected ? f.hand : null, now)
+    }
     view.presence?.motionControl(!!s.control.aim(p.id))
     frames.set(p.id, f)
     const pointing = f.connected && f.mode === Mode.point
@@ -1044,6 +1067,36 @@ const camRight = new THREE.Vector3()
 function toolWorld(a: Arm, t: ToolTarget) {
   const y = t.yaw * D2R
   return a.model.root.localToWorld(new THREE.Vector3(-t.reach * Math.cos(y), t.height, t.reach * Math.sin(y)))
+}
+
+/** The approved holder's camera hand follows the same tool solver and limits as 3D, while its deadman is held. */
+function driveCameraHand(a: Arm, who: string, f: Frame): string {
+  const move = a.cameraHand.step(f.hand, f.connected && f.touching && !!sim?.allowed(who), who)
+  if (!move) { settle(a); return 'deadman' }
+  a.homing = false; a.drive = null; a.claw = null; a.track = null
+  if (move.started || !a.cameraTrack) {
+    const tool = KIN.forward(poseOf(a))
+    a.cameraTrack = { tool: toolWorld(a, tool), delta: new THREE.Vector3(), pitch: tool.pitch, roll: tool.roll }
+  }
+  const k = a.cameraTrack
+  const frame = controlFrame(who)
+  const delta = k.delta.clone().addScaledVector(frame.right, move.delta[0] * a.scale).addScaledVector(UP, move.delta[1] * a.scale).addScaledVector(frame.forward, -move.delta[2] * a.scale)
+  const local = a.model.root.worldToLocal(k.tool.clone().add(delta))
+  const turn = handTurn([0, 0, 0, 1], move.rotation, 0)
+  const current = poseOf(a), want = Math.atan2(local.z, -local.x) * R2D
+  const goal: ToolTarget = {
+    yaw: KIN.heading(want, current), reach: Math.max(KIND.drive.reach[0], Math.hypot(local.x, local.z)),
+    height: Math.max(CLAW_LOW, local.y), pitch: clamp(k.pitch - turn.tip, ...KIN.pitchRange), roll: clamp(k.roll + turn.twist, ...KIN.rollRange),
+  }
+  const solved = solveNear(KIN, goal, 60, heldBox(a), current)
+  if (solved) { setPose(a, solved.pose); k.delta.copy(delta) }
+  a.joints[GRIP].target = move.pinch ? 0 : 1
+  a.goal = goal
+  const ok = !!solved && turnBetween(goal.yaw, want) < 1e-6
+  if (!ok && !a.edge) sim?.remote.feedback({ haptic: 'bump' }, who)
+  a.edge = !ok
+  view.presence?.motionControl(true)
+  return ok ? '' : 'edge'
 }
 
 /**
@@ -1176,7 +1229,7 @@ function stepArm(a: Arm, now: number, dt: number) {
   // What the holder's node strip chose (PROTOCOL §3a): on the trackpad, the one finger drives those joints, the rest hold.
   const focus = armWho && armWho !== 'host' && s ? s.focus.of(armWho) : null
   const frame = focus ? frames.get(armWho!) : undefined
-  const onPad = !!frame && !s?.remote.padOf(armWho!) && (frame.mode === Mode.hold || frame.mode === Mode.tilt || frame.mode === Mode.orbit)
+  const onPad = !!frame && !frame.hand && !s?.remote.padOf(armWho!) && (frame.mode === Mode.hold || frame.mode === Mode.tilt || frame.mode === Mode.orbit)
   const chosen = onPad && focus!.parts.length ? focus!.parts : null
   if (focus && focus.serial !== a.chosen) {
     // A new choice starts from where the arm is: no drive, dial or jog carried over; the newly chosen joints' rings flare.
@@ -1187,8 +1240,8 @@ function stepArm(a: Arm, now: number, dt: number) {
     for (const j of a.joints) if (focus.parts.includes(j.node)) j.flash = 1
   }
   a.state = ''
-  if (stopped || mirror || !armWho || armWho === 'host' && !xrDrives.has(armWho) || !s) { a.drive = null; if (!armWho) a.edge = false }
-  else if (chosen) { a.drive = null; a.claw = null; a.track = null; if (now - (lastInput.get(armWho) ?? 0) > 200) a.state = 'watchdog' }
+  if (stopped || mirror || !armWho || armWho === 'host' && !xrDrives.has(armWho) || !s) { a.drive = null; releaseCameraHand(a); if (!armWho) a.edge = false }
+  else if (chosen) { a.drive = null; a.claw = null; a.track = null; releaseCameraHand(a); if (now - (lastInput.get(armWho) ?? 0) > 200) a.state = 'watchdog' }
   else {
     a.state = driveWhole(a, armWho, now, dt)
     // Locked joints hold where they are while the rest of the arm moves.
@@ -1779,7 +1832,7 @@ quickViews([
   { name: 'Close-up', show: framed(inspectArm) },
   { name: 'First person', show: () => document.querySelector<HTMLButtonElement>('.presence-controls .presence-enter')?.click(), current: () => view.presence?.mode === 'first-person', phone: true },
 ])
-if (!view.presence?.shared?.guest) quickAction({ id: 'reset', label: 'Reset', hint: 'Every arm home', icon: 'reset', run: () => $('home-all').click() })
+if (!view.presence?.shared?.guest) quickAction({ id: 'reset', group: 'page', label: 'Reset', hint: 'Every arm home', icon: 'reset', run: () => $('home-all').click() })
 resize()
 renderPanel()
 renderer.setAnimationLoop(loop)
@@ -1790,6 +1843,7 @@ Object.assign(window, {
     arms: () => arms.map((a) => ({
       id: a.id, profile: a.profile, state: a.state, edge: a.edge, live: !!a.hw?.live, twin: !!a.hw, hover: a.hover, claw: a.claw?.phase ?? null, goal: a.goal, anchor: a.track ? { p0: a.track.p0, tool: a.track.tool.y } : null,
       pose: frames.get(sim?.claims.holder(a.id) ?? '')?.pose ?? null,
+      hand: frames.get(sim?.claims.holder(a.id) ?? '')?.hand ?? null, handActive: !!a.cameraTrack,
       tool: KIN.forward(poseOf(a)), joints: a.joints.map((j) => ({ node: j.node, angle: j.angle, target: j.target, vel: j.vel, state: j.state })),
     })),
     blocks: () => blocks.map((b) => b.by?.id ?? null),

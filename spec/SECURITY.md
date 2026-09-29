@@ -6,7 +6,7 @@ wire formats are in [PROTOCOL.md](PROTOCOL.md).
 
 This is the state on 29 September 2026, with the ob.Pal Link 1.6.0 items of §8. File references point into this
 repository as it was then. §11 covers updates and downloads, §12 physical control, and §13 what an independent review
-should test.
+should test. §14 covers local camera processing.
 
 ## 1. The connection path
 
@@ -614,3 +614,11 @@ If you review ob.Pal from outside, these six are the places to start:
 This is where to begin, not everything worth testing. Anything that could load or disturb the live service is better
 tried on a deployment of your own (§6). Send findings to the address in [SECURITY.md](../SECURITY.md); the same terms
 apply.
+
+## 14. Local camera processing
+
+The branded camera requests video only, after a tap. QR decoding and MediaPipe Hand Landmarker inference run on the phone. Camera frames are never uploaded, recorded or added to a WebRTC media track. Only the HAND landmark packet, gesture bits and estimated palm translation use the existing authenticated, encrypted state channel. The model and WASM runtime are served from this deployment's `/models/`; no third-party inference service is contacted. Camera permission is optional: the ten-digit code remains available.
+
+Closing, backgrounding or leaving the camera stops its tracks and workers, including streams whose permission resolves after close. Switching or pausing a connection stops hand input before routing to another host. A host drops late packets and expires a silent hand after 250 ms. Hand tracking does not grant device ownership or arm approval; the arm still requires its held control and Stop still latches until that control is released.
+
+Scanning accepts only canonical pairing links on the current deployment and complete ten-digit codes. QR contents are never opened as arbitrary URLs. The optional synthetic landmark seam is restricted to loopback origins with an explicit `camera-test=1` query and is for local browser verification only.

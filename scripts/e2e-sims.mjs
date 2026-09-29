@@ -13,6 +13,7 @@
  *   is unreported or out of its limits, Stop holding the pose and reaching the driver, every automatic stop saying why.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch. OBPAL_SHOTS=<dir> saves screens.
  * --only=tracking (or OBPAL_E2E_SIMS_ONLY=tracking) runs the arm's tracking checks and their pairing/claim setup.
+ * --only=panels (or OBPAL_E2E_SIMS_ONLY=panels) runs just the window checks, also through e2e:all's guard.
  */
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -33,6 +34,7 @@ import { startLocal } from '../extension/e2e/local.mjs'
 
 const HEADED = process.argv.includes('--headed')
 const ONLY_TRACKING = process.argv.includes('--only=tracking') || process.env.OBPAL_E2E_SIMS_ONLY === 'tracking'
+const ONLY_PANELS = process.argv.includes('--only=panels') || process.env.OBPAL_E2E_SIMS_ONLY === 'panels'
 const SHOTS = process.env.OBPAL_SHOTS || ''
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
 const RTC_ARGS = ['--disable-features=WebRtcHideLocalIpsWithMdns', '--ignore-certificate-errors']
@@ -154,6 +156,8 @@ async function phone(invite, { xr = true, way = 'motion' } = {}) {
 }
 
 try {
+  if (ONLY_PANELS) await runPanels(local, check)
+  else {
   console.log('ob.Pal sims e2e')
   // ---- robot arm ----
   // The screen's camera: a picture the test paints, with a phone glowing in it (window.__fakeCam).
@@ -522,6 +526,7 @@ try {
   await runAudio(local, check)
   await runPanels(local, check)
   await runArmLive(local, check)
+  }
   }
   await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {

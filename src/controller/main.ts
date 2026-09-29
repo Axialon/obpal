@@ -27,6 +27,8 @@ import { LinkBadge } from './linkbadge'
 import { sheetExits } from './sheet'
 import { Connections, type Connection, type Join } from './connections'
 import { ConnectionSheet } from './connection-sheet'
+import { CameraView } from '../ui/camera'
+import { HandTracker } from './hand-tracker'
 import '../styles/connections.css'
 import { calmMarks, icon, ICONS, logo, logoMark } from '../ui/icons'
 import { dismissHint, hint, repositionHints, setHintFrame } from '../ui/hints'
@@ -56,6 +58,13 @@ const safeImage = (u?: string) => (u && /^https:\/\//.test(u) ? u : undefined)
 const CAMERA_3D_NEEDS = 'The camera follows the phone on Android with Google Play Services for AR'
 let connectTo: (join: Join) => Promise<void> = async () => {}
 let openConnections: (scan?: boolean) => void = () => {}
+const arrival = new URLSearchParams(location.search)
+const scannedDigits = /^#code=[1-9][0-9]{9}$/.test(location.hash) ? location.hash.slice(6) : ''
+const typedArrival = arrival.get('type') === '1' || !!scannedDigits
+const scanArrival = arrival.get('scan') === '1'
+const cameraTest = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) && arrival.get('camera-test') === '1'
+for (const key of ['code', 'type', 'scan']) arrival.delete(key)
+if (typedArrival || scanArrival) history.replaceState(null, '', `${location.pathname}${arrival.size ? `?${arrival}` : ''}${scannedDigits ? '' : location.hash}`)
 
 applyTheme(initialTheme())
 insertMarkup(document.body, 'afterbegin', html`<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>`)
@@ -214,6 +223,7 @@ function startPage() {
     input.select()
   }
   input.focus()
+  if (scannedDigits) { input.value = scannedDigits; input.dispatchEvent(new Event('input')) }
 }
 
 /** Mark the current surface and accent in the settings sheet, if it is open. */
@@ -583,24 +593,76 @@ async function boot(code?: Join) {
     controllers: () => switcher.open(),
   })
   /** The controller bar and the catalogue (./switcher.ts). */
-  const switcher = new Switcher({ pick, feel: (strong) => tick(strong), toast: (text) => toast(text) })
+  const switcher = new Switcher({ pick, hand: openHands, feel: (strong) => tick(strong), toast: (text) => toast(text) })
   /** The node strip along the trackpad's edge: which part of what you hold the pad drives (./strip.ts). */
   const strip = new NodeStrip({ send: (id, v) => { if (link.ready) link.sendCtl({ t: 'value', id, v }) }, feel: (strong) => tick(strong), changed: () => render() })
 
   // The top bar's connection badge: encrypted, how the screen was verified, the path and the round trip (./linkbadge.ts).
   const linkBadge = new LinkBadge()
   const connections = new ConnectionSheet(link)
+  let handCamera: CameraView | null = null
+  let handTracker: HandTracker | null = null
+  let handHold = false
+  let handSeq = 0
+  let handGen = 0
+  function stopHands() {
+    handHold = false
+    handTracker?.stop(); handTracker = null
+    const camera = handCamera; handCamera = null
+    camera?.close()
+  }
+  function openHands() {
+    if (!link.ready || !layout.utilities?.includes('camera.hand')) return
+    releaseControls()
+    keyboard.close(true)
+    const stop = layout.tray.find(c => c.tone === 'stop')
+    const camera = new CameraView({ mode: 'hand', measurements: cameraTest,
+      typed: () => stopHands(),
+      close: () => { handTracker?.stop(); handTracker = null; handCamera = null; handHold = false; syncMotion(); render(); lastSend = 0; pump(16.7) },
+      hold: stop ? active => { handHold = active; lastSend = 0; pump(16.7) } : undefined,
+      stop: stop ? () => { handHold = false; lastSend = 0; pump(16.7); link.sendCtl({ t: 'btn', id: stop.id, ev: 'tap' }) } : undefined,
+      ready: (video, overlay) => {
+        if (handCamera !== camera) return
+        handTracker?.stop()
+        handTracker = new HandTracker(video, overlay, {
+          send: b => link.sendState(b), timeOrigin: t0,
+          loading: p => camera.loading(p), error: text => camera.unavailable(text), hand: (g, side, palm) => camera.handState(g, side, palm),
+          sequence: () => (handSeq = (handSeq + 1) & 0xffff), generation: () => (handGen = (handGen + 1) & 0xff),
+          say: text => camera.say(text), metrics: m => {
+            camera.setMetrics(`${m.trackingFps.toFixed(0)} fps · ${m.latencyMs.toFixed(0)} ms`)
+            const meter = document.querySelector<HTMLOutputElement>('[data-camera-metrics]')
+            if (meter) meter.dataset.measurements = JSON.stringify(m)
+          },
+        })
+        const tracker = handTracker
+        void camera.prepareHands(() => { if (handTracker === tracker) tracker.start() })
+      },
+    })
+    handCamera = camera
+    render()
+    syncMotion()
+    camera.open()
+    void keepAwake()
+  }
+  // Local automation can replace the model result, but still crosses camera timing, filtering, HAND and WebRTC.
+  if (cameraTest) Object.assign(window, { __cameraHand: {
+    stats: () => handTracker?.stats ?? null,
+    inject: (result: Parameters<HandTracker['injectForTest']>[0]) => handTracker?.injectForTest(result),
+  } })
+  document.addEventListener('visibilitychange', () => { if (document.hidden) stopHands() })
   // The keyboard's dock hands its Back step to the sheet that opens over it (./sheet.ts).
   openConnections = (scan = false) => { keyboard.close(true); tick(); connections.open(scan) }
   connectTo = async (join) => { hungUp = false; await link.connect(join) }
   link.setLimit(Number(store.get('obpal.connections.limit') ?? 3))
-  addEventListener('pagehide', () => { connections.close(); link.destroy() })
+  addEventListener('pagehide', () => { stopHands(); connections.close(); link.destroy() })
   if (code) {
     screenMessage({ title: 'Connecting', body: code.v === 2 ? 'Reaching your screen over Wi-Fi…' : 'Finding your screen…', spinner: true })
     void connectTo(code).catch((e: Error) => screenMessage({ title: 'Scan again', body: e.message, art: ICONS.phone }))
   } else {
     startPage()
+    if (scanArrival) openConnections(true)
     void link.settled().then(() => {
+      if (typedArrival || scanArrival) return
       let id = ''
       try { id = sessionStorage.getItem('obpal.active') ?? '' } catch { /* private mode */ }
       if (id && link.rows.get(id)?.invite) void link.use(id)
@@ -608,6 +670,7 @@ async function boot(code?: Join) {
   }
 
   function releaseControls() {
+    stopHands()
     buttons.releaseAll()
     buttonHold = false
     wiiA(false); wiiB(false)
@@ -712,7 +775,7 @@ async function boot(code?: Join) {
   // is driven; and after two minutes untouched the screen rests (black, and free to sleep) until a touch.
   function motionWanted() {
     // A screen that takes tosses listens for a flick in any mode, gyro on or not.
-    return !!link.active && document.visibilityState === 'visible' && !resting && (!tierSettled || gyroOn || mode === Mode.point || mode === Mode.track || mode === Mode.gamepad || tab === 'drums' || tab === 'keys' || !!layout.toss)
+    return !!link.active && !handCamera && document.visibilityState === 'visible' && !resting && (!tierSettled || gyroOn || mode === Mode.point || mode === Mode.track || mode === Mode.gamepad || tab === 'drums' || tab === 'keys' || !!layout.toss)
   }
   /** Start or stop the sensors to match what's needed; true if they just started. */
   function syncMotion(): boolean {
@@ -724,7 +787,7 @@ async function boot(code?: Join) {
     control.defer()
     return want
   }
-  function busy() { return gyroOn || mode === Mode.point || mode === Mode.track || mode === Mode.gamepad || (pad?.touches ?? 0) > 0 || buttonHold }
+  function busy() { return !!handCamera || gyroOn || mode === Mode.point || mode === Mode.track || mode === Mode.gamepad || (pad?.touches ?? 0) > 0 || buttonHold }
   function rest(on: boolean) {
     if (on === resting) return
     resting = on
@@ -1058,7 +1121,11 @@ async function boot(code?: Join) {
       tick(kind !== 'tap')
       if (mode === Mode.point) dismissHint('point')
     }
-    pad.onTouchChange = (touching) => { document.getElementById('pad')!.classList.toggle('active', touching); goFullscreen(); if (touching) pump(16.7) }
+    pad.onTouchChange = (touching) => {
+      document.getElementById('pad')!.classList.toggle('active', touching)
+      // Releasing controls before a camera dialog must not put a late fullscreen layer over it.
+      if (touching) { goFullscreen(); pump(16.7) }
+    }
     document.getElementById('gyro')!.addEventListener('click', () => { tick(); setGyro(!gyroOn) })
     document.getElementById('center')!.addEventListener('click', () => { tick(); recenterHere() })
     // The button sits on the trackpad, which captures every pointer: keep this one for the button.
@@ -1167,7 +1234,7 @@ async function boot(code?: Join) {
       if (sentController === was) toast(`${CONTROLLERS[was].name} isn’t on ${screenName()} now`)
       queueMicrotask(setMode)
     }
-    switcher.render(sorted, controllerNow(), screenName(), keyboard.open)
+    switcher.render(sorted, controllerNow(), screenName(), keyboard.open, !!layout.utilities?.includes('camera.hand'), !!handCamera)
     const isMusic = tab === 'drums' || tab === 'keys'
     if (isMusic !== musicActive) { musicActive = isMusic; musicWire.use(isMusic) }
     surface.classList.toggle('music-on', isMusic)
@@ -1577,6 +1644,7 @@ async function boot(code?: Join) {
       <div class="sheet settings glass" role="dialog" aria-label="Settings">
         <div class="sheet-head"><div class="grip" aria-hidden="true"></div><button class="icon-btn glass sheet-x" id="set-close" aria-label="Close">${ICONS.close}</button></div>
         <button class="set-row set-cam glass" id="scan-open">${ICONS.camera}<span>Scan a code<small>Connect another screen</small></span>${ICONS.right}</button>
+        ${layout.utilities?.includes('camera.hand') ? html`<button class="set-row glass" id="hand-settings">${ICONS.hand}<span>Hand camera<small>Control with your other hand</small></span>${ICONS.right}</button>` : ''}
         <p class="sheet-k"><b>01</b>Feel</p>
         <label class="bb-field"><span>Sensitivity</span><output id="gv"></output><input class="bb-range" type="range" id="gain" min="0.5" max="3" step="0.1"></label>
         <label class="bb-field"><span>Steadiness</span><output id="sv"></output><input class="bb-range" type="range" id="smooth" min="0" max="1" step="0.05"></label>
@@ -1601,6 +1669,8 @@ async function boot(code?: Join) {
     // inside the tap (browsers that tie a camera to a gesture keep it), and each takes over Settings' Back step.
     sheet.querySelector<HTMLButtonElement>('#connections-open')!.onclick = () => { close(true); openConnections() }
     sheet.querySelector<HTMLButtonElement>('#scan-open')!.onclick = () => { close(true); openConnections(true) }
+    const handSettings = sheet.querySelector<HTMLButtonElement>('#hand-settings')
+    if (handSettings) handSettings.onclick = () => { close(true); openHands() }
     const gain = sheet.querySelector<HTMLInputElement>('#gain')!
     const smooth = sheet.querySelector<HTMLInputElement>('#smooth')!
     const left = sheet.querySelector<HTMLInputElement>('#left')!
@@ -1689,6 +1759,17 @@ async function boot(code?: Join) {
 
   function pump(dt: number) {
     if (!surface || !link.ready) return
+    if (handCamera) {
+      const now = performance.now()
+      if (now - lastSend < 66) return
+      const neutral = emptyState()
+      neutral.seq = st.seq = (st.seq + 1) & 0xffff
+      neutral.t = Math.round((now - t0) * 1000) >>> 0
+      neutral.flags = handHold ? Flag.touching : 0
+      neutral.touches = handHold ? 1 : 0
+      if (link.sendState(encodeState(neutral))) lastSend = now
+      return
+    }
     if (control.sim && performance.now() - controlSent >= 33) {
       const state = control.sample(dt / 1000)
       const active = state.active && !document.hidden && (gyroOn || mode === Mode.point || mode === Mode.track && trackWay() === 'motion' || drums.aiming || keys.aiming || mode === Mode.gamepad && gamepad.spatialActive)

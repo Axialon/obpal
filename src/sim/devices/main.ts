@@ -180,7 +180,7 @@ if (logic.reset) {
 // The tray's reset: every unit home, and the device's own reset (a race, a game) where it has one. A guest's screen
 // only watches.
 if (!presence.shared.guest) quickAction({
-  id: 'reset', label: 'Reset', hint: logic.reset ? `${logic.resetLabel ?? 'Reset'}, and every unit home` : 'Every unit home', icon: 'reset',
+  id: 'reset', group: 'page', label: 'Reset', hint: logic.reset ? `${logic.resetLabel ?? 'Reset'}, and every unit home` : 'Every unit home', icon: 'reset',
   run: () => { $('home-all').click(); if (logic.reset) $('reset').click() },
 })
 
