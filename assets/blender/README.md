@@ -23,23 +23,47 @@ housing chamfers are 2 mm. Insets have a 1.5 mm Carbon seam, backed 1 mm below t
 Flat faces keep their own normals rather than becoming inflated smooth shells.
 Each rigid frame is merged by material. `compress.mjs` compresses the exported streams with
 meshoptimizer 1.1.1 (MIT), validates them by decoding, and writes `public/models/*.glb`.
-Positions retain 18 bits of exponential precision; normals retain 12. No textures are needed.
+Positions normally retain 18 bits of exponential precision; the v2 humanoids opt
+into 24 bits for their machined edge slivers. Normals retain 12 bits. No textures are needed.
 Intermediate exports stay under ignored `artifacts/codex-style/authored/`.
 
 `render_humanoids.py` produces the eight 3840×2160 turntable stills and the pair in
-the arena under `artifacts/humanoid/phase-3/renders/`. Add `-- --draft` for 1280×720
-iterations. These are original Cycles studio renders, with the same opaque kit
-finishes as the runtime; no downloaded environment or textures are used.
+the arena under `artifacts/humanoid/phase-3b/v2/renders/`. Add `-- --draft` for
+1280×720 iterations, or `-- --silhouettes` for transparent flat-black front/side
+images. These are original Cycles studio renders. `humanoid_surfaces.py` supplies
+the same linear colours, roughness and metalness as the runtime's three primary
+robot finishes. The phone Viewer omits the obsidian/glass clearcoat lobe; smoked robot
+glass is opaque, and arena fins use one alpha pass. No downloaded environment or
+textures are used. The live scene approximates studio illumination with a static
+procedural reflection map and sole-contact gradients, not ray-traced reflections.
 
 Keel and Morrow retain the profile's complete pivot hierarchy at both LODs. A dot
 in an anatomical joint ID becomes an underscore in glTF, whose animation binding
 names exclude dots. `tests/humanoid-models.test.ts` compares every translation and
 parent to the live profile, sweeps each joint through both limits and checks all
-geometry, material, triangle and byte contracts. The lower LOD removes bearing
-segments and service details. The live rig uses 5.5/6.5 m hysteresis and preserves
-all angles during swaps. The arena has no separate LOD: its 4,972 triangles and
-four draws already fit its 15k budget. These visual shells are not manufacturing
-geometry or a physical self-collision model.
+geometry, material, triangle and byte contracts. It also checks limb coverage in
+folded poses and all three finger frames. Both LODs derive from the same machined
+shells; distant non-socket parts are simplified to fit the 10k budget. The live
+rig uses 5.5/6.5 m hysteresis and preserves all angles during swaps. The arena's
+7,360 triangles and six material batches fit its 15k budget without another LOD.
+
+`humanoid_clearance.py` cuts moving sleeve envelopes, expanded by 8 mm, from the
+fixed shoulder/hip shells and collar surround. It samples each independent axis
+at 17 positions; internal spherical bearings remain closed. The authoring audit
+uses actual segment/triangle intersections at 65 positions per axis, at both
+LODs, rather than bounding-box overlap. Run it with:
+
+```powershell
+& $env:BLENDER -b --factory-startup --python-exit-code 1 --python assets/blender/audit_humanoids.py
+```
+
+The audit writes `clearance.json` to a new temporary directory and fails for an
+exterior crossing outside the nested joint envelopes. Copy its evidence into
+`artifacts/` after the run. Its scope is adjacent exterior shells in independent
+sweeps; it is not a physical self-collision solver for arbitrary simultaneous
+angles or manufacturing certification. `scripts/humanoid-model-proof.mjs` adds
+the actual three.js desktop/phone views and per-joint sweep sheets to the guarded
+humanoid e2e run, again writing only to the test's temporary directory.
 
 Coordinates are metres, Y up, in the original procedural model's local frame. The export disables
 Blender's axis conversion intentionally. Named empty objects are the moving pivots; material names
@@ -55,7 +79,7 @@ authored assets. Until the mesh is in, the device's procedural rig is built (it 
 state) but kept out of view, and a small loading pill shows (`src/sim/kit/reveal.ts`, `loading.ts`);
 the finished device then eases in. The procedural rig is shown instead only if the mesh fails or
 is still missing after four seconds. Catalogue previews retain their lightweight procedural rigs.
-The production decoder uses WebAssembly; only `/sim/arm/` and `/sim/device/` permit
+The production decoder uses WebAssembly; `/sim/arm/`, `/sim/device/` and `/sim/humanoid/` permit
 `'wasm-unsafe-eval'`. Trusted Types and the `obpal-templates` policy remain enforced everywhere.
 
 `scripts/style-prototypes.mjs` writes regression evidence to a fresh temporary folder and prints

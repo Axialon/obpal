@@ -1,11 +1,30 @@
 /** The authored skins share the simulation's named frames, at both levels of detail. */
 import * as THREE from 'three'
 import { finishPrototype } from '../kit/prototype'
+import { obsidian, smokedGlass } from '../kit/surfaces'
 import type { RigProfile } from './profile'
 
 // glTF animation names cannot contain dots; the anatomical IDs remain unchanged.
 export const pivotName = (id: string) => id.replaceAll('.', '_')
 export const modelName = (profile: RigProfile) => (profile.id === 'morrow-v1' ? 'morrow' : 'keel')
+
+// Coarse-pointer Viewers omit the second specular lobe. The same shell colour,
+// roughness and environment reflection keep the material hierarchy on phones.
+const mobileFinishes = Object.fromEntries(
+  Object.entries({ obsidian, smokedGlass }).map(([name, source]) => {
+    const material = new THREE.MeshStandardMaterial({
+      color: source.color,
+      metalness: source.metalness,
+      roughness: source.roughness,
+    })
+    material.userData.simShared = true
+    return [name, material]
+  }),
+)
+export function finishHumanoid(scene: THREE.Group) {
+  const mobile = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches
+  finishPrototype(scene, mobile ? mobileFinishes : {})
+}
 
 /** Reject a whole asset before touching a live rig, including rotated or scaled frames. */
 export function modelPivots(scene: THREE.Group, profile: RigProfile) {
@@ -36,8 +55,9 @@ export function modelPivots(scene: THREE.Group, profile: RigProfile) {
   const scale = profile.height / 1.8
   for (const chain of profile.chains.filter((c) => c.group === 'arms')) {
     const first = validate(`${chain.id}.fingers`, [0, -0.08 * scale, -0.022 * scale], nodes.get(chain.end))
-    validate(`${chain.id}.tips`, [0, -0.035 * scale, 0], first)
+    const second = validate(`${chain.id}.tips`, [0, -0.035 * scale, 0], first)
+    validate(`${chain.id}.distal`, [0, -0.029 * scale, 0], second)
   }
-  finishPrototype(scene)
+  finishHumanoid(scene)
   return nodes
 }

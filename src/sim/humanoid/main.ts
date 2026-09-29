@@ -25,6 +25,7 @@ import { Contacts, PracticeMode } from './contacts'
 import { CALIBRATION_KEY, parseCalibration } from './calibration'
 import { WalkthroughView } from './walkthrough'
 import { FingerInput } from './fingers'
+import { lightArena, soleShadow } from './lighting'
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 applyTheme(initialTheme())
@@ -36,6 +37,7 @@ mountSimPanels('humanoid', 'Controls')
 const stage = createStage($('stage') as HTMLCanvasElement, initialTheme(), { maxDpr: 1.5, portraitFraming: true })
 addEventListener('bb-theme', (e) => stage.setTheme(themeById((e as CustomEvent<{ theme: string }>).detail.theme)))
 stage.renderer.shadowMap.enabled = false
+lightArena(stage)
 stage.scene.add(arena())
 const framing = {
   target: [0, 0.9, 0] as [number, number, number],
@@ -59,6 +61,13 @@ const actors = ['Keel', 'Morrow'].map((name, i) => {
   control.yaw = i ? Math.PI / 2 : -Math.PI / 2
   stage.scene.add(rig.root)
   rig.load()
+  const shadows = profile.chains
+    .filter((chain) => chain.group === 'legs')
+    .map((chain) => {
+      const mesh = soleShadow()
+      stage.scene.add(mesh)
+      return { joint: chain.end, mesh }
+    })
   return {
     id: `robot-${i + 1}`,
     name,
@@ -74,6 +83,7 @@ const actors = ['Keel', 'Morrow'].map((name, i) => {
     offset: new THREE.Vector3(),
     generation: -1,
     fingers: new FingerInput(),
+    shadows,
   }
 })
 let selected = 0,
@@ -285,7 +295,20 @@ const test =
   ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) &&
   ['humanoid', 'load'].includes(new URLSearchParams(location.search).get('test') ?? '')
 const injected = new Map<number, BodyInput>()
+let inspecting = false
 stage.onFrame = (t, dt) => {
+  for (const actor of actors)
+    for (const shadow of actor.shadows) {
+      const foot = actor.rig.point(shadow.joint)
+      shadow.mesh.position.set(foot.x, 0.002, foot.z - 0.035)
+      shadow.mesh.rotation.z = actor.rig.root.rotation.y
+      shadow.mesh.material.uniforms.strength.value = Math.max(0, 0.6 - Math.max(0, foot.y - 0.08) * 2)
+      shadow.mesh.visible = actor.rig.root.visible
+    }
+  if (test && inspecting) {
+    stage.view.invalidate()
+    return
+  }
   const begin = performance.now(),
     now = t * 1000,
     inputs = seats?.read(now),
@@ -434,6 +457,12 @@ if (test)
     __humanoid: {
       actors,
       camera: stage.camera,
+      /** Loopback-only stills and joint sweeps use the actual live renderer and skins. */
+      inspect: () => {
+        inspecting = true
+        stage.controls.enabled = false
+        return stage
+      },
       contacts,
       walkthrough,
       inject: (index: number, state: BodyState) => {

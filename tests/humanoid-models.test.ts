@@ -77,6 +77,45 @@ describe('authored humanoids', () => {
     ['morrow', MORROW],
   ] as const) {
     for (const suffix of ['', '-lod']) {
+      it(`${name}${suffix} keeps covered limb centre lines through folded poses`, async () => {
+        const scene = await load(name + suffix),
+          nodes = modelPivots(scene, profile)
+        const surface = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide })
+        scene.traverse((object) => {
+          if ((object as THREE.Mesh).isMesh) (object as THREE.Mesh).material = surface
+        })
+        const ray = new THREE.Raycaster(),
+          direction = new THREE.Vector3(0.815, 0.319, 0.48).normalize()
+        for (const fraction of [0, 0.5, 1]) {
+          const q = neutral(profile)
+          for (const chain of profile.chains) {
+            const joint = profile.joints.find((j) => j.id === chain.joints[3])!
+            q[joint.id] = joint.limits[1] * fraction
+          }
+          for (const joint of profile.joints)
+            nodes.get(joint.id)!.quaternion.setFromAxisAngle(v(joint.axis), q[joint.id])
+          scene.updateMatrixWorld(true)
+          for (const chain of profile.chains) {
+            const ids = [chain.joints[0], chain.joints[3], chain.end]
+            for (let segment = 0; segment < 2; segment++) {
+              const a = nodes.get(ids[segment])!.getWorldPosition(new THREE.Vector3())
+              const b = nodes.get(ids[segment + 1])!.getWorldPosition(new THREE.Vector3())
+              for (let i = 0; i <= 24; i++) {
+                const point = a.clone().lerp(b, i / 24)
+                ray.set(point, direction)
+                // Signed crossings support the deliberately overlapping closed
+                // parts in each material batch; simple odd/even would cancel them.
+                const winding = ray.intersectObject(nodes.get(chain.joints[0])!, true).reduce((sum, hit) => {
+                  const normal = hit.face!.normal.clone().transformDirection(hit.object.matrixWorld)
+                  return sum + Math.sign(normal.dot(direction))
+                }, 0)
+                expect(winding, `${chain.id}, segment ${segment}, sample ${i}, fold ${fraction}`).toBeGreaterThan(0)
+              }
+            }
+          }
+        }
+        surface.dispose()
+      })
       it(`${name}${suffix} preserves every pivot through independent full-limit sweeps`, async () => {
         const scene = await load(name + suffix),
           nodes = modelPivots(scene, profile)
@@ -101,6 +140,7 @@ describe('authored humanoids', () => {
           const finger = scene.getObjectByName(`${side}_arm_fingers`)!
           expect(finger.parent).toBe(nodes.get(`${side}.arm.wrist.yaw`))
           expect(scene.getObjectByName(`${side}_arm_tips`)!.parent).toBe(finger)
+          expect(scene.getObjectByName(`${side}_arm_distal`)!.parent).toBe(scene.getObjectByName(`${side}_arm_tips`))
         }
       })
     }
@@ -110,6 +150,7 @@ describe('authored humanoids', () => {
       expect(high.min.distanceTo(low.min)).toBeLessThan(0.016)
       expect(high.max.distanceTo(low.max)).toBeLessThan(0.016)
       expect(high.min.y).toBeGreaterThanOrEqual(-0.001)
+      expect(Math.abs(high.max.y - profile.height)).toBeLessThan(0.012)
     })
   }
   it('rejects absent, duplicate, translated, scaled, rotated and reparented pivots before a swap', async () => {

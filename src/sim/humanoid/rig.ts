@@ -20,7 +20,7 @@ export class Rig {
   private level = 0
   private loaded = false
   private grips: Grip = { left: 0, right: 0 }
-  private fingers: { side: keyof Grip; first: THREE.Object3D; tip: THREE.Object3D }[] = []
+  private fingers: { side: keyof Grip; first: THREE.Object3D; tip: THREE.Object3D; distal: THREE.Object3D }[] = []
   constructor(
     readonly profile: RigProfile,
     readonly variant = 0,
@@ -101,8 +101,9 @@ export class Rig {
     for (const side of ['left', 'right'] as const) {
       const group = groups[this.profile.joints.findIndex((j) => j.id === `${side}.arm.wrist.yaw`)]
       const first = group?.getObjectByName(`${side}_arm_fingers`),
-        tip = group?.getObjectByName(`${side}_arm_tips`)
-      if (first && tip) this.fingers.push({ side, first, tip })
+        tip = group?.getObjectByName(`${side}_arm_tips`),
+        distal = group?.getObjectByName(`${side}_arm_distal`)
+      if (first && tip && distal) this.fingers.push({ side, first, tip, distal })
     }
     this.root.userData.lods = this.skins.filter(Boolean).length
     this.grip(this.grips)
@@ -110,10 +111,11 @@ export class Rig {
   /** Collective fingers suit these three- and four-finger hands, with bounded knuckle travel. */
   grip(value: Grip) {
     this.grips = value
-    for (const { side, first, tip } of this.fingers) {
+    for (const { side, first, tip, distal } of this.fingers) {
       const curl = THREE.MathUtils.clamp(value[side], 0, 1)
       first.rotation.x = (curl * Math.PI) / 3
-      tip.rotation.x = (curl * Math.PI) / 2
+      tip.rotation.x = (curl * Math.PI) / 3
+      distal.rotation.x = (curl * Math.PI) / 3
     }
   }
   /** Hysteresis keeps distant actors stable when an orbit straddles the LOD boundary. */

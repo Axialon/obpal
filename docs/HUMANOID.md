@@ -252,6 +252,83 @@ are emulated. Physical-phone fps, camera/render contention, thermals and real
 motion-to-display latency remain **unverified**. Hardware and real leg enable are
 still phase 4; no physical-driver support is implied by the meshes.
 
+## Phase 3b model revision
+
+Keel and Morrow v2 keep the approved heights, joint-centre spans, named frames and
+control limits. Their skins now use tapered octagonal lofts, bevelled panels,
+closed articulation bearings, a column inside the collar, overlapping abdominal
+lamellae and ankle actuator housings. Keel has a broad shoulder cap and deep split
+shield; Morrow retains its open oval, offset ribs and crescent guards, with a
+swept dorsal crescent visible in side silhouette. Both hands have a palm, thumb,
+separated digits and three articulated phalanges. BODY and optional HAND retain
+their existing responsibilities; only the visual finger linkage gains a frame.
+
+`humanoid_surfaces.py` extends the shared kit with gloss obsidian, satin graphite
+and smoked glass. Those three primary finishes use matching linear colours,
+roughness and metalness in Blender and three.js. Lime is confined to the brow and sternum/core.
+Coarse-pointer Viewers use standard-material shell/glass reflections without the
+second clearcoat lobe. Robot glass remains opaque; perimeter fins use a single
+transparent pass. The arena is an 8 × 8 m deck with half-metre grid lines, 1/2/3 m
+distance rings, two illuminated corners, twenty glass fins and a supported halo.
+The live scene uses a static procedural studio reflection map and soft sole
+contact gradients. Cycles' ray-traced reflections are an offline approximation
+target, not an extra real-time rendering pass.
+
+The authoring pipeline welds bearing seams before cutting. Expanded copies of the
+moving sleeves machine the shoulder/hip openings through 17 positions per axis,
+with an 8 mm tool margin. Both LODs retain those concave sockets; simplification
+is restricted to the other parts. An independent authoring audit tests actual
+tessellated triangle intersections at 65 positions per joint and both LODs.
+Nested bearing volumes are intentional overlaps. This is an adjacent-shell
+visual audit, not a whole-body physical collision solver: arbitrary simultaneous
+joint combinations can still self-contact, and the meshes do not certify real
+hardware clearance. The existing joint limits are unchanged.
+
+Meshopt remains the existing compressor and decoder. These four robot assets opt
+into 24-bit exponential position precision to preserve the machined edge slivers;
+other kit assets keep 18 bits, and normal streams keep 12 bits. Export checks
+repair only corner normals that oppose their final triangles after batching.
+All geometry and materials remain original, texture-free and MIT-credited.
+
+The final compressed assets measure:
+
+| Asset | Bytes | Triangles | Material batches |
+| --- | ---: | ---: | ---: |
+| Keel | 489,688 | 22,788 | 41 |
+| Keel distant LOD | 279,420 | 8,856 | 41 |
+| Morrow | 454,940 | 22,752 | 41 |
+| Morrow distant LOD | 256,436 | 9,078 | 41 |
+| Arena | 113,048 | 7,360 | 6 |
+
+Both heroes and the arena total 1,057,676 bytes, 52,900 triangles and 88 material
+batches before scene effects. Every asset stays within its triangle and byte
+budget, with zero textures. The clearance audit passed **8,060 sampled poses**
+with zero adjacent exterior-shell crossings. The 22 model contract tests also
+cover every named pivot, both LODs, compressed normals and 2,400 limb-centre
+coverage samples through straight, halfway and folded poses. Visual sweep sheets
+record 1,054 additional poses in the live three.js scene.
+
+The final five-minute PC run used both hero meshes with synthetic BODY motion,
+DPR 1 and Chromium/ANGLE on an RTX 4090. It measured **17,929 frames in 300.210
+seconds**, raw frame-interval p95 **16.90 ms**, retarget/contact logic p95
+**0.60 ms**, render submission p95 **0.70 ms** and GPU timer p95 **3.44 ms**.
+The scene rendered **93 draws and 53,004 triangles**. Logic stayed below 2 ms;
+combined p95 logic/submission/GPU cost was 4.74 ms against the 16.7 ms budget.
+Raw frame intervals include scheduling jitter and are reported separately.
+This run does not measure simultaneous camera inference or establish the
+physical-phone 60 fps target.
+
+After merging master `797c381`, all four typechecks and **2,148 unit tests** passed
+(14 skipped). The full sims suite passed **359/359**, including the shared button
+checks, and pages passed **59/59**. The Desktop guard reported **no new sessions**:
+19 test-browser lines before and after. No final-suite flake needed a rerun.
+
+Evidence is under `artifacts/humanoid/phase-3b/`: preserved `v1/`, final `v2/`,
+3840 × 2160 comparisons in `comparisons/`, a native-64-pixel silhouette sheet,
+desktop/phone three.js views, per-joint sweep sheets and raw performance data.
+Phone viewports are emulated. Physical-phone fps, camera/render contention,
+thermals and real motion-to-display latency remain **unverified**.
+
 ## Open decisions — decided by the owner (2026-09-30)
 
 1. **Decided:** Keel and Morrow, including their names, are approved for phase 3. An octopus bot follows in a separately planned phase 6, after humanoid models and motion testing. Rig geometry, joints and chains remain profile data; nothing octopus-specific ships now.

@@ -283,7 +283,7 @@ def cable(parent, points, radius=.002, material='carbon'):
     return o
 
 
-def export(name):
+def export(name, repair_normals=False, position_bits=18):
     """Merge by material inside each rigid pivot, keeping all control frames separate."""
     bpy.ops.object.select_all(action='DESELECT')
     groups = [o for o in bpy.context.scene.objects if o.type == 'EMPTY']
@@ -308,6 +308,20 @@ def export(name):
             bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
             bm.to_mesh(parts[0].data)
             bm.free()
+            if repair_normals:
+                # A swept Boolean can reverse an internal socket face when the
+                # material batch is oriented. Keep all valid weighted corners;
+                # rebuild only those pointing behind their final triangle.
+                data = parts[0].data
+                data.calc_loop_triangles()
+                normals = [corner.vector.copy() for corner in data.corner_normals]
+                for tri in data.loop_triangles:
+                    a, b, c = [data.vertices[index].co for index in tri.vertices]
+                    normal = (b-a).cross(c-a).normalized()
+                    if sum((normals[index] for index in tri.loops), Vector()).dot(normal) < .01:
+                        for index in tri.loops:
+                            normals[index] = normal
+                data.normals_split_custom_set(normals)
     out = ROOT / 'artifacts/codex-style/authored'
     out.mkdir(parents=True, exist_ok=True)
     raw = out / (name + '.glb')
@@ -315,4 +329,4 @@ def export(name):
                               export_texcoords=False, export_normals=True, export_materials='EXPORT',
                               export_cameras=False, export_lights=False, export_animations=False,
                               export_extras=False, export_attributes=False)
-    subprocess.run(['node', str(ROOT / 'assets/blender/compress.mjs'), str(raw), name], check=True, cwd=ROOT)
+    subprocess.run(['node', str(ROOT / 'assets/blender/compress.mjs'), str(raw), name, str(position_bits)], check=True, cwd=ROOT)

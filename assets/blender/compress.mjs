@@ -4,7 +4,9 @@ import { MeshoptEncoder } from 'meshoptimizer/encoder'
 import { MeshoptDecoder } from 'meshoptimizer/decoder'
 
 await Promise.all([MeshoptEncoder.ready, MeshoptDecoder.ready])
-const [input, name] = process.argv.slice(2)
+const [input, name, precision = '18'] = process.argv.slice(2)
+const positionBits = Number(precision)
+if (!Number.isInteger(positionBits) || positionBits < 18 || positionBits > 24) throw new Error('Position precision must be 18–24 bits')
 if (!/^[a-z][a-z0-9-]*$/.test(name)) throw new Error('Invalid model name')
 const raw = await readFile(input), jsonLength = raw.readUInt32LE(12)
 const doc = JSON.parse(raw.subarray(20, 20 + jsonLength).toString())
@@ -22,7 +24,7 @@ for (const mesh of doc.meshes) for (const primitive of mesh.primitives) {
     const mode = semantic === 'indices' ? 'TRIANGLES' : 'ATTRIBUTES'
     let filter = 'NONE'
     if (a.componentType === 5126) {
-      source = MeshoptEncoder.encodeFilterExp(new Float32Array(source.buffer), a.count, size, semantic === 'POSITION' ? 18 : 12, 'SharedComponent')
+      source = MeshoptEncoder.encodeFilterExp(new Float32Array(source.buffer), a.count, size, semantic === 'POSITION' ? positionBits : 12, 'SharedComponent')
       filter = 'EXPONENTIAL'
     }
     const compressed = MeshoptEncoder.encodeGltfBuffer(source, a.count, size, mode)
