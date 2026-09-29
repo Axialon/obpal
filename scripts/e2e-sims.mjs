@@ -30,6 +30,7 @@ import { runLoad } from './e2e-load.mjs'
 import { simsStrip } from './sims-strip.mjs'
 import { runPanels } from './e2e-panels.mjs'
 import { runArmLive } from './e2e-arm-live.mjs'
+import { runHumanoid } from './e2e-humanoid.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
 
 const HEADED = process.argv.includes('--headed')
@@ -156,7 +157,8 @@ async function phone(invite, { xr = true, way = 'motion' } = {}) {
 }
 
 try {
-  if (ONLY_PANELS) await runPanels(local, check)
+  if (process.env.OBPAL_E2E_SIMS_ONLY === 'humanoid') await runHumanoid(local, check)
+  else if (ONLY_PANELS) await runPanels(local, check)
   else {
   console.log('ob.Pal sims e2e')
   // ---- robot arm ----
@@ -526,6 +528,7 @@ try {
   await runAudio(local, check)
   await runPanels(local, check)
   await runArmLive(local, check)
+  await runHumanoid(local, check)
   }
   }
   await check('no Content Security Policy violations on any page', cspCheck)

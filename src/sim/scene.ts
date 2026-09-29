@@ -73,7 +73,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   const remote = await Remote.create({ appName: o.appName, layout: o.layout, seats: 8 })
   holdForPhone(remote)
   const query = new URLSearchParams(location.search)
-  const control = new ControlSession(remote, query.get('d') ?? (location.pathname.includes('/arm/') ? `arm-${query.get('kind') ?? 'arm5'}` : 'arena'))
+  const control = new ControlSession(remote, query.get('d') ?? (location.pathname.includes('/arm/') ? `arm-${query.get('kind') ?? 'arm5'}` : location.pathname.includes('/humanoid/') ? 'humanoid' : 'arena'))
   const claims = new Claims()
   const approved = new Set<string>()
   const pending = new Set<string>()

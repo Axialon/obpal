@@ -252,7 +252,7 @@ export async function runQuick(browser, origin, checkIt) {
     } finally { await context.close() }
   })
 
-  await check('quick actions: a sim offers all six, each does its job, and the tray keeps clear of the dock, the windows and the chip', async () => {
+  await check('quick actions: a sim offers its actions, each does its job, and the tray keeps clear of the dock, the windows and the chip', async () => {
     const { page, context, errors } = await open(browser, origin, '/sim/drone/')
     try {
       await page.waitForFunction(() => window.__device && document.querySelector('.quick-tray [data-quick="camera"]') && document.querySelector('.quick-tray [data-quick="sound"]'), null, { timeout: 20000 })
@@ -338,7 +338,7 @@ export async function runQuick(browser, origin, checkIt) {
     } finally { await context.close() }
   })
 
-  await check('quick actions: the viewer offers all six; the camera moves, reset brings it home, theme opens the picker', async () => {
+  await check('quick actions: the viewer offers its actions; the camera moves, reset brings it home, theme opens the picker', async () => {
     const { page, context, errors } = await open(browser, origin, '/view/')
     try {
       await page.waitForFunction(() => window.__viewer && document.querySelector('.quick-tray [data-quick="sound"]'), null, { timeout: 20000 })

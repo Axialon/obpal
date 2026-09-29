@@ -73,8 +73,8 @@ function groundTexture(floor: string, grid: string) {
   return tex
 }
 
-export function createStage(canvas: HTMLCanvasElement, theme: Theme): Stage {
-  const view = simView(canvas, { onResize: () => { stage.resize(); stage.frame(framing) }, params: { alpha: true } })
+export function createStage(canvas: HTMLCanvasElement, theme: Theme, options: { maxDpr?: number; portraitFraming?: boolean } = {}): Stage {
+  const view = simView(canvas, { onResize: () => { stage.resize(); stage.frame(framing) }, params: { alpha: true }, ...options })
   const renderer = view.renderer
   renderer.toneMapping = THREE.ACESFilmicToneMapping
   renderer.toneMappingExposure = 0.95
@@ -179,6 +179,11 @@ export function createStage(canvas: HTMLCanvasElement, theme: Theme): Stage {
       const control = simPanels().get('controls'), panel = control?.visible ? control.placement.rect : null
       const top = 64
       if (panel && panel.x < 80 && panel.w < w / 2) { camera.setViewOffset(w, h, -(panel.x + panel.w) / 2, 0, w, h); free = { w: w - panel.x - panel.w, h: h - top } }
+      else if (options.portraitFraming && panel && w < h && panel.y > 128) {
+        // Keep the whole figure above a bottom panel, below the page's status strip.
+        camera.setViewOffset(w, h, 0, (h - 128 - panel.y) / 2, w, h)
+        free = { w, h: Math.max(120, panel.y - 128) }
+      }
       else { camera.clearViewOffset(); free = { w, h: h - top } }
       // The loading pill stands where the device will: in the middle of what the panel leaves free.
       placeLoading(w - free.w + free.w / 2)

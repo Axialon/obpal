@@ -102,7 +102,7 @@ function deployRecovery(): Plugin {
  * arriving. A page's own scripts are one module graph that runs only when all of it has come, so this one is an entry
  * of its own (simEarly), named in the page just before them; its few imports are preloaded beside it.
  */
-const EARLY_PAGES = ['/sim/device/index.html', '/sim/arm/index.html']
+const EARLY_PAGES = ['/sim/device/index.html', '/sim/arm/index.html', '/sim/humanoid/index.html']
 function simEarly(): Plugin {
   return {
     name: 'obpal-sim-early',
@@ -390,7 +390,7 @@ export default defineConfig({
         // Controller floor from PLAN.md: Safari 15, Chromium 95, Firefox 115.
         target: ['safari15', 'chrome95', 'firefox115', 'edge95'],
         rollupOptions: {
-          input: { index: 'index.html', controller: 'p/index.html', viewer: 'view/index.html', sponsor: 'sponsor/index.html', donate: 'donate/index.html', link: 'link/index.html', privacy: 'privacy/index.html', sims: 'sim/index.html', simArm: 'sim/arm/index.html', simArena: 'sim/arena/index.html', simDevice: 'sim/device/index.html', simEarly: 'src/sim/kit/early.ts', catalogue: 'catalogue/index.html', embed: 'embed/index.html', buttons: 'buttons/index.html' },
+          input: { index: 'index.html', controller: 'p/index.html', viewer: 'view/index.html', sponsor: 'sponsor/index.html', donate: 'donate/index.html', link: 'link/index.html', privacy: 'privacy/index.html', sims: 'sim/index.html', simArm: 'sim/arm/index.html', simArena: 'sim/arena/index.html', simHumanoid: 'sim/humanoid/index.html', simDevice: 'sim/device/index.html', simEarly: 'src/sim/kit/early.ts', catalogue: 'catalogue/index.html', embed: 'embed/index.html', buttons: 'buttons/index.html' },
         },
       },
     },

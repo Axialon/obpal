@@ -7,8 +7,11 @@ import { ICONS } from './icons'
 import { setMarkup } from './markup'
 
 let mounted: BodyInput | null = null
+let toggle: (() => void) | null = null
+/** Another explicit camera button may share the same capture lifetime as the shortcut. */
+export function toggleBodyCapture() { toggle?.() }
 
-export function mountBodyCapture(): BodyInput {
+export function mountBodyCapture(options: { beforeOpen?: () => boolean; closed?: () => void } = {}): BodyInput {
   if (mounted) return mounted
   const input = new BodyInput()
   mounted = input
@@ -21,10 +24,11 @@ export function mountBodyCapture(): BodyInput {
   function stop() { camera?.close() }
   function open() {
     if (camera) { stop(); return }
+    if (options.beforeOpen && !options.beforeOpen()) return
     const view = new CameraView({ mode: 'body', local: true, measurements: test, changed,
       typed: stop,
       reset: () => { tracker?.stop(); tracker = null; input.reset() },
-      close: () => { tracker?.stop(); tracker = null; input.reset(); camera = null; changed() },
+      close: () => { tracker?.stop(); tracker = null; input.reset(); camera = null; changed(); options.closed?.() },
       ready: (video, overlay) => {
         if (camera !== view) return
         tracker?.stop(); input.reset()
@@ -43,6 +47,7 @@ export function mountBodyCapture(): BodyInput {
     view.open()
     changed()
   }
+  toggle = open
   quickAction({ id: 'body', group: 'page', label: 'Body camera', hint: 'Camera frames stay on this device', icon: 'camera', pressed: () => camera?.capturing ?? false, run: open })
   // Arms already use all four page shortcuts, including Stop. Keep capture available in their camera panel too.
   const glow = document.querySelector('#glow-cam')

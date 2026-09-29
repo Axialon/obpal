@@ -118,7 +118,7 @@ const QUAD_FRAG = 'uniform sampler2D tMap; varying vec2 vUv; void main() { gl_Fr
  * The drawing for a sim's canvas. `onResize` hears whenever the canvas's size (CSS px) changes, for the camera's aspect
  * and view; before the first frame, the sim sets them up from `width` and `height`.
  */
-export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h: number): void; params?: WebGLRendererParameters }): SimView {
+export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h: number): void; params?: WebGLRendererParameters; maxDpr?: number }): SimView {
   const contactTest = new URLSearchParams(location.search).get('test') === 'contact'
   const loadTest = new URLSearchParams(location.search).get('test') === 'load'
   let recordContacts: (() => void) | undefined
@@ -139,7 +139,8 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
   let W = canvas.clientWidth || innerWidth, H = canvas.clientHeight || innerHeight
   /** The canvas in device pixels, exactly, where the browser says. */
   let device: [number, number] | null = null
-  let steps = pixelLadder(devicePixelRatio || 1, coarse, { w: W, h: H })
+  const ladder = () => pixelLadder(devicePixelRatio || 1, coarse, { w: W, h: H }).filter(s => s.pr <= (opts.maxDpr ?? Infinity))
+  let steps = ladder()
   const quality = new URLSearchParams(location.search).get('quality')
   const pin = () => { const at = quality === null ? -1 : pickPixels(steps, quality, devicePixelRatio || 1, coarse); return at < 0 ? null : at }
   let pinned = pin()
@@ -203,8 +204,7 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
 
   /** The canvas's size or density changed: a ladder for it, the same kind of step on it, and the governor learns it again. */
   function rescale() {
-    const dpr = devicePixelRatio || 1
-    const next = pixelLadder(dpr, coarse, { w: W, h: H })
+    const next = ladder()
     if (JSON.stringify(next) !== JSON.stringify(steps)) {
       const was = steps[governor.level]
       steps = next

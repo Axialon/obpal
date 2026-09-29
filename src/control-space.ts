@@ -15,7 +15,7 @@ export const CONTROL_SPACES: Record<string, ControlSpace> = {
   airhockey: space('point', 30), pinball: space('tilt', 18, 18), football: space('settings', 25, 20),
   marblerun: space('tilt', 20, 20), planetary: space('drive', 30), telescope: space('point'),
   pendulum: space('tilt', 25, 20), trebuchet: space('settings', 30), slider: space('point'), jib: space('point'),
-  arena: space('tilt', 25, 25), viewer: space('tool'),
+  arena: space('tilt', 25, 25), humanoid: space('tilt', 25, 25), viewer: space('tool'),
 }
 export const unit = (n: number) => Math.max(-1, Math.min(1, Number.isFinite(n) ? n : 0))
 /** Dead zone in degrees, with continuous full travel beyond it. */

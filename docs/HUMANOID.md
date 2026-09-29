@@ -1,6 +1,6 @@
 # Humanoid: full-body capture and robot following
 
-Approved Phase 0 plan, researched 2026-09-30 against master `be50c71`. Phase 1 implementation and measured evidence are recorded below; all other numbers remain proposed targets, not hardware safety ratings. Each phase ends with coordinator review, merge and deployment.
+Approved Phase 0 plan, researched 2026-09-30 against master `be50c71`. Phase 1 and 2 implementation and measured evidence are recorded below; all other numbers remain proposed targets, not hardware safety ratings. Each phase ends with coordinator review, merge and deployment.
 
 ## Capture and transport
 
@@ -68,7 +68,7 @@ Measure median user segment lengths during one second standing, arms apart. Norm
 
 For shoulder–elbow–wrist or hip–knee–ankle, robot lengths `a,b` and target distance `d` give flexion `acos(clamp((d²−a²−b²)/(2ab),−1,1))`, with zero straight. Clamp reach to `|a−b|+ε … a+b−ε`. Proximal offset is `acos(clamp((a²+d²−b²)/(2ad),−1,1))`; place the middle joint in the observed bend plane. Retain the previous pole near straightness, preventing elbow/knee flips. Decompose into the profile's joint axes, clamp, recompute forward kinematics and report unreachable residuals. Heel-to-toe direction sets foot pitch/yaw; ground normal sets ankle roll.
 
-Mirror reflects calibrated x and swaps left/right landmark pairs before solving; rebuild proper rotation frames, never reflect quaternion components. Switching mirror resets calibration and cannot occur while hardware is live.
+Mirror reflects calibrated x and swaps left/right landmark pairs before solving; rebuild proper rotation frames, never reflect quaternion components. Switching mirror resets tracking and contact anchors; derived calibration remains anatomical and reusable. Hardware mode will refuse mirror changes while live.
 
 Sim contact engages after 80 ms with sole height <2 cm and speed <0.1 m/s; release above 4 cm or 0.2 m/s. Lock soles, adjust pelvis height, keep approximate centre of mass inside the support polygon with 2 cm margin. Blend incompatible poses toward support. This visual heuristic cannot stabilise real legs.
 
@@ -78,9 +78,9 @@ At 30 fps: capture wait 33 ms + inference 25 + transport 15 + filter 20 + retarg
 
 ## Sim experience
 
-`/sim/humanoid/` opens into robot/arena, with Pair, Camera and Switch controller in the shortcuts dock. Dark frost, ob.Pal typography and lime status marks frame the scene; one strip shows seat/input/quality. Body opens on a tap with head/feet guides. Default: standing auto-calibration; optional one-second T-pose refines shoulders. Classical play needs no calibration.
+`/sim/humanoid/` opens into robot/arena, with Pair, Camera and Switch controller in the shortcuts dock. Dark frost, ob.Pal typography and lime status marks frame the scene; one strip shows seat/input/quality. Body opens on a tap with head/feet guides. Standing auto-calibration and mirror are on by default, with the optional eight-chain range walkthrough approved below. Classical play needs no calibration.
 
-Reuse `Remote` participants/claims and `src/sim/devices/seats.ts`: two seats, one actor per claim, host-authoritative contacts/scoring. Webcam reserves one local seat; phones track one person each. Source changes release claims/anchors; disconnect holds its actor. Spectators cannot drive or arm hardware.
+Reuse `Remote` participants/claims and `src/sim/devices/seats.ts`: two seats, one actor per claim, host-authoritative contacts/scoring. Webcam reserves one local seat; phones track one person each. Source changes reset tracking/contact anchors; closing the local webcam releases its claim and disconnect holds its actor. Spectators cannot drive or arm hardware.
 
 Priority: Stop/fault → held-deadman gate for hardware → joint/contact constraints → selected control source. Gamepad sticks, tilt or trackpad command root travel/yaw; BODY commands articulation. Procedural stepping owns legs while locomoting, blending back over 150 ms when stopped. An explicit preset takes its affected joints until completion/cancel, blending over 120 ms; manual input cancels it. Tracking loss never silently switches to another controller.
 
@@ -135,7 +135,7 @@ Each phase merges master, runs `pnpm run check`, then affected e2e suites. Tests
 | Phase | Files and work | Tests and acceptance | E2e suites |
 |---|---|---|---|
 | 1. Capture — implemented | New `packages/core/src/body.ts`, exports, `packages/host/src/{stream,remote,element}.ts`; `src/controller/body-{worker,tracker,signal}.ts`; shared `src/ui/body-capture.ts`, camera/controller/Viewer entry points; capability catalogue, model credits, protocol/privacy docs | `tests/body-{protocol,stream,tracker}.test.ts`: quantisation bounds, seq/time/gen wrap, loss/reacquisition, malformed packets, budget and HAND compatibility. Fake Y4M camera plus synthetic landmark seam: permission/close/background, host offline capture, no image traffic, source switching. ≥30 processed fps on reference device remains a device acceptance target; measured PC results below | camera, phone, embed, shared, catalogue; extension for Frame consumers |
-| 2. Sim | New `sim/humanoid/index.html`, `src/sim/humanoid/{main,rig,retarget,controls,contacts}.ts`; seats adapter, catalogue, Vite route/CSP/early entry, audio integration | `tests/humanoid-{ik,controls,contacts}.test.ts`: FK/IK roundtrip ≤1° or 1 cm on reachable fixtures, mirror twice identity, singularities finite, every joint bounded. Add `scripts/e2e-humanoid.mjs` to sims: two seats, calibration/loss, classical-only play, every preset and cancellation. Meet frame budget with procedural rigs | sims, shared, phone, catalogue, pages |
+| 2. Sim — implemented | New `sim/humanoid/index.html`, `src/sim/humanoid/{main,profile,ik,rig,retarget,calibration,walkthrough,controls,contacts}.ts`; seats adapter, catalogue, Vite route/early entry, audio integration | `tests/humanoid-{ik,calibration,controls,contacts}.test.ts`: FK/IK roundtrip ≤1° or 1 cm, mirror identity, finite singularities, bounded joints, monotonic/clamped/identity range mapping. `scripts/e2e-humanoid.mjs` under sims: two seats, loss, classical controls, presets, complete/skip/redo/persist/reset walkthrough and screenshots. Five-minute procedural-rig PC budget; physical phone acceptance remains unverified | sims, shared, phone, catalogue, pages |
 | 3. Models | `assets/blender/humanoids.py`, arena script, `public/models/*.glb`, kit model/material registrations and credits | Extend prototype/reveal tests: named pivots, joint sweeps, compressed bytes/triangles, cold/warm/failure reveal. Before/after screenshots at phone/desktop sizes; five-minute two-actor performance within budgets | sims, pages |
 | 4. Drivers | `src/sim/humanoid/{drivers,safety,live}.ts`, fake drivers; `hardware/humanoid/README.md` specifies guardian and Unitree bridge contract | Unit fault matrix and `scripts/e2e-humanoid-live.mjs` under sims: stale single joint amid fresh others, unknown/out-of-limit/NaN state, swapped mappings, caps, replay, deadman release/loss, browser freeze, socket/bridge death, stop acknowledgement, leg refusal, reconnect requiring rearm. Zero motion goals after Stop; fake guardian holds within 110 ms. No real robot endpoints | sims, phone, shared |
 | 5. Review | Relevant humanoid/UI files, `docs/DEVICE-CHECKLIST.md`, this plan, camera/help documentation | One bounded Opus design review: ≤30 minutes, ≤10 findings, one polish pass, then focused verification. Device checklist covers lighting/occlusion, seated use, permissions, thermal cadence, 60 fps Viewer and measured latency. Record unavailable devices as unverified; no invented passes | sims, camera, phone, shared, pages; catalogue/extension only if changed |
@@ -157,12 +157,37 @@ Evidence is under ignored `artifacts/humanoid/phase-1/`: `camera-results.json`, 
 
 After merging master `04f60bf`, all four typechecks pass and Vitest reports 2,071 passed, 14 skipped. The integrated e2e run passes camera 20/20, phone 35/35, embed 19/19, shared 7/7, catalogue 134/134 and extension 23/23. The Desktop guard reports 19 test-browser lines before and after, with no new sessions.
 
-**Unverified on real devices:** phone processed FPS and thermals, 60 fps capture, moving-person/occlusion accuracy, physical exposure-to-display/network latency, Safari/iOS lifecycle behaviour, and simultaneous mid-phone Viewer performance. No humanoid retargeting, models or real drivers ship in this phase. Phases 2–5 and the owner's decisions remain pending.
+**Unverified on real devices:** phone processed FPS and thermals, 60 fps capture, moving-person/occlusion accuracy, physical exposure-to-display/network latency, Safari/iOS lifecycle behaviour, and simultaneous mid-phone Viewer performance. Phase 1 shipped capture only; subsequent sim work and the owner's decisions are recorded below.
 
-## Open decisions for the owner
+## Phase 2 simulation — done (2026-09-30)
 
-1. Approve Keel and Morrow as the initial designs and working names?
-2. Accept standing auto-calibration with optional T-pose, and mirror on by default in the sim?
-3. Begin with cooperative practice/contact scoring, or competitive timed rounds? Proposed default: practice.
-4. Prioritise a guarded ROS 2 upper-body target or a specific Unitree variant for later commissioning? Proposed default: ROS contract first, both fake adapters.
-5. Keep real legs unavailable until separate commissioning evidence exists? Proposed default: yes; retain the explicit capability-gated enable design.
+`/sim/humanoid/` now has two procedural, independently limited Keel/Morrow rigs, existing exclusive seats, practice/free scoring, the six interruptible presets, classical root locomotion and BODY articulation including legs. Stop latches both actors; a disconnected seat holds its own actor. The shared BODY camera requires an explicit tap and reserves a local seat. Phone BODY uses the existing authenticated WebRTC path; spectators cannot take occupied seats. No hardware driver or leg lock is involved.
+
+Named profiles supply joints, chains, geometry, mirror mappings and optional torso/head anchors. Analytic two-link IK, anatomical scale normalisation, per-joint bounds and visual foot support are independent modules. A generic named-tree fixture proves that the rig does not require pelvis/head names. This is an extension boundary, not an octopus implementation. Pose Lite's sparse wrist/ankle observations cannot recover every axial rotation reliably; unknown axes retain default limits. Optional HAND finger articulation and final shell geometry belong with the phase 3 meshes. The procedural sim therefore advertises BODY capture only, avoiding a second landmarker whose output it cannot yet display.
+
+Standing proportions settle over one second; mirror starts on. Eight optional range steps animate one figure and record only sufficiently observed joint spans (at least 5°); skipped or unobserved axes use the reference mapping. Each measured user range maps to the selected robot's safe limits. Derived anatomical ranges and segment lengths share a profile version across Keel/Morrow and persist under the local seat or paired-device identity. The storage parser accepts only known finite range/length fields. Reset clears the measurements and the standing estimator. Images and landmarks are never stored. Privacy copy describes this optional derived-data exception.
+
+The walkthrough and controls use family glass, typography, actions and dock placement. Phone framing keeps both figures above the open controls, with orbit/recentre available; the closed-panel view gives the arena more space. Contact capsules count one hit per stroke, using hand motion relative to the shoulder so walking alone cannot score. Feedback uses a short ring, existing contact/footstep samples, servo synthesis and optional seat haptics. Reduced motion removes flashes; sound follows the existing activation/mute rules.
+
+After merging master `bbc4bb8`, all four typechecks pass and Vitest reports 2,121 passed, 14 skipped. Required e2e suites pass: sims 220/220, shared 7/7, phone 35/35, catalogue 134/134 and pages 59/59. The initial arm re-anchor timing flake passed when sims was rerun alone; it also passed on merged master. A final focused humanoid run passes 11/11 after correcting support-offset rotation. Rereading a BODY frame cannot extend its 250 ms freshness window. Every guard reports 19 test-browser lines before and after: **no new sessions**.
+
+Measured on PC headless Chromium (Playwright build 1237), NVIDIA RTX 4090 through ANGLE/D3D11, at 1440×900, two moving procedural actors with synthetic BODY input and no camera inference. After a two-second warmup, the final sample ran for 300.195 seconds:
+
+| Measurement | Result |
+|---|---|
+| Render intervals recorded | 17,999 |
+| Frame interval p95 | 16.90 ms |
+| Retarget/control/contact logic p95 | 0.60 ms |
+| Render submission CPU p95 | 0.50 ms |
+| GPU timer p95 | 2.58 ms |
+| Draw calls / triangles / DPR | 53 / 3,060 / 1 |
+
+Evidence lives in ignored `artifacts/humanoid/phase-2/`: `final/results.json`, raw `final/frame-times.json`, desktop/phone sim screenshots, all eight walkthrough steps at both sizes, check logs and guarded suite logs. Phone screenshots use an emulated Pixel 7 viewport, not phone hardware. Physical phone Viewer frame rate, camera/render contention, thermals, moving-person accuracy and real motion-to-display latency remain **unverified**. Procedural silhouettes are phase 2 stand-ins; approved Blender models and physical-driver safety work remain phases 3 and 4.
+
+## Open decisions — decided by the owner (2026-09-30)
+
+1. **Decided:** Keel and Morrow, including their names, are approved for phase 3. An octopus bot follows in a separately planned phase 6, after humanoid models and motion testing. Rig geometry, joints and chains remain profile data; nothing octopus-specific ships now.
+2. **Decided:** practice with contact scoring first. A mode enum separates scoring from movement; timed rounds come later.
+3. **Decided:** standing auto-calibration and mirror on by default, plus an optional guided personal range calibration. Eight short steps cover shoulders (raise, forward, out), elbows, wrists, spine twist/bend, hips, knees, ankles and head. Each shows one animated figure and a measured arc, with completion, skip and redo. Measured ranges map monotonically onto robot limits. Only derived ranges and segment lengths persist in localStorage per device; landmarks never persist. Classical play requires no calibration.
+4. **Decided:** ROS 2 first, with fake G1/H1 adapters in phase 4. Real legs remain locked pending separate commissioning. Sim legs follow BODY with visual foot-contact balance and classical locomotion; no sim feature inherits the hardware leg lock.
+5. **Decided:** npm 0.3.0 ships HAND and BODY together. Publishing belongs to the coordinator; this branch does not publish or change the release version.

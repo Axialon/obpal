@@ -104,7 +104,7 @@ export class Seats {
         touching: f.touching, drag: f.pad1, pan: f.pad2, pinch: f.zoom, twist: f.twist, tilt: f.tilt,
         hold: f.clutch && mode === Mode.hold ? f.qRel : null,
         point, spot: point && spotOf ? spotOf(point.x, point.y, p.id) : null,
-        pose: f.pose,
+        pose: f.pose, body: f.body,
         space: this.control?.aim(p.id, now) ?? undefined, scope: this.control?.scope(p.id),
         ...events,
       })

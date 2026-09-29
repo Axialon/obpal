@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="description" content="Move a full-body robot with your camera or phone. Calibrate your reach and practise together in the ob.Pal humanoid sim." />
+    <title>Humanoids · ob.Pal</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/plus-jakarta-sans-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/src/styles/fonts.css" />
+    <link rel="stylesheet" href="/src/family/family.css" />
+    <script type="module" src="/src/sim/humanoid/main.ts"></script>
+  </head>
+  <body class="sim humanoid">
+    <canvas id="stage" aria-label="Two humanoid robots in a practice arena"></canvas>
+    <header class="sim-top">
+      <div class="sim-left">
+        <a class="logo" href="/" aria-label="ob.Pal"><span class="mark-slot" data-mark></span><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span></a>
+        <button class="switch-btn" id="t-switch" type="button" aria-label="Blackboxes apps" title="Blackboxes apps"></button>
+        <a class="sim-crumb" href="/sim/">Sims</a>
+      </div>
+      <div class="chip glass" id="chip" hidden>
+        <button class="chip-who" id="chip-who" aria-label="People in this scene"><span class="chip-people" id="chip-people"></span><span class="chip-text" id="chip-text"></span></button>
+        <button class="chip-x" id="chip-invite" aria-label="Invite another device" aria-pressed="false" data-icon="plus"></button>
+        <button class="chip-x" id="chip-disc" aria-label="Disconnect everyone" data-icon="close"></button>
+      </div>
+    </header>
+    <div class="humanoid-strip glass" aria-label="Practice status"><span>Practice</span><b id="practice-score">0 · 0</b><span id="input-quality" role="status">Ready to move</span></div>
+    <aside class="sim-panel glass" aria-label="Humanoid controls">
+      <header class="sim-id"><p class="eyebrow">Full-body practice</p><h1>Humanoids</h1><p class="sim-lede">Your movement, their reach.</p></header>
+      <section class="sim-sec">
+        <header class="kit-card-head"><span class="kit-card-n">01</span><h2 class="kit-card-title">Your seat</h2></header>
+        <div class="sim-actions" id="seat-actions"><button class="kit-action" data-seat="0" aria-pressed="true">Keel</button><button class="kit-action" data-seat="1" aria-pressed="false">Morrow</button></div>
+        <p id="seat-owner" class="sim-lede">Choose a seat, then move or pair a phone.</p>
+        <div class="sim-actions"><button class="kit-action" id="local-body">Body camera</button><button class="kit-action" id="range-calibrate">Calibrate reach</button></div>
+        <label class="sim-auto"><input id="mirror" type="checkbox" checked /> Mirror movement</label>
+      </section>
+      <section class="sim-sec">
+        <header class="kit-card-head"><span class="kit-card-n">02</span><h2 class="kit-card-title">Moves</h2></header>
+        <div class="sim-actions humanoid-moves" id="moves"></div>
+        <div class="sim-actions humanoid-drive" aria-label="Locomotion"><button class="kit-action" data-drive="q" aria-label="Turn left">↶</button><button class="kit-action" data-drive="w" aria-label="Walk forward">↑</button><button class="kit-action" data-drive="e" aria-label="Turn right">↷</button><button class="kit-action" data-drive="a" aria-label="Walk left">←</button><button class="kit-action" data-drive="s" aria-label="Walk back">↓</button><button class="kit-action" data-drive="d" aria-label="Walk right">→</button></div>
+        <p class="sim-lede">WASD · Q/E turn · 1–6 moves</p>
+      </section>
+      <section class="sim-sec">
+        <header class="kit-card-head"><span class="kit-card-n">03</span><h2 class="kit-card-title">Practice</h2></header>
+        <label class="sim-auto"><input id="scoring" type="checkbox" checked /> Contact scoring</label>
+        <div class="sim-actions"><button class="kit-action" id="reset-score">Reset scores</button><button class="kit-action" id="reframe">Recentre view</button></div>
+      </section>
+      <div data-sound-home></div>
+      <div class="safety"><button class="estop" id="estop">Stop<kbd>Space</kbd></button><button class="kit-action" id="resume">Resume</button></div>
+      <details class="log-wrap"><summary>Activity record</summary><ol class="log" id="log"></ol></details>
+    </aside>
+    <div class="people glass" id="people" hidden role="dialog" aria-label="People in this scene"><ul class="people-list" id="people-list"></ul><button class="people-new" id="invite-new">New invite link</button></div>
+    <p class="note" id="note" role="status"></p>
+    <div class="bb-menu bb-glass switcher" id="switcher" aria-label="Blackboxes apps" hidden></div>
+  </body>
+</html>

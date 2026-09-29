@@ -23,7 +23,7 @@ import { nextBuild } from './lib/deploy-sim.mjs'
 const PORT = Number(process.env.OBPAL_E2E_WORKER_PORT) || 5179
 const HEADED = process.argv.includes('--headed')
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
-const PAGES = ['/', '/p/', '/view/', '/sim/', '/sim/arm/', '/sim/arena/', '/sim/device/', '/embed/', '/link/', '/catalogue/', '/buttons/', '/sponsor/', '/donate/', '/privacy/']
+const PAGES = ['/', '/p/', '/view/', '/sim/', '/sim/arm/', '/sim/arena/', '/sim/humanoid/', '/sim/device/', '/embed/', '/link/', '/catalogue/', '/buttons/', '/sponsor/', '/donate/', '/privacy/']
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const results = []
 async function check(name, fn) {
@@ -203,6 +203,7 @@ try {
     ['/sim/device/', ['.sim-top', '.sim-window[data-panel="controls"]', '.panel-dock']],
     ['/sim/arm/', ['.sim-top', '.sim-window[data-panel="controls"]', '.panel-dock']],
     ['/sim/arena/', ['.sim-top', '.sim-window[data-panel="controls"]', '.panel-dock']],
+    ['/sim/humanoid/', ['.sim-top', '.sim-window[data-panel="controls"]', '.panel-dock']],
     ['/embed/', ['.sim-top', '.sim-panel']],
     ['/view/', ['.topbar', '.catalog', '.presence-floating', '.obpal-chip .pill', '.obpal-chip .card']],
     ['/p/', ['.msg-card']],

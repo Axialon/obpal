@@ -48,6 +48,14 @@ export const DEVICE_IDS = deviceCards.map(c => c.id)
 /** The sims that aren't devices: the arena and the Viewer (the arms come from ./arms.ts). */
 const SCENES: SimCard[] = [
   {
+    id: 'humanoid', name: 'Humanoids', kind: 'Robot', category: 'robotics', href: '/sim/humanoid/', fresh: true,
+    blurb: 'Your whole body drives a robot. Find your reach and practise together.',
+    controllers: [Controller.gamepad, Controller.trackpad],
+    how: { 'face.gamepad': 'Sticks move · buttons choose moves', 'face.trackpad': 'Tilt or drag to move · tray chooses moves' },
+    teaches: 'Body capture, personal range calibration and two-seat practice.',
+    preview: () => import('./humanoid/rig').then(m => m.preview()),
+  },
+  {
     id: 'arena', name: 'Faction arena', kind: 'Game', href: '/sim/arena/',
     blurb: 'Four players, a phone each: tilt to roll, tap to dash, knock the others off the ring.',
     controllers: [Controller.trackpad, Controller.gamepad],
