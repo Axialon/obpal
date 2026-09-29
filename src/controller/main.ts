@@ -34,7 +34,7 @@ import '../styles/connections.css'
 import { calmMarks, icon, ICONS, logo, logoMark } from '../ui/icons'
 import { dismissHint, hint, repositionHints, setHintFrame } from '../ui/hints'
 import { enhanceSelects } from '../ui/kit/select'
-import { iconAction, SIM_ACTION_ICONS } from '../ui/kit/action'
+import { iconAction, SIM_ACTION_ICONS, statefulIconAction } from '../ui/kit/action'
 import { fitControlInk } from '../ui/kit/ink'
 import { Segmented } from '../ui/kit/segmented'
 import { setPopoverFrame } from '../ui/kit/place'
@@ -1004,7 +1004,12 @@ async function boot(code?: Join) {
       if (m.toast) toast(m.toast)
       if (m.haptic && hapticsKind() === 'vibrate') navigator.vibrate(m.haptic === 'bump' ? 20 : 9)
     }
-    if (surface && m.t !== 'pong' && m.t !== 'feedback') { renderTray(); setMode() }
+    if (surface && m.t === 'state' && Object.keys(m.values).every(k => k.startsWith('action.'))) {
+      for (const action of ['record', 'grip'] as const) {
+        const button = document.querySelector<HTMLButtonElement>(`#tray [data-id="${action}"]`)
+        if (button && control.sim) statefulIconAction(button, action, values[`action.${action}`] === true)
+      }
+    } else if (surface && m.t !== 'pong' && m.t !== 'feedback') { renderTray(); setMode() }
     if (surface && m.t === 'welcome') pump(16.7)
     if (m.t === 'welcome' || m.t === 'layout') buttons.changed()
   }
@@ -1509,8 +1514,8 @@ async function boot(code?: Join) {
         b.querySelector('.tray-label')!.textContent = word
         return b
       }
-      const position = tool('control.position', 'Set position', 'center', 'Position')
-      iconAction(position, 'center', 'Set position')
+      const position = tool('control.position', 'Set position', 'position', 'Position')
+      iconAction(position, 'position', 'Set position')
       position.onclick = () => { void requestMotionPermission(); tick(); recenterHere() }
       // Object or scene scope: one toggle, lit for the scene, drawn as what it reaches.
       const wide = control.scope === 'scene'
@@ -1562,6 +1567,7 @@ async function boot(code?: Join) {
         if (!ic) b.classList.add('text')
         else b.title = c.label
         if (control.sim && SIM_ACTION_ICONS[c.label]) iconAction(b, SIM_ACTION_ICONS[c.label], c.label)
+        if (control.sim && (c.id === 'record' || c.id === 'grip')) statefulIconAction(b, c.id, values[`action.${c.id}`] === true)
       }
       if (c.type === 'toggle') b.setAttribute('aria-pressed', String(!!values[c.id]))
       if (c.type === 'keyboard') b.setAttribute('aria-expanded', String(keyboard.open))

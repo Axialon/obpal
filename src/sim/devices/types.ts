@@ -165,6 +165,8 @@ export interface DeviceLogic {
   home(unit: number): void
   /** A unit's live readout for the panel (a speed, a height, a colour). */
   readout(unit: number): string
+  /** Authoritative state for action glyphs on the holder's phone. */
+  actionState?(unit: number): Record<string, boolean>
   /** Put the scene back as it was (the panel's button, named `resetLabel`), where there's more to it than its units. */
   reset?(): void
   readonly resetLabel?: string

@@ -37,6 +37,7 @@ export class GimbalLogic extends Machine {
   private zero: Quat = [0, 0, 0, 1]
   private last: Quat = [0, 0, 0, 1]
   private hand: { gen: number; zero: Quat; at: Quat } | null = null
+  actionState() { return { 'action.record': this.units[0].recording } }
   home() {
     this.zero = [...this.last]
     this.hand = null

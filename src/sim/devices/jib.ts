@@ -35,6 +35,7 @@ export class JibLogic extends Machine {
   readonly units = [0, 1].map(() => ({ swing: 0, boom: 0.15, pan: 0, tilt: -0.3, recording: false, takes: 0, time: 0, actions: 0 }))
   private angles = [[0, 0], [0, 0]]
   private zeros = [[0, 0], [0, 0]]
+  actionState(n: number) { return { 'action.record': this.units[n].recording } }
   home(n: number) { Object.assign(this.units[n], { swing: 0, boom: 0.15, pan: 0, tilt: -0.3, recording: false, time: 0 }); this.zeros[n] = [...this.angles[n]] }
   step(inputs: readonly (DeviceInput | null)[], delta: number) {
     const dt = timestep(delta)

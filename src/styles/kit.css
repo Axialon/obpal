@@ -334,7 +334,10 @@ button.kit-action:focus-visible, a.kit-action:focus-visible { outline: 2px solid
 button.kit-action:disabled { opacity: 0.45; cursor: default; transform: none; }
 .kit-action[hidden] { display: none; }
 button.kit-action[aria-pressed='true'] { border-color: rgb(var(--bb-accent-rgb) / 0.7); background: rgb(var(--bb-accent-rgb) / 0.12); box-shadow: var(--kit-ring); color: var(--bb-ink); }
-.kit-action > .ic { width: 16px; height: 16px; color: var(--bb-accent-text); }
+.kit-action > .ic { width: 16px; height: 16px; color: inherit; }
+button:is(.kit-action, .kit-icon-action)[aria-pressed='true'] > .ic { color: var(--bb-accent-text); }
+/* Accent-filled controls use the family's contrasting ink; neutral actions inherit their text colour. */
+button.tray-btn.kit-icon-action[aria-pressed='true'] > .ic { color: var(--bb-accent-ink); }
 button.kit-action.kit-primary { border-color: rgb(255 255 255 / 0.25); background: var(--bb-glass-accent); box-shadow: 0 10px 26px -14px rgb(var(--bb-accent-rgb) / 0.9), inset 0 1px 0 rgb(255 255 255 / 0.45); color: var(--bb-accent-ink); }
 button.kit-action.kit-primary > .ic { color: var(--bb-accent-ink); }
 @media (pointer: coarse) { button.kit-action, a.kit-action { height: 42px; } }

@@ -62,6 +62,7 @@ import { CapsuleGauge, RingGauge } from '../../ui/kit/gauge'
 import { Telemetry } from '../../ui/kit/telemetry'
 import { Readout } from '../../ui/kit/readout'
 import { iconAction } from '../../ui/kit/action'
+import { syncActionState } from '../action-state'
 import { mountQuick, quickAction, quickViews } from '../../ui/quick'
 import { HandCursor } from '../../ui/hand-cursor'
 import { holdReload } from '../../ui/recover'
@@ -359,11 +360,13 @@ function settle(a: Arm) {
   releaseCameraHand(a)
   if (!a.homing) for (let i = 0; i < GRIP; i++) a.joints[i].target = null
 }
-function toggleGrip(a: Arm) {
+function gripClosed(a: Arm) {
   const g = a.joints[GRIP]
   // Closed on a block, it's shut, however wide the block keeps it.
-  const shut = blocks.some((b) => b.by === a) || (g.target ?? g.angle) <= 0.5
-  g.target = shut ? 1 : 0
+  return blocks.some((b) => b.by === a) || (g.target ?? g.angle) <= 0.5
+}
+function toggleGrip(a: Arm) {
+  a.joints[GRIP].target = gripClosed(a) ? 1 : 0
 }
 function homeArm(a: Arm, by: string) {
   a.drive = null
@@ -1752,6 +1755,10 @@ function xButton(onclick: () => void) {
 }
 
 function renderReadouts() {
+  if (sim) syncActionState(sim.remote, who => {
+    const node = sim!.claims.held(who), f = node ? findNode(node) : null
+    return { 'action.grip': !!f && gripClosed(f.arm) }
+  })
   for (const a of arms) {
     // The joints its holder's strip drives, and those locked, marked in the grid as on the model.
     const armWho = sim?.claims.holder(a.id)

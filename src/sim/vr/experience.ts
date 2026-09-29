@@ -8,7 +8,7 @@ import type { SharedPresence, Pose } from './presence'
 import type { V3 } from './world'
 import '../../styles/presence.css'
 import { simPanels } from '../ui/panels'
-import { iconAction } from '../../ui/kit/action'
+import { iconAction, statefulIconAction } from '../../ui/kit/action'
 
 export type ViewMode = 'overview' | 'first-person' | 'xr'
 const UP = new THREE.Vector3(0, 1, 0)
@@ -33,6 +33,7 @@ export class Experience extends EventTarget {
   private reading: [number, number, number] | null = null
   private sensor = false
   private grab = false
+  private grabButton?: HTMLButtonElement
   private turning = false
   private lastPosition: THREE.Vector3 | null = null
   private lastYaw = 0
@@ -105,7 +106,7 @@ export class Experience extends EventTarget {
     toggle('Comfort shade', this.settings.vignette, v => { this.settings.vignette = v; this.save() })
     toggle('Drive with XR sticks', false, v => { this.drive = v })
     if (shared && !shared.guest) button('Share scene', () => { const url = shared.shareUrl(); if (url) { void navigator.clipboard?.writeText(url).then(() => { this.info.textContent = 'Scene link copied' }).catch(() => { this.showLink(url) }); this.showLink(url) } })
-    if (shared) button('Grab / release', () => { this.grab = !this.grab })
+    if (shared) this.grabButton = button('Grab / release', () => { this.grab = !this.grab; this.syncGrab() })
     const stop = document.getElementById('estop')
     if (stop) button('Stop arms', () => shared?.guest ? shared.stopArms() : stop.click())
     this.info = document.createElement('small'); this.info.setAttribute('role', 'status'); this.controls.append(this.info)
@@ -117,6 +118,7 @@ export class Experience extends EventTarget {
       if (glyph) iconAction(child, glyph, child.getAttribute('aria-label') || label)
     }
     this.controlsHome.prepend(this.controls)
+    this.syncGrab()
     this.bindLook()
     for (let n = 0; n < 2; n++) {
       const ray = renderer.xr.getController(n)
@@ -149,6 +151,7 @@ export class Experience extends EventTarget {
   }
   get activeCamera() { return this.mode === 'overview' ? this.overview : this.renderer.xr.isPresenting ? this.renderer.xr.getCamera() : this.camera }
   get immersive() { return this.mode !== 'overview' }
+  private syncGrab() { if (this.grabButton) statefulIconAction(this.grabButton, 'grab', this.grab) }
   private save() { try { localStorage.setItem('obpal.comfort', JSON.stringify(this.settings)) } catch { /* private storage */ } }
   private showLink(url: string) { let a = this.controls.querySelector<HTMLAnchorElement>('a'); if (!a) { a = document.createElement('a'); this.controls.append(a) }; a.href = url; a.textContent = 'Open shared scene'; a.target = '_blank'; a.rel = 'noopener' }
   recenter() { this.look.recenter(); this.resetOrientation(); this.xrZero = null; this.lastPosition = null; this.steady.reset() }
@@ -164,7 +167,7 @@ export class Experience extends EventTarget {
   /** A phone acting as both display and motion controller holds its look until the control is released. */
   motionControl(active: boolean) { if (active) this.motionUntil = performance.now() + 180 }
   setMode(mode: ViewMode) {
-    this.mode = mode; this.grab = false; this.grabbing.clear(); this.recenter()
+    this.mode = mode; this.grab = false; this.syncGrab(); this.grabbing.clear(); this.recenter()
     this.camera.position.set(0, 0, 0); this.camera.quaternion.identity()
     this.leaveButton.hidden = mode === 'overview'
     document.body.classList.toggle('presence-active', mode !== 'overview')

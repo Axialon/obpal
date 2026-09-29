@@ -31,6 +31,7 @@ import { PartHalos } from './halo'
 import { mountSimPanels, numberSections } from '../ui/panels'
 import { Telemetry } from '../../ui/kit/telemetry'
 import { iconAction } from '../../ui/kit/action'
+import { syncActionState } from '../action-state'
 import { mountQuick, quickAction, quickViews } from '../../ui/quick'
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
@@ -277,7 +278,7 @@ function howTo(node: string) {
 void entry.view().then((m) => {
   view = m.createView(stage, logic)
   const home = $<HTMLButtonElement>('home-all')
-  if (home.textContent?.trim() === 'Home all') iconAction(home, 'reset', 'Home all')
+  if (home.textContent?.trim() === 'Home all') iconAction(home, 'home', 'Home all')
   if (sim) view.connect?.(sim)
   numberSections(document.querySelector('.dev-panel')!)
   stage.resize()
@@ -398,6 +399,10 @@ if (!presence.shared.guest) void startSimScene({
     const focus = units.map((u) => { const who = s.claims.holder(u.id); return who && who !== 'host' ? s.focus.of(who) : null })
     perUnit.forEach((inp, n) => { if (inp && focus[n]) perUnit[n] = routeParts(spec, inp, focus[n]!, dt) })
     logic.step(perUnit, dt)
+    if (logic.actionState) syncActionState(s.remote, who => {
+      const n = unitOf(s.claims.held(who))
+      return n < 0 ? { 'action.record': false } : logic.actionState!(n)
+    })
     presence.afterStep()
     const events = logic.drain()
     deviceSound?.update(now, events)
