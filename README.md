@@ -5,7 +5,7 @@ Your phone is the controller: robots, drones, games, music and your computer, wi
 - **Sims:** over 40 at [/sim](https://obpal.blackboxes.net/sim/), from robot arms and drones to a music studio.
 - **Together:** up to eight phones in one scene.
 - **Controllers:** gamepad, wheel, trackpad, pointer, air mouse, 3D hand, keyboard, drums and keys ([spec/CATALOGUE.md](spec/CATALOGUE.md)), and the buttons of a headset, clicker or Bluetooth pad.
-- **Websites:** [ob.Pal Link](https://obpal.blackboxes.net/link/), a browser extension, gives a page a gamepad (for games that read the Gamepad API), a 3D mouse or keys. Tested in Chrome, Edge, Brave and Vivaldi; [the limits](extension/README.md#limitations). With ob.Pal Desktop (Windows only, macOS coming soon), the whole PC.
+- **Websites:** [Add ob.Pal Link from the Chrome Web Store](https://chromewebstore.google.com/detail/obpal-link/jnnpcnoilofjaffabnhecfokjjknlemg), a browser extension that gives a page a gamepad (for games that read the Gamepad API), a 3D mouse or keys. Tested in Chrome, Edge, Brave and Vivaldi; see [manual install](extension/README.md#manual-install-unpacked) and [the limits](extension/README.md#limitations). With ob.Pal Desktop (Windows only, macOS coming soon), the whole PC.
 - **Your own page:** one tag, `<obpal-remote>`, or the host SDK ([below](#use-it-in-your-own-page)).
 - **Private and open:** encrypted, no accounts; the code is MIT licensed.
 

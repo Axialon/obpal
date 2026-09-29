@@ -387,7 +387,7 @@ async function capture(captures) {
 const above = { x: 64, y: 54, w: 1152, align: 'center' }
 const SHOTS = [
   {
-    title: 'Your phone controls *any website*',
+    title: 'Your phone controls *websites*',
     sub: 'Scan the code: the controller opens in your phone’s browser. No app to install.',
     cap: above,
     light: { x: 120, y: 330, w: 1040, h: 560 },
@@ -395,21 +395,21 @@ const SHOTS = [
   },
   {
     title: 'A *gamepad* for browser games',
-    sub: 'For any game that uses the Gamepad API. Rumble reaches your phone.',
+    sub: 'For browser games that read the Gamepad API. Rumble reaches your phone.',
     cap: above,
     light: { x: 120, y: 330, w: 1040, h: 560 },
     items: [{ src: 'phone-gamepad', kind: 'phone', x: 69, y: 200 }],
   },
   {
     title: 'Rotate, pan and zoom in *3D*',
-    sub: 'Drag to rotate, two fingers to pan, pinch to zoom, on any 3D viewer in the page.',
+    sub: 'Drag to rotate, two fingers to pan, pinch to zoom in 3D viewers on the page.',
     cap: above,
     light: { x: 120, y: 330, w: 1040, h: 560 },
     items: [{ src: 'phone-rotate', kind: 'phone', x: 69, y: 200 }],
   },
   {
     title: 'Your *whole PC*, with ob.Pal Desktop',
-    sub: 'Every window, or only the programs you allow. Ctrl + Alt + Backspace stops it all.',
+    sub: 'On Windows, every window or only the programs you allow. Ctrl + Alt + Backspace stops it all.',
     cap: above,
     light: { x: 120, y: 330, w: 1040, h: 560 },
     // Down to the trackpad's gestures; the frame's edge cuts it below them.

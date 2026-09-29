@@ -74,6 +74,16 @@ export function turnChecks({ hostTurn, check, relay }) {
 
 /** The public repo whose latest release the /link/ buttons download. */
 export const LINK_REPO = 'Axialon/obpal-link'
+export const LINK_STORE = 'https://chromewebstore.google.com/detail/obpal-link/jnnpcnoilofjaffabnhecfokjjknlemg'
+export const LINK_ZIP = `https://github.com/${LINK_REPO}/releases/latest/download/obpal-link.zip`
+
+/** The page offers both the store install and the manual release zip. */
+export function linkInstallChecks(html) {
+  return [
+    row('/link/ store', html.includes(`href="${LINK_STORE}"`), 'Chrome Web Store listing'),
+    row('/link/ zip', html.includes(`href="${LINK_ZIP}"`), 'manual release zip'),
+  ]
+}
 
 /** The files a Link release carries (.claude/skills/release/reference.md): the extension under two names, and the helper. */
 export const RELEASE_ASSETS = (version) => ['obpal-link.zip', `obpal-link-${version}.zip`, 'obpal-desktop-windows-x64.zip']

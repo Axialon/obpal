@@ -9,7 +9,13 @@ A Chromium (Manifest V3) extension that makes a phone paired through ob.Pal a co
 
 It works in Chrome, Edge, Brave and Vivaldi (Chromium 120 or later). Other Chromium browsers may work, but aren't tested. The phone needs no app: it opens the ob.Pal controller in its browser.
 
-## Install (unpacked)
+## Install
+
+[Add ob.Pal Link from the Chrome Web Store](https://chromewebstore.google.com/detail/obpal-link/jnnpcnoilofjaffabnhecfokjjknlemg), then pin it to the toolbar. Edge and other Chromium browsers can install it from the same listing.
+
+### Manual install (unpacked)
+
+Download [the latest release zip](https://github.com/Axialon/obpal-link/releases/latest/download/obpal-link.zip), unzip it into a folder you'll keep, and use **Load unpacked** on that folder. To build your own copy from this repository instead:
 
 ```sh
 pnpm install
@@ -22,7 +28,7 @@ pnpm run build:extension   # writes extension/dist
    - Brave: `brave://extensions`
    - Vivaldi: `vivaldi://extensions`
 2. Turn on **Developer mode**.
-3. Click **Load unpacked** and select `extension/dist`.
+3. Click **Load unpacked** and select the unzipped folder or `extension/dist`.
 4. Pin **ob.Pal Link** to the toolbar.
 
 After a rebuild, click the reload icon on the extension's card.

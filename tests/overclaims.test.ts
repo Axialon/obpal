@@ -29,9 +29,15 @@ const PAGES = [
   'buttons/index.html',
 ]
 
+/** Store art copy is written in HTML and the screenshot captions in render.mjs. */
+const STORE_ART = [
+  'extension/store/src/marquee.html', 'extension/store/src/tile.html', 'extension/store/src/shot.html',
+  'extension/store/src/render.mjs',
+]
+
 /** What visitors read: the pages, the summaries written for AI readers, Link's README and store listing, and the strings the scripts add. */
 const COPY = [
-  ...PAGES, 'public/llms.txt', 'public/llms-full.txt', 'extension/README.md', 'extension/store/listing.md', 'extension/package.json',
+  ...PAGES, 'public/llms.txt', 'public/llms-full.txt', 'extension/README.md', 'extension/store/listing.md', ...STORE_ART, 'extension/package.json',
   'extension/vite.config.ts', 'extension/src/options/options.ts', 'extension/src/popup/popup.ts', 'src/landing/main.ts',
   'src/catalogue/data.ts', 'packages/core/src/catalogue.ts', 'src/controller/main.ts', 'src/sim/arm/main.ts',
 ]
@@ -195,6 +201,7 @@ describe('overclaims', () => {
     expect(count('npm-entries', 'a.md', 'import { TossDetector } from \'@obpal/core/toss\'')).toBe(0)
     // A broad claim, in a heading and in a description, and with its qualifier.
     expect(count('broad', 'a.html', '<h1>Your phone controls any website.</h1>')).toBe(1)
+    expect(count('broad', 'extension/store/src/render.mjs', "title: 'Your phone controls *any website*'")).toBe(1)
     expect(count('broad', 'a.html', '<meta name="description" content="Gamepad, 3D mouse or keys for any website." />')).toBe(1)
     expect(count('broad', 'a.md', 'Four phones: any browser game that reads the Gamepad API.')).toBe(1)
     expect(count('broad', 'a.html', '<h1>Your phone controls any website.</h1><p>Tested in Chrome and Edge. <a href="https://example.com/#limitations">The limits</a>.</p>')).toBe(0)

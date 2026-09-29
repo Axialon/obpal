@@ -11,6 +11,9 @@ export function turnChecks(r: {
   relay: { opened: boolean; openMs?: number; echoMs?: number; localType?: string; relayProtocol?: string } | null
 }): Check[]
 export const LINK_REPO: string
+export const LINK_STORE: string
+export const LINK_ZIP: string
+export function linkInstallChecks(html: string): Check[]
 export const RELEASE_ASSETS: (version: string) => string[]
 export function linkVersionLabel(html: string): string | null
 export function latestRelease(json: unknown): { tag: string; assets: string[] } | null

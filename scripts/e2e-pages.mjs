@@ -76,6 +76,11 @@ try {
           if (!html.includes('<title>ob.Pal (obpal):')) throw new Error('home title')
           for (const name of ['description', 'og:description', 'twitter:description']) if (!html.match(new RegExp(`<meta (?:name|property)="${name}" content="[^"]*obpal`))) throw new Error(`${name}: plain spelling`)
         }
+        if (new URL(canonical).pathname === '/link/') {
+          const link = data['@graph'].find(n => n['@type'] === 'SoftwareApplication' && n.name === 'ob.Pal Link')
+          const store = 'https://chromewebstore.google.com/detail/obpal-link/jnnpcnoilofjaffabnhecfokjjknlemg'
+          if (link?.installUrl !== store || !html.includes(`href="${store}"`)) throw new Error('/link/: store install')
+        }
       }
     }
     return `${urls.length} canonical pages with JSON-LD`

@@ -9,9 +9,7 @@ should test.
 
 ## Before you rely on it
 
-- **Downloads.** ob.Pal Desktop is unsigned and never updates itself, and until ob.Pal Link is on the Chrome Web Store,
-  both come from GitHub releases. GitHub shows a SHA-256 digest for each file, which PowerShell's `Get-FileHash` can
-  check ([how](spec/SECURITY.md#11-updates-and-downloads)).
+- **Downloads.** [ob.Pal Link is on the Chrome Web Store](https://chromewebstore.google.com/detail/obpal-link/jnnpcnoilofjaffabnhecfokjjknlemg). Manual Link zips and the unsigned ob.Pal Desktop helper come from GitHub releases; Desktop never updates itself. GitHub shows a SHA-256 digest for each file, which PowerShell's `Get-FileHash` can check ([how](spec/SECURITY.md#11-updates-and-downloads)).
 - **Machines.** The sims' Stop is a software hold, not an emergency stop. Real-arm and hardware paths are experimental
   and haven't been tested on hardware. Keep the machine's own emergency stop within reach.
 - **Review.** The standards checklist is a self-assessment, not a certification, and no independent security assessment

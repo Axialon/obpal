@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { newestInstalled, shortPath } from '../scripts/lib/browser.mjs'
 import { countSessionLines, failures, knownSuites, listeningPids, newSessionLines, parseArgs, parseResult, suitePorts } from '../scripts/lib/e2e.mjs'
-import { latestRelease, linkVersionLabel, pageHeaderChecks, RELEASE_ASSETS, releaseChecks, securityTxtCheck, shownCode, turnChecks } from '../scripts/lib/live.mjs'
+import { latestRelease, LINK_STORE, LINK_ZIP, linkInstallChecks, linkVersionLabel, pageHeaderChecks, RELEASE_ASSETS, releaseChecks, securityTxtCheck, shownCode, turnChecks } from '../scripts/lib/live.mjs'
 import { applyAllow, DEFAULT_CO_AUTHOR, parseArgs as mergeArgs, parseVitest, pickCoAuthor, summarizeNumstat } from '../scripts/lib/merge.mjs'
 import { formatDuration, formatTable } from '../scripts/lib/report.mjs'
 import { addedLines, isLocalOnly, mask, PRIVATE_RULES, riskyPath, scanText, SECRET_RULES } from '../scripts/lib/scan.mjs'
@@ -291,7 +291,13 @@ describe('check:live: headers, security.txt, the pairing code, TURN', () => {
 
 describe('check:live: release truth, the /link/ label against the download', () => {
   const files = (v: string) => ['obpal-link.zip', `obpal-link-${v}.zip`, 'obpal-desktop-windows-x64.zip']
-  const page = (v: string) => `<p class="fine">Version ${v} · free, MIT licensed · in review on the Chrome Web Store</p>`
+  const page = (v: string) => `<a href="${LINK_STORE}">Add to Chrome</a><a href="${LINK_ZIP}">Download manual zip</a><p class="fine">Manual zip: Version ${v} · free, MIT licensed.</p>`
+
+  it('checks both install routes on /link/', () => {
+    expect(linkInstallChecks(page('1.6.1')).map(r => r.status)).toEqual(['pass', 'pass'])
+    expect(linkInstallChecks(page('1.6.1').replace(LINK_STORE, 'https://example.com'))[0].status).toBe('FAIL')
+    expect(linkInstallChecks(page('1.6.1').replace(LINK_ZIP, 'https://example.com'))[1].status).toBe('FAIL')
+  })
 
   it('reads the version /link/ shows, and the tag and files of GitHub\'s latest release', () => {
     expect(linkVersionLabel(page('1.6.1'))).toBe('1.6.1')

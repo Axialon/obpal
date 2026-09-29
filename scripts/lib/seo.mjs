@@ -17,7 +17,8 @@ export function sitemapXml(cards, modified = () => '2026-09-28') {
 }
 
 const alternateName = ['obpal', 'ob pal', 'OB Pal', 'obPal']
-const sameAs = ['https://github.com/Axialon/obpal', 'https://github.com/Axialon/obpal-link', 'https://www.npmjs.com/package/@obpal/host', 'https://www.npmjs.com/package/@obpal/core']
+const linkStore = 'https://chromewebstore.google.com/detail/obpal-link/jnnpcnoilofjaffabnhecfokjjknlemg'
+const sameAs = ['https://github.com/Axialon/obpal', 'https://github.com/Axialon/obpal-link', linkStore, 'https://www.npmjs.com/package/@obpal/host', 'https://www.npmjs.com/package/@obpal/core']
 const organization = { '@type': 'Organization', '@id': `${SITE}/#blackboxes`, name: 'Blackboxes', alternateName, sameAs, url: 'https://blackboxes.net/' }
 const website = { '@type': 'WebSite', '@id': `${SITE}/#website`, name: 'ob.Pal', alternateName, sameAs, url: `${SITE}/`, publisher: { '@id': organization['@id'] } }
 const software = (name, url, description, platform) => ({ '@type': 'SoftwareApplication', name, url, description, applicationCategory: 'MultimediaApplication', operatingSystem: platform, offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' } })
@@ -39,7 +40,7 @@ export function structuredData(path, cards) {
   if (path === '/' || path === '/link/') {
     if (path === '/') graph.push({ ...software('ob.Pal', `${SITE}/`, 'Use your phone as a controller for 3D scenes, games, robot sims and more in a browser.', 'Web browser'), alternateName, sameAs })
     graph.push(
-      software('ob.Pal Link', `${SITE}/link/`, 'Browser extension that lets your phone control websites as a gamepad, 3D mouse or keyboard.', 'Chrome'),
+      { ...software('ob.Pal Link', `${SITE}/link/`, 'Browser extension that lets your phone control websites as a gamepad, 3D mouse or keyboard.', 'Chrome'), installUrl: linkStore },
       software('ob.Pal Desktop', `${SITE}/link/`, 'Optional Windows helper for controlling the PC mouse and keyboard with a phone.', 'Windows'),
     )
     if (path === '/') graph.push({ '@type': 'FAQPage', mainEntity: FAQ.map(({ question, answer }) => ({ '@type': 'Question', name: question, acceptedAnswer: { '@type': 'Answer', text: answer } })) })

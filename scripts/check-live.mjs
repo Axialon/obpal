@@ -6,15 +6,15 @@
  *   turn     /api/ice offers TURN to a room with a live host, and a DataChannel forced through the relay opens and echoes
  *   headers  the shared headers (HSTS, CSP, COOP, Permissions-Policy, nosniff, Referrer-Policy, X-Frame-Options),
  *            /.well-known/security.txt, CORS on /embed.js, no-cache on the controller's service worker
- *   release  the version /link/ shows is the tag of GitHub's latest obpal-link release (what its buttons download),
- *            and that release carries its three files. Unauthenticated, so GitHub's rate limit applies
+ *   release  /link/ has the store and manual zip links; its manual zip version matches GitHub's latest obpal-link
+ *            release, which carries all three files. Unauthenticated, so GitHub's rate limit applies
  *
  *   pnpm run check:live [-- --origin <url>] [--only pages,api,turn,headers,release]
  * The origin: --origin, else OBPAL_LIVE_ORIGIN, else https://obpal.blackboxes.net. The browser: OBPAL_E2E_CHROMIUM,
  * else Playwright's own Chromium (scripts/lib/browser.mjs). Exit code 1 when a check fails (a warning doesn't).
  */
 import { resolveChromium, shortPath } from './lib/browser.mjs'
-import { LINK_REPO, PAGES, VIEWPORTS, latestRelease, linkVersionLabel, pageHeaderChecks, releaseChecks, securityTxtCheck, shownCode, turnChecks } from './lib/live.mjs'
+import { LINK_REPO, PAGES, VIEWPORTS, latestRelease, linkInstallChecks, linkVersionLabel, pageHeaderChecks, releaseChecks, securityTxtCheck, shownCode, turnChecks } from './lib/live.mjs'
 import { formatDuration, formatTable } from './lib/report.mjs'
 
 const PARTS = ['pages', 'api', 'turn', 'headers', 'release']
@@ -56,9 +56,11 @@ if (only.includes('headers')) {
 
 // ---- release (plain requests) --------------------------------------------------------------------------------------
 if (only.includes('release')) {
-  // /link/ shows the version built from extension/package.json; its buttons download GitHub's latest release.
+  // /link/ shows the version built from extension/package.json; its manual zip downloads GitHub's latest release.
   const link = await fetch(`${ORIGIN}/link/`)
-  const label = link.ok ? linkVersionLabel(await link.text()) : null
+  const html = link.ok ? await link.text() : ''
+  for (const r of linkInstallChecks(html)) add('release', r)
+  const label = linkVersionLabel(html)
   const api = await fetch(`https://api.github.com/repos/${LINK_REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'obpal-check-live' } })
   const release = api.ok ? latestRelease(await api.json().catch(() => null)) : null
   for (const r of releaseChecks({ label, release, http: api.status })) add('release', r)

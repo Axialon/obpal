@@ -43,12 +43,15 @@ describe('search pages', () => {
 
   it('names the plain spelling and public profiles in home JSON-LD and metadata', () => {
     const graph = structuredData('/', SIMS)['@graph'] as Record<string, unknown>[]
-    const links = ['https://github.com/Axialon/obpal', 'https://github.com/Axialon/obpal-link', 'https://www.npmjs.com/package/@obpal/host', 'https://www.npmjs.com/package/@obpal/core']
+    const store = 'https://chromewebstore.google.com/detail/obpal-link/jnnpcnoilofjaffabnhecfokjjknlemg'
+    const links = ['https://github.com/Axialon/obpal', 'https://github.com/Axialon/obpal-link', store, 'https://www.npmjs.com/package/@obpal/host', 'https://www.npmjs.com/package/@obpal/core']
     for (const type of ['Organization', 'WebSite', 'SoftwareApplication']) {
       const node = graph.find(n => n['@type'] === type && (type !== 'SoftwareApplication' || n.name === 'ob.Pal'))!
       expect(node.alternateName).toEqual(['obpal', 'ob pal', 'OB Pal', 'obPal'])
       expect(node.sameAs).toEqual(links)
     }
+    const link = (structuredData('/link/', SIMS)['@graph'] as Record<string, unknown>[]).find(n => n['@type'] === 'SoftwareApplication' && n.name === 'ob.Pal Link')!
+    expect(link.installUrl).toBe(store)
     const home = readText('index.html')
     expect(home).toMatch(/<title>ob\.Pal[^<]*obpal/i)
     expect(home).toMatch(/<meta name="description" content="[^"]*obpal/)

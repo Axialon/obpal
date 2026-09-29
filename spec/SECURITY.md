@@ -525,8 +525,7 @@ The items the review set for the next Link release, and how Link 1.6.0 does each
 - **CPace's encoding is ob.Pal's own.** Moving to the draft's encoding would let its test vectors apply. That's a
   protocol change: a new label and version.
 - **The edge's minimum TLS version** is a Cloudflare zone setting. The owner checks that it's 1.2 or above.
-- **ob.Pal Desktop never updates itself.** It is unsigned, and until ob.Pal Link is published on the Chrome Web Store,
-  Link's updates come from GitHub releases (§11).
+- **ob.Pal Desktop never updates itself.** It is unsigned; Link installed from the Chrome Web Store updates through the store, while manual installs use GitHub releases (§11).
 - **The site and `embed.js` change with every deploy.** `embed.js` has no version to pin (§11).
 - **No arm has been driven on real hardware.** The sims' Stop is a software hold, not an emergency stop (§12).
 - **No independent review is recorded.** The ASVS list is a self-assessment (§13).
@@ -555,10 +554,7 @@ What you install, how it updates, and how to check it.
   Put the hex digits GitHub shows after `sha256:` in place of `<digest>`. Case doesn't matter, and the same check works
   for any other asset. `True` means the file is the one on the release page, byte for byte. It doesn't say who built
   it, because the digest comes from the same place as the file. On `False`, delete the file and download it again.
-- **ob.Pal Link.** Once it is published on the Chrome Web Store, Chrome updates it from there. Until then, GitHub
-  releases are the channel: Link is installed with "Load unpacked", so you update it by replacing that folder with a
-  newer release and reloading it. Its manifest has no update address (`extension/vite.config.ts:58-82`), and Link
-  doesn't check for updates itself.
+- **ob.Pal Link.** [Install it from the Chrome Web Store](https://chromewebstore.google.com/detail/obpal-link/jnnpcnoilofjaffabnhecfokjjknlemg) for browser-managed updates. For a manual install, GitHub releases are the channel: replace the unpacked folder with a newer release and reload it. The manual build's manifest has no update address (`extension/vite.config.ts:58-82`), and Link doesn't check for updates itself.
 - **The site and `embed.js`.** They change with every deploy, and `embed.js` has no version in its address, so a page
   that embeds it runs whatever was deployed last. When a deploy replaces the pieces it loads, the element fetches a
   fresh `embed.js` once and carries on, and its Retry button loads it again if that fails too

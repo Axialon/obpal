@@ -1,6 +1,6 @@
 # ob-pal: phone as a 3D remote (plan, 2026-09-25)
 
-## Current state (2026-09-29)
+## Current state (2026-09-30)
 
 What ships, what is a preview and what is only planned. The dated notes below are the history: where one of them disagrees with this block, this block is right.
 
@@ -8,7 +8,7 @@ What ships, what is a preview and what is only planned. The dated notes below ar
   - The phone controller (a web app, opened from a QR code or a short code): gamepad, trackpad, Wii pointer, 3D hand, button trays and the phone's keyboard, for several phones at once.
   - The hosted Viewer, the embed (`<script type="module" src="https://obpal.blackboxes.net/embed.js">` and `<obpal-remote>`), the public sims and the catalogue.
   - `@obpal/core` and `@obpal/host` on npm (0.1.0, 2026-09-29). The next release, 0.2.0 with the pose source, goes out with `pnpm run publish:npm`, from the main checkout.
-  - **ob.Pal Link 1.6.2**, a Chromium extension: a standard gamepad for browser games that read the Gamepad API, and the phone as a 3D mouse or keys. Tested in Chrome, Edge, Brave and Vivaldi. It is the latest release of Axialon/obpal-link on GitHub (1.6.2, published 2026-09-29, with the held-input fail-safe). The Chrome Web Store has 1.6.1 in review, not yet published there; 1.6.2 goes to the store once that review ends.
+  - **ob.Pal Link 1.6.2**, a Chromium extension: a standard gamepad for browser games that read the Gamepad API, and the phone as a 3D mouse or keys. Tested in Chrome, Edge, Brave and Vivaldi. It is the latest release of Axialon/obpal-link on GitHub (1.6.2, published 2026-09-29, with the held-input fail-safe). The Chrome Web Store published 1.6.1 on 30 September 2026; 1.6.2 is the next store update.
   - **ob.Pal Desktop 0.3.0**, Windows only: keys and the mouse for the program in front. It isn't code-signed, so Windows may warn about it.
   - 3D position comes from the camera mode, or is estimated from the phone's motion without it.
 - **Preview.**
@@ -619,7 +619,7 @@ Scheduled 2026-09-27: phase B lands with step 5b (the controller hub, below), an
 7. Arms.
 8. Bluetooth research.
 8b. **Research: TVs, headsets, AR glasses and watches, with controller profiles** (owner, 2026-09-27; added here, see below). The quick scan is [spec/RESEARCH-DEVICES.md](spec/RESEARCH-DEVICES.md).
-9. Chrome Web Store: **Link 1.6.1 is in review** (extension/store/UPLOAD.md), not yet published there. 1.6.2 (the held-input fail-safe and the qualified wording) is packed as extension/release/obpal-link-1.6.2-store.zip, to upload once that review ends. Until then, Link installs from GitHub's latest release.
+9. Chrome Web Store: **Link 1.6.1 was published on 30 September 2026.** 1.6.2 (the held-input fail-safe and the qualified wording) is packed as extension/release/obpal-link-1.6.2-store.zip for the next store update. Link installs from the store; the GitHub release remains the manual route.
 
 **Next, in this order (owner OK'd 2026-09-27: "go ahead in that order"):**
 

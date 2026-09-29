@@ -38,7 +38,7 @@ The steps in the Developer Dashboard, in order. What to paste is in [listing.md]
 ## After approval
 
 - **Delete the first-upload zip** (`%USERPROFILE%\.obpal-keys\store\`): the store has the key now. Keep `extension-key.pem` itself, as safely as before.
-- **Later updates:** raise the version, run `pnpm run store:extension`, and upload `extension\release\obpal-link-<version>-store.zip` with **Package → Upload new package**. It has no key and doesn't need one.
+- **Later updates:** raise the version, run `pnpm run store:extension`, and upload `extension\release\obpal-link-<version>-store.zip` with **Package → Upload new package**. It has no key and doesn't need one. On the item's **Store listing** tab, replace `screenshot-1.png` through `screenshot-5.png`, `tile-440x280.png` and `marquee-1400x560.png` with the refreshed files in `extension/store/`.
 - **The GitHub release keeps working** for developer-mode installs: its manifest keeps the public key, so it has the same ID and ob.Pal Desktop allows it. Because the IDs match, anyone who loaded the GitHub copy should remove it before installing from the store.
 - **Send Claude the listing's address**, so the site's Link page and the README can link to it.
 
