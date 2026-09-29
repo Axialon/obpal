@@ -5,7 +5,7 @@
   "license": "MIT",
   "description": "ob.Pal protocol core: the state codec, pairing, signaling, the control catalogue and the device-side link.",
   "keywords": ["obpal", "webrtc", "controller", "gamepad", "gyro", "phone", "remote", "protocol"],
-  "homepage": "https://obpal.blackboxes.net",
+  "homepage": "https://obpal.blackboxes.net/",
   "repository": { "type": "git", "url": "git+https://github.com/Axialon/obpal.git", "directory": "packages/core" },
   "bugs": "https://github.com/Axialon/obpal/issues",
   "sideEffects": false,

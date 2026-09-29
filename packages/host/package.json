@@ -5,7 +5,7 @@
   "license": "MIT",
   "description": "ob.Pal host SDK and <obpal-remote>: pair a phone controller with any web page and read its input each frame.",
   "keywords": ["obpal", "webrtc", "controller", "gamepad", "gyro", "phone", "remote", "three.js", "web-component", "custom-element"],
-  "homepage": "https://obpal.blackboxes.net/embed/",
+  "homepage": "https://obpal.blackboxes.net/",
   "repository": { "type": "git", "url": "git+https://github.com/Axialon/obpal.git", "directory": "packages/host" },
   "bugs": "https://github.com/Axialon/obpal/issues",
   "sideEffects": false,

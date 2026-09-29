@@ -16,7 +16,7 @@
  *                npm with other files, which is a forgotten bump; or older than the latest; or a prerelease). Host's
  *                core dependency must be a version on npm or one this run publishes.
  *   6. rehearse  install the packed tarballs in a temp folder and import every entry point.
- *   7. publish   (--yes) `pnpm --filter <package> publish --access public`, core first. This machine's npm signs in on
+ *   7. publish   (--yes) publish each inspected `pnpm pack` tarball through the npm TTY shim, core first. npm signs in on
  *                the web: npm prints a link the owner approves in a browser, and this prints it as one line,
  *                `APPROVE: <url>`, for whoever is watching. Nothing else about the sign-in is read or kept.
  *   8. verify    (--yes) wait up to 4 minutes for each new version to show on the registry, check that its tarball is
@@ -244,13 +244,13 @@ async function release() {
 
   if (!yes) {
     row('publish', 'skipped', 'dry run')
-    finish(0, 'Dry run: nothing was published. To publish, run this from the main checkout, on master, with a clean tree:\n  pnpm run publish:npm -- --yes\nnpm will print a link to approve in the browser; it comes through as "APPROVE: <url>".')
+    finish(0, 'Dry run: nothing was published. To publish, run this from the main checkout, on master, with a clean tree:\n  pnpm run publish:npm -- --yes\nnpm will print one approval link per package; each comes through as "APPROVE: <url>".')
   }
 
   // ---- 7. publish
-  /** `pnpm --filter <name> publish --access public`, its output streamed as it comes, npm's sign-in link called out as one line. */
-  const publish = (name) => streamCommand('pnpm', ['--filter', name, 'publish', '--access', 'public'], {
-    cwd: root, shell: win, timeoutMs: PUBLISH_MS,
+  /** Publish the inspected tarball with npm's web sign-in link called out as one line. */
+  const publish = (name) => streamCommand(process.execPath, [join(root, 'scripts', 'lib', 'tty-npm.cjs'), join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'), 'publish', packed[name].tgz, '--access', 'public', '--no-progress'], {
+    cwd: root, keepStdinOpen: true, timeoutMs: PUBLISH_MS,
     write: (stream, text) => process[stream].write(text),
     onApprove: (url) => console.log(`\nAPPROVE: ${url}`),
   })

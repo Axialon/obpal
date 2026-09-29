@@ -16,8 +16,10 @@ export function sitemapXml(cards, modified = () => '2026-09-28') {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${paths.map(path => `  <url><loc>${escapeHtml(pageUrl(path))}</loc><lastmod>${modified(path)}</lastmod></url>`).join('\n')}\n</urlset>\n`
 }
 
-const organization = { '@type': 'Organization', '@id': `${SITE}/#blackboxes`, name: 'Blackboxes', url: 'https://blackboxes.net/' }
-const website = { '@type': 'WebSite', '@id': `${SITE}/#website`, name: 'ob.Pal', url: `${SITE}/`, publisher: { '@id': organization['@id'] } }
+const alternateName = ['obpal', 'ob pal', 'OB Pal', 'obPal']
+const sameAs = ['https://github.com/Axialon/obpal', 'https://github.com/Axialon/obpal-link', 'https://www.npmjs.com/package/@obpal/host', 'https://www.npmjs.com/package/@obpal/core']
+const organization = { '@type': 'Organization', '@id': `${SITE}/#blackboxes`, name: 'Blackboxes', alternateName, sameAs, url: 'https://blackboxes.net/' }
+const website = { '@type': 'WebSite', '@id': `${SITE}/#website`, name: 'ob.Pal', alternateName, sameAs, url: `${SITE}/`, publisher: { '@id': organization['@id'] } }
 const software = (name, url, description, platform) => ({ '@type': 'SoftwareApplication', name, url, description, applicationCategory: 'MultimediaApplication', operatingSystem: platform, offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' } })
 export const FAQ = [
   { question: 'How do I pair my phone with ob.Pal?', answer: 'Open a sim or the viewer on a screen, then scan its QR code with your phone or type its short code. The controller opens in your phone browser.' },
@@ -35,7 +37,7 @@ export function structuredData(path, cards) {
   else if (path !== '/' && path !== '/sim/') crumbs.push({ '@type': 'ListItem', position: crumbs.length + 1, name: path === '/sim/arm/' ? 'Robot arms' : path.split('/').filter(Boolean).at(-1), item: canonical })
   const graph = [organization, website, { '@type': 'BreadcrumbList', itemListElement: crumbs }]
   if (path === '/' || path === '/link/') {
-    if (path === '/') graph.push(software('ob.Pal', `${SITE}/`, 'Use your phone as a controller for 3D scenes, games, robot sims and more in a browser.', 'Web browser'))
+    if (path === '/') graph.push({ ...software('ob.Pal', `${SITE}/`, 'Use your phone as a controller for 3D scenes, games, robot sims and more in a browser.', 'Web browser'), alternateName, sameAs })
     graph.push(
       software('ob.Pal Link', `${SITE}/link/`, 'Browser extension that lets your phone control websites as a gamepad, 3D mouse or keyboard.', 'Chrome'),
       software('ob.Pal Desktop', `${SITE}/link/`, 'Optional Windows helper for controlling the PC mouse and keyboard with a phone.', 'Windows'),

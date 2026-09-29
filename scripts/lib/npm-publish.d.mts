@@ -27,7 +27,7 @@ export function authWatcher(): { feed(chunk: string): string[]; end(): string[] 
 export function streamCommand(
   cmd: string,
   args: string[],
-  opts?: { cwd?: string; shell?: boolean; timeoutMs?: number; write?: (stream: 'stdout' | 'stderr', text: string) => void; onApprove?: (url: string) => void },
+  opts?: { cwd?: string; shell?: boolean; keepStdinOpen?: boolean; timeoutMs?: number; write?: (stream: 'stdout' | 'stderr', text: string) => void; onApprove?: (url: string) => void },
 ): Promise<{ ok: boolean; code: number | null; ms: number; timedOut: boolean; tail: string }>
 export function waitUntil<T>(
   check: () => Promise<T | false | null | undefined>,

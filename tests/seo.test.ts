@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { SIMS, DEVICE_IDS } from '../src/sim/catalogue'
 import { AI_SIGNALS, catalogueMarkup, deviceMarkup, INDEXABLE_PAGES, robotsTxt, simUrl, sitemapXml, structuredData } from '../scripts/lib/seo.mjs'
+import { readText } from './devtools-node.mjs'
 
 const pages = new Set<string>([...INDEXABLE_PAGES, ...SIMS.map(simUrl).filter((p): p is string => Boolean(p))])
 const noEmpty = (value: unknown): boolean => {
@@ -38,6 +39,19 @@ describe('search pages', () => {
       }
       walk(data)
     }
+  })
+
+  it('names the plain spelling and public profiles in home JSON-LD and metadata', () => {
+    const graph = structuredData('/', SIMS)['@graph'] as Record<string, unknown>[]
+    const links = ['https://github.com/Axialon/obpal', 'https://github.com/Axialon/obpal-link', 'https://www.npmjs.com/package/@obpal/host', 'https://www.npmjs.com/package/@obpal/core']
+    for (const type of ['Organization', 'WebSite', 'SoftwareApplication']) {
+      const node = graph.find(n => n['@type'] === type && (type !== 'SoftwareApplication' || n.name === 'ob.Pal'))!
+      expect(node.alternateName).toEqual(['obpal', 'ob pal', 'OB Pal', 'obPal'])
+      expect(node.sameAs).toEqual(links)
+    }
+    const home = readText('index.html')
+    expect(home).toMatch(/<title>ob\.Pal[^<]*obpal/i)
+    expect(home).toMatch(/<meta name="description" content="[^"]*obpal/)
   })
 
   it('uses catalogue text for the static list and each device page', () => {

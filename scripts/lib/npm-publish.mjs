@@ -375,13 +375,13 @@ export function authWatcher() {
 /**
  * Runs a command with its output passed on as it arrives (`write(stream, text)`) and npm's sign-in links in it given to
  * `onApprove(url)`, each once. Stdin is closed, so npm doesn't stop at a prompt. After `timeoutMs` the command and what it
- * started are killed. `shell` is for the .cmd shims on Windows (pnpm, npm).
+ * started are killed. `keepStdinOpen` lets the npm TTY shim wait silently for web approval.
  * @param {string} cmd
  * @param {string[]} args
- * @param {{ cwd?: string, shell?: boolean, timeoutMs?: number, write?: (stream: 'stdout' | 'stderr', text: string) => void, onApprove?: (url: string) => void }} [opts]
+ * @param {{ cwd?: string, shell?: boolean, keepStdinOpen?: boolean, timeoutMs?: number, write?: (stream: 'stdout' | 'stderr', text: string) => void, onApprove?: (url: string) => void }} [opts]
  * @returns {Promise<{ ok: boolean, code: number | null, ms: number, timedOut: boolean, tail: string }>}
  */
-export function streamCommand(cmd, args, { cwd, shell = false, timeoutMs = 0, write = () => {}, onApprove = () => {} } = {}) {
+export function streamCommand(cmd, args, { cwd, shell = false, keepStdinOpen = false, timeoutMs = 0, write = () => {}, onApprove = () => {} } = {}) {
   return new Promise((done) => {
     const t0 = Date.now()
     // One watcher per stream, because a link split across chunks is split within its own stream.
@@ -392,12 +392,12 @@ export function streamCommand(cmd, args, { cwd, shell = false, timeoutMs = 0, wr
     let timedOut = false
     let child
     try {
-      child = spawn(cmd, args, { cwd, shell, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      child = spawn(cmd, args, { cwd, shell, stdio: [keepStdinOpen ? 'pipe' : 'ignore', 'pipe', 'pipe'], windowsHide: true })
     } catch (e) { done({ ok: false, code: null, ms: 0, timedOut: false, tail: String(e.message) }); return }
     const timer = timeoutMs > 0 ? setTimeout(() => {
       timedOut = true
-      if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true })
-      else child.kill()
+      if (process.platform === 'win32' && shell) spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true })
+      else child.kill('SIGKILL')
     }, timeoutMs) : null
     for (const stream of ['stdout', 'stderr']) {
       child[stream].on('data', (chunk) => {

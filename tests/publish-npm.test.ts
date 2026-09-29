@@ -283,10 +283,10 @@ describe('npm\'s sign-in link', () => {
 describe('running npm with its sign-in link called out', () => {
   const url = 'https://www.npmjs.com/auth/cli/9f3c2b1a-7d4e-4c8b-a1f0-2e5d6c7b8a90'
   /** Runs a small script of Node's, standing in for npm, and collects what came through. */
-  async function run(code: string, timeoutMs = 0) {
+  async function run(code: string, timeoutMs = 0, keepStdinOpen = false) {
     const out: string[] = []
     const approved: string[] = []
-    const r = await streamCommand(nodePath, ['-e', code], { timeoutMs, write: (stream, text) => out.push(`${stream}:${text}`), onApprove: (u) => approved.push(u) })
+    const r = await streamCommand(nodePath, ['-e', code], { timeoutMs, keepStdinOpen, write: (stream, text) => out.push(`${stream}:${text}`), onApprove: (u) => approved.push(u) })
     return { r, out: out.join(''), approved }
   }
 
@@ -315,6 +315,12 @@ describe('running npm with its sign-in link called out', () => {
     const stuck = await run('setTimeout(() => {}, 60000)', 300)
     expect(stuck.r).toMatchObject({ ok: false, timedOut: true })
     expect(stuck.r.ms).toBeLessThan(30000)
+  })
+
+  it('keeps the TTY shim input open until web approval or timeout', async () => {
+    const waiting = await run("process.stdin.on('end', () => console.log('stdin closed')); process.stdin.resume()", 300, true)
+    expect(waiting.out).not.toContain('stdin closed')
+    expect(waiting.r).toMatchObject({ ok: false, timedOut: true })
   })
 })
 
@@ -377,6 +383,9 @@ describe('the release is wired up', () => {
     const help = runScript('scripts/publish-npm.mjs', ['--help'])
     expect(help.status).toBe(0)
     expect(help.out).toContain('dry run')
+    const source = readText('scripts/publish-npm.mjs')
+    expect(source).toContain("'tty-npm.cjs'")
+    expect(source).toContain("'publish', packed[name].tgz, '--access', 'public', '--no-progress'")
   })
 
   it('has a changelog for each package that names its version first, and packs it', () => {

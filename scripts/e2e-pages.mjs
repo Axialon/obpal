@@ -12,6 +12,7 @@
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch.
  */
 import { fileURLToPath } from 'node:url'
+import { readdirSync } from 'node:fs'
 import { chromium, devices } from 'playwright'
 import { cspCheck, cspViolations } from './csp-watch.mjs'
 import { startWorker } from './local-worker.mjs'
@@ -43,6 +44,12 @@ try {
   worker = await startWorker({ port: PORT })
   console.log(`ob.Pal pages e2e (${worker.origin})`)
   browser = await chromium.launch({ executablePath, headless: !HEADED })
+  await check('IndexNow key is served at its matching public URL', async () => {
+    const file = readdirSync(fileURLToPath(new URL('../public/', import.meta.url))).find(name => /^[a-f0-9]{32}\.txt$/.test(name))
+    if (!file) throw new Error('key file missing')
+    const response = await fetch(worker.origin + '/' + file)
+    if (!response.ok || (await response.text()).trim() !== file.slice(0, -4)) throw new Error('key file is not served')
+  })
   await check('robots, sitemap and agent digest are served', async () => {
     const [robots, sitemap, llms, full] = await Promise.all(['/robots.txt', '/sitemap.xml', '/llms.txt', '/llms-full.txt'].map(p => fetch(worker.origin + p)))
     for (const r of [robots, sitemap, llms, full]) if (!r.ok) throw new Error(`${r.url}: ${r.status}`)
@@ -59,7 +66,17 @@ try {
       if (!html.includes(`<link rel="canonical" href="${canonical}"`)) throw new Error(`${canonical}: canonical`)
       const scripts = [...html.matchAll(/<script type="application\/ld\+json">([^<]+)<\/script>/g)]
       if (!scripts.length) throw new Error(`${canonical}: JSON-LD missing`)
-      for (const script of scripts) JSON.parse(script[1])
+      for (const script of scripts) {
+        const data = JSON.parse(script[1])
+        if (new URL(canonical).pathname === '/') {
+          for (const type of ['Organization', 'WebSite', 'SoftwareApplication']) {
+            const node = data['@graph'].find(n => n['@type'] === type && (type !== 'SoftwareApplication' || n.name === 'ob.Pal'))
+            if (!node?.alternateName?.includes('obpal') || !node?.sameAs?.includes('https://github.com/Axialon/obpal')) throw new Error(`${type}: name signals`)
+          }
+          if (!html.includes('<title>ob.Pal (obpal):')) throw new Error('home title')
+          for (const name of ['description', 'og:description', 'twitter:description']) if (!html.match(new RegExp(`<meta (?:name|property)="${name}" content="[^"]*obpal`))) throw new Error(`${name}: plain spelling`)
+        }
+      }
     }
     return `${urls.length} canonical pages with JSON-LD`
   })

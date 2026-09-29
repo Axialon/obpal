@@ -18,7 +18,7 @@
     "check:live": "node scripts/check-live.mjs",
     "indexnow": "node scripts/indexnow.mjs",
     "merge:lane": "node scripts/merge-lane.mjs",
-    "deploy": "pnpm run test && pnpm run build && node scripts/keep-assets.mjs wrangler deploy",
+    "deploy": "pnpm run test && pnpm run build && node scripts/keep-assets.mjs wrangler deploy && node scripts/indexnow.mjs",
     "sync:family": "node scripts/sync-family.mjs",
     "pack:extension": "pnpm run build:extension && pnpm --filter @obpal/extension run pack",
     "store:extension": "pnpm run build:extension && node extension/scripts/store.mjs",
