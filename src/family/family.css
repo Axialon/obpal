@@ -119,7 +119,7 @@
   --bb-shadow: 0 24px 60px -28px rgb(0 0 0 / 0.95);
   --bb-aurora: 31 45 56;
 }
-[data-bb-theme='light'] {
+:where(:not([data-bb-product='obpal']))[data-bb-theme='light'] {
   color-scheme: light;
   --bb-page: #eef1f6;
   --bb-base-rgb: 246 248 251;
@@ -127,9 +127,9 @@
   --bb-sheet: #f7f9fc;
   --bb-ink: #0f172a;
   --bb-ink-2: #334155;
-  --bb-ink-3: #526176;
+  --bb-ink-3: #64748b;
   --bb-line: rgb(15 23 42 / 0.1);
-  --bb-line-strong: rgb(15 23 42 / 0.55);
+  --bb-line-strong: rgb(15 23 42 / 0.18);
   --bb-hi: rgb(255 255 255 / 0.7);
   --bb-wash: rgb(15 23 42 / 0.04);
   --bb-shadow: 0 22px 50px -30px rgb(15 23 42 / 0.35);
@@ -167,41 +167,15 @@
 /* Accent used as text or hairline: the bright identity colour on dark surfaces, the strong shade on light. */
 :root { --bb-accent-text: var(--bb-accent); --bb-accent-soft: color-mix(in srgb, var(--bb-accent) 55%, var(--bb-ink)); }
 [data-bb-theme='light'] { --bb-accent-text: var(--bb-accent-strong); --bb-accent-soft: var(--bb-accent-strong); }
-[data-bb-theme='light'][data-bb-product='obpal']:not([data-bb-accent]),
-[data-bb-theme='light'][data-bb-accent='lime'] { --bb-accent-strong: #426b0d; }
-/* Pale accents need a darker text shade on Light, including selected controls over their tinted fill. */
-[data-bb-theme='light'][data-bb-accent='sky'] { --bb-accent-strong: #03658e; }
-[data-bb-theme='light'][data-bb-accent='mint'] { --bb-accent-strong: #086747; }
-[data-bb-theme='light'][data-bb-accent='rose'] { --bb-accent-strong: #be123c; }
-
-/* The surface's own highlight channel, for see-through fills (glass tracks, scrollbars): the surface's tinted white
- * on dark surfaces, slate ink on the light one. --bb-range-deepen: how far a slider's fill leans to the strong accent
- * shade, so a pale accent still reads on the light surface. */
-:root { --bb-hl-rgb: 255 255 255; --bb-range-deepen: 0%; }
-[data-bb-theme='navy'] { --bb-hl-rgb: 214 230 255; }
-[data-bb-theme='violet'] { --bb-hl-rgb: 231 222 255; }
-[data-bb-theme='wine'] { --bb-hl-rgb: 255 240 248; }
-[data-bb-theme='onyx'] { --bb-hl-rgb: 241 246 249; }
-[data-bb-theme='light'] { --bb-hl-rgb: 15 23 42; --bb-range-deepen: 38%; }
 
 /* ---- derived surfaces ------------------------------------------------------------------------------------ */
 
-:root {
+:root:where(:not([data-bb-product='obpal'])) {
   --bb-glass: linear-gradient(180deg, rgb(var(--bb-surface-rgb) / 0.74), rgb(var(--bb-base-rgb) / 0.68));
   --bb-glass-solid: linear-gradient(180deg, rgb(var(--bb-surface-rgb) / 0.96), rgb(var(--bb-base-rgb) / 0.94));
   --bb-glass-accent: linear-gradient(180deg, rgb(var(--bb-accent-rgb) / 0.96), rgb(var(--bb-accent-rgb) / 0.8));
   --bb-blur: blur(20px) saturate(150%);
   --bb-focus: 0 0 0 2px var(--bb-page), 0 0 0 4px rgb(var(--bb-accent-rgb) / 0.85);
-  /* Opaque by default. Supported browsers soften the small amount of colour that passes through. */
-  --bb-frost-solid: rgb(var(--bb-base-rgb));
-  --bb-frost: var(--bb-frost-solid);
-  --bb-frost-accent: var(--bb-accent);
-  --bb-frost-blur: blur(28px) saturate(150%);
-  --bb-frost-edge: var(--bb-line-strong);
-  --bb-frost-shadow: 0 8px 28px -12px rgb(0 0 0 / 0.38), inset 0 1px 0 var(--bb-hi);
-}
-@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  :root { --bb-frost: rgb(var(--bb-base-rgb) / 0.96); --bb-frost-accent: rgb(var(--bb-accent-rgb) / 0.96); }
 }
 
 /* ---- base ------------------------------------------------------------------------------------------------ */
@@ -226,14 +200,16 @@
 
 /* ---- glass ----------------------------------------------------------------------------------------------- */
 
-.bb-glass {
-  --bb-ink-3: var(--bb-ink-2);
-  background: var(--bb-frost);
-  border: 1px solid var(--bb-frost-edge);
-  box-shadow: var(--bb-frost-shadow);
-  -webkit-backdrop-filter: var(--bb-frost-blur);
-  backdrop-filter: var(--bb-frost-blur);
+:where(:root:not([data-bb-product='obpal'])) .bb-glass {
+  background: var(--bb-glass);
+  border: 1px solid var(--bb-line);
+  box-shadow: var(--bb-shadow), inset 0 1px 0 var(--bb-hi);
+  -webkit-backdrop-filter: var(--bb-blur);
+  backdrop-filter: var(--bb-blur);
   background-clip: border-box;
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :where(:root:not([data-bb-product='obpal'])) .bb-glass { background: var(--bb-glass-solid); }
 }
 
 /* ---- controls -------------------------------------------------------------------------------------------- */
@@ -269,147 +245,36 @@
 }
 .bb-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bb-accent); box-shadow: 0 0 10px rgb(var(--bb-accent-rgb) / 0.7); }
 
-/* ---- range: Apple-style slider -----------------------------------------------------------------------------
- * A thin glass track (the surface shows through it) filled with the accent up to a round white knob; no tray.
- * A native <input type="range" class="bb-range">, so keys and screen readers work; add .vertical to stand it up
- * (the minimum at the bottom). family.js keeps --fill, the filled share, in step with the value, whether a person or
- * code sets it. .bb-meter is the read-only kind: the same track and fill, and a knob if it holds an <i>. */
+/* ---- range: Apple-style slider. A hairline track filled with the accent up to a white knob; no tray. ----------
+ * family.js keeps --fill in step with the value (call BlackboxesFamily.syncRanges() after setting values in code). */
 
-:root {
-  --bb-range-line: 4px;
-  --bb-range-knob: 20px;
-  /* The control's size across the track: what a pointer can grab. The track stays thin within it. */
-  --bb-range-hit: 28px;
-  /* A vertical slider's length, unless it's sized otherwise. */
-  --bb-range-length: 160px;
-  /* The track where it isn't filled: glass, the surface showing through. */
-  --bb-range-glass: rgb(var(--bb-hl-rgb) / 0.16);
-  --bb-range-knob-bg: #fff;
-  --bb-range-knob-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.08), 0 0.5px 1px rgb(0 0 0 / 0.12), 0 2px 6px rgb(0 0 0 / 0.22);
-  --bb-range-knob-lift: 0 0 0 0.5px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.14), 0 5px 14px rgb(0 0 0 / 0.3);
-}
-/* Fingers get a bigger knob and a 44px touch target; the track stays as thin. */
-@media (pointer: coarse) { :root { --bb-range-knob: 26px; --bb-range-hit: 44px; } }
-
-/* The fill and the focus ring are worked out on each control, so a subtree's own accent reaches it. */
-.bb-range, .bb-meter {
-  --bb-range-tint: var(--bb-accent);
-  --bb-range-ring: rgb(var(--bb-accent-rgb) / 0.5);
-}
-@supports (color: color-mix(in srgb, red, blue)) {
-  .bb-range, .bb-meter {
-    --bb-range-tint: color-mix(in srgb, var(--bb-accent), var(--bb-accent-strong) var(--bb-range-deepen));
-    --bb-range-ring: color-mix(in srgb, var(--bb-accent-text) 60%, transparent);
-  }
-}
-
-.bb-range {
+:where(:root:not([data-bb-product='obpal'])) .bb-range {
   --fill: 50%;
   -webkit-appearance: none; appearance: none; display: block;
-  width: 100%; height: var(--bb-range-hit); margin: 0; padding: 0; background: transparent; cursor: pointer;
-  touch-action: pan-y; -webkit-tap-highlight-color: transparent;
+  width: 100%; height: 26px; margin: 0; padding: 0; background: transparent; cursor: pointer; touch-action: pan-y;
 }
-.bb-range::-webkit-slider-runnable-track {
-  height: var(--bb-range-line); border: 0; border-radius: 999px;
-  background: linear-gradient(to right, var(--bb-range-tint) 0 var(--fill), var(--bb-range-glass) var(--fill));
-  box-shadow: inset 0 0.5px 0 var(--bb-hi);
+:where(:root:not([data-bb-product='obpal'])) .bb-range::-webkit-slider-runnable-track {
+  height: 4px; border: 0; border-radius: 999px;
+  background: linear-gradient(to right, var(--bb-accent) 0 var(--fill), var(--bb-line-strong) var(--fill) 100%);
 }
-.bb-range::-webkit-slider-thumb {
-  -webkit-appearance: none; appearance: none; width: var(--bb-range-knob); height: var(--bb-range-knob);
-  margin-top: calc((var(--bb-range-line) - var(--bb-range-knob)) / 2); border: 0; border-radius: 50%;
-  background: var(--bb-range-knob-bg); box-shadow: var(--bb-range-knob-shadow);
+:where(:root:not([data-bb-product='obpal'])) .bb-range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 22px; height: 22px; margin-top: -9px; border: 0; border-radius: 50%;
+  background: #fff; box-shadow: 0 2px 6px rgb(0 0 0 / 0.24), 0 0 0 0.5px rgb(0 0 0 / 0.1);
   transition: transform var(--bb-dur-1) var(--bb-ease), box-shadow var(--bb-dur-2) var(--bb-ease);
 }
-.bb-range::-moz-range-track {
-  height: var(--bb-range-line); border: 0; border-radius: 999px; background: var(--bb-range-glass); box-shadow: inset 0 0.5px 0 var(--bb-hi);
-}
-.bb-range::-moz-range-progress { height: var(--bb-range-line); border-radius: 999px; background: var(--bb-range-tint); }
-.bb-range::-moz-range-thumb {
-  width: var(--bb-range-knob); height: var(--bb-range-knob); border: 0; border-radius: 50%;
-  background: var(--bb-range-knob-bg); box-shadow: var(--bb-range-knob-shadow);
-  transition: transform var(--bb-dur-1) var(--bb-ease), box-shadow var(--bb-dur-2) var(--bb-ease);
-}
-.bb-range:not(.vertical):dir(rtl)::-webkit-slider-runnable-track {
-  background: linear-gradient(to left, var(--bb-range-tint) 0 var(--fill), var(--bb-range-glass) var(--fill));
-}
-
-/* Hovered: the glass brightens and the knob lifts. Held: the knob grows. Focused from the keyboard: a ring. */
-@media (hover: hover) {
-  .bb-range:hover { --bb-range-glass: rgb(var(--bb-hl-rgb) / 0.24); }
-  .bb-range:hover::-webkit-slider-thumb { box-shadow: var(--bb-range-knob-lift); }
-  .bb-range:hover::-moz-range-thumb { box-shadow: var(--bb-range-knob-lift); }
-}
-.bb-range:active::-webkit-slider-thumb { transform: scale(1.1); box-shadow: var(--bb-range-knob-lift); }
-.bb-range:active::-moz-range-thumb { transform: scale(1.1); box-shadow: var(--bb-range-knob-lift); }
+:where(:root:not([data-bb-product='obpal'])) .bb-range:active::-webkit-slider-thumb { transform: scale(1.12); }
 .bb-range:focus-visible { outline: none; box-shadow: none; }
-.bb-range:focus-visible::-webkit-slider-thumb { box-shadow: var(--bb-range-knob-shadow), 0 0 0 4px var(--bb-range-ring); }
-.bb-range:focus-visible::-moz-range-thumb { box-shadow: var(--bb-range-knob-shadow), 0 0 0 4px var(--bb-range-ring); }
-.bb-range:disabled { --bb-range-tint: rgb(var(--bb-hl-rgb) / 0.32); opacity: 0.55; cursor: not-allowed; }
-.bb-range:disabled::-webkit-slider-thumb { transform: none; box-shadow: var(--bb-range-knob-shadow); }
-.bb-range:disabled::-moz-range-thumb { transform: none; box-shadow: var(--bb-range-knob-shadow); }
-
-/* Vertical: the writing mode stands it up (Chrome 124, Safari 17.4, Firefox 120); direction puts the minimum at
- * the bottom. Where form controls can't be vertical, family.js sets data-bb-vranges="rotate" and it's turned. */
-.bb-range.vertical {
-  writing-mode: vertical-lr; direction: rtl; width: var(--bb-range-hit); height: var(--bb-range-length); touch-action: pan-x;
-}
-.bb-range.vertical::-webkit-slider-runnable-track {
-  width: var(--bb-range-line); height: 100%;
-  background: linear-gradient(to top, var(--bb-range-tint) 0 var(--fill), var(--bb-range-glass) var(--fill));
-}
-.bb-range.vertical::-webkit-slider-thumb { margin: 0 0 0 calc((var(--bb-range-line) - var(--bb-range-knob)) / 2); }
-.bb-range.vertical::-moz-range-track { width: var(--bb-range-line); height: 100%; }
-.bb-range.vertical::-moz-range-progress { width: var(--bb-range-line); }
-[data-bb-vranges='rotate'] .bb-range.vertical {
-  writing-mode: horizontal-tb; direction: ltr; width: var(--bb-range-length); height: var(--bb-range-hit);
-  margin: calc((var(--bb-range-length) - var(--bb-range-hit)) / 2) calc((var(--bb-range-hit) - var(--bb-range-length)) / 2);
-  transform: rotate(-90deg);
-}
-[data-bb-vranges='rotate'] .bb-range.vertical::-webkit-slider-runnable-track {
-  width: auto; height: var(--bb-range-line);
-  background: linear-gradient(to right, var(--bb-range-tint) 0 var(--fill), var(--bb-range-glass) var(--fill));
-}
-[data-bb-vranges='rotate'] .bb-range.vertical::-webkit-slider-thumb { margin: calc((var(--bb-range-line) - var(--bb-range-knob)) / 2) 0 0; }
-[data-bb-vranges='rotate'] .bb-range.vertical::-moz-range-track { width: auto; height: var(--bb-range-line); }
-[data-bb-vranges='rotate'] .bb-range.vertical::-moz-range-progress { width: auto; height: var(--bb-range-line); }
-
-.bb-meter {
-  --fill: 0%;
-  position: relative; display: block; height: var(--bb-range-line); border-radius: 999px;
-  background: linear-gradient(to right, var(--bb-range-tint) 0 var(--fill), var(--bb-range-glass) var(--fill));
-  box-shadow: inset 0 0.5px 0 var(--bb-hi);
-}
-.bb-meter > i {
-  position: absolute; top: 50%; left: var(--fill); width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%;
-  background: var(--bb-range-knob-bg); box-shadow: var(--bb-range-knob-shadow);
-}
+:where(:root:not([data-bb-product='obpal'])) .bb-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 2px 6px rgb(0 0 0 / 0.24), 0 0 0 4px rgb(var(--bb-accent-rgb) / 0.4); }
+:where(:root:not([data-bb-product='obpal'])) .bb-range::-moz-range-track { height: 4px; border: 0; border-radius: 999px; background: var(--bb-line-strong); }
+:where(:root:not([data-bb-product='obpal'])) .bb-range::-moz-range-progress { height: 4px; border-radius: 999px; background: var(--bb-accent); }
+:where(:root:not([data-bb-product='obpal'])) .bb-range::-moz-range-thumb { width: 22px; height: 22px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 2px 6px rgb(0 0 0 / 0.24), 0 0 0 0.5px rgb(0 0 0 / 0.1); }
+:where(:root:not([data-bb-product='obpal'])) .bb-range:disabled { opacity: 0.45; cursor: default; }
 
 /* A labelled slider row: name left, value right (tabular), the slider beneath. */
 .bb-field { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 2px 10px; }
 .bb-field > span { font: 600 13px/1.3 var(--bb-font-ui); color: var(--bb-ink-2); }
 .bb-field > output { font: 600 12px/1.3 var(--bb-font-data); color: var(--bb-ink-3); font-variant-numeric: tabular-nums; }
 .bb-field > .bb-range { grid-column: 1 / -1; }
-
-/* ---- scrollbars: thin, on a clear track, in the surface's own ink; the accent when pointed at or dragged -------
- * For mouse and trackpad only: phones keep their own overlay scrollbars. Chromium and Safari draw these. Chromium
- * drops ::-webkit-scrollbar styling wherever scrollbar-width or scrollbar-color is set, and its thin standard
- * scrollbar keeps its arrow buttons, so the standard properties are for Firefox alone. A rounded box that scrolls
- * sets --bb-scroll-inset to keep the thumb's ends clear of its corners. */
-
-@media (hover: hover) and (pointer: fine) {
-  ::-webkit-scrollbar { width: 10px; height: 10px; }
-  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
-  ::-webkit-scrollbar-track:vertical { margin: var(--bb-scroll-inset, 0px) 0; }
-  ::-webkit-scrollbar-track:horizontal { margin: 0 var(--bb-scroll-inset, 0px); }
-  ::-webkit-scrollbar-button { display: none; }
-  ::-webkit-scrollbar-thumb { min-height: 36px; border: 3px solid transparent; border-radius: 999px; background: rgb(var(--bb-hl-rgb) / 0.18) padding-box; }
-  ::-webkit-scrollbar-thumb:hover { background-color: rgb(var(--bb-accent-rgb) / 0.5); }
-  ::-webkit-scrollbar-thumb:active { background-color: rgb(var(--bb-accent-rgb) / 0.8); }
-}
-@supports not selector(::-webkit-scrollbar) {
-  :root { scrollbar-color: rgb(var(--bb-hl-rgb) / 0.3) transparent; }
-  * { scrollbar-width: thin; }
-}
 
 /* ---- top bar --------------------------------------------------------------------------------------------- */
 
@@ -443,7 +308,7 @@
 
 /* ---- menus (product switcher, More, themes) -------------------------------------------------------------- */
 
-.bb-menu { position: absolute; z-index: var(--bb-z-menu); min-width: 260px; padding: 8px; border-radius: var(--bb-r-xl); animation: bb-rise var(--bb-dur-3) var(--bb-ease-out); }
+:where(:root:not([data-bb-product='obpal'])) .bb-menu { scrollbar-width: thin; scrollbar-color: var(--bb-line-strong) transparent; position: absolute; z-index: var(--bb-z-menu); min-width: 260px; padding: 8px; border-radius: var(--bb-r-xl); animation: bb-rise var(--bb-dur-3) var(--bb-ease-out); }
 .bb-menu[hidden] { display: none; }
 .bb-menu-item {
   display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 10px; border-radius: var(--bb-r-md);
@@ -451,64 +316,48 @@
   font: 600 14px/1.2 var(--bb-font-ui);
 }
 .bb-menu-item:hover, .bb-menu-item:focus-visible { background: var(--bb-wash); }
-.bb-menu-item:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: -2px; box-shadow: none; }
 .bb-menu-item[aria-current='page'] { background: rgb(var(--bb-item-rgb, var(--bb-accent-rgb)) / 0.14); }
 .bb-menu-item .bb-mark { width: 30px; height: 30px; flex: none; }
 .bb-menu-item b { display: block; font: 750 14px/1.2 var(--bb-font-display); letter-spacing: -0.01em; }
 .bb-menu-item small { display: block; margin-top: 2px; font: 500 12px/1.2 var(--bb-font-ui); color: var(--bb-ink-3); }
 .bb-menu-group { padding: 8px 10px 4px; }
 
-/* Every pairing can be judged before it's picked: a surface card previews its surface with the accent in effect, and
- * an accent swatch previews its colour on the surface in effect. Both follow the visitor's picks as they change. */
-.bb-themes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; min-width: min(300px, 100%); }
-.bb-accents { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 4px; padding: 4px 4px 6px; }
-.bb-accent {
-  position: relative; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; padding: 0; cursor: pointer;
-  border: 0; background: linear-gradient(135deg, rgb(var(--bb-surface-rgb)), var(--bb-page)); box-shadow: inset 0 0 0 1px var(--bb-line-strong);
-  color: #0b0b0c; transition: transform var(--bb-dur-1) var(--bb-ease), box-shadow var(--bb-dur-2) var(--bb-ease);
+:where(:root:not([data-bb-product='obpal'])) .bb-themes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; min-width: 300px; }
+:where(:root:not([data-bb-product='obpal'])) .bb-accents { display: flex; flex-wrap: wrap; gap: 5px; padding: 2px 2px 4px; }
+:where(:root:not([data-bb-product='obpal'])) .bb-accent {
+  display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; padding: 0; cursor: pointer;
+  border: 2px solid transparent; background: var(--sw); box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.25);
+  color: #0b0b0c; transition: transform var(--bb-dur-1) var(--bb-ease);
 }
-.bb-accent::before { content: ''; position: absolute; inset: 6px; border-radius: 50%; background: var(--sw); box-shadow: 0 0 10px -2px var(--sw); }
 .bb-accent:hover { transform: scale(1.08); }
-.bb-accent[aria-checked='true'] { box-shadow: 0 0 0 2px var(--bb-page), 0 0 0 3.5px var(--sw), inset 0 0 0 1px var(--bb-line-strong); }
-.bb-accent:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: 4px; }
-.bb-accent .bb-ic { position: relative; width: 12px; height: 12px; opacity: 0; }
+:where(:root:not([data-bb-product='obpal'])) .bb-accent[aria-checked='true'] { border-color: var(--bb-ink); box-shadow: 0 0 0 3px var(--bb-page), inset 0 0 0 1px rgb(0 0 0 / 0.25); }
+:where(:root:not([data-bb-product='obpal'])) .bb-accent .bb-ic { width: 14px; height: 14px; opacity: 0; }
 .bb-accent[aria-checked='true'] .bb-ic { opacity: 1; }
-.bb-accent.product::before { background: conic-gradient(from 210deg, var(--sw), color-mix(in srgb, var(--sw) 55%, white), var(--sw)); }
-.bb-theme {
-  display: grid; justify-items: center; gap: 7px; padding: 8px 6px 9px; border-radius: var(--bb-r-md);
-  border: 1px solid var(--bb-line); background: var(--bb-wash); color: var(--bb-ink-2); cursor: pointer; font: 600 12px/1 var(--bb-font-ui);
-  transition: border-color var(--bb-dur-2) var(--bb-ease), box-shadow var(--bb-dur-2), background var(--bb-dur-2);
+:where(:root:not([data-bb-product='obpal'])) .bb-accent.product { background: conic-gradient(from 210deg, var(--sw), color-mix(in srgb, var(--sw) 55%, white), var(--sw)); }
+:where(:root:not([data-bb-product='obpal'])) .bb-theme {
+  display: grid; justify-items: center; gap: 6px; padding: 10px 6px; border-radius: var(--bb-r-md);
+  border: 1px solid var(--bb-line); background: transparent; color: var(--bb-ink-2); cursor: pointer; font: 600 12px/1 var(--bb-font-ui);
 }
-.bb-theme:hover { border-color: var(--bb-line-strong); }
-.bb-theme:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: 2px; }
-/* The surface as a small window: a glass bar across its top and a pill in the accent. */
-.bb-theme i { position: relative; display: block; width: 100%; max-width: 64px; height: 36px; border-radius: 10px; overflow: hidden; border: 1px solid rgb(255 255 255 / 0.16); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1); }
-.bb-theme i::before { content: ''; position: absolute; left: 6px; right: 6px; top: 6px; height: 6px; border-radius: 3px; background: rgb(128 128 128 / 0.32); }
-.bb-theme i::after { content: ''; position: absolute; right: 6px; bottom: 6px; width: 22px; height: 10px; border-radius: 5px; background: var(--bb-accent); box-shadow: 0 0 10px rgb(var(--bb-accent-rgb) / 0.6); }
-.bb-theme[aria-checked='true'] { border-color: rgb(var(--bb-accent-rgb) / 0.85); color: var(--bb-ink); background: rgb(var(--bb-accent-rgb) / 0.1); box-shadow: 0 0 16px -4px rgb(var(--bb-accent-rgb) / 0.55); }
-[data-bb-theme='light'] .bb-theme { border-color: var(--bb-line-strong); }
-[data-bb-theme='light'] .bb-theme[aria-checked='true'] { border-color: var(--bb-accent-text); box-shadow: inset 0 0 0 1px var(--bb-accent-text); }
-[data-bb-theme='light'] .bb-accent[aria-checked='true'] { box-shadow: 0 0 0 2px var(--bb-page), 0 0 0 3.5px var(--bb-ink-2); }
+:where(:root:not([data-bb-product='obpal'])) .bb-theme i { width: 40px; height: 28px; border-radius: 9px; border: 1px solid rgb(255 255 255 / 0.18); box-shadow: inset -10px -8px 0 -4px rgb(var(--bb-accent-rgb) / 0.95); }
+:where(:root:not([data-bb-product='obpal'])) .bb-theme[aria-checked='true'] { border-color: rgb(var(--bb-accent-rgb) / 0.8); color: var(--bb-ink); background: rgb(var(--bb-accent-rgb) / 0.1); }
 
 /* ---- tooltips and coach-mark hints ------------------------------------------------------------------------ */
 
-.bb-tip {
+:where(:root:not([data-bb-product='obpal'])) .bb-tip {
   position: fixed; z-index: var(--bb-z-tip); pointer-events: none; padding: 6px 9px; border-radius: 9px;
-  background: var(--bb-frost); color: var(--bb-ink); border: 1px solid var(--bb-frost-edge);
-  -webkit-backdrop-filter: var(--bb-frost-blur); backdrop-filter: var(--bb-frost-blur);
+  background: rgb(var(--bb-surface-rgb) / 0.96); color: var(--bb-ink); border: 1px solid var(--bb-line-strong);
   font: 600 12px/1.2 var(--bb-font-ui); white-space: nowrap; box-shadow: var(--bb-shadow);
   opacity: 0; transform: translate3d(0, 3px, 0); transition: opacity var(--bb-dur-1) var(--bb-ease), transform var(--bb-dur-2) var(--bb-ease);
 }
 .bb-tip[data-on] { opacity: 1; transform: translate3d(0, 0, 0); }
 
-.bb-hint {
-  position: fixed; z-index: var(--bb-z-hint); display: flex; align-items: center; gap: 10px; max-width: min(320px, calc(100vw - 24px));
-  padding: 10px 8px 10px 14px; border-radius: 16px; background: var(--bb-frost-accent); color: var(--bb-accent-ink); border: 1px solid var(--bb-frost-edge);
-  -webkit-backdrop-filter: var(--bb-frost-blur); backdrop-filter: var(--bb-frost-blur);
+:where(:root:not([data-bb-product='obpal'])) .bb-hint {
+  position: fixed; z-index: var(--bb-z-hint); display: flex; align-items: center; gap: 10px; max-width: min(320px, calc(100vw - 24px)); pointer-events: none;
+  padding: 10px 8px 10px 14px; border-radius: 16px; background: var(--bb-glass-accent); color: var(--bb-accent-ink);
   font: 650 13px/1.35 var(--bb-font-ui); box-shadow: 0 18px 40px -16px rgb(0 0 0 / 0.6), inset 0 1px 0 rgb(255 255 255 / 0.4);
   animation: bb-rise var(--bb-dur-3) var(--bb-ease-out), bb-float 3.2s var(--bb-ease) 0.4s 3; will-change: transform;
 }
-.bb-hint button { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 8px; background: rgb(0 0 0 / 0.12); color: inherit; cursor: pointer; }
+:where(:root:not([data-bb-product='obpal'])) .bb-hint button { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 8px; background: rgb(0 0 0 / 0.12); color: inherit; cursor: pointer; pointer-events: auto; }
 
 @keyframes bb-rise { from { opacity: 0; transform: translate3d(0, 6px, 0); } to { opacity: 1; transform: translate3d(0, 0, 0); } }
 @keyframes bb-float { 0%, 100% { transform: translate3d(0, 0, 0); } 50% { transform: translate3d(0, -4px, 0); } }
@@ -526,7 +375,265 @@
 
 @media (prefers-reduced-motion: reduce) {
   .bb-hint, .bb-menu { animation: none; }
-  .bb-range::-webkit-slider-thumb { transition: none; }
-  .bb-range::-moz-range-thumb { transition: none; }
-  .bb-btn, .bb-tool, .bb-tip, .bb-switch .bb-ic, .bb-accent, .bb-theme { transition: none; }
+  :where(:root:not([data-bb-product='obpal'])) .bb-btn, :where(:root:not([data-bb-product='obpal'])) .bb-tool, :where(:root:not([data-bb-product='obpal'])) .bb-tip, :where(:root:not([data-bb-product='obpal'])) .bb-switch .bb-ic { transition: none; }
+}
+
+/*
+ ob.Pal opts into its tray previews, frosted surfaces and reactive range presentation through the product attribute.
+ */
+:where([data-bb-product='obpal'])[data-bb-theme='light'] {
+  color-scheme: light;
+  --bb-page: #eef1f6;
+  --bb-base-rgb: 246 248 251;
+  --bb-surface-rgb: 255 255 255;
+  --bb-sheet: #f7f9fc;
+  --bb-ink: #0f172a;
+  --bb-ink-2: #334155;
+  --bb-ink-3: #526176;
+  --bb-line: rgb(15 23 42 / 0.1);
+  --bb-line-strong: rgb(15 23 42 / 0.55);
+  --bb-hi: rgb(255 255 255 / 0.7);
+  --bb-wash: rgb(15 23 42 / 0.04);
+  --bb-shadow: 0 22px 50px -30px rgb(15 23 42 / 0.35);
+  --bb-aurora: 203 213 225;
+}
+:where([data-bb-product='obpal'])[data-bb-theme='light'][data-bb-product='obpal']:not([data-bb-accent]),
+:where([data-bb-product='obpal'])[data-bb-theme='light'][data-bb-accent='lime'] { --bb-accent-strong: #426b0d; }
+:where([data-bb-product='obpal'])[data-bb-theme='light'][data-bb-accent='sky'] { --bb-accent-strong: #03658e; }
+:where([data-bb-product='obpal'])[data-bb-theme='light'][data-bb-accent='mint'] { --bb-accent-strong: #086747; }
+:where([data-bb-product='obpal'])[data-bb-theme='light'][data-bb-accent='rose'] { --bb-accent-strong: #be123c; }
+:root:where([data-bb-product='obpal']) { --bb-hl-rgb: 255 255 255; --bb-range-deepen: 0%; }
+:where([data-bb-product='obpal'])[data-bb-theme='navy'] { --bb-hl-rgb: 214 230 255; }
+:where([data-bb-product='obpal'])[data-bb-theme='violet'] { --bb-hl-rgb: 231 222 255; }
+:where([data-bb-product='obpal'])[data-bb-theme='wine'] { --bb-hl-rgb: 255 240 248; }
+:where([data-bb-product='obpal'])[data-bb-theme='onyx'] { --bb-hl-rgb: 241 246 249; }
+:where([data-bb-product='obpal'])[data-bb-theme='light'] { --bb-hl-rgb: 15 23 42; --bb-range-deepen: 38%; }
+
+:root:where([data-bb-product='obpal']) {
+  --bb-glass: linear-gradient(180deg, rgb(var(--bb-surface-rgb) / 0.74), rgb(var(--bb-base-rgb) / 0.68));
+  --bb-glass-solid: linear-gradient(180deg, rgb(var(--bb-surface-rgb) / 0.96), rgb(var(--bb-base-rgb) / 0.94));
+  --bb-glass-accent: linear-gradient(180deg, rgb(var(--bb-accent-rgb) / 0.96), rgb(var(--bb-accent-rgb) / 0.8));
+  --bb-blur: blur(20px) saturate(150%);
+  --bb-focus: 0 0 0 2px var(--bb-page), 0 0 0 4px rgb(var(--bb-accent-rgb) / 0.85);
+  /* Opaque by default. Supported browsers soften the small amount of colour that passes through. */
+  --bb-frost-solid: rgb(var(--bb-base-rgb));
+  --bb-frost: var(--bb-frost-solid);
+  --bb-frost-accent: var(--bb-accent);
+  --bb-frost-blur: blur(28px) saturate(150%);
+  --bb-frost-edge: var(--bb-line-strong);
+  --bb-frost-shadow: 0 8px 28px -12px rgb(0 0 0 / 0.38), inset 0 1px 0 var(--bb-hi);
+}
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  :root:where([data-bb-product='obpal']) { --bb-frost: rgb(var(--bb-base-rgb) / 0.96); --bb-frost-accent: rgb(var(--bb-accent-rgb) / 0.96); }
+}
+
+:where(:root[data-bb-product='obpal']) .bb-glass {
+  --bb-ink-3: var(--bb-ink-2);
+  background: var(--bb-frost);
+  border: 1px solid var(--bb-frost-edge);
+  box-shadow: var(--bb-frost-shadow);
+  -webkit-backdrop-filter: var(--bb-frost-blur);
+  backdrop-filter: var(--bb-frost-blur);
+  background-clip: border-box;
+}
+
+:root:where([data-bb-product='obpal']) {
+  --bb-range-line: 4px;
+  --bb-range-knob: 20px;
+  /* The control's size across the track: what a pointer can grab. The track stays thin within it. */
+  --bb-range-hit: 28px;
+  /* A vertical slider's length, unless it's sized otherwise. */
+  --bb-range-length: 160px;
+  /* The track where it isn't filled: glass, the surface showing through. */
+  --bb-range-glass: rgb(var(--bb-hl-rgb) / 0.16);
+  --bb-range-knob-bg: #fff;
+  --bb-range-knob-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.08), 0 0.5px 1px rgb(0 0 0 / 0.12), 0 2px 6px rgb(0 0 0 / 0.22);
+  --bb-range-knob-lift: 0 0 0 0.5px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.14), 0 5px 14px rgb(0 0 0 / 0.3);
+}
+@media (pointer: coarse) { :root:where([data-bb-product='obpal']) { --bb-range-knob: 26px; --bb-range-hit: 44px; } }
+:where(:root[data-bb-product='obpal']) .bb-range, :where(:root[data-bb-product='obpal']) .bb-meter {
+  --bb-range-tint: var(--bb-accent);
+  --bb-range-ring: rgb(var(--bb-accent-rgb) / 0.5);
+}
+@supports (color: color-mix(in srgb, red, blue)) {
+  :where(:root[data-bb-product='obpal']) .bb-range, :where(:root[data-bb-product='obpal']) .bb-meter {
+    --bb-range-tint: color-mix(in srgb, var(--bb-accent), var(--bb-accent-strong) var(--bb-range-deepen));
+    --bb-range-ring: color-mix(in srgb, var(--bb-accent-text) 60%, transparent);
+  }
+}
+
+:where(:root[data-bb-product='obpal']) .bb-range {
+  --fill: 50%;
+  -webkit-appearance: none; appearance: none; display: block;
+  width: 100%; height: var(--bb-range-hit); margin: 0; padding: 0; background: transparent; cursor: pointer;
+  touch-action: pan-y; -webkit-tap-highlight-color: transparent;
+}
+:where(:root[data-bb-product='obpal']) .bb-range::-webkit-slider-runnable-track {
+  height: var(--bb-range-line); border: 0; border-radius: 999px;
+  background: linear-gradient(to right, var(--bb-range-tint) 0 var(--fill), var(--bb-range-glass) var(--fill));
+  box-shadow: inset 0 0.5px 0 var(--bb-hi);
+}
+:where(:root[data-bb-product='obpal']) .bb-range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: var(--bb-range-knob); height: var(--bb-range-knob);
+  margin-top: calc((var(--bb-range-line) - var(--bb-range-knob)) / 2); border: 0; border-radius: 50%;
+  background: var(--bb-range-knob-bg); box-shadow: var(--bb-range-knob-shadow);
+  transition: transform var(--bb-dur-1) var(--bb-ease), box-shadow var(--bb-dur-2) var(--bb-ease);
+}
+:where(:root[data-bb-product='obpal']) .bb-range::-moz-range-track {
+  height: var(--bb-range-line); border: 0; border-radius: 999px; background: var(--bb-range-glass); box-shadow: inset 0 0.5px 0 var(--bb-hi);
+}
+:where(:root[data-bb-product='obpal']) .bb-range::-moz-range-progress { height: var(--bb-range-line); border-radius: 999px; background: var(--bb-range-tint); }
+:where(:root[data-bb-product='obpal']) .bb-range::-moz-range-thumb {
+  width: var(--bb-range-knob); height: var(--bb-range-knob); border: 0; border-radius: 50%;
+  background: var(--bb-range-knob-bg); box-shadow: var(--bb-range-knob-shadow);
+  transition: transform var(--bb-dur-1) var(--bb-ease), box-shadow var(--bb-dur-2) var(--bb-ease);
+}
+:where(:root[data-bb-product='obpal']) .bb-range:not(.vertical):dir(rtl)::-webkit-slider-runnable-track {
+  background: linear-gradient(to left, var(--bb-range-tint) 0 var(--fill), var(--bb-range-glass) var(--fill));
+}
+@media (hover: hover) {
+  :where(:root[data-bb-product='obpal']) .bb-range:hover { --bb-range-glass: rgb(var(--bb-hl-rgb) / 0.24); }
+}
+@media (hover: hover) {
+  :where(:root[data-bb-product='obpal']) .bb-range:hover::-webkit-slider-thumb { box-shadow: var(--bb-range-knob-lift); }
+}
+@media (hover: hover) {
+  :where(:root[data-bb-product='obpal']) .bb-range:hover::-moz-range-thumb { box-shadow: var(--bb-range-knob-lift); }
+}
+:where(:root[data-bb-product='obpal']) .bb-range:active::-webkit-slider-thumb { transform: scale(1.1); box-shadow: var(--bb-range-knob-lift); }
+:where(:root[data-bb-product='obpal']) .bb-range:active::-moz-range-thumb { transform: scale(1.1); box-shadow: var(--bb-range-knob-lift); }
+:where(:root[data-bb-product='obpal']) .bb-range:focus-visible::-webkit-slider-thumb { box-shadow: var(--bb-range-knob-shadow), 0 0 0 4px var(--bb-range-ring); }
+:where(:root[data-bb-product='obpal']) .bb-range:focus-visible::-moz-range-thumb { box-shadow: var(--bb-range-knob-shadow), 0 0 0 4px var(--bb-range-ring); }
+:where(:root[data-bb-product='obpal']) .bb-range:disabled { --bb-range-tint: rgb(var(--bb-hl-rgb) / 0.32); opacity: 0.55; cursor: not-allowed; }
+:where(:root[data-bb-product='obpal']) .bb-range:disabled::-webkit-slider-thumb { transform: none; box-shadow: var(--bb-range-knob-shadow); }
+:where(:root[data-bb-product='obpal']) .bb-range:disabled::-moz-range-thumb { transform: none; box-shadow: var(--bb-range-knob-shadow); }
+:where(:root[data-bb-product='obpal']) .bb-range.vertical {
+  writing-mode: vertical-lr; direction: rtl; width: var(--bb-range-hit); height: var(--bb-range-length); touch-action: pan-x;
+}
+:where(:root[data-bb-product='obpal']) .bb-range.vertical::-webkit-slider-runnable-track {
+  width: var(--bb-range-line); height: 100%;
+  background: linear-gradient(to top, var(--bb-range-tint) 0 var(--fill), var(--bb-range-glass) var(--fill));
+}
+:where(:root[data-bb-product='obpal']) .bb-range.vertical::-webkit-slider-thumb { margin: 0 0 0 calc((var(--bb-range-line) - var(--bb-range-knob)) / 2); }
+:where(:root[data-bb-product='obpal']) .bb-range.vertical::-moz-range-track { width: var(--bb-range-line); height: 100%; }
+:where(:root[data-bb-product='obpal']) .bb-range.vertical::-moz-range-progress { width: var(--bb-range-line); }
+:where([data-bb-product='obpal'])[data-bb-vranges='rotate'] .bb-range.vertical {
+  writing-mode: horizontal-tb; direction: ltr; width: var(--bb-range-length); height: var(--bb-range-hit);
+  margin: calc((var(--bb-range-length) - var(--bb-range-hit)) / 2) calc((var(--bb-range-hit) - var(--bb-range-length)) / 2);
+  transform: rotate(-90deg);
+}
+:where([data-bb-product='obpal'])[data-bb-vranges='rotate'] .bb-range.vertical::-webkit-slider-runnable-track {
+  width: auto; height: var(--bb-range-line);
+  background: linear-gradient(to right, var(--bb-range-tint) 0 var(--fill), var(--bb-range-glass) var(--fill));
+}
+:where([data-bb-product='obpal'])[data-bb-vranges='rotate'] .bb-range.vertical::-webkit-slider-thumb { margin: calc((var(--bb-range-line) - var(--bb-range-knob)) / 2) 0 0; }
+:where([data-bb-product='obpal'])[data-bb-vranges='rotate'] .bb-range.vertical::-moz-range-track { width: auto; height: var(--bb-range-line); }
+:where([data-bb-product='obpal'])[data-bb-vranges='rotate'] .bb-range.vertical::-moz-range-progress { width: auto; height: var(--bb-range-line); }
+
+:where(:root[data-bb-product='obpal']) .bb-meter {
+  --fill: 0%;
+  position: relative; display: block; height: var(--bb-range-line); border-radius: 999px;
+  background: linear-gradient(to right, var(--bb-range-tint) 0 var(--fill), var(--bb-range-glass) var(--fill));
+  box-shadow: inset 0 0.5px 0 var(--bb-hi);
+}
+:where(:root[data-bb-product='obpal']) .bb-meter > i {
+  position: absolute; top: 50%; left: var(--fill); width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%;
+  background: var(--bb-range-knob-bg); box-shadow: var(--bb-range-knob-shadow);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :where(:root[data-bb-product='obpal'], :root[data-bb-product='obpal'] *)::-webkit-scrollbar { width: 10px; height: 10px; }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :where(:root[data-bb-product='obpal'], :root[data-bb-product='obpal'] *)::-webkit-scrollbar-track, :where(:root[data-bb-product='obpal'], :root[data-bb-product='obpal'] *)::-webkit-scrollbar-corner { background: transparent; }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :where(:root[data-bb-product='obpal'], :root[data-bb-product='obpal'] *)::-webkit-scrollbar-track:vertical { margin: var(--bb-scroll-inset, 0px) 0; }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :where(:root[data-bb-product='obpal'], :root[data-bb-product='obpal'] *)::-webkit-scrollbar-track:horizontal { margin: 0 var(--bb-scroll-inset, 0px); }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :where(:root[data-bb-product='obpal'], :root[data-bb-product='obpal'] *)::-webkit-scrollbar-button { display: none; }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :where(:root[data-bb-product='obpal'], :root[data-bb-product='obpal'] *)::-webkit-scrollbar-thumb { min-height: 36px; border: 3px solid transparent; border-radius: 999px; background: rgb(var(--bb-hl-rgb) / 0.18) padding-box; }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :where(:root[data-bb-product='obpal'], :root[data-bb-product='obpal'] *)::-webkit-scrollbar-thumb:hover { background-color: rgb(var(--bb-accent-rgb) / 0.5); }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :where(:root[data-bb-product='obpal'], :root[data-bb-product='obpal'] *)::-webkit-scrollbar-thumb:active { background-color: rgb(var(--bb-accent-rgb) / 0.8); }
+}
+@supports not selector(::-webkit-scrollbar) {
+  :root:where([data-bb-product='obpal']) { scrollbar-color: rgb(var(--bb-hl-rgb) / 0.3) transparent; }
+}
+@supports not selector(::-webkit-scrollbar) {
+  :where(:root[data-bb-product='obpal']) { scrollbar-width: thin; }
+  :where(:root[data-bb-product='obpal']) * { scrollbar-width: thin; }
+}
+
+:where(:root[data-bb-product='obpal']) .bb-menu { position: absolute; z-index: var(--bb-z-menu); min-width: 260px; padding: 8px; border-radius: var(--bb-r-xl); animation: bb-rise var(--bb-dur-3) var(--bb-ease-out); }
+:where(:root[data-bb-product='obpal']) .bb-menu-item:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: -2px; box-shadow: none; }
+:where(:root[data-bb-product='obpal']) .bb-themes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; min-width: min(300px, 100%); }
+:where(:root[data-bb-product='obpal']) .bb-accents { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 4px; padding: 4px 4px 6px; }
+:where(:root[data-bb-product='obpal']) .bb-accent {
+  position: relative; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; padding: 0; cursor: pointer;
+  border: 0; background: linear-gradient(135deg, rgb(var(--bb-surface-rgb)), var(--bb-page)); box-shadow: inset 0 0 0 1px var(--bb-line-strong);
+  color: #0b0b0c; transition: transform var(--bb-dur-1) var(--bb-ease), box-shadow var(--bb-dur-2) var(--bb-ease);
+}
+:where(:root[data-bb-product='obpal']) .bb-accent::before { content: ''; position: absolute; inset: 6px; border-radius: 50%; background: var(--sw); box-shadow: 0 0 10px -2px var(--sw); }
+:where(:root[data-bb-product='obpal']) .bb-accent[aria-checked='true'] { box-shadow: 0 0 0 2px var(--bb-page), 0 0 0 3.5px var(--sw), inset 0 0 0 1px var(--bb-line-strong); }
+:where(:root[data-bb-product='obpal']) .bb-accent:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: 4px; }
+:where(:root[data-bb-product='obpal']) .bb-accent .bb-ic { position: relative; width: 12px; height: 12px; opacity: 0; }
+:where(:root[data-bb-product='obpal']) .bb-accent.product::before { background: conic-gradient(from 210deg, var(--sw), color-mix(in srgb, var(--sw) 55%, white), var(--sw)); }
+:where(:root[data-bb-product='obpal']) .bb-theme {
+  display: grid; justify-items: center; gap: 7px; padding: 8px 6px 9px; border-radius: var(--bb-r-md);
+  border: 1px solid var(--bb-line); background: var(--bb-wash); color: var(--bb-ink-2); cursor: pointer; font: 600 12px/1 var(--bb-font-ui);
+  transition: border-color var(--bb-dur-2) var(--bb-ease), box-shadow var(--bb-dur-2), background var(--bb-dur-2);
+}
+:where(:root[data-bb-product='obpal']) .bb-theme:hover { border-color: var(--bb-line-strong); }
+:where(:root[data-bb-product='obpal']) .bb-theme:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: 2px; }
+:where(:root[data-bb-product='obpal']) .bb-theme i { position: relative; display: block; width: 100%; max-width: 64px; height: 36px; border-radius: 10px; overflow: hidden; border: 1px solid rgb(255 255 255 / 0.16); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1); }
+:where(:root[data-bb-product='obpal']) .bb-theme i::before { content: ''; position: absolute; left: 6px; right: 6px; top: 6px; height: 6px; border-radius: 3px; background: rgb(128 128 128 / 0.32); }
+:where(:root[data-bb-product='obpal']) .bb-theme i::after { content: ''; position: absolute; right: 6px; bottom: 6px; width: 22px; height: 10px; border-radius: 5px; background: var(--bb-accent); box-shadow: 0 0 10px rgb(var(--bb-accent-rgb) / 0.6); }
+:where(:root[data-bb-product='obpal']) .bb-theme[aria-checked='true'] { border-color: rgb(var(--bb-accent-rgb) / 0.85); color: var(--bb-ink); background: rgb(var(--bb-accent-rgb) / 0.1); box-shadow: 0 0 16px -4px rgb(var(--bb-accent-rgb) / 0.55); }
+:where([data-bb-product='obpal'])[data-bb-theme='light'] .bb-theme { border-color: var(--bb-line-strong); }
+:where([data-bb-product='obpal'])[data-bb-theme='light'] .bb-theme[aria-checked='true'] { border-color: var(--bb-accent-text); box-shadow: inset 0 0 0 1px var(--bb-accent-text); }
+:where([data-bb-product='obpal'])[data-bb-theme='light'] .bb-accent[aria-checked='true'] { box-shadow: 0 0 0 2px var(--bb-page), 0 0 0 3.5px var(--bb-ink-2); }
+
+:where(:root[data-bb-product='obpal']) .bb-tip {
+  position: fixed; z-index: var(--bb-z-tip); pointer-events: none; padding: 6px 9px; border-radius: 9px;
+  background: var(--bb-frost); color: var(--bb-ink); border: 1px solid var(--bb-frost-edge);
+  -webkit-backdrop-filter: var(--bb-frost-blur); backdrop-filter: var(--bb-frost-blur);
+  font: 600 12px/1.2 var(--bb-font-ui); white-space: nowrap; box-shadow: var(--bb-shadow);
+  opacity: 0; transform: translate3d(0, 3px, 0); transition: opacity var(--bb-dur-1) var(--bb-ease), transform var(--bb-dur-2) var(--bb-ease);
+}
+
+:where(:root[data-bb-product='obpal']) .bb-hint {
+  position: fixed; z-index: var(--bb-z-hint); display: flex; align-items: center; gap: 10px; max-width: min(320px, calc(100vw - 24px));
+  padding: 10px 8px 10px 14px; border-radius: 16px; background: var(--bb-frost-accent); color: var(--bb-accent-ink); border: 1px solid var(--bb-frost-edge);
+  -webkit-backdrop-filter: var(--bb-frost-blur); backdrop-filter: var(--bb-frost-blur);
+  font: 650 13px/1.35 var(--bb-font-ui); box-shadow: 0 18px 40px -16px rgb(0 0 0 / 0.6), inset 0 1px 0 rgb(255 255 255 / 0.4);
+  animation: bb-rise var(--bb-dur-3) var(--bb-ease-out), bb-float 3.2s var(--bb-ease) 0.4s 3; will-change: transform;
+}
+:where(:root[data-bb-product='obpal']) .bb-hint button { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 8px; background: rgb(0 0 0 / 0.12); color: inherit; cursor: pointer; }
+
+@media (prefers-reduced-motion: reduce) {
+  :where(:root[data-bb-product='obpal']) .bb-range::-webkit-slider-thumb { transition: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where(:root[data-bb-product='obpal']) .bb-range::-moz-range-thumb { transition: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where(:root[data-bb-product='obpal']) .bb-btn, :where(:root[data-bb-product='obpal']) .bb-tool, :where(:root[data-bb-product='obpal']) .bb-tip, :where(:root[data-bb-product='obpal']) .bb-switch .bb-ic, :where(:root[data-bb-product='obpal']) .bb-accent, :where(:root[data-bb-product='obpal']) .bb-theme { transition: none; }
 }

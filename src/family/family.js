@@ -1,4 +1,3 @@
-import { html, setMarkup } from '../ui/markup'
 /*
  * Blackboxes family: shared behaviour for ecosystem.blackboxes.net, the nine engines and ob.Pal.
  * A dependency-free classic script (works inlined or imported). Exposes window.BlackboxesFamily.
@@ -14,6 +13,35 @@ import { html, setMarkup } from '../ui/markup'
   'use strict';
   if (global.BlackboxesFamily) return;
   var doc = global.document;
+  var markup = null;
+  var reactiveRanges = false;
+  function isObpal() { return doc.documentElement.getAttribute('data-bb-product') === 'obpal'; }
+  /** Hosts with a DOM template policy supply their tag and sink, without importing product code here. */
+  function configure(options) {
+    options = options || {};
+    if (options.markup) markup = options.markup;
+    if (options.reactiveRanges) { reactiveRanges = true; syncRanges(doc); }
+  }
+  function Template(strings, values) { this.strings = strings; this.values = values; }
+  function html(strings) {
+    var values = Array.prototype.slice.call(arguments, 1);
+    return markup ? markup.html.apply(null, [strings].concat(values)) : new Template(strings, values);
+  }
+  function serialize(value) {
+    if (value instanceof Template) return value.strings.map(function (s, i) {
+      return s + (i < value.values.length ? serialize(value.values[i]) : '');
+    }).join('');
+    if (Array.isArray(value)) return value.map(serialize).join('');
+    if (value === null || value === undefined) return '';
+    // These two code-owned SVG literals are also accepted by the host's template catalogue.
+    if (value === ICON.check || value === ICON.chevron) return value;
+    return esc(String(value));
+  }
+  function output(value) { return markup ? value : serialize(value); }
+  function setMarkup(el, value) {
+    if (markup) markup.setMarkup(el, value);
+    else el.innerHTML = serialize(value);
+  }
 
   var PRODUCTS = [
     { id: 'ecosystem', name: 'Blackboxes', category: 'The ecosystem', host: 'ecosystem.blackboxes.net', accent: '#7dd3fc' },
@@ -220,16 +248,16 @@ import { html, setMarkup } from '../ui/markup'
     };
     function place() {
       // Measure the whole card before choosing its position, including after its content changes.
-      menu.style.maxHeight = '';
+      if (isObpal() || placement) menu.style.maxHeight = '';
       if (placement) { placement(menu, button); return; }
       var r = button.getBoundingClientRect();
       var top = Math.round(r.bottom + 10);
       var height = menu.offsetHeight;
-      if (top + height > global.innerHeight - 12) top = Math.max(12, r.top - height - 10);
+      if (isObpal() && top + height > global.innerHeight - 12) top = Math.max(12, r.top - height - 10);
       menu.style.position = 'fixed';
       menu.style.top = top + 'px';
       // A short screen scrolls the menu, so its last item is always reachable.
-      menu.style.maxHeight = Math.max(0, global.innerHeight - top - 12) + 'px';
+      menu.style.maxHeight = Math.max(isObpal() ? 0 : 160, global.innerHeight - top - 12) + 'px';
       menu.style.overflowY = 'auto';
       var w = menu.offsetWidth;
       var right = r.left + r.width / 2 > global.innerWidth / 2;
@@ -237,7 +265,7 @@ import { html, setMarkup } from '../ui/markup'
       menu.style.left = Math.round(Math.max(12, Math.min(x, global.innerWidth - w - 12))) + 'px';
     }
     // Keyboard: arrows open it and move through its items, Home and End jump, Escape closes it back to the button.
-    function items() { return Array.prototype.slice.call(menu.querySelectorAll('a[href],button:not([disabled])')).filter(function (el) { return el.getClientRects().length; }); }
+    function items() { return Array.prototype.slice.call(menu.querySelectorAll('a[href],button:not([disabled])')).filter(function (el) { return !isObpal() || el.getClientRects().length; }); }
     function focusItem(i) { var list = items(); if (list.length) list[(i + list.length) % list.length].focus(); }
     button.setAttribute('aria-haspopup', 'true');
     button.setAttribute('aria-expanded', 'false');
@@ -249,7 +277,7 @@ import { html, setMarkup } from '../ui/markup'
     button.addEventListener('keydown', function (e) {
       if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
       e.preventDefault();
-      e.stopPropagation();
+      if (isObpal()) e.stopPropagation();
       if (menu.hidden) api.open();
       focusItem(e.key === 'ArrowDown' ? 0 : -1);
     });
@@ -264,10 +292,10 @@ import { html, setMarkup } from '../ui/markup'
     menu.addEventListener('click', function (e) { e.stopPropagation(); });
     global.addEventListener('resize', api.place);
     // Scrolling the card itself must keep its limit and scroll position; only its surroundings move its anchor.
-    global.addEventListener('scroll', function (e) { if (e.target === global || !menu.contains(e.target)) api.place(); }, true);
+    global.addEventListener('scroll', function (e) { if ((isObpal() || placement) && (e.target === global || !menu.contains(e.target))) api.place(); }, true);
     if (global.visualViewport) {
-      global.visualViewport.addEventListener('resize', api.place);
-      global.visualViewport.addEventListener('scroll', api.place);
+      global.visualViewport.addEventListener('resize', function () { if (isObpal() || placement) api.place(); });
+      global.visualViewport.addEventListener('scroll', function () { if (isObpal() || placement) api.place(); });
     }
     return api;
   }
@@ -294,6 +322,7 @@ import { html, setMarkup } from '../ui/markup'
       else return;
       var scroll = menu.scrollTop;
       setMarkup(menu, themeMenu());
+      if (!isObpal() && !placement) return;
       api.place();
       menu.scrollTop = scroll;
       // Rebuilding the choices must not lose keyboard focus after a pick.
@@ -312,7 +341,10 @@ import { html, setMarkup } from '../ui/markup'
         item.type = 'button';
         item.className = 'bb-menu-item';
         item.setAttribute('role', 'menuitem');
-        setMarkup(item, html`${[...src.childNodes].map((n) => n.cloneNode(true))}<span>${src.getAttribute('aria-label') || src.getAttribute('data-tip') || ''}</span>`);
+        Array.prototype.forEach.call(src.childNodes, function (n) { item.appendChild(n.cloneNode(true)); });
+        var label = doc.createElement('span');
+        label.textContent = src.getAttribute('aria-label') || src.getAttribute('data-tip') || '';
+        item.appendChild(label);
         item.addEventListener('click', function () { src.click(); });
         m.appendChild(item);
       });
@@ -337,7 +369,7 @@ import { html, setMarkup } from '../ui/markup'
   /** Keep a .bb-range's accent fill in step with its value. */
   function rangeFill(el) {
     el.style.setProperty('--fill', (rangeShare(parseFloat(el.value), bound(el.min, 0), bound(el.max, 100)) * 100).toFixed(2) + '%');
-    watchRange(el);
+    if (reactiveRanges || isObpal()) watchRange(el);
   }
   function syncRanges(root) {
     (root || doc).querySelectorAll('.bb-range').forEach(rangeFill);
@@ -382,12 +414,14 @@ import { html, setMarkup } from '../ui/markup'
   }, true);
   // A reset puts a form's values back without an input event; refill once it has.
   doc.addEventListener('reset', function (e) {
+    if (!reactiveRanges && !isObpal()) return;
     var form = e.target;
     setTimeout(function () { if (form.querySelectorAll) syncRanges(form); }, 0);
   }, true);
   // Sliders fill as they arrive (their value may already be set), and refill when their attributes change.
   if (global.MutationObserver && doc.documentElement) {
     new global.MutationObserver(function (records) {
+      if (!reactiveRanges && !isObpal()) return;
       for (var i = 0; i < records.length; i++) {
         var r = records[i];
         if (r.type === 'attributes') {
@@ -402,7 +436,7 @@ import { html, setMarkup } from '../ui/markup'
         }
       }
     }).observe(doc.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['min', 'max', 'step', 'value'] });
-    syncRanges(doc);
+    if (isObpal()) syncRanges(doc);
   }
 
   // ---- tooltips ---------------------------------------------------------------------------------------------
@@ -455,7 +489,9 @@ import { html, setMarkup } from '../ui/markup'
       var el = doc.createElement('div');
       el.className = 'bb-hint';
       el.setAttribute('role', 'status');
-      setMarkup(el, html`<span></span><button type="button" aria-label="Dismiss">&times;</button>`);
+      setMarkup(el, isObpal()
+        ? html`<span></span><button type="button" aria-label="Dismiss">&times;</button>`
+        : html`<span></span><button type="button" aria-label="Dismiss hint" data-tip="Dismiss hint"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>`);
       el.firstChild.textContent = text;
       el.lastChild.addEventListener('click', function () { dismissHint(id); });
       doc.body.appendChild(el);
@@ -464,12 +500,24 @@ import { html, setMarkup } from '../ui/markup'
         var t = anchor();
         if (!t) return dismissHint(id, true);
         var r = t.getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight;
-        var below = opts.place === 'below' || (opts.place !== 'above' && r.top < global.innerHeight / 2);
-        el.style.left = Math.round(Math.max(12, Math.min(r.left + r.width / 2 - w / 2, global.innerWidth - w - 12))) + 'px';
-        el.style.top = Math.round(below ? r.bottom + 12 : r.top - h - 12) + 'px';
+        if (isObpal()) {
+          var below = opts.place === 'below' || (opts.place !== 'above' && r.top < global.innerHeight / 2);
+          el.style.left = Math.round(Math.max(12, Math.min(r.left + r.width / 2 - w / 2, global.innerWidth - w - 12))) + 'px';
+          el.style.top = Math.round(below ? r.bottom + 12 : r.top - h - 12) + 'px';
+        } else {
+          var side = opts.place;
+          var below = side === 'below' || (side !== 'above' && r.top < global.innerHeight / 2);
+          var x = side === 'right' ? r.right + 12 : side === 'left' ? r.left - w - 12 : r.left + r.width / 2 - w / 2;
+          var y = side === 'right' || side === 'left' ? r.top + r.height / 2 - h / 2 : below ? r.bottom + 12 : r.top - h - 12;
+          el.style.left = Math.round(Math.max(12, Math.min(x, global.innerWidth - w - 12))) + 'px';
+          var minY = global.innerWidth <= 760 ? 142 : 12;
+          if (global.innerWidth <= 760) y = minY;
+          el.style.top = Math.round(Math.max(minY, Math.min(y, global.innerHeight - h - 12))) + 'px';
+        }
       };
       place();
       global.addEventListener('resize', place);
+      if (!isObpal()) doc.addEventListener('pointermove', place, { passive: true });
       el._place = place;
     }, opts.delay || 900);
   }
@@ -478,15 +526,19 @@ import { html, setMarkup } from '../ui/markup'
     if (!silent) store.sset('bb.hint.' + id, '1');
     if (!el) return;
     global.removeEventListener('resize', el._place);
+    doc.removeEventListener('pointermove', el._place);
     el.remove();
     delete hints[id];
   }
 
   global.BlackboxesFamily = {
+    configure: configure,
     PRODUCTS: PRODUCTS, THEMES: THEMES, ACCENTS: ACCENTS, DEFAULT_THEME: DEFAULT_THEME,
     getTheme: getTheme, setTheme: setTheme, applyTheme: applyTheme, watchTheme: watchTheme, setProduct: setProduct, product: product,
     getAccent: getAccent, setAccent: setAccent, applyAccent: applyAccent, accentColor: accentColor,
-    mark: mark, productMenu: productMenu, themeMenu: themeMenu,
+    mark: function (id, opts) { return output(mark(id, opts)); },
+    productMenu: function (current, opts) { return output(productMenu(current, opts)); },
+    themeMenu: function () { return output(themeMenu()); },
     popover: popover, mountSwitcher: mountSwitcher, mountThemes: mountThemes, mountMore: mountMore,
     initTips: initTips, hint: hint, dismissHint: dismissHint, icons: ICON, rangeShare: rangeShare, rangeFill: rangeFill, syncRanges: syncRanges
   };

@@ -39,7 +39,9 @@ function family() {
   }
   const window = { document, location: { hostname: 'localhost', protocol: 'http:' }, HTMLInputElement: RangeInput, addEventListener: noop, dispatchEvent: noop }
   new Function('window', source.replace(/^import .*$/gm, ''))(window)
-  return { api: (window as unknown as { BlackboxesFamily: FamilyApi }).BlackboxesFamily, listeners }
+  const api = (window as unknown as { BlackboxesFamily: FamilyApi }).BlackboxesFamily
+  api.configure({ reactiveRanges: true })
+  return { api, listeners }
 }
 
 describe('Sliders: the accent fill up to the knob (family.js)', () => {

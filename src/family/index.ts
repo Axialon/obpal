@@ -1,4 +1,4 @@
-import type { Content } from '../ui/markup'
+import { html, setMarkup, type Content } from '../ui/markup'
 /**
  * Typed access to the shared Blackboxes family design system (vendored from the BlackBoxes repo, shared/family/;
  * refresh with `pnpm run sync:family`). family.js is a classic script that defines window.BlackboxesFamily.
@@ -17,6 +17,8 @@ export type MenuPlacement = (menu: HTMLElement, button: HTMLElement) => void
 export interface SwitcherOptions { href?: (product: FamilyProduct) => string; itemClass?: string }
 
 export interface FamilyApi {
+  /** Adapt the shared templates to this product's Trusted Types policy. */
+  configure(options: { markup?: { html: typeof html; setMarkup: typeof setMarkup }; reactiveRanges?: boolean }): void
   PRODUCTS: FamilyProduct[]
   THEMES: FamilyTheme[]
   ACCENTS: FamilyAccent[]
@@ -60,3 +62,4 @@ declare global {
 }
 
 export const family: FamilyApi = window.BlackboxesFamily
+family.configure({ markup: { html, setMarkup }, reactiveRanges: true })
