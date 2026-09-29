@@ -11,7 +11,7 @@ let toggle: (() => void) | null = null
 /** Another explicit camera button may share the same capture lifetime as the shortcut. */
 export function toggleBodyCapture() { toggle?.() }
 
-export function mountBodyCapture(options: { beforeOpen?: () => boolean; closed?: () => void } = {}): BodyInput {
+export function mountBodyCapture(options: { beforeOpen?: () => boolean; closed?: () => void; timeOrigin?: number } = {}): BodyInput {
   if (mounted) return mounted
   const input = new BodyInput()
   mounted = input
@@ -19,7 +19,7 @@ export function mountBodyCapture(options: { beforeOpen?: () => boolean; closed?:
   let seq = 0, gen = 0
   let button: HTMLButtonElement | null = null
   function changed() { quickChanged(); button?.setAttribute('aria-pressed', String(camera?.capturing ?? false)) }
-  const timeOrigin = performance.now()
+  const timeOrigin = options.timeOrigin ?? performance.now()
   const test = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) && new URLSearchParams(location.search).get('test') === 'camera'
   function stop() { camera?.close() }
   function open() {

@@ -26,6 +26,8 @@ import { CALIBRATION_KEY, parseCalibration } from './calibration'
 import { WalkthroughView } from './walkthrough'
 import { FingerInput } from './fingers'
 import { lightArena, soleShadow } from './lighting'
+import { DriverPanel } from './driver-panel'
+import { upperJoints } from './driver-profile'
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 applyTheme(initialTheme())
@@ -33,7 +35,7 @@ mountMarks()
 mountTopBar()
 mountQuick()
 family.watchTheme()
-mountSimPanels('humanoid', 'Controls')
+const panels = mountSimPanels('humanoid', 'Controls')
 const stage = createStage($('stage') as HTMLCanvasElement, initialTheme(), { maxDpr: 1.5, portraitFraming: true })
 addEventListener('bb-theme', (e) => stage.setTheme(themeById((e as CustomEvent<{ theme: string }>).detail.theme)))
 stage.renderer.shadowMap.enabled = false
@@ -92,7 +94,9 @@ let selected = 0,
   localSource = 'classical',
   localActive = false,
   stopped = false
+const localCaptureOrigin = performance.now()
 const localBody = mountBodyCapture({
+    timeOrigin: localCaptureOrigin,
     beforeOpen: () => takeLocal('body'),
     closed: () => {
       if (localSource === 'body') {
@@ -136,6 +140,36 @@ const walkthrough = new WalkthroughView(HUMANOID, actors[0].retarget.data, (data
   if (reset) actors[selected].retarget.reset()
   save(actors[selected], data)
 })
+// This retargeter consumes local capture directly; practice presets and phone input never reach it.
+const driverRetarget = new Retargeter(HUMANOID)
+const drivers: DriverPanel = new DriverPanel(
+  panels,
+  () => {
+    const now = performance.now(),
+      body = localBody.read(now),
+      actor = actors[selected]
+    driverRetarget.data = actor.retarget.data
+    driverRetarget.setMirror(actor.retarget.mirror)
+    const pose = driverRetarget.step(body, now)
+    const elapsed = Math.round((now - localCaptureOrigin) * 1000) >>> 0
+    const age = body ? ((elapsed - body.t) >>> 0) / 1000 : Infinity
+    return {
+      kind: 'body',
+      token: `body:${selected}:${pose.generation}:${driverRetarget.mirror}`,
+      positions: pose.q,
+      at: now - age,
+      preset: false,
+      valid:
+        !!body &&
+        pose.tracked &&
+        !pose.calibrating &&
+        !walkthrough.dialog.open &&
+        !!drivers.session.driver &&
+        upperJoints(drivers.session.driver.profile).every((j) => pose.valid.has(j.id)),
+    }
+  },
+  () => toggleBodyCapture(),
+)
 function choose(index: number) {
   if (walkthrough.dialog.open) walkthrough.dialog.close()
   selected = index
@@ -191,6 +225,7 @@ for (const name of PRESETS) {
   $('moves').append(b)
 }
 const stop = () => {
+  void drivers.session.stop('Stop')
   stopped = true
   keys.clear()
   for (const a of actors) {
@@ -293,7 +328,7 @@ const frameTimes: number[] = [],
   renderTimes: number[] = []
 const test =
   ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) &&
-  ['humanoid', 'load'].includes(new URLSearchParams(location.search).get('test') ?? '')
+  ['humanoid', 'humanoid-live', 'load'].includes(new URLSearchParams(location.search).get('test') ?? '')
 const injected = new Map<number, BodyInput>()
 let inspecting = false
 stage.onFrame = (t, dt) => {
@@ -455,6 +490,10 @@ stage.onFrame = (t, dt) => {
 if (test)
   Object.assign(window, {
     __humanoid: {
+      drivers,
+      /** Local capture seam preserves the real capture-clock origin and BODY decoding. */
+      injectLocal: (state: BodyState) => localBody.receive(encodeBody(state)),
+      localCaptureOrigin,
       actors,
       camera: stage.camera,
       /** Loopback-only stills and joint sweeps use the actual live renderer and skins. */

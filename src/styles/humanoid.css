@@ -27,3 +27,39 @@
 .range-actions .kit-primary { flex: 1; }
 .range-reset { display: block; min-height: 44px; margin: 10px auto -12px; padding: 0 12px; background: none; border: 0; border-radius: 8px; color: var(--bb-ink-3); font: 500 11px var(--bb-font-ui); cursor: pointer; }
 @media (max-width: 600px) { .humanoid-strip { top: 78px; gap: 10px; padding: 8px 12px; max-width: calc(100vw - 80px); } .humanoid-calibration { padding: 22px; } .range-steps { gap: 5px; } }
+
+/* The driver lane uses the same window, controls and glass as the practice scene. */
+.humanoid-driver { display: grid; gap: 12px; font: 500 12px/1.5 var(--bb-font-ui); }
+.driver-disclaimer, .driver-note { margin: 0; color: var(--bb-ink-2); font-size: 11px; }
+.driver-overview { display: grid; grid-template-columns: 40% 1fr; align-items: center; gap: 12px; }
+.driver-overview h3 { margin: 5px 0; font: 700 23px var(--bb-font-display); letter-spacing: -.03em; }
+.driver-overview p { margin: 0; color: var(--bb-ink-2); font-size: 11px; overflow-wrap: anywhere; }
+.driver-eyebrow { color: var(--bb-ink-3); font: 600 10px var(--bb-font-data); text-transform: uppercase; letter-spacing: .08em; }
+.driver-figure { height: 148px; }
+.driver-figure canvas { display: block; width: 100%; height: 100%; }
+.driver-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.driver-row .kit-select { flex: 1; min-width: 0; }
+.humanoid-driver details { border-top: 1px solid var(--bb-line); padding-top: 8px; }
+.humanoid-driver summary { cursor: pointer; min-height: 32px; align-content: center; }
+.humanoid-driver summary span { float: right; color: var(--bb-ink-3); font-family: var(--bb-font-data); }
+.driver-checks { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; list-style: none; padding: 0; margin: 8px 0; }
+.driver-checks li { color: var(--bb-ink-3); }
+.driver-checks li[data-ok='true'] { color: var(--bb-accent-text); }
+.humanoid-driver .sim-auto { min-height: 44px; display: flex; align-items: center; gap: 10px; }
+.humanoid-driver [data-jog] { margin-top: 12px; display: grid; gap: 8px; }
+.humanoid-driver [data-jog][hidden] { display: none; }
+.driver-map { margin: 4px 0 8px; }
+.driver-map [data-map] { max-height: 190px; overflow: auto; }
+.driver-map table { border-collapse: collapse; font: 10px var(--bb-font-data); text-align: left; }
+.driver-map td, .driver-map th { padding: 6px; border-bottom: 1px solid var(--bb-line); }
+.driver-leg-row { display: flex; gap: 10px; align-items: center; color: var(--bb-ink-3); font-size: 11px; }
+.driver-footer { position: sticky; bottom: -12px; z-index: 1; display: grid; gap: 8px; padding: 12px 0; background: var(--bb-frost); backdrop-filter: var(--bb-frost-blur); border-top: 1px solid var(--bb-line-strong); }
+.driver-footer .driver-note { text-align: center; }
+.driver-deadman { width: 100%; min-height: 58px; touch-action: none; user-select: none; }
+.humanoid-driver .driver-deadman[data-held='true'] { background: var(--bb-accent); color: var(--bb-accent-ink); border-color: var(--bb-accent); box-shadow: 0 0 24px rgb(var(--bb-accent-rgb) / .2); }
+.driver-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.driver-actions .estop { width: 100%; margin: 0; min-height: 48px; }
+.humanoid-driver[data-state='live'] [data-state] { color: var(--bb-accent-text); }
+/* Leave the desktop pairing badge below the entire Stop button. */
+@media (min-width: 601px) { .driver-footer { bottom: 36px; margin-bottom: 48px; } }
+@media (max-width: 600px) { .driver-figure { height: 116px; } .driver-overview h3 { font-size: 21px; } }

@@ -33,6 +33,7 @@ import { runPanels } from './e2e-panels.mjs'
 import { runSimButtons } from './e2e-sim-buttons.mjs'
 import { runArmLive } from './e2e-arm-live.mjs'
 import { runHumanoid } from './e2e-humanoid.mjs'
+import { runHumanoidLive } from './e2e-humanoid-live.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
 
 const HEADED = process.argv.includes('--headed')
@@ -161,6 +162,7 @@ async function phone(invite, { xr = true, way = 'motion' } = {}) {
 
 try {
   if (ONLY_BUTTONS) await runSimButtons(local, check)
+  else if (process.env.OBPAL_E2E_SIMS_ONLY === 'humanoid-live') await runHumanoidLive(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'humanoid') await runHumanoid(local, check)
   else if (ONLY_PANELS) await runPanels(local, check)
   else {
@@ -533,6 +535,7 @@ try {
   await runPanels(local, check)
   await runArmLive(local, check)
   await runHumanoid(local, check)
+  await runHumanoidLive(local, check)
   await runSimButtons(local, check)
   }
   }

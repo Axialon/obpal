@@ -30,7 +30,7 @@ async function until(read, ms = 10000, label = 'humanoid state') {
 }
 
 /** An independent synthetic landmark producer. No robot angle setter bypasses the capture/retarget path. */
-function installFixture() {
+export function installFixture() {
   const h = window.__humanoid,
     p = h.actors[0].rig.profile,
     root = h.actors[0].rig.root
