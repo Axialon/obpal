@@ -1,6 +1,6 @@
 /**
  * ob.Pal themes are the Blackboxes family surfaces (src/family). The theme only picks what the UI sits on;
- * ob.Pal's identity accent stays lime on every surface. UI colours come from the family CSS tokens, while
+ * ob.Pal's default accent is lime; a visitor can choose another independently. UI colours come from the family CSS tokens, while
  * the 3D stage colours (backdrop gradient and ground grid) live here because three.js needs them as values.
  */
 import { html } from './markup'
@@ -68,11 +68,17 @@ export function applyTheme(t: Theme, remember = false) {
   family.setProduct('obpal')
   if (remember) family.setTheme(t.id)
   else family.applyTheme(t.id)
-  document.documentElement.dataset.theme = t.id
-  // Site pages wear ob.Pal's own palette (styles/site.css), so the browser's bar matches it rather than the surface.
-  if (document.documentElement.classList.contains('site')) document.querySelector('meta[name="theme-color"]')?.setAttribute('content', SITE_PAGE)
+  syncTheme()
 }
-const SITE_PAGE = '#0a0718'
+
+/** Keep the app's legacy attribute and browser chrome in step with every family picker, including the tray. */
+function syncTheme() {
+  const root = document.documentElement
+  root.dataset.theme = root.dataset.bbTheme
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', getComputedStyle(root).getPropertyValue('--bb-page').trim())
+}
+addEventListener('bb-theme', syncTheme)
+family.watchTheme()
 
 /**
  * Two-tone swatch markup for theme pickers: the surface with the accent in effect (the visitor's own pick, else ob.Pal's

@@ -10,6 +10,29 @@ export interface Size { width: number; height: number }
 export type Side = 'below' | 'above' | 'right' | 'left'
 export interface Placement { left: number; top: number; maxHeight: number; side: Side }
 
+/** A tray card centred on its opener, or a phone sheet centred on the column, inside the usable visual viewport. */
+export function placeTrayCard(anchor: Box, pop: Size, bounds: Box, { sheet = false, column = anchor, margin = 12, gap = 12, avoid = [] as Box[] } = {}) {
+  const maxWidth = Math.max(0, bounds.width - margin * 2)
+  let maxHeight = Math.max(0, bounds.height - margin * 2)
+  const width = Math.min(pop.width, maxWidth), height = Math.min(pop.height, maxHeight)
+  const local = { ...anchor, left: anchor.left - bounds.left, top: anchor.top - bounds.top + (anchor.height - height) / 2 }
+  const beside = placePopover(local, { width, height }, bounds, { beside: true, margin, gap })
+  const centre = column.top + column.height / 2 - height / 2
+  const left = sheet ? bounds.left + (bounds.width - width) / 2 : bounds.left + beside.left
+  let top = sheet ? Math.max(bounds.top + margin, Math.min(centre, bounds.top + bounds.height - margin - height)) : bounds.top + beside.top
+  const blocked = avoid.filter(r => r.left < left + width && r.left + r.width > left).map((r): [number, number] => [r.top - gap, r.top + r.height + gap])
+  if (blocked.length) {
+    const start = bounds.top + margin, end = bounds.top + bounds.height - margin
+    maxHeight = Math.max(0, ...freeSpans(start, end, blocked).map(([a, b]) => b - a))
+    const fit = Math.min(height, maxHeight)
+    top = edgeSpot(top + height / 2, fit, start, end, blocked) - fit / 2
+  }
+  return {
+    left, top,
+    maxWidth, maxHeight,
+  }
+}
+
 /**
  * Below the anchor, or above it when there's more room there and too little below, its start (or end) edge on the
  * anchor's; `beside`: to its right, or left when there's more room there and too little on the right, its top on the

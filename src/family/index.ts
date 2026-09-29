@@ -10,7 +10,9 @@ export type FamilyThemeId = 'carbon' | 'navy' | 'violet' | 'wine' | 'onyx' | 'li
 export interface FamilyProduct { id: string; name: string; category: string; host: string; accent: string }
 export interface FamilyTheme { id: FamilyThemeId; name: string; page: string; surface: string; light: boolean }
 export interface FamilyAccent { id: string; name: string; color?: string }
-interface Popover { open(): void; close(): void; toggle(): void }
+interface Popover { open(): void; close(): void; toggle(): void; place(): void }
+/** Optional placement for an edge tray or another host with its own reserved screen space. */
+export type MenuPlacement = (menu: HTMLElement, button: HTMLElement) => void
 
 export interface SwitcherOptions { href?: (product: FamilyProduct) => string; itemClass?: string }
 
@@ -35,9 +37,9 @@ export interface FamilyApi {
   /** opts.href(product): a site's own link for a product (a local preview); opts.itemClass: a class for each item. */
   productMenu(current: string, opts?: SwitcherOptions): Content
   themeMenu(): Content
-  popover(button: HTMLElement, menu: HTMLElement, onOpen?: (menu: HTMLElement) => void): Popover
+  popover(button: HTMLElement, menu: HTMLElement, onOpen?: (menu: HTMLElement) => void, place?: MenuPlacement): Popover
   mountSwitcher(button: HTMLElement, menu: HTMLElement, current: string, opts?: SwitcherOptions): Popover
-  mountThemes(button: HTMLElement, menu: HTMLElement): Popover
+  mountThemes(button: HTMLElement, menu: HTMLElement, place?: MenuPlacement): Popover
   mountMore(button: HTMLElement, menu: HTMLElement, toolsRoot: HTMLElement): Popover
   initTips(): void
   hint(id: string, anchor: () => Element | null, text: string, opts?: { place?: 'above' | 'below'; delay?: number }): void

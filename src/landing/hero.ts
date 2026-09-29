@@ -214,7 +214,19 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     return probe.getBoundingClientRect().height || innerHeight
   }
 
-  const me = () => field!.orb('me', LIME)
+  const me = () => field!.orb('me', family.accentColor())
+  const palette = () => {
+    if (!field) return
+    const root = document.documentElement, css = getComputedStyle(root)
+    const carbon = root.dataset.bbTheme === 'carbon', light = root.dataset.bbTheme === 'light'
+    field.palette(carbon ? '#f1edff' : css.getPropertyValue('--bb-ink').trim(),
+      light ? css.getPropertyValue('--bb-accent-text').trim() : family.accentColor(),
+      carbon ? '#5c3ef5' : css.getPropertyValue('--bb-ink-2').trim())
+    field.recolor('me', family.accentColor())
+    wake()
+  }
+  addEventListener('bb-theme', palette)
+  addEventListener('bb-accent', palette)
   /** The player takes over from the opening. */
   function takeOver() {
     if (tour && field) { const o = me().orb; o.route = []; o.flying = false; o.aim = null }
@@ -585,6 +597,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
         new Promise((r) => setTimeout(r, 2500)),
       ])
       field = createField(stage, { coarse, still })
+      palette()
       field.onHit = onHit
       field.onQuiet = (q) => glass.note(q.kind, q.speed, q.why)
       setQuality()

@@ -54,9 +54,6 @@ const EDGE = 0.016
 const MAX_PADS = 8
 
 const LAVENDER = new Color('#b3a4ff')
-const UV = new Color('#5c3ef5')
-const INK = new Color('#f1edff')
-const LIME = new Color('#c6ff34')
 
 /**
  * A marble hit something (the edge of the screen: a wall): what (a button: which), how hard (0…1, and its speed into
@@ -196,6 +193,8 @@ export interface Field {
   orb(id: string, color: string): FieldOrb
   /** A marble takes another colour (its glass, glow, halo and light). */
   recolor(id: string, color: string): void
+  /** The headline is text even when drawn in 3D: its ink and accent follow the page's surface. */
+  palette(ink: string, accent: string, side: string): void
   removeOrb(id: string): void
   orbs(): FieldOrb[]
   /** Advance everything by dt; returns whether anything still moves. */
@@ -259,6 +258,7 @@ const GLOW_GLSL = `
   }`
 
 export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; still?: boolean }): Field {
+  const UV = new Color('#5c3ef5'), INK = new Color('#f1edff'), LIME = new Color('#c6ff34')
   const renderer = new WebGLRenderer({ canvas, alpha: true, antialias: true, premultipliedAlpha: true })
   renderer.setClearColor(0x000000, 0)
   renderer.outputColorSpace = SRGBColorSpace
@@ -774,6 +774,12 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
       o.color.set(color)
       o.halo.material.color.set(color)
       for (const m of [o.pool, o.caustic]) (m.material as MeshBasicMaterial).color.set(color)
+    },
+    palette(ink, accent, side) {
+      INK.set(ink)
+      LIME.set(accent)
+      sideMat.color.set(side).multiplyScalar(0.8)
+      for (const l of letters) { l.cap.color.copy(INK); l.cap.emissive.copy(LIME) }
     },
     removeOrb(id) {
       const o = orbMap.get(id)

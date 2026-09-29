@@ -21,7 +21,7 @@
   --aurora-3-rgb: var(--bb-surface-rgb);
   /* Highlight channel for subtle fills and hairlines: white on dark surfaces, slate ink on the light one. */
   --hl-rgb: 255 255 255;
-  --focus: var(--accent);
+  --focus: var(--accent-text);
   --line: var(--bb-line);
   --ok: #6ee7b7;
   --warn: #fcd34d;
@@ -105,7 +105,7 @@ a { color: var(--accent-text); }
 @keyframes hint-float { 0%, 100% { transform: translate3d(0, 0, 0); } 50% { transform: translate3d(0, -4px, 0); } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; } }
 
-[data-bb-theme='light'] { --hl-rgb: 15 23 42; }
+[data-bb-theme='light'] { --hl-rgb: 15 23 42; --ok: #086747; --warn: #92400e; --bad: #be123c; }
 /* The family's app switcher, by the logo on every page (its menu is family.js's). */
 .switch-btn { width: 30px; height: 30px; display: grid; place-items: center; flex: none; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--muted); cursor: pointer; transition: background 0.2s var(--ease), color 0.2s; }
 .switch-btn:hover { background: rgb(var(--hl-rgb) / 0.07); color: var(--ink); }

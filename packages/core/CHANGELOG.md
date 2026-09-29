@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+- The device link serves a deferred ICE restart when its socket returns, and ends the restart if the path recovers by itself.
+- `encodeHand` and `decodeHand` add the 144-byte HAND packet `0x16`, with 21 hand landmarks, handedness, confidence, gestures, capture time and a generation byte; older hosts ignore this new packet type.
+- `encodeBody` and `decodeBody` add the 276-byte BODY packet `0x17`, with 33 camera-based body landmarks, visibility, presence, capture time and a generation byte; body tracking runs on the phone, and older hosts ignore this new packet type.
+- HAND and BODY each carry an independent sequence number; their existing packet layouts are unchanged.
+
 ## 0.2.0
 
 - The README gives the install line.

@@ -6,9 +6,11 @@
  * pairing chip and a sim's windows, and an open pairing card folds for it on a phone on its side; the keyboard, a click
  * outside and a swipe back close it; the phone controller and the embed don't have it. Run by scripts/e2e-pages.mjs.
  */
+import { checkFrost } from './lib/frost.mjs'
+
 const assert = (ok, message) => { if (!ok) throw new Error(message) }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-const ORDER = ['scan', 'pair', 'open', 'switch', 'reset', 'camera', 'stop', 'next1', 'next2', 'next3', 'fullscreen', 'sound', 'theme']
+const ORDER = ['scan', 'pair', 'open', 'switch', 'reset', 'camera', 'stop', 'body', 'next1', 'next2', 'next3', 'fullscreen', 'sound', 'theme']
 
 /** A page at a size; its fullscreen requests counted, since a headless screen may not grant them. */
 async function open(browser, origin, path, { width = 1440, height = 900, phone = false } = {}) {
@@ -57,6 +59,148 @@ export async function runQuick(browser, origin, checkIt) {
     stage = ''
     try { return await fn() } catch (e) { throw new Error(stage ? `${stage}: ${e.message.split('\n')[0]}` : e.message) }
   })
+
+  /** The full card (including its last row), the safe margin, and the page width, measured after layout. */
+  const fits = async (page, selector, { scroll = false } = {}) => {
+    const found = await page.locator(selector).evaluate(el => {
+      const r = el.getBoundingClientRect(), v = visualViewport
+      const top = Math.max(v.offsetTop, ...[...document.querySelectorAll('.top, .topbar, .sim-top')].map(el => {
+        const b = el.getBoundingClientRect()
+        return b.width > v.width / 2 && b.top <= v.offsetTop + 12 ? b.bottom : v.offsetTop
+      }))
+      return { left: r.left - v.offsetLeft, top: r.top - top, right: v.offsetLeft + v.width - r.right,
+        bottom: v.offsetTop + v.height - r.bottom, clipped: el.scrollHeight - el.clientHeight, sideways: el.scrollWidth - el.clientWidth,
+        overflow: document.documentElement.scrollWidth - innerWidth }
+    })
+    assert(['left', 'top', 'right', 'bottom'].every(k => found[k] >= 11.5), `${selector} margin: ${JSON.stringify(found)}`)
+    assert(!found.overflow && !found.sideways, `page or card scrolls horizontally: ${JSON.stringify(found)}`)
+    assert(scroll || found.clipped <= 1, `${selector} unnecessarily scrolls: ${JSON.stringify(found)}`)
+  }
+  const surfaces = page => page.evaluate(() => {
+    const color = selector => { const el = document.querySelector(selector); return el ? getComputedStyle(el).backgroundColor : null }
+    const root = getComputedStyle(document.documentElement)
+    return { body: getComputedStyle(document.body).background, bar: color('.top, .topbar, .sim-top'), tab: color('.quick-tab'), tray: color('.quick-panel'),
+      card: color('.quick-themes'), accent: root.getPropertyValue('--bb-accent').trim(),
+      theme: document.documentElement.dataset.theme, family: document.documentElement.dataset.bbTheme }
+  })
+  for (const [width, height] of [[360, 740], [375, 812], [390, 844], [430, 932], [844, 390]]) {
+    await check(`quick actions: every card fits ${width}x${height}, Navy/Light/accent apply and persist, Light reads at AA`, async () => {
+      for (const path of ['/', '/view/', '/sim/arm/', '/sim/studio/']) {
+        const { page, context } = await open(browser, origin, path, { width, height, phone: true })
+        try {
+          await sleep(600)
+          await openTray(page)
+          for (const id of await offered(page)) {
+            at(`${path} ${id} tooltip`)
+            await page.evaluate(() => document.activeElement?.blur())
+            await action(page, id).focus()
+            await page.locator('.quick-tip').waitFor({ state: 'visible', timeout: 3000 })
+            await fits(page, '.quick-tip')
+          }
+          at(`${path} theme picker`)
+          await action(page, 'theme').click()
+          await fits(page, '.quick-themes')
+          const initial = await surfaces(page)
+          assert(initial.theme === 'carbon' && initial.accent === '#c6ff34', `${path}: default changed`)
+          const base = path === '/' ? 'rgb(10, 7, 24)' : path === '/sim/studio/' ? 'rgba(0, 0, 0, 0)' : path.startsWith('/sim/') ? 'rgb(14, 14, 15)' : 'rgb(11, 11, 12)'
+          assert(initial.body.startsWith(base), `${path}: default surface changed: ${initial.body}`)
+          let previous = initial
+          for (const theme of ['navy', 'light']) {
+            at(`${path} pick ${theme}`)
+            await page.locator(`.quick-themes [data-bb-theme-id="${theme}"]`).click()
+            await page.waitForTimeout(50)
+            const picked = await surfaces(page)
+            assert(picked.theme === theme && picked.family === theme, `${path}: theme attributes disagree`)
+            for (const key of ['body', 'bar', 'tab', 'tray', 'card']) assert(picked[key] !== previous[key], `${path}: ${key} did not change to ${theme}`)
+            await fits(page, '.quick-themes')
+            await page.reload()
+            await openTray(page)
+            await action(page, 'theme').click()
+            assert(JSON.stringify(await surfaces(page)) === JSON.stringify(picked), `${path}: ${theme} did not survive reload`)
+            previous = picked
+          }
+          for (const accent of ['sky', 'rose', 'mint', 'product']) {
+            at(`${path} pick ${accent}`)
+            await page.locator(`.quick-themes [data-bb-accent-id="${accent}"]`).click()
+            await checkFrost(page, '.quick-themes', { text: ['.bb-label', '.bb-theme'] })
+            await checkFrost(page, '.quick-panel', { text: ['.quick-btn:not([data-group="primary"])'] })
+          }
+          await page.locator('.quick-themes [data-bb-accent-id="sky"]').click()
+          const accent = await surfaces(page)
+          assert(accent.accent === '#38bdf8' && accent.accent !== initial.accent, `${path}: accent did not apply`)
+          await page.reload()
+          await openTray(page)
+          await action(page, 'theme').click()
+          assert(JSON.stringify(await surfaces(page)) === JSON.stringify(accent), `${path}: accent did not survive reload`)
+          await fits(page, '.quick-themes')
+        } finally { await context.close() }
+      }
+      return 'home, viewer, arm, studio; all tooltips and theme choices'
+    })
+  }
+
+  await check('quick actions: a sheet repositions through rotation and safe insets; the tab stays centred without reduced-motion slides', async () => {
+    const { page, context } = await open(browser, origin, '/', { width: 375, height: 812, phone: true })
+    try {
+      await openTray(page)
+      await action(page, 'theme').click()
+      for (const viewport of [{ width: 844, height: 390 }, { width: 375, height: 812 }]) {
+        await page.setViewportSize(viewport)
+        await page.locator('.quick-tray').evaluate(el => {
+          el.style.setProperty('--quick-safe-left', '24px')
+          el.style.setProperty('--quick-safe-right', '24px')
+          el.style.setProperty('--quick-safe-bottom', '20px')
+          dispatchEvent(new Event('resize'))
+        })
+        await sleep(100)
+        await fits(page, '.quick-themes')
+        const layout = await page.evaluate(() => {
+          const panel = document.querySelector('.quick-panel'), tab = document.querySelector('.quick-tab'), menu = document.querySelector('.quick-themes')
+          const p = panel.getBoundingClientRect(), t = tab.getBoundingClientRect(), m = menu.getBoundingClientRect()
+          return { centre: Math.abs(p.top + p.height / 2 - t.top - t.height / 2), left: m.left, right: innerWidth - m.right, bottom: innerHeight - m.bottom,
+            motion: getComputedStyle(panel).transitionDuration }
+        })
+        assert(layout.centre <= 1 && layout.left >= 36 && layout.right >= 36 && layout.bottom >= 32, JSON.stringify(layout))
+        assert(layout.motion.split(',').every(n => parseFloat(n) <= .001), 'reduced motion still slides')
+      }
+      await page.getByRole('button', { name: 'Close theme', exact: true }).click()
+      assert(await page.locator('.quick-themes').evaluate(el => el.hidden), 'sheet close did not close it')
+      assert(await action(page, 'theme').evaluate(el => el === document.activeElement), 'sheet close lost focus')
+      await page.setViewportSize({ width: 844, height: 390 })
+      await page.keyboard.press('ArrowDown')
+      assert(await page.evaluate(() => document.activeElement?.getAttribute('data-bb-theme-id') === 'carbon'), 'keyboard landed on a hidden sheet control')
+      await fits(page, '.quick-themes')
+      await page.setViewportSize({ width: 360, height: 260 })
+      await sleep(100)
+      await fits(page, '.quick-themes', { scroll: true })
+      await page.locator('.quick-themes').evaluate(el => { el.scrollTop = el.scrollHeight })
+      await sleep(100)
+      assert(await page.locator('.quick-themes').evaluate(el => el.scrollTop > 0), 'last-resort scrolling snapped back to the top')
+      await page.locator('.quick-themes [data-bb-accent-id="mint"]').click()
+      assert(await page.locator('.quick-themes').evaluate(el => el.scrollTop > 0), 'a choice lost the card scroll position')
+    } finally { await context.close() }
+  })
+
+  for (const path of ['/sim/', '/sim/arena/', '/sim/drone/', '/link/', '/catalogue/', '/buttons/', '/sponsor/', '/donate/', '/privacy/']) {
+    await check(`quick actions: ${path} applies both choices through the family tokens after reload`, async () => {
+      const { page, context } = await open(browser, origin, path, { width: 390, height: 844, phone: true })
+      try {
+        await openTray(page)
+        await action(page, 'theme').click()
+        const before = await surfaces(page)
+        await page.locator('.quick-themes [data-bb-theme-id="light"]').click()
+        await page.locator('.quick-themes [data-bb-accent-id="sky"]').click()
+        await sleep(50)
+        const after = await surfaces(page)
+        for (const key of ['body', 'bar', 'tab', 'tray', 'card', 'accent']) assert(before[key] === null || after[key] !== before[key], `${key} did not change`)
+        await fits(page, '.quick-themes')
+        await page.reload()
+        await openTray(page)
+        await action(page, 'theme').click()
+        assert(JSON.stringify(await surfaces(page)) === JSON.stringify(after), 'surface or accent did not survive reload')
+      } finally { await context.close() }
+    })
+  }
 
   await check('quick actions: home offers pairing, fullscreen and sound; each does its job; Esc closes it', async () => {
     const { page, context, errors } = await open(browser, origin, '/')
@@ -117,7 +261,7 @@ export async function runQuick(browser, origin, checkIt) {
       clear('tab', await box(page, '.quick-tab'), { 'the dock': await box(page, '.panel-dock'), 'a window': windows, 'the pairing pill': pairing.pill, 'the pairing card': pairing.card })
       await openTray(page)
       const ids = await offered(page)
-      assert(ids.join() === 'pair,switch,reset,camera,fullscreen,sound,theme', `the sim offers ${ids}`)
+      assert(ids.join() === 'pair,switch,reset,camera,body,fullscreen,sound,theme', `the sim offers ${ids}`)
       clear('open tray', await box(page, '.quick-panel'), { 'the dock': await box(page, '.panel-dock'), 'a window': windows, 'the pairing pill': pairing.pill, 'the pairing card': pairing.card })
       at('camera')
       const camera = () => page.evaluate(() => window.__device.stage.camera.position.toArray().map((v) => +v.toFixed(3)).join())
@@ -179,7 +323,7 @@ export async function runQuick(browser, origin, checkIt) {
       await page.waitForFunction(() => window.__arena && document.querySelector('.quick-tray [data-quick="reset"]'), null, { timeout: 20000 })
       await openTray(page)
       const ids = await offered(page)
-      assert(ids.join() === 'pair,switch,reset,camera,fullscreen,sound,theme', `the arena offers ${ids}`)
+      assert(ids.join() === 'pair,switch,reset,camera,body,fullscreen,sound,theme', `the arena offers ${ids}`)
       await action(page, 'camera').click()
       await page.waitForFunction(() => document.body.classList.contains('presence-active'), null, { timeout: 5000 })
       await openTray(page)
@@ -200,7 +344,7 @@ export async function runQuick(browser, origin, checkIt) {
       await page.waitForFunction(() => window.__viewer && document.querySelector('.quick-tray [data-quick="sound"]'), null, { timeout: 20000 })
       await openTray(page)
       const ids = await offered(page)
-      assert(ids.join() === 'pair,open,reset,camera,fullscreen,sound,theme', `the viewer offers ${ids}`)
+      assert(ids.join() === 'pair,open,reset,camera,body,fullscreen,sound,theme', `the viewer offers ${ids}`)
       clear('open tray', await box(page, '.quick-panel'), { 'the catalogue': await box(page, '#catalog') })
       // Reset brings the camera home; the camera's next view moves it; reset brings it back to the same place.
       const camera = () => page.evaluate(() => window.__viewer.camera.position.toArray().map((v) => +v.toFixed(2)).join())

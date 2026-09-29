@@ -199,7 +199,7 @@ import { html, setMarkup } from '../ui/markup'
    * Wire a button to a popover menu: toggles aria-expanded, closes on outside click or Escape, and places the
    * menu under the button (right-aligned when the button sits in the right half of the screen).
    */
-  function popover(button, menu, onOpen) {
+  function popover(button, menu, onOpen, placement) {
     var api = {
       open: function () {
         closeAll(api);
@@ -215,15 +215,21 @@ import { html, setMarkup } from '../ui/markup'
         var i = openMenus.indexOf(api);
         if (i >= 0) openMenus.splice(i, 1);
       },
-      toggle: function () { if (menu.hidden) api.open(); else api.close(); }
+      toggle: function () { if (menu.hidden) api.open(); else api.close(); },
+      place: function () { if (!menu.hidden) place(); }
     };
     function place() {
+      // Measure the whole card before choosing its position, including after its content changes.
+      menu.style.maxHeight = '';
+      if (placement) { placement(menu, button); return; }
       var r = button.getBoundingClientRect();
       var top = Math.round(r.bottom + 10);
+      var height = menu.offsetHeight;
+      if (top + height > global.innerHeight - 12) top = Math.max(12, r.top - height - 10);
       menu.style.position = 'fixed';
       menu.style.top = top + 'px';
       // A short screen scrolls the menu, so its last item is always reachable.
-      menu.style.maxHeight = Math.max(160, global.innerHeight - top - 12) + 'px';
+      menu.style.maxHeight = Math.max(0, global.innerHeight - top - 12) + 'px';
       menu.style.overflowY = 'auto';
       var w = menu.offsetWidth;
       var right = r.left + r.width / 2 > global.innerWidth / 2;
@@ -231,7 +237,7 @@ import { html, setMarkup } from '../ui/markup'
       menu.style.left = Math.round(Math.max(12, Math.min(x, global.innerWidth - w - 12))) + 'px';
     }
     // Keyboard: arrows open it and move through its items, Home and End jump, Escape closes it back to the button.
-    function items() { return Array.prototype.slice.call(menu.querySelectorAll('a[href],button:not([disabled])')); }
+    function items() { return Array.prototype.slice.call(menu.querySelectorAll('a[href],button:not([disabled])')).filter(function (el) { return el.getClientRects().length; }); }
     function focusItem(i) { var list = items(); if (list.length) list[(i + list.length) % list.length].focus(); }
     button.setAttribute('aria-haspopup', 'true');
     button.setAttribute('aria-expanded', 'false');
@@ -243,6 +249,7 @@ import { html, setMarkup } from '../ui/markup'
     button.addEventListener('keydown', function (e) {
       if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
       e.preventDefault();
+      e.stopPropagation();
       if (menu.hidden) api.open();
       focusItem(e.key === 'ArrowDown' ? 0 : -1);
     });
@@ -255,7 +262,13 @@ import { html, setMarkup } from '../ui/markup'
       else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); api.close(); button.focus(); }
     });
     menu.addEventListener('click', function (e) { e.stopPropagation(); });
-    global.addEventListener('resize', function () { if (!menu.hidden) place(); });
+    global.addEventListener('resize', api.place);
+    // Scrolling the card itself must keep its limit and scroll position; only its surroundings move its anchor.
+    global.addEventListener('scroll', function (e) { if (e.target === global || !menu.contains(e.target)) api.place(); }, true);
+    if (global.visualViewport) {
+      global.visualViewport.addEventListener('resize', api.place);
+      global.visualViewport.addEventListener('scroll', api.place);
+    }
     return api;
   }
   doc.addEventListener('click', function () { closeAll(null); });
@@ -271,15 +284,21 @@ import { html, setMarkup } from '../ui/markup'
     menu.setAttribute('role', 'menu');
     return popover(button, menu, function (m) { if (!m.childElementCount) setMarkup(m, productMenu(current, opts)); });
   }
-  function mountThemes(button, menu) {
-    var api = popover(button, menu, function (m) { setMarkup(m, themeMenu()); });
+  function mountThemes(button, menu, placement) {
+    var api = popover(button, menu, function (m) { setMarkup(m, themeMenu()); }, placement);
     menu.addEventListener('click', function (e) {
       var t = e.target.closest ? e.target.closest('[data-bb-theme-id]') : null;
       var a = e.target.closest ? e.target.closest('[data-bb-accent-id]') : null;
       if (t) setTheme(t.getAttribute('data-bb-theme-id'));
       else if (a) setAccent(a.getAttribute('data-bb-accent-id'));
       else return;
+      var scroll = menu.scrollTop;
       setMarkup(menu, themeMenu());
+      api.place();
+      menu.scrollTop = scroll;
+      // Rebuilding the choices must not lose keyboard focus after a pick.
+      var selected = t ? '[data-bb-theme-id="' + getTheme() + '"]' : '[data-bb-accent-id="' + getAccent() + '"]';
+      menu.querySelector(selected).focus({ preventScroll: true });
     });
     return api;
   }

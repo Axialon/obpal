@@ -785,12 +785,12 @@ $('themes').onclick = (e) => {
   const el = e.target as Element
   const t = el.closest<HTMLElement>('[data-bb-theme-id]')
   const a = el.closest<HTMLElement>('[data-bb-accent-id]')
-  if (t) setTheme(themeById(t.dataset.bbThemeId))
+  if (t) family.setTheme(t.dataset.bbThemeId!)
   else if (a) setAccent(a.dataset.bbAccentId!)
 }
 // A surface picked on another Blackboxes tab applies here when this tab regains focus.
-family.watchTheme()
 addEventListener('bb-theme', (e) => { const id = (e as CustomEvent<{ theme: string }>).detail.theme; if (id !== theme.id) setTheme(themeById(id)) })
+addEventListener('bb-accent', () => setAccent(family.getAccent()))
 $('t-theme').onclick = (e) => { e.stopPropagation(); if (!$('lighting').hidden) toggleLighting(false); toggleThemes() }
 $('t-light').onclick = (e) => { e.stopPropagation(); toggleLighting() }
 
@@ -1024,7 +1024,7 @@ async function startRemote() {
   // Open while nobody is here; it closes by itself as a phone comes in, and the + in the people chip opens it again.
   // It folds while a panel is where it opens, and on narrow screens the caption makes way for it.
   pairChip = new PairingChip({
-    remote, open: true, testLink: true, avoid: '#lighting, #themes, #more, #switcher, #people, #catalog, .presence-controls, .quick-panel, .obpal-camera',
+    remote, open: true, testLink: true, avoid: '#lighting, #themes, #more, #switcher, #people, #catalog, .presence-controls, .quick-panel, .quick-themes, .obpal-camera',
     onToggle: (open) => { $('chip-invite').setAttribute('aria-pressed', String(open)); $('caption').classList.toggle('pair-open', open) },
   })
   remote.on('connect', () => {

@@ -17,7 +17,7 @@
     radial-gradient(60% 55% at 80% 12%, rgb(var(--uv-rgb) / 0.5), transparent 70%),
     radial-gradient(45% 45% at 8% 92%, rgb(var(--haze-rgb) / 0.16), transparent 70%),
     radial-gradient(30% 30% at 58% 58%, rgb(var(--accent-rgb) / 0.05), transparent 70%),
-    linear-gradient(180deg, #0f0a28 0%, var(--page) 88%); }
+    linear-gradient(180deg, var(--hero-top) 0%, var(--page) 88%); }
 /* The stage floor: a faint grid of points that fades out toward the edges. */
 .hero::after { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
   background-image: radial-gradient(rgb(var(--haze-rgb) / 0.2) 1px, transparent 1.3px); background-size: 30px 30px;

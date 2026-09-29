@@ -1,10 +1,17 @@
 /*
- * ob.Pal's site pages (home, catalogue, Link, the sims hub, support, privacy) wear one signature palette, whatever
- * surface the visitor picked for the apps: an ultraviolet night, lime light for anything you can touch, and a lavender
- * haze around it. The apps (viewer, phone, sims) keep the visitor's own surface.
- * It overrides the family tokens on <html class="site">, so every alias in base.css follows.
+ * Site pages keep their ultraviolet identity on Carbon. Other surfaces re-tint the same composition through the
+ * family tokens; the visitor's accent is independent of the surface, just as it is in the apps.
  */
 html.site {
+  --haze-rgb: var(--bb-hl-rgb);
+  --uv-rgb: var(--bb-aurora);
+  --hero-top: var(--bb-sheet);
+  --core-rgb: var(--bb-hl-rgb);
+  --p-sky: #38bdf8;
+  --p-rose: #fb7185;
+  --p-amber: #fcd34d;
+}
+html.site:not([data-bb-theme]), html.site[data-bb-theme='carbon'] {
   color-scheme: dark;
   --bb-page: #0a0718;
   --bb-base-rgb: 14 10 34;
@@ -19,23 +26,14 @@ html.site {
   --bb-wash: rgb(235 228 255 / 0.05);
   --bb-shadow: 0 24px 60px -28px rgb(4 2 14 / 0.9);
   --bb-aurora: 92 62 245;
-  --bb-accent: #c6ff34;
-  --bb-accent-rgb: 198 255 52;
-  --bb-accent-ink: #172100;
-  --bb-accent-strong: #4d7c0f;
-  --bb-accent-text: var(--bb-accent);
-  --bb-accent-soft: color-mix(in srgb, var(--bb-accent) 55%, var(--bb-ink));
   --bb-hl-rgb: 235 228 255;
   --bb-range-deepen: 0%;
   --hl-rgb: 255 255 255;
   /* The haze and the depth around the lime, and the white-hot core of a light. */
   --haze-rgb: 179 164 255;
   --uv-rgb: 92 62 245;
+  --hero-top: #0f0a28;
   --core-rgb: 244 255 214;
-  /* Everyone else in a shared scene. */
-  --p-sky: #38bdf8;
-  --p-rose: #fb7185;
-  --p-amber: #fcd34d;
 }
 
 /* The page never scrolls sideways: anything drawn past the edge is clipped, not scrollable. */

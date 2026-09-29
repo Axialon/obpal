@@ -4,7 +4,7 @@
  * the pairing chip and anything else fixed on that edge). Switches that are on wear the accent ring, as the dock's
  * open windows do. Family tokens throughout, so the site's palette and every app surface carry it.
  */
-:root { --quick-tab-w: 20px; --quick-btn: 38px; }
+:root { --quick-tab-w: 20px; --quick-btn: 40px; }
 /* Sim windows keep this much clear of the right edge (styles/panels.css), so the open column never covers them. */
 html.quick-on { --quick-reserve: 46px; }
 @media (pointer: coarse) {
@@ -20,9 +20,9 @@ html.quick-on { --quick-reserve: 46px; }
   html.quick-on .obpal-chip { --obpal-offset-x: calc(12px + var(--quick-reserve)); }
 }
 
-.quick-tray { --quick-y: 50%; position: fixed; inset: 0 0 auto auto; z-index: 7; width: 0; height: 0; }
+.quick-tray { --quick-y: 50%; --quick-safe-top: env(safe-area-inset-top, 0px); --quick-safe-right: env(safe-area-inset-right, 0px); --quick-safe-bottom: env(safe-area-inset-bottom, 0px); --quick-safe-left: env(safe-area-inset-left, 0px); position: fixed; inset: 0 0 auto auto; z-index: 7; width: 0; height: 0; }
 .quick-tray[hidden] { display: none; }
-.quick-tab, .quick-panel { position: fixed; right: env(safe-area-inset-right, 0px); top: var(--quick-y); box-sizing: border-box; touch-action: none; -webkit-tap-highlight-color: transparent; }
+.quick-tab, .quick-panel { position: fixed; right: var(--quick-safe-right); top: var(--quick-y); box-sizing: border-box; touch-action: none; -webkit-tap-highlight-color: transparent; }
 
 /* The tab: a sliver of glass at the edge, carrying the primary action's glyph. */
 .quick-tab {
@@ -44,8 +44,8 @@ html.quick-on { --quick-reserve: 46px; }
 .quick-panel {
   /* One column; where the edge is short (a phone on its side), the tray says how many rows fit and it wraps. */
   display: grid; grid-auto-flow: column; grid-template-rows: repeat(var(--quick-rows, 6), var(--quick-btn)); grid-auto-columns: var(--quick-btn);
-  place-items: center; gap: 6px; padding: 5px; margin-right: 6px;
-  border: 1px solid var(--bb-frost-edge); border-radius: calc(var(--quick-btn) / 2 + 5px); background: var(--bb-frost);
+  place-items: center; gap: 8px; padding: 7px; margin-right: 8px;
+  border: 1px solid var(--bb-frost-edge); border-radius: calc(var(--quick-btn) / 2 + 8px); background: var(--bb-frost);
   -webkit-backdrop-filter: var(--bb-frost-blur); backdrop-filter: var(--bb-frost-blur);
   box-shadow: 0 22px 50px -24px rgb(0 0 0 / 0.85), 0 0 0 1px rgb(0 0 0 / 0.14), inset 0 1px 0 var(--bb-hi);
   transform: translate(calc(100% + 12px), -50%); visibility: hidden;
@@ -70,7 +70,23 @@ button.quick-btn[aria-pressed='true'], button.quick-btn[aria-expanded='true'] { 
 .quick-tip b { font: 650 13px/1.25 var(--bb-font-ui); letter-spacing: -0.01em; }
 .quick-tip span { color: var(--bb-ink-2); font: 500 12px/1.4 var(--bb-font-ui); }
 /* The tray's own surface picker (the family's), beside the column. */
-.quick-themes { width: 280px; transition-property: none; }
+.bb-menu.quick-themes { width: 280px; min-width: 0; box-sizing: border-box; overflow: auto; overscroll-behavior: contain; transition-property: none; }
+.quick-tip { overflow: auto; overscroll-behavior: contain; }
+.quick-themes.quick-sheet { width: 360px; padding: 12px; border-radius: var(--bb-r-2xl); }
+.quick-theme-close { display: none; }
+.quick-sheet .quick-theme-close { display: grid; place-items: center; position: absolute; top: 4px; right: 8px; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; color: var(--bb-ink-2); background: transparent; }
+.quick-sheet .bb-menu-group { padding: 12px 8px; }
+.quick-sheet .bb-accents { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; padding: 4px; }
+.quick-sheet .bb-accent { width: 44px; height: 44px; justify-self: center; }
+.quick-sheet .bb-accent::before { inset: 10px; }
+@media (pointer: coarse) and (min-width: 480px) {
+  .bb-menu.quick-themes { width: 420px; }
+  .quick-themes .bb-themes { grid-template-columns: repeat(6, 1fr); }
+  .quick-themes .bb-theme { padding: 8px 4px; gap: 8px; }
+  .quick-themes .bb-accents { justify-content: start; gap: 4px; }
+  .quick-themes .bb-accent { width: 44px; height: 44px; }
+  .quick-themes .bb-accent::before { inset: 10px; }
+}
 /* Pairing asked for from the tray on the home page: the hero's own card rings once in the accent. */
 .pair-called { outline: none; animation: quick-called 1.6s var(--bb-ease) 1; }
 @keyframes quick-called {
@@ -85,7 +101,7 @@ button.quick-btn[aria-pressed='true'], button.quick-btn[aria-expanded='true'] { 
 }
 
 /* Group boundaries share the column's gutter and stay intact when it wraps. */
-.quick-btn.quick-divider::before { content: ''; position: absolute; top: -9px; left: 50%; width: 20px; height: 1px; margin: 4px 0; transform: translateX(-50%); background: var(--bb-line); pointer-events: none; }
+.quick-btn.quick-divider:not(.quick-column-start)::before { content: ''; position: absolute; top: -4px; left: 50%; width: 24px; height: 1px; transform: translateX(-50%); background: var(--bb-line); pointer-events: none; }
 button.quick-btn[data-group='primary'] { background: var(--bb-accent); color: var(--bb-accent-ink); }
 button.quick-btn[data-quick='stop'] { background: color-mix(in srgb, var(--bad, #fb7185) 16%, transparent); color: var(--bad, #fb7185); }
 .quick-tip b { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

@@ -16,7 +16,7 @@ import '../styles/quick.css'
 import { family } from '../family'
 import { ICONS } from './icons'
 import { html, setMarkup } from './markup'
-import { edgeSpot, freeSpans, placePopover } from './kit/place'
+import { edgeSpot, freeSpans, placeTrayCard, type Box } from './kit/place'
 import { mountPairCameraActions, openPairCamera, phoneCamera } from './camera'
 import { onQuickChange, orderedQuickActions, quickKey, quickActions, quickDefault, type QuickId } from './quick-actions'
 import { hint, dismissHint } from './hints'
@@ -52,7 +52,7 @@ export function mountQuick() {
   })
   quickDefault({
     id: 'theme', group: 'system', label: 'Theme', hint: 'Surface and accent', icon: 'palette', stay: true,
-    run: () => tray?.themes(),
+    run: () => {}, // The family picker owns its button's click and keyboard handling.
   })
   if (!location.pathname.startsWith('/view') && (!location.pathname.startsWith('/sim/') || location.pathname === '/sim/')) {
     const next = [['Viewer', '/view/', 'cube'], ['Sims', '/sim/', 'gamepad'], ['Link', '/link/', 'link']]
@@ -69,7 +69,7 @@ class QuickTray {
   private readonly panel = document.createElement('div')
   private readonly tip = document.createElement('div')
   private readonly buttons = new Map<QuickId, HTMLButtonElement>()
-  private picker: { menu: HTMLElement; api: { open(): void; close(): void } } | null = null
+  private picker: { menu: HTMLElement; api: { open(): void; close(): void; place(): void } } | null = null
   private frame = 0
   private sliding = 0
   private swipe: { id: number; x: number; y: number; done: boolean } | null = null
@@ -139,6 +139,8 @@ class QuickTray {
     const place = () => { if (!this.frame) this.frame = requestAnimationFrame(() => { this.frame = 0; this.place() }) }
     for (const type of ['resize', 'scroll', 'obpal:panels']) addEventListener(type, place, { passive: true })
     window.visualViewport?.addEventListener('resize', place)
+    window.visualViewport?.addEventListener('scroll', place)
+    new ResizeObserver(place).observe(this.panel)
     document.addEventListener('fullscreenchange', () => this.sync())
     // The pairing chip opens and folds its card on that edge: the tray moves to stay clear.
     const watch = () => {
@@ -163,6 +165,7 @@ class QuickTray {
 
   /** The page's actions, in the tray's order; a button each, kept between renders so focus stays. */
   render() {
+    const focused = this.focused()
     const ordered = orderedQuickActions()
     const shown = ordered.map(a => a.id)
     const primary = ordered.find(a => a.group === 'primary')
@@ -199,8 +202,9 @@ class QuickTray {
     }
     this.tab.hidden = !shown.length
     this.sync()
-    this.roving(this.focused() ?? shown[0])
+    this.roving(focused ?? shown[0])
     this.place()
+    if (this.open && focused) this.buttons.get(focused)?.focus({ preventScroll: true })
   }
 
   /** Names, icons and switches' states, as they are now. */
@@ -215,7 +219,7 @@ class QuickTray {
       if (a.pressed) b.setAttribute('aria-pressed', String(a.pressed()))
       else b.removeAttribute('aria-pressed')
       if (a.expanded) b.setAttribute('aria-expanded', String(a.expanded()))
-      else b.removeAttribute('aria-expanded')
+      else if (id !== 'theme') b.removeAttribute('aria-expanded')
     }
     if (!this.tip.hidden && this.tip.dataset.for) this.showTip(this.tip.dataset.for as QuickId)
   }
@@ -300,7 +304,7 @@ class QuickTray {
   /** A glass tooltip beside the column: the action's name and what it does. */
   private showTip(id: QuickId) {
     const a = actions.get(id), b = this.buttons.get(id)
-    if (!a || !b || !this.open) return
+    if (!a || !b || !this.open || (this.picker && !this.picker.menu.hidden)) return
     const name = document.createElement('b'), what = document.createElement('span')
     name.textContent = a.label
     what.textContent = a.hint ?? ''
@@ -310,10 +314,7 @@ class QuickTray {
     }
     this.tip.dataset.for = id
     this.tip.hidden = false
-    const r = b.getBoundingClientRect(), t = this.tip.getBoundingClientRect()
-    const at = placePopover({ left: r.left, top: r.top + r.height / 2 - t.height / 2, width: r.width, height: t.height }, { width: t.width, height: t.height }, { width: innerWidth, height: innerHeight }, { beside: true, gap: 12 })
-    this.tip.style.left = `${at.left}px`
-    this.tip.style.top = `${at.top}px`
+    this.placeCard(this.tip, b)
     b.setAttribute('aria-describedby', this.tip.id)
   }
   private hideTip() {
@@ -328,21 +329,50 @@ class QuickTray {
     menu.className = 'bb-menu bb-glass themes-menu quick-themes'
     menu.setAttribute('aria-label', 'Surface and accent')
     document.body.append(menu)
-    this.picker = { menu, api: family.mountThemes(button, menu) }
+    this.picker = { menu, api: family.mountThemes(button, menu, () => {
+      this.hideTip()
+      // A non-modal sheet on a narrow phone: the same choices and keyboard behaviour, with an explicit close target.
+      if (!menu.querySelector('.quick-theme-close')) {
+        const close = document.createElement('button')
+        close.type = 'button'
+        close.className = 'quick-theme-close'
+        close.setAttribute('aria-label', 'Close theme')
+        setMarkup(close, ICONS.close)
+        close.addEventListener('click', () => { this.picker?.api.close(); button.focus({ preventScroll: true }) })
+        menu.prepend(close)
+      }
+      this.placeCard(menu, button, true)
+    }) }
   }
 
-  /** Once the family has opened the picker under its button, it moves beside the column instead. */
-  themes() {
-    const button = this.buttons.get('theme'), menu = this.picker?.menu
-    if (!button || !menu) return
-    requestAnimationFrame(() => {
-      if (menu.hidden) return
-      const r = button.getBoundingClientRect(), m = menu.getBoundingClientRect()
-      const at = placePopover({ left: r.left, top: r.top, width: r.width, height: r.height }, { width: m.width, height: m.height }, { width: innerWidth, height: innerHeight }, { beside: true, gap: 12 })
-      menu.style.left = `${at.left}px`
-      menu.style.top = `${at.top}px`
-      menu.style.maxHeight = `${at.maxHeight}px`
-    })
+  /** Safe-area insets and the page's full-width bars bound the usable visual viewport, including zoom and keyboards. */
+  private bounds(): Box {
+    const view = window.visualViewport, style = getComputedStyle(this.el)
+    const inset = (side: string) => parseFloat(style.getPropertyValue(`--quick-safe-${side}`)) || 0
+    const x = view?.offsetLeft ?? 0, y = view?.offsetTop ?? 0
+    const width = view?.width ?? innerWidth, height = view?.height ?? innerHeight
+    let top = y + inset('top'), bottom = y + height - inset('bottom')
+    for (const el of document.querySelectorAll('.sim-top, .topbar, header.top, .top, .panel-dock, .dock')) {
+      const r = el.getBoundingClientRect(), css = getComputedStyle(el)
+      if (r.width < width / 2 || !r.height || css.visibility === 'hidden' || !['fixed', 'sticky'].includes(css.position)) continue
+      if (r.top <= top + 12 && r.bottom > top) top = r.bottom
+      else if (r.bottom >= bottom - 12 && r.top < bottom) bottom = r.top
+    }
+    const left = x + inset('left')
+    return { left, top, width: Math.max(0, width - inset('left') - inset('right')), height: Math.max(0, bottom - top) }
+  }
+
+  private placeCard(card: HTMLElement, button: HTMLElement, picker = false) {
+    const bounds = this.bounds(), sheet = picker && bounds.width < 480
+    card.classList.toggle('quick-sheet', sheet)
+    card.style.position = 'fixed'
+    card.style.maxWidth = `${Math.max(0, bounds.width - 24)}px`
+    card.style.maxHeight = 'none'
+    const pill = document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.pill')?.getBoundingClientRect()
+    const at = placeTrayCard(button.getBoundingClientRect(), card.getBoundingClientRect(), bounds, { sheet, column: this.panel.getBoundingClientRect(), avoid: pill?.width ? [pill] : [] })
+    card.style.left = `${at.left}px`
+    card.style.top = `${at.top}px`
+    card.style.maxHeight = `${at.maxHeight}px`
   }
 
   /**
@@ -353,11 +383,8 @@ class QuickTray {
   place() {
     const h = window.visualViewport?.height ?? innerHeight, w = window.visualViewport?.width ?? innerWidth
     const coarse = matchMedia('(pointer: coarse)').matches
-    const bar = [...document.querySelectorAll('.sim-top, .topbar, header.top, .top')].reduce((y, el) => {
-      const r = el.getBoundingClientRect()
-      return r.width > w / 2 ? Math.max(y, r.bottom) : y
-    }, 0)
-    const top = Math.max(8, bar + 12), bottom = h - 8
+    const bounds = this.bounds()
+    const top = bounds.top + 12, bottom = bounds.top + bounds.height - 12
     // What's fixed on that edge: the pairing chip's pill, and its card while it's open (folded, the card keeps its box
     // but isn't there); the viewer's viewpoint row; a sim's badge and windows; the home page's sound button.
     const chip = document.querySelector('.obpal-chip')?.shadowRoot
@@ -365,13 +392,14 @@ class QuickTray {
       ...document.querySelectorAll('.presence-floating, .sim-badge, [data-sound], .sim-window:not([hidden])')]
       .filter((el): el is Element => !!el && !(el as HTMLElement).hidden).map((el) => el.getBoundingClientRect()).filter((r) => r.width && r.height)
     // Those within `reach` of the edge are in the way.
-    const blockedBy = (reach: number) => things.filter((r) => r.right > w - reach && r.left < w).map((r): [number, number] => [r.top - 8, r.bottom + 8])
+    const right = bounds.left + bounds.width
+    const blockedBy = (reach: number) => things.filter((r) => r.right > right - reach && r.left < right).map((r): [number, number] => [r.top - 8, r.bottom + 8])
     const count = Math.max(1, this.buttons.size)
-    const button = parseFloat(getComputedStyle(this.panel).getPropertyValue('--quick-btn')) || 38, gap = 6, pad = 12
+    const button = parseFloat(getComputedStyle(this.panel).getPropertyValue('--quick-btn')) || 40, gap = 8, pad = 16
     let rows = count, blocked = blockedBy((this.tab.offsetWidth || 24) + 4), need = this.tab.offsetHeight || 56
     if (this.open) {
-      // Its width with `cols` columns, and its 6px from the edge; how many rows a stretch of the edge holds.
-      const reach = (cols: number) => cols * button + (cols - 1) * gap + pad + 6
+      // Its width with `cols` columns, and its 8px from the edge; how many rows a stretch of the edge holds.
+      const reach = (cols: number) => cols * button + (cols - 1) * gap + pad + 8
       const fit = (room: number) => Math.max(1, Math.min(count, Math.floor((room - pad + gap) / (button + gap))))
       for (let cols = 1; cols <= count; cols++) {
         blocked = blockedBy(reach(cols))
@@ -385,8 +413,11 @@ class QuickTray {
       need = rows * button + (rows - 1) * gap + pad
     }
     this.panel.style.setProperty('--quick-rows', String(rows))
+    for (const [i, b] of [...this.buttons.values()].entries()) b.classList.toggle('quick-column-start', i % rows === 0)
     // A phone held upright: the lower middle, under the thumb; elsewhere, the middle.
-    const want = h * (coarse && h > w ? 0.6 : 0.5)
+    const want = (window.visualViewport?.offsetTop ?? 0) + h * (coarse && h > w ? 0.6 : 0.5)
     this.el.style.setProperty('--quick-y', `${Math.round(edgeSpot(want, need, top, bottom, blocked))}px`)
+    this.picker?.api.place()
+    if (!this.tip.hidden && this.tip.dataset.for) this.showTip(this.tip.dataset.for as QuickId)
   }
 }

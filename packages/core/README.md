@@ -1,6 +1,6 @@
 # @obpal/core
 
-The ob.Pal protocol, for hosts and devices alike: the STATE, PAD, POINTER and POSE codecs, pairing and its HMAC binding, room signaling, the direct LAN code, the control catalogue (utilities, routes, profiles and controllers) and the device-side link.
+The ob.Pal protocol, for hosts and devices alike: the STATE, PAD, POINTER, POSE, HAND and BODY codecs, pairing and its HMAC binding, room signaling, the direct LAN code, the control catalogue (utilities, routes, profiles and controllers) and the device-side link.
 
 Most pages want [`@obpal/host`](https://github.com/Axialon/obpal/tree/main/packages/host#readme), or one tag:
 

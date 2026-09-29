@@ -127,9 +127,9 @@
   --bb-sheet: #f7f9fc;
   --bb-ink: #0f172a;
   --bb-ink-2: #334155;
-  --bb-ink-3: #64748b;
+  --bb-ink-3: #526176;
   --bb-line: rgb(15 23 42 / 0.1);
-  --bb-line-strong: rgb(15 23 42 / 0.18);
+  --bb-line-strong: rgb(15 23 42 / 0.55);
   --bb-hi: rgb(255 255 255 / 0.7);
   --bb-wash: rgb(15 23 42 / 0.04);
   --bb-shadow: 0 22px 50px -30px rgb(15 23 42 / 0.35);
@@ -167,6 +167,12 @@
 /* Accent used as text or hairline: the bright identity colour on dark surfaces, the strong shade on light. */
 :root { --bb-accent-text: var(--bb-accent); --bb-accent-soft: color-mix(in srgb, var(--bb-accent) 55%, var(--bb-ink)); }
 [data-bb-theme='light'] { --bb-accent-text: var(--bb-accent-strong); --bb-accent-soft: var(--bb-accent-strong); }
+[data-bb-theme='light'][data-bb-product='obpal']:not([data-bb-accent]),
+[data-bb-theme='light'][data-bb-accent='lime'] { --bb-accent-strong: #426b0d; }
+/* Pale accents need a darker text shade on Light, including selected controls over their tinted fill. */
+[data-bb-theme='light'][data-bb-accent='sky'] { --bb-accent-strong: #03658e; }
+[data-bb-theme='light'][data-bb-accent='mint'] { --bb-accent-strong: #086747; }
+[data-bb-theme='light'][data-bb-accent='rose'] { --bb-accent-strong: #be123c; }
 
 /* The surface's own highlight channel, for see-through fills (glass tracks, scrollbars): the surface's tinted white
  * on dark surfaces, slate ink on the light one. --bb-range-deepen: how far a slider's fill leans to the strong accent
@@ -480,6 +486,9 @@
 .bb-theme i::before { content: ''; position: absolute; left: 6px; right: 6px; top: 6px; height: 6px; border-radius: 3px; background: rgb(128 128 128 / 0.32); }
 .bb-theme i::after { content: ''; position: absolute; right: 6px; bottom: 6px; width: 22px; height: 10px; border-radius: 5px; background: var(--bb-accent); box-shadow: 0 0 10px rgb(var(--bb-accent-rgb) / 0.6); }
 .bb-theme[aria-checked='true'] { border-color: rgb(var(--bb-accent-rgb) / 0.85); color: var(--bb-ink); background: rgb(var(--bb-accent-rgb) / 0.1); box-shadow: 0 0 16px -4px rgb(var(--bb-accent-rgb) / 0.55); }
+[data-bb-theme='light'] .bb-theme { border-color: var(--bb-line-strong); }
+[data-bb-theme='light'] .bb-theme[aria-checked='true'] { border-color: var(--bb-accent-text); box-shadow: inset 0 0 0 1px var(--bb-accent-text); }
+[data-bb-theme='light'] .bb-accent[aria-checked='true'] { box-shadow: 0 0 0 2px var(--bb-page), 0 0 0 3.5px var(--bb-ink-2); }
 
 /* ---- tooltips and coach-mark hints ------------------------------------------------------------------------ */
 

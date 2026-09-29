@@ -86,7 +86,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   // Its card never covers the panel (the e-stop), the people list, the stop banner, the menus, a camera's picture (the
   // device sims) or the open quick-actions tray: it folds while one is in the way.
   const chip = new PairingChip({
-    remote, open: true, testLink: true, avoid: '.sim-window, #people, .stopped-banner, #switcher, #themes, .quick-panel, .obpal-camera',
+    remote, open: true, testLink: true, avoid: '.sim-window, #people, .stopped-banner, #switcher, #themes, .quick-panel, .quick-themes, .obpal-camera',
     onToggle: (open) => $('chip-invite').setAttribute('aria-pressed', String(open)),
   })
   addEventListener('obpal:viewmode', e => { if ((e as CustomEvent<string>).detail !== 'overview') chip.collapse() })

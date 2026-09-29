@@ -98,9 +98,25 @@ requestAnimationFrame(loop)
 
 **Properties and methods:** `frame(now, who?)`, `participants`, `setScene({ nodes?, held? })`, `holder(node)`, `holding(who)`, `held`, `layout`, `open`, `status`, `pairingUrl`, `ready` (a promise of the `Remote`, or null where the browser can't host a phone; awaiting it starts the remote now), `remote`, `start()`.
 
-**Frame** (`frame()` and `Remote.consume()`): `qRel` and `clutch` (1:1 rotation while the gyro is on), `tilt` (a stick from tilting), `pad1`, `pad2`, `zoom`, `twist` (trackpad gestures since the last frame), `aim` (Wii-style pointing), `pose` (3D, while a thumb is on the pad: `p`, `q`, `tracked`, `touching`, `gen` and `source`, which says whether the pose comes from the phone's `camera`, a `model` estimated from its motion, an `unknown` phone or the host's `glow` camera), `touching`, `mode`, `connected`.
+**Frame** (`frame()` and `Remote.consume()`): `qRel` and `clutch` (1:1 rotation while the gyro is on), `tilt` (a stick from tilting), `pad1`, `pad2`, `zoom`, `twist` (trackpad gestures since the last frame), `aim` (Wii-style pointing), `pose` (3D, while a thumb is on the pad: `p`, `q`, `tracked`, `touching`, `gen` and `source`, which says whether the pose comes from the phone's `camera`, a `model` estimated from its motion, an `unknown` phone or the host's `glow` camera), `hand`, `body`, `touching`, `mode`, `connected`.
 
 Without the element, from the hosted script: `const remote = await window.obpal.remote({ appName: 'My scene' })`.
+
+## Hand and body
+
+Hand and body tracking use the phone's camera. Read them from the same frame as other input:
+
+```ts
+const frame = pal.frame(performance.now())
+if (frame.hand?.tracked) {
+  const wrist = frame.hand.landmarks[0] // 21 hand landmarks; frame.hand.gen changes when tracking reacquires
+}
+if (frame.body?.tracked) {
+  const leftShoulder = frame.body.landmarks[11] // 33 body landmarks, with visibility and presence scores
+}
+```
+
+Either field is null when no packet arrived or its last packet is at least 250 ms old; check `tracked` before using landmarks. The phone performs camera-based body tracking locally. See the [HAND packet](https://github.com/Axialon/obpal/blob/main/spec/PROTOCOL.md#hand-packet-type-6-a-camera-tracked-hand) and [BODY protocol notes](https://github.com/Axialon/obpal/blob/main/docs/PROTOCOL.md#body-packet-type-7-a-camera-tracked-body) for coordinates and freshness rules.
 
 ## The SDK
 

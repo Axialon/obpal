@@ -1,6 +1,6 @@
 {
   "name": "@obpal/core",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "license": "MIT",
   "description": "ob.Pal protocol core: the state codec, pairing, signaling, the control catalogue and the device-side link.",

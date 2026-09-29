@@ -45,7 +45,7 @@ body.sim #stage { position: fixed; inset: 0; width: 100%; height: 100%; display:
 /* The pairing chip (@obpal/host) in the bottom-right corner; on phones, above the sim's own panel. The menus (apps,
    surface and accent) end above it, over the family menus' own inline height. */
 :root { --obpal-offset: 20px; --obpal-radius: 26px; }
-body.sim .bb-menu { max-height: min(640px, calc(100% - 70px - 76px)) !important; }
+body.sim .bb-menu:not(.quick-themes) { max-height: min(640px, calc(100% - 70px - 76px)) !important; }
 
 /* The panel: what the scene controls, who holds it, and safety. */
 .sim-panel { position: fixed; left: 20px; top: 88px; bottom: 20px; z-index: 3; width: 330px; display: flex; flex-direction: column; gap: 14px; padding: 18px; border-radius: 26px; overflow: auto; --bb-scroll-inset: 14px; }
@@ -208,7 +208,7 @@ body.stopped #stage { filter: saturate(0.4) brightness(0.8); transition: filter 
   /* The pairing chip rides above the panel, and the panel leaves its open card room below the top bar (the card is
      about 333px, its chip 44px, and the gaps and the bar 102px). Percentages: of the screen as it is, toolbars and all. */
   :root { --sim-sheet: clamp(24%, calc(100% - 480px), 44%); --obpal-offset-x: 12px; --obpal-offset-y: calc(var(--sim-sheet) + 20px); }
-  body.sim .bb-menu { max-height: calc(100% - 70px - var(--sim-sheet) - 76px) !important; }
+  body.sim .bb-menu:not(.quick-themes) { max-height: calc(100% - 70px - var(--sim-sheet) - 76px) !important; }
 }
 /* Short phones: a smaller QR code (48px less card) leaves the panel more. */
 @media (max-width: 860px) and (max-height: 700px) {

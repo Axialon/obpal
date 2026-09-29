@@ -66,7 +66,11 @@ scene.add(new THREE.HemisphereLight('#ffffff', '#26313b', 1.1))
 softKey(scene, 3)
 renderer.shadowMap.enabled = true
 renderer.shadowMap.type = THREE.PCFSoftShadowMap
-scene.background = new THREE.Color('#06080c')
+const surface = () => {
+  scene.background = new THREE.Color(document.documentElement.dataset.bbTheme === 'carbon' ? '#06080c' : getComputedStyle(document.documentElement).getPropertyValue('--bb-page').trim())
+}
+surface()
+addEventListener('bb-theme', surface)
 const camera = new THREE.PerspectiveCamera(40, 1, 0.05, 60)
 camera.position.set(0, 4.3, 3.4)
 camera.lookAt(0, 0, 0.15)
