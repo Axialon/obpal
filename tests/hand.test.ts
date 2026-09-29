@@ -40,6 +40,23 @@ describe('3D following: a tracked phone in the hand’s own terms', () => {
     expect(back.gen).toBe(3)
     expect(back.flags & PoseFlag.tracked).toBe(1)
   })
+
+  it.each([['unknown', 0], ['camera', 1], ['model', 2]] as const)('round-trips the %s source in byte 29 only', (source, byte) => {
+    const pose = { flags: PoseFlag.tracked, seq: 7, t: 123456, p: [0.25, 1.5, -0.75] as [number, number, number], q: qAxisAngle(0, 1, 0, 0.7), gen: 3 }
+    const legacy = new Uint8Array(encodePose(pose))
+    const packet = encodePose({ ...pose, source })
+    expect(packet.byteLength).toBe(32)
+    expect(new Uint8Array(packet)[29]).toBe(byte)
+    expect(decodePose(packet)?.source).toBe(source)
+    legacy[29] = byte
+    expect(new Uint8Array(packet)).toEqual(legacy)
+  })
+
+  it.each([0, 255])('reads source byte %i as unknown, including legacy phones', (byte) => {
+    const packet = encodePose({ flags: PoseFlag.tracked, seq: 1, t: 0, p: [0, 0, 0], q: [0, 0, 0, 1], gen: 1 })
+    new DataView(packet).setUint8(29, byte)
+    expect(decodePose(packet)?.source).toBe('unknown')
+  })
 })
 
 function mul(a: number[], b: number[]): [number, number, number, number] {

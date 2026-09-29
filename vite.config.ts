@@ -39,9 +39,10 @@ const CSP_EXTRA: Record<string, Record<string, string[]>> = {
   '/p/index.html': { 'img-src': ['https:'] },
   // The viewer reads models and their textures from files the person opens.
   '/view/index.html': { 'connect-src': ['blob:', 'data:'] },
-  // The arm sim drives a real arm through a rosbridge wherever the person points it.
+  // The arm sim drives a real arm through a rosbridge wherever the person points it, and shows the Blender models (next entry).
   '/sim/arm/index.html': { 'connect-src': ['ws:', 'wss:'], 'script-src': ["'wasm-unsafe-eval'"] },
-  // The three Blender prototypes decode meshopt geometry. No other page enables WebAssembly compilation.
+  // The Blender models (src/sim/kit/prototype.ts) are meshopt-compressed, and their decoder compiles WebAssembly. Only
+  // the arm and device sims load them, so only these two pages allow it.
   '/sim/device/index.html': { 'script-src': ["'wasm-unsafe-eval'"] },
 }
 function contentSecurityPolicy(page: string): string {
@@ -73,6 +74,23 @@ function pagePolicy(): Plugin {
     transformIndexHtml: {
       order: 'post',
       handler: (html, ctx) => ({ html, tags: [{ tag: 'meta', attrs: { 'http-equiv': 'Content-Security-Policy', content: contentSecurityPolicy(ctx.path) }, injectTo: 'head-prepend' }] }),
+    },
+  }
+}
+
+/**
+ * Every page but two gets src/ui/recover.ts: when a deploy has removed a lazy chunk the page still needs, it reloads
+ * itself once. The phone controller is left out (its service worker serves the cached page whatever a reload does, and
+ * the phone may be pairing), and so is the embed demo (its element recovers by itself, packages/host/src/embed.ts).
+ */
+const NO_RECOVERY = ['/p/index.html', '/embed/index.html']
+function deployRecovery(): Plugin {
+  return {
+    name: 'obpal-deploy-recovery',
+    apply: 'build',
+    transformIndexHtml: {
+      order: 'pre',
+      handler: (_html, ctx) => NO_RECOVERY.includes(ctx.path) ? [] : [{ tag: 'script', attrs: { type: 'module', src: '/src/ui/recover.ts' }, injectTo: 'head' }],
     },
   }
 }
@@ -326,7 +344,7 @@ function searchPages(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [markupBuild(root), cloudflare(), controllerServiceWorker(), embedScript(), catalogueFiles(), linkVersion(), pagePreviews(), searchPages(), pagePolicy()],
+  plugins: [markupBuild(root), cloudflare(), deployRecovery(), controllerServiceWorker(), embedScript(), catalogueFiles(), linkVersion(), pagePreviews(), searchPages(), pagePolicy()],
   server: { port: 5175, strictPort: true },
   environments: {
     client: {

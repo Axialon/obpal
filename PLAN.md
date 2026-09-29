@@ -7,6 +7,7 @@ What ships, what is a preview and what is only planned. The dated notes below ar
 - **Shipped.**
   - The phone controller (a web app, opened from a QR code or a short code): gamepad, trackpad, Wii pointer, 3D hand, button trays and the phone's keyboard, for several phones at once.
   - The hosted Viewer, the embed (`<script type="module" src="https://obpal.blackboxes.net/embed.js">` and `<obpal-remote>`), the public sims and the catalogue.
+  - `@obpal/core` and `@obpal/host` on npm (0.1.0, 2026-09-29). The next release, 0.2.0 with the pose source, goes out with `pnpm run publish:npm`, from the main checkout.
   - **ob.Pal Link 1.6.2**, a Chromium extension: a standard gamepad for browser games that read the Gamepad API, and the phone as a 3D mouse or keys. Tested in Chrome, Edge, Brave and Vivaldi. It is the latest release of Axialon/obpal-link on GitHub (1.6.2, published 2026-09-29, with the held-input fail-safe). The Chrome Web Store has 1.6.1 in review, not yet published there; 1.6.2 goes to the store once that review ends.
   - **ob.Pal Desktop 0.3.0**, Windows only: keys and the mouse for the program in front. It isn't code-signed, so Windows may warn about it.
   - 3D position comes from the camera mode, or is estimated from the phone's motion without it.
@@ -15,7 +16,6 @@ What ships, what is a preview and what is only planned. The dated notes below ar
   - Real robot arms (Feetech, serial, ROS 2): experimental, and untested on hardware. Stop is a software hold, not an emergency stop, and the arm's own stop must stay within reach.
   - Offline: a phone paired once connects straight over Wi-Fi when the internet is down, if the network lets devices reach each other. The tests cover that flow, not every network.
 - **Planned.**
-  - `@obpal/host` and `@obpal/core` on npm (npm answers 404 for them today, so pages use the embed).
   - A signed Desktop, and macOS and Linux builds.
   - TVs, headsets and watches as screens or controllers: research only (step 8b).
 - **Privacy.** No accounts and no analytics. Telemetry is off by default, and feedback is opt-in only.
@@ -39,7 +39,7 @@ What ships, what is a preview and what is only planned. The dated notes below ar
    - An HTTPS page can't open `ws://` to a LAN IP in Safari, and Chrome 147+ puts a permission prompt in front of it.
    - WebRTC is the one prompt-free path from a public page to a LAN host today.
 4. **Hosts, three tiers, one protocol:**
-   - (a) **JS SDK** for browser 3D apps (three.js, model-viewer, Babylon). Zero install for the people using the page. Meant for ChromeOS, Quest and Vision Pro browsers too, untested for now; TVs are research (step 8b). The packages aren't on npm yet, so pages use the embed.
+   - (a) **JS SDK** for browser 3D apps (three.js, model-viewer, Babylon). Zero install for the people using the page. Meant for ChromeOS, Quest and Vision Pro browsers too, untested for now; TVs are research (step 8b). The packages are on npm (`@obpal/host`, `@obpal/core`), and pages can also use the embed.
    - (b) **Small native bridge** (Go + pion) for desktop apps. It injects OS mouse/keyboard input and sends OSC to a Blender add-on for exact 1:1 rotation.
    - (c) **Later:** legacy protocol emitters (VRPN, opentrack, DSU, TUIO, MIDI), virtual HID devices, and an Android-only Bluetooth-HID "Direct mode".
 5. **Input:**
@@ -66,6 +66,8 @@ What ships, what is a preview and what is only planned. The dated notes below ar
 | Motion-to-photon, relayed via TURN | ≤110 ms p50 |
 | Drift, clutch held 60 s | <1.5° |
 | Unauthenticated input accepted | 0 |
+
+Each target is measured on physical phones, by the checklist in [docs/DEVICE-CHECKLIST.md](docs/DEVICE-CHECKLIST.md): how, over what denominator and under which conditions. Simulated runs (`pnpm run perf:connect -- --lock`, on one machine) test the software's recovery paths and never count toward a target.
 
 ## 2. Architecture
 
@@ -630,7 +632,7 @@ Scheduled 2026-09-27: phase B lands with step 5b (the controller hub, below), an
      - A tiny `window.obpal.remote(opts)` works without the element.
      - A page decides what's controllable: `setScene({ nodes })` passes through, so any listed model can be taken over by QR or link.
      - Agents: an llms.txt section with a copy-paste snippet, the embed in catalogue.json, and a typed example in packages/host/README.
-     - npm: package.json and README ready, but publishing needs the owner's npm account.
+     - npm: published (`@obpal/core` and `@obpal/host` 0.1.0, 2026-09-29); `pnpm run publish:npm` releases the next version.
    - **Branded QR** (packages/host/src/qr.ts).
      - uqr's matrix at ECC 'Q' or 'H'.
      - Rounded dot modules; finder squares as the ob.Pal box, rounded with a lime or host-accent eye; the mark in the centre over a clear quiet zone.

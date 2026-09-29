@@ -33,7 +33,7 @@ import { mountTopBar } from '../../landing/topbar'
 import { startSimScene, type SimScene } from '../scene'
 import { simView } from '../view'
 import {
-  calibrateHome, defaultCalibration, FeetechDriver, fromRaw, hasSerial, RosDriver, ROS_DEFAULTS, SerialTextDriver, toRaw,
+  calibrateHome, defaultCalibration, FeetechDriver, firstOutOfLimits, fromRaw, hasSerial, RosDriver, ROS_DEFAULTS, SerialTextDriver, toRaw,
   type ArmDriver, type Calibration, type DriverKind,
 } from './drivers'
 import { blockBox, eject, restOf, settle as settleBlocks, stepAmong, type Base, type Blk, type Stand } from './blocks'
@@ -61,6 +61,7 @@ import { Readout } from '../../ui/kit/readout'
 import { ICONS } from '../../ui/icons'
 import { html, setMarkup } from '../../ui/markup'
 import { mountQuick, quickAction, quickViews } from '../../ui/quick'
+import { holdReload } from '../../ui/recover'
 
 applyTheme(initialTheme())
 mountMarks()
@@ -206,7 +207,7 @@ interface Arm {
   jog: Map<string, [number, number]>
 }
 
-interface Track3 { gen: number; p0: [number, number, number]; q0: [number, number, number, number]; heading: number; tool: THREE.Vector3; delta: THREE.Vector3; forward: number; pitch: number; roll: number }
+interface Track3 { gen: number; p0: [number, number, number]; q0: [number, number, number, number]; heading: number; tool: THREE.Vector3; delta: THREE.Vector3; forward: number; pitch: number; roll: number; space: { origin: { yaw: number; reach: number; height: number }; tool: ToolTarget } | null }
 
 /** A claw move (A in Point): down to the floor, close or open, back up to the hover height. */
 interface Claw {
@@ -689,6 +690,8 @@ addEventListener('keydown', (e) => {
 // A live arm never runs unwatched: the screen going to the background stops everything.
 document.addEventListener('visibilitychange', () => { if (document.hidden && arms.some((a) => a.hw?.live)) estop('host', 'The screen went to the background') })
 addEventListener('beforeunload', (e) => { if (arms.some((a) => a.hw?.live)) e.preventDefault() })
+// Nor does the page reload itself for an update (src/ui/recover.ts) while one is live.
+holdReload(() => arms.some((a) => a.hw?.live))
 
 // ---- driving one joint: deadman, velocity from the input, then the caps ----
 
@@ -1051,7 +1054,7 @@ function driveTrack(a: Arm, who: string, f: Frame): string {
   a.claw = null
   if (!a.track || a.track.gen !== pose.gen) {
     const t = KIN.forward(poseOf(a))
-    a.track = { gen: pose.gen, p0: [...pose.p], q0: [...pose.q], heading: headingOf(pose.q), tool: toolWorld(a, t), delta: new THREE.Vector3(), forward: 0, pitch: t.pitch, roll: t.roll }
+    a.track = { gen: pose.gen, p0: [...pose.p], q0: [...pose.q], heading: headingOf(pose.q), tool: toolWorld(a, t), delta: new THREE.Vector3(), forward: 0, pitch: t.pitch, roll: t.roll, space: null }
   }
   const k = a.track
   const m = handMove([pose.p[0] - k.p0[0], pose.p[1] - k.p0[1], pose.p[2] - k.p0[2]], k.heading)
@@ -1075,11 +1078,14 @@ function driveTrack(a: Arm, who: string, f: Frame): string {
   }
   const space = sim?.control.aim(who)
   if (space) {
-    const target = workspace(a, who, [space.aim[0], 0])
-    goal.yaw = target.yaw
-    goal.height = armHeight(space.aim[1], KIND.drive.height)
+    const target = { ...workspace(a, who, [space.aim[0], 0]), height: armHeight(space.aim[1], KIND.drive.height) }
+    // Calibrated motion shares the pose's grab anchor. Moving the released phone must not retarget the tool.
+    k.space ??= { origin: target, tool: KIN.forward(current) }
+    const origin = k.space.origin, tool = k.space.tool
+    goal.yaw = KIN.heading(tool.yaw + ((target.yaw - origin.yaw + 540) % 360) - 180, current)
+    goal.height = Math.max(CLAW_LOW, tool.height + target.height - origin.height)
     k.forward += m.forward
-    goal.reach = clamp(target.reach + k.forward * (KIND.drive.reach[1] - KIND.drive.reach[0]) / 0.3, ...KIND.drive.reach)
+    goal.reach = clamp(tool.reach + target.reach - origin.reach + k.forward * (KIND.drive.reach[1] - KIND.drive.reach[0]) / 0.3, ...KIND.drive.reach)
   }
   a.goal = goal
   // Where the gripper goes comes first: tip it if that's what it takes to get there.
@@ -1419,7 +1425,7 @@ async function goLive(a: Arm, cap: number) {
   if (!r || r.raw.some((v) => v === null)) { sim?.note(`${a.name} hasn’t reported every joint yet`); return }
   if (performance.now() - r.at > REPORT_MS) { sim?.note(`${a.name} isn’t reporting where it is right now`); return }
   const angles = fromRaw(hw.cal, r.raw as number[])
-  const out = KIN.joints.findIndex((s, i) => !(angles[i] >= s.min - 3 && angles[i] <= s.max + 3))
+  const out = firstOutOfLimits(KIN.joints, angles)
   if (out >= 0) { sim?.note(`${a.name}’s ${KIN.joints[out].name.toLowerCase()} reads outside its limits: calibrate it first`); return }
   // Start from where the arm is, so going live never jumps.
   startFrom(a, angles)
@@ -1771,6 +1777,7 @@ Object.assign(window, {
   __arm: {
     arms: () => arms.map((a) => ({
       id: a.id, profile: a.profile, state: a.state, edge: a.edge, live: !!a.hw?.live, twin: !!a.hw, hover: a.hover, claw: a.claw?.phase ?? null, goal: a.goal, anchor: a.track ? { p0: a.track.p0, tool: a.track.tool.y } : null,
+      pose: frames.get(sim?.claims.holder(a.id) ?? '')?.pose ?? null,
       tool: KIN.forward(poseOf(a)), joints: a.joints.map((j) => ({ node: j.node, angle: j.angle, target: j.target, vel: j.vel, state: j.state })),
     })),
     blocks: () => blocks.map((b) => b.by?.id ?? null),

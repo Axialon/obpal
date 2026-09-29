@@ -17,8 +17,9 @@
  *   apex-domains     wrangler naming the apex domains blackboxes.net / blackboxes.dev or the boxem project.
  * Lanes (the command runs in or names .claude/worktrees/, or comes from the obpal-lane agent):
  *   push             git push; gh writes (pull requests, releases, repositories).
- *   deploy           wrangler deploy and other remote writes, pnpm run deploy, npm/pnpm publish,
- *                    open-source.mjs --publish, Cloudflare API writes.
+ *   deploy           wrangler deploy and other remote writes, pnpm run deploy, npm/pnpm publish, the npm release
+ *                    with --yes (publish:npm, scripts/publish-npm.mjs; its dry run is allowed), open-source.mjs
+ *                    --publish, Cloudflare API writes.
  *   sync-family      scripts/sync-family.mjs, which writes other repos: the coordinator's call.
  *
  * The parsing is a careful approximation of both shells (quotes, escapes, heredocs and here-strings, $( ) and
@@ -249,7 +250,10 @@ function lanes(seg) {
   const wr = wrangler(seg)
   if (wr && (WRANGLER_WRITES.has(wr.sub) || wr.words.includes('--remote'))) return deny('deploy', `Lanes never deploy or write to Cloudflare: wrangler ${wr.sub}${wr.words.includes('--remote') ? ' --remote' : ''} is the coordinator's. wrangler dev, types and local data are fine.`)
   const script = pmScript(seg)
-  if (script === 'deploy' || (PM.has(first) && args(seg).includes('publish'))) return deny('deploy', 'Lanes never deploy or publish; the coordinator does, from the main checkout.')
+  // The npm release publishes only with --yes, however it is started: pnpm/npm/yarn (run) publish:npm, behind npx or
+  // corepack, or a runtime on scripts/publish-npm.mjs. Reading or searching the script is not running it.
+  const npmRelease = script === 'publish:npm' || (!TEXTUAL.has(first) && has(seg, /^publish:npm$|(^|[\\/])publish-npm\.mjs$/))
+  if (script === 'deploy' || (PM.has(first) && args(seg).includes('publish')) || (npmRelease && has(seg, /^--yes(=.*)?$/))) return deny('deploy', 'Lanes never deploy or publish; the coordinator does, from the main checkout.')
   if ((first === 'node' && has(seg, /(^|[\\/])sync-family\.mjs$/)) || script === 'sync:family') return deny('sync-family', 'scripts/sync-family.mjs writes other repos: it is the coordinator\'s call, never a lane\'s.')
   if (first === 'node' && has(seg, /(^|[\\/])open-source\.mjs$/) && seg.includes('--publish')) return deny('deploy', 'Lanes never publish the open-source snapshot; without --publish (export and scan only) is fine.')
   if (['curl', 'curl.exe', 'invoke-restmethod', 'irm', 'invoke-webrequest', 'iwr'].includes(first) && has(seg, /api\.cloudflare\.com/i)) {

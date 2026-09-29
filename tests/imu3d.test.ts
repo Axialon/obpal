@@ -2,12 +2,49 @@ import { describe, expect, it } from 'vitest'
 import { qAxisAngle, qMul } from '../packages/core/src/quat'
 import { handMove, headingOf } from '../packages/host/src/hand'
 import { ImuTracker } from '../src/controller/imu3d'
+import { Tracker } from '../src/controller/track'
 
 const D2R = Math.PI / 180
 
 describe('3D from the phone’s own sensors (Wii-style: the gyro and an arm model, no camera)', () => {
   // A phone held upright facing the person, pointing its back toward the screen (−z).
   const upright = qAxisAngle(0, 1, 0, 0)
+
+  it('estimates reach times the change in pointing direction even for rotation in place', () => {
+    const t = new ImuTracker()
+    t.reach = 0.6
+    t.anchor(upright)
+    // No translation or acceleration: a wrist turn still looks like an arm swing.
+    const p = t.step(qAxisAngle(0, 1, 0, Math.PI / 2), [0, 0, 0], null, 1 / 60)
+    expect(p[0]).toBeCloseTo(-0.6)
+    expect(p[1]).toBe(0)
+    expect(p[2]).toBeCloseTo(0.6)
+  })
+
+  it('cannot measure a sideways-only move with unchanged orientation', () => {
+    const t = new ImuTracker()
+    t.anchor(upright)
+    // Accelerate sideways, brake, then rest. Only acceleration along the pointing axis contributes.
+    for (const x of [2, -2, 0]) for (let i = 0; i < 30; i++) {
+      expect(t.step(upright, [x, 0, 0], [0, 0, 0], 1 / 60)).toEqual([0, 0, 0])
+    }
+  })
+
+  it('shares non-repeating origins between camera recentering and motion grabs', () => {
+    let generation = 0
+    const next = () => ++generation
+    const camera = new Tracker(next), motion = new ImuTracker(next)
+    const seen = new Set<number>()
+    for (let i = 0; i < 260; i++) {
+      camera.recenter()
+      expect(seen.has(camera.gen)).toBe(false)
+      seen.add(camera.gen)
+      motion.anchor(upright)
+      expect(seen.has(motion.gen)).toBe(false)
+      seen.add(motion.gen)
+      motion.release()
+    }
+  })
 
   it('swinging left moves the hand left, tipping up raises it, and turning back returns it', () => {
     const t = new ImuTracker()

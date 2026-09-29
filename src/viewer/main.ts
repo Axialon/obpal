@@ -25,6 +25,7 @@ import { LIGHT_CONTROLS, LIGHT_PRESETS, loadLighting, saveLighting, type Lightin
 import { ICONS, logo, settleMotion } from '../ui/icons'
 import { dismissHint, hint } from '../ui/hints'
 import { initTips } from '../ui/tips'
+import { holdForPhone } from '../ui/recover'
 import { enhanceSelects } from '../ui/kit/select'
 import { mountQuick, quickAction, quickViews } from '../ui/quick'
 import { applyTheme, initialTheme, THEMES, themeById, type Theme } from '../ui/themes'
@@ -1006,6 +1007,7 @@ function drawCursor(s: Seat, px: number, py: number, vx: number, vy: number, off
 
 async function startRemote() {
   remote = await Remote.create({ appName: 'ob.Pal Viewer', layout, seats: 8 })
+  holdForPhone(remote)
   controlSpace = new ControlSession(remote, 'viewer')
   sharedPresence.connect(remote)
   remote.setHostPerson({ name: 'Screen', color: family.accentColor() })

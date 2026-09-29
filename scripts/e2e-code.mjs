@@ -6,6 +6,8 @@
  *     short code; the keyboard opens and closes it; it follows the page's theme; reduced motion stills it.
  *   - A phone types the code on the start page and joins: the chip closes, the screen shows a new code at once, and the
  *     phone reloads into the same scene with the invite it was handed.
+ *   - A screen with a phone connected never reloads itself when a lazy chunk is gone after a deploy (src/ui/recover.ts);
+ *     one with no phone does.
  *   - A spent code finds nothing; a wrong secret with a live handle fails the exchange and retires that code.
  *   - Ten lookups that find nothing, and the address is slowed down, live codes included.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch. OBPAL_SHOTS=<dir> saves
@@ -272,6 +274,27 @@ try {
     await phone.locator('.modes').waitFor({ timeout: 25000 })
     await until('still one on the screen', () => screen.evaluate(() => window.__obpal.participants.length === 1), 10000)
     return 'rejoined'
+  })
+
+  await check('a screen with a phone connected never reloads itself for a gone chunk (src/ui/recover.ts), and one with no phone does', async () => {
+    const chunkGone = (page) => page.evaluate(() => window.dispatchEvent(new Event('vite:preloadError')))
+    const guard = (page) => page.evaluate(() => sessionStorage.getItem('obpal:deploy-reload'))
+    let loads = 0
+    const count = () => { loads++ }
+    screen.on('load', count)
+    await chunkGone(screen)
+    await sleep(2500)
+    screen.off('load', count)
+    if (loads || await guard(screen)) throw new Error(`the screen with a phone reloaded (${loads} loads) or wrote its guard`)
+    const bare = await screenCtx.newPage()
+    try {
+      await bare.goto(`${ORIGIN}/view/`)
+      let bareLoads = 0
+      bare.on('load', () => { bareLoads++ })
+      await chunkGone(bare)
+      await until('the screen with no phone reloaded', async () => { try { return bareLoads === 1 && !!(await guard(bare)) } catch { return false } }, 10000)
+    } finally { await bare.close() }
+    return 'held with a phone in; reloaded once with none'
   })
 
   const second = await phoneAt(`${ORIGIN}/p/`)

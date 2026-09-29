@@ -5,14 +5,19 @@
  *   - breaks no Content Security Policy directive (scripts/csp-watch.mjs) and throws no error;
  *   - has its policy: the page's own <meta> one and the headers' frame-ancestors one;
  *   - takes its fonts from this origin, never from a font service, and they load.
- * Then the quick-actions tray on each kind of page (scripts/e2e-quick.mjs).
+ * Then the quick-actions tray on each kind of page (scripts/e2e-quick.mjs), and the Viewer open across a deploy
+ * (src/ui/recover.ts): its lazy QR chunk is asked for after a pretend deploy (scripts/lib/deploy-sim.mjs) has
+ * removed the old build's chunks, and the page reloads once into the new build; it doesn't when the chunks are kept,
+ * and it never reloads twice.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch.
  */
+import { fileURLToPath } from 'node:url'
 import { chromium, devices } from 'playwright'
 import { cspCheck, cspViolations } from './csp-watch.mjs'
 import { startWorker } from './local-worker.mjs'
 import { checkFrost, setSurface } from './lib/frost.mjs'
 import { runQuick } from './e2e-quick.mjs'
+import { nextBuild } from './lib/deploy-sim.mjs'
 
 const PORT = Number(process.env.OBPAL_E2E_WORKER_PORT) || 5179
 const HEADED = process.argv.includes('--headed')
@@ -214,6 +219,71 @@ try {
   }
   // The quick-actions tray on each kind of page (scripts/e2e-quick.mjs).
   await runQuick(browser, worker.origin, check)
+  // The Viewer opened before a deploy. Its lazy QR chunk is asked for only after the deploy, which serves the next build
+  // from memory (scripts/lib/deploy-sim.mjs): `kept`, the old build's chunks are still there (scripts/keep-assets.mjs);
+  // otherwise they are gone; `stuck`, the next build's QR chunk is missing as well.
+  const next = await nextBuild(fileURLToPath(new URL('../dist/client', import.meta.url)))
+  const RELOAD_KEY = 'obpal:deploy-reload'
+  const isQr = (path) => /^\/assets\/qr-/.test(path)
+  async function viewerAcrossDeploy({ kept = false, stuck = false }, run) {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+    try {
+      const page = await ctx.newPage()
+      const seen = { loads: 0, errors: [] }
+      page.on('load', () => { seen.loads++ })
+      page.on('pageerror', (e) => seen.errors.push(e.message))
+      let deployed = false
+      let deploy = () => {}
+      const after = new Promise((r) => { deploy = r })
+      let asked = () => {}
+      const qrAsked = new Promise((r) => { asked = r })
+      await ctx.route(`${worker.origin}/**`, async (route) => {
+        const path = new URL(route.request().url()).pathname
+        if (!deployed && next.gone.has(path) && isQr(path)) { asked(); await after }
+        if (!deployed) return route.continue()
+        const removed = (next.gone.has(path) && !kept) || (stuck && isQr(path))
+        if (removed) return route.fulfill({ status: 404, contentType: 'text/plain', body: 'removed by the deploy' })
+        const file = next.files.get(path)
+        if (file) return route.fulfill({ status: 200, contentType: file.type, body: file.body, headers: { 'cache-control': 'no-store' } })
+        return route.continue()
+      })
+      await page.goto(`${worker.origin}/view/`)
+      await Promise.race([qrAsked, sleep(15000).then(() => { throw new Error('the pairing chip never asked for its QR chunk') })])
+      deployed = true
+      deploy()
+      const qr = page.locator('.obpal-chip .qr svg')
+      const drawn = async () => { await qr.first().waitFor({ timeout: 15000 }).catch(() => {}); return await qr.count() > 0 }
+      const record = () => page.evaluate((k) => sessionStorage.getItem(k), RELOAD_KEY)
+      return await run({ seen, drawn, record })
+    } finally { await ctx.close() }
+  }
+  await check('a Viewer open across a deploy that removed the QR chunk reloads once, into the new build, and draws the code', async () => {
+    return await viewerAcrossDeploy({}, async ({ seen, drawn, record }) => {
+      if (!(await drawn())) throw new Error(`no QR code drawn; ${seen.loads} loads; ${seen.errors.join(' | ')}`)
+      if (seen.loads !== 2) throw new Error(`${seen.loads} page loads (want the first and one reload)`)
+      if (!seen.errors.some((e) => /dynamically imported module/.test(e))) throw new Error(`the chunk did not fail: ${seen.errors.join(' | ') || 'no errors'}`)
+      if (!(await record())) throw new Error('the reload left no guard in sessionStorage')
+      return 'the old chunk 404ed, one reload, the QR drawn from the new build'
+    })
+  })
+  await check('the same deploy with the old chunks kept needs no reload', async () => {
+    return await viewerAcrossDeploy({ kept: true }, async ({ seen, drawn, record }) => {
+      if (!(await drawn())) throw new Error(`no QR code drawn; ${seen.errors.join(' | ')}`)
+      await sleep(1500)
+      if (seen.loads !== 1 || seen.errors.length || await record()) throw new Error(`${seen.loads} loads, ${seen.errors.length} errors, guard ${await record()}`)
+      return 'the old chunk still served: no error, no reload'
+    })
+  })
+  await check('a chunk missing from the new build too is reloaded for once, never again', async () => {
+    return await viewerAcrossDeploy({ stuck: true }, async ({ seen, record }) => {
+      const end = Date.now() + 15000
+      while (seen.loads < 2 && Date.now() < end) await sleep(100)
+      await sleep(3000)
+      if (seen.loads !== 2) throw new Error(`${seen.loads} page loads (want the first and one reload)`)
+      if (!(await record())) throw new Error('no guard in sessionStorage')
+      return `${seen.loads} loads, ${seen.errors.length} errors, and it stopped`
+    })
+  })
   await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {
   console.error(e)

@@ -21,11 +21,11 @@ The element shows a "Scan to control" chip in a corner. A phone that scans it jo
 
 ## Install
 
-Not published yet. When it is:
-
 ```bash
 npm install @obpal/host
 ```
+
+ES modules with type declarations; npm also installs [`@obpal/core`](https://www.npmjs.com/package/@obpal/core), which it depends on. Entry points: `@obpal/host` (the SDK), `@obpal/host/element` (`defineObpalRemote`), `@obpal/host/gamepad` (`installGamepadShim`) and `@obpal/host/qr` (the QR codes). [CHANGELOG.md](https://github.com/Axialon/obpal/blob/main/packages/host/CHANGELOG.md) lists what changed in each release.
 
 ## The element, typed
 
@@ -98,7 +98,7 @@ requestAnimationFrame(loop)
 
 **Properties and methods:** `frame(now, who?)`, `participants`, `setScene({ nodes?, held? })`, `holder(node)`, `holding(who)`, `held`, `layout`, `open`, `status`, `pairingUrl`, `ready` (a promise of the `Remote`, or null where the browser can't host a phone; awaiting it starts the remote now), `remote`, `start()`.
 
-**Frame** (`frame()` and `Remote.consume()`): `qRel` and `clutch` (1:1 rotation while the gyro is on), `tilt` (a stick from tilting), `pad1`, `pad2`, `zoom`, `twist` (trackpad gestures since the last frame), `aim` (Wii-style pointing), `pose` (3D, while a thumb is on the pad), `touching`, `mode`, `connected`.
+**Frame** (`frame()` and `Remote.consume()`): `qRel` and `clutch` (1:1 rotation while the gyro is on), `tilt` (a stick from tilting), `pad1`, `pad2`, `zoom`, `twist` (trackpad gestures since the last frame), `aim` (Wii-style pointing), `pose` (3D, while a thumb is on the pad: `p`, `q`, `tracked`, `touching`, `gen` and `source`, which says whether the pose comes from the phone's `camera`, a `model` estimated from its motion, an `unknown` phone or the host's `glow` camera), `touching`, `mode`, `connected`.
 
 Without the element, from the hosted script: `const remote = await window.obpal.remote({ appName: 'My scene' })`.
 

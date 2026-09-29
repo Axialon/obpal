@@ -330,7 +330,9 @@ A browser-extension host that drives programs outside the browser talks to a nat
   - `b`: held mouse buttons, 0 left, 1 middle, 2 right, 3 back, 4 forward;
   - `m`: relative mouse motion this frame, whole px, +y down, |v| ≤ 2000;
   - `w`: wheel this frame in 1/120 notch units, DOM convention (`[deltaX, deltaY]`, +y scrolls down), |v| ≤ 2400.
-  A missing list means nothing held. The helper diffs `k` and `b` against what it holds, so a lost, dropped or refused frame can never leave a key down; the next frame repairs the state. Frames go at 60 Hz while there is input and at least every 250 ms otherwise; the helper releases everything after 500 ms without one, and accepts at most 250 per second.
+  A missing list means nothing held. The helper diffs `k` and `b` against what it holds, so a lost, dropped or refused frame can never leave a key down; the next frame repairs the state. The helper accepts at most 250 frames per second and releases everything after 500 ms without one.
+
+  **Cadence** (what ob.Pal Link sends). The phone in control is live while it has had a STATE, PAD, POINTER or POSE packet accepted in the last 300 ms; a phone at rest still sends 15 Hz (§4, §5), so it stays live. While it is live, Link sends a frame on every tick, about 60 Hz, whenever the frame holds a key or button or carries motion or wheel. A change in what is held goes out at once, a release included. A frame with nothing held and no motion or wheel goes only as a heartbeat, at least every 250 ms. After 300 ms without a packet from that phone (or when it disconnects, the PC stops allowing it, or the target leaves the PC), Link sends one empty frame, which releases everything, and then sends nothing until fresh input arrives: a held key or button is never kept down by repeating a stale frame. The helper's 500 ms release is the backstop for a lost frame or a Link that has gone, not the normal path.
 - `text{s, del?}`: **typing** from the phone's keyboard into whatever has the keyboard focus: Backspace `del` times (0 when absent), then `s`, typed as characters (Unicode, so the keyboard layout doesn't matter), except that `"\n"` presses Enter and `"\t"` Tab. At most 256 characters and 256 deletions, and no other control characters (`bad-text`); at most 40 requests per second (`text-rate`). Only a helper whose `hello` says `caps.text` knows it.
 - `release`: release everything now.
 - `allow{path, keyboard, mouse}`: allow a program (its image path). The helper accepts only a program it has seen in the foreground in this session.
@@ -396,18 +398,23 @@ See [MUSIC.md](MUSIC.md) for synthesis, budgets and measurement limits.
 
 ## POSE packet (type 5): the device in space
 
-While 3D tracking is on (mode 6, catalogue `motion.track`), the device sends a POSE packet on the unreliable channel for each tracked frame, beside STATE (which still carries touches and the mode). Where the position comes from depends on the way the device tracks. In the camera mode the device tracks itself with its camera and motion sensors (WebXR `immersive-ar` on Android), which drifts far less than integrating an accelerometer does. Without it, the position is estimated from the phone's own motion (its gyro through an arm model, its accelerometer for push and pull) and is only as good as that estimate. The packet is the same either way.
+While 3D tracking is on (mode 6, catalogue `motion.track`), the device sends a POSE packet on the unreliable channel for each tracking frame, beside STATE (which still carries touches and the mode). The `source` says where the position comes from. `camera` uses the phone's camera and motion sensors (WebXR `immersive-ar` on Android) to track position and correct drift; it can still lose tracking. `model` estimates position from gyro orientation through a 0.45 m arm model, plus acceleration along the pointing axis clamped to ±0.35 m. Rotation in place therefore reads as a move, while a sideways-only translation with unchanged orientation reads as zero. Model position is not measured 6-DOF tracking.
 
 | Offset | Type | Field |
 |---|---|---|
 | 0 | u8 | header 0x15 (version 1, type 5) |
-| 1 | u8 | flags: b0 tracked (clear while the device has lost track of the world), b1 touching (the deadman, sampled with this pose) |
-| 2 | u16 | seq |
+| 1 | u8 | flags: b0 tracked (pose usable; clear when camera tracking is lost or WebXR position is emulated), b1 touching (the deadman, sampled with this pose) |
+| 2 | u16 | seq, continuous across generations and sources (wraps) |
 | 4 | u32 | capture time, µs, device session clock |
 | 8 | f32×3 | position, metres, in the tracking space: y up, origin where tracking began |
 | 20 | i16×4 | orientation, Q15 quaternion (x, y, z, w): device → tracking space; the camera looks along −z, the top edge is +y |
-| 28 | u8 | generation: a new tracking session, with a new origin |
-| 29 | u8, u16 | reserved |
+| 28 | u8 | generation: a new tracking session, recenter or motion grab, with a new origin (wraps) |
+| 29 | u8 | source: 0 unknown (legacy), 1 camera, 2 model |
+| 30 | u16 | reserved |
 
-Hosts read it as `Frame.pose` (`@obpal/host`), stale after 250 ms. A pose is absolute within a generation. Hosts anchor a drive when the person's deadman goes down, and re-anchor when the generation changes.
+The packet remains 32 bytes. Older phones leave byte 29 at zero; older hosts ignore it. Unrecognised source values read as `unknown`. The `tracked` flag alone does not distinguish measured position from an estimate: model poses also set it when usable.
+
+Hosts read it as `Frame.pose` (`@obpal/host`), stale after 250 ms, with `source: 'camera' | 'model' | 'unknown' | 'glow'`. `glow` is assigned locally by the host's camera follower, not sent in POSE. Camera and motion origins share one counter on the phone. The host stream compares sequence numbers across all origins, ignores older or duplicate packets without refreshing expiry, and exposes a monotonic `Frame.pose.gen` for each observed origin or source change, including after a stream reset; it is not the raw wrapping byte.
+
+A pose is absolute within a generation. Hosts anchor a drive when the person's deadman goes down, and re-anchor when the generation changes. When `tracked` is false, hosts hold still and discard their drive anchor; when tracking returns they anchor at the returned pose so movement during tracking loss causes no jump.
 

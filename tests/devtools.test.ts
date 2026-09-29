@@ -144,6 +144,15 @@ describe('e2e runner: suites, ports, results, the ob.Pal Desktop guard', () => {
     expect(() => parseArgs(['--wait-min', '0'], known)).toThrow('positive number')
   })
 
+  it('runs the phone modules (connections, camera, controllers, recovery) inside the phone suite, which a full run includes', () => {
+    const suite = readText('scripts/e2e-phone.mjs')
+    for (const run of ['phoneConnections', 'phoneCamera', 'phoneControllers', 'phoneRecovery']) {
+      expect(suite, `${run} is imported`).toMatch(new RegExp(`^import \\{ ${run} \\} from './phone-[a-z]+\\.mjs'`, 'm'))
+      expect(suite, `${run} is run`).toMatch(new RegExp(`^\\s*await ${run}\\(`, 'm'))
+    }
+    expect(knownSuites(JSON.parse(readText('package.json')).scripts)).toContain('phone')
+  })
+
   it('knows which ports each suite binds: its stand-in and its own worker, unless production is asked for', () => {
     expect(suitePorts('phone', {})).toEqual({ port: 5176, worker: 5189 })
     expect(suitePorts('phone', { OBPAL_E2E_UPSTREAM: 'https://obpal.blackboxes.net' })).toEqual({ port: 5176, worker: null })

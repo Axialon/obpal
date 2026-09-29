@@ -5,6 +5,7 @@
  */
 import type { Remote } from '@obpal/host'
 import type { ScreenPointer } from '../viewer/pointer'
+import { holdForPhone } from '../ui/recover'
 
 export interface Paired { remote: Remote; Pointer: typeof ScreenPointer }
 
@@ -17,6 +18,7 @@ export async function startPairing(slot: HTMLElement): Promise<Paired> {
     layout: { v: 1, tray: [], modes: [Mode.tilt, Mode.point], toss: true },
     seats: 4,
   })
+  holdForPhone(remote)
   slot.replaceChildren()
   // The pairing chip as a panel in the hero's own glass: the QR code as wide as the card, the short code under it.
   // 'Use this device' opens the phone controller in a tab: no phone at hand, and it still plays (with its trackpad).

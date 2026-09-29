@@ -1,6 +1,6 @@
 {
   "name": "@obpal/host",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "license": "MIT",
   "description": "ob.Pal host SDK and <obpal-remote>: pair a phone controller with any web page and read its input each frame.",
@@ -17,7 +17,7 @@
     "./qr": "./src/qr.ts",
     "./element": "./src/element.ts"
   },
-  "files": ["dist"],
+  "files": ["dist", "CHANGELOG.md"],
   "scripts": {
     "build": "node ../../scripts/build-packages.mjs",
     "prepack": "node ../../scripts/build-packages.mjs"

@@ -7,6 +7,7 @@ import type { SceneNode } from '@obpal/core'
 import { Claims, PairingChip, PartFocus, Remote, type Layout, type Participant } from '@obpal/host'
 import { family } from '../family'
 import { ICONS } from '../ui/icons'
+import { holdForPhone } from '../ui/recover'
 import { ControlSession } from './control-space'
 
 export interface SimScene {
@@ -67,6 +68,7 @@ const clock = () => new Date().toLocaleTimeString('en-GB', { hour12: false })
 
 export async function startSimScene(o: SimOptions): Promise<SimScene> {
   const remote = await Remote.create({ appName: o.appName, layout: o.layout, seats: 8 })
+  holdForPhone(remote)
   const query = new URLSearchParams(location.search)
   const control = new ControlSession(remote, query.get('d') ?? (location.pathname.includes('/arm/') ? `arm-${query.get('kind') ?? 'arm5'}` : 'arena'))
   const claims = new Claims()

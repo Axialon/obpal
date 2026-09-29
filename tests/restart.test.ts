@@ -3,7 +3,7 @@
  * (Remote), against stand-ins for WebSocket and RTCPeerConnection. PROTOCOL §1.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DeviceLink, fingerprintHex, type LinkStatus } from '@obpal/core'
+import { DeviceLink, fingerprintHex, importPairKey, type LinkStatus, type StoredPair } from '@obpal/core'
 import { Remote } from '../packages/host/src/remote'
 
 const FP_DEVICE = new Uint8Array(32).fill(0x11)
@@ -27,6 +27,8 @@ class FakeChannel {
   onclose: (() => void) | null = null
   send(d: string) { this.sent.push(d) }
   close() { this.readyState = 'closed' }
+  /** The other side closed it. */
+  shut() { this.readyState = 'closed'; this.onclose?.() }
   open() { this.readyState = 'open'; this.onopen?.() }
   receive(m: object) { this.onmessage?.({ data: JSON.stringify(m) }) }
 }
@@ -94,12 +96,20 @@ async function until<T>(what: string, fn: () => T | undefined | null | false, ms
 const offers = (ws: FakeWS) => ws.sent.map((s) => JSON.parse(s)).filter((m) => m.t === 'sig' && m.d.offer)
 const events = new EventTarget()
 
+/** The phone's page: an event target whose visibility a test sets (show), and which says `visibilitychange` as a page does. */
+let page: EventTarget & { visibilityState: string }
+function show(state: 'hidden' | 'visible') {
+  page.visibilityState = state
+  page.dispatchEvent(new Event('visibilitychange'))
+}
+
 beforeEach(() => {
+  page = Object.assign(new EventTarget(), { visibilityState: 'visible' })
   FakePC.all = []
   FakeWS.all = []
   vi.stubGlobal('WebSocket', FakeWS)
   vi.stubGlobal('RTCPeerConnection', FakePC)
-  vi.stubGlobal('document', { addEventListener() {}, removeEventListener() {}, visibilityState: 'visible' })
+  vi.stubGlobal('document', page)
   vi.stubGlobal('addEventListener', events.addEventListener.bind(events))
   vi.stubGlobal('removeEventListener', events.removeEventListener.bind(events))
   vi.stubGlobal('fetch', async () => Response.json({ iceServers: [{ urls: 'stun:stun.example:3478' }] }))
@@ -221,6 +231,159 @@ describe('the phone keeps its link when the path under it goes', () => {
     ws.readyState = 1
     ws.receive({ t: 'welcome', id: 'd2', role: 'device', host: true })
     await until('the offer sent', () => offers(ws).length === 1)
+    link.close()
+  })
+
+  /** The phone's signaling socket is lost, and the phone lets it retry: the socket it gets next, opened and welcomed. */
+  async function socketBack(prev: FakeWS) {
+    const next = await until('the socket retried', () => FakeWS.all.at(-1) !== prev && FakeWS.all.at(-1))
+    next.open()
+    next.receive({ t: 'welcome', id: 'd2', role: 'device', host: true })
+    return next
+  }
+
+  it.each([
+    ['disconnected', false],
+    ['disconnected', true],
+    ['failed', false],
+    ['failed', true],
+  ] as const)('a path %s (control channel closed: %s) while the socket is down: the restart it waits for goes when the socket is back, and a screen with no such connection has it build a new one', async (lost, closed) => {
+    const { link, ws, pc, statuses } = await connected(true)
+    ws.close() // the socket is lost (a phone that woke with no network yet)
+    if (closed) pc.channels.ctl.shut()
+    pc.state(lost)
+    await until('reconnecting', () => statuses.includes('reconnecting'))
+    for (let i = 0; i < 5; i++) await tick()
+    expect(FakePC.all).toHaveLength(1) // nothing could be sent, and nothing is built again while it waits for the socket
+    const next = await socketBack(ws)
+    await until('a restart offer on the new socket', () => offers(next).find((m) => m.d.restart === true))
+    next.receive({ t: 'sig', from: 'h1', d: { gone: true } })
+    await until('a new connection', () => FakePC.all.length > 1 && FakePC.all.at(-1) !== pc)
+    expect(pc.connectionState).toBe('closed')
+    link.close()
+  })
+
+  it('the path coming back on its own while a restart waits for the socket: connected again, and nothing left to restart', async () => {
+    const { link, ws, pc, statuses } = await connected(true)
+    ws.close()
+    pc.state('disconnected')
+    await until('reconnecting', () => statuses.includes('reconnecting'))
+    for (let i = 0; i < 5; i++) await tick()
+    pc.state('connected')
+    await until('connected again', () => link.status === 'connected')
+    const next = await socketBack(ws)
+    for (let i = 0; i < 10; i++) await tick()
+    expect(offers(next)).toHaveLength(0)
+    expect(FakePC.all).toHaveLength(1)
+    expect(link.status).toBe('connected')
+    link.close()
+  })
+
+  it('a network change while the socket is down (the link still up): the restart goes when the socket is back', async () => {
+    const { link, ws, pc } = await connected(true)
+    ws.close()
+    events.dispatchEvent(new Event('online'))
+    for (let i = 0; i < 20; i++) await tick()
+    expect(pc.restarts).toBe(0)
+    const next = await socketBack(ws)
+    await until('a restart offer on the new socket', () => offers(next).find((m) => m.d.restart === true))
+    expect(pc.restarts).toBe(1)
+    link.close()
+  })
+})
+
+/**
+ * Coming back to a phone that was locked or switched away from (packages/core/src/device.ts onVisible). The page's
+ * visibility goes hidden, then visible; only the timers are faked, so "at once" is measured against the grace a lost path
+ * otherwise waits (3 s for a host that takes no restarts, 0.5 s for one that does).
+ */
+describe('the phone coming back to its page', () => {
+  /** Fake the clock from here on, then let `by` ms pass. Restore it with vi.useRealTimers(). */
+  const passing = async (by: number) => { await vi.advanceTimersByTimeAsync(by) }
+  const clock = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  afterEach(() => vi.useRealTimers())
+
+  it.each([
+    ['a host that takes no restarts', 'disconnected', false],
+    ['a host that takes no restarts', 'failed', false],
+    ['a host that takes restarts', 'disconnected', true],
+    ['a host that takes restarts', 'failed', true],
+  ] as const)('with %s and its path %s, hidden then visible builds the connection again at once', async (_who, lost, restart) => {
+    const { link, pc, statuses } = await connected(restart)
+    clock()
+    pc.state(lost)
+    // Hidden changes nothing: the path's own timer is still what is waiting.
+    show('hidden')
+    await passing(1)
+    expect(FakePC.all).toHaveLength(1)
+    expect(pc.connectionState).toBe(lost)
+    // Visible again: no waiting for the grace, which is still ahead (a lost path waits 3 s, 0.5 s on a host with restarts).
+    show('visible')
+    await passing(1)
+    vi.useRealTimers()
+    await until('a new connection', () => FakePC.all.at(-1) !== pc)
+    expect(pc.connectionState).toBe('closed')
+    expect(statuses).toContain('reconnecting')
+    link.close()
+  })
+
+  it.each(['connected', 'connecting'] as const)('with its connection %s, hidden then visible leaves it alone', async (state) => {
+    const { link, pc, statuses } = await connected(true)
+    pc.connectionState = state
+    clock()
+    show('hidden')
+    show('visible')
+    await passing(10_000)
+    vi.useRealTimers()
+    expect(FakePC.all).toHaveLength(1)
+    expect(pc.connectionState).toBe(state)
+    expect(link.status).toBe('connected')
+    expect(statuses).not.toContain('reconnecting')
+    link.close()
+  })
+
+  it('with no screen there, coming back has nothing to reconnect to', async () => {
+    const link = new DeviceLink({ service: 'https://svc.test', pairing: { secret: SECRET, fp: FP_HOST }, caps: () => ({ tier: 3, sensorApi: 'events', haptics: 'none', platform: 'test' }), name: 'Test phone' })
+    await link.start()
+    const ws = FakeWS.all.at(-1)!
+    ws.open()
+    ws.receive({ t: 'welcome', id: 'd1', role: 'device', host: false })
+    await until('waiting for the host', () => link.status === 'waiting-host')
+    clock()
+    show('hidden')
+    show('visible')
+    await passing(10_000)
+    vi.useRealTimers()
+    expect(FakePC.all.every((p) => p.connectionState !== 'closed')).toBe(true)
+    expect(link.status).toBe('waiting-host')
+    link.close()
+  })
+
+  it('a direct LAN link is never rebuilt on coming back: its code is single-use, so another attempt could not work', async () => {
+    const key = await importPairKey(new Uint8Array(32).fill(5))
+    const pair: StoredPair = { id: 'AQEBAQEBAQEBAQEBAQEBAQ', key, peerFp: FP_HOST, peerName: 'Desk', at: 1 }
+    const lan = { id: new Uint8Array(16).fill(1), nonce: new Uint8Array(16).fill(2), ufrag: 'AAjr', pwd: 'RfMNkMijI//CP0AuqTCu0VY7', cands: [{ host: '192.168.1.101', port: 42610 }] }
+    const link = new DeviceLink({ lan, pair, caps: () => ({ tier: 3, sensorApi: 'events', haptics: 'none', platform: 'test' }), name: 'Test phone', cert: {} as RTCCertificate })
+    const statuses: LinkStatus[] = []
+    link.on('status', (s) => statuses.push(s))
+    await link.start()
+    const pc = await until('the direct connection', () => FakePC.all.at(-1))
+    await until('its answer', () => pc.localDescription)
+    pc.state('connected')
+    pc.channels.ctl.open()
+    await until('the hello', () => pc.channels.ctl.sent.length > 0)
+    pc.channels.ctl.receive({ t: 'welcome', proto: 1, name: 'Screen', layout: { v: 1, tray: [] } })
+    await until('connected', () => link.status === 'connected')
+    expect(link.direct).toBe(true)
+    pc.state('disconnected')
+    clock()
+    show('hidden')
+    show('visible')
+    await passing(10_000)
+    vi.useRealTimers()
+    expect(FakePC.all).toHaveLength(1)
+    expect(pc.connectionState).toBe('disconnected')
+    expect(statuses).not.toContain('reconnecting')
     link.close()
   })
 })

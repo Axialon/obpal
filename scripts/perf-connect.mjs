@@ -15,27 +15,57 @@
  *                 session is up (a phone and screen that restart ICE), the longest gap in input meanwhile, and whether
  *                 the screen kept the same participant
  *   rebuild       the screen closes the phone's peer connection (a link that failed outright): time until input again
+ * and, when asked for (--lock), on every run:
+ *   lock          SIMULATED, on this one machine: the phone's page is hidden and frozen for 30 s (--lock-ms=<ms> for less, for
+ *                 a trial), then thawed and shown, and the time until the screen has input from it again is the resume.
+ *                 The page is frozen with CDP Page.setWebLifecycleState; Chromium freezes only a hidden page and a headless
+ *                 page never is, so where its heartbeat keeps beating the page is held at a breakpoint instead
+ *                 (Debugger.pause), which stops its scripts, timers and message handling just as thoroughly. Visibility
+ *                 is the page's own visibilitychange, played by the harness (no browser window is there to hide). The
+ *                 network under the link never goes away and no operating system suspends anything, so this is the
+ *                 software's part of a resume alone (a lower bound), never a measure of a locked phone. --lock-lost is the
+ *                 other end: half way through, the phone's connections through the site are cut and the screen closes its
+ *                 peer connection, as when the screen gives up on a silent phone and the system drops its sockets, so the
+ *                 phone must find a new link when it wakes (written to artifacts/perf-connect-lock-lost.json).
+ *                 --lock-net-ms=<ms> also keeps its network away for that long after the wake, as a radio coming back does. A 30 s lock needs
+ *                 at least 7 runs (raised to 7 if fewer are asked for); the median, p90 and n go to
+ *                 artifacts/perf-connect-lock.json (--lock-json=<file>) with that label. The physical check, on phones, is
+ *                 docs/DEVICE-CHECKLIST.md.
  * --relay: the same through a TURN relay only (both sides' peer connections forced to iceTransportPolicy 'relay'), with
  * the room service and its TURN credentials from production through the HTTPS stand-in (extension/e2e/local.mjs on
  * OBPAL_E2E_PORT, default 5176), since a local worker has no TURN keys.
  * --origin=<url>: bench a site already running there (production, say) and start nothing locally (no signal cut).
- * OBPAL_BENCH_SKIP=cut,restart,rebuild leaves checks out; OBPAL_BENCH_WAIT_MS is how long a run may take to connect.
+ * OBPAL_BENCH_SKIP=cut,restart,rebuild,lock leaves checks out; OBPAL_BENCH_WAIT_MS is how long a run may take to connect.
  * Needs a build (pnpm run build, or vite build) and Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>.
- * Usage: node scripts/perf-connect.mjs [--runs=7] [--relay] [--origin=<url>] [--headed] [--json=<file>]
+ * Usage: node scripts/perf-connect.mjs [--runs=7] [--relay] [--origin=<url>] [--headed] [--json=<file>] [--lock [--lock-lost [--lock-net-ms=<ms>]] [--lock-ms=<ms>] [--lock-json=<file>]]
  */
-import { writeFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { connect, createServer } from 'node:net'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { chromium, devices } from 'playwright'
 import { startWorker } from './local-worker.mjs'
 import { startLocal, UPSTREAM } from '../extension/e2e/local.mjs'
 
 const PORT = Number(process.env.OBPAL_E2E_WORKER_PORT) || 5179
 const HEADED = process.argv.includes('--headed')
-const RUNS = Number(process.argv.find((a) => a.startsWith('--runs='))?.slice(7) ?? 7)
+/** --lock-lost is the worst case of a lock: half way through, the screen gives up on the silent phone and its sockets are gone. */
+const LOCK_LOST = process.argv.includes('--lock-lost')
+const LOCK = process.argv.includes('--lock') || LOCK_LOST
+/** With --lock-lost: the phone's network takes this long to come back after the wake (--lock-net-ms=<ms>), so its sockets are refused meanwhile. */
+const LOCK_NET_MS = LOCK_LOST ? Number(process.argv.find((a) => a.startsWith('--lock-net-ms='))?.slice(14) ?? 0) : 0
+const LOCK_MS = Number(process.argv.find((a) => a.startsWith('--lock-ms='))?.slice(10) ?? 30_000)
+/** A lock result counts from this many phones, each locked for the full 30 s. */
+const LOCK_RUNS = 7
+const LOCK_COUNTS = LOCK_MS >= 30_000
+const LOCK_JSON = process.argv.find((a) => a.startsWith('--lock-json='))?.slice(12) || resolve(dirname(fileURLToPath(import.meta.url)), `../artifacts/perf-connect-lock${LOCK_LOST ? '-lost' : ''}.json`)
+const RUNS_ASKED = Number(process.argv.find((a) => a.startsWith('--runs='))?.slice(7) ?? 7)
+const RUNS = LOCK && LOCK_COUNTS ? Math.max(RUNS_ASKED, LOCK_RUNS) : RUNS_ASKED
 const JSON_OUT = process.argv.find((a) => a.startsWith('--json='))?.slice(7) ?? ''
 const RELAY = process.argv.includes('--relay')
 const AT = process.argv.find((a) => a.startsWith('--origin='))?.slice(9).replace(/\/$/, '') ?? ''
 const SKIP = new Set((process.env.OBPAL_BENCH_SKIP ?? '').split(',').filter(Boolean))
+const LOCKING = LOCK && !SKIP.has('lock')
 const WAIT_MS = Number(process.env.OBPAL_BENCH_WAIT_MS) || 45000
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
 const RTC_ARGS = ['--disable-features=WebRtcHideLocalIpsWithMdns', '--ignore-certificate-errors']
@@ -62,7 +92,7 @@ const fmt = (xs) => {
  * only use relayed candidates.
  */
 function watchPage({ relay }) {
-  const rtc = { pcs: [], sockets: [], pongs: [] }
+  const rtc = { pcs: [], sockets: [], pongs: [], ctls: [] }
   window.__rtc = rtc
   const PC = window.RTCPeerConnection
   window.RTCPeerConnection = class extends PC {
@@ -72,6 +102,7 @@ function watchPage({ relay }) {
   PC.prototype.createDataChannel = function (label, opts) {
     const ch = make.call(this, label, opts)
     if (label === 'ctl') {
+      rtc.ctls.push(ch)
       ch.addEventListener('message', (e) => {
         try { const m = JSON.parse(e.data); if (m.t === 'pong' && typeof m.t0 === 'number') rtc.pongs.push(performance.now() - m.t0) } catch { /* not ours */ }
       })
@@ -104,11 +135,14 @@ function linkStats(page) {
 
 /**
  * A TCP relay in front of the site, for the phone alone: cut() drops every connection through it at once, with no
- * close frame, the way a lost network does (the room service then sees the phone's socket as lost, not closed).
+ * close frame, the way a lost network does (the room service then sees the phone's socket as lost, not closed);
+ * hold(true) refuses new connections until hold(false), a network that hasn't come back yet.
  */
 async function tcpRelay(port) {
   const conns = new Set()
+  let held = false
   const server = createServer((c) => {
+    if (held) { c.destroy(); return }
     const up = connect(port, '127.0.0.1')
     const end = () => { c.destroy(); up.destroy(); conns.delete(c); conns.delete(up) }
     for (const s of [c, up]) { conns.add(s); s.on('error', end); s.on('close', end) }
@@ -118,6 +152,7 @@ async function tcpRelay(port) {
   return {
     port: server.address().port,
     cut() { for (const s of conns) s.resetAndDestroy?.() ?? s.destroy() },
+    hold(on) { held = on },
     close: () => new Promise((r) => { for (const s of conns) s.destroy(); server.close(() => r()) }),
   }
 }
@@ -131,10 +166,50 @@ const inputGap = (screen, since) => screen.evaluate((t) => {
 }, since)
 const flowing = (screen) => screen.evaluate(() => window.__inputs.at(-1) > Date.now() - 300)
 
+/**
+ * For the lock step, before any of a phone page's scripts: a heartbeat the harness can read to see whether the page runs,
+ * and a page visibility the harness sets (a headless page has no window to hide, so its visibility never changes on
+ * its own): `__setVisibility('hidden' | 'visible')` changes what the page reads and says visibilitychange, as a browser
+ * does when a screen locks or unlocks.
+ */
+function lockPage() {
+  window.__beat = 0
+  setInterval(() => window.__beat++, 25)
+  let state = 'visible'
+  Object.defineProperty(Document.prototype, 'visibilityState', { configurable: true, get: () => state })
+  Object.defineProperty(Document.prototype, 'hidden', { configurable: true, get: () => state === 'hidden' })
+  window.__setVisibility = (next) => { state = next; document.dispatchEvent(new Event('visibilitychange')) }
+}
+
+/**
+ * Freeze a phone's page as a locked phone does: no script runs, timers and incoming messages wait. Chromium's own
+ * freeze first (Page.setWebLifecycleState), which takes a hidden page only; if the page's heartbeat is still beating,
+ * the page is held at a breakpoint instead. Resolves once the page is frozen, with how, the way back (thaw) and the
+ * tidying up after it (done).
+ * @param {import('playwright').CDPSession} cdp
+ */
+async function freezePage(cdp) {
+  const beat = () => Promise.race([
+    cdp.send('Runtime.evaluate', { expression: 'window.__beat', returnByValue: true }).then((r) => r.result.value),
+    sleep(1000).then(() => 'stalled'), // an evaluation that never answers is a page that isn't running
+  ])
+  await cdp.send('Page.setWebLifecycleState', { state: 'frozen' })
+  const a = await beat()
+  await sleep(300)
+  const b = await beat()
+  if (b === 'stalled' || a === b) return { method: 'Page.setWebLifecycleState', thaw: () => cdp.send('Page.setWebLifecycleState', { state: 'active' }), done: async () => {} }
+  await cdp.send('Page.setWebLifecycleState', { state: 'active' })
+  await cdp.send('Debugger.enable')
+  const paused = new Promise((r) => cdp.once('Debugger.paused', r))
+  await cdp.send('Debugger.pause')
+  await paused
+  return { method: 'Debugger.pause', thaw: () => cdp.send('Debugger.resume'), done: () => cdp.send('Debugger.disable') }
+}
+
 const closers = []
 let worker = null
 let exitCode = 0
-const out = { relay: RELAY, origin: AT || 'local', runs: [], failed: 0 }
+const out = { relay: RELAY, origin: AT || 'local', runs: [], failed: 0, lock: [] }
 try {
   let origin = AT
   if (!AT && RELAY) {
@@ -170,6 +245,7 @@ try {
     const ctx = await phoneBrowser.newContext({ ...devices['Pixel 7'], ignoreHTTPSErrors: true })
     try {
       await ctx.addInitScript(watchPage, { relay: RELAY })
+      if (LOCKING) await ctx.addInitScript(lockPage)
       const phone = await ctx.newPage()
       const errors = []
       phone.on('pageerror', (e) => errors.push(e.message))
@@ -194,6 +270,41 @@ try {
       out.runs.push(r)
       console.log(`  run ${run + 1}: connected ${marks.welcome.toFixed(0)} ms (page ${marks.page.toFixed(0)}, signal ${marks.signal?.toFixed(0)}, ice ${marks.ice?.toFixed(0)}, sent ${marks.sent?.toFixed(0)}, answer ${marks.answer?.toFixed(0)}, open ${marks.open?.toFixed(0)}), pong ${r.pong.toFixed(1)} ms, ICE rtt ${r.iceRtt?.toFixed(1) ?? '?'} ms, ${r.path}, ${r.dtls ?? '?'} ${r.cipher ?? ''}`)
       if (errors.length) console.log(`  phone errors: ${errors.slice(0, 3).join(' | ')}`)
+      if (LOCKING) {
+        await until('input flowing', () => flowing(screen), 20000).catch(() => {})
+        const before = await people()
+        const connectionsBefore = await phone.evaluate(() => window.__rtc.pcs.length)
+        // The screen locks: the page is hidden, then frozen.
+        await phone.evaluate(() => window.__setVisibility('hidden'))
+        const frozen = await freezePage(await ctx.newCDPSession(phone))
+        const from = Date.now()
+        await sleep(LOCK_MS / 2)
+        if (LOCK_LOST) {
+          // The link doesn't survive the lock: the phone's connections through the site are cut, and the screen closes its peer connection.
+          relay?.cut()
+          if (LOCK_NET_MS) relay?.hold(true)
+          await screen.evaluate(() => { for (const p of window.__obpal.peers.values()) if (p.bound) p.pc.close() })
+        }
+        await sleep(LOCK_MS / 2)
+        // What the screen took from the phone while it was frozen (a moment after the freeze, for packets on their way).
+        const leaked = await screen.evaluate(([a, b]) => window.__inputs.filter((x) => x > a && x < b).length, [from + 300, Date.now()])
+        // The screen unlocks: the page runs again and is shown. The resume is from here until the screen has input from it.
+        const t0 = Date.now()
+        if (LOCK_NET_MS) setTimeout(() => relay?.hold(false), LOCK_NET_MS)
+        await frozen.thaw()
+        await phone.evaluate(() => window.__setVisibility('visible'))
+        const first = await until('input after the lock', () => screen.evaluate((since) => window.__inputs.find((x) => x > since) ?? 0, t0), 30000, 5).catch(() => 0)
+        await frozen.done()
+        relay?.hold(false)
+        // A phone that never came back: what it says of itself, to tell a stuck link from a slow one.
+        const stuckHost = first ? '' : await screen.evaluate(() => `; the screen's peers ${[...window.__obpal.peers.values()].map((p) => `${p.bound ? 'bound' : 'unbound'} ${p.pc.connectionState} ctl ${p.ctl.readyState}`).join(', ')}`).catch(() => '')
+        const stuck = first ? '' : await phone.evaluate(() => `peer connections ${window.__rtc.pcs.map((p) => `${p.connectionState}/${p.iceConnectionState}`).join(',')}; control channels ${window.__rtc.ctls.map((c) => c.readyState).join(',')}; sockets ${window.__rtc.sockets.map((s) => s.readyState).join(',')}; the page says "${document.querySelector('#banner:not([hidden]), .msg')?.textContent?.trim().slice(0, 60) ?? ''}"`).catch((e) => `(${e.message})`)
+        await sleep(300)
+        const rebuilt =(await phone.evaluate(() => window.__rtc.pcs.length)) > connectionsBefore
+        const r = { ms: first ? first - t0 : null, method: frozen.method, silent: leaked === 0, samePerson: (await people()) === before, rebuilt }
+        out.lock.push(r)
+        console.log(`  lock ${LOCK_MS / 1000} s, simulated${LOCK_LOST ? `, link lost in the middle${LOCK_NET_MS ? `, network back ${LOCK_NET_MS} ms after the wake` : ''}` : ''} (frozen by ${frozen.method}): ${first ? `input again after ${first - t0} ms` : `no input again in 30 s (${stuck}${stuckHost})`}; silent while frozen: ${r.silent}${r.silent ? '' : ` (${leaked} packets)`}; same participant: ${r.samePerson}; connection ${rebuilt ? 'built again' : 'kept'}`)
+      }
       if (run < RUNS - 1) continue
 
       if (relay && !SKIP.has('cut')) {
@@ -252,6 +363,33 @@ try {
   console.log(`  rtt, control channel ping/pong     ${fmt(col('pong'))}`)
   console.log(`  rtt, ICE pair (getStats)           ${fmt(col('iceRtt'))}`)
   console.log(`  paths                              ${[...new Set(out.runs.map((r) => `${r.path} ${r.dtls ?? ''} ${r.cipher ?? ''}`))].join('; ')}`)
+  if (LOCKING) {
+    const n = out.lock.length
+    // A run that never resumed is the slowest there is: it sorts last and holds the p90 up.
+    const all = out.lock.map((r) => r.ms ?? Infinity)
+    // Nearest rank, as docs/DEVICE-CHECKLIST.md reads a percentile: the ceil(p × n)-th of the samples, smallest first.
+    const nearest = (xs, p) => [...xs].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))[Math.max(0, Math.ceil(p * xs.length) - 1)]
+    const ms = (v) => (Number.isFinite(v) ? Math.round(v) : null)
+    const say = (v) => (Number.isFinite(v) ? `${Math.round(v)} ms` : 'never')
+    const res = {
+      simulated: true,
+      label: 'SIMULATED on one machine: the phone page is hidden and frozen by the test harness. The network under the link stays up and no operating system suspends anything. Not a measure of a locked phone.',
+      target: 'PLAN §1: resume after a 30 s screen lock, at most 3 s at p90 (judged on phones: docs/DEVICE-CHECKLIST.md)',
+      linkLost: LOCK_LOST, networkBackMsAfterWake: LOCK_NET_MS,
+      lockMs: LOCK_MS, n, neverResumed: all.filter((v) => !Number.isFinite(v)).length,
+      medianMs: ms(nearest(all, 0.5)), p90Ms: ms(nearest(all, 0.9)), minMs: ms(Math.min(...all)), maxMs: ms(Math.max(...all)),
+      counts: LOCK_COUNTS && n >= LOCK_RUNS,
+      frozenBy: [...new Set(out.lock.map((r) => r.method))].join(', '),
+      silentWhileFrozen: out.lock.filter((r) => r.silent).length, sameParticipant: out.lock.filter((r) => r.samePerson).length, connectionKept: out.lock.filter((r) => !r.rebuilt).length,
+      samplesMs: out.lock.map((r) => r.ms), relay: RELAY, origin: AT || 'local', platform: process.platform, when: new Date().toISOString(),
+    }
+    out.lockResult = res
+    console.log(`  resume after a ${LOCK_MS / 1000} s lock${LOCK_LOST ? ` that loses the link${LOCK_NET_MS ? ` and gets its network back ${LOCK_NET_MS} ms after the wake` : ''}` : ''}, SIMULATED  median ${say(nearest(all, 0.5))}, p90 ${say(nearest(all, 0.9))}, min ${say(Math.min(...all))}, max ${say(Math.max(...all))} (n=${n}${res.counts ? '' : `; does not count: a full 30 s lock needs ${LOCK_RUNS} runs`})`)
+    console.log(`    frozen by ${res.frozenBy}; silent while frozen ${res.silentWhileFrozen}/${n}; same participant ${res.sameParticipant}/${n}; connection kept ${res.connectionKept}/${n}`)
+    await mkdir(dirname(LOCK_JSON), { recursive: true })
+    await writeFile(LOCK_JSON, JSON.stringify(res, null, 1))
+    console.log(`    written to ${LOCK_JSON}`)
+  }
   if (screenErrors.length) console.log(`  screen errors: ${screenErrors.slice(0, 3).join(' | ')}`)
   if (JSON_OUT) await writeFile(JSON_OUT, JSON.stringify(out, null, 1))
 } catch (e) {

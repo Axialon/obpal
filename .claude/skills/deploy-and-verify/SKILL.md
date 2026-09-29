@@ -10,7 +10,7 @@ description: Deploy ob.Pal to production, then verify the live site in one comma
 - `pnpm run e2e:all` passes every suite, and its guard line says "no new sessions".
 - A Durable Object migration or new secrets in the change: confirm the owner has set the secrets.
 
-1. **Deploy:** `pnpm run deploy`. It runs vitest, builds and runs `wrangler deploy`. Note the version id it prints.
+1. **Deploy:** `pnpm run deploy`. It runs vitest, builds, carries the last two deployed builds' hashed files (`.kept-assets/`, ignored by git) into the new build so pages opened before the deploy still find their chunks, and runs `wrangler deploy`. Note the version id it prints.
 2. **Verify:** `pnpm run check:live` (about 1.5 min, read only, prints no credentials). It exits 1 on any FAIL. A WARN, such as security.txt expiring within 30 days, doesn't fail it.
    - Rerun one part with `-- --only pages|api|turn|headers|release`.
    - Check another deployment with `-- --origin https://…`.

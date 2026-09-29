@@ -172,6 +172,21 @@ export async function runArmLive(local, check) {
       assert(!s.events.some(e => e.kind === 'torque' || e.kind === 'send'), 'the arm was given torque or a goal while a joint was out of its limits')
       return `"${r.note}"`
     }))
+    // The gripper reads 0 (closed) to 1 (open): 1.5 is far out of it, yet within the 3 a turning joint is given.
+    await check('robot arm, live: going live is refused while the gripper reads outside 0 to 1, and allowed a hair past it', async () => {
+      const said = await withArm(browser, local, { pos: [0, 18, 72, 62, 0, 1.5] }, async page => {
+        const r = await tryLive(page)
+        assert(/Arm 1.s gripper reads outside its limits: calibrate it first/.test(r.note), `expected the out-of-limits refusal for the gripper, saw "${r.note}"`)
+        await sleep(300)
+        const s = await snap(page)
+        assert(!s.live && s.hw === 'twin', `Arm 1 went live with the gripper at 1.5 (${s.hw})`)
+        assert(!s.events.some(e => e.kind === 'torque' || e.kind === 'send'), 'the arm was given torque or a goal while the gripper was out of its limits')
+        return r.note
+      })
+      // A reading a little past the open end is calibration slop, not a fault.
+      await withArm(browser, local, { pos: [0, 18, 72, 62, 0, 1.03] }, page => goLive(page, 0.25))
+      return `"${said}"`
+    })
     await check('robot arm, live: going live is also refused on a stale report, while stopped, and while everyone is let in without asking', () => withArm(browser, local, {}, async page => {
       await page.evaluate(() => window.__fake.setSilent(true))
       await sleep(1400)

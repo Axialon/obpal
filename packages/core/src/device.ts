@@ -208,8 +208,10 @@ export class DeviceLink {
   private onSignal(m: SignalIn) {
     if (m.t === 'welcome') {
       this.hostPresent = m.host
-      // The socket came back while the link held: an ICE restart waiting for it goes now, and nothing else changes.
-      if (this.linkUp()) { if (m.host && this.restartWanted) void this.restartIce(); return }
+      // The socket came back. An ICE restart that waited for it goes now, with the path still down too (the link is then
+      // 'reconnecting', and this is the only thing looking for a path); a link that held with nothing waiting changes nothing.
+      if (m.host && this.restartWanted && this.pc && this.pc.connectionState !== 'closed') { void this.restartIce(); return }
+      if (this.linkUp()) return
       if (m.host) void this.sendOffer()
       else this.setStatus('waiting-host')
     } else if (m.t === 'peer' && m.role === 'host') {
@@ -315,7 +317,16 @@ export class DeviceLink {
     }
     pc.onconnectionstatechange = () => {
       if (this.pc !== pc) return
-      if (pc.connectionState === 'connected') { this.clearAttempt(); if (this.restarting && pc.signalingState === 'stable') this.restartDone(pc) }
+      if (pc.connectionState === 'connected') {
+        this.clearAttempt()
+        if (this.restarting && pc.signalingState === 'stable') this.restartDone(pc)
+        else if (this.restartWanted && this.status === 'reconnecting' && this.ctl?.readyState === 'open') {
+          // The path came back by itself while a restart waited for the socket: the link is up, with nothing to restart.
+          this.restartWanted = false
+          this.pongAt = performance.now()
+          this.setStatus('connected')
+        }
+      }
       else if (pc.connectionState === 'failed') this.pathLost(true)
       else if (pc.connectionState === 'disconnected') this.pathLost(false)
     }

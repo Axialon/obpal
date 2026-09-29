@@ -44,7 +44,8 @@ The eyebrow stays: **Open source · no app · no account**. Each sub-line is 12 
    - Real arms are experimental and untested on hardware: never "built for real arms". Stop is a software hold, not an emergency stop, and the arm's own stop stays within reach.
    - "Any website" and "any browser game" come with what is tested (Chrome, Edge, Brave and Vivaldi; games that read the Gamepad API) and a link to the limits in extension/README.md.
    - ob.Pal Desktop is Windows only; macOS is "coming soon".
-   - The Chrome Web Store and npm once they're live. Until `@obpal/host` is on npm, the page shows the embed snippet (`<script type="module" src="https://obpal.blackboxes.net/embed.js">` and `<obpal-remote>`), not the import.
+   - The Chrome Web Store, only after Link is listed there.
+   - `@obpal/core` and `@obpal/host` are on npm, so a page or README may show `npm install @obpal/host` and the import. It says only what the packages do (their READMEs), and names only paths they export: the test reads their `exports`. The embed snippet (`<script type="module" src="https://obpal.blackboxes.net/embed.js">` and `<obpal-remote>`) stays the first example, for a page with no build step.
    - The 3D position comes from the camera mode, or is estimated from the phone's own motion without it. No precision such as "in metres".
    - Offline claims only what the extension's tests cover: a phone paired once, on a network that lets devices reach each other.
    - Telemetry is off by default; feedback is opt-in only.

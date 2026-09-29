@@ -1,9 +1,9 @@
 /**
  * 3D from the phone's own sensors (mode 6, no camera), followed the way a Wii remote with MotionPlus is: the gyro
- * knows exactly how the phone turns, and an arm model turns that into where the hand is. The phone sits at the end of
- * an arm, about 45 cm from a pivot behind it (elbow and shoulder together), so swinging it left moves it left and
- * tipping it up raises it, and none of that drifts. Pushing and pulling along where the phone points, which turning
- * can't show, comes from the accelerometer, integrated only while the phone moves and reset whenever it's still.
+ * estimates how the phone turns, and an arm model estimates where the hand is. It assumes a pivot about 45 cm behind
+ * the phone: even a wrist turn in place reads as a move, while a sideways translation without turning reads as zero.
+ * Push and pull along the pointing axis comes from the accelerometer, clamped to 35 cm either way, with velocity
+ * reset whenever the phone is still. This is an approximation, not measured 6-DOF position.
  *
  * Output is a POSE (./track.ts is the camera-tracked alternative): metres in a y-up frame, orientation device → that
  * frame, origin where the thumb went down.
@@ -30,6 +30,8 @@ export class ImuTracker {
   private stillMs = 0
   private anchored = false
 
+  constructor(private nextGen: () => number = () => this.gen + 1) {}
+
   /** The thumb went down: the phone's pose now is the origin, and whichever way it points is forward. */
   anchor(q: Quat) {
     // Held upright (screen toward the person), the back points; held flat like a remote, the top edge does.
@@ -40,7 +42,7 @@ export class ImuTracker {
     this.speed = 0
     this.stillMs = 0
     this.anchored = true
-    this.gen = (this.gen + 1) & 0xff
+    this.gen = this.nextGen()
   }
 
   /**

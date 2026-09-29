@@ -13,6 +13,7 @@
  * Each driver speaks its own raw units; a Calibration maps between them.
  */
 import { positionOf, readPosition, STS, syncGoals, syncTorque, takeStatus } from './feetech'
+import type { JointSpec } from './model'
 
 export type DriverKind = 'feetech' | 'serial' | 'ros'
 export const JOINT_COUNT = 6
@@ -41,6 +42,20 @@ export function toRaw(c: Calibration, sim: number[]): number[] {
 
 export function fromRaw(c: Calibration, raw: number[]): number[] {
   return raw.map((r, i) => (i < 5 ? (r - c.zero[i]) / (c.dir[i] * c.perDeg) : (c.gripOpen === c.gripClosed ? 0 : (r - c.gripClosed) / (c.gripOpen - c.gripClosed))))
+}
+
+/**
+ * How far past its range a joint's reading may sit and still count as inside it, for calibration and backlash: 3° for a
+ * joint that turns, a twentieth of the range for any other (the gripper's 0 … 1, which a slack of 3 would never catch).
+ */
+export const limitSlack = (j: JointSpec): number => (j.unit === '°' ? 3 : (j.max - j.min) * 0.05)
+
+/**
+ * The first joint whose reading (from `fromRaw`, in the joints' own units) is outside its own range and slack, or -1.
+ * A reading that isn't a number is outside. Going live is refused for it (main.ts goLive).
+ */
+export function firstOutOfLimits(joints: readonly JointSpec[], angles: readonly number[]): number {
+  return joints.findIndex((j, i) => !(angles[i] >= j.min - limitSlack(j) && angles[i] <= j.max + limitSlack(j)))
 }
 
 /** Calibrate from the arm posed like the sim's home pose: the raw readings become those angles (and the gripper open). */

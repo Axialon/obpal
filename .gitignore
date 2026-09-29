@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# The last deployed builds' hashed files, carried into each deploy (scripts/keep-assets.mjs).
+.kept-assets/
 .wrangler/
 .dev.vars
 *.log

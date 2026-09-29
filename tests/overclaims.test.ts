@@ -4,7 +4,8 @@ import { readText } from './devtools-node.mjs'
 /**
  * The site says only what ships (spec/MESSAGING.md, voice rule 5). These checks read the words the public meets, on the
  * pages, in the READMEs and Link's store listing, and in the specs a developer reads, and fail on an overclaim:
- *   - the npm import, while `@obpal/host` isn't on npm
+ *   - the npm import, while `@obpal/host` isn't on npm; once it is, words that say it isn't (or will be), and an import
+ *     from a path the packages don't export
  *   - "any website" or "any browser game", unless what is tested and where the limits are stand beside it
  *   - a TV among the screens a sim opens on
  *   - macOS, unless it is "coming soon" or a preview
@@ -14,8 +15,12 @@ import { readText } from './devtools-node.mjs'
  * A failure names the file and the words around the hit, so the fix is a sentence and not a search.
  */
 
-/** Whether `@obpal/host` is on npm. It isn't (npm answers 404 for it): set this when it is, and the import may be shown. */
-const NPM_PUBLISHED = false
+/**
+ * Whether `@obpal/core` and `@obpal/host` are on npm: they are (0.1.0 went up on 2026-09-29; `pnpm run publish:npm` puts up
+ * the next). While it is false the npm import is an overclaim and a README says the package isn't on npm; once it is true
+ * the import is shown and "not published yet" is the overclaim.
+ */
+const NPM_PUBLISHED = true
 
 /** Every page the site builds (vite.config.ts), as its file in the build. */
 const PAGES = [
@@ -76,12 +81,14 @@ interface Rule {
   claim: RegExp
   /** The files it reads. */
   files: readonly string[]
-  /** True when the words near the claim, or the whole file, make it right. Absent, the claim is never right. */
-  ok?: (near: string, all: string) => boolean
+  /** True when the words near the claim, or the whole file, or the claim itself, make it right. Absent, the claim is never right. */
+  ok?: (near: string, all: string, claim: string) => boolean
   /** How many characters before and after a claim count as near it (200 each by default). */
   near?: readonly [number, number]
   /** Only the first claim in each file is checked: a document says it up front. */
   once?: boolean
+  /** The rule stands only while the packages are (or aren't) on npm; absent, always. */
+  when?: 'published' | 'unpublished'
 }
 
 /** Where the words of these files go wrong under a rule, each as "file: …the words around the hit…". */
@@ -93,7 +100,7 @@ function violations(rule: Rule, sources: Readonly<Record<string, string>>): stri
     for (const m of text.matchAll(new RegExp(rule.claim.source, `${rule.claim.flags.replace('g', '')}g`))) {
       const at = m.index ?? 0
       const near = text.slice(Math.max(0, at - before), at + m[0].length + after)
-      if (!rule.ok?.(near, text)) found.push(`${file}: …${text.slice(Math.max(0, at - 50), at + m[0].length + 60)}…`)
+      if (!rule.ok?.(near, text, m[0])) found.push(`${file}: …${text.slice(Math.max(0, at - 50), at + m[0].length + 60)}…`)
       if (rule.once) break
     }
   }
@@ -107,6 +114,17 @@ const read = (files: readonly string[]) => Object.fromEntries(files.map((f) => [
 const NPM_LINE = /(?:\bfrom|\bimport\s*\(?)\s*['"]@obpal\/|\b(?:npm|pnpm|yarn)\s+(?:i|install|add)\s+@obpal\//
 /** A sentence that says the package isn't on npm yet. */
 const NOT_PUBLISHED = /\bnot (?:yet )?published\b|\b(?:isn't|is not) (?:on npm|published)\b|\bnot on npm\b|\bunpublished\b/i
+/** Words that put the packages off npm, or say they will be there: false once they are. Read with what is said about npm near them. */
+const NOT_ON_NPM = new RegExp([
+  String.raw`\b(?:not|isn't|aren't|is not|are not)(?: yet)? (?:published|on npm|available on npm)\b`,
+  String.raw`\bunpublished\b`,
+  String.raw`\b(?:coming|soon)\b[^.]{0,40}\bnpm\b`,
+  String.raw`\bnpm\b[^.]{0,40}\b(?:coming|soon)\b`,
+  String.raw`\bonce (?:it|they)(?: is|'s| are|'re) (?:live|published|on npm)\b`,
+  String.raw`\buntil\b[^.]{0,60}\bis on npm\b`,
+].join('|'), 'i')
+/** The import paths the packages export (their package.json `exports`): `@obpal/core`, `@obpal/host/element`, and so on. */
+const ENTRY_POINTS = new Set(['core', 'host'].flatMap((p) => Object.keys(JSON.parse(readText(`packages/${p}/package.json`)).exports as Record<string, unknown>).map((k) => `@obpal/${p}${k.slice(1)}`)))
 /** A broad claim's qualifier is two things: what is tested, and where the limits are (a link to them, or the word). */
 const TESTED = /\btested\b/i
 const LIMITS = /\blimit(?:s|ations)?\b/i
@@ -114,8 +132,19 @@ const LIMITS = /\blimit(?:s|ations)?\b/i
 const NOT_SHIPPED = /coming soon|preview/i
 
 const RULES: Rule[] = [
-  { id: 'npm-copy', name: 'no page or listing shows the npm import while the package is unpublished', claim: NPM_LINE, files: PROSE },
-  { id: 'npm-docs', name: 'a README or spec that shows the npm import says the package isn’t on npm yet', claim: NPM_LINE, files: DOCS, ok: (_, all) => NOT_PUBLISHED.test(all) },
+  { id: 'npm-copy', name: 'no page or listing shows the npm import while the package is unpublished', claim: NPM_LINE, files: PROSE, when: 'unpublished' },
+  {
+    id: 'npm-docs', name: 'a README or spec that shows the npm import says the package isn’t on npm yet',
+    claim: NPM_LINE, files: DOCS, ok: (_, all) => NOT_PUBLISHED.test(all), when: 'unpublished',
+  },
+  {
+    id: 'npm-stale', name: 'no page, listing, README or spec says the packages are not on npm, or soon will be',
+    claim: NOT_ON_NPM, files: [...COPY, ...DOCS], near: [120, 120], ok: (near) => !/\bnpm\b|@obpal\//i.test(near), when: 'published',
+  },
+  {
+    id: 'npm-entries', name: 'an import from our packages names a path they export',
+    claim: /@obpal\/(?:core|host)(?:\/[\w-]+)*/, files: [...COPY, ...DOCS], ok: (_near, _all, claim) => ENTRY_POINTS.has(claim),
+  },
   {
     id: 'broad', name: '“any website” and “any browser game” come with what is tested and a link to the limits',
     claim: /\bany (?:web ?site|browser game)s?\b/i, files: [...COPY, ...DOCS], near: [220, 340], ok: (near) => TESTED.test(near) && LIMITS.test(near),
@@ -139,8 +168,8 @@ const RULES: Rule[] = [
 
 describe('overclaims', () => {
   for (const rule of RULES) {
-    // The npm import is allowed once the package is published; every other rule stands.
-    const applies = !(NPM_PUBLISHED && rule.id.startsWith('npm'))
+    // The npm import is allowed once the packages are published, and then the words that say they aren't are not; the rest stand.
+    const applies = !rule.when || (rule.when === 'published') === NPM_PUBLISHED
     it.skipIf(!applies)(rule.name, () => {
       expect(violations(rule, read(rule.files))).toEqual([])
     })
@@ -154,6 +183,16 @@ describe('overclaims', () => {
     expect(count('npm-copy', 'a.html', `<pre>&lt;script type="module" src="https://obpal.blackboxes.net/embed.js"&gt;</pre>`)).toBe(0)
     expect(count('npm-docs', 'a.md', 'Not published yet. When it is:\n```\nimport { Remote } from \'@obpal/host\'\n```')).toBe(0)
     expect(count('npm-docs', 'a.md', '```\nimport { Remote } from \'@obpal/host\'\n```')).toBe(1)
+    // Once they are on npm: the words that say they aren't, or will be, and a path they don't export.
+    expect(count('npm-stale', 'a.md', 'Not published yet. When it is:\n```\nnpm install @obpal/host\n```')).toBe(1)
+    expect(count('npm-stale', 'a.md', 'The packages aren\'t on npm yet, so pages use the embed.')).toBe(1)
+    expect(count('npm-stale', 'a.html', '<p>The SDK is coming to npm.</p>')).toBe(1)
+    expect(count('npm-stale', 'a.md', 'The Chrome Web Store and npm once they\'re live.')).toBe(1)
+    expect(count('npm-stale', 'a.md', 'Link is not yet published on the Chrome Web Store.')).toBe(0)
+    expect(count('npm-stale', 'a.md', 'npm install @obpal/host, and the embed if you would rather not build.')).toBe(0)
+    expect(count('npm-entries', 'a.md', 'import { threeObject } from \'@obpal/host/adapters\'')).toBe(1)
+    expect(count('npm-entries', 'a.md', 'import { defineObpalRemote } from \'@obpal/host/element\'')).toBe(0)
+    expect(count('npm-entries', 'a.md', 'import { TossDetector } from \'@obpal/core/toss\'')).toBe(0)
     // A broad claim, in a heading and in a description, and with its qualifier.
     expect(count('broad', 'a.html', '<h1>Your phone controls any website.</h1>')).toBe(1)
     expect(count('broad', 'a.html', '<meta name="description" content="Gamepad, 3D mouse or keys for any website." />')).toBe(1)

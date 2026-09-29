@@ -43,7 +43,7 @@ Copy this into a page. The element shows a "Scan to control" chip in a corner; a
 
 ## Use it in a page: the host SDK
 
-The SDK is `@obpal/host`, in the repo at packages/host (its README has typed examples, the element included). It isn't on npm yet; its package.json is ready for it.
+The SDK is `@obpal/host` on npm (`npm install @obpal/host`). Its source is in the repo at packages/host, and its README has typed examples, the element included. The protocol and the catalogue are `@obpal/core` (`npm install @obpal/core`).
 
 - `const remote = await Remote.create({ appName, layout })`, then `new PairingChip({ remote })` shows the pairing chip: the QR code and the short code, in a corner, in the page's own accent and font (options: `corner`, `accent`, `open`, `variant: 'panel'` for a place of your own, and more in the README).
 - Each frame, `remote.consume(now)` returns what the phone does:

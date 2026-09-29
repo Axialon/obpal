@@ -36,7 +36,11 @@ One tag, no build step ([demo](https://obpal.blackboxes.net/embed/); attributes,
 <obpal-remote app="My scene" seats="4" modes="face.trackpad face.wii"></obpal-remote>
 ```
 
-Or the SDK itself. `@obpal/host` isn't on npm yet, so build it from this repository first (`pnpm build:packages`, below):
+Or the SDK itself, from npm ([`@obpal/host`](https://www.npmjs.com/package/@obpal/host); it brings [`@obpal/core`](https://www.npmjs.com/package/@obpal/core)):
+
+```bash
+npm install @obpal/host
+```
 
 ```js
 import { Remote, Mode, PairingChip } from '@obpal/host'
@@ -77,7 +81,7 @@ Optional TURN relay, for guest Wi-Fi, cellular and corporate networks: set the `
 
 The embed: `pnpm build` writes `/embed.js` and its lazy part (`/assets/embed/`) beside the site; `pnpm e2e:embed` tests it end to end (the /embed/ demo, another site under a strict CSP, no WebRTC).
 
-npm: the packages aren't published yet. `pnpm build:packages` builds `packages/core/dist` and `packages/host/dist` (ES modules, type declarations and the licence; `pnpm pack` does it first). Publishing needs the `@obpal` scope on npm: `pnpm --filter @obpal/core publish`, then `pnpm --filter @obpal/host publish` (host depends on core's version).
+npm: `@obpal/core` and `@obpal/host` are on npm, and each has a CHANGELOG.md. `pnpm build:packages` builds `packages/core/dist` and `packages/host/dist` (ES modules, type declarations and the licence; `pnpm pack` does it first). `pnpm run publish:npm` is the release: a dry run that builds, tests, packs and inspects both tarballs and prints what it would publish; `pnpm run publish:npm -- --yes` publishes from the main checkout, on master, with a clean tree. npm asks the publisher to approve a sign-in link in a browser, and the script then checks the registry and installs the package in a temp folder.
 
 ## Layout
 

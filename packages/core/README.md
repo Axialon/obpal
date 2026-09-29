@@ -27,7 +27,13 @@ const { profile, errors } = checkProfile(JSON.parse(profileJson))
 - Protocol: [spec/PROTOCOL.md](https://github.com/Axialon/obpal/blob/main/spec/PROTOCOL.md)
 - Catalogue: [spec/CATALOGUE.md](https://github.com/Axialon/obpal/blob/main/spec/CATALOGUE.md), and as data at https://obpal.blackboxes.net/catalogue.json
 
-Not published yet; `npm install @obpal/core` once it is.
+## Install
+
+```bash
+npm install @obpal/core
+```
+
+ES modules with type declarations. Entry points: `@obpal/core`, and `@obpal/core/toss` for the toss detector alone. [CHANGELOG.md](https://github.com/Axialon/obpal/blob/main/packages/core/CHANGELOG.md) lists what changed in each release.
 
 ## License
 

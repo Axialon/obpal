@@ -284,12 +284,15 @@ async function boot(code?: Join) {
     setMarkup(b, lock.locked ? ICONS['rotation-lock'] : ICONS['rotation-free'])
   }
   // ---- 3D tracking (mode 6): WebXR follows the phone through space; each pose goes out in a POSE packet ----
-  const tracker = new Tracker()
+  // Camera sessions/recenters and motion grabs share origins, even when the tracking method changes.
+  let poseGen = 0
+  const nextPoseGen = () => ++poseGen
+  const tracker = new Tracker(nextPoseGen)
   let trackOk = false
   /** Glowing for the computer's camera (no WebXR on this phone). */
   let glowing = false
   /** 3D from the phone's own sensors (the default): the gyro and an arm model, pushes from the accelerometer. */
-  const imu = new ImuTracker()
+  const imu = new ImuTracker(nextPoseGen)
   let imuHeld = false
   let imuScreen = 0
   /** The way Settings shows as chosen: the camera only where this phone can follow with it (else Motion, in its place). */
@@ -307,7 +310,7 @@ async function boot(code?: Join) {
   tracker.onPose = (p, q, tracked) => {
     if (!link.ready) return
     poseSeq = (poseSeq + 1) & 0xffff
-    link.sendState(encodePose({ flags: (tracked ? PoseFlag.tracked : 0) | ((pad?.touches ?? 0) > 0 || buttonHold ? PoseFlag.touching : 0), seq: poseSeq, t: Math.round((performance.now() - t0) * 1000) >>> 0, p, q, gen: tracker.gen }, poseBuf))
+    link.sendState(encodePose({ flags: (tracked ? PoseFlag.tracked : 0) | ((pad?.touches ?? 0) > 0 || buttonHold ? PoseFlag.touching : 0), seq: poseSeq, t: Math.round((performance.now() - t0) * 1000) >>> 0, p, q, gen: tracker.gen, source: 'camera' }, poseBuf))
   }
   tracker.onEnd = () => { toast('3D tracking ended'); render() }
 
@@ -1762,7 +1765,7 @@ async function boot(code?: Join) {
         if (!imuHeld) imu.anchor(qp)
         const p = imu.step(qp, motion.accel ? toPoseFrame(q, motion.accel) : null, motion.hasGyro ? toPoseFrame(q, motion.gyro) : null, s)
         poseSeq = (poseSeq + 1) & 0xffff
-        link.sendState(encodePose({ flags: PoseFlag.tracked | PoseFlag.touching, seq: poseSeq, t: st.t, p, q: qp, gen: imu.gen }, poseBuf))
+        link.sendState(encodePose({ flags: PoseFlag.tracked | PoseFlag.touching, seq: poseSeq, t: st.t, p, q: qp, gen: imu.gen, source: 'model' }, poseBuf))
       } else if (imuHeld) imu.release()
       imuHeld = held
     }

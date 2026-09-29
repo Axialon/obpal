@@ -166,7 +166,7 @@ export class GlowFollower {
       if (!g.anchor && g.last) { g.anchor = { ...g.last }; g.gen = (g.gen + 1) & 0xff }
       if (!g.anchor) continue
       const m = g.last ? glowMove(g.anchor, g.last, this.cam.w, this.cam.h) : null
-      out.set(id, { p: m ? [m.right, m.up, -m.forward] : [0, 0, 0], q: [0, 0, 0, 1], tracked: !!m, touching: f.touching, gen: g.gen })
+      out.set(id, { p: m ? [m.right, m.up, -m.forward] : [0, 0, 0], q: [0, 0, 0, 1], tracked: !!m, touching: f.touching, gen: g.gen, source: 'glow' })
     }
     return out
   }

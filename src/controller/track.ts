@@ -15,6 +15,8 @@ export class Tracker {
   onPose?: (p: Vec3, q: Quat, tracked: boolean) => void
   onEnd?: () => void
 
+  constructor(private nextGen: () => number = () => this.gen + 1) {}
+
   static async supported(): Promise<boolean> {
     try { return !!(await xr()?.isSessionSupported('immersive-ar')) } catch { return false }
   }
@@ -22,7 +24,7 @@ export class Tracker {
   get active() { return !!this.session }
 
   /** The next pose starts a fresh host reference while the camera keeps tracking the same space. */
-  recenter() { this.gen = (this.gen + 1) & 0xff }
+  recenter() { this.gen = this.nextGen() }
 
   /**
    * Start tracking; call from a tap. `overlay` stays on screen over the camera view. Rejects when it can't start; a

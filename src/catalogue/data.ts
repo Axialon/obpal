@@ -47,7 +47,7 @@ export const EMBED = {
   element: 'obpal-remote',
   demo: 'https://obpal.blackboxes.net/embed/',
   snippet: EMBED_SNIPPET,
-  npm: '@obpal/host (defineObpalRemote from @obpal/host/element); not published yet',
+  npm: 'npm install @obpal/host (defineObpalRemote from @obpal/host/element)',
   attributes: {
     app: 'The name the phone shows ("Controlling …"); the page title by default',
     modes: 'What the phone offers, in order: mode names (point, hold, tilt, pad, gamepad, track) and catalogue controller ids (face.wii, face.gamepad, …; see controllers). The first opens on the phone',

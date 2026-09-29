@@ -15,6 +15,10 @@
  *     tap, and the layout rules (the edge and the touch size) at three phone sizes, the node strip's at 360 px too.
  *   - The camera in settings (./phone-camera.mjs): the scanner first, one tap away, its camera started inside the tap
  *     and no dead Back step left behind; the 3D hand's camera says what it needs, and a failed start can be retried.
+ *   - The connections hub (./phone-connections.mjs): scanning, switching, remembering and forgetting screens.
+ *   - Recovery (./phone-recovery.mjs): motion refused leaves a touch-only phone whose trackpad still moves the screen, and
+ *     Disconnect, then Reconnect, brings the phone back with its input flowing.
+ * phone-connections, phone-camera, phone-controllers and phone-recovery run inside this suite, so `e2e:all -- phone` covers them.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch. OBPAL_SHOTS=<dir> saves screens.
  */
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -27,6 +31,7 @@ import { startLocal } from '../extension/e2e/local.mjs'
 import { phoneConnections } from './phone-connections.mjs'
 import { phoneControllers } from './phone-controllers.mjs'
 import { phoneCamera } from './phone-camera.mjs'
+import { phoneRecovery } from './phone-recovery.mjs'
 
 const HEADED = process.argv.includes('--headed')
 const SHOTS = process.env.OBPAL_SHOTS || ''
@@ -314,6 +319,7 @@ try {
   })
   await phoneConnections({ browser: sb, origin: local.origin, check, shots: SHOTS })
   await phoneCamera({ browser: sb, origin: local.origin, check, shots: SHOTS })
+  await phoneRecovery({ browser: sb, origin: local.origin, check, shots: SHOTS })
   await phoneControllers({ browser: sb, origin: local.origin, check, shots: SHOTS })
   await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {

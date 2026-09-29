@@ -114,7 +114,7 @@ Keep the exe where you installed it from: the manifest points at that path. Movi
 
 To update in place, switch ob.Pal Link away from **PC** and close its options page if it's open (or close the browser): the extension keeps the helper running while either needs it, and Windows can't replace a running exe. Then unzip the new version over the old folder; `install` is needed again only if the folder moved.
 
-`install --origin chrome-extension://<id>/` adds another extension ID to `allowed_origins`, for a copy of ob.Pal Link with a different ID (a Chrome Web Store build, or a fork with its own key). The built-in ID is ob.Pal Link's stable one, fixed by the public key in `extension/vite.config.ts`.
+`install --origin chrome-extension://<id>/` adds another extension ID to `allowed_origins`, next to ob.Pal Link's own, for a copy of Link with a different ID, such as a fork packed with its own key. Repeat the option to add several; each ID must be 32 letters a to p, or `install` refuses it. The built-in ID is ob.Pal Link's stable one, fixed by the public key in `extension/vite.config.ts`, and the Chrome Web Store build keeps it (the store's first upload carries the key), so the store build needs no `--origin`. Only the Windows `install` takes it: the Mac package's `install.command` allows just the built-in ID.
 
 Then, in ob.Pal Link:
 1. Click the **PC** chip. The browser asks once for the *nativeMessaging* permission.
@@ -135,7 +135,7 @@ The extension's options page turns **Whole PC** on and off, lists every allowed 
 Remote-input tools have a history of remote code execution (PLAN.md §9). The helper is built so that the worst a hostile phone, network or page can do is press keys you already allowed, in a program you already allowed, while it is in front.
 
 **Reachability**
-- Reached only through Chrome Native Messaging: Chrome launches the helper and owns both pipes. The host manifest lists one `allowed_origins` entry, ob.Pal Link's extension ID; Chrome refuses other extensions, and the helper checks the origin Chrome passes on its command line as well.
+- Reached only through Chrome Native Messaging: Chrome launches the helper and owns both pipes. The host manifest lists ob.Pal Link's extension ID in `allowed_origins`, and nothing else unless you ran `install --origin`; Chrome refuses other extensions, and the helper checks the origin Chrome passes on its command line as well.
 - No network listener, no socket, no IPC endpoint, no auto-update.
 - Runs as the user, unelevated. Registration is `HKCU` only.
 
@@ -218,5 +218,5 @@ Length-prefixed JSON on stdin/stdout (spec/PROTOCOL.md § Native messaging frame
 - Windows only for now; the macOS preview is coming soon and awaits its first real Mac test. Linux (`uinput`, a udev rule, or the libei portal) still needs an injector and foreground lookup behind the same traits.
 - No virtual gamepad: it needs a driver (ViGEmBus is archived; HIDMaestro is the user-mode candidate). The scope model already carries `gamepad`.
 - The mouse is relative only (what games with raw input expect). An absolute path for desktop pointing is a later option.
-- Not code-signed: SmartScreen will warn on first run until a signing identity exists. The extension ID it allows is fixed by the manifest key; a Chrome Web Store build gets its ID from the key uploaded with it (see `extension/scripts/key.mjs`).
+- Not code-signed: SmartScreen will warn on first run until a signing identity exists. The extension ID it allows is fixed by the manifest key, and the Chrome Web Store build keeps it because its first upload carries that key (see `extension/scripts/key.mjs`); `install --origin` is only for a copy of Link with a different ID.
 - The pointer moves relatively, so Windows' pointer speed and *Enhance pointer precision* apply, as they do to a mouse.

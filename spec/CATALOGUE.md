@@ -23,6 +23,8 @@ It does not become a one-off mode. The wire formats are in [PROTOCOL.md](PROTOCO
 | `motion.hold` | 3D | 1:1 orientation while held | STATE 0x11 (qRel) |
 | `motion.tilt` | 3D | Racing-style tilt stick | STATE 0x11 (tilt) |
 
+`motion.track` exposes `Frame.pose.source`: `camera` for the phone's WebXR tracking, `model` for its estimated arm-model position, `unknown` for legacy phones, and `glow` for a pose made by the host's camera follower. The model assumes a 0.45 m arm and adds only pointing-axis push/pull (clamped to ±0.35 m): a wrist turn in place moves the estimate, while sideways-only translation reads as zero. `tracked` means usable, not necessarily measured; hosts hold still while it is false and re-anchor when it returns. See [PROTOCOL §POSE](PROTOCOL.md#pose-packet-type-5-the-device-in-space).
+
 **Categories** order the phone's UI. Controller comes first, then Motion, then Pointer, Touch and 3D. A host declares which utilities it accepts in its layout (`utilities: string[]`; absent means all). The phone offers only those.
 
 **Device buttons.** A device also presses its controller's controls with the physical inputs its browser lets a page hear ([RESEARCH-BUTTONS.md](RESEARCH-BUTTONS.md) has the matrix):

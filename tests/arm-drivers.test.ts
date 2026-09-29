@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { syncGoals } from '../src/sim/arm/feetech'
-import { FeetechDriver, ROS_DEFAULTS, RosDriver, SerialTextDriver, type RosOptions } from '../src/sim/arm/drivers'
+import { KINDS } from '../src/sim/arm/kind'
+import type { JointSpec } from '../src/sim/arm/model'
+import { FeetechDriver, firstOutOfLimits, limitSlack, ROS_DEFAULTS, RosDriver, SerialTextDriver, type RosOptions } from '../src/sim/arm/drivers'
 
 const hex = (b: ArrayLike<number>) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join(' ')
 
@@ -90,5 +92,65 @@ describe('a driver’s own hold, sent when the screen stops a live arm', () => {
       await driver.hold()
       expect(sent).toHaveLength(0)
     })
+  })
+})
+
+describe('going live is refused for a joint that reads outside its own range', () => {
+  const REAL = Object.values(KINDS).filter((k) => k.hardware)
+  /** Each joint at its home, which is inside every range. */
+  const home = (joints: readonly JointSpec[]) => joints.map((j) => j.home)
+
+  it('is for the kinds that can be a real arm’s twin, with the gripper last and 0 … 1', () => {
+    expect(REAL.length).toBeGreaterThan(0)
+    for (const k of REAL) {
+      const grip = k.kin.joints[k.kin.joints.length - 1]
+      expect([grip.key, grip.min, grip.max]).toEqual(['gripper', 0, 1])
+    }
+  })
+
+  it('takes the home pose, and each joint at either end of its range', () => {
+    for (const k of REAL) {
+      expect(firstOutOfLimits(k.kin.joints, home(k.kin.joints))).toBe(-1)
+      k.kin.joints.forEach((j, i) => {
+        for (const edge of [j.min, j.max]) expect(firstOutOfLimits(k.kin.joints, home(k.kin.joints).map((v, n) => (n === i ? edge : v)))).toBe(-1)
+      })
+    }
+  })
+
+  it('gives a joint that turns 3° past either end, and no more', () => {
+    for (const k of REAL) {
+      k.kin.joints.slice(0, -1).forEach((j, i) => {
+        const at = (v: number) => firstOutOfLimits(k.kin.joints, home(k.kin.joints).map((h, n) => (n === i ? v : h)))
+        expect(at(j.max + 3)).toBe(-1)
+        expect(at(j.min - 3)).toBe(-1)
+        expect(at(j.max + 3.5)).toBe(i)
+        expect(at(j.min - 3.5)).toBe(i)
+      })
+    }
+  })
+
+  it('checks the gripper against 0 … 1, not the 3 a joint gets', () => {
+    for (const k of REAL) {
+      const g = k.kin.joints.length - 1
+      const at = (v: number) => firstOutOfLimits(k.kin.joints, home(k.kin.joints).map((h, n) => (n === g ? v : h)))
+      expect([at(0), at(1), at(-0.04), at(1.04)]).toEqual([-1, -1, -1, -1])
+      expect([at(-0.06), at(1.06), at(2), at(-1), at(3)]).toEqual([g, g, g, g, g])
+    }
+  })
+
+  it('names the first joint out, and counts a reading that is not a number as out', () => {
+    const joints = REAL[0].kin.joints
+    const angles = home(joints)
+    expect(firstOutOfLimits(joints, angles.map((v, i) => (i === 1 || i === 5 ? 999 : v)))).toBe(1)
+    expect(firstOutOfLimits(joints, angles.map((v, i) => (i === 2 ? NaN : v)))).toBe(2)
+    expect(firstOutOfLimits(joints, angles.slice(0, 5))).toBe(5)
+  })
+
+  it('gives a joint that slides, or has no unit, a twentieth of its range', () => {
+    const slide: JointSpec = { key: 'z', name: 'Z', min: 0, max: 0.4, home: 0, vmax: 1, amax: 1, unit: 'm' }
+    expect(limitSlack(slide)).toBeCloseTo(0.02)
+    expect(limitSlack({ ...slide, min: -170, max: 170, unit: '°' })).toBe(3)
+    expect(firstOutOfLimits([slide], [0.41])).toBe(-1)
+    expect(firstOutOfLimits([slide], [0.43])).toBe(0)
   })
 })

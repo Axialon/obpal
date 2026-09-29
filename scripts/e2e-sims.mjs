@@ -10,6 +10,7 @@
  *   The arm's live path, with a fake driver in place of hardware (./e2e-arm-live.mjs): going live refused for a joint that
  *   is unreported or out of its limits, Stop holding the pose and reaching the driver, every automatic stop saying why.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch. OBPAL_SHOTS=<dir> saves screens.
+ * --only=tracking (or OBPAL_E2E_SIMS_ONLY=tracking) runs the arm's tracking checks and their pairing/claim setup.
  */
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -28,6 +29,7 @@ import { runArmLive } from './e2e-arm-live.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
 
 const HEADED = process.argv.includes('--headed')
+const ONLY_TRACKING = process.argv.includes('--only=tracking') || process.env.OBPAL_E2E_SIMS_ONLY === 'tracking'
 const SHOTS = process.env.OBPAL_SHOTS || ''
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
 const RTC_ARGS = ['--disable-features=WebRtcHideLocalIpsWithMdns', '--ignore-certificate-errors']
@@ -172,6 +174,31 @@ try {
     navigator.mediaDevices.getUserMedia = async () => c.captureStream(30)
   })
   const angle = (node) => arm.page.evaluate((n) => window.__arm.arms().flatMap((x) => x.joints).find((j) => j.node === n).angle, node)
+  const poseOf = (id) => arm.page.evaluate((id) => window.__arm.arms().find((a) => a.id === id).pose, id)
+  const positionOf = (id) => arm.page.evaluate((id) => window.__arm.toolPosition(id), id)
+  const thumb = async (phone, held) => {
+    const box = await phone.page.locator('#pad').boundingBox()
+    await phone.cdp.send('Input.dispatchTouchEvent', { type: held ? 'touchStart' : 'touchEnd', touchPoints: held ? [{ x: box.x + box.width / 2, y: box.y + box.height / 2, id: 1 }] : [] })
+  }
+  // Measure every rendered frame against the held tool position, so a transient jump also fails.
+  const holdsStill = async (id, action) => {
+    const before = await positionOf(id)
+    const sample = arm.page.evaluate(({ id, before }) => new Promise((resolve) => {
+      const start = performance.now()
+      let max = 0
+      const frame = () => {
+        const p = window.__arm.toolPosition(id)
+        max = Math.max(max, Math.hypot(...p.map((v, i) => v - before[i])))
+        if (performance.now() - start < 800) requestAnimationFrame(frame)
+        else resolve(max)
+      }
+      frame()
+    }), { id, before })
+    await action()
+    const jump = await sample
+    if (jump >= 0.01) throw new Error(`tool jumped ${(jump * 100).toFixed(2)} cm (must be less than 1 cm)`)
+    return `${(jump * 1000).toFixed(2)} mm maximum movement`
+  }
   let a
   await check('robot arm: a phone must be let in before its first claim', async () => {
     // This one has no WebXR (an iPhone): its 3D glows for the screen's camera.
@@ -250,6 +277,8 @@ try {
     const box = await b.page.locator('#pad').boundingBox()
     await b.cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2, id: 1 }] })
     await sleep(300)
+    const pose = await poseOf('a2')
+    if (pose?.source !== 'camera' || !pose.tracked) throw new Error(`expected a tracked camera pose: ${JSON.stringify(pose)}`)
     for (let i = 1; i <= 10; i++) { await b.page.evaluate((y) => { window.__fakePose.p = [0, y, 0] }, 0.01 * i); await sleep(50) }
     await sleep(900)
     const up = await tool()
@@ -262,6 +291,29 @@ try {
     if (Math.abs(rise - 0.15) > 0.02) throw new Error(`gripper rose ${rise.toFixed(3)} m for a 10 cm hand move (×1.5 expected): ${JSON.stringify({ before, up })}`)
     if (Math.abs(held.height - up.height) > 0.01) throw new Error(`moved without the thumb: ${up.height.toFixed(3)} → ${held.height.toFixed(3)}`)
     return `hand +10 cm → gripper +${(rise * 100).toFixed(1)} cm, then held`
+  })
+  await check('robot arm, camera: re-grabbing after moving the released phone jumps less than 1 cm', async () => {
+    return holdsStill('a2', () => thumb(b, true))
+  })
+  await check('robot arm, camera: tracked=false holds still, and returning tracking re-anchors without a jump', async () => {
+    const lost = await holdsStill('a2', async () => {
+      await b.page.evaluate(() => { window.__fakePose.tracked = false; window.__fakePose.p = [0.25, 0.6, 0.2] })
+      await until('untracked camera pose', async () => {
+        const p = await poseOf('a2')
+        return p?.source === 'camera' && p.tracked === false && p.touching
+      })
+    })
+    const returned = await holdsStill('a2', async () => {
+      await b.page.evaluate(() => { window.__fakePose.tracked = true })
+      await until('tracking returned', async () => (await poseOf('a2'))?.tracked)
+    })
+    // Prove the returned tracking is driving again, rather than remaining frozen.
+    const before = await positionOf('a2')
+    for (let i = 1; i <= 5; i++) { await b.page.evaluate((y) => { window.__fakePose.p[1] = y }, 0.6 + i * 0.005); await sleep(60) }
+    await until('movement after re-anchoring', async () => (await positionOf('a2'))[1] - before[1] > 0.02)
+    await thumb(b, false)
+    await sleep(300)
+    return `lost: ${lost}; returned: ${returned}; following resumed`
   })
   await check('robot arm, 3D from the phone’s own motion (no camera): swinging the phone swings the gripper', async () => {
     // B switches 3D to its own motion in settings.
@@ -276,6 +328,8 @@ try {
     const box = await b.page.locator('#pad').boundingBox()
     await b.cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2, id: 1 }] })
     await sleep(300)
+    const pose = await poseOf('a2')
+    if (pose?.source !== 'model' || !pose.tracked) throw new Error(`expected a usable model pose: ${JSON.stringify(pose)}`)
     // Swing the phone 30° to the left (its heading), in steps.
     for (let i = 1; i <= 10; i++) { await b.cdp.send('DeviceOrientation.setDeviceOrientationOverride', { alpha: 10 + 3 * i, beta: 70, gamma: 0 }); await sleep(50) }
     await sleep(900)
@@ -288,8 +342,13 @@ try {
       const ph = await b.page.evaluate(() => ({ tab: document.querySelector('.modes [aria-selected=true]')?.dataset.tab, mode: document.getElementById('surface')?.dataset.mode, way: localStorage.getItem('obpal.track3d') }))
       throw new Error(`the gripper didn’t follow: yaw ${before.yaw.toFixed(1)} → ${after.yaw.toFixed(1)}; arm ${JSON.stringify(arm2)}; phone ${JSON.stringify(ph)}`)
     }
+    await sleep(400)
+    const regrab = await holdsStill('a2', () => thumb(b, true))
+    const next = await poseOf('a2')
+    if (next?.source !== 'model' || next.gen <= pose.gen) throw new Error(`motion re-grab reused its origin: ${JSON.stringify(next)}`)
+    await thumb(b, false)
     await b.page.locator('.modes [data-tab=rotate]').click()
-    return `phone swung 30° → arm swung ${swung.toFixed(1)}°`
+    return `source model; phone swung 30° → arm swung ${swung.toFixed(1)}°; re-grab: ${regrab}`
   })
   await check('robot arm, camera: a phone without WebXR glows, and the screen’s camera moves the gripper as it moves', async () => {
     await a.claim('Whole arm', 0)
@@ -307,6 +366,8 @@ try {
     const box = await a.page.locator('#pad').boundingBox()
     await a.cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2, id: 1 }] })
     await sleep(300)
+    const pose = await poseOf('a1')
+    if (pose?.source !== 'glow' || !pose.tracked) throw new Error(`expected a tracked glow pose: ${JSON.stringify(pose)}`)
     for (let i = 1; i <= 10; i++) { await arm.page.evaluate((y) => { window.__fakeCam.y = y }, 60 - 2 * i); await sleep(60) }
     await sleep(1000)
     const after = await tool()
@@ -317,6 +378,7 @@ try {
     await a.page.locator('#glow-end').click()
     return `glow rose 20 px in the picture → gripper +${(rise * 100).toFixed(1)} cm; Stop stays on the glowing screen`
   })
+  if (!ONLY_TRACKING) {
   await check('robot arm: a phone e-stops every joint, and only the screen resumes', async () => {
     // A holds the whole Arm 1 now: back to Rotate, where a drag swings it.
     await a.page.locator('.modes [data-tab=rotate]').click()
@@ -456,6 +518,7 @@ try {
   await runAudio(local, check)
   await runPanels(local, check)
   await runArmLive(local, check)
+  }
   await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {
   console.error(e)
