@@ -18,6 +18,13 @@ export interface SimScene {
   nodes: SceneNode[]
   /** Whether a participant may claim (approved, or approval isn't needed). */
   allowed(id: string): boolean
+  /** Whether the screen is letting everyone in without asking. */
+  waived(): boolean
+  /**
+   * Keep approval on while something physical is live: "let everyone in without asking" is switched off, and can't be
+   * switched on again until the sim lets go. Called with the current state whenever it may have changed.
+   */
+  holdApproval(held: boolean): void
   nameOf(id: string | undefined): string
   colorOf(id: string | undefined): string
   /** Add a line to the record (who held which node, and when). */
@@ -78,10 +85,24 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
     onToggle: (open) => $('chip-invite').setAttribute('aria-pressed', String(open)),
   })
   addEventListener('obpal:viewmode', e => { if ((e as CustomEvent<string>).detail !== 'overview') chip.collapse() })
-  Object.assign(window, { __obpal: remote, __sim: { claims, approved, chip, control } })
+  Object.assign(window, { __obpal: remote, __sim: { claims, approved, chip, control, allowed: (id: string) => allowed(id) } })
 
   const autoAllow = $('auto-allow') as HTMLInputElement | null
-  const allowed = (id: string) => !o.approval || approved.has(id) || !!autoAllow?.checked
+  let approvalHeld = false
+  const waived = () => !!autoAllow?.checked && !approvalHeld
+  const allowed = (id: string) => !o.approval || approved.has(id) || waived()
+  const holdApproval = (held: boolean) => {
+    if (held === approvalHeld) return
+    approvalHeld = held
+    if (!autoAllow) return
+    autoAllow.disabled = held
+    autoAllow.parentElement!.title = held ? 'Approval stays on while a real arm is live' : ''
+    if (held && autoAllow.checked) {
+      autoAllow.checked = false
+      note('Everyone is asked again: a real arm is live')
+      renderPeople()
+    }
+  }
 
   let noteTimer: ReturnType<typeof setTimeout> | undefined
   const note = (text: string) => {
@@ -219,7 +240,11 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
     if (!nodes.some((n) => n.id === node)) { remote.feedback({ haptic: 'bump', toast: 'That’s not in this scene' }, who.id); return }
     take(node, who.id)
   })
-  autoAllow?.addEventListener('change', () => { if (autoAllow.checked) { for (const id of pending) approved.add(id); pending.clear() } renderPeople() })
+  autoAllow?.addEventListener('change', () => {
+    if (approvalHeld) autoAllow.checked = false
+    else if (autoAllow.checked) { for (const id of pending) approved.add(id); pending.clear() }
+    renderPeople()
+  })
   $('chip-disc').onclick = () => remote.disconnect()
   $('chip-invite').onclick = () => { chip.toggle(); if (chip.expanded) $('people').hidden = true }
   $('chip-who').onclick = () => { const p = $('people'); p.hidden = !p.hidden; if (!p.hidden) chip.collapse() }
@@ -243,7 +268,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
     publish()
   }
 
-  const result: SimScene = { remote, control, claims, focus, nodes, allowed, nameOf, colorOf, log, note, publish, take, release, setNodes, nodeName }
+  const result: SimScene = { remote, control, claims, focus, nodes, allowed, waived, holdApproval, nameOf, colorOf, log, note, publish, take, release, setNodes, nodeName }
   publish()
   return result
 }

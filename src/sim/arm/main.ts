@@ -549,7 +549,8 @@ let stopped: { by: string; why: string } | null = null
 function estop(by: string, why = '') {
   if (stopped) return
   stopped = { by, why }
-  for (const a of arms) { a.homing = false; a.drive = null; a.claw = null; for (const j of a.joints) j.target = null }
+  // A live arm's driver stops it where it is, and liveStep sends it nothing more: a goal already sent would be carried out.
+  for (const a of arms) { a.homing = false; a.drive = null; a.claw = null; for (const j of a.joints) j.target = null; if (a.hw?.live) void holdDriver(a.hw.driver) }
   document.body.classList.add('stopped')
   const who = sim?.nameOf(by) ?? 'The screen'
   $('stop-by').textContent = why || `Stopped by ${who}`
@@ -563,7 +564,13 @@ function resume() {
   if (!stopped) return
   stopped = null
   document.body.classList.remove('stopped')
-  for (const a of arms) if (a.hw) a.hw.lagSince = 0
+  for (const a of arms) {
+    if (!a.hw) continue
+    a.hw.lagSince = 0
+    // The arm held where it was, and its twin braked somewhere else: start again from the arm, so resuming never jumps it.
+    const r = a.hw.live ? reported(a.hw) : null
+    if (r) startFrom(a, fromRaw(a.hw.cal, r.raw))
+  }
   sim?.log('Resumed from the screen')
   renderPanel()
 }
@@ -1310,19 +1317,32 @@ function loop(now: number) {
 
 // ---- real arms: connect, calibrate, go live (./drivers.ts) ----
 
-/** While live: copy the twin to the arm, and stop everything if the arm stops reporting or can't keep up. */
+/** How old an arm's report can be, in ms, and still count as where it is: past it the arm is silent. */
+const REPORT_MS = 1200
+
+/**
+ * While live: stop everything if the arm stops reporting or can't keep up, otherwise copy the twin to the arm. Once
+ * stopped it sends nothing: the driver was told to hold, and any goal after that would aim the arm away again.
+ */
 function liveStep(a: Arm, now: number) {
+  if (stopped) return
   const hw = a.hw!
+  if (hw.driver.feedback === 'measured') {
+    const r = hw.driver.read()
+    if (!r || now - r.at > REPORT_MS) {
+      if (now - hw.since > 2000) { estop('host', `${a.name} stopped reporting where it is`); return }
+    } else {
+      const got = fromRaw(hw.cal, r.raw.map((v) => v ?? NaN))
+      let off = 0
+      for (let i = 0; i < GRIP; i++) if (Number.isFinite(got[i])) off = Math.max(off, Math.abs(got[i] - a.joints[i].angle))
+      if (off <= 12) hw.lagSince = 0
+      else {
+        hw.lagSince ||= now
+        if (now - hw.lagSince > 600) { estop('host', `${a.name} isn’t keeping up (${Math.round(off)}° off): check for something in its way`); return }
+      }
+    }
+  }
   hw.driver.send(toRaw(hw.cal, a.joints.map((j) => j.angle)))
-  if (hw.driver.feedback !== 'measured' || stopped) return
-  const r = hw.driver.read()
-  if (!r || now - r.at > 1200) { if (now - hw.since > 2000) estop('host', `${a.name} stopped reporting where it is`); return }
-  const got = fromRaw(hw.cal, r.raw.map((v) => v ?? NaN))
-  let off = 0
-  for (let i = 0; i < GRIP; i++) if (Number.isFinite(got[i])) off = Math.max(off, Math.abs(got[i] - a.joints[i].angle))
-  if (off <= 12) { hw.lagSince = 0; return }
-  hw.lagSince ||= now
-  if (now - hw.lagSince > 600) estop('host', `${a.name} isn’t keeping up (${Math.round(off)}° off): check for something in its way`)
 }
 
 /** Where an arm's calibration is kept: per kind of arm (the five-axis arm's as it always was), driver and arm. */
@@ -1348,33 +1368,64 @@ function attach(a: Arm, driver: ArmDriver) {
     const wasLive = a.hw.live
     a.hw = null
     sim?.log(`${a.name} lost its hardware: ${why}`, '#fb7185')
-    if (wasLive) estop('host', `${a.name} lost its connection: ${why}`)
+    if (wasLive) {
+      // The arm is no longer on the arm's list, so estop can't reach its driver: tell it here, in case the link still carries it.
+      void holdDriver(driver)
+      estop('host', `${a.name} lost its connection: ${why}`)
+    }
     renderPanel()
   }
   sim?.log(`The screen connected ${a.name} to ${driver.label}: the twin follows it`)
   renderPanel()
 }
 
+/** Tell a driver to stop where its arm is. A failing link mustn't get in the way of a stop, so nothing it throws gets out. */
+function holdDriver(driver: ArmDriver): Promise<void> {
+  try { return Promise.resolve(driver.hold?.()).catch(() => {}) } catch { return Promise.resolve() }
+}
+
 async function disconnect(a: Arm) {
   const hw = a.hw
   if (!hw) return
+  const wasLive = hw.live
+  if (wasLive) {
+    // Stop sending, then let the hold out before the link closes (a link that hangs doesn't hold this up for long).
+    hw.live = false
+    await Promise.race([holdDriver(hw.driver), new Promise((resolve) => setTimeout(resolve, 400))])
+  }
   a.hw = null
   await hw.driver.close().catch(() => {})
-  sim?.log(`The screen disconnected ${a.name}${hw.live ? ' while live: it holds where it is' : ''}`)
+  sim?.log(`The screen disconnected ${a.name}${wasLive ? ' while live: it holds where it is' : ''}`)
   renderPanel()
+}
+
+/** The arm's latest report when it has a value for every joint and isn't stale. */
+function reported(hw: Hardware): { raw: number[]; at: number } | null {
+  const r = hw.driver.read()
+  return r && r.raw.every((v) => v !== null) && performance.now() - r.at <= REPORT_MS ? { raw: r.raw as number[], at: r.at } : null
+}
+
+/** Put the twin where the arm is, at rest and aimed at nothing. */
+function startFrom(a: Arm, angles: number[]) {
+  a.joints.forEach((j, i) => { j.angle = clamp(angles[i], j.spec.min, j.spec.max); j.vel = 0; j.target = null })
 }
 
 async function goLive(a: Arm, cap: number) {
   const hw = a.hw
   if (!hw || hw.live) return
+  if (stopped) { sim?.note(`${a.name} can’t go live while everything is stopped: resume first`); return }
+  if (sim?.waived()) { sim.note(`${a.name} can’t go live while everyone is let in without asking: switch that off first`); return }
   const r = hw.driver.read()
   if (!r || r.raw.some((v) => v === null)) { sim?.note(`${a.name} hasn’t reported every joint yet`); return }
+  if (performance.now() - r.at > REPORT_MS) { sim?.note(`${a.name} isn’t reporting where it is right now`); return }
   const angles = fromRaw(hw.cal, r.raw as number[])
   const out = KIN.joints.findIndex((s, i) => !(angles[i] >= s.min - 3 && angles[i] <= s.max + 3))
   if (out >= 0) { sim?.note(`${a.name}’s ${KIN.joints[out].name.toLowerCase()} reads outside its limits: calibrate it first`); return }
   // Start from where the arm is, so going live never jumps.
-  a.joints.forEach((j, i) => { j.angle = clamp(angles[i], j.spec.min, j.spec.max); j.vel = 0; j.target = null })
+  startFrom(a, angles)
   await hw.driver.torque(true)
+  // Something happened while the arm took the torque: it was disconnected, lost, or everything was stopped.
+  if (a.hw !== hw || stopped) return
   hw.live = true
   hw.cap = cap
   hw.since = performance.now()
@@ -1386,6 +1437,7 @@ async function goLive(a: Arm, cap: number) {
 function offLive(a: Arm) {
   if (!a.hw?.live) return
   a.hw.live = false
+  void holdDriver(a.hw.driver)
   sim?.log(`The screen took ${a.name} off live: it holds where it is`)
   renderPanel()
 }
@@ -1511,6 +1563,8 @@ function renderPanel() {
   })
   $('add-arm').hidden = arms.length >= MAX_ARMS
   const live = arms.filter((a) => a.hw?.live).length
+  // Approval can't be waived while a real arm is live: a stranger let in unasked would be steering hardware.
+  sim?.holdApproval(live > 0)
   const connected = arms.filter((a) => a.hw).length
   const badge = $('sim-badge')
   badge.textContent = live ? `${live} real arm${live > 1 ? 's' : ''} live` : connected ? `Twin of ${connected} real arm${connected > 1 ? 's' : ''}` : 'Simulated · no hardware connected'

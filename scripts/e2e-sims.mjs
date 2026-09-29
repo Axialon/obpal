@@ -7,6 +7,8 @@
  *   Arena: two phones claim slots and roll their pucks.
  *   The node strip (./sims-strip.mjs): on an arm and on the excavator, a part switched mid-drag holds, the new one
  *   starts from where it was, and the same finger carries on with it.
+ *   The arm's live path, with a fake driver in place of hardware (./e2e-arm-live.mjs): going live refused for a joint that
+ *   is unreported or out of its limits, Stop holding the pose and reaching the driver, every automatic stop saying why.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch. OBPAL_SHOTS=<dir> saves screens.
  */
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -22,6 +24,7 @@ import { runAudio } from './e2e-audio.mjs'
 import { runTemporal } from './e2e-temporal.mjs'
 import { simsStrip } from './sims-strip.mjs'
 import { runPanels } from './e2e-panels.mjs'
+import { runArmLive } from './e2e-arm-live.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
 
 const HEADED = process.argv.includes('--headed')
@@ -452,6 +455,7 @@ try {
   await runControlViews(local, check)
   await runAudio(local, check)
   await runPanels(local, check)
+  await runArmLive(local, check)
   await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {
   console.error(e)

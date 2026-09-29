@@ -62,6 +62,12 @@ export interface ArmDriver {
   send(raw: number[]): void
   /** Hold (true) or go limp (false), where the hardware allows. */
   torque(on: boolean): Promise<void>
+  /**
+   * The driver's own stop, under the page's: drop the goal the arm was following and hold where it is, torque on. The
+   * screen calls it once when it stops a live arm and sends no goal after it until the arm is resumed. A driver
+   * without one leaves the arm on the last goal it was sent.
+   */
+  hold?(): Promise<void>
   close(): Promise<void>
   /** The connection dropped by itself (cable pulled, socket closed). */
   onLost?: (why: string) => void
@@ -234,6 +240,14 @@ export class FeetechDriver implements ArmDriver {
     await this.bus.run(() => this.port!.write(syncTorque(this.ids, on)))
   }
 
+  /** Aim every servo at where it last reported itself, torque left on: it stops, rather than finishing the move or pushing on what is in its way. */
+  async hold() {
+    const port = this.port
+    if (!port || this.raw.some((v) => v === null)) return
+    const pkt = syncGoals(this.raw.map((pos, i) => ({ id: this.ids[i], pos: pos! })))
+    await this.bus.run(() => port.write(pkt)).catch(() => {})
+  }
+
   async close() {
     this.polling = false
     const p = this.port
@@ -300,6 +314,9 @@ export class SerialTextDriver implements ArmDriver {
   }
 
   async torque(on: boolean) { await this.say(on ? 'T1' : 'T0') }
+
+  /** `S`: the sketch holds where its joints are now, without waiting out its half-second watchdog. A `J` after it would aim them again. */
+  async hold() { await this.say('S') }
 
   async close() {
     clearInterval(this.timer)
@@ -384,13 +401,27 @@ export class RosDriver implements ArmDriver {
     const now = performance.now()
     if (now - this.lastSend < 33) return
     this.lastSend = now
-    const pick = this.o.joints.map((name, i) => ({ name, v: raw[i] })).filter((j) => j.name)
+    this.goal(this.o.joints.map((name, i) => ({ name, v: raw[i] })).filter((j) => j.name), false)
+  }
+
+  /** Publish one goal for the named joints: a trajectory controller gets a single point 100 ms ahead (at rest there, if `still`). */
+  private goal(pick: { name: string; v: number }[], still: boolean) {
     if (this.o.command === 'trajectory') {
-      this.op({ op: 'publish', topic: this.o.topic, msg: { joint_names: pick.map((j) => j.name), points: [{ positions: pick.map((j) => j.v), time_from_start: { sec: 0, nanosec: 100_000_000 } }] } })
+      this.op({ op: 'publish', topic: this.o.topic, msg: { joint_names: pick.map((j) => j.name), points: [{ positions: pick.map((j) => j.v), ...(still ? { velocities: pick.map(() => 0) } : {}), time_from_start: { sec: 0, nanosec: 100_000_000 } }] } })
     } else this.op({ op: 'publish', topic: this.o.topic, msg: { layout: { dim: [], data_offset: 0 }, data: pick.map((j) => j.v) } })
   }
 
   async torque() { /* ROS controllers hold their last command. */ }
+
+  /**
+   * Replace the goal the controller is following with where each joint last reported itself: a trajectory ends there at
+   * rest, and a position controller is told to stay. ROS itself holds the last command, which is the goal being stopped.
+   */
+  async hold() {
+    const pick = this.o.joints.map((name, i) => ({ name, v: this.raw[i] })).filter((j) => j.name)
+    if (pick.some((j) => j.v === null)) return
+    this.goal(pick as { name: string; v: number }[], true)
+  }
 
   async close() {
     this.closing = true
