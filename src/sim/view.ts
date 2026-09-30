@@ -23,6 +23,8 @@ import type { Experience } from './vr/experience'
 import { listenFrom } from './audio/context'
 import { contactRecorder } from './contact'
 import { recordFrame } from './kit/reveal'
+import { loadingNow } from './kit/loading'
+import { SceneWarmup } from './kit/warmup'
 
 /** Frames averaged into the still picture. */
 export const STILL_FRAMES = 32
@@ -118,11 +120,20 @@ const QUAD_FRAG = 'uniform sampler2D tMap; varying vec2 vUv; void main() { gl_Fr
  * The drawing for a sim's canvas. `onResize` hears whenever the canvas's size (CSS px) changes, for the camera's aspect
  * and view; before the first frame, the sim sets them up from `width` and `height`.
  */
-export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h: number): void; params?: WebGLRendererParameters; maxDpr?: number }): SimView {
+export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h: number): void; params?: WebGLRendererParameters; maxDpr?: number; ready?: () => boolean }): SimView {
   const contactTest = new URLSearchParams(location.search).get('test') === 'contact'
   const loadTest = new URLSearchParams(location.search).get('test') === 'load'
   let recordContacts: (() => void) | undefined
   const renderer = new WebGLRenderer({ canvas, antialias: true, ...opts.params })
+  const warmup = new SceneWarmup()
+  canvas.classList.add('sim-warming')
+  const reveal = () => {
+    if (warmup.frame(!loadingNow() && (opts.ready?.() ?? true), renderer.info.programs?.length ?? 0, renderer.info.memory.textures) && canvas.classList.contains('sim-warming')) {
+      canvas.classList.remove('sim-warming')
+      canvas.dataset.simReady = 'true'
+      performance.mark('obpal:scene:revealed')
+    }
+  }
   let triangles = 0, calls = 0, renderMs = 0
   let insetTriangles = 0, insetCalls = 0, insetMs = 0
   const renderScene = (scene: Scene, camera: Camera) => {
@@ -171,6 +182,7 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
   let gpuLast: GpuSample | null = null
   let gpuFresh = false
   let samples = 0
+  let sizePending = true
   function pollTiming() {
     if (!timer) return
     while (timing.length) {
@@ -191,8 +203,7 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
     const [dw, dh] = exact ?? [Math.round(W * dpr), Math.round(H * dpr)]
     const k = step.pr / dpr
     const bw = Math.max(1, Math.round(dw * k)), bh = Math.max(1, Math.round(dh * k))
-    renderer.setPixelRatio(1)
-    renderer.setSize(bw, bh, false)
+    if (canvas.width !== bw || canvas.height !== bh) renderer.setSize(bw, bh, false)
     if (!accum || accum.width !== bw || accum.height !== bh) {
       accum?.dispose()
       sample?.dispose()
@@ -200,6 +211,7 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
       sample = new FramebufferTexture(bw, bh)
     }
     force = true
+    sizePending = false
   }
 
   /** The canvas's size or density changed: a ladder for it, the same kind of step on it, and the governor learns it again. */
@@ -213,7 +225,8 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
       pinned = pin()
     } else governor.reset()
     step = steps[pinned ?? governor.level]
-    size()
+    // ResizeObserver runs after animation callbacks. Keep the last picture until draw can replace it.
+    sizePending = true
     opts.onResize(W, H)
   }
 
@@ -293,13 +306,22 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
         still = 0; force = true
         renderer.shadowMap.autoUpdate = true
         renderScene(scene, camera)
+        reveal()
         return
       }
+      if (sizePending) size()
       insetTriangles = insetCalls = insetMs = 0
       signature(scene, camera, sig)
       const moving = force || changed(sig, prev, EPS_FRAME) || changed(sig, ref, EPS_TOTAL)
       ;[prev, sig] = [sig, prev]
       if (moving || noStill) {
+        if (pinned === null) {
+          const before = governor.level
+          pollTiming()
+          const gpu = gpuFresh ? gpuLast : null
+          gpuFresh = false
+          if (governor.frame(dt, gpu) !== before) { step = steps[governor.level]; size() }
+        }
         // One shadow update for the scene; jitter and PTZ inset passes reuse it.
         renderer.shadowMap.autoUpdate = false
         renderer.shadowMap.needsUpdate = true
@@ -312,13 +334,7 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
         renderScene(scene, camera)
         if (q) { gl.endQuery(timer!.TIME_ELAPSED_EXT); timing.push({ q, level: governor.level }) }
         if (!samples) samples = gl.getParameter(gl.SAMPLES) as number
-        if (pinned === null) {
-          const before = governor.level
-          pollTiming()
-          const gpu = gpuFresh ? gpuLast : null
-          gpuFresh = false
-          if (governor.frame(dt, gpu) !== before) { step = steps[governor.level]; size() }
-        }
+        reveal()
         return
       }
       // Still: one more frame into the average, until it has them all (then the screen keeps it).
@@ -338,6 +354,7 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
       show.uniforms.tMap.value = accum!.texture
       renderer.render(showScene, quadCam)
       still++
+      reveal()
     },
     gfx: () => ({
       triangles: triangles + insetTriangles, calls: calls + insetCalls, renderMs: renderMs + insetMs,

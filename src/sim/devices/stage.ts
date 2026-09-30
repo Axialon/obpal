@@ -73,7 +73,7 @@ function groundTexture(floor: string, grid: string) {
   return tex
 }
 
-export function createStage(canvas: HTMLCanvasElement, theme: Theme, options: { maxDpr?: number; portraitFraming?: boolean } = {}): Stage {
+export function createStage(canvas: HTMLCanvasElement, theme: Theme, options: { maxDpr?: number; portraitFraming?: boolean; ready?: () => boolean } = {}): Stage {
   const view = simView(canvas, { onResize: () => { stage.resize(); stage.frame(framing) }, params: { alpha: true }, ...options })
   const renderer = view.renderer
   renderer.toneMapping = THREE.ACESFilmicToneMapping

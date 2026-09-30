@@ -692,8 +692,9 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
     exact = device && Math.abs(device[0] - W * dpr) < 1.5 && Math.abs(device[1] - H * dpr) < 1.5 ? device : null
     const [dw, dh] = exact ?? [Math.round(W * dpr), Math.round(H * dpr)]
     const k = quality.pr / dpr
-    renderer.setPixelRatio(1)
-    renderer.setSize(Math.max(1, Math.round(dw * k)), Math.max(1, Math.round(dh * k)), false)
+    const bw = Math.max(1, Math.round(dw * k)), bh = Math.max(1, Math.round(dh * k))
+    // setSize clears even an unchanged canvas; the renderer keeps its default pixel ratio of one.
+    if (canvas.width !== bw || canvas.height !== bh) renderer.setSize(bw, bh, false)
     renderer.getDrawingBufferSize(buf)
     const g = glassScale(quality, dpr)
     behind.setSize(Math.max(1, Math.round(W * g)), Math.max(1, Math.round(H * g)))

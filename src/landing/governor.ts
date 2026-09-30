@@ -116,6 +116,8 @@ export function pick(steps: readonly Step[], name: string): number {
 /** The field's share of a 60 Hz frame (ms of GPU time): above HI it steps down; it steps up if the step above fits LO. */
 export const HI_MS = 10
 export const LO_MS = 6.5
+/** Minimum drawing time at a level before another decision, including the first level. */
+export const DWELL_S = 1.5
 /** Frame times (s) above this are too slow (under 50 frames a second). */
 export const SLOW = 1 / 50
 /** A step down that doesn't make frames at least this much faster didn't help. */
@@ -139,6 +141,10 @@ export class Governor {
   /** Steps down on frame times alone, to confirm: the level they came from, its median frame time, how many steps. */
   private trial: { from: number; median: number; tries: number } | null = null
   private slowWindows = 0
+  private highWindows = 0
+  private lowWindows = 0
+  private elapsed = 0
+  private decideAfter = DWELL_S
   /** Frame times alone won't step below this (a step down here didn't help). */
   private floor: number
 
@@ -157,12 +163,16 @@ export class Governor {
    * has come back. Returns the level to draw at from now on (it changes only at the end of a window).
    */
   frame(dt: number, gpu: GpuSample | null = null): number {
+    if (!Number.isFinite(dt) || dt <= 0) return this.level
+    // A scheduling stall is not time spent learning this level's drawing cost.
+    this.elapsed += Math.min(dt, 0.1)
     this.dts.push(dt)
     if (gpu && gpu.level === this.level && Number.isFinite(gpu.ms)) this.gpu.push(gpu.ms)
     if (this.dts.length < this.size) return this.level
     const dts = this.dts, gpus = this.gpu
     this.dts = []
     this.gpu = []
+    if (this.elapsed + 1e-6 < this.decideAfter) return this.level
     if (gpus.length >= dts.length * 0.5) this.byGpu(median(gpus))
     else this.byFrames(median(dts))
     return this.level
@@ -173,6 +183,8 @@ export class Governor {
     this.known = []
     this.trial = null
     this.slowWindows = 0
+    this.highWindows = this.lowWindows = 0
+    this.decideAfter = this.elapsed + DWELL_S
     this.floor = this.steps.length - 1
     this.dts = []
     this.gpu = []
@@ -183,16 +195,20 @@ export class Governor {
     this.slowWindows = 0
     this.known[this.level] = ms
     if (ms > HI_MS) {
-      if (this.level < this.steps.length - 1) this.go(this.level + 1)
+      this.lowWindows = 0
+      if (++this.highWindows >= 2 && this.level < this.steps.length - 1) this.go(this.level + 1)
       return
     }
+    this.highWindows = 0
     if (this.level === 0) return
     const up = this.level - 1
     const guess = this.known[up] ?? ms * cost(this.steps[up], this.steps[this.level])
-    if (guess < LO_MS) this.go(up)
+    if (guess < LO_MS) { if (++this.lowWindows >= 3) this.go(up) }
+    else this.lowWindows = 0
   }
 
   private byFrames(dt: number) {
+    this.highWindows = this.lowWindows = 0
     const t = this.trial
     if (t) {
       if (dt <= t.median * HELPED) { this.trial = null; this.slowWindows = 0; return }
@@ -213,6 +229,8 @@ export class Governor {
 
   private go(level: number) {
     this.level = level
+    this.decideAfter = this.elapsed + DWELL_S
+    this.highWindows = this.lowWindows = 0
     this.dts = []
     this.gpu = []
   }

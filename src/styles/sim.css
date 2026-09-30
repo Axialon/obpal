@@ -1,6 +1,8 @@
 /* Public sims (CATALOGUE §7): a full-bleed stage, a glass panel of nodes and safety, and the shared-scene chrome. */
 body.sim { margin: 0; overflow: hidden; background: rgb(var(--base-rgb, 7 9 13)); color: var(--ink); font-family: var(--font); }
-body.sim #stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+body.sim #stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; transition: opacity 0.32s var(--ease); }
+body.sim #stage.sim-warming { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { body.sim #stage { transition: none; } }
 /* Shared action geometry: glyphs and labels form one centred group, with equal space on either side. */
 body.sim :is(.btn, .estop, .people-new, .allow, .presence-controls > button, .sim-badge) { align-items: center; justify-content: center; }
 body.sim :is(.btn, .estop, .people-new, .allow) { display: inline-flex; }

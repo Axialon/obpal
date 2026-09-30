@@ -572,8 +572,9 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     const busy = f.step(dt)
     foresee(f, dt)
     const padsBusy = answerPads(dt)
-    f.render()
     if (busy) pace(dt)
+    // A quality step clears the drawing buffer. Replace it before this frame can be presented.
+    f.render()
     looping = busy || padsBusy || mine || tilting || tour
     return looping
   })

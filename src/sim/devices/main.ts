@@ -68,7 +68,7 @@ if (!$('dev-units-sec').hidden) {
   document.querySelector<HTMLElement>('.dev-panel .safety')!.hidden = true
 }
 
-const stage = createStage($<HTMLCanvasElement>('stage'), themeById(family.getTheme()))
+const stage = createStage($<HTMLCanvasElement>('stage'), themeById(family.getTheme()), { ready: () => view !== null })
 const logic = entry.logic()
 const units = Array.from({ length: spec.units }, (_, n) => ({ id: `${spec.id}${n + 1}`, name: spec.unitNames?.[n] ?? `${spec.unit} ${n + 1}` }))
 const unitOf = (node: string | undefined) => units.findIndex((u) => u.id === node)

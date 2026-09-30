@@ -98,7 +98,7 @@ describe('the governor, timed by the GPU', () => {
   it("started at the screen's own pixels (as the hero does), a fast GPU climbs to the finest; a slow one never leaves them for more", () => {
     const steps = ladder(1, false)
     const fast = new Governor(steps, { level: pick(steps, 'native') })
-    expect(run(fast, 300, gpuAt(0.3))).toEqual([2, 1, 0])
+    expect(run(fast, 600, gpuAt(0.3))).toEqual([2, 1, 0])
     // An integrated GPU: 7 ms at its own pixels, 16 ms at 1.5 times them, so it stays put.
     const igpu = new Governor(steps, { level: pick(steps, 'native') })
     expect(run(igpu, 600, gpuAt(3.5))).toEqual([2])
@@ -145,6 +145,30 @@ describe('the governor, timed by the GPU', () => {
   it('its thresholds leave room for the rest of the page in a 60 Hz frame', () => {
     expect(HI_MS).toBeLessThan(1000 / 60)
     expect(LO_MS).toBeLessThan(HI_MS)
+  })
+  it('ignores a single expensive GPU window between healthy ones', () => {
+    const g = new Governor(ladder(1, false))
+    run(g, 90, () => ({ dt: 1 / 60, ms: 4 }))
+    run(g, 45, () => ({ dt: 1 / 60, ms: 14 }))
+    run(g, 45, () => ({ dt: 1 / 60, ms: 4 }))
+    expect(g.level).toBe(0)
+  })
+  it('requires sustained headroom before upgrading and dwells after a step', () => {
+    const g = new Governor(ladder(1, false), { level: 2, window: 5 })
+    run(g, 5, () => ({ dt: 1 / 60, ms: 1 }))
+    expect(g.level).toBe(2)
+    run(g, 100, () => ({ dt: 1 / 60, ms: 1 }))
+    expect(g.level).toBe(1)
+    run(g, 20, () => ({ dt: 1 / 60, ms: 1 }))
+    expect(g.level).toBe(1)
+    run(g, 100, () => ({ dt: 1 / 60, ms: 1 }))
+    expect(g.level).toBe(0)
+  })
+  it('does not treat an isolated scheduling stall as elapsed dwell time', () => {
+    const g = new Governor(ladder(1, false), { level: 2, window: 5 })
+    g.frame(10, { ms: 1, level: 2 })
+    run(g, 14, () => ({ dt: 1 / 60, ms: 1 }))
+    expect(g.level).toBe(2)
   })
 })
 
