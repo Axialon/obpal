@@ -105,7 +105,7 @@ function deployRecovery(): Plugin {
  * arriving. A page's own scripts are one module graph that runs only when all of it has come, so this one is an entry
  * of its own (simEarly), named in the page just before them; its few imports are preloaded beside it.
  */
-const EARLY_PAGES = ['/sim/device/index.html', '/sim/arm/index.html', '/sim/humanoid/index.html']
+const EARLY_PAGES = ['/sim/device/index.html', '/sim/arm/index.html', '/sim/humanoid/index.html', '/sim/arena/index.html']
 function simEarly(): Plugin {
   return {
     name: 'obpal-sim-early',

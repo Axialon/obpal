@@ -28,6 +28,7 @@ import { runControlViews } from './e2e-control-views.mjs'
 import { runAudio } from './e2e-audio.mjs'
 import { runTemporal } from './e2e-temporal.mjs'
 import { runWarmup } from './e2e-warmup.mjs'
+import { runGraphicsRecovery, runGraphicsRecoveryLayouts } from './e2e-graphics-recovery.mjs'
 import { runLoad } from './e2e-load.mjs'
 import { simsStrip } from './sims-strip.mjs'
 import { runPanels } from './e2e-panels.mjs'
@@ -162,7 +163,12 @@ async function phone(invite, { xr = true, way = 'motion' } = {}) {
 }
 
 try {
-  if (process.env.OBPAL_E2E_SIMS_ONLY === 'warm-up') await runWarmup(local, check)
+  if (process.env.OBPAL_E2E_SIMS_ONLY === 'graphics-layouts') {
+    const browser = await chromium.launch({ executablePath, headless: true, args: RTC_ARGS })
+    try { await runGraphicsRecoveryLayouts(browser, local.origin, check) } finally { await browser.close() }
+  }
+  else if (process.env.OBPAL_E2E_SIMS_ONLY === 'graphics-recovery') await runGraphicsRecovery(local, check)
+  else if (process.env.OBPAL_E2E_SIMS_ONLY === 'warm-up') await runWarmup(local, check)
   else if (ONLY_BUTTONS) await runSimButtons(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'humanoid-live') await runHumanoidLive(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'humanoid') await runHumanoid(local, check)
@@ -529,6 +535,7 @@ try {
   await simsStrip({ origin: local.origin, check, executablePath, headed: HEADED, shots: SHOTS })
   await runTemporal(local, check)
   await runWarmup(local, check)
+  await runGraphicsRecovery(local, check)
   await runLoad(local, check)
   await runControl(local, check)
   await runMusic(local, check)

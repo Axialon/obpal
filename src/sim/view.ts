@@ -25,6 +25,7 @@ import { contactRecorder } from './contact'
 import { recordFrame } from './kit/reveal'
 import { loadingNow } from './kit/loading'
 import { SceneWarmup } from './kit/warmup'
+import { startGraphics } from './kit/graphics'
 
 /** Frames averaged into the still picture. */
 export const STILL_FRAMES = 32
@@ -124,10 +125,13 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
   const contactTest = new URLSearchParams(location.search).get('test') === 'contact'
   const loadTest = new URLSearchParams(location.search).get('test') === 'load'
   let recordContacts: (() => void) | undefined
-  const renderer = new WebGLRenderer({ canvas, antialias: true, ...opts.params })
+  const renderer = startGraphics(() => new WebGLRenderer({ canvas, antialias: true, ...opts.params }))
+  let failed = false
+  addEventListener('obpal:scene-failed', () => { failed = true; renderer.setAnimationLoop(null) }, { once: true })
   const warmup = new SceneWarmup()
   canvas.classList.add('sim-warming')
   const reveal = () => {
+    if (failed) return
     if (warmup.frame(!loadingNow() && (opts.ready?.() ?? true), renderer.info.programs?.length ?? 0, renderer.info.memory.textures) && canvas.classList.contains('sim-warming')) {
       canvas.classList.remove('sim-warming')
       canvas.dataset.simReady = 'true'
@@ -295,6 +299,7 @@ export function simView(canvas: HTMLCanvasElement, opts: { onResize(w: number, h
       insetCalls += renderer.info.render.calls
     },
     draw(scene, camera, dt) {
+      if (failed) return
       if (contactTest) { recordContacts ??= contactRecorder(scene, camera); recordContacts() }
       if (loadTest) recordFrame()
       view.presence?.update(dt, performance.now())

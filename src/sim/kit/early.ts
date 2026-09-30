@@ -7,6 +7,16 @@
  */
 import { expectRig } from './loading'
 import { downloadPrototype, pageModels } from './models'
+import { modelFailed, sceneFailed } from './recovery'
+import { holdReload } from '../../ui/recover'
+
+// A shared visitor must keep its authenticated scene link across a failed import.
+holdReload(() => new URLSearchParams(location.search).get('join') === '1')
+addEventListener('obpal:model-failed', modelFailed)
+// A module that never loads cannot reach its page boundary.
+addEventListener('error', event => {
+  if (event.target instanceof HTMLScriptElement && event.target.type === 'module') sceneFailed(event)
+}, true)
 
 const wanted = pageModels(location.pathname, location.search)
 if (wanted.length) {

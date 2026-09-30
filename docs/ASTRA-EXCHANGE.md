@@ -1,6 +1,6 @@
 # The Astra exchange
 
-Use GPT-Astra Pro in ChatGPT for one bounded engineering stage at a time. Transport is manual: upload a request ZIP,
+Use Astra in ChatGPT for one bounded engineering stage at a time. Transport is manual: upload a request ZIP,
 paste its prompt, save Astra's returned ZIP, and let the local integrator verify and apply it. The coordinator owns merging
 and deployment. No exchange command merges, pushes, deploys, publishes, installs Desktop or accesses the registry.
 
@@ -59,7 +59,30 @@ and provenance. Request archives are not cryptographic signatures; the owner mus
 `--paths` accepts comma-separated portable globs: `*` within a path component, `**` across directories, and `?` for one
 character. Omit it for all eligible tracked files. Source comes from the pinned **master Git blobs**, including when
 the calling worktree has uncommitted changes. It does not export the calling branch's pending implementation.
+Use `--at <sha>` to pin an earlier master commit explicitly even if master moves; it must be an ancestor of master.
 `source_modes` records each exported file's Git mode; preserve it when constructing diffs from the snapshot.
+
+### Full and lean packs
+
+`--mirror <public-commit-sha>` records the public snapshot at `https://github.com/Axialon/obpal` in MANIFEST's
+`repository_mirror: { url, commit, equals_private, sanitized_paths: ['wrangler.jsonc'] }` and START_HERE.
+`equals_private` is the full pinned private master SHA. Each public publish is one snapshot commit with the same
+tracked content as private master, except the deployment placeholders made by `scripts/open-source.mjs` SANITIZE.
+Verify this equality over the export scope before sending a pack. Public history is snapshot history; private
+development history is not published. Astra should browse, search and read source and docs at the named public commit.
+
+The default full-source pack includes `source/`. Add `--lean` to include only START_HERE, TASK, RETURN_CONTRACT,
+ASTRA_PROMPT and MANIFEST. Lean requires `--mirror`. Its manifest retains the **full source_hashes and source_modes
+of the eligible export scope**, without size-budget trimming of hashes. If the docs and complete manifest exceed the
+ZIP budget, packing refuses; narrow the scope or raise the budget. Source is still scanned before omission.
+Astra reconstructs before bytes from the mirror commit and verifies SHA-256 against MANIFEST.source_hashes.
+GitHub failure or a hash mismatch means a one-line explanation and request for the full-source pack, never a guessed
+delta. Sanitized wrangler.jsonc bytes cannot replace private before bytes if that path is selected. Intake uses the
+same scope, archive digest and before-hash checks for either pack; no source/ members are needed for lean intake.
+
+```powershell
+pnpm run astra:pack -- --stage sample-code --task artifacts/astra/TASK.md --paths "packages/core/src/code.ts,tests/code.test.ts" --at <private-master-sha> --mirror <public-commit-sha> --lean --messages 14 --spent 0
+```
 
 Every selected eligible source file and the brief pass `scripts/lib/scan.mjs` before size trimming. The deny list is
 read from this checkout and, for a linked worktree, the main checkout; its words are never printed. Binary members
@@ -67,7 +90,7 @@ are scanned too. Private findings refuse the request. The tool does not silently
 request may be refused, in which case select a public, bounded scope. Local-only and guarded paths are excluded.
 
 The budget is in MiB (default 24, maximum 64), covering both compressed ZIP size and all expanded member bytes,
-including the manifest. Largest source files are trimmed first; every omission and reason appears in the manifest and
+including the manifest. In full packs, largest source files are trimmed first; every omission and reason appears in the manifest and
 console report. Fixed instructions are never trimmed. A request with no remaining source is refused. Do not ask Astra
 to modify a trimmed path. Narrow the scope or increase the budget when the stage needs that context.
 
@@ -75,12 +98,32 @@ Optionally pass `--checkpoint <json>` with `master_sha`, `check_summary` and `e2
 real verification. A mismatching master is refused. Without those records, START_HERE says the checks are not recorded;
 it never invents a green checkpoint. Checkpoint text and the brief are scanned before export.
 
+### Working within the message budget
+
+Astra has 200 messages for the whole programme. `--messages <n>` allocates this stage's budget (default 12);
+`--spent <n>` optionally supplies the programme total used so far. These are message counts, separate from the
+`--budget` ZIP size in MiB. MANIFEST records `message_budget: { programme_total: 200, stage, spent }`, with null
+when spent was not supplied. START_HERE and the one-paste prompt carry the same line. Counts must be whole numbers;
+stage messages are 1–200 and supplied spent plus stage allocation must fit 200.
+
+Keep a local budget ledger: stage, allocation, spent before, actual Astra replies used, spent after and messages
+remaining. Update actual usage after each reply and pass that total as `--spent` for the next request. Return ZIP
+ASTRA_START carries the original request's budget checkpoint; it does not invent later usage. A dense, one-paste
+reconcile costs Astra one message per round trip. One message delivers a coherent stage ZIP or precise reconcile.
+Astra plans internally, resolves questions from the pack/GitHub, records assumptions in STAGE.md, self-checks with
+code where available and reports actual execution. If work cannot fit, one message includes a coherent partial
+and a precise continuation plan.
+
+The compact prompt uses a clear role, goal, reading order, constraints and output contract, following
+[OpenAI's reasoning prompting guidance](https://developers.openai.com/api/docs/guides/reasoning-best-practices#how-to-prompt-reasoning-models-effectively).
+Detailed product and exchange rules stay in START_HERE.
+
 ## 3. Upload and paste
 
-Attach the request ZIP in ChatGPT with GPT-Astra Pro selected. Paste the entire sibling `.prompt.txt` once. START_HERE,
+Attach the request ZIP in your Astra conversation in ChatGPT. Paste the entire sibling `.prompt.txt` once. START_HERE,
 TASK, MANIFEST and RETURN_CONTRACT provide context, bounds, exact source hashes and the required return format.
-Ask Astra to return the ZIP as a downloadable artifact, then save it into your chosen inbox. No connected account,
-automatic chat transport or third-party project source is needed.
+Ask Astra to return the ZIP as a downloadable file, then save it to `Downloads/obpal-astra/inbox`.
+Lean packs use the public GitHub snapshot for source; keep the original request ZIP for intake.
 
 ## 4. Intake and review Astra's return
 

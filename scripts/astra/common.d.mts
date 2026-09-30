@@ -3,12 +3,16 @@ export const REPOSITORY: string
 export const SUITES: string[]
 export function sha256(bytes: string | Uint8Array): string
 export function json(value: unknown): string
+export function messageBudgetLine(budget?: { stage?: number; spent?: number | null }): string
 export function git(root: string, args: string[], input?: string | Uint8Array): Bytes
 export function archive(members: Record<string, string | Uint8Array>, metadata: Record<string, unknown>): Bytes
 export interface Manifest {
   schema_version: number; repository: string; kind: string; stage: string; master_sha: string
   files: Record<string, string>; source_hashes: Record<string, string>
   source_modes?: Record<string, string>
+  lean?: boolean
+  repository_mirror?: { url: string; commit: string; equals_private: string; sanitized_paths: string[] }
+  message_budget?: { programme_total: number; stage: number; spent: number | null }
   export_scope: { globs: string[]; paths: string[]; trimmed: { path: string; reason: string }[] }
   input: { sha: string; archive_sha256: string; hashes: Record<string, string> }
   changed_paths: string[]; new_paths: string[]; deleted_paths: string[]

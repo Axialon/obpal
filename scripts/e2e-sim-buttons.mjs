@@ -10,6 +10,25 @@ export async function runSimButtons(local, check) {
   const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM })
   const out = await mkdtemp(join(tmpdir(), 'obpal-button-ink-')), rows = []
   try {
+    await check('button ink: a late SVG receives its spacing without a resize', async () => {
+      const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, ignoreHTTPSErrors: true, reducedMotion: 'reduce' })
+      try {
+        const page = await context.newPage()
+        await page.goto(`${local.origin}/sim/rover/`)
+        await page.waitForFunction(() => !!window.__obpal?.pairingUrl)
+        await page.evaluate(() => document.fonts.ready)
+        await page.waitForTimeout(700)
+        await page.locator('#reset svg').evaluate(svg => {
+          const fresh = svg.cloneNode(true)
+          fresh.removeAttribute('style')
+          svg.replaceWith(fresh)
+        })
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve)))))
+        const button = (await page.evaluate(measureButtonInk)).find(row => row.id === 'reset')
+        if (!button || inkError(button) > .5) throw new Error(`Late SVG: ${JSON.stringify(button?.groupOffset)}`)
+        return `${inkError(button).toFixed(3)}px without a resize or panel interaction`
+      } finally { await context.close() }
+    })
     await check('button ink fallback and regression detection', async () => {
       const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, ignoreHTTPSErrors: true })
       try {

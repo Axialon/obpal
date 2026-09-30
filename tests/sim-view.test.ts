@@ -2,6 +2,24 @@ import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
 import { BUDGET, Governor, pickPixels, pixelLadder } from '../src/landing/governor'
 import { changed, halton, jitterOf, signature, STILL_FRAMES } from '../src/sim/view'
+import { GraphicsUnavailable, startGraphics } from '../src/sim/kit/graphics'
+
+describe('graphics initialization', () => {
+  it('marks a constructor failure and preserves its cause, without calling it an asset failure', () => {
+    const cause = new Error('context creation failed')
+    try { startGraphics(() => { throw cause }) } catch (error) {
+      expect(error).toBeInstanceOf(GraphicsUnavailable)
+      expect((error as Error).cause).toBe(cause)
+    }
+    expect(() => startGraphics(() => { throw cause })).toThrow(GraphicsUnavailable)
+  })
+  it('returns the single successful renderer unchanged', () => {
+    const renderer = { initialized: true }
+    let creates = 0
+    expect(startGraphics(() => { creates++; return renderer })).toBe(renderer)
+    expect(creates).toBe(1)
+  })
+})
 
 describe("the sims' ladder: the screen's own pixels, or exactly twice them", () => {
   it('at 1x: twice the pixels each way, then the screen\'s own (no 1.5, which the browser would average unevenly)', () => {

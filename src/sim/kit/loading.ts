@@ -10,6 +10,8 @@
 let holding = 0
 let expecting = false
 let leaving: ReturnType<typeof setTimeout> | undefined
+let expectation: ReturnType<typeof setTimeout> | undefined
+let stopped = false
 
 /** The pill, where the page has one (not in a test's stand-in for a document). */
 const element = () => typeof document === 'undefined' || typeof document.getElementById !== 'function' ? null : document.getElementById('sim-load')
@@ -17,6 +19,7 @@ const element = () => typeof document === 'undefined' || typeof document.getElem
 function update() {
   const el = element()
   if (!el) return
+  if (stopped) { el.hidden = true; el.classList.remove('on'); return }
   if (expecting || holding > 0) {
     clearTimeout(leaving)
     if (!el.hidden && el.classList.contains('on')) return
@@ -35,9 +38,21 @@ function update() {
  * on its way. If nothing holds within `patience` ms (the page never got that far), it goes.
  */
 export function expectRig(patience = 15000) {
+  if (stopped) return
+  clearTimeout(expectation)
   expecting = true
   update()
-  setTimeout(() => { expecting = false; update() }, patience)
+  expectation = setTimeout(() => { expecting = false; update() }, patience)
+}
+
+/** A terminal start failure replaces the pill; late downloads cannot bring its busy state back. */
+export function stopLoading() {
+  stopped = true
+  expecting = false
+  holding = 0
+  clearTimeout(expectation)
+  clearTimeout(leaving)
+  update()
 }
 
 /** Whether the pill is up: rigs are held, or the page is about to hold one. */
@@ -45,6 +60,7 @@ export const loadingNow = () => expecting || holding > 0
 
 /** A rig is held back; the pill shows until every held rig has been let go. */
 export function beginLoading() {
+  if (stopped) return
   expecting = false
   holding++
   update()

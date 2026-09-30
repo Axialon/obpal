@@ -33,7 +33,9 @@ import { Telemetry } from '../../ui/kit/telemetry'
 import { iconAction } from '../../ui/kit/action'
 import { syncActionState } from '../action-state'
 import { mountQuick, quickAction, quickViews } from '../../ui/quick'
+import { startScene } from '../kit/recovery'
 
+startScene(async () => {
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 const params = new URLSearchParams(location.search)
 const entry = deviceById(params.get('d') ?? location.pathname.split('/')[2]) ?? DEVICES[0]
@@ -275,7 +277,7 @@ function howTo(node: string) {
   return `${units[n]?.name ?? spec.name} · ${spec.how[spec.controllers[0]] ?? ''}`
 }
 
-void entry.view().then((m) => {
+await entry.view().then((m) => {
   view = m.createView(stage, logic)
   const home = $<HTMLButtonElement>('home-all')
   if (home.textContent?.trim() === 'Home all') iconAction(home, 'home', 'Home all')
@@ -443,3 +445,4 @@ if (presence.shared.guest) {
   document.querySelectorAll<HTMLButtonElement>('#home-all, #reset').forEach(b => { b.disabled = true })
   Object.assign(window, { __device: { spec, logic, units, stage } })
 }
+})

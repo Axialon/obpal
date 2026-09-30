@@ -66,7 +66,9 @@ import { syncActionState } from '../action-state'
 import { mountQuick, quickAction, quickViews } from '../../ui/quick'
 import { HandCursor } from '../../ui/hand-cursor'
 import { holdReload } from '../../ui/recover'
+import { modelFailed, startScene } from '../kit/recovery'
 
+startScene(() => {
 applyTheme(initialTheme())
 mountMarks()
 mountTopBar()
@@ -305,7 +307,7 @@ function addArm(number?: number): Arm | null {
     armInstances.clear()
     if (hold) hold.install(install); else install()
     armInstances.set(shownRoots()); view.invalidate()
-  }).catch(() => hold?.fallback()) // Optional meshes must never prevent an arm from running.
+  }).catch(() => { hold?.fallback(); modelFailed() }) // Optional meshes must never prevent an arm from running.
   refreshNodes()
   return arm
 }
@@ -1891,4 +1893,5 @@ Object.assign(window, {
     /** Attach a driver without the port chooser (tests, and pages embedding this one with their own transport). */
     connectWith: async (id: string, driver: ArmDriver) => { const a = armOf(id); if (!a || a.hw) return false; await driver.connect(); attach(a, driver); return true },
   },
+})
 })

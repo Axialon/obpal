@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { createServer } from 'node:net'
 import { archive, args, beneath, defaultOutbox, denyWords, git, globMatch, guarded, json, loadArchive,
-  masterSha, REPOSITORY, saveExchange, scanMembers, sha256, stageId, SUITES, tree } from './common.mjs'
+  masterSha, messageBudgetLine, REPOSITORY, saveExchange, scanMembers, sha256, stageId, SUITES, tree } from './common.mjs'
 import { scanText, SECRET_RULES, PRIVATE_RULES } from '../lib/scan.mjs'
 import { LIMITS } from './zip.mjs'
 import { reviewStage } from './review.mjs'
@@ -219,6 +219,7 @@ async function exchange({ root, returned, request, stage: requestedStage, mode, 
   const steps = [], members = {}, redactions = [], deviations = []
   let logBudget = 8 << 20
   let stage = 'rejected', base = masterSha(root), head = null, lane = null, verified = null, commits = [], privateRefused = false
+  let message_budget
   const deny = denyWords(root)
   const capture = (name, text, knownSize = Buffer.byteLength(text)) => {
     if (knownSize > logBudget) {
@@ -248,7 +249,8 @@ async function exchange({ root, returned, request, stage: requestedStage, mode, 
         if (matches.length !== 1) throw new Error('Retained request not uniquely found; supply --request <original.zip>')
         request = matches[0]
       }
-      stage = stageId(loadArchive(request).manifest.stage)
+      const input = loadArchive(request).manifest
+      stage = stageId(input.stage); message_budget = input.message_budget
       verified = verifyStage({ root, returned, request }); base = verified.base
       record('preflight', { exit_code: 0, log: 'Archive hashes, retained request, pinned master, scope, before hashes and path safety verified.\n' })
       const destination = beneath(root, `.claude/worktrees/astra-${stage}`)
@@ -265,7 +267,7 @@ async function exchange({ root, returned, request, stage: requestedStage, mode, 
       const reviewPath = join(evidence, 'review.md')
       writeFileSync(reviewPath, review.markdown, { flag: 'wx' })
       writeFileSync(join(evidence, 'stage.json'), json({ schema_version: 1, stage, base, head,
-        touched: verified.touched, suites: verified.suites, outbox,
+        touched: verified.touched, suites: verified.suites, outbox, message_budget,
         review_sha256: sha256(review.markdown), lock_changed: review.lockChanged }), { flag: 'wx' })
       return { path: reviewPath, result: 'review-required', steps, head, branch: `astra/${stage}`, deviations }
     }
@@ -273,6 +275,7 @@ async function exchange({ root, returned, request, stage: requestedStage, mode, 
     const evidence = beneath(root, `artifacts/astra/${stage}`)
     const state = JSON.parse(readFileSync(join(evidence, 'stage.json'), 'utf8'))
     if (state.schema_version !== 1 || state.stage !== stage) throw new Error('Invalid local stage state')
+    message_budget = state.message_budget
     outbox ??= state.outbox
     if (!outbox) throw new Error('Local stage has no outbox')
     base = state.base
@@ -371,9 +374,11 @@ async function exchange({ root, returned, request, stage: requestedStage, mode, 
   members['SOURCE.json'] = json({ base_sha: base, head, changed_paths: head ? verified.touched : [], hashes,
     pending_status: redact(pending, deny, redactions, 'SOURCE.json'), deviations })
   members['REDACTIONS.json'] = json(redactions)
-  const prompt = `You are GPT-Astra Pro reconciling ob.Pal stage ${stage}. Read MANIFEST.json, RESULT.md, SOURCE.json, INTEGRATION.md, actual.patch, acceptance/ and REDACTIONS.json in the attached result ZIP. These are integrator evidence: preserve every real failed, blocked or unexecuted check. Do not claim merged or deployed. Explain findings and propose the next bounded stage; if changes are needed, request a fresh pinned request ZIP. Do not replay a stale stage or invent green results.\n`
+  const prompt = `You are Astra reconciling ob.Pal stage ${stage}. Read MANIFEST.json, RESULT.md, SOURCE.json, INTEGRATION.md, actual.patch, acceptance/ and REDACTIONS.json in the attached result ZIP. Preserve every real failed, blocked or unexecuted check. Do not claim merged or deployed. Deliver one precise, coherent reconcile with findings and the next bounded stage; changes need a fresh pinned request ZIP. Never replay a stale stage or invent green results.
+Working within the message budget
+${messageBudgetLine(message_budget)} This is the request's budget checkpoint; the owner's ledger records subsequent usage. Each round trip costs Astra one message. Plan internally, resolve questions from the pack/GitHub, list assumptions and report actual self-checks. If needed, include a coherent partial with a precise continuation plan in this message.\n`
   members['ASTRA_START.txt'] = prompt
-  const path = saveExchange(outbox ?? defaultOutbox(), stage, 'Return', archive(members, { kind: 'result', stage, result }), prompt)
+  const path = saveExchange(outbox ?? defaultOutbox(), stage, 'Return', archive(members, { kind: 'result', stage, result, message_budget }), prompt)
   return { path, result, steps, head, branch: lane ? `astra/${stage}` : null, deviations }
 }
 

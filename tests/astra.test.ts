@@ -8,18 +8,19 @@ import { reuseDependencies } from '../scripts/astra/dependencies.mjs'
 import { LIMITS, readZip, safePath, writeZip } from '../scripts/astra/zip.mjs'
 
 const TASK = '# Sample\n\nAdd one test.\n\n## Acceptance\nA passing test.\n\n## Out of scope\nEverything else.\n'
+const MIRROR = 'a'.repeat(40)
 function commit(root: string, subject: string) {
   git(root, ['add', '-A'])
   // Fixture identities are synthetic and never change the checkout's Git configuration.
   git(root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-m', subject])
 }
-function fixture(stage = 'fixture', globs = ['*.txt']) {
+function fixture(stage = 'fixture', globs = ['*.txt'], options: Partial<Parameters<typeof buildPack>[0]> = {}) {
   const root = mkdtempSync(join(tmpdir(), 'obpal-astra-test-')), outbox = join(root, 'outbox')
   git(root, ['init', '-b', 'master'])
   writeFileSync(join(root, 'value.txt'), 'before\n')
   commit(root, 'Initial fixture')
   const base = git(root, ['rev-parse', 'HEAD']).toString().trim()
-  const pack = buildPack({ root, stage, task: TASK, globs })
+  const pack = buildPack({ root, stage, task: TASK, globs, ...options })
   mkdirSync(outbox)
   const request = join(outbox, `obpal-${stage}-Request-fixture.zip`); writeFileSync(request, pack.bytes)
   writeFileSync(join(root, 'value.txt'), 'after\n')
@@ -51,6 +52,56 @@ async function receive(f: ReturnType<typeof fixture>) {
 
 // Real Git fixture operations need headroom when the full suite runs in parallel on Windows.
 describe('Astra request packs', { timeout: 30_000 }, () => {
+  it('omits source bytes in lean packs while keeping every eligible hash, mode and mirror pin', () => {
+    const f = fixture()
+    writeFileSync(join(f.root, 'large.txt'), 'X'.repeat(50000)); commit(f.root, 'Large fixture')
+    const options = { root: f.root, stage: 'lean', task: TASK, mirror: MIRROR, messages: 14, spent: 0 }
+    const full = buildPack(options), lean = buildPack({ ...options, lean: true, budget: 0.02 })
+    const fullMembers = readZip(full.bytes), members = readZip(lean.bytes)
+    const manifest = JSON.parse(members['MANIFEST.json'].toString())
+    const fullManifest = JSON.parse(fullMembers['MANIFEST.json'].toString())
+    expect(Object.keys(members).sort()).toEqual(['ASTRA_PROMPT.txt', 'MANIFEST.json', 'RETURN_CONTRACT.md', 'START_HERE.md', 'TASK.md'])
+    expect(manifest.source_hashes).toEqual(fullManifest.source_hashes)
+    expect(manifest.source_modes).toEqual(fullManifest.source_modes)
+    expect(manifest.source_hashes['large.txt']).toBe(sha256('X'.repeat(50000)))
+    expect(manifest.export_scope.trimmed).toEqual([])
+    expect(manifest.repository_mirror).toEqual({ url: 'https://github.com/Axialon/obpal', commit: MIRROR,
+      equals_private: git(f.root, ['rev-parse', 'master']).toString().trim(), sanitized_paths: ['wrangler.jsonc'] })
+    expect(manifest.message_budget).toEqual({ programme_total: 200, stage: 14, spent: 0 })
+    expect(manifest.lean).toBe(true)
+    const start = members['START_HERE.md'].toString()
+    expect(start).toContain('Compute your before state from the mirror commit')
+    expect(start).toContain('Every before hash from the mirror must match MANIFEST.source_hashes')
+    expect(start).toContain('full-source pack (the non-lean build), rather than guessing')
+    expect(start).toContain('Working within the message budget')
+    expect(lean.prompt).toContain('Budget: 14 messages for this stage; 200 for the programme; spent so far: 0.')
+    expect(lean.prompt).toContain('Working within the message budget')
+    expect(lean.prompt).toContain('You are Astra,')
+    expect(lean.prompt).toContain('Finish with the ZIP as a downloadable file')
+    expect(lean.prompt.length).toBeLessThan(1200)
+    expect([start, lean.prompt, members['RETURN_CONTRACT.md'].toString()].join('\n')).not.toMatch(/GPT-Astra|Astra Pro/)
+    expect(() => buildPack({ ...options, lean: true, budget: 0.001 })).toThrow('Budget')
+  })
+  it('requires a full mirror SHA for lean and validates the programme budget without losing zero spent', () => {
+    const f = fixture(), options = { root: f.root, stage: 'budget', task: TASK }
+    expect(() => buildPack({ ...options, lean: true })).toThrow('--lean requires --mirror')
+    expect(() => buildPack({ ...options, mirror: 'main' })).toThrow('full public commit SHA')
+    for (const messages of [0, -1, 1.5, 201, NaN]) expect(() => buildPack({ ...options, messages })).toThrow('Messages')
+    for (const spent of [-1, 1.5, 201, NaN, 199]) expect(() => buildPack({ ...options, spent })).toThrow('Spent')
+    const m = JSON.parse(readZip(buildPack(options).bytes)['MANIFEST.json'].toString())
+    expect(m.message_budget).toEqual({ programme_total: 200, stage: 12, spent: null })
+  })
+  it('honours an explicit earlier master pin and checks its checkpoint instead of moving master', () => {
+    const f = fixture()
+    writeFileSync(join(f.root, 'value.txt'), 'later master\n'); commit(f.root, 'Advance master')
+    const options = { root: f.root, stage: 'pin', task: TASK, at: f.base, mirror: MIRROR, checkpoint: { master_sha: f.base } }
+    const pack = buildPack(options), members = readZip(pack.bytes), m = JSON.parse(members['MANIFEST.json'].toString())
+    expect(pack.master).toBe(f.base)
+    expect(m.repository_mirror.equals_private).toBe(f.base)
+    expect(members['source/value.txt'].toString()).toBe('before\n')
+    expect(() => buildPack({ ...options, checkpoint: { master_sha: git(f.root, ['rev-parse', 'master']).toString().trim() } })).toThrow('Checkpoint')
+    expect(() => buildPack({ ...options, at: 'master' })).toThrow('--at must be a commit SHA')
+  })
   it('exports pinned tracked blobs with exact member hashes, ignoring dirty and untracked files', () => {
     const f = fixture()
     writeFileSync(join(f.root, 'value.txt'), 'dirty\n')
@@ -93,6 +144,21 @@ describe('Astra request packs', { timeout: 30_000 }, () => {
 })
 
 describe('Astra return intake', { timeout: 30_000 }, () => {
+  it('accepts a lean request through intake and carries its message budget into the reconcile ZIP', async () => {
+    const f = fixture('lean-intake', ['*.txt'], { lean: true, mirror: MIRROR, messages: 14, spent: 0 })
+    expect(readZip(f.pack.bytes)['source/value.txt']).toBeUndefined()
+    expect(verifyStage(f).touched).toEqual(['value.txt'])
+    const received = await receive(f)
+    expect(received.result).toBe('review-required')
+    const report = await verify({ root: f.root, stage: 'lean-intake', run: () => { throw new Error('No approval must execute nothing') } })
+    const result = loadArchive(report.path)
+    expect(result.manifest.message_budget).toEqual({ programme_total: 200, stage: 14, spent: 0 })
+    const prompt = result.members['ASTRA_START.txt'].toString()
+    expect(prompt).toContain('You are Astra reconciling')
+    expect(prompt).toContain('Budget: 14 messages for this stage; 200 for the programme; spent so far: 0.')
+    expect(prompt).toContain('Each round trip costs Astra one message')
+    expect(prompt).not.toMatch(/GPT-Astra|Astra Pro/)
+  })
   it('reuses trusted third-party dependencies without installing and points workspace packages into the lane', () => {
     const f = fixture('dependency-links')
     mkdirSync(join(f.root, 'packages', 'core'), { recursive: true })

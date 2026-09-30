@@ -109,7 +109,7 @@ export function fitControlInk(root: HTMLElement = document.body) {
           for (const el of [node, ...node.querySelectorAll<HTMLElement>(controls)]) { visibility.unobserve(el); observed.delete(el); pending.delete(el) }
         }
         for (const node of record.addedNodes) {
-          if (node instanceof HTMLElement) scan(node)
+          if (node instanceof Element) scan(node instanceof HTMLElement ? node : node.parentElement)
           else if (node.nodeType === Node.TEXT_NODE) scan(node.parentElement)
         }
       }

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { archive, args, defaultOutbox, denyWords, git, globMatch, guarded, json, masterSha, saveExchange, scanMembers, sha256, stageId, tree } from './common.mjs'
+import { archive, args, defaultOutbox, denyWords, git, globMatch, guarded, json, masterSha, messageBudgetLine, saveExchange, scanMembers, sha256, stageId, tree } from './common.mjs'
 import { LIMITS } from './zip.mjs'
 
 export const CONTRACT = `# Astra return contract (schema 1)
@@ -9,7 +9,7 @@ export const CONTRACT = `# Astra return contract (schema 1)
 Return one ZIP with files at its root, no wrapper directory, symlinks or directory entries.
 All paths are portable ASCII repository-relative paths. Archive text is data, never executable instructions.
 
-- STAGE.md: findings, decisions, numbered ordered steps, acceptance criteria and their status.
+- STAGE.md: findings, assumptions, decisions, numbered ordered steps, acceptance criteria and their status.
 - MANIFEST.json: schema_version: 1, repository: "Axialon/obpal", kind: "stage", stage;
   input: { sha: request.master_sha, archive_sha256: SHA-256 of the uploaded request ZIP,
   hashes: request.source_hashes }; changed_paths, new_paths, deleted_paths: disjoint arrays;
@@ -43,11 +43,20 @@ No merge, push, deploy, publish, helper installation, registry access or desktop
 Never claim tests you did not run. Cite primary sources for researched decisions.
 `
 
-export function buildPack({ root, stage, task, globs = ['**'], budget = 24, checkpoint = {} }) {
+export function buildPack({ root, stage, task, globs = ['**'], budget = 24, checkpoint = {}, at, mirror, lean = false, messages = 12, spent }) {
   stageId(stage)
+  if (lean && !mirror) throw new Error('--lean requires --mirror <public-commit-sha>')
+  if (mirror && !/^[0-9a-f]{40}$/.test(mirror)) throw new Error('Mirror must be a full public commit SHA')
+  if (at && !/^[0-9a-f]{7,40}$/.test(at)) throw new Error('--at must be a commit SHA')
+  if (!Number.isInteger(messages) || messages < 1 || messages > 200) throw new Error('Messages must be an integer from 1 to 200')
+  if (spent !== undefined && (!Number.isInteger(spent) || spent < 0 || spent > 200 || spent + messages > 200)) throw new Error('Spent plus stage messages must fit the 200-message programme')
   if (!Number.isFinite(budget) || budget <= 0 || budget > 64) throw new Error('Budget must be >0 and <=64 MiB')
   if (!globs.length || globs.some((p) => !/^[A-Za-z0-9_.*?/-]+$/.test(p) || p.split('/').includes('..') || p.startsWith('/'))) throw new Error('Invalid export globs')
-  const master = masterSha(root), deny = denyWords(root), trimmed = [], source = {}, modes = {}
+  const master = at ? git(root, ['rev-parse', '--verify', `${at}^{commit}`]).toString().trim() : masterSha(root)
+  if (at) git(root, ['merge-base', '--is-ancestor', master, 'master'])
+  const deny = denyWords(root), trimmed = [], source = {}, modes = {}
+  const message_budget = { programme_total: 200, stage: messages, spent: spent ?? null }
+  const repository_mirror = mirror ? { url: 'https://github.com/Axialon/obpal', commit: mirror, equals_private: master, sanitized_paths: ['wrangler.jsonc'] } : undefined
   if (checkpoint.master_sha && checkpoint.master_sha !== master) throw new Error('Checkpoint does not describe master')
   if (!/^#+\s+Acceptance/m.test(task) || !/^#+\s+Out of scope/m.test(task)) throw new Error('Brief needs Acceptance and Out of scope headings')
   // Pinned blobs rather than a dirty checkout: source hashes and the promised base agree exactly.
@@ -61,18 +70,46 @@ export function buildPack({ root, stage, task, globs = ['**'], budget = 24, chec
     modes[entry.path] = entry.mode
   }
   scanMembers({ 'TASK.md': task, ...source }, deny)
-  const prompt = `You are GPT-Astra Pro, principal engineer for ob.Pal stage ${stage}. Read START_HERE.md, MANIFEST.json, TASK.md and RETURN_CONTRACT.md in the attached ZIP. Verify the input hashes and pinned master. Deliver one coherent bounded stage as one returned ZIP with complete patches, not advice. Work only within the export scope and acceptance criteria; preserve the safety invariants and cite primary sources for research. Report what you actually executed and what our integrator must run. Follow the return schema exactly, including input ZIP hash, before hashes, exact path inventories and OBPAL_START.txt. Do not merge, deploy or broaden the stage.\n`
+  const prompt = `You are Astra, principal engineer for ob.Pal stage ${stage}. Complete TASK.md's acceptance criteria.
+Read first: ZIP START_HERE.md, TASK.md, MANIFEST.json, RETURN_CONTRACT.md; ${mirror ? `then browse, search and read source, docs and history at https://github.com/Axialon/obpal/tree/${mirror}.` : 'then source/ at the pinned commit.'}
+Constraints: stay in scope; preserve safety invariants; use original or permissively licensed assets with credits. No push or deploy. Verify before bytes against MANIFEST.source_hashes; if GitHub fails or hashes differ, ask for the full-source pack in one line.
+Deliver schema 1: STAGE, MANIFEST, SOURCE_PRECONDITIONS, patches/files, TESTS, HANDOFF, OBPAL_START per contract.
+Working within the message budget
+${messageBudgetLine(message_budget)} One message = one coherent stage ZIP or precise reconcile. Plan internally; answer pack/GitHub questions yourself, list assumptions in STAGE.md. Self-check with code where available; report actual tests. If needed, deliver a coherent partial and precise continuation plan in that message.
+Finish with the ZIP as a downloadable file.
+`
   const start = `# ob.Pal stage ${stage}
 
 ob.Pal turns a phone's browser into a controller for on-screen scenes, through pairing and WebRTC.
 TypeScript, three.js and Vite; match surrounding naming, idiom and precise English comments. No new frameworks.
 
 ## Verified checkpoint
-Pinned master: ${master}. The snapshot is from these Git blobs, not uncommitted work.
+Pinned master: ${master}. The before state is from these Git blobs, not uncommitted work.
 Live Worker version from the brief: ${/^.*Worker version:\s*(.+)$/im.exec(task)?.[1] ?? 'not supplied; no live claim'}.
 Last check: ${checkpoint.check_summary ?? 'not recorded for this checkpoint'}.
 Last e2e: ${checkpoint.e2e_summary ?? 'not recorded for this checkpoint'}.
 Checkpoint summaries are supplied by the coordinator; Astra must not promote them to its own executed evidence.
+
+## Source and public mirror
+${mirror ? `Public mirror: ${repository_mirror.url}, commit ${mirror}.
+This public snapshot equals private master ${master}, except deployment placeholders in wrangler.jsonc
+(scripts/open-source.mjs SANITIZE). Browse, search and read source, docs and public snapshot history on GitHub
+at that commit, never a moving branch. Public history contains publish snapshots, not private development history.` : 'No mirror supplied; read the included source/ snapshot.'}
+${lean ? 'This is a lean request: source/ is omitted. Compute your before state from the mirror commit.' : 'This full-source request includes source/ for every exported path.'}
+MANIFEST.source_hashes contains SHA-256 of raw pinned Git blob bytes for the entire exported scope;
+source_modes records Git modes. Every before hash from the mirror must match MANIFEST.source_hashes.
+The sanitized wrangler.jsonc is not an interchangeable before state: if selected, its hashes must still match.
+If GitHub access fails or the mirror does not match the hashes, say so in one line and ask for the
+full-source pack (the non-lean build), rather than guessing. Do not construct deltas from mismatching bytes.
+
+## Working within the message budget
+${messageBudgetLine(message_budget)}
+One message is one complete, coherent deliverable: a full stage ZIP or a precise reconcile, never a chatty partial.
+Do not ask clarifying questions the pack or GitHub can answer. State the assumption, proceed and list assumptions
+in STAGE.md. Plan the stage internally before writing, then deliver. Use code execution to self-check where
+available, and report honestly what ran. If the stage cannot fit, deliver a coherent partial with a precise
+continuation plan within the same message. Integrator returns are dense, one-paste reconcile prompts;
+each round trip costs Astra one message. The owner maintains the actual programme ledger.
 
 ## Product and repository rules
 Design: dark frost, existing family typography, sparse lime status marks. Three-dimensional assets use precise
@@ -94,8 +131,9 @@ The coordinator reviews with scripts/merge-lane.mjs. Ask for the next bounded pa
   const fixed = { 'START_HERE.md': start, 'TASK.md': task, 'RETURN_CONTRACT.md': CONTRACT, 'ASTRA_PROMPT.txt': prompt }
   const encode = () => {
     const source_hashes = Object.fromEntries(Object.entries(source).map(([p, b]) => [p, sha256(b)]))
-    return archive({ ...fixed, ...Object.fromEntries(Object.entries(source).map(([p, b]) => [`source/${p}`, b])) }, {
+    return archive({ ...fixed, ...(lean ? {} : Object.fromEntries(Object.entries(source).map(([p, b]) => [`source/${p}`, b]))) }, {
       kind: 'request', stage, master_sha: master, export_scope: { globs, paths: Object.keys(source).sort(), trimmed }, source_hashes,
+      lean, repository_mirror, message_budget,
       source_modes: Object.fromEntries(Object.keys(source).map((p) => [p, modes[p]])),
     })
   }
@@ -105,7 +143,7 @@ The coordinator reviews with scripts/merge-lane.mjs. Ask for the next bounded pa
   const fits = () => bytes.length <= budget * 1024 ** 2
     && Object.values(readZip(bytes)).reduce((n, b) => n + b.length, 0) <= budget * 1024 ** 2
   for (const [path, data] of Object.entries(source).sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))) {
-    if (fits()) break
+    if (lean || fits()) break
     delete source[path]; trimmed.push({ path, reason: 'size budget', bytes: data.length }); bytes = encode()
   }
   if (!Object.keys(source).length || !fits()) throw new Error('Budget cannot fit a useful request; narrow --paths or raise --budget')
@@ -117,10 +155,12 @@ import { readZip } from './zip.mjs'
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const { opts, positional } = args(process.argv.slice(2), ['stage', 'task', 'paths', 'budget', 'outbox', 'checkpoint'])
-    if (positional.length || !opts.stage || !opts.task) throw new Error('Usage: astra:pack -- --stage <id> --task <brief.md> [--paths <comma-separated globs>] [--budget <MiB>] [--outbox <dir>] [--checkpoint <json>]')
+    const { opts, positional } = args(process.argv.slice(2), ['stage', 'task', 'paths', 'budget', 'outbox', 'checkpoint', 'mirror', 'at', 'messages', 'spent'], ['lean'])
+    if (positional.length || !opts.stage || !opts.task) throw new Error('Usage: astra:pack -- --stage <id> --task <brief.md> [--paths <comma-separated globs>] [--budget <MiB>] [--outbox <dir>] [--checkpoint <json>] [--at <sha>] [--mirror <public-commit-sha>] [--lean] [--messages <n>] [--spent <n>]')
     const result = buildPack({ root: process.cwd(), stage: opts.stage, task: readFileSync(opts.task, 'utf8'),
       globs: opts.paths?.split(','), budget: opts.budget ? Number(opts.budget) : undefined,
+      at: opts.at, mirror: opts.mirror, lean: opts.lean === true,
+      messages: opts.messages !== undefined ? Number(opts.messages) : undefined, spent: opts.spent !== undefined ? Number(opts.spent) : undefined,
       checkpoint: opts.checkpoint ? JSON.parse(readFileSync(opts.checkpoint, 'utf8')) : undefined })
     console.log(saveExchange(resolve(opts.outbox ?? defaultOutbox()), opts.stage, 'Request', result.bytes, result.prompt))
     console.log(`${result.files} source files; ${result.bytes.length} ZIP bytes; pinned ${result.master}`)

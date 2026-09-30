@@ -17,6 +17,26 @@ function tab(over: Partial<RecoverEnv> = {}) {
 }
 
 describe('a page that outlives a deploy reloads itself, once', () => {
+  it('shares the retry bound between a manual retry and deploy recovery deciding together', async () => {
+    let answer: (value: boolean) => void = () => {}
+    const reachable = new Promise<boolean>(resolve => { answer = resolve })
+    const t = tab({ reachable: () => reachable })
+    const manual = recoverer(t.env)
+    const decisions = Promise.all([t.recover(), manual()])
+    answer(true)
+    expect(await decisions).toEqual([true, false])
+    expect(t.seen.reloads).toBe(1)
+  })
+  it('keeps a phone or shared scene that becomes active while reachability is being checked', async () => {
+    let answer: (value: boolean) => void = () => {}, busy = false
+    const t = tab({ held: () => busy, reachable: () => new Promise(resolve => { answer = resolve }) })
+    const pending = t.recover()
+    busy = true
+    answer(true)
+    expect(await pending).toBe(false)
+    expect(t.seen.reloads).toBe(0)
+    expect(t.data.has(RELOAD_KEY)).toBe(false)
+  })
   it('reloads on a failed chunk and writes the time first, so the page that comes back knows', async () => {
     const t = tab()
     expect(await t.recover()).toBe(true)

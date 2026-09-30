@@ -36,10 +36,14 @@ export function recoverer(env: RecoverEnv): () => Promise<boolean> {
     deciding = true
     try {
       if (env.held() || !env.storage) return false
-      const last = Number(env.storage.getItem(RELOAD_KEY))
+      const recent = () => {
+        const last = Number(env.storage!.getItem(RELOAD_KEY))
+        return last > 0 && env.now() - last < RELOAD_WINDOW_MS
+      }
       // A clock set back leaves `last` in the future: that counts as recent too.
-      if (last > 0 && env.now() - last < RELOAD_WINDOW_MS) return false
-      if (!(await env.reachable())) return false
+      if (recent()) return false
+      // A manual retry and deploy recovery can decide together; a connection can also arrive during the request.
+      if (!(await env.reachable()) || env.held() || recent()) return false
       // Written before the reload, so the page that comes back can't do it again.
       env.storage.setItem(RELOAD_KEY, String(env.now()))
       env.reload()

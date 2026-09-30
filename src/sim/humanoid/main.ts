@@ -32,7 +32,9 @@ import { iconAction } from '../../ui/kit/action'
 import { lightArena, quietHorizon, soleShadow } from './lighting'
 import { DriverPanel } from './driver-panel'
 import { upperJoints } from './driver-profile'
+import { startScene } from '../kit/recovery'
 
+startScene(() => {
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 const previewSoft = softPreview(location.search)
 const robots = robotRoster(previewSoft)
@@ -660,3 +662,4 @@ if (test)
         }),
     },
   })
+})

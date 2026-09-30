@@ -4,7 +4,7 @@
  *   pnpm run e2e:all                      every suite (package.json's e2e:<name> scripts)
  *   pnpm run e2e:all -- phone shared      just these, in this order (commas work too, or --suites phone,shared)
  *   Options: --out <dir> for the suites' logs (default: a fresh temp folder), --wait-min <n> for how long a busy port
- *   is waited for (15), --timeout-min <n> per suite (30).
+ *   is waited for (15), --timeout-min <n> per suite (30, or 45 for the full sims suite).
  *
  * Service. Each suite runs against its own fresh local worker (this checkout's, under `wrangler dev`: see
  * extension/e2e/local.mjs), never production, whose per-address limits every run on this machine shares. Production
@@ -29,7 +29,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveChromium, shortPath } from './lib/browser.mjs'
-import { DEFAULT_PORT, DEFAULT_WORKER_PORT, failures, knownSuites, listeningPids, newSessionLines, parseArgs, parseResult, suitePorts } from './lib/e2e.mjs'
+import { DEFAULT_PORT, DEFAULT_WORKER_PORT, failures, knownSuites, listeningPids, newSessionLines, parseArgs, parseResult, suitePorts, suiteTimeout } from './lib/e2e.mjs'
 import { formatDuration, formatTable } from './lib/report.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
@@ -165,9 +165,10 @@ for (const suite of opts.suites) {
   const t0 = Date.now()
   process.stdout.write(`> e2e:${suite} … `)
   let timedOut = false
+  const timeoutMin = suiteTimeout(suite, opts, env)
   const code = await new Promise((r) => {
     current = spawn('pnpm', ['run', `e2e:${suite}`], { cwd: root, env, shell: win, stdio: ['ignore', fd, fd], windowsHide: true, detached: !win })
-    const timer = setTimeout(() => { timedOut = true; killTree(current) }, opts.timeoutMin * 60_000)
+    const timer = setTimeout(() => { timedOut = true; killTree(current) }, timeoutMin * 60_000)
     current.on('error', () => { clearTimeout(timer); r(-1) })
     current.on('exit', (c) => { clearTimeout(timer); r(c ?? -1) })
   })
@@ -181,7 +182,7 @@ for (const suite of opts.suites) {
   const ok = code === 0 && !timedOut && (!res || res.failed === 0)
   const result = timedOut ? 'TIMEOUT' : ok ? 'pass' : 'FAIL'
   console.log(`${result} ${tests} in ${formatDuration(ms)}`)
-  let note = timedOut ? `stopped after ${opts.timeoutMin} min` : !ok ? failed[0] ?? `exit ${code}; see ${suite}.log` : ''
+  let note = timedOut ? `stopped after ${timeoutMin} min` : !ok ? failed[0] ?? `exit ${code}; see ${suite}.log` : ''
   if (!ok && failed.length) details.push([suite, failed])
   if (worker !== null) {
     const leftover = await stopLeftoverWorker(worker)

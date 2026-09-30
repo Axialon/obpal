@@ -24,7 +24,7 @@ export function knownSuites(scripts) {
  * @param {string[]} known
  */
 export function parseArgs(argv, known) {
-  const opts = { suites: [], out: '', waitMin: 15, timeoutMin: 30, help: false }
+  const opts = { suites: [], out: '', waitMin: 15, timeoutMin: null, help: false }
   const names = []
   const num = (flag, v) => {
     const n = Number(v)
@@ -50,6 +50,11 @@ export function parseArgs(argv, known) {
   if (unknown.length) throw new Error(`unknown suite${unknown.length > 1 ? 's' : ''} ${unknown.join(', ')} (known: ${known.join(' ')})`)
   opts.suites = !wanted.length || wanted.includes('all') ? [...known] : [...new Set(wanted)]
   return opts
+}
+
+/** The full sims suite has a larger budget; explicit overrides and other suites retain theirs. */
+export function suiteTimeout(suite, opts, env = {}) {
+  return opts.timeoutMin ?? (suite === 'sims' && !env.OBPAL_E2E_SIMS_ONLY ? 45 : 30)
 }
 
 /**

@@ -12,6 +12,9 @@ export const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex'
 export const json = (value) => `${JSON.stringify(value, null, 2)}\n`
 export const utc = () => new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').replace('.', '')
 export const defaultOutbox = () => join(homedir(), 'Downloads', 'obpal-astra', 'outbox')
+export function messageBudgetLine(budget = {}) {
+  return `Budget: ${budget.stage ?? 12} messages for this stage; 200 for the programme; spent so far: ${budget.spent ?? 'not supplied'}.`
+}
 export function stageId(id) {
   if (typeof id !== 'string' || !/^[a-z0-9][a-z0-9-]{0,59}$/.test(id)) throw new Error('Stage must be 1-60 lower-case letters, digits or hyphens')
   return id
@@ -110,12 +113,13 @@ export function saveExchange(outbox, stage, kind, bytes, prompt) {
   writeFileSync(join(outbox, `${stem}.prompt.txt`), prompt, { flag: 'wx' })
   return path
 }
-export function args(argv, allowed) {
+export function args(argv, allowed, flags = []) {
   const opts = {}, positional = []
   for (let i = 0; i < argv.length; i++) {
     const name = argv[i]
     if (name === '--') continue
     if (!name.startsWith('--')) { positional.push(name); continue }
+    if (flags.includes(name.slice(2)) && !(name.slice(2) in opts)) { opts[name.slice(2)] = true; continue }
     if (!allowed.includes(name.slice(2)) || !argv[i + 1] || argv[i + 1].startsWith('--') || name.slice(2) in opts) throw new Error(`Invalid argument: ${name}`)
     opts[name.slice(2)] = argv[++i]
   }

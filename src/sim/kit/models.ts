@@ -98,7 +98,11 @@ export function downloadPrototype(name: Prototype): Promise<Group | null> {
       performance.measure(`obpal:${name}:load`, `obpal:${name}:load`, `obpal:${name}:decoded`)
       if (download) download.stage = 'ready'
       return scene
-    }).catch(() => { if (download) download.stage = 'failed'; return null })
+    }).catch(() => {
+      if (download) download.stage = 'failed'
+      if (typeof dispatchEvent === 'function') dispatchEvent(new Event('obpal:model-failed'))
+      return null
+    })
     download = { started: performance.now(), stage: 'fetching', scene }
     downloads.set(name, download)
   }

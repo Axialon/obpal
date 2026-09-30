@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { newestInstalled, shortPath } from '../scripts/lib/browser.mjs'
-import { countSessionLines, failures, knownSuites, listeningPids, newSessionLines, parseArgs, parseResult, suitePorts } from '../scripts/lib/e2e.mjs'
+import { countSessionLines, failures, knownSuites, listeningPids, newSessionLines, parseArgs, parseResult, suitePorts, suiteTimeout } from '../scripts/lib/e2e.mjs'
 import { latestRelease, LINK_STORE, LINK_ZIP, linkInstallChecks, linkVersionLabel, pageHeaderChecks, RELEASE_ASSETS, releaseChecks, securityTxtCheck, shownCode, turnChecks } from '../scripts/lib/live.mjs'
 import { applyAllow, DEFAULT_CO_AUTHOR, parseArgs as mergeArgs, parseVitest, pickCoAuthor, summarizeNumstat } from '../scripts/lib/merge.mjs'
 import { formatDuration, formatTable } from '../scripts/lib/report.mjs'
@@ -134,6 +134,11 @@ describe('e2e runner: suites, ports, results, the ob.Pal Desktop guard', () => {
 
   it('reads suites bare, comma-separated or after --suites, and options', () => {
     expect(parseArgs([], known).suites).toEqual(known)
+    const defaults = parseArgs([], known)
+    expect(suiteTimeout('sims', defaults)).toBe(45)
+    for (const suite of ['home', 'pages', 'phone']) expect(suiteTimeout(suite, defaults)).toBe(30)
+    expect(suiteTimeout('sims', defaults, { OBPAL_E2E_SIMS_ONLY: 'graphics-recovery' })).toBe(30)
+    expect(suiteTimeout('sims', parseArgs(['--timeout-min=30'], known))).toBe(30)
     expect(parseArgs(['--', 'all'], known).suites).toEqual(known)
     expect(parseArgs(['phone', 'code,phone'], known).suites).toEqual(['phone', 'code'])
     expect(parseArgs(['--suites', 'e2e:embed,phone'], known).suites).toEqual(['embed', 'phone'])

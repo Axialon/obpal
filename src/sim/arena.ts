@@ -25,7 +25,9 @@ import { mountSound } from './audio/session'
 import { mountSimPanels, numberSections } from './ui/panels'
 import { Readout } from '../ui/kit/readout'
 import { mountQuick, quickAction, quickViews } from '../ui/quick'
+import { modelFailed, startScene } from './kit/recovery'
 
+startScene(() => {
 applyTheme(initialTheme())
 mountMarks()
 mountTopBar()
@@ -145,7 +147,7 @@ const slots: Slot[] = FACTIONS.map((f, i) => {
     holder.position.y = 0.07 + (box.max.y - box.min.y) / 2
     holder.name = 'insignia'
     group.add(holder)
-  })
+  }, undefined, modelFailed)
   return { id: `p${i + 1}`, name: `Player ${i + 1} · ${f.faction}`, faction: f.faction, model: f.model, spawn, group, ring, pos: spawn.clone(), vel: new THREE.Vector2(), falling: 0, dashAt: -9, lastHitBy: null, lastHitAt: 0, points: 0, flash: 0 }
 })
 const slotOf = (id: string) => slots.find((s) => s.id === id)!
@@ -369,3 +371,4 @@ function resize() {
 resize()
 renderScore()
 renderer.setAnimationLoop(loop)
+})
