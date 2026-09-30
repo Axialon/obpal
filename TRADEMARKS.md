@@ -1,6 +1,6 @@
-# DRAFT: ob.Pal name and logo policy
+# ob.Pal name and logo policy
 
-**Draft for maintainer review.** This is the project's proposed naming policy, not legal advice or a statement that a trademark is registered.
+This is the project's naming policy. It is not legal advice or a statement that a trademark is registered.
 
 The code is licensed under [MIT](LICENSE). That license lets you use, change and distribute the code, including a fork. It does not license the ob.Pal name, wordmark or logo for presenting your fork, mirror or modified build as ob.Pal or as endorsed by its maintainers.
 

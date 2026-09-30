@@ -26,6 +26,9 @@
 .connection-limit .kit-select { min-width: 84px; }
 .connection-say { min-height: 20px; margin: 10px 0 0; font-size: 13px; color: var(--secondary); line-height: 1.4; }
 .connection-say:empty { display: none; }
+.connection-recovery { padding: 0 0 10px; }
+.connection-recovery .connection-actions { margin-top: 10px; }
+.connection-recovery .connection-actions .btn { white-space: normal; }
 .connection-empty { padding: 20px 0; color: var(--muted); }
 .connection-rename { display: flex; gap: 6px; width: 100%; }
 .connection-rename input { min-width: 0; flex: 1; border: 1px solid var(--glass-edge); border-radius: 10px; padding: 8px; background: transparent; color: inherit; font-size: 16px; }

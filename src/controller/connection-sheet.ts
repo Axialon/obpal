@@ -1,6 +1,7 @@
 /** The phone's private list and scanner, built with DOM text under the controller's Trusted Types policy. */
 import { formatCode, lookupCode, splitCode, type StoredConnection } from '@obpal/core'
-import { Connections, type Join } from './connections'
+import { Connections, type Connection, type Join } from './connections'
+import { pendingPhase, STILL_CONNECTING } from './pairing-recovery'
 import { CameraView } from '../ui/camera'
 import { readScan } from './scan-code'
 import { sheetExits } from './sheet'
@@ -40,9 +41,13 @@ export class ConnectionSheet {
   private returnFocus: HTMLElement | null = null
   private say: HTMLElement | null = null
   private background: { el: HTMLElement; hidden: string | null; inert: boolean } | null = null
+  private joining: Connection | null = null
 
   constructor(private hub: Connections) {
-    hub.changed = () => { if (this.dialog && this.view === 'list') this.list() }
+    hub.changed = () => {
+      if (this.joining?.welcome && !this.joining.failure && this.joining.link.ready && hub.active === this.joining) { this.close(); return }
+      if (this.dialog && this.view === 'list') this.list()
+    }
     addEventListener('pagehide', () => this.close())
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.view === 'scan') this.close() })
   }
@@ -88,6 +93,7 @@ export class ConnectionSheet {
     ++this.generation
     this.stopCamera()
     this.busy = false
+    this.joining = null
     this.exits()
     this.dialog.close()
     this.dialog.remove()
@@ -101,7 +107,14 @@ export class ConnectionSheet {
       this.background = null
     }
     this.hub.suspend(false)
-    if (this.returnFocus?.isConnected) this.returnFocus.focus()
+    const focus = this.returnFocus?.isConnected ? this.returnFocus : document.getElementById('code-in') ?? document.querySelector<HTMLElement>('.connection-title')
+    focus?.focus()
+  }
+
+  enterCode(id?: string) {
+    if (id) this.hub.cancel(id)
+    this.open()
+    this.code()
   }
 
   private tell(s: string) { if (this.say) this.say.textContent = s }
@@ -118,9 +131,12 @@ export class ConnectionSheet {
     const all = new Map(this.hub.rows)
     for (const c of this.hub.live.values()) if (!all.has(c.row.id)) all.set(c.row.id, c.row)
     const rows = [...all.values()].sort((a, b) => (Number(b.id === this.hub.current) - Number(a.id === this.hub.current)) || Number(!!this.hub.live.get(b.id)?.link.ready) - Number(!!this.hub.live.get(a.id)?.link.ready) || b.at - a.at)
-    const signature = JSON.stringify([this.hub.loading, this.hub.saving, this.hub.current, this.hub.maxLive, rows.map((r) => [r.id, r.name, r.at, this.hub.live.get(r.id)?.link.status, this.hub.live.get(r.id)?.stats?.path])])
+    const signature = JSON.stringify([this.hub.loading, this.hub.saving, this.hub.current, this.hub.maxLive, rows.map((r) => [r.id, r.name, r.at, this.hub.live.get(r.id)?.link.status, this.hub.live.get(r.id)?.failure, this.hub.live.get(r.id)?.stats?.path, this.hub.live.get(r.id)?.stillConnecting])])
     if (signature === this.signature) return
     this.signature = signature
+    const focus = document.activeElement as HTMLElement | null
+    const focusRow = focus?.closest<HTMLElement>('.connection-row')?.dataset.connection
+    const focusLabel = focus?.getAttribute('aria-label') ?? focus?.textContent
     const list = h('div', 'connection-list')
     list.setAttribute('role', 'list')
     list.setAttribute('aria-label', 'Saved screens')
@@ -141,27 +157,35 @@ export class ConnectionSheet {
     }
     limit.append(select)
     this.body.replaceChildren(list, tools, limit)
+    if (focus && !focus.isConnected) {
+      const scope = [...list.children].find(el => (el as HTMLElement).dataset.connection === focusRow) ?? this.body
+      const next = [...scope.querySelectorAll<HTMLElement>('button, select')].find(el => (el.getAttribute('aria-label') ?? el.textContent) === focusLabel)
+      ;(next ?? this.dialog!.querySelector<HTMLElement>('[aria-label="Close connections"]'))?.focus()
+    }
   }
 
   private entry(row: StoredConnection) {
     const c = this.hub.live.get(row.id)
     const active = row.id === this.hub.current
-    const live = !!c?.link.ready
-    const connecting = c && ['signaling', 'connecting', 'securing', 'reconnecting'].includes(c.link.status)
+    const live = !!c?.welcome && !c.failure && c.link.ready
+    const connecting = c && !live && !c.failure && pendingPhase(c.link.status)
+    const needsCode = !live && !row.invite
     const el = h('div', 'connection-row')
     el.dataset.connection = row.id
     el.dataset.active = String(active)
     el.setAttribute('role', 'listitem')
     const use = button('', () => {
-      if (!live && !row.invite) { this.scan(); this.tell('Scan this screen’s current code to reconnect.'); return }
+      if (needsCode) { this.hub.cancel(row.id); this.code(); return }
+      if (connecting) { this.tell(c.stillConnecting ? STILL_CONNECTING : 'Connecting… You can cancel this attempt.'); return }
       tick()
-      void this.hub.use(row.id).then(() => this.close(), (e: Error) => this.tell(e.message))
+      void this.hub.use(row.id).then(c => this.follow(c), (e: Error) => this.tell(e.message))
     }, 'connection-use')
-    use.setAttribute('aria-label', `${active ? 'Active' : 'Switch to'} ${row.name}`)
+    use.setAttribute('aria-label', `${live && active ? 'Active' : needsCode ? 'Pair again with' : connecting ? 'Connecting to' : 'Switch to'} ${row.name}`)
     const mark = h('span', 'connection-mark', active ? '●' : live ? 'Ⅱ' : '○')
     mark.setAttribute('aria-hidden', 'true')
     const label = h('span', 'connection-label')
-    label.append(h('b', '', row.name), h('small', '', `${kinds[row.kind]} · ${active && live ? 'Connected' : live ? 'Available · paused' : connecting ? 'Connecting…' : 'Offline'}`))
+    label.append(h('b', '', row.name), h('small', '', `${kinds[row.kind]} · ${active && live ? 'Connected' : live ? 'Available · paused' : connecting ? c.stillConnecting ? 'Still connecting' : 'Connecting…' : 'Offline'}`))
+    if (needsCode) label.append(h('small', '', 'Enter current code'))
     const detail = h('span', 'connection-detail')
     const badge = h('small', 'connection-badge', 'Not connected')
     if (live) setMarkup(badge, html`${ICONS.lock}<span>${c?.stats?.path === 'relay' ? 'Relayed' : c?.stats?.path === 'direct' ? 'Direct' : 'Encrypted'}</span>`)
@@ -176,8 +200,45 @@ export class ConnectionSheet {
     }, 'connection-option')
     forget.setAttribute('aria-label', `Forget ${row.name}`)
     manage.append(rename, forget)
-    el.append(use, manage)
+    el.append(use)
+    if (c && !live) {
+      const recovery = h('div', 'connection-recovery')
+      const progress = c.stillConnecting ? STILL_CONNECTING : 'Connecting… Keep the screen’s ob.Pal page open.'
+      const state = h('p', 'connection-say', connecting ? c.link.status === 'unreachable' ? `ob.Pal is out of reach. ${progress}` : progress : this.refusal(c.failure ?? c.link.status))
+      state.setAttribute('role', 'status')
+      const actions = h('div', 'connection-actions')
+      actions.append(button('Cancel attempt', () => {
+        this.joining = null
+        if (!this.hub.cancel(row.id)) return
+        this.tell('Attempt cancelled. Your saved screens are kept.')
+        this.dialog?.querySelector<HTMLElement>('[aria-label="Close connections"]')?.focus()
+      }), button('Enter current code', () => { this.joining = null; this.hub.cancel(row.id); this.code() }))
+      recovery.append(state, actions)
+      el.append(recovery)
+    }
+    el.append(manage)
     return el
+  }
+
+  private refusal(status: Connection['link']['status']) {
+    const text: Partial<Record<Connection['link']['status'], string>> = {
+      'code-wrong': 'That code did not match. Enter the new one.', 'invite-used': 'That code was used. Enter the new one.',
+      'host-mismatch': 'Could not verify this screen. Scan again.', full: 'This screen has no free place.',
+      removed: 'This screen removed the phone.', 'taken-over': 'Another phone took over.',
+      'lan-failed': 'Could not reach this screen over Wi-Fi.', 'lan-unsupported': 'Direct Wi-Fi is unavailable in this browser.',
+    }
+    return text[status] ?? 'Not connected. Enter the screen’s current code to pair again.'
+  }
+
+  private follow(c?: Connection) {
+    if (!this.dialog || !c) return
+    if (c.welcome && !c.failure && c.link.ready && this.hub.active === c) { this.close(); return }
+    this.joining = c
+    this.view = 'list'
+    this.signature = ''
+    this.tell('')
+    this.list()
+    this.dialog.querySelector<HTMLElement>('[aria-label="Close connections"]')?.focus()
   }
 
   private rename(row: StoredConnection) {
@@ -213,6 +274,7 @@ export class ConnectionSheet {
   private scan() {
     if (!this.body) return
     ++this.generation
+    this.retireAttempt()
     this.stopCamera()
     this.view = 'scan'
     this.dialog!.querySelector('h2')!.textContent = 'Scan a code'
@@ -228,6 +290,7 @@ export class ConnectionSheet {
         this.signature = ''
         this.tell('')
         this.list()
+        if (reason === 'close') this.body?.querySelector<HTMLElement>('.connection-actions button')?.focus()
       },
       found: (text) => {
         const result = readScan(text, location.origin)
@@ -244,6 +307,7 @@ export class ConnectionSheet {
   private code(digits = '') {
     if (!this.body) return
     ++this.generation
+    this.retireAttempt()
     this.stopCamera()
     this.view = 'code'
     this.dialog!.querySelector('h2')!.textContent = 'Enter a code'
@@ -259,7 +323,14 @@ export class ConnectionSheet {
     input.value = formatCode(digits)
     const go = button('Connect', () => {}, 'btn primary')
     go.type = 'submit'
-    form.append(input, go, button('Scan instead', () => this.scan()))
+    form.append(input, go, button('Scan instead', () => this.scan()), button('Back to connections', () => {
+      ++this.generation
+      this.busy = false
+      this.view = 'list'
+      this.signature = ''
+      this.list()
+      this.dialog?.querySelector<HTMLElement>('[aria-label="Close connections"]')?.focus()
+    }))
     form.onsubmit = (e) => { e.preventDefault(); void this.short(input.value) }
     this.body.replaceChildren(form)
     input.focus()
@@ -286,7 +357,13 @@ export class ConnectionSheet {
 
   private async join(join: Join) {
     const generation = this.generation
-    try { await this.hub.connect(join); if (generation === this.generation) this.close() }
-    catch (e) { this.tell(e instanceof Error ? e.message : 'Could not connect. Try again.') }
+    try { const c = await this.hub.connect(join); if (generation === this.generation) this.follow(c) }
+    catch (e) { if (generation === this.generation) this.tell(e instanceof Error ? e.message : 'Could not connect. Try again.') }
+  }
+
+  private retireAttempt() {
+    this.joining = null
+    const pending = this.hub.attempt
+    if (pending) this.hub.cancel(pending.row.id)
   }
 }

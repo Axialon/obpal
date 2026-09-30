@@ -371,7 +371,10 @@ try {
   await check('the spent code finds nothing', async () => {
     await second.locator('#code-in').fill(joinedWith)
     await second.locator('#code-in').press('Enter')
-    const say = await until('an answer', async () => (await second.locator('#code-say').textContent()) || '', 8000)
+    const say = await until('a lookup result', async () => {
+      const status = second.locator('#code-say')
+      return await status.evaluate(el => el.classList.contains('bad') ? el.textContent : '')
+    }, 8000)
     if (!/No screen shows that code/.test(say)) throw new Error(say)
     return say
   })

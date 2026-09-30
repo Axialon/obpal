@@ -27,6 +27,7 @@ import { LinkBadge } from './linkbadge'
 import { sheetExits } from './sheet'
 import { Connections, type Connection, type Join } from './connections'
 import { ConnectionSheet } from './connection-sheet'
+import { pendingPhase, STILL_CONNECTING } from './pairing-recovery'
 import { CameraView } from '../ui/camera'
 import { HandTracker } from './hand-tracker'
 import { BodyTracker } from './body-tracker'
@@ -61,6 +62,7 @@ const safeImage = (u?: string) => (u && /^https:\/\//.test(u) ? u : undefined)
 const CAMERA_3D_NEEDS = 'The camera follows the phone on Android with Google Play Services for AR'
 let connectTo: (join: Join) => Promise<void> = async () => {}
 let openConnections: (scan?: boolean) => void = () => {}
+let entryGeneration = 0
 const arrival = new URLSearchParams(location.search)
 const scannedDigits = /^#code=[1-9][0-9]{9}$/.test(location.hash) ? location.hash.slice(6) : ''
 const typedArrival = arrival.get('type') === '1' || !!scannedDigits
@@ -155,6 +157,7 @@ void boot(pairing ?? undefined)
  * no code is the start of another) goes by itself.
  */
 function startPage() {
+  ++entryGeneration
   screenMessage({ title: 'Scan the code on your screen', art: ICONS.phone, body: 'Or type the code shown beside it.' })
   const card = app.querySelector('.msg-card')!
   card.classList.add('start')
@@ -206,14 +209,32 @@ function startPage() {
     if (!parts) return tell(digits.startsWith('0') ? 'Codes start with 1 to 9: check the first digit.' : 'A code has ten digits.', true)
     if (busy || Date.now() < blockedUntil) return
     busy = true
+    const generation = ++entryGeneration
     input.readOnly = true
     go.textContent = 'Connecting…'
+    tell('Finding your screen…')
     ready()
     const r = await lookupCode(location.origin, parts.handle)
     busy = false
     input.readOnly = false
     go.textContent = 'Connect'
-    if ('room' in r) return void connectTo({ v: 'code', code: { ...parts, room: r.room, ticket: r.ticket } })
+    if (!form.isConnected) return
+    if (generation !== entryGeneration) {
+      input.value = ''
+      tell('Enter the screen’s current code.')
+      ready()
+      return
+    }
+    if ('room' in r) {
+      tell('Connecting… Keep the screen’s ob.Pal page open.')
+      return void connectTo({ v: 'code', code: { ...parts, room: r.room, ticket: r.ticket } }).catch(() => {
+        if (!form.isConnected) return
+        tell('Could not connect. Enter the screen’s current code.', true)
+        input.value = ''
+        ready()
+        input.focus()
+      })
+    }
     input.setAttribute('aria-invalid', 'true')
     if (r.error === 'no-code') tell('No screen shows that code. Check it: each code works once.', true)
     else if (r.error === 'slow-down') {
@@ -581,7 +602,7 @@ async function boot(code?: Join) {
   const caps = (): Caps => ({ tier, sensorApi: motionSupported() ? 'events' : 'none', haptics: hapticsKind(), platform: navigator.platform || 'unknown' })
   const name = deviceName()
   const link = new Connections({ service: location.origin, cert: own, caps, name, beforeSwitch: releaseControls, switched: switchSurface,
-    status: onStatus, message: onHost, stats: (s) => linkBadge.update(s), seal: (s) => linkBadge.reveal(s), notice: (text) => toast(text) })
+    status: onStatus, message: onHost, stats: (s) => linkBadge.update(s), seal: (s) => linkBadge.reveal(s), notice: (text) => toast(text), attempt: showAttempt })
   const musicWire = new MusicWire(m => { if (link.ready) link.sendCtl(m) })
   const drums = new Drums(musicWire, motion, control)
   const keys = new Keys(musicWire, motion, control, recenterHere)
@@ -612,6 +633,38 @@ async function boot(code?: Join) {
     screenMessage({ title: 'Disconnected', art: ICONS.phone, body: 'Reconnect, or scan another code.', action: { label: 'Reconnect', run: () => location.reload() } })
   })
   const connections = new ConnectionSheet(link)
+  function showAttempt(c: Connection | null) {
+    // A different active screen stays usable; the Connections sheet presents the pending choice beside it.
+    if (link.ready) return
+    if (!c) { if (!link.active && !link.attempt) startPage(); return }
+    if (c.failure || !pendingPhase(c.link.status)) return
+    const card = app.querySelector<HTMLElement>('.msg-card')
+    if (!card) return
+    if (c.stillConnecting) {
+      card.querySelector('h1')!.textContent = 'Still connecting'
+      card.querySelector('p')!.textContent = c.link.status === 'unreachable' ? `ob.Pal is out of reach. ${STILL_CONNECTING}` : STILL_CONNECTING
+    }
+    if (card.querySelector('.pairing-recovery')) return
+    const tools = document.createElement('div')
+    tools.className = 'connection-actions pairing-recovery'
+    for (const [text, run] of [
+      ['Cancel attempt', () => {
+        if (!link.cancel(c.row.id)) return
+        startPage()
+        document.getElementById('code-say')!.textContent = 'Attempt cancelled. Your saved screens are kept.'
+      }],
+      ['Enter current code', () => connections.enterCode(c.row.id)],
+    ] as const) {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'btn'
+      button.textContent = text
+      button.onclick = run
+      tools.append(button)
+    }
+    card.querySelector('p')!.setAttribute('role', 'status')
+    card.append(tools)
+  }
   let handCamera: CameraView | null = null
   let handTracker: HandTracker | null = null
   let handHold = false
@@ -702,7 +755,7 @@ async function boot(code?: Join) {
   } })
   document.addEventListener('visibilitychange', () => { if (document.hidden) { stopHands(); stopBody() } })
   // The keyboard's dock hands its Back step to the sheet that opens over it (./sheet.ts).
-  openConnections = (scan = false) => { keyboard.close(true); tick(); connections.open(scan) }
+  openConnections = (scan = false) => { ++entryGeneration; keyboard.close(true); tick(); connections.open(scan) }
   connectTo = async (join) => { hungUp = false; await link.connect(join) }
   link.setLimit(Number(store.get('obpal.connections.limit') ?? 3))
   addEventListener('pagehide', () => { stopHands(); stopBody(); connections.close(); link.destroy() })
@@ -959,7 +1012,7 @@ async function boot(code?: Join) {
     }
     const text = s === 'waiting-host' ? 'Waiting for the screen' : 'Reconnecting…'
     if (surface) banner(text)
-    else if (started || s === 'waiting-host') screenMessage({ title: s === 'waiting-host' ? 'Waiting for the screen' : 'Connecting', body: s === 'waiting-host' ? 'Keep the page with the code open.' : 'Securing the connection…', spinner: true })
+    else screenMessage({ title: s === 'waiting-host' ? 'Waiting for the screen' : 'Connecting', body: s === 'waiting-host' ? 'Keep the page with the code open.' : 'Securing the connection…', spinner: true })
   }
 
   function onHost(m: HostMsg) {

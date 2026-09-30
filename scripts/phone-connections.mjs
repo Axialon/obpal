@@ -70,6 +70,7 @@ function delayedStorage() {
 }
 
 export async function phoneConnections({ browser, origin, check, shots }) {
+  await pendingRecovery({ browser, origin, check, shots })
   const screens = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true })
   const ctx = await browser.newContext({ ...devices['Pixel 7'], viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, ignoreHTTPSErrors: true })
   await ctx.addInitScript(cameraFrames)
@@ -227,6 +228,8 @@ export async function phoneConnections({ browser, origin, check, shots }) {
       await phone.goBack()
       await until('Back closed scanner', async () => await phone.locator('dialog[open]').count() === 0)
       if (!(await stopped())) throw new Error('Back left camera running')
+      await phone.goForward()
+      if (await phone.locator('dialog[open]').count() || !(await stopped())) throw new Error('Forward reopened a camera or sheet')
       if (errors.length) throw new Error(errors.join(' | '))
       return 'list survives a new tab; camera ends on code entry and Back'
     })
@@ -318,4 +321,257 @@ export async function phoneConnections({ browser, origin, check, shots }) {
       } finally { await apple.close() }
     })
   } finally { await ctx.close(); await screens.close() }
+}
+
+/** A missing host and delayed welcomes are simulated in the browser; no controller or transport test hooks ship. */
+async function pendingRecovery({ browser, origin, check, shots }) {
+  const ctx = await browser.newContext({ ...devices['Pixel 7'], viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, ignoreHTTPSErrors: true, serviceWorkers: 'block' })
+  const errors = []
+  ctx.on('page', p => p.on('pageerror', e => errors.push(e.message)))
+  const channels = []
+  let lookups = 0
+  await ctx.route('**/api/code', r => { lookups++; return r.fulfill({ json: { room: 'AAAAAAAAAAAAAAAAAAAAAA', ticket: 'BBBBBBBBBBBBBBBBBBBBBB' } }) })
+  await ctx.routeWebSocket('**/r/**', ws => { channels.push(ws); ws.send(JSON.stringify({ t: 'welcome', id: 'test-phone', role: 'device', host: false })) })
+  await ctx.addInitScript(() => {
+    window.__cameraRequests = 0
+    if (navigator.mediaDevices) navigator.mediaDevices.getUserMedia = async () => { window.__cameraRequests++; throw new DOMException('No camera', 'NotFoundError') }
+    window.__peers = []
+    const Peer = RTCPeerConnection
+    window.RTCPeerConnection = class extends Peer { constructor(...args) { super(...args); window.__peers.push(this) } }
+  })
+  const page = await ctx.newPage()
+  const shot = async name => { if (shots) await page.screenshot({ path: join(shots, `${name}-390x844.png`), animations: 'disabled' }) }
+  try {
+    await check('pending pairing stays recoverable beyond two minutes; cancel clears the attempt without replaying its code', async () => {
+      await page.goto(`${origin}/p/`)
+      await page.clock.install()
+      await page.locator('#code-in').fill('1234567890')
+      await page.getByRole('heading', { name: 'Waiting for the screen', exact: true }).waitFor()
+      await page.getByRole('button', { name: 'Cancel attempt', exact: true }).waitFor()
+      await shot('pending')
+      await page.clock.fastForward(20_001)
+      await page.getByRole('heading', { name: 'Still connecting', exact: true }).waitFor()
+      await page.getByRole('status').filter({ hasText: 'Keep the screen\'s ob.Pal page open.' }).waitFor()
+      await page.clock.fastForward(146_000)
+      if (await page.locator('#code-go').count()) throw new Error('pending pairing returned to a disabled entry form')
+      if (lookups !== 1) throw new Error('a stale code was replayed')
+      await shot('still-connecting')
+      await page.keyboard.press('AudioVolumeUp')
+      await page.getByRole('button', { name: 'Connections', exact: true }).click()
+      await page.getByRole('button', { name: 'Pair again with New screen', exact: true }).waitFor()
+      await shot('cancel')
+      await page.getByRole('button', { name: 'Cancel attempt', exact: true }).click()
+      await page.getByRole('status').filter({ hasText: 'Attempt cancelled.' }).waitFor()
+      await shot('cancelled')
+      if (await page.locator('.connection-row').count()) throw new Error('cancelled unsaved attempt remains live')
+      const states = await page.evaluate(() => window.__peers.map(p => p.connectionState))
+      if (!states.length || states.some(s => s !== 'closed')) throw new Error(`pending peer survived: ${states}`)
+      await page.keyboard.press('Escape')
+      await page.locator('#code-in').waitFor()
+      await page.clock.fastForward(60_000)
+      if (lookups !== 1 || await page.locator('.modes').count()) throw new Error('cancelled code or target came back')
+      return '166 simulated seconds; explanation and cancellation remain; peer closed; one lookup'
+    })
+    await check('a code-required screen opens typing directly without a camera; Close, Escape and Back/Forward restore focus', async () => {
+      await page.clock.resume()
+      await page.getByRole('button', { name: 'Connections', exact: true }).click()
+      await page.getByRole('button', { name: 'Enter a code', exact: true }).click()
+      const code = page.getByRole('textbox', { name: 'Code from your screen', exact: true })
+      await code.fill('1234567890')
+      await page.locator('dialog').getByRole('button', { name: 'Connect', exact: true }).click()
+      const pair = page.getByRole('button', { name: 'Pair again with New screen', exact: true })
+      await pair.waitFor()
+      await pair.click()
+      await code.waitFor()
+      await shot('camera-less')
+      if (await page.evaluate(() => window.__cameraRequests) !== 0) throw new Error('code-required navigation opened the camera')
+      if (!(await code.evaluate(el => el === document.activeElement))) throw new Error('code entry has no focus')
+      if (await code.inputValue()) throw new Error('recovery reused the previous code')
+      await page.keyboard.press('Escape')
+      await until('Escape restored focus', () => page.locator('#code-in').evaluate(el => el === document.activeElement))
+      await page.waitForFunction(() => !history.state?.obpalSheet)
+      const open = async () => page.getByRole('button', { name: 'Connections', exact: true }).click()
+      await open()
+      await page.getByRole('button', { name: 'Close connections' }).click()
+      await until('Close restored focus', () => page.getByRole('button', { name: 'Connections', exact: true }).evaluate(el => el === document.activeElement))
+      await page.waitForFunction(() => !history.state?.obpalSheet)
+      await open()
+      await page.goBack()
+      await until('Back closes connections', async () => await page.locator('dialog[open]').count() === 0)
+      if (new URL(page.url()).pathname !== '/p/') throw new Error('Back left the controller')
+      if (!(await page.getByRole('button', { name: 'Connections', exact: true }).evaluate(el => el === document.activeElement))) throw new Error('Back lost focus')
+      await page.goForward()
+      if (new URL(page.url()).pathname !== '/p/') throw new Error('Forward left the controller')
+      if (await page.locator('dialog[open]').count()) throw new Error('Forward revived a closed sheet or camera')
+      await open()
+      await page.getByRole('button', { name: 'Scan another code', exact: true }).click()
+      await page.getByText('No camera was found. Enter the code shown on your screen.', { exact: true }).waitFor()
+      await page.locator('[data-camera-type]').click()
+      await code.waitFor()
+      if (!(await code.evaluate(el => el === document.activeElement)) || await page.locator('.obpal-camera[open]').count()) throw new Error('scanner-to-code did not restore typing')
+      await page.keyboard.press('Escape')
+      if (errors.length) throw new Error(errors.join(' | '))
+      return 'typing first; no camera request; empty fresh code; Close, Escape, Back/Forward and scanner-to-code'
+    })
+    await check('a used invite keeps its refusal message instead of becoming generic still-connecting recovery', async () => {
+      await page.goto(`${origin}/p/`)
+      await page.locator('#code-in').fill('1234567890')
+      await page.getByRole('heading', { name: 'Waiting for the screen', exact: true }).waitFor()
+      await until('peer prepared', () => page.evaluate(() => !!window.__peers.at(-1)?.localDescription))
+      channels.at(-1).send(JSON.stringify({ t: 'sig', from: 'test-screen', d: { spent: true } }))
+      await page.getByRole('heading', { name: /This code was used|That code was just used/ }).waitFor()
+      await page.clock.fastForward(21_000)
+      if (await page.getByRole('heading', { name: 'Still connecting', exact: true }).count() || await page.locator('.modes').count()) throw new Error('refusal was hidden or controls appeared')
+      return 'used code remains distinct; no controls'
+    })
+    await check('leaving code entry during lookup ignores the late result, and fresh typed entry still works', async () => {
+      await page.goto(`${origin}/p/`)
+      let lookup
+      await page.route('**/api/code', r => { lookup = r })
+      await page.locator('#code-in').fill('1234567890')
+      await until('lookup held', () => lookup)
+      await page.getByRole('button', { name: 'Connections', exact: true }).click()
+      await page.getByRole('button', { name: 'Enter a code', exact: true }).click()
+      const mark = await page.evaluate(() => history.state?.obpalSheet)
+      await lookup.fulfill({ json: { room: 'AAAAAAAAAAAAAAAAAAAAAA', ticket: 'BBBBBBBBBBBBBBBBBBBBBB' } })
+      await page.locator('#code-say').filter({ hasText: 'Enter the screen’s current code.' }).waitFor({ state: 'attached' })
+      if (await page.evaluate(() => window.__peers.length) || await page.locator('.connection-row').count()) throw new Error('a superseded lookup created a target')
+      await page.keyboard.press('Escape')
+      await page.waitForFunction(mark => history.state?.obpalSheet !== mark, mark)
+      if (await page.locator('#code-go').isDisabled() && !(await page.locator('#code-say').textContent())) throw new Error('entry form returned to an unexplained disabled Connect')
+      await page.unroute('**/api/code')
+      await page.locator('#code-in').fill('1234567890')
+      await page.getByRole('heading', { name: 'Waiting for the screen', exact: true }).waitFor()
+      await page.getByRole('button', { name: 'Cancel attempt', exact: true }).click()
+      return 'late lookup discarded; no link created; fresh code starts a new attempt'
+    })
+  } finally { await ctx.close() }
+
+  await check('cancelling a delayed welcome keeps the saved pairing and another active screen; late delivery cannot reactivate it', async () => {
+    const screens = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true })
+    const phoneCtx = await browser.newContext({ ...devices['Pixel 7'], viewport: { width: 390, height: 844 }, ignoreHTTPSErrors: true, serviceWorkers: 'block' })
+    await phoneCtx.addInitScript(() => {
+      window.__holdWelcomes = false; window.__welcomes = []; window.__controllers = 0; window.__peers = []
+      const Peer = RTCPeerConnection
+      window.RTCPeerConnection = class extends Peer { constructor(...args) { super(...args); window.__peers.push(this) } }
+      const descriptor = Object.getOwnPropertyDescriptor(RTCDataChannel.prototype, 'onmessage')
+      Object.defineProperty(RTCDataChannel.prototype, 'onmessage', { ...descriptor, set(fn) {
+        const channel = this
+        descriptor.set.call(channel, event => {
+          if (window.__holdWelcomes && JSON.parse(event.data).t === 'welcome') { window.__welcomes.push(() => fn.call(channel, event)); return }
+          fn.call(channel, event)
+        })
+      } })
+      const send = RTCDataChannel.prototype.send
+      RTCDataChannel.prototype.send = function(data) {
+        if (typeof data === 'string') { try { if (JSON.parse(data).t === 'mode') window.__controllers++ } catch {} }
+        return send.call(this, data)
+      }
+    })
+    try {
+      const a = await screens.newPage(), b = await screens.newPage(), p = await phoneCtx.newPage()
+      await a.goto(`${origin}/view/`); await b.goto(`${origin}/view/`)
+      const inviteA = await until('active invite', () => a.evaluate(() => window.__obpal?.pairingUrl))
+      const inviteB = await until('second invite', () => b.evaluate(() => window.__obpal?.pairingUrl))
+      await p.goto(inviteA); await p.locator('.modes').waitFor({ timeout: 25000 })
+      await p.evaluate(() => document.querySelectorAll('.hint, .bt-notice').forEach(el => el.remove()))
+      const open = async () => { await p.getByRole('button', { name: 'Connections', exact: true }).click(); await p.locator('.connection-list[aria-busy="false"]').waitFor() }
+      await open()
+      await p.getByRole('button', { name: 'Rename ob.Pal Viewer', exact: true }).click()
+      await p.getByRole('textbox', { name: 'Screen name' }).fill('Active screen')
+      await p.getByRole('button', { name: 'Save', exact: true }).click()
+      await p.getByRole('status').filter({ hasText: /^Saved$/ }).waitFor()
+      await p.getByRole('button', { name: 'Close connections' }).click()
+      // First remember B normally, then return to A and delay only B's authenticated welcome on reconnect.
+      await p.evaluate(url => { location.hash = new URL(url).hash }, inviteB)
+      await until('B active', async () => await p.locator('.host-name').textContent() === 'ob.Pal Viewer')
+      await open()
+      await p.getByRole('button', { name: 'Switch to Active screen', exact: true }).click()
+      await p.getByRole('button', { name: 'Connections', exact: true }).waitFor()
+      const before = await p.evaluate(() => new Promise(resolve => {
+        const req = indexedDB.open('obpal')
+        req.onsuccess = () => { const db = req.result, q = db.transaction('connections').objectStore('connections').getAll(); q.onsuccess = () => { db.close(); resolve(q.result.map(r => [r.id, r.name, r.invite?.key instanceof CryptoKey])) } }
+      }))
+      await b.evaluate(() => { window.__pendingInputs = 0; window.__obpal.on('input', () => window.__pendingInputs++) })
+      // Lose only B's channel, then delay its verified reconnect welcome while A stays active.
+      await p.evaluate(() => { window.__holdWelcomes = true; window.__peers[1].close() })
+      await until('welcome delayed', () => p.evaluate(() => window.__welcomes.length > 0))
+      if (await b.evaluate(() => window.__pendingInputs)) throw new Error('input reached a pending target')
+      await open()
+      await p.getByRole('button', { name: 'Cancel attempt', exact: true }).click()
+      await p.getByRole('button', { name: 'Close connections' }).click()
+      const controllers = await p.evaluate(() => window.__controllers)
+      await p.evaluate(() => { window.__holdWelcomes = false; window.__welcomes.splice(0).forEach(fn => { fn(); fn() }) })
+      await sleep(500)
+      if (await p.locator('.host-name').textContent() !== 'Active screen') throw new Error('late welcome replaced the active screen')
+      if (await p.evaluate(() => window.__controllers) !== controllers) throw new Error('late welcome restored controls')
+      await open()
+      if (await p.locator('.connection-row').count() !== before.length) throw new Error('cancellation forgot a remembered screen')
+      const after = await p.evaluate(() => new Promise(resolve => {
+        const req = indexedDB.open('obpal')
+        req.onsuccess = () => { const db = req.result, q = db.transaction('connections').objectStore('connections').getAll(); q.onsuccess = () => { db.close(); resolve(q.result.map(r => [r.id, r.name, r.invite?.key instanceof CryptoKey])) } }
+      }))
+      if (JSON.stringify(after) !== JSON.stringify(before)) throw new Error('cancellation changed a saved invite')
+      if (await b.evaluate(() => window.__pendingInputs)) throw new Error('late welcome sent input to the cancelled target')
+      if (!(await a.evaluate(() => window.__obpal.participants.length === 1))) throw new Error('another active screen disconnected')
+      return 'saved rows kept; active screen stays connected; two late welcomes ignored'
+    } finally { await phoneCtx.close(); await screens.close() }
+  })
+
+  await check('a valid delayed welcome restores controls once; full and unavailable signaling retain their specific messages', async () => {
+    const screens = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true })
+    const phones = await browser.newContext({ ...devices['Pixel 7'], ignoreHTTPSErrors: true, serviceWorkers: 'block' })
+    await phones.addInitScript(() => {
+      window.__welcomes = []; window.__modes = 0
+      const descriptor = Object.getOwnPropertyDescriptor(RTCDataChannel.prototype, 'onmessage')
+      Object.defineProperty(RTCDataChannel.prototype, 'onmessage', { ...descriptor, set(fn) {
+        const channel = this
+        descriptor.set.call(channel, event => {
+          if (JSON.parse(event.data).t === 'welcome') { window.__welcomes.push(message => fn.call(channel, message ? { data: JSON.stringify(message) } : event)); return }
+          fn.call(channel, event)
+        })
+      } })
+      const send = RTCDataChannel.prototype.send
+      RTCDataChannel.prototype.send = function(data) {
+        if (typeof data === 'string') { try { if (JSON.parse(data).t === 'mode') window.__modes++ } catch {} }
+        return send.call(this, data)
+      }
+    })
+    try {
+      const host = await screens.newPage()
+      await host.goto(`${origin}/view/`)
+      const invite = await until('returning host invite', () => host.evaluate(() => window.__obpal?.pairingUrl))
+      await host.evaluate(() => { window.__inputs = 0; window.__obpal.on('input', () => window.__inputs++) })
+      const valid = await phones.newPage()
+      await valid.goto(invite)
+      await until('authenticated welcome held', () => valid.evaluate(() => window.__welcomes.length > 0))
+      if (await valid.locator('.modes').count() || await host.evaluate(() => window.__inputs)) throw new Error('pending welcome exposed controls or sent input')
+      await valid.evaluate(() => { window.__welcomes[0](); window.__welcomes[0]() })
+      await valid.locator('.modes').waitFor({ timeout: 25000 })
+      if (await valid.evaluate(() => window.__modes) !== 1) throw new Error('duplicate welcome restored controls more than once')
+      await valid.close()
+
+      const full = await phones.newPage()
+      await full.goto(await host.evaluate(() => window.__obpal.pairingUrl))
+      await until('full-scene candidate', () => full.evaluate(() => window.__welcomes.length > 0))
+      // The real QR link was verified; inject only the existing refusal to exercise its presentation.
+      await full.evaluate(() => window.__welcomes[0]({ t: 'lock', reason: 'full' }))
+      await full.getByRole('heading', { name: 'This scene is full', exact: true }).waitFor()
+      await full.clock.install()
+      await full.clock.fastForward(21_000)
+      if (await full.getByRole('heading', { name: 'Still connecting', exact: true }).count() || await full.locator('.modes').count()) throw new Error('full scene was hidden or made usable')
+      await full.close()
+
+      await phones.addInitScript(() => { window.WebSocket = class { constructor() { throw new DOMException('Isolated signaling failure', 'NetworkError') } } })
+      const unavailable = await phones.newPage()
+      await unavailable.clock.install()
+      await unavailable.goto(await host.evaluate(() => window.__obpal.pairingUrl))
+      await unavailable.getByRole('heading', { name: 'ob.Pal is out of reach', exact: true }).waitFor()
+      await unavailable.clock.fastForward(21_000)
+      await unavailable.getByRole('status').filter({ hasText: 'ob.Pal is out of reach.' }).waitFor()
+      await unavailable.getByRole('button', { name: 'Cancel attempt', exact: true }).click()
+      await unavailable.locator('#code-in').waitFor()
+      return 'one controls render; full stays full; unavailable signaling stays named; waiting-host covered separately'
+    } finally { await phones.close(); await screens.close() }
+  })
 }

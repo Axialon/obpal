@@ -3,6 +3,7 @@ import {
   b64url, DeviceLink, encodeLanPairing, encodePairing, forgetConnection, getPair, listConnections, parsePairingCode, putConnection, removeConnection, roomIdFor, saveInvite,
   type Caps, type DeviceMsg, type HostMsg, type LinkStats, type LinkStatus, type ConnectionSeal, type PairingCode, type StoredConnection,
 } from '@obpal/core'
+import { pendingPhase } from './pairing-recovery'
 
 export type Join = PairingCode | { v: 'code'; code: { handle: string; secret: string; room: string; ticket: string } }
   | { v: 'saved'; row: StoredConnection }
@@ -14,6 +15,11 @@ export interface Connection {
   values: Record<string, number | boolean | string>
   scene?: Extract<HostMsg, { t: 'scene' }>
   stats?: LinkStats
+  /** Presentation only: one attempt window has passed without a usable welcome. */
+  stillConnecting: boolean
+  presented?: boolean
+  /** Keep a refusal visible if the socket's closing event later reports ordinary progress. */
+  failure?: LinkStatus
 }
 
 export interface ConnectionDeps {
@@ -28,6 +34,7 @@ export interface ConnectionDeps {
   stats(stats: LinkStats): void
   seal?(s: { seal: ConnectionSeal; delayMs: number; source?: string }): void
   notice?(text: string): void
+  attempt?(connection: Connection | null): void
   create?: (options: ConstructorParameters<typeof DeviceLink>[0]) => DeviceLink
 }
 
@@ -44,17 +51,22 @@ export class Connections {
   private loaded: Promise<void>
   private writes: Promise<void> = Promise.resolve()
   private pending = 0
+  private recoveryTimer: ReturnType<typeof setTimeout> | undefined
   loading = true
 
   constructor(private deps: ConnectionDeps) {
     this.loaded = listConnections().then((rows) => { for (const r of rows) this.rows.set(r.id, r); this.loading = false; this.changed() })
   }
 
-  get ready() { return !this.suspended && !!this.active?.welcome && this.active.link.ready }
-  get status(): LinkStatus { return this.active?.link.status ?? 'closed' }
+  get ready() { return !this.suspended && !!this.active?.welcome && !this.active.failure && this.active.link.ready }
+  get status(): LinkStatus { return this.active?.failure ?? this.active?.link.status ?? 'closed' }
   get maxLive() { return this.limit }
   get current() { return this.active?.row.id ?? '' }
   get saving() { return this.pending > 0 }
+  get attempt() {
+    const c = this.live.get(this.wanted)
+    return c && (c.failure || !c.welcome || !c.link.ready) ? c : null
+  }
   async settled() {
     await this.loaded
     // Imports and the transactions they produce belong to the same queue. Include writes added while waiting.
@@ -77,8 +89,8 @@ export class Connections {
     if (on === this.suspended) return
     if (on) this.deps.beforeSwitch()
     this.suspended = on
-    if (this.active?.link.ready) this.active.link.sendCtl({ t: 'attention', active: !on })
-    if (!on && this.active?.welcome) {
+    if (this.active?.link.ready && !this.active.failure) this.active.link.sendCtl({ t: 'attention', active: !on })
+    if (!on && this.active?.welcome && !this.active.failure) {
       this.deps.message(this.active.welcome)
       this.deps.message({ t: 'state', values: this.active.values })
       if (this.active.scene) this.deps.message(this.active.scene)
@@ -87,6 +99,9 @@ export class Connections {
 
   async connect(join: Join) {
     const generation = ++this.generation
+    // A new choice retires the old pending choice, never a different active screen.
+    const previous = this.attempt
+    if (previous && previous !== this.active) this.drop(previous.row.id)
     await this.loaded
     const common = { service: this.deps.service, cert: this.deps.cert, caps: this.deps.caps, name: this.deps.name, remember: true }
     const pair = join.v === 2 ? await getPair(b64url(join.lan.id)) : null
@@ -97,24 +112,34 @@ export class Connections {
     if (generation !== this.generation) return
     if (this.forgetting.has(id)) throw new Error('This screen is being forgotten. Try again in a moment.')
     const existing = this.live.get(id)
-    if (existing?.link.ready) { this.activate(id); return }
+    if (existing?.welcome && !existing.failure && existing.link.ready) { this.activate(id); return existing }
     if (existing) this.drop(id)
     const options = join.v === 'saved' ? { ...common, saved: join.row.invite! }
       : join.v === 2 ? { ...common, lan: join.lan, pair: pair! }
         : join.v === 'code' ? { ...common, code: join.code } : { ...common, pairing: join.pairing }
     const link = (this.deps.create ?? ((o) => new DeviceLink(o)))(options)
     const row = this.rows.get(id) ?? { id, name: pair?.peerName ?? 'New screen', kind: pair ? 'pc' : 'site', at: Date.now(), ...(pair ? { pairId: pair.id } : {}) }
-    const c: Connection = { row, link, values: {} }
+    const c: Connection = { row, link, values: {}, stillConnecting: false }
     // Only the finite QR-to-seal effect needs the original modules. Do not put invite bytes in a UI snapshot.
     let sealSource = join.v === 1 ? encodePairing(join.pairing) : join.v === 2 ? encodeLanPairing(join.lan) : undefined
     this.live.set(id, c)
     this.wanted = id
+    clearTimeout(this.recoveryTimer)
+    this.recoveryTimer = setTimeout(() => {
+      if (this.attempt !== c || c.failure) return
+      c.stillConnecting = true
+      this.deps.attempt?.(c)
+      this.changed()
+    }, 20_000)
     // A pending join takes a slot too. Keep the active screen until the new one has proved itself.
     this.trim(id)
     link.on('status', (s) => {
       if (this.live.get(id) !== c) return
-      if (s !== 'connected') { c.stats = undefined; c.values = {}; c.scene = undefined }
-      if (this.active === c || (!this.active && this.wanted === id)) this.deps.status(s)
+      if (c.failure && pendingPhase(s)) return
+      if (!pendingPhase(s) && s !== 'closed') c.failure = s
+      if (s !== 'connected') { c.stats = undefined; c.values = {}; c.scene = undefined; c.presented = false }
+      // A status alone cannot make a new target usable; activate only with its verified welcome and layout.
+      if (s !== 'connected' && (this.active === c || (!this.active && this.wanted === id))) this.deps.status(s)
       const refusal: Partial<Record<LinkStatus, string>> = { 'code-wrong': 'That code did not match. Enter the new one.', 'invite-used': 'That code was used. Scan the new one.', 'host-mismatch': 'Could not verify this screen. Scan again.', removed: 'This screen removed the phone.', full: 'This screen has no free place.', 'lan-failed': 'Could not reach this screen over Wi-Fi.', 'lan-unsupported': 'Direct Wi-Fi is unavailable in this browser.' }
       if (refusal[s] && this.wanted === id) this.deps.notice?.(refusal[s]!)
       if (['removed', 'invite-used', 'host-mismatch'].includes(s) && this.rows.has(id)) {
@@ -123,9 +148,10 @@ export class Connections {
         this.save(c.row)
       }
       this.changed()
+      if (this.wanted === id) this.deps.attempt?.(this.attempt)
     })
     link.on('message', (m) => {
-      if (this.live.get(id) !== c) return
+      if (this.live.get(id) !== c || c.failure) return
       if (m.t === 'welcome') {
         // Cache no grants or invite bytes in a renderable snapshot.
         c.welcome = { t: 'welcome', proto: m.proto, name: String(m.name).slice(0, 80), layout: m.layout, attention: m.attention, kind: m.kind }
@@ -133,7 +159,10 @@ export class Connections {
           ...(m.pair && /^[A-Za-z0-9_-]{22}$/.test(m.pair.id) ? { pairId: m.pair.id } : {}) }
         if (join.v === 1) this.rememberInvite(c, join.pairing)
         this.save(c.row)
-        if (this.wanted === id || this.active === c) { this.activate(id, true); return }
+        if (this.wanted === id || this.active === c) {
+          if (this.active !== c || !c.presented) this.activate(id, true)
+          return
+        }
         link.sendCtl({ t: 'attention', active: false })
       } else if (m.t === 'layout' && c.welcome) c.welcome = { ...c.welcome, layout: m.layout }
       else if (m.t === 'state') Object.assign(c.values, m.values)
@@ -142,13 +171,14 @@ export class Connections {
       this.changed()
     })
     link.on('invite', (fragment) => {
+      if (this.live.get(id) !== c || c.failure) return
       sealSource = fragment
       const parsed = parsePairingCode(fragment)
       if (parsed?.v !== 1) return
       this.rememberInvite(c, parsed.pairing)
     })
     link.on('pair', (p) => {
-      if (this.live.get(id) !== c) return
+      if (this.live.get(id) !== c || c.failure) return
       // Merge the old PC entry (including a local rename) when the authenticated grant identifies it.
       for (const old of this.rows.values()) if (old.id !== id && old.pairId === p.id) {
         if (old.renamed) c.row = { ...c.row, name: old.name, renamed: true }
@@ -160,11 +190,11 @@ export class Connections {
       this.save(c.row)
     })
     link.on('seal', (s) => {
-      if (this.active === c) this.deps.seal?.({ ...s, ...(sealSource ? { source: `${this.deps.service}/p/#${sealSource}` } : {}) })
+      if (this.active === c && !c.failure) this.deps.seal?.({ ...s, ...(sealSource ? { source: `${this.deps.service}/p/#${sealSource}` } : {}) })
       sealSource = undefined
     })
     link.on('stats', (s) => {
-      if (this.live.get(id) !== c) return
+      if (this.live.get(id) !== c || c.failure) return
       c.stats = s
       if (this.active === c) this.deps.stats(s)
       this.changed()
@@ -172,18 +202,28 @@ export class Connections {
     if (!this.active) this.deps.status('connecting')
     else this.deps.notice?.('Connecting to another screen…')
     this.changed()
+    this.deps.attempt?.(c)
     void link.start().catch(() => { if (this.live.get(id) === c) { this.drop(id); this.changed() } })
+    return c
   }
 
   activate(id: string, refresh = false) {
     const next = this.live.get(id)
-    if (!next?.welcome || !next.link.ready) return
+    if (!next?.welcome || next.failure || !next.link.ready) return
     // Reconnecting the old active screen must not override a newer choice still pairing.
-    if (!refresh) this.wanted = id
+    if (!refresh) {
+      const pending = this.attempt
+      if (pending && pending !== next && pending !== this.active) this.drop(pending.row.id)
+      this.wanted = id
+    }
+    if (this.wanted === id) {
+      clearTimeout(this.recoveryTimer)
+    }
     if (next === this.active && !refresh) return
     this.deps.beforeSwitch()
     this.active?.link.sendCtl({ t: 'attention', active: false })
     this.active = next
+    next.presented = true
     next.row = { ...next.row, at: Date.now() }
     this.save(next.row)
     next.link.sendCtl({ t: 'attention', active: !this.suspended })
@@ -193,12 +233,29 @@ export class Connections {
     if (next.stats) this.deps.stats(next.stats)
     this.trim()
     this.changed()
+    if (this.wanted === id) this.deps.attempt?.(null)
   }
 
   async use(id: string) {
     const row = this.rows.get(id)
-    if (this.live.get(id)?.link.ready) this.activate(id)
-    else if (row) await this.connect({ v: 'saved', row })
+    const c = this.live.get(id)
+    if (c?.welcome && !c.failure && c.link.ready) { this.activate(id); return c }
+    else if (row) return this.connect({ v: 'saved', row })
+  }
+
+  /** Cancel a pending choice without forgetting its saved pairing or touching another active screen. */
+  cancel(id: string) {
+    const c = this.live.get(id)
+    if (!c || (!c.failure && c.welcome && c.link.ready)) return false
+    if (this.wanted === id) { ++this.generation; clearTimeout(this.recoveryTimer); this.wanted = '' }
+    this.drop(id)
+    try {
+      sessionStorage.removeItem('obpal.pair')
+      if (sessionStorage.getItem('obpal.active') === id) sessionStorage.removeItem('obpal.active')
+    } catch { /* private mode */ }
+    this.deps.attempt?.(this.attempt)
+    this.changed()
+    return true
   }
 
   async rename(id: string, name: string) {
@@ -227,11 +284,12 @@ export class Connections {
   }
 
   close() { if (this.active) this.drop(this.active.row.id); this.changed() }
-  destroy() { ++this.generation; for (const id of [...this.live.keys()]) this.drop(id) }
+  destroy() { ++this.generation; clearTimeout(this.recoveryTimer); for (const id of [...this.live.keys()]) this.drop(id) }
 
   private drop(id: string) {
     const c = this.live.get(id)
     if (!c) return
+    if (this.wanted === id || this.attempt === c) clearTimeout(this.recoveryTimer)
     if (this.active === c) { this.deps.beforeSwitch(); this.active = null; this.deps.switched(null) }
     this.live.delete(id)
     c.link.close()

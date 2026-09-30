@@ -104,6 +104,6 @@ The viewer catalogue includes brand models: Club V Crew insignia (CVC, CC, K9C, 
 
 ## License
 
-The code is MIT licensed; see [LICENSE](LICENSE). The ob.Pal name and logo have a separate [draft fork naming policy](TRADEMARKS.md). The Club V Crew insignia and wordmark models in `public/models/cvc` are brand assets and aren't covered by it; see [their notice](public/models/cvc/NOTICE.md).
+The code is MIT licensed; see [LICENSE](LICENSE). The ob.Pal name and logo have a separate [fork naming policy](TRADEMARKS.md). The Club V Crew insignia and wordmark models in `public/models/cvc` are brand assets and aren't covered by it; see [their notice](public/models/cvc/NOTICE.md).
 
 Contact: [hello@obpal.blackboxes.net](mailto:hello@obpal.blackboxes.net)

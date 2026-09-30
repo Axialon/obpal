@@ -15,7 +15,8 @@
  *     tap, and the layout rules (the edge and the touch size) at three phone sizes, the node strip's at 360 px too.
  *   - The camera in settings (./phone-camera.mjs): the scanner first, one tap away, its camera started inside the tap
  *     and no dead Back step left behind; the 3D hand's camera says what it needs, and a failed start can be retried.
- *   - The connections hub (./phone-connections.mjs): scanning, switching, remembering and forgetting screens.
+ *   - The connections hub (./phone-connections.mjs): scanning, switching, remembering and forgetting screens;
+ *     pending beyond two simulated minutes, cancellation and late welcomes, camera-less typing and focus recovery.
  *   - Recovery (./phone-recovery.mjs): motion refused leaves a touch-only phone whose trackpad still moves the screen, and
  *     Disconnect, then Reconnect, brings the phone back with its input flowing.
  * phone-connections, phone-camera, phone-controllers and phone-recovery run inside this suite, so `e2e:all -- phone` covers them.

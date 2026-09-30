@@ -42,6 +42,7 @@ const COPY = [
   'src/catalogue/data.ts', 'packages/core/src/catalogue.ts', 'src/controller/main.ts', 'src/sim/arm/main.ts',
   'packages/host/src/chip.ts', 'packages/host/src/seal.ts', 'packages/host/src/origin.ts', 'packages/host/src/remote.ts', 'src/controller/linkbadge.ts',
   'src/ui/trust-origin.ts', 'src/ui/shares.ts', 'src/trust/main.ts', 'TRADEMARKS.md', 'spec/SECURITY.md',
+  'src/controller/connection-sheet.ts', 'src/controller/connections.ts', 'src/controller/pairing-recovery.ts',
 ]
 
 /** The words of `COPY` that aren't code: what the code in it imports from our own packages is no claim about npm. */
@@ -200,6 +201,10 @@ const RULES: Rule[] = [
     near: [30, 0], ok: (near, _all, claim) => negated(near, claim, NEGATIVE_CAMERA),
   },
   {
+    id: 'pending-diagnosis', name: 'pending pairing copy does not diagnose an unknown network cause', files: COPY,
+    claim: /\b(?:still connecting|waiting for the screen)\b[^.!?]{0,100}\b(?:because|due to|caused by|blocked by)\b/i,
+  },
+  {
     id: 'host-storage', name: 'copy makes no storage promise for the apps and integrations a person controls', files: TRUST_COPY,
     claim: /\b(?:hosts?|screens?|integrations?|websites?|apps?|both devices)\b[^.!?]{0,45}\b(?:cannot|can't|can never|never|doesn't|does not|do not)\b[^.!?]{0,25}\b(?:store|record|log|keep)\b[^.!?]{0,25}\b(?:input|typing|controls?)\b|\bno (?:host|screen|integration|website|app) can (?:store|record|log|keep) (?:input|typing)\b/i,
   },
@@ -270,6 +275,8 @@ describe('overclaims', () => {
     expect(count('camera-upload', 'a.md', 'Camera frames are never uploaded. Camera frames are recorded with consent.')).toBe(1)
     expect(count('camera-upload', 'a.md', 'Camera frames are never uploaded but are recorded locally.')).toBe(1)
     expect(count('host-storage', 'a.html', '<p>No host can store input.</p>')).toBe(1)
+    expect(count('pending-diagnosis', 'a.ts', 'Still connecting because your firewall blocks the connection.')).toBe(1)
+    expect(count('pending-diagnosis', 'a.ts', "Still connecting. Keep the screen's ob.Pal page open.")).toBe(0)
     expect(count('host-storage', 'a.md', 'Websites never record your typing.')).toBe(1)
     expect(count('host-storage', 'a.md', 'Control input is not stored by ob.Pal. An integration decides what its own page does with input.')).toBe(0)
   })
