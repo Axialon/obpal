@@ -1,4 +1,4 @@
-"""Machine the fixed shell openings around the moving shoulder and hip sleeves.
+"""Machine fixed shell openings around moving sleeves, including folded elbows and knees.
 
 The cutting tools are copies of our own moving parts, expanded by 8 mm. They are
 sampled through each independent axis, then discarded. Pivots and limits stay
@@ -38,8 +38,11 @@ def machine_openings(nodes, morrow, low):
             ('leg.roll', 'leg.yaw', 'pelvis', 2, (-25*sign, 45*sign)),
             ('leg.pitch', 'leg.yaw', 'pelvis', 0, (-35, 100)),
             ('leg.yaw', 'leg.yaw', 'pelvis', 1, (-35, 35)),
+            ('arm.elbow', 'arm.elbow', 'arm.yaw', 0, (0, 130 if morrow else 140)),
+            ('leg.knee', 'leg.knee', 'leg.yaw', 0, (0, -130)),
         ]:
-            pairs.append((nodes[side+'.'+hinge], nodes[side+'.'+leaf], nodes[parent], axis, limits))
+            fixed = nodes[side+'.'+parent] if parent.startswith(('arm.', 'leg.')) else nodes[parent]
+            pairs.append((nodes[side+'.'+hinge], nodes[side+'.'+leaf], fixed, axis, limits))
     pairs.append((nodes['head.pitch'], nodes['head.pitch'], nodes['spine.roll'], 0, (-35, 45)))
     for moving, leaf, parent, axis, limits in pairs:
         shells = [o for o in parent.children if o.type == 'MESH' and o.data.materials[0].name == 'obsidian']

@@ -16,12 +16,13 @@ export const lime = new THREE.MeshStandardMaterial({ color: '#a4ce35', emissive:
 const linear = (r: number, g: number, b: number) => new THREE.Color().setRGB(r, g, b, THREE.LinearSRGBColorSpace)
 export const obsidian = new THREE.MeshPhysicalMaterial({ color: linear(.009, .012, .013), metalness: .58, roughness: .22, clearcoat: .65, clearcoatRoughness: .18 })
 export const graphite = new THREE.MeshStandardMaterial({ color: linear(.026, .030, .032), metalness: .55, roughness: .44 })
+export const elastomer = new THREE.MeshPhysicalMaterial({ color: linear(.0025, .004, .0045), metalness: .04, roughness: .92, specularIntensity: .5 })
 export const smokedGlass = new THREE.MeshPhysicalMaterial({ color: linear(.021, .040, .044), metalness: .34, roughness: .115, clearcoat: 1, clearcoatRoughness: .18 })
 export const deckObsidian = new THREE.MeshStandardMaterial({ color: linear(.012, .016, .017), metalness: .42, roughness: .31 })
 export const etch = new THREE.MeshStandardMaterial({ color: linear(.064, .075, .077), metalness: .62, roughness: .44 })
 export const arenaGlass = new THREE.MeshPhysicalMaterial({ color: linear(.065, .092, .096), metalness: .16, roughness: .18, clearcoat: .7, clearcoatRoughness: .18, transparent: true, opacity: .34, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true })
 export const halo = new THREE.MeshStandardMaterial({ color: linear(.45, .50, .47), emissive: linear(.45, .50, .47), emissiveIntensity: 1.4, roughness: .3 })
-for (const m of [ceramic, warmShell, titanium, darkTitanium, gunmetal, polished, carbon, optic, lime, obsidian, graphite, smokedGlass, deckObsidian, etch, arenaGlass, halo]) m.userData.simShared = true
+for (const m of [ceramic, warmShell, titanium, darkTitanium, gunmetal, polished, carbon, optic, lime, obsidian, graphite, elastomer, smokedGlass, deckObsidian, etch, arenaGlass, halo]) m.userData.simShared = true
 
 /** A crowned plate, tapering toward both ends of its local y axis, inside the requested envelope. */
 export function shell(w: number, h: number, d: number, material: THREE.Material = ceramic, taper = 0.22) {

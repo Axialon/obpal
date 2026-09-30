@@ -32,11 +32,18 @@ export function lightArena(stage: Stage) {
     }
   })
   stage.ground.position.y = -0.14
+  // The shared floor is a backdrop; keep its far edge below the heroes' rim light.
+  ;(stage.ground.material as THREE.MeshStandardMaterial).opacity = 0.22
   stage.lights.key.position.set(-3, 4, -3)
   stage.lights.key.intensity = 3.2
   const rim = new THREE.DirectionalLight('#d8ebed', 1.4)
   rim.position.set(2, 3, 2)
   stage.scene.add(rim)
+}
+
+/** Preserve Light mode while keeping Carbon's horizon quiet after theme or framing changes. */
+export function quietHorizon(stage: Stage) {
+  if (!stage.theme.light && stage.scene.fog) stage.scene.fog.color.set('#0e1315')
 }
 
 /** Soft sole contact, independent of shadow maps and screen resolution. */

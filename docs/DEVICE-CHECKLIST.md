@@ -129,6 +129,37 @@ Lay the phone flat on a table, or hold it in a stand, and turn the gyro on in 1:
 
 Attempts by a device that does not hold the screen's current code: a phone that opens the controller page (`/p/`) with no code; a short code typed with one digit changed; the QR code of an earlier session, after the screen has been reloaded. Each attempt: the screen's `__obpal.participants.length` stays at what it was, and the model does not move. Ten attempts of each kind. Write accepted out of attempts; anything but 0 is a security fault, not a result to average.
 
+## Humanoid capture, practice and calibration
+
+These checks need physical devices. Emulated screenshots and desktop GPU timings
+must not fill their result rows. Hardware drivers are tested against simulated
+drivers only; this checklist does not authorize a robot connection or leg enable.
+
+1. Prop the phone facing a standing user, select Body and verify full-body framing,
+   mirror, standing calibration and loss/reacquisition. Hands in Body stay off
+   unless explicitly enabled. Record processed fps and thermals separately with
+   Body alone and optional hands after twenty minutes. Close or hide capture;
+   confirm the camera light goes out. Repeat explicit local-webcam capture in
+   the Viewer and humanoid sim; frames and landmarks must never enter storage.
+2. At phone and desktop widths, complete all eight personal-range steps, skip,
+   revisit, redo, reload and reset. Check the selected robot silhouette, active
+   limb, joint arc and single primary action. Only derived ranges/lengths persist.
+   Repeat with reduced motion, touch, keyboard and a screen reader.
+3. Practice with two seats and both v3 heroes for five minutes. Exercise BODY legs,
+   classical locomotion, all presets, contact scoring, sound and Stop/Resume. Check
+   no support pole obstructs the default view, joint covers remain continuous,
+   fingers curl together and impacts yield briefly. Record frame/GPU timings,
+   DPR, draws, browser/device and whether camera inference runs simultaneously;
+   target 60 fps with logic below 2 ms and total frame work below 16.7 ms.
+4. Film BODY-to-pose response with both user and Viewer in the same high-frame-rate
+   shot. Report camera/display rates and sample count; separate transport,
+   inference and the sim's intentional elastic settling when interpreting lag.
+5. With simulated drivers only, inspect observe, held, stopped and fault states.
+   Confirm the held deadman is unmistakable, both checklist confirmations can
+   scroll fully above the footer, and Stop is reachable on a short phone screen.
+   Release, blur, hide and reopen; each must hold and require fresh rearm. Practice
+   legs remain available while the hardware lane refuses uncommissioned legs.
+
 ## Results
 
 Copy this table to `artifacts/device-results-<date>.md` and fill it in, one row per device, path and target. Do not put results in this file.

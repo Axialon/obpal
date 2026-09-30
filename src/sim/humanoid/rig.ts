@@ -11,6 +11,7 @@ import { loadPrototype, finishPrototype, retirePrototype } from '../kit/prototyp
 import { holdRig } from '../kit/reveal'
 import { modelName, modelPivots } from './models'
 import type { Grip } from './fingers'
+import { fingerAngles } from './tendons'
 
 export class Rig {
   readonly root = new THREE.Group()
@@ -20,7 +21,14 @@ export class Rig {
   private level = 0
   private loaded = false
   private grips: Grip = { left: 0, right: 0 }
-  private fingers: { side: keyof Grip; first: THREE.Object3D; tip: THREE.Object3D; distal: THREE.Object3D }[] = []
+  private fingers: {
+    side: keyof Grip
+    first: THREE.Object3D
+    tip: THREE.Object3D
+    distal: THREE.Object3D
+    thumb?: THREE.Object3D
+    thumbTip?: THREE.Object3D
+  }[] = []
   constructor(
     readonly profile: RigProfile,
     readonly variant = 0,
@@ -103,7 +111,9 @@ export class Rig {
       const first = group?.getObjectByName(`${side}_arm_fingers`),
         tip = group?.getObjectByName(`${side}_arm_tips`),
         distal = group?.getObjectByName(`${side}_arm_distal`)
-      if (first && tip && distal) this.fingers.push({ side, first, tip, distal })
+      const thumb = group?.getObjectByName(`${side}_arm_thumb`),
+        thumbTip = group?.getObjectByName(`${side}_arm_thumb_tip`)
+      if (first && tip && distal) this.fingers.push({ side, first, tip, distal, thumb, thumbTip })
     }
     this.root.userData.lods = this.skins.filter(Boolean).length
     this.grip(this.grips)
@@ -111,11 +121,14 @@ export class Rig {
   /** Collective fingers suit these three- and four-finger hands, with bounded knuckle travel. */
   grip(value: Grip) {
     this.grips = value
-    for (const { side, first, tip, distal } of this.fingers) {
+    for (const { side, first, tip, distal, thumb, thumbTip } of this.fingers) {
       const curl = THREE.MathUtils.clamp(value[side], 0, 1)
-      first.rotation.x = (curl * Math.PI) / 3
-      tip.rotation.x = (curl * Math.PI) / 3
-      distal.rotation.x = (curl * Math.PI) / 3
+      const angles = fingerAngles(this.profile, curl)
+      first.rotation.x = angles[0]
+      tip.rotation.x = angles[1]
+      distal.rotation.x = angles[2]
+      if (thumb) thumb.rotation.x = curl * 0.55
+      if (thumbTip) thumbTip.rotation.x = curl * 0.7
     }
   }
   /** Hysteresis keeps distant actors stable when an orbit straddles the LOD boundary. */

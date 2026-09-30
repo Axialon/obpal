@@ -13,6 +13,7 @@ import { LiveSession } from './live'
 import type { TargetInput } from './safety'
 
 export class DriverPanel {
+  private footerSize: ResizeObserver
   readonly session = new LiveSession()
   readonly el = document.createElement('div')
   readonly panel
@@ -49,9 +50,12 @@ export class DriverPanel {
         <details data-checklist>
           <summary>Go-live checklist <span data-check-count></span></summary>
           <ul class="driver-checks" data-checks></ul>
-          <label class="sim-auto"><input type="checkbox" data-mapping />Joint map verified</label>
-          <label class="sim-auto"
-            ><input type="checkbox" data-workspace />Workspace clear; emergency stop reachable</label
+          <label class="sim-auto" title="Joint map verified"
+            ><input type="checkbox" data-mapping aria-label="Joint map verified" />Map checked</label
+          >
+          <label class="sim-auto" title="Workspace clear; emergency stop reachable"
+            ><input type="checkbox" data-workspace aria-label="Workspace clear; emergency stop reachable" />Workspace
+            and Stop clear</label
           >
           <details class="driver-map">
             <summary>Joint map · radians</summary>
@@ -93,6 +97,16 @@ export class DriverPanel {
       anchor: 'arm',
       state: 'closed',
     })
+    // Focus and scroll keep whole confirmation rows above the persistent Stop controls.
+    const footer = this.el.querySelector<HTMLElement>('.driver-footer')!
+    this.footerSize = new ResizeObserver(() => {
+      const height = footer.offsetHeight
+      if (!height) return
+      const bottom = Math.max(0, parseFloat(getComputedStyle(footer).bottom) || 0)
+      this.panel.body.style.scrollPaddingBottom = `${height + bottom + 16}px`
+      this.panel.body.style.scrollPaddingTop = '8px'
+    })
+    this.footerSize.observe(footer)
     const choose = new GlassSelect({
       label: 'Simulated driver',
       value: 'ros',

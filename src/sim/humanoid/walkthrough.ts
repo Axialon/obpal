@@ -151,7 +151,7 @@ export class WalkthroughView {
     this.done.disabled = this.walk.active && this.walk.progress < 5 / 45
     const message = this.walk.active
       ? this.walk.progress
-        ? 'Range captured · keep it comfortable'
+        ? `${Math.round(this.walk.progress * 100)}% · keep it comfortable`
         : 'Move comfortably in view'
       : 'Only ranges and lengths are saved on this device.'
     if (this.status.textContent !== message) this.status.textContent = message

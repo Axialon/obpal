@@ -15,11 +15,11 @@ export class RangeFigure {
   private camera = new THREE.PerspectiveCamera(27, 1, 0.05, 30)
   private rig: Rig | null = null
   private rigs = new Map<string, Rig>()
-  private glass = new THREE.MeshPhysicalMaterial({ color: '#5c7278', metalness: 0.55, roughness: 0.16, clearcoat: 1 })
+  private glass = new THREE.MeshPhysicalMaterial({ color: '#384c51', metalness: 0.45, roughness: 0.26, clearcoat: 0.6 })
   private active = new THREE.MeshPhysicalMaterial({
     color: '#c6ff34',
     emissive: '#c6ff34',
-    emissiveIntensity: 0.28,
+    emissiveIntensity: 0.1,
     metalness: 0.35,
     roughness: 0.22,
     clearcoat: 1,
@@ -95,7 +95,7 @@ export class RangeFigure {
     const radius = Math.min(32, width * 0.075),
       start = -Math.PI * 0.8,
       sweep = Math.PI * 1.6
-    ctx.lineWidth = 3
+    ctx.lineWidth = 2
     ctx.lineCap = 'round'
     ctx.strokeStyle = accent
     ctx.globalAlpha = 0.22
@@ -108,9 +108,5 @@ export class RangeFigure {
       ctx.arc(x, y, radius, start, start + sweep * progress)
       ctx.stroke()
     }
-    ctx.fillStyle = accent
-    ctx.font = '600 12px Inter, sans-serif'
-    ctx.textAlign = 'center'
-    ctx.fillText(`${Math.round(progress * 100)}%`, x, y + radius + 17)
   }
 }

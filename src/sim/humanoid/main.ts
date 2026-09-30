@@ -17,7 +17,8 @@ import { Seats } from '../devices/seats'
 import { startSimScene, type SimScene } from '../scene'
 import { mountSimPanels, numberSections } from '../ui/panels'
 import { mountSound } from '../audio/session'
-import { HUMANOID, KEEL, MORROW } from './profile'
+import { HUMANOID, KEEL, MORROW, clamp } from './profile'
+import { forward } from './ik'
 import { Rig, arena } from './rig'
 import { Retargeter, FootBalance, type Retargeted } from './retarget'
 import { ActorControl, classical, PRESETS } from './controls'
@@ -25,7 +26,9 @@ import { Contacts, PracticeMode } from './contacts'
 import { CALIBRATION_KEY, parseCalibration } from './calibration'
 import { WalkthroughView } from './walkthrough'
 import { FingerInput } from './fingers'
-import { lightArena, soleShadow } from './lighting'
+import { Tendons } from './tendons'
+import { iconAction } from '../../ui/kit/action'
+import { lightArena, quietHorizon, soleShadow } from './lighting'
 import { DriverPanel } from './driver-panel'
 import { upperJoints } from './driver-profile'
 
@@ -37,7 +40,10 @@ mountQuick()
 family.watchTheme()
 const panels = mountSimPanels('humanoid', 'Controls')
 const stage = createStage($('stage') as HTMLCanvasElement, initialTheme(), { maxDpr: 1.5, portraitFraming: true })
-addEventListener('bb-theme', (e) => stage.setTheme(themeById((e as CustomEvent<{ theme: string }>).detail.theme)))
+addEventListener('bb-theme', (e) => {
+  stage.setTheme(themeById((e as CustomEvent<{ theme: string }>).detail.theme))
+  quietHorizon(stage)
+})
 stage.renderer.shadowMap.enabled = false
 lightArena(stage)
 stage.scene.add(arena())
@@ -50,9 +56,11 @@ const framing = {
   max: 16,
 }
 stage.frame(framing)
+quietHorizon(stage)
 addEventListener('obpal:panels', () => {
   stage.resize()
   stage.frame(framing)
+  quietHorizon(stage)
 })
 const actors = ['Keel', 'Morrow'].map((name, i) => {
   const profile = i ? MORROW : KEEL,
@@ -85,6 +93,7 @@ const actors = ['Keel', 'Morrow'].map((name, i) => {
     offset: new THREE.Vector3(),
     generation: -1,
     fingers: new FingerInput(),
+    tendons: new Tendons(profile),
     shadows,
   }
 })
@@ -230,6 +239,7 @@ const stop = () => {
   keys.clear()
   for (const a of actors) {
     a.control.stop()
+    a.tendons.freeze()
     a.balance.reset()
   }
   sound.stop()
@@ -242,12 +252,25 @@ $('resume').onclick = () => {
   for (const a of actors) a.control.resume()
   $('estop').setAttribute('aria-pressed', 'false')
 }
-$('reframe').onclick = () => stage.frame(framing)
+iconAction($('resume') as HTMLButtonElement, 'play', 'Resume')
+$('reframe').onclick = () => {
+  stage.frame(framing)
+  quietHorizon(stage)
+}
 $('reset-score').onclick = () => contacts.reset()
 $('scoring').onchange = () =>
   (contacts.mode = ($('scoring') as HTMLInputElement).checked ? PracticeMode.Practice : PracticeMode.Free)
 quickAction({ id: 'stop', group: 'page', label: 'Stop', icon: 'stop', run: stop })
-quickAction({ id: 'reset', group: 'page', label: 'Recentre', icon: 'reset', run: () => stage.frame(framing) })
+quickAction({
+  id: 'reset',
+  group: 'page',
+  label: 'Recentre',
+  icon: 'reset',
+  run: () => {
+    stage.frame(framing)
+    quietHorizon(stage)
+  },
+})
 document.querySelectorAll<HTMLButtonElement>('[data-drive]').forEach((b) => {
   b.onpointerdown = (e) => {
     if (!takeLocal()) return
@@ -381,6 +404,7 @@ stage.onFrame = (t, dt) => {
       a.retarget.reset()
       a.balance.reset()
       a.control.resetSource()
+      a.tendons.freeze()
     }
     a.last = a.retarget.step(source === 'body' ? body : null, now)
     if (a.last.generation !== a.generation) {
@@ -397,10 +421,18 @@ stage.onFrame = (t, dt) => {
     if (!a.control.stopped) {
       const balance = a.balance.step(a.control.profile, q, dt, a.control.moving)
       a.offset.copy(balance.root)
-      a.rig.pose(balance.q, a.control.position, a.control.yaw, a.offset)
       const grip = a.fingers.step(body, input?.hand ?? null, a.retarget.mirror, owner)
       const closed = a.control.preset && a.control.preset !== 'wave'
-      a.rig.grip(closed ? { left: 1, right: 1 } : grip)
+      const pose = a.tendons.step(balance.q, closed ? { left: 1, right: 1 } : grip, dt)
+      // Ground the actual elastic pose; the target's feet can be ahead during settling.
+      const fk = forward(a.control.profile, pose),
+        legs = a.control.profile.chains.filter((c) => c.group === 'legs')
+      if (legs.length) {
+        const lowest = Math.min(...legs.map((c) => fk.get(c.end)!.p.y - 0.08))
+        a.offset.y = clamp(-lowest, -Math.max(0, fk.get(a.control.profile.root)!.p.y - 0.12), 0.4)
+      }
+      a.rig.pose(pose, a.control.position, a.control.yaw, a.offset)
+      a.rig.grip(a.tendons.grip)
       for (const foot of balance.landed)
         sound.bus.emit({
           kind: 'footstep',
@@ -431,6 +463,12 @@ stage.onFrame = (t, dt) => {
       dt,
       t,
     )) {
+      const attacker = actors.find((a) => a.id === hit.from),
+        defender = actors.find((a) => a.id === hit.to)
+      const spine = defender?.control.profile.frame?.spine[1]
+      if (spine) defender?.tendons.contact(spine, hit.blocked ? 0.15 : 0.45)
+      for (const chain of attacker?.control.profile.chains.filter((c) => c.group === 'arms') ?? [])
+        attacker?.tendons.contact(chain.joints[3], -0.25)
       const f = flashes[flashIndex++ % flashes.length]
       f.mesh.position.copy(hit.at)
       f.mesh.lookAt(stage.camera.position)

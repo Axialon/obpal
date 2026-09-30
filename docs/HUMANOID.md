@@ -1,6 +1,6 @@
 # Humanoid: full-body capture and robot following
 
-Approved Phase 0 plan, researched 2026-09-30 against master `be50c71`. Phase 1 and 2 implementation and measured evidence are recorded below; all other numbers remain proposed targets, not hardware safety ratings. Each phase ends with coordinator review, merge and deployment.
+Approved Phase 0 plan, researched 2026-09-30 against master `be50c71`. Implementation and measured evidence are recorded below; other numbers remain proposed targets, not hardware safety ratings. Each phase ends with coordinator review, merge and deployment.
 
 ## Capture and transport
 
@@ -138,7 +138,7 @@ Each phase merges master, runs `pnpm run check`, then affected e2e suites. Tests
 | 2. Sim — implemented | New `sim/humanoid/index.html`, `src/sim/humanoid/{main,profile,ik,rig,retarget,calibration,walkthrough,controls,contacts}.ts`; seats adapter, catalogue, Vite route/early entry, audio integration | `tests/humanoid-{ik,calibration,controls,contacts}.test.ts`: FK/IK roundtrip ≤1° or 1 cm, mirror identity, finite singularities, bounded joints, monotonic/clamped/identity range mapping. `scripts/e2e-humanoid.mjs` under sims: two seats, loss, classical controls, presets, complete/skip/redo/persist/reset walkthrough and screenshots. Five-minute procedural-rig PC budget; physical phone acceptance remains unverified | sims, shared, phone, catalogue, pages |
 | 3. Models — implemented | `assets/blender/{humanoids,humanoid_arena,render_humanoids}.py`, five meshopt GLBs, `humanoid/{models,rig,range-figure,walkthrough,fingers}.ts`, kit registrations and credits | Full-limit pivot sweeps at both LODs; geometry/material/byte contracts; cold/warm/failed/late reveal and LOD switching. Selected-robot walkthrough, reduced-motion pixels, optional BODY/HAND finger fusion, phone/desktop screenshots and five-minute two-hero performance | sims, pages |
 | 4. Drivers — implemented | `src/sim/humanoid/{drivers,safety,live}.ts`, fake drivers; `hardware/humanoid/README.md` specifies guardian and Unitree bridge contract | Unit fault matrix and `scripts/e2e-humanoid-live.mjs` under sims: stale single joint amid fresh others, unknown/out-of-limit/NaN state, swapped mappings, caps, replay, deadman release/loss, browser freeze, socket/bridge death, stop acknowledgement, leg refusal, reconnect requiring rearm. Zero motion goals after Stop; fake guardian holds within 110 ms. No real robot endpoints | sims, phone, shared |
-| 5. Review | Relevant humanoid/UI files, `docs/DEVICE-CHECKLIST.md`, this plan, camera/help documentation | One bounded Opus design review: ≤30 minutes, ≤10 findings, one polish pass, then focused verification. Device checklist covers lighting/occlusion, seated use, permissions, thermal cadence, 60 fps Viewer and measured latency. Record unavailable devices as unverified; no invented passes | sims, camera, phone, shared, pages; catalogue/extension only if changed |
+| 5. Review — implemented | Humanoid authoring/rig/UI files, new `tendons.ts` and tendon tests/proof, `docs/DEVICE-CHECKLIST.md`, this plan and original asset credits | Owner's revised brief: bounded review (12 ranked findings on the requested gpt-6.1-sol lane), anatomy-led v3, coupled tendon routing and series elasticity, 30–120 Hz stability, soft impacts, v2/v3 4K and live comparisons, silhouettes, swept clearances and five-minute two-actor budget. Device numbers remain unverified | sims, pages, phone; calibration/driver checks are in sims |
 
 ## Phase 1 capture — done (2026-09-30)
 
@@ -348,6 +348,104 @@ The isolated run recorded **39 simulated hold samples**: three explicit deadman 
 Evidence is in `artifacts/humanoid/phase-4/`: machine-readable and readable fault matrices, raw hold events and histograms, phone/desktop driver states, preserved development failures, full-suite logs and frame-time data. The driver footer reserves space above the desktop pairing badge so Stop remains exposed; no shared button styles changed.
 
 After that layout correction, the focused live-driver suite passed **22/22**, phone **35/35**, shared **7/7** and camera **20/20**. The final 39 hold samples measured p95 **104.8 ms**, maximum **105.4 ms**. Nine-point hit tests keep Stop unobstructed on desktop and phone. Final screenshots and the histogram are in `final-browser/`; the raw runner log is in `final-validation/`. The Desktop guard reported **no new sessions**, with 19 test-browser lines before and after. The two full-sims readiness failures above remain an integration follow-up.
+
+## Phase 5 review and v3 articulation
+
+The bounded review records twelve ranked findings in
+`artifacts/humanoid/phase-5/review.md`: exposed bearings, shallow chest and hip
+volume, small hands, rigid motion, intrusive halo supports, the bright horizon,
+missing soft surfaces, crowded range feedback, phone checklist reachability,
+the Resume action and incomplete comparison evidence. The review uses the
+requested gpt-6.1-sol lane; it is not an Opus design review.
+
+Keel and Morrow v3 preserve the approved heights, joint-centre spans, identities,
+limits and three primary material tiers. Catmull-interpolated superellipse
+sections form pectoral/deltoid, iliac, thigh, calf and elbow-led forearm volumes.
+Keel keeps its split shield and vertical void; Morrow keeps its open oval,
+offset glass ribs and lime core. Both have a palm, thenar volume, an opposable
+thumb, knuckles and three phalanges. Texture-free charcoal elastomer covers
+the abdominal and articulation cores, with geometric channels and restrained
+wrist/ankle sheaths. Soft covers intentionally overlap; no cloth or finite-element
+simulation is implied. All shapes, routing ratios and materials are original
+MIT assets. The arena halo hangs overhead without floor-reaching support blades;
+the humanoid scene's Carbon horizon is quieter. Other sims keep their finishes.
+
+The inspiration is 1X's publicly described soft covers and tendon transmission
+([NEO Gamma](https://www.1x.tech/discover/introducing-neo-gamma),
+[NEO hands](https://www.1x.tech/discover/neos-hands)). We do not reproduce NEO's
+mechanical routing, controller or hardware parameters. `tendons.ts` is an original,
+bounded visual approximation between the practice target and joint pose. Retargeting
+and drivers still exchange joint angles; the driver reference profile omits
+compliance. The driver state machine, guardian and arm source are unchanged.
+
+Each collective finger tendon drives three phalanges in profile ratios: Keel's
+full curl is 0.72/1.05/0.80 radians, Morrow's 0.68/1.00/0.76. The thumb folds through
+two linked frames. Wrist and ankle pitch/roll use normalized differential strokes
+`a+b` and `a-b`; each stroke shares a capped travel envelope, and the inverse
+recovers the joint angles before applying their existing limits. Saturation
+reduces simultaneous extreme pitch/roll rather than exceeding travel. These
+couplings are sim choices, not measurements of a vendor mechanism.
+Other axes use the net stroke of an antagonistic tendon pair at a unit moment
+arm, reduced to the angle coordinate; no independent servo controller or
+individual tension solver runs in this visual approximation.
+
+Unit-inertia spring/damper states integrate at substeps no larger than 1/240 s,
+with a maximum 1/30 s elapsed step. Keel uses stiffness 196 s⁻² and damping
+24 s⁻¹; Morrow 256 s⁻² and 29 s⁻¹. Named contact chains add a bounded velocity
+impulse, giving a little yield and recovery without mutating the retarget target.
+Stop freezes stored velocity. The foot-contact heuristic still supplies targets;
+the root height is corrected from the actual elastic pose during settling. This
+is visual balance, not a physical stability or cable-force model.
+
+Thirteen tendon unit cases cover ratios, differential saturation, fixed distal axes, bounded overshoot,
+identical fixed-step integration at 30/60/120 Hz, alternating full-range targets,
+soft impacts, invalid cadence and the uncompensated driver reference. Browser
+proof curls the authored finger pivots and runs a real jab preset, preserving
+raw target/pose samples and frame strips. The range figure now uses quieter
+glass and a thinner joint arc; its percentage lives in the status line. Shared
+icon actions, tappable progress, skip/redo/reset and reduced motion remain intact.
+The phone driver confirmation retains its full accessible safety label, exposes
+its whole row above the sticky footer and keeps the full-size worded Stop.
+
+| V3 asset | Bytes | Triangles | Material batches |
+| --- | ---: | ---: | ---: |
+| Keel | 357,088 | 22,904 | 48 |
+| Keel distant LOD | 196,208 | 9,408 | 48 |
+| Morrow | 337,892 | 23,221 | 48 |
+| Morrow distant LOD | 162,332 | 8,456 | 48 |
+| Arena | 112,876 | 7,464 | 6 |
+
+The two hero meshes and arena total 807,856 bytes and 53,589 triangles, with
+zero textures. Both LODs preserve the named pivots and continuous limb cores.
+Elbow/knee openings now join the shoulder/hip/head machining; the same audit
+thresholds pass 8,060 independently sampled poses with zero adjacent exterior
+crossings. Sharp socket edges split normals while anatomy-led outer surfaces
+keep smooth reflections. A closed soft core bridges the folding clearances;
+neither a hollow gap nor a raised audit tolerance is used to achieve clearance.
+
+The five-minute two-actor PC sample collected 17,856 frames over 300,213 ms:
+p95 logic 0.70 ms, render submission 0.80 ms and GPU work 2.901 ms, with 107
+draw calls and 53,693 triangles at DPR 1 on Chromium/ANGLE D3D11 and an RTX 4090.
+The sum of component p95 work values is 4.401 ms; this is a work summary, not
+a measured combined per-frame percentile. The p95 browser frame interval was
+16.80 ms, including refresh scheduling. This meets the PC work/draw budgets;
+it does not verify the physical-phone 60 fps target.
+
+Final validation passes all four typechecks and 2,241 unit tests (14 skipped),
+sims 381/381 on its isolated rerun, pages 59/59 and phone 35/35. The initial sims
+run retained two failures: a corrected test-seam query in the new tendon proof
+and a kart landscape readiness timeout that passed on the one isolated rerun.
+The Desktop guard stayed at 19 test-browser lines before and after: **no new
+sessions**. All evidence is under `artifacts/humanoid/phase-5/`: `review.md`,
+`performance.md`, v2/v3 4K comparisons, actual desktop/phone scene comparisons,
+all eight walkthrough steps, driver states, silhouettes and tendon curl/jab
+strips with raw deterministic samples. Tests write their captures to temporary
+folders; the retained copies remain ignored artifacts.
+
+Physical-phone fps, camera/render contention, thermals, real motion-to-display
+latency, cable forces and hardware compliance remain **unverified**. The hardware
+leg lock is unchanged and does not gate practice legs. Adjacent-shell audits and
+synthetic motion tests do not certify hardware clearances or physical balance.
 
 ## Open decisions — decided by the owner (2026-09-30)
 

@@ -1,10 +1,11 @@
-/** Assemble preserved v1 and new v2 authoring evidence; never downloads or generates imagery. */
+/** Assemble preserved and revised authoring evidence; never downloads or generates imagery. */
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import sharp from 'sharp'
 
 const root = resolve(process.argv[2] || 'artifacts/humanoid/phase-3b')
+const versions = process.argv[3] === 'v2-v3' ? ['v2', 'v3'] : ['v1', 'v2']
 const out = join(root, 'comparisons')
 await mkdir(out, { recursive: true })
 const names = ['keel', 'morrow'].flatMap((name) =>
@@ -13,11 +14,11 @@ const names = ['keel', 'morrow'].flatMap((name) =>
 names.push('pair-arena')
 const title = (text, width, height = 72) =>
   Buffer.from(
-    `<svg width="${width}" height="${height}"><rect width="100%" height="100%" fill="#101314"/><text x="36" y="48" fill="#e6ebdf" font-family="sans-serif" font-size="30">${text}</text></svg>`,
+    `<svg width="${width}" height="${height}"><rect width="100%" height="100%" fill="#101314"/><text x="${width < 720 ? 18 : 36}" y="48" fill="#e6ebdf" font-family="sans-serif" font-size="${width < 720 ? 18 : 30}">${text}</text></svg>`,
   )
 for (const name of names) {
   const panels = []
-  for (const [i, version] of ['v1', 'v2'].entries()) {
+  for (const [i, version] of versions.entries()) {
     // Centre crops use all of the source's vertical resolution. Each full source
     // remains beside the sheet for inspecting details at the original 4K size.
     const input = await sharp(join(root, version, 'renders', `${name}.png`))
@@ -30,13 +31,37 @@ for (const name of names) {
   await sharp({ create: { width: 3840, height: 2160, channels: 4, background: '#101314' } })
     .composite(panels)
     .png()
-    .toFile(join(out, `${name}-v1-v2.png`))
+    .toFile(join(out, `${name}-${versions.join('-')}.png`))
+}
+
+for (const size of versions[1] === 'v3' ? ['desktop', 'phone'] : []) {
+  const width = size === 'desktop' ? 1440 : 412,
+    height = size === 'desktop' ? 900 : 915
+  const steps = ['shoulders', 'elbows', 'wrists', 'spine', 'hips', 'knees', 'ankles', 'head']
+  for (const name of [...names, ...(versions[1] === 'v3' ? steps.map((step) => `range-${step}`) : [])]) {
+    const panels = []
+    for (const [i, version] of versions.entries()) {
+      panels.push({
+        input: await sharp(join(root, version, 'sim', `${size}-${name}.png`))
+          .resize(width, height, { fit: 'contain', background: '#101314' })
+          .png()
+          .toBuffer(),
+        left: i * width,
+        top: 72,
+      })
+      panels.push({ input: title(`${name} / ${version}`, width), left: i * width, top: 0 })
+    }
+    await sharp({ create: { width: width * 2, height: height + 72, channels: 4, background: '#101314' } })
+      .composite(panels)
+      .png()
+      .toFile(join(out, `${size}-${name}-${versions.join('-')}.png`))
+  }
 }
 
 // A native 64 px figure and an unfiltered 8× enlargement of the same pixels.
 const silhouettes = []
 for (const [i, name] of ['keel-front', 'keel-side', 'morrow-front', 'morrow-side'].entries()) {
-  const small = await sharp(join(root, 'v2', 'renders', `${name}-silhouette.png`))
+  const small = await sharp(join(root, versions[1], 'renders', `${name}-silhouette.png`))
     .trim()
     .resize({ height: 64 })
     .png()

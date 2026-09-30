@@ -29,6 +29,14 @@ export interface RigProfile {
   chains: readonly Chain[]
   height: number
   calibrationId?: string
+  /** Original sim-only tendon envelopes; driver reference profiles omit these. */
+  compliance?: {
+    stiffness: number
+    damping: number
+    wristTravel: number
+    ankleTravel: number
+    fingers: readonly [number, number, number]
+  }
   skins: readonly {
     joint: string
     size: Vec3
@@ -170,13 +178,19 @@ export const HUMANOID = {
     nose: 0,
   },
 } satisfies RigProfile
-export const KEEL: RigProfile = { ...HUMANOID, id: 'keel-v1', calibrationId: HUMANOID.id }
+export const KEEL: RigProfile = {
+  ...HUMANOID,
+  id: 'keel-v1',
+  calibrationId: HUMANOID.id,
+  compliance: { stiffness: 196, damping: 24, wristTravel: 1.3, ankleTravel: 1.45, fingers: [0.72, 1.05, 0.8] },
+}
 const scale = 1.65 / 1.8
 export const MORROW: RigProfile = {
   ...HUMANOID,
   id: 'morrow-v1',
   calibrationId: HUMANOID.id,
   height: 1.65,
+  compliance: { stiffness: 256, damping: 29, wristTravel: 1.25, ankleTravel: 1.4, fingers: [0.68, 1, 0.76] },
   joints: joints.map((j) => ({
     ...j,
     offset: j.offset.map((n, axis) =>

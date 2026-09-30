@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import *
-from humanoid_surfaces import finishes, loft, ball, oval_band, rounded_normals
+from humanoid_surfaces import finishes, loft, ball, oval_band, rounded_normals, anatomy, sheath
 from humanoid_clearance import machine_openings
 
 
@@ -71,10 +71,11 @@ def hand(wrist, name, morrow, low):
     The original two control frames remain; the distal frame adds the third
     knuckle. All hands have a visible web and separated tips at neutral.
     """
-    ball(wrist, .043, low=low)
-    loft(wrist, [( .005, .032, .03, 0), (-.025, .053, .036, -.002),
-                 (-.075, .050, .030, -.005), (-.087, .043, .024, -.012)], low=low, edge=.004)
-    seam(wrist, (.062, .045, .004), (0, -.045, -.039), low)
+    ball(wrist, .037, low=low, material='elastomer', scale=(1, 1.2, .9))
+    anatomy(wrist, [(.005, .031, .027, 0), (-.027, .052, .034, -.001),
+                   (-.071, .053, .029, -.004), (-.087, .045, .023, -.010)], low=low)
+    sign = -1 if name.startswith('left') else 1
+    ball(wrist, .026, (sign*.038, -.051, -.004), low, 'obsidian', (1, 1.3, .8))
     first = pivot(name+'_fingers', wrist, (0, -.08, -.022))
     second = pivot(name+'_tips', first, (0, -.035, 0))
     third = pivot(name+'_distal', second, (0, -.029, 0))
@@ -83,14 +84,17 @@ def hand(wrist, name, morrow, low):
     for n in range(count):
         x = (n-(count-1)/2)*(width+.006)
         for frame, length, w in [(first, .035, width), (second, .029, width*.94), (third, .029, width*.84)]:
-            axle(frame, .012, w, low, (x, 0, 0))
-            plate(frame, (w, length-.001, .027), (x, -length/2, -.001), 'graphite', taper=.1, edge=.002)
-    # A swept thumb gives the hand a recognisable side profile without adding an
-    # unsupported independent human-finger channel or a fourth animated material.
-    sign = -1 if name.startswith('left') else 1
-    thumb = plate(wrist, (.027, .066, .029), (sign*.060, -.059, .005), 'graphite', taper=.2, edge=.003)
-    thumb.rotation_euler.z = sign*.5
-    plate(wrist, (.025, .035, .028), (sign*.070, -.097, -.008), 'graphite', taper=.25, edge=.003)
+            ball(frame, .013, (x, 0, 0), low, 'elastomer', (w/.026, 1, .9))
+            anatomy(frame, [(.004, w*.45, .012, 0), (-length*.35, w*.51, .014, -.001),
+                            (-length, w*.40, .011, -.002)], 'elastomer', low, (x, 0, 0))
+        ball(wrist, .014, (x, -.077, -.025), low, 'obsidian', (1, .85, .8))
+    thumb = pivot(name+'_thumb', wrist, (sign*.050, -.040, .005))
+    thumb.rotation_euler.z = sign*.55
+    anatomy(thumb, [(0, .017, .017, 0), (-.025, .017, .015, -.001), (-.050, .013, .013, -.003)], 'elastomer', low)
+    thumb_tip = pivot(name+'_thumb_tip', thumb, (0, -.05, -.003))
+    anatomy(thumb_tip, [(.006, .014, .013, 0), (-.015, .014, .013, -.003), (-.032, .010, .009, -.005)], 'elastomer', low)
+    for x in [-.017, .017]:
+        sheath(wrist, [(x, .018, .020), (x, -.006, .031), (x, -.034, .032)], .002)
 
 
 def build_robot(name, low=False, clear=True):
@@ -114,20 +118,18 @@ def build_robot(name, low=False, clear=True):
 
     # The hip bridge rises into the abdominal ball. Nested lamellae replace the
     # old rod: broad lower plates overlap a continuous dark core through bending.
-    loft(pelvis, [(-.075, .052 if not morrow else .078, .060, .006),
-                   (-.025, .140 if not morrow else .170, .075, 0),
-                   (.055, .153 if not morrow else .183, .078, 0),
-                   (.095, .123 if not morrow else .158, .078, 0)], low=low)
-    ball(torso, .103, low=low, scale=(1, 1.05, 1))
-    # Shells below and above the waist enclose the bearing instead of meeting at
-    # two disconnected flat ends. The lower abdomen stays narrow on Keel.
-    for bottom, top in [(-.078, -.028), (-.026, .026), (.028, .079)]:
-        ys = [bottom, (bottom+top)/2, top]
-        outside = [(math.sqrt(.111**2-y*y), y) for y in ys]
-        inside = [(r-.005, y) for r, y in reversed(outside)]
-        band = lathe(torso, outside+inside+[outside[0]], material='obsidian', segments=12 if low else 24)
-        band['clearanceProtected'] = True
-    plate(torso, (.211, .045, .035), (0, .096, -.059), 'obsidian', taper=.2, edge=.004)
+    anatomy(pelvis, [(-.077, .071 if not morrow else .097, .067, .008),
+                    (-.018, .169 if not morrow else .190, .089, .006),
+                    (.044, .182 if not morrow else .207, .100, 0),
+                    (.096, .126 if not morrow else .159, .077, 0)], low=low)
+    ball(torso, .104, low=low, material='elastomer', scale=(1, 1.15, 1))
+    # A quiet soft core and abdominal plates replace the exposed bearing rings.
+    anatomy(torso, [(-.095, .096, .081, .006), (-.025, .105, .086, .003),
+                    (.052, .111, .088, 0), (.119, .123, .096, -.002)], 'elastomer', low)
+    for y, width in [(-.015, .125), (.041, .145), (.092, .174)]:
+        plate(torso, (width, .043, .019), (0, y, -.092), 'obsidian', taper=.15, edge=.004)
+    for x in [-.058, .058]:
+        sheath(torso, [(x, -.05, .080), (x*.85, .03, .087), (x, .12, .079)], .003, 'elastomer')
     seam(pelvis, (.16 if not morrow else .20, .051, .008), (0, .018, -.080), low)
 
     # A continuous spine sweeps behind the thorax. Its depth is intentional in
@@ -149,14 +151,18 @@ def build_robot(name, low=False, clear=True):
         rounded_normals(back)
         # An open, offset double ellipse is Morrow's defining negative space.
         # The forward glass ribs float on the structural rim, not across the gap.
-        oval_band(torso, .131, .181, -.012, .027, low=low, at_y=.269, depth=1.65)
+        oval_band(torso, .151, .171, -.016, .035, low=low, at_y=.279, depth=1.85)
         oval_band(torso, .117, .163, .031, .014, 'graphite', low, at_y=.27, depth=1.8)
         for y, sign in [(.185, -1), (.286, 1), (.376, -1)]:
-            rib = plate(torso, (.209, .044, .049), (sign*.010, y, -.050), 'smokedGlass', taper=.28, edge=.004)
+            rib = anatomy(torso, [(-.019, .061, .018, 0), (0, .116, .037, -.017), (.019, .071, .020, 0)],
+                          'smokedGlass', low, (sign*.010, y, -.069))
             rib.rotation_euler.z = sign*.19
         loft(torso, [(.14, .018, .019, .012), (.35, .025, .025, .012)], 'lime', low, .002)
         # Compact shoulder girdle nests behind the oval and under each cap.
         plate(torso, (.422, .071, .095), (0, .367, .035), 'graphite', taper=.15, edge=.006)
+        for sign in [-1, 1]:
+            anatomy(torso, [(.150, .039, .073, .010), (.249, .051, .086, -.006),
+                            (.351, .050, .088, -.011), (.407, .036, .059, .006)], low=low, at=(sign*.130, 0, 0))
     else:
         # Two deep, swept shield leaves: an actual vertical void separates their
         # inner edges, with a small smoked sternum bridge above the opening.
@@ -167,7 +173,13 @@ def build_robot(name, low=False, clear=True):
                 points.reverse()
             shell = prism(torso, points, .15, (0, 0, -.036), 'obsidian', .009 if not low else .006)
             shell['shieldSide'] = sign
+            # Pectoral camber gives the shield actual chest depth, preserving its
+            # central void and crisp perimeter instead of flattening the ribcage.
+            for vertex in shell.data.vertices:
+                vertex.co.z -= .032*math.exp(-((vertex.co.y-.343)/.105)**2)
             rounded_normals(shell)
+            anatomy(torso, [(.144, .046, .067, .019), (.233, .077, .108, .010),
+                            (.335, .086, .121, -.007), (.408, .068, .093, .011)], low=low, at=(sign*.108, 0, 0))
             # Layered upper panels leave a two-millimetre recessed seam border.
             panel = plate(torso, (.100, .062, .017), (sign*.124, .377, -.119), 'graphite', taper=.18, edge=.002)
             panel.rotation_euler.z = -sign*.32
@@ -182,61 +194,70 @@ def build_robot(name, low=False, clear=True):
     # The upper head reaches the specified nominal 1.80/1.65 m standing height.
     neck = nodes['head.yaw']
     cylinder(neck, .050, .139, (0, -.008, .012), 'graphite', segments=seg)
-    ball(nodes['head.pitch'], .090, low=low, material='obsidian')
-    loft(torso, [(.396, .112, .071, .013), (.448, .077, .066, .014),
-                 (.493, .078, .065, .012)], 'graphite', low)
-    collar = ring(nodes['head.pitch'], .114, .018, (0, .034, .006), 'obsidian', axis='y', segments=seg)
-    collar.scale.y = 1.7 if morrow else 1.25
+    ball(nodes['head.pitch'], .068, (0, .036, .009), low, 'elastomer', (1, 1.25, 1))
+    anatomy(torso, [(.396, .105, .071, .013), (.448, .072, .063, .014),
+                   (.493, .069, .061, .012)], 'elastomer', low)
+    collar = ring(nodes['head.pitch'], .082, .012, (0, .049, .006), 'obsidian', axis='y', segments=seg)
+    collar.scale.y = 1.2
+    collar['clearanceProtected'] = True
     # Rear collar sweeps upward like a hood, while the chin stays free to pitch.
     plate(torso, (.182, .058, .021), (0, .429, .108), 'obsidian', taper=.12, edge=.005)
     head = nodes['head.pitch']
-    loft(head, [(-.020, .055, .050, 0), (.070, .075, .066, 0), (.120, .083, .074, -.004),
-                (.190 if morrow else .222, .126 if morrow else .120, .104, -.004),
-                (.290, .078, .072, .020)], low=low, edge=.009)
+    head_shell = loft(head, [(.066, .061, .058, -.007), (.105, .078, .067, -.011), (.151, .093, .079, -.003),
+                           (.216, .117 if morrow else .110, .094, .001),
+                           (.290, .079, .072, .018)], low=low, edge=.009)
+    head_shell['clearanceProtected'] = True
     brow = plate(head, (.199 if not morrow else .210, .061, .035), (0, .211, -.120 if not morrow else -.107), 'smokedGlass', taper=.12, edge=.004)
     brow.rotation_euler.x = -.13
     plate(head, (.078 if morrow else .128, .005, .008), (0, .205, -.140 if not morrow else -.126), 'lime', edge=.0008)
-    seam(head, (.066, .050, .008), (0, .124, -.114 if not morrow else -.103), low)
+    plate(head, (.091, .029, .012), (0, .104, -.077), 'obsidian', taper=.2, edge=.002)
 
     for side, sign in [('left', -1), ('right', 1)]:
         a, l = side+'.arm', side+'.leg'
         shoulder = nodes[a+'.yaw']
         # Full spheres provide uninterrupted structure while the rigid sleeves
         # move around them. Shoulder shells grow from a 90 mm bearing envelope.
-        ball(shoulder, .082 if not morrow else .078, low=low)
-        loft(shoulder, [(.062 if not morrow else .042, .064 if not morrow else .052, .063, .003), (.006, .092 if not morrow else .074, .074, .002),
-                       (-.069, .074, .064, .004), (-.129, .058, .049, .006),
-                       (-.220, .047, .038, .011), (-.248, .039, .032, .010)], low=low, edge=.005)
+        ball(shoulder, .088 if not morrow else .081, low=low, material='elastomer')
+        anatomy(shoulder, [(.055, .058, .062, .003), (.006, .102 if not morrow else .090, .091, 0),
+                          (-.068, .094 if not morrow else .084, .084, -.002), (-.144, .068, .061, .003),
+                          (-.221, .048, .042, .009), (-.273, .043, .036, .010)], low=low)
+        # A closed soft tendon core bridges the machined folding clearance.
+        core = cylinder(shoulder, .029, .235, (0, -.153, .006), 'elastomer', segments=12)
+        core['clearanceProtected'] = True
         # A slim panel follows the upper-arm taper rather than a uniform tube.
-        seam(shoulder, (.065, .093, .007), (0, -.141, -.041), low)
+        seam(shoulder, (.053, .071, .006), (0, -.145, -.057), low, 'elastomer')
         elbow = nodes[a+'.elbow']
-        ball(elbow, .058, low=low)
-        axle(elbow, .047, .098, low)
-        loft(elbow, [(-.019, .047, .027, .009), (-.064, .067 if not morrow else .062, .044, .025),
-                    (-.125, .061, .048, .027), (-.203, .044, .036, .018),
-                    (-.243, .032, .029, .008)], low=low, edge=.006)
+        ball(elbow, .057, low=low, material='elastomer', scale=(1, 1.18, .9))
+        anatomy(elbow, [(.020, .040, .031, .005), (-.008, .051, .039, .007), (-.067, .071 if not morrow else .067, .053, .012),
+                       (-.128, .062, .052, .019), (-.202, .044, .036, .012),
+                       (-.244, .032, .028, .006)], low=low)
+        anatomy(elbow, [(-.038, .039, .028, .045), (-.098, .047, .031, .047),
+                       (-.186, .034, .023, .035), (-.226, .025, .017, .016)], 'elastomer', low)
         if morrow:
             for s in [-1, 1]:
                 points = [(s*x, y) for x, y in [(.042, -.058), (.079, -.089), (.067, -.16), (.039, -.208), (.055, -.127)]]
                 if s < 0:
                     points.reverse()
                 prism(elbow, points, .068, (0, 0, .020), 'obsidian', .003)
-        seam(elbow, (.074, .108, .008), (0, -.131, -.024), low)
+        for x in [-.019, .019]:
+            sheath(elbow, [(x, -.16, .055), (x, -.22, .043), (x, -.256, .025)], .0027, 'elastomer')
         hand(nodes[a+'.wrist.yaw'], a.replace('.', '_'), morrow, low)
 
         thigh = nodes[l+'.yaw']
-        ball(thigh, .086, low=low)
-        loft(thigh, [(-.008, .064, .064, 0), (-.062, .087, .078, -.005),
-                    (-.179, .080, .064, -.011), (-.292, .060, .047, -.008),
-                    (-.366, .051, .041, -.003)], low=low, edge=.007)
-        seam(thigh, (.098, .138, .008), (0, -.203, -.074), low)
+        ball(thigh, .088, low=low, material='elastomer', scale=(1, 1.1, 1))
+        anatomy(thigh, [(.066, .042, .042, .008), (.016, .078, .076, .005), (-.006, .085, .082, .004), (-.079, .098, .100, -.011),
+                       (-.185, .096, .092, -.015), (-.291, .068, .059, -.006),
+                       (-.395, .051, .043, -.002)], low=low)
+        core = cylinder(thigh, .034, .440, (0, -.230, 0), 'elastomer', segments=12)
+        core['clearanceProtected'] = True
+        anatomy(thigh, [(-.042, .056, .031, .065), (-.119, .071, .033, .085),
+                       (-.259, .047, .029, .051), (-.340, .035, .018, .031)], 'elastomer', low)
         knee = nodes[l+'.knee']
-        ball(knee, .076, low=low)
-        axle(knee, .059, .132, low)
+        ball(knee, .075, low=low, material='elastomer', scale=(1, 1.08, .88))
         # A low-profile upper cuff clears the thigh during the full knee fold.
-        loft(knee, [(-.021, .052, .034, -.019), (-.089, .068, .054, -.024),
-                    (-.218, .062, .051, -.018), (-.330, .040, .034, -.003),
-                    (-.380, .034, .030, 0)], low=low, edge=.006)
+        anatomy(knee, [(.030, .047, .034, -.006), (-.012, .057, .042, -.010), (-.107, .072, .074, -.004),
+                      (-.204, .067, .073, .005), (-.315, .041, .044, .007),
+                      (-.381, .034, .031, .001)], low=low)
         if morrow:
             for s in [-1, 1]:
                 points = [(s*x, y) for x, y in [(.039, -.063), (.086, -.101), (.108, -.214), (.054, -.341), (.035, -.35), (.066, -.205)]]
@@ -244,10 +265,10 @@ def build_robot(name, low=False, clear=True):
                     points.reverse()
                 prism(knee, points, .070, (0, 0, -.035), 'obsidian', .004)
         plate(knee, (.12, .105, .034), (0, -.047, -.052), 'obsidian', taper=.3, edge=.005)
-        seam(knee, (.071, .141, .006), (0, -.215, -.071), low)
         foot = nodes[l+'.ankle.roll']
-        ball(foot, .052, low=low)
-        axle(foot, .041, .098, low)
+        ball(foot, .051, low=low, material='elastomer', scale=(1, 1.2, 1))
+        for x in [-.031, .031]:
+            sheath(foot, [(x, .034, .029), (x, .007, .043), (x, -.025, .054)], .003, 'elastomer')
         # Split sloped soles form a toe, instep and heel instead of two blocks.
         # The ankle shroud swallows the bottom of the shin at neutral.
         loft(foot, [(.021, .038, .039, 0), (-.025, .065, .071, -.020),
@@ -262,10 +283,10 @@ def build_robot(name, low=False, clear=True):
                 vertex.co = (z, y, -x-.047)
             rounded_normals(sole)
         for s in [-1, 1]:
-            cylinder(foot, .012, .062, (s*.037, -.007, .054), 'graphite', segments=seg)
+            cylinder(foot, .012, .062, (s*.037, -.007, .054), 'elastomer', segments=seg)
         if not low:
             for z in [-.095, -.133]:
-                plate(foot, (.141, .006, .005), (0, -.044, z), 'graphite', edge=.0005)
+                plate(foot, (.141, .006, .005), (0, -.044, z), 'elastomer', edge=.0005)
 
     machine_openings(nodes, morrow, low)
     if not morrow:
@@ -297,7 +318,7 @@ def build_robot(name, low=False, clear=True):
         return obj.get('machined') or obj.get('clearanceProtected')
     fixed = sum(triangles(obj) for obj in parts if protected(obj))
     flexible = sum(triangles(obj) for obj in parts if not protected(obj))
-    ratio = max(.08, min(1, ((8800 if distant else 23500)-fixed)/max(1, flexible)))
+    ratio = max(.02, min(1, ((8800 if distant else 23500)-fixed)/max(1, flexible)))
     for obj in parts:
         if protected(obj) or len(obj.data.polygons) <= 3 or ratio >= 1:
             continue
@@ -319,10 +340,13 @@ def build_robot(name, low=False, clear=True):
         bm.to_mesh(obj.data)
         bm.free()
         obj.data.normals_split_custom_set([(0, 0, 0)]*len(obj.data.loops))
-        # The machined interior stays faceted; averaging across its re-entrant
-        # cuts can turn corner normals inward. Uncut armour keeps weighted edges.
+        # Curved anatomical armour keeps smooth outer reflections. Sharp socket
+        # edges split the normals; manufactured shield facets stay planar.
+        smooth = bool(obj.get('anatomical'))
+        if smooth:
+            obj.data.set_sharp_from_angle(angle=math.radians(35))
         for polygon in obj.data.polygons:
-            polygon.use_smooth = False
+            polygon.use_smooth = smooth
     return nodes
 
 

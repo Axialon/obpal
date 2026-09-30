@@ -11,7 +11,7 @@ from humanoid_arena import build_arena
 from common import *
 from mathutils import Matrix
 
-OUT = ROOT / 'artifacts/humanoid/phase-3b/v2/renders'
+OUT = Path(sys.argv[sys.argv.index('--out')+1]) if '--out' in sys.argv else ROOT / 'artifacts/humanoid/phase-5/v3/renders'
 OUT.mkdir(parents=True, exist_ok=True)
 DRAFT = '--draft' in sys.argv
 SILHOUETTES = '--silhouettes' in sys.argv

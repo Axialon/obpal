@@ -379,6 +379,23 @@ export async function runHumanoidLive(local, check) {
         })
         await phone.screenshot({ path: join(directory, 'phone-observe.png') })
         await arm(phone)
+        const workspace = region(phone).getByLabel('Workspace clear; emergency stop reachable', { exact: true })
+        await workspace.evaluate((input) => input.closest('label').scrollIntoView({ block: 'center' }))
+        const confirmation = await workspace.evaluate((input) => {
+          const label = input.closest('label'),
+            box = label.getBoundingClientRect(),
+            footer = label.closest('.humanoid-driver').querySelector('.driver-footer').getBoundingClientRect(),
+            body = label.closest('.panel-body').getBoundingClientRect()
+          return {
+            visible: box.top >= body.top && box.bottom <= footer.top - 4,
+            exposed: [0.2, 0.5, 0.8].every((x) =>
+              [0.2, 0.5, 0.8].every((y) =>
+                label.contains(document.elementFromPoint(box.left + box.width * x, box.top + box.height * y)),
+              ),
+            ),
+          }
+        })
+        assert(confirmation.visible && confirmation.exposed, 'Workspace confirmation is covered by the driver footer')
         await phone.screenshot({ path: join(directory, 'phone-checklist.png') })
         await phone.evaluate(() => {
           __humanoid.drivers.panel.body.scrollTop = 0

@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { cspCheck } from './csp-watch.mjs'
 import { modelProof } from './humanoid-model-proof.mjs'
+import { tendonProof } from './humanoid-tendon-proof.mjs'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const assert = (ok, message) => {
@@ -143,6 +144,8 @@ export async function runHumanoid(local, check) {
   try {
     await run('authored model views in the live renderer', () => modelProof(browser, local.origin, directory))
     if (process.env.OBPAL_HUMANOID_MODEL_PROOF_ONLY === '1') return
+    await run('sim tendon curl and jab yield and settle', () => tendonProof(browser, local.origin, directory))
+    if (process.env.OBPAL_HUMANOID_TENDON_PROOF_ONLY === '1') return
     await run('cold, warm, failed and late model loads reveal cleanly at the current pose', async () => {
       for (const mode of ['cold', 'warm', 'failed', 'late']) {
         const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 900 } })

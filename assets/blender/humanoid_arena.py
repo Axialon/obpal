@@ -46,11 +46,11 @@ def build_arena(clear=True):
                     for obj in [fin, base]:
                         obj.location.x, obj.location.z = obj.location.z, obj.location.x
                         obj.rotation_euler.y = math.pi/2
-    # A suspended quiet halo marks the volume, with two rear support blades.
+    # A suspended quiet halo leaves every floor-to-robot camera sightline clear.
     ring(deck, 3.46, .028, (0, 3.18, 0), 'graphite', axis='y', segments=128)
     ring(deck, 3.46, .008, (0, 3.155, 0), 'halo', axis='y', segments=128)
-    for s in [-1, 1]:
-        plate(deck, (.061, 3.13, .14), (s*2.45, 1.565, 2.45), 'graphite', taper=.2, edge=.006)
+    for x, z in [(-2.45, -2.45), (2.45, -2.45), (-2.45, 2.45), (2.45, 2.45)]:
+        cylinder(deck, .008, .7, (x, 3.56, z), 'graphite', segments=8)
     return deck
 
 

@@ -10,6 +10,7 @@ def finishes():
     definitions = {
         'obsidian': ((.009, .012, .013), .58, .22, .65),
         'graphite': ((.026, .030, .032), .55, .44, 0),
+        'elastomer': ((.0025, .004, .0045), .04, .92, 0),
         'smokedGlass': ((.021, .040, .044), .34, .115, 1),
         'arenaGlass': ((.065, .092, .096), .16, .18, .7),
         'deckObsidian': ((.012, .016, .017), .42, .31, .2),
@@ -28,6 +29,8 @@ def finishes():
         shader.inputs['Roughness'].default_value = roughness
         shader.inputs['Coat Weight'].default_value = coat
         shader.inputs['Coat Roughness'].default_value = .18
+        if name == 'elastomer':
+            shader.inputs['Specular IOR Level'].default_value = .25
         if name == 'arenaGlass':
             shader.inputs['Alpha'].default_value = .34
             material.surface_render_method = 'DITHERED'
@@ -78,6 +81,8 @@ def ball(parent, radius, at=(0, 0, 0), low=False, material='graphite', scale=(1,
         vertex.co.x *= scale[0]
         vertex.co.y *= scale[1]
         vertex.co.z *= scale[2]
+    for polygon in obj.data.polygons:
+        polygon.use_smooth = True
     return obj
 
 
@@ -92,3 +97,63 @@ def oval_band(parent, rx, ry, z, tube, material='obsidian', low=False, at_y=.25,
         vertex.co.y += (ry-1)*math.sin(angle)
         vertex.co.z *= depth
     return obj
+
+
+def anatomy(parent, sections, material='obsidian', low=False, at=(0, 0, 0)):
+    """Smooth superellipse sections for pectoral, deltoid and muscle-led volume.
+
+    The original joint centres stay fixed. These are authored shell envelopes,
+    not copied anatomy or a physical soft-body/cloth simulation.
+    """
+    rings = []
+    count, subdivisions = (12, 2) if low else (16, 3)
+    for i in range(len(sections)-1):
+        before, a = sections[max(0, i-1)], sections[i]
+        b, after = sections[i+1], sections[min(len(sections)-1, i+2)]
+        for n in range(subdivisions):
+            t = n/subdivisions
+            values = [a[0]+(b[0]-a[0])*t]
+            for axis in range(1, 4):
+                p, q, r, s = before[axis], a[axis], b[axis], after[axis]
+                values.append(.5*((2*q)+(-p+r)*t+(2*p-5*q+4*r-s)*t*t+(-p+3*q-3*r+s)*t*t*t))
+            rings.append(values)
+    rings.append(sections[-1])
+    vertices = []
+    for y, w, d, z in rings:
+        for i in range(count):
+            angle = math.tau*i/count
+            x, depth = math.cos(angle), math.sin(angle)
+            vertices.append((math.copysign(abs(x)**.72, x)*w, y,
+                             z+math.copysign(abs(depth)**.72, depth)*d))
+    faces = [tuple(reversed(range(count))), tuple(range((len(rings)-1)*count, len(rings)*count))]
+    for ring_index in range(len(rings)-1):
+        for i in range(count):
+            a, b = ring_index*count+i, ring_index*count+(i+1)%count
+            faces.append((a, b, b+count, a+count))
+    obj = mesh('Anatomy-led shell', vertices, faces, parent, material, at)
+    obj['anatomical'] = True
+    for polygon in obj.data.polygons:
+        polygon.use_smooth = True
+    return obj
+
+
+def sheath(parent, points, radius=.0028, material='graphite'):
+    """A small original tendon conduit, with geometric shading and no texture."""
+    vertices, faces = [], []
+    for i, p in enumerate(points):
+        tangent = Vector(points[min(i+1, len(points)-1)])-Vector(points[max(0, i-1)])
+        tangent.normalize()
+        side = tangent.cross(Vector((0, 0, 1)))
+        if side.length_squared < .01:
+            side = tangent.cross(Vector((0, 1, 0)))
+        side.normalize()
+        normal = side.cross(tangent).normalized()
+        for j in range(6):
+            angle = j*math.tau/6
+            vertices.append(tuple(Vector(p)+radius*(side*math.cos(angle)+normal*math.sin(angle))))
+    for i in range(len(points)-1):
+        for j in range(6):
+            a, b = i*6+j, i*6+(j+1)%6
+            faces.append((a, b, b+6, a+6))
+    faces += [tuple(reversed(range(6))), tuple(range((len(points)-1)*6, len(points)*6))]
+    return mesh('Tendon sheath', vertices, faces, parent, material)

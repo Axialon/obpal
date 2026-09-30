@@ -46,6 +46,8 @@
 .driver-checks li { color: var(--bb-ink-3); }
 .driver-checks li[data-ok='true'] { color: var(--bb-accent-text); }
 .humanoid-driver .sim-auto { min-height: 44px; display: flex; align-items: center; gap: 10px; }
+.humanoid-driver [data-checklist] > .sim-auto { padding: 6px 0; scroll-margin-block: 8px; }
+.humanoid-driver [data-checklist] { padding-bottom: 16px; }
 .humanoid-driver [data-jog] { margin-top: 12px; display: grid; gap: 8px; }
 .humanoid-driver [data-jog][hidden] { display: none; }
 .driver-map { margin: 4px 0 8px; }
