@@ -40,7 +40,7 @@
 .strike-map text { fill: var(--muted); font-size: 7px; text-anchor: middle; }
 .music-face button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .tone-keys { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(2, 1fr); gap: 8px; }
-.tone-key { display: flex; flex-direction: column; justify-content: space-between; align-items: center; padding: 14px 6px 16px; border-radius: 12px 12px 24px 24px;
+.tone-key { display: flex; flex-direction: column; justify-content: space-between; align-items: center; padding: 15px 6px; border-radius: 12px 12px 24px 24px;
   background: linear-gradient(#eef2e8, #b4bbab); color: #182012; border: 1px solid #f3f7ee; box-shadow: inset 0 -6px 12px rgb(0 0 0 / 0.12), 0 10px 22px -12px rgb(0 0 0 / 0.7);
   touch-action: none; user-select: none; transition: background 90ms, transform 90ms; }
 .tone-key small { font: 600 11px/1 var(--font-data); opacity: 0.5; }

@@ -34,6 +34,7 @@ import { phoneControllers } from './phone-controllers.mjs'
 import { phoneCamera } from './phone-camera.mjs'
 import { runPhonePacks } from './lib/packs-ui.mjs'
 import { phoneRecovery } from './phone-recovery.mjs'
+import { visitPhoneButtons, assertButtonInk } from './lib/surface-buttons.mjs'
 
 const HEADED = process.argv.includes('--headed')
 const SHOTS = process.env.OBPAL_SHOTS || ''
@@ -71,6 +72,11 @@ try {
   console.log('ob.Pal phone lock and hardware buttons e2e')
   const sb = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
   closers.push(sb)
+  await check('all controller faces, dock, camera and connection sheets: button ink within 0.5px at three sizes, Carbon and Light', async () => {
+    const rows = []
+    await visitPhoneButtons(sb, local.origin, (_page, size, state, measured) => rows.push(...measured.map(r => ({ size, state, ...r }))))
+    return assertButtonInk(rows)
+  })
 
   await check('the buttons diagnostic logs each key, holds the volume keys, asks whether the volume moved, and sums it up', async () => {
     const bctx = await sb.newContext({ ...devices['Pixel 7'], ignoreHTTPSErrors: true })

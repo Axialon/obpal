@@ -40,3 +40,6 @@ html.site:not([data-bb-theme]), html.site[data-bb-theme='carbon'] {
 html.site, html.site body { overflow-x: clip; }
 html.site body { min-height: 100svh; }
 html.site ::selection { background: rgb(var(--bb-accent-rgb) / 0.35); color: var(--bb-ink); }
+/* Site actions and the surface tiles use the shared glyph edges, with equal room on each side. */
+html.site .bb-theme { padding-block: 8.5px; align-content: center; }
+html.site .top-nav a { display: inline-flex; align-items: center; justify-content: center; }

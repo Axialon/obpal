@@ -46,6 +46,7 @@ import { cspCheck } from './csp-watch.mjs'
 import sharp from 'sharp'
 import { startLocal } from '../extension/e2e/local.mjs'
 import { trayReading } from './lib/orientation.mjs'
+import { guardSiteButtons } from './lib/surface-buttons.mjs'
 import { runWarmup } from './e2e-warmup.mjs'
 
 const HEADED = process.argv.includes('--headed')
@@ -181,6 +182,7 @@ try {
   console.log('ob.Pal home e2e')
   const browser = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
   browsers.push(browser)
+  if (!ONLY) await guardSiteButtons(browser, local.origin, [['home', '/']], check)
 
   if (!ONLY || ONLY === 'warm-up') await runWarmup(local, check, { home: true })
 

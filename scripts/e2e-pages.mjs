@@ -23,6 +23,7 @@ import { checkFrost, setSurface } from './lib/frost.mjs'
 import { runQuick } from './e2e-quick.mjs'
 import { runPackCatalogue } from './lib/packs-ui.mjs'
 import { nextBuild } from './lib/deploy-sim.mjs'
+import { guardSiteButtons, SITE_BUTTON_ROUTES } from './lib/surface-buttons.mjs'
 import { runGraphicsRecoveryLayouts } from './e2e-graphics-recovery.mjs'
 
 const PORT = Number(process.env.OBPAL_E2E_WORKER_PORT) || 5179
@@ -50,6 +51,7 @@ try {
   worker = await startWorker({ port: PORT })
   console.log(`ob.Pal pages e2e (${worker.origin})`)
   browser = await chromium.launch({ executablePath, headless: !HEADED })
+  await guardSiteButtons(browser, worker.origin, SITE_BUTTON_ROUTES.filter(([name]) => name !== 'home'), check)
   await check('IndexNow key is served at its matching public URL', async () => {
     const file = readdirSync(fileURLToPath(new URL('../public/', import.meta.url))).find(name => /^[a-f0-9]{32}\.txt$/.test(name))
     if (!file) throw new Error('key file missing')

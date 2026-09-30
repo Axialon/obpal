@@ -1,5 +1,5 @@
 /** Browser-side ink measurement. Text uses the loaded font's actual glyph bounds, not its line box. */
-export function measureButtonInk() {
+export function measureButtonInk({ surfaces = false } = {}) {
   const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d')
   const baselines = new Map()
   const box = r => ({ x: r.x, y: r.y, width: r.width, height: r.height })
@@ -32,8 +32,18 @@ export function measureButtonInk() {
   }
   function ink(node) {
     const el = node.parentElement
-    if (!el || el.closest('svg, .kit-sr, sup, kbd') || !rendered(el) || !node.textContent.trim()) return []
+    if (!el || el.closest('svg, .kit-sr, sup, kbd' + (surfaces ? ', .ctl-mark, .hw-badges' : '')) || !rendered(el) || !node.textContent.trim()) return []
     const s = getComputedStyle(el), font = `${s.fontStyle} ${s.fontWeight} ${s.fontSize} ${s.fontFamily}`
+    let clipLeft = -Infinity, clipRight = Infinity, ellipsis = false
+    if (surfaces) for (let p = el; p && p !== document.body; p = p.parentElement) {
+      // A scroller can reveal the rest of a button later. Only its label's own clipping trims its glyphs here.
+      if (p.matches('button, [role="button"], a.btn, a.kit-action, a.kit-cta')) break
+      const style = getComputedStyle(p), rect = p.getBoundingClientRect()
+      if (/(hidden|clip|auto|scroll)/.test(style.overflowX)) {
+        clipLeft = Math.max(clipLeft, rect.left); clipRight = Math.min(clipRight, rect.right)
+        if (style.textOverflow === 'ellipsis' && p.scrollWidth > p.clientWidth) ellipsis = true
+      }
+    }
     // A zero-height inline marker finds the alphabetic baseline without assuming the engine's line metrics.
     if (!baselines.has(font)) {
       const probe = document.createElement('span'), marker = document.createElement('i'), t = document.createTextNode('Hg')
@@ -60,14 +70,33 @@ export function measureButtonInk() {
       let label = text.slice(line.start, line.end)
       if (s.textTransform === 'uppercase') label = label.toUpperCase()
       if (s.textTransform === 'lowercase') label = label.toLowerCase()
+      // Ranges include the hidden tail of an ellipsised label. Measure the prefix the browser actually paints.
+      if (ellipsis && line.right > clipRight) {
+        const limit = clipRight - ctx.measureText('…').width
+        let end = line.start
+        for (; end < line.end; end++) {
+          range.setStart(node, end); range.setEnd(node, end + 1)
+          if (range.getBoundingClientRect().right > limit) break
+        }
+        label = label.slice(0, end - line.start) + '…'
+      }
       const m = ctx.measureText(label)
-      return { x: line.x - m.actualBoundingBoxLeft, y: line.y + baselines.get(font) - m.actualBoundingBoxAscent,
-        width: (m.actualBoundingBoxLeft + m.actualBoundingBoxRight), height: (m.actualBoundingBoxAscent + m.actualBoundingBoxDescent) }
-    })
+      // Canvas has no numeric-feature setting. Preserve the DOM's tabular advances between glyphs.
+      const advance = !ellipsis && /tabular-nums/.test(s.fontVariantNumeric) ? line.right - line.x - m.width : 0
+      const edgeAdvance = index => {
+        range.setStart(node, index); range.setEnd(node, index + 1)
+        return range.getBoundingClientRect().width - ctx.measureText(text[index]).width
+      }
+      const first = advance ? edgeAdvance(line.start) / 2 : 0, last = advance ? edgeAdvance(line.end - 1) / 2 : 0
+      const left = Math.max(clipLeft, line.x - m.actualBoundingBoxLeft + first), right = Math.min(clipRight, line.x + m.actualBoundingBoxRight + advance - last)
+      return { x: left, y: line.y + baselines.get(font) - m.actualBoundingBoxAscent,
+        width: Math.max(0, right - left), height: (m.actualBoundingBoxAscent + m.actualBoundingBoxDescent) }
+    }).filter(b => b.width > 0 && b.height > 0)
   }
   const roots = [document]
   for (let i = 0; i < roots.length; i++) for (const el of roots[i].querySelectorAll('*')) if (el.shadowRoot) roots.push(el.shadowRoot)
-  return roots.flatMap(root => [...root.querySelectorAll('button, [role="button"], a.kit-action, a.kit-cta, a.dcard-go, a.sim-crumb, .kit-chip, .arm-badge, .sim-badge')]).filter(visible).map((el, index) => {
+  const selector = 'button, [role="button"], a.kit-action, a.kit-cta, a.dcard-go, a.sim-crumb, .kit-chip, .arm-badge, .sim-badge' + (surfaces ? ', a.btn, .top-nav a, .page-top nav a, .tag, .count, .fact' : '')
+  return roots.flatMap(root => [...root.querySelectorAll(selector)]).filter(visible).map((el, index) => {
     const button = box(el.getBoundingClientRect()), texts = [], icons = [], annotations = []
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
     while (walker.nextNode()) texts.push(...ink(walker.currentNode))
@@ -75,16 +104,18 @@ export function measureButtonInk() {
       const r = svg.getBBox(), m = svg.getScreenCTM()
       if (!m || !r.width || !r.height) continue
       const a = new DOMPoint(r.x, r.y).matrixTransform(m), b = new DOMPoint(r.x + r.width, r.y + r.height).matrixTransform(m)
-      const target = svg.closest('.ns-lock') ? annotations : icons
+      const target = svg.closest('.ns-lock' + (surfaces ? ', .ctl-mark, .hw-badges' : '')) ? annotations : icons
       target.push({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.abs(b.x - a.x), height: Math.abs(b.y - a.y) })
     }
     // A badge/disc or keycap is part of the visible group, while its glyph's own centre is still reported separately.
-    const decorations = [...el.querySelectorAll('kbd, .panel-badge, .dev-face-ic, .kit-side-ic, .kit-seg-ic, .kit-select-ic, .kit-select-badge, .sel-thumb, .mark, .dot, .ns-count b, .kit-chip > button, .sims-filters-n')].filter(rendered).filter(e => {
+    const decorations = [...el.querySelectorAll('kbd, .panel-badge, .dev-face-ic, .kit-side-ic, .kit-seg-ic, .kit-select-ic, .kit-select-badge, .sel-thumb, .mark, .dot, .ns-count b, .kit-chip > button, .sims-filters-n' + (surfaces ? ', .look > i, .bb-theme > i, .swatch, .gyro-ic, .gyro-sw, .row-ic, .sw, img, .tile-art, .pick-art, .ctl-gauge, .person, .fact, .music-pad > i' : ''))].filter(rendered).filter(e => {
       const s = getComputedStyle(e)
-      return s.backgroundColor !== 'rgba(0, 0, 0, 0)' || s.backgroundImage !== 'none' || s.boxShadow !== 'none'
+      return e.matches('img, .swatch, .tile-art, .pick-art, .ctl-gauge') || s.backgroundColor !== 'rgba(0, 0, 0, 0)' || s.backgroundImage !== 'none' || s.boxShadow !== 'none'
     }).map(e => box(e.getBoundingClientRect()))
     for (const svg of el.querySelectorAll('svg')) if (rendered(svg) && getComputedStyle(svg).backgroundColor !== 'rgba(0, 0, 0, 0)') decorations.push(box(svg.getBoundingClientRect()))
     const labelInk = union(texts), iconInk = union(icons), groupInk = union([...texts, ...icons, ...decorations])
+    const point = centre(groupInk ?? button), hit = el.getRootNode().elementFromPoint(point.x, point.y)
+    const occluded = surfaces && (!hit || !el.contains(hit))
     const iconGaps = icons.map(icon => {
       if (!labelInk) return { axis: null, distance: null }
       const x = Math.max(labelInk.x - (icon.x + icon.width), icon.x - (labelInk.x + labelInk.width))
@@ -93,7 +124,9 @@ export function measureButtonInk() {
     })
     const closest = iconGaps.filter(g => g.distance !== null).sort((a, b) => a.distance - b.distance)[0]
     const name = el.getAttribute('aria-label') || (el.getAttribute('aria-labelledby') || '').split(' ').map(id => el.getRootNode().getElementById(id)?.textContent || '').join(' ').trim() || el.textContent.trim() || el.getAttribute('title') || ''
-    return { index, id: el.id, classes: typeof el.className === 'string' ? el.className : '', name, label: el.textContent.trim(), button, labelInk, iconInk, decorations, groupInk,
+    // Full-width menu rows and switches intentionally lead from the start. Their group still centres vertically.
+    const verticalOnly = surfaces && (el.matches('.row, .connection-use, .connection-title, .bb-product, .sel-opt, .kit-option, .lf-where, .sc-pick, .phone-pick, .type-open, .scan-open, .set-row, .gyro') || el.matches('.chip') && getComputedStyle(el).textAlign === 'left' || el.matches('.facts') && getComputedStyle(el).justifyContent !== 'center')
+    return { index, id: el.id, classes: typeof el.className === 'string' ? el.className : '', name, label: el.textContent.trim(), button, labelInk, iconInk, decorations, groupInk, verticalOnly, occluded,
       labelOffset: labelInk ? offset(labelInk, button) : null, iconOffset: iconInk ? offset(iconInk, button) : null,
       groupOffset: groupInk ? offset(groupInk, button) : null,
       icons: icons.map((ink, i) => ({ box: ink, centre: centre(ink), offset: offset(ink, button), labelGap: iconGaps[i] })), annotations,
@@ -102,8 +135,16 @@ export function measureButtonInk() {
   })
 }
 
-export const inkError = r => r.groupOffset ? Math.max(Math.abs(r.groupOffset.x), Math.abs(r.groupOffset.y)) : 0
+export const inkError = r => r.groupOffset ? Math.max(r.verticalOnly ? 0 : Math.abs(r.groupOffset.x), Math.abs(r.groupOffset.y)) : 0
 export function inkSummary(rows) {
-  const errors = rows.filter(r => r.groupInk).map(inkError).sort((a, b) => a - b)
+  const errors = rows.filter(r => r.groupInk && !r.occluded).map(inkError).sort((a, b) => a - b)
   return { controls: rows.length, measured: errors.length, worst: errors.at(-1) ?? 0, p95: errors[Math.ceil(errors.length * .95) - 1] ?? 0 }
+}
+
+/** Let font, mutation and visibility observers fit controls revealed by a sheet before reading their ink. */
+export async function readButtonInk(page, options = {}) {
+  await page.evaluate(() => document.fonts.ready)
+  await page.waitForTimeout(180)
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  return page.evaluate(measureButtonInk, options)
 }

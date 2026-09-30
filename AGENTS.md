@@ -30,7 +30,7 @@ Instructions for coding agents, Codex and others, working in this repository. A 
 - **Scope:** never delete recursively outside your worktree.
 
 ## Before you hand back
-1. `git merge master`, resolve any conflicts, and run the checks again.
+1. `git merge master` **once**, right before your final validation, resolve any conflicts, and run the checks. If master moves after that, don't merge it again unless your branch conflicts with it: hand back, and say which master you validated against. The coordinator's merge reruns typecheck, vitest and the suites your change touches.
 2. `pnpm run check`, then the e2e suites your change touches.
 3. Commit everything. Leave no uncommitted work and no running servers.
 

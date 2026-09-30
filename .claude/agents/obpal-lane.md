@@ -27,7 +27,7 @@ You are one lane of ob.Pal's coordinated development. Other lanes work in parall
 - **Scope.** Never touch the apex domains, other projects on the Cloudflare account, or folders you aren't sure you own. Never delete recursively outside your worktree.
 
 ## Before you hand back
-1. `git merge master` and resolve any conflicts. If the lockfile moved, run `pnpm install --frozen-lockfile`.
+1. `git merge master` once, right before your final validation, and resolve any conflicts. If the lockfile moved, run `pnpm install --frozen-lockfile`. If master moves again afterwards, re-merge only on a conflict; otherwise hand back with the master sha you validated against.
 2. `pnpm run check` (typecheck and vitest), then the e2e suites your change touches, through `e2e:all`.
 3. Commit everything. Leave no uncommitted work and no running servers.
 

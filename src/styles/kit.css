@@ -4,6 +4,8 @@
  * accent ring for the chosen item among many. Everything follows the visitor's surface and accent.
  */
 
+@import './ink.css';
+
 :root {
   /* A control's height; fingers get 44px. */
   --kit-h: 40px;
@@ -25,11 +27,6 @@
 .kit-native { display: none !important; }
 /* Visible glyph edges, including descenders and side bearings, supplied by kit/ink.ts. */
 /* Geometry is immediate even when the page's reduced-motion rule assigns a short transition to every element. */
-.kit-ink { display: inline-block; flex: none; text-box: trim-both cap alphabetic; margin-block: calc(var(--ink-ascent, 1cap) - 1cap) var(--ink-descent, 0px); margin-inline: var(--ink-left, 0px) var(--ink-right, 0px); transition-property: none; }
-.kit-ink[data-ink-lines] { flex: none; inline-size: var(--ink-width); }
-@supports not (text-box: trim-both cap alphabetic) {
-  .kit-ink { line-height: 1; margin-block: var(--ink-top, 0px) var(--ink-bottom, 0px); }
-}
 
 /* Icon actions retain the same target as a labelled action; the glyph has no inline baseline. */
 button.kit-icon-action { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 36px; min-width: 36px; padding: 0; }

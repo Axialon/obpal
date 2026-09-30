@@ -152,7 +152,7 @@ button.row:active:not(:disabled) { transform: scale(0.985); }
 /* Toggles for what a program (or the whole PC) may receive: keyboard, mouse. */
 .kinds { display: flex; flex-wrap: wrap; gap: 6px; }
 .kind {
-  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px 0 10px; border-radius: 999px; border: 1px solid var(--line);
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--line);
   background: var(--fill); color: var(--muted); font: 650 12.5px/1 var(--font); transition: background 0.2s var(--ease), color 0.2s, border-color 0.2s, transform 0.12s var(--ease);
 }
 .kind .ic { width: 16px; height: 16px; }
@@ -209,7 +209,7 @@ kbd { display: inline-grid; place-items: center; min-width: 22px; height: 20px; 
 .look-k + .looks, .look-k + .accents { margin-bottom: 12px; }
 .looks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .look {
-  display: grid; justify-items: center; gap: 7px; min-width: 0; padding: 10px 6px 9px; border-radius: 14px; border: 1px solid var(--line);
+  display: grid; justify-items: center; gap: 7px; min-width: 0; padding: 9.5px 6px; border-radius: 14px; border: 1px solid var(--line);
   background: var(--fill); color: var(--secondary); font: 650 11.5px/1.1 var(--font); transition: background 0.2s var(--ease), border-color 0.2s, color 0.2s, transform 0.12s var(--ease);
 }
 .look:hover { background: var(--fill-hover); color: var(--ink); }

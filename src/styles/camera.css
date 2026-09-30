@@ -98,8 +98,8 @@
 .camera-hold { height: 64px; width: min(240px, 60vw); border: 1px solid var(--bb-frost-edge); border-radius: 20px; background: var(--frost-accent); color: var(--bb-accent); backdrop-filter: var(--bb-frost-blur); font: 700 17px/1.4 var(--bb-font-ui); touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .camera-hold[aria-pressed='true'] { background: var(--bb-accent); color: var(--bb-accent-ink); box-shadow: var(--kit-ring); }
 .camera-stop { width: 56px; height: 56px; padding: 0; border: 0; border-radius: 14px; background: var(--bad); color: #2a0610; font-weight: 750; touch-action: manipulation; }
-.camera-download { max-width: calc(100% - 32px); min-height: 64px; padding: 12px 20px; border-radius: 20px; color: var(--bb-ink); font-weight: 600; }
-.camera-download small { display: block; margin-top: 4px; font-weight: 400; }
+.camera-download { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; max-width: calc(100% - 32px); min-height: 64px; padding: 12px 20px; border-radius: 20px; color: var(--bb-ink); font-weight: 600; }
+.camera-download small { display: block; font-weight: 400; }
 .obpal-camera .hint { z-index: 2; font-family: var(--bb-font-ui); }
 body:has(.sheet-wrap) .obpal-camera .hint { visibility: visible; }
 .obpal-camera .hint.in { animation: none; }

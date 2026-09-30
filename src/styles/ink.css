@@ -1,0 +1,12 @@
+/* Visible glyph edges, including descenders and side bearings, supplied by ui/kit/ink.ts on every surface. */
+.kit-ink { display: inline-block; flex: none; text-box: trim-both cap alphabetic; margin-block: calc(var(--ink-ascent, 1cap) - 1cap) var(--ink-descent, 0px); margin-inline: var(--ink-left, 0px) var(--ink-right, 0px); transition-property: none; }
+.kit-ink[data-ink-lines] { flex: none; inline-size: var(--ink-width); }
+.kit-ink-box { display: inline-flex; align-items: center; justify-content: center; }
+.fact { padding-inline: 8px; justify-content: center; }
+@supports not (text-box: trim-both cap alphabetic) {
+  .kit-ink { line-height: 1; margin-block: var(--ink-top, 0px) var(--ink-bottom, 0px); }
+}
+/* Plain text actions use a centred flex line instead of the native inline baseline. Specific layouts still win. */
+:where(button:has(> .kit-ink), a.btn:has(> .kit-ink), .top-nav a, .page-top nav a) { display: inline-flex; align-items: center; justify-content: center; }
+:where(button:has(.kit-ink)) { align-content: center; }
+:root[data-bb-product='obpal'] .bb-theme { padding-block: 8.5px; align-content: center; }

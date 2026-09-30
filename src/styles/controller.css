@@ -85,10 +85,13 @@ body.live .aurora i { animation-play-state: paused; }
   touch-action: manipulation; transition: transform 0.12s var(--ease), background 0.15s, color 0.15s; }
 .bar-btn:active { transform: scale(0.94); background: rgb(var(--hl-rgb) / 0.08); }
 .bar-btn .ic { width: 21px; height: 21px; }
+/* The screen name remains a leading row; its glyphs centre vertically in the full touch target. */
+.bar .connection-title { display: inline-flex; align-items: center; justify-content: start; }
+.connection-use :is(.connection-label, .connection-detail) { display: grid; align-content: center; }
 /* The connection badge (./linkbadge.ts): a lock, the path's colour (mint direct, amber relayed) and the round trip. */
 .link-badge, .link-sheet { --lb-ok: var(--ok); --lb-warn: var(--warn); }
 [data-bb-theme='light'] :is(.link-badge, .link-sheet) { --lb-ok: #0b8a60; --lb-warn: #b45309; }
-.link-badge { display: inline-flex; align-items: center; gap: 6px; flex: none; height: var(--tap); padding: 0 12px 0 10px; border-radius: 14px; color: var(--secondary);
+.link-badge { display: inline-flex; align-items: center; gap: 6px; flex: none; height: var(--tap); padding: 0 11px; border-radius: 14px; color: var(--secondary);
   font: 650 12px/1 var(--font-data, var(--font)); font-variant-numeric: tabular-nums; touch-action: manipulation; transition: transform 0.12s var(--ease), opacity 0.2s var(--ease); }
 /* In the bar the badge is a quiet well, not a second pane of glass. */
 .bar .link-badge.glass { background: rgb(var(--hl-rgb) / 0.05); border-color: var(--line); box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
@@ -126,32 +129,38 @@ body.live .aurora i { animation-play-state: paused; }
    Icons, and the name only on the one in use (or on every slot, where each has the room). Switching slides the lit
    slot across as it grows. The best slot for this screen carries the catalogue's spark as a dot. */
 .ctl-bar { flex: none; display: flex; align-items: center; gap: var(--sp-1); min-width: 0; padding: 6px; border-radius: 24px; container: ctl-bar / inline-size; }
-.ctl-tabs { flex: 1; min-width: 0; display: flex; gap: var(--sp-1); }
+.ctl-tabs { flex: 1; min-width: 0; display: flex; gap: var(--sp-1); container: ctl-tabs / inline-size; }
 .ctl-tab { position: relative; flex: 1 1 0; min-width: var(--tap); height: var(--tap-lg); display: flex; align-items: center; justify-content: center; gap: 0; padding: 0 12px; border: 0; border-radius: 18px;
   background: transparent; color: var(--muted); touch-action: manipulation;
   transition: flex-grow 0.34s var(--ease), background 0.28s var(--ease), color 0.2s, box-shadow 0.28s, gap 0.34s var(--ease); }
 .ctl-tab:active { background: rgb(var(--hl-rgb) / 0.07); }
 /* The slot in use sizes to its icon and name (its name opens out as it lights); the others share what's left. */
-.ctl-tab[aria-selected='true'] { flex: 0 1 auto; gap: 8px; padding: 0 16px 0 14px; background: var(--glass-light); color: var(--accent-ink);
+.ctl-tab[aria-selected='true'] { flex: 0 1 auto; gap: 8px; padding: 0 15px; background: var(--glass-light); color: var(--accent-ink);
   box-shadow: 0 10px 26px -10px rgb(var(--accent-rgb) / 0.6), inset 0 1px 0 rgb(255 255 255 / 0.45); }
 .ctl-tab-ic { position: relative; display: grid; place-items: center; flex: none; }
 .ctl-tab .ic { width: 22px; height: 22px; }
 .ctl-tab-t { min-width: 0; max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0; font: 750 14px/1 var(--font); letter-spacing: -0.012em;
   transition: max-width 0.34s var(--ease), opacity 0.2s var(--ease); }
 .ctl-tab[aria-selected='true'] .ctl-tab-t { max-width: 132px; opacity: 1; }
+.ctl-tab .ctl-tab-t { flex-shrink: 1; }
+.ctl-tab:not([aria-selected='true']) .ctl-tab-t { margin-inline: 0; }
 /* A 360 px phone: the name a size smaller and the lit slot a little tighter, so every name fits. */
 @container ctl-bar (max-width: 330px) {
-  .ctl-tab[aria-selected='true'] { gap: 6px; padding: 0 12px 0 10px; }
+  .ctl-tab[aria-selected='true'] { gap: 6px; padding: 0 11px; }
   .ctl-tab-t { font-size: 13px; }
 }
 /* A bar too narrow for a name (a small phone on its side): icons alone, the lit one still lit. */
-@container ctl-bar (max-width: 300px) {
+@container ctl-tabs (max-width: 300px) {
   .ctl-tab[aria-selected='true'] { flex: 1 1 0; gap: 0; padding: 0 12px; }
-  .ctl-tab[aria-selected='true'] .ctl-tab-t { max-width: 0; opacity: 0; }
+  .ctl-tab[aria-selected='true'] .ctl-tab-t { max-width: 0; margin-inline: 0; }
+}
+@container ctl-bar (max-width: 300px) {
+  .ctl-tab[aria-selected='true'] .ctl-tab-t { opacity: 0; }
 }
 /* Two slots or fewer: there's room for every name. */
 .ctl-bar:is([data-slots='1'], [data-slots='2']) .ctl-tab { flex: 1 1 0; gap: 8px; }
 .ctl-bar:is([data-slots='1'], [data-slots='2']) .ctl-tab-t { max-width: 132px; opacity: 1; }
+.ctl-bar:is([data-slots='1'], [data-slots='2']) .ctl-tab-t { margin-inline: var(--ink-left, 0px) var(--ink-right, 0px); }
 .ctl-tab-best { position: absolute; top: -3px; right: -5px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px rgb(var(--base-rgb)), 0 0 8px rgb(var(--accent-rgb) / 0.8); }
 .ctl-tab[aria-selected='true'] .ctl-tab-best { background: var(--accent-ink); box-shadow: 0 0 0 2px rgb(var(--accent-rgb)); }
 .ctl-sep { flex: none; width: 1px; height: 24px; margin: 0 2px; background: var(--line); }
@@ -344,7 +353,7 @@ body:has(.sheet-wrap) .hint { visibility: hidden; }
 .picker-list { overflow-y: auto; touch-action: pan-y; overscroll-behavior: contain; padding: 0 14px calc(16px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch; }
 .picker-list h3 { margin: 14px 6px 10px; font-size: 11px; font-weight: 750; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); }
 .pick-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-.pick { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px 6px 10px; border-radius: 20px; border: 1px solid rgb(var(--hl-rgb) / 0.07); background: linear-gradient(160deg, rgb(var(--hl-rgb) / 0.08), rgb(var(--hl-rgb) / 0.015)); touch-action: manipulation; transition: transform 0.12s var(--ease), border-color 0.2s, background 0.2s; }
+.pick { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 11px 6px; border-radius: 20px; border: 1px solid rgb(var(--hl-rgb) / 0.07); background: linear-gradient(160deg, rgb(var(--hl-rgb) / 0.08), rgb(var(--hl-rgb) / 0.015)); touch-action: manipulation; transition: transform 0.12s var(--ease), border-color 0.2s, background 0.2s; }
 .pick:active { transform: scale(0.96); }
 .pick-art { width: 54px; height: 54px; display: grid; place-items: center; border-radius: 16px; background: rgb(var(--base-rgb) / 0.5); font-size: 22px; font-weight: 800; }
 .pick-art img { width: 44px; height: 44px; object-fit: contain; }
@@ -369,7 +378,7 @@ body:has(.sheet-wrap) .hint { visibility: hidden; }
 .ctl-k b { font: 600 11px/1 var(--font-data); letter-spacing: 0; color: var(--accent-text); }
 .ctl-k::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 .ctl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 10px; }
-.ctl-card { position: relative; min-width: 0; min-height: 128px; display: grid; justify-items: center; align-content: center; gap: 10px; padding: 14px 6px 12px; border-radius: 22px;
+.ctl-card { position: relative; min-width: 0; min-height: 128px; display: grid; justify-items: center; align-content: center; gap: 10px; padding: 13px 6px; border-radius: 22px;
   border: 1px solid rgb(var(--hl-rgb) / 0.08); background: linear-gradient(160deg, rgb(var(--hl-rgb) / 0.07), rgb(var(--hl-rgb) / 0.015)); color: var(--ink);
   touch-action: manipulation; -webkit-touch-callout: none; transition: transform 0.14s var(--ease), border-color 0.2s, background 0.2s, box-shadow 0.25s, opacity 0.2s; }
 .ctl-card:active { transform: scale(0.96); }
@@ -431,7 +440,7 @@ body:has(.sheet-wrap) .hint { visibility: hidden; }
 .accent-row .bb-accent { width: 36px; height: 36px; }
 /* Each swatch (the family's: its colour on the surface in effect) answers a finger a little beyond its disc. */
 .accent-row .bb-accent::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; }
-.theme-opt { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 4px 8px; border-radius: 16px; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.03); font-size: 11px; font-weight: 650; color: var(--secondary); touch-action: manipulation; }
+.theme-opt { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 9px 4px; border-radius: 16px; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.03); font-size: 11px; font-weight: 650; color: var(--secondary); touch-action: manipulation; }
 .theme-opt[aria-checked='true'] { border-color: rgb(var(--accent-rgb) / 0.75); background: rgb(var(--accent-rgb) / 0.12); color: var(--ink); }
 /* What the 3D hand follows: its words over three choices in a row, as the surface choices are. */
 .sheet .row.track3d, .track3d { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; align-items: stretch; }

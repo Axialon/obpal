@@ -100,7 +100,7 @@ html.field3d .hero::after { opacity: 0; }
 .hero .pair { --obpal-accent: var(--bb-accent); --obpal-font: var(--font); }
 .hero[data-live] .pair::before { background: linear-gradient(160deg, rgb(var(--accent-rgb) / 0.9), rgb(var(--accent-rgb) / 0.2) 50%, rgb(var(--haze-rgb) / 0.5)); }
 
-.hero-hint { position: absolute; left: 50%; bottom: calc(30px + var(--pad-room)); z-index: 1; display: inline-flex; align-items: center; gap: 10px; padding: 10px 16px 10px 12px; border-radius: 999px;
+.hero-hint { position: absolute; left: 50%; bottom: calc(30px + var(--pad-room)); z-index: 1; display: inline-flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 999px;
   border: 1px solid var(--line); background: var(--frost); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur);
   color: var(--secondary); font: 650 13.5px/1 var(--font); white-space: nowrap; transform: translate3d(-50%, 0, 0); transition: opacity 0.6s var(--ease), transform 0.6s var(--ease);
   animation: hint-bob 3.2s var(--ease) 1.2s 3; }
@@ -109,7 +109,7 @@ html.field3d .hero::after { opacity: 0; }
 @keyframes hint-bob { 0%, 100% { transform: translate3d(-50%, 0, 0); } 50% { transform: translate3d(-50%, -5px, 0); } }
 /* The marbles' sound: a glass button in the corner. On or off, it's an icon; waiting for the click or tap a browser
    wants before a page may sound, it says so, and asks softly a few times. */
-.hero-sound { position: absolute; right: max(var(--gut), 24px); bottom: calc(26px + var(--pad-room)); z-index: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 44px; height: 44px; padding: 0 16px 0 12px; border-radius: 999px; font: 650 13.5px/1 var(--font);
+.hero-sound { position: absolute; right: max(var(--gut), 24px); bottom: calc(26px + var(--pad-room)); z-index: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 44px; height: 44px; padding: 0 14px; border-radius: 999px; font: 650 13.5px/1 var(--font);
   border: 1px solid var(--line); background: var(--frost); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); color: var(--secondary); cursor: pointer;
   transition: color 0.2s var(--ease), border-color 0.2s var(--ease), box-shadow 0.3s var(--ease), transform 0.2s var(--ease); }
 .hero-sound:hover { color: var(--ink); border-color: rgb(var(--accent-rgb) / 0.45); }

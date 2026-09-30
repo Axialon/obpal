@@ -62,6 +62,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium, devices } from 'playwright'
 import { nativePort } from '../e2e/native-port.mjs'
 import { startLocal, UPSTREAM } from '../e2e/local.mjs'
+import { visitLinkButtons, assertButtonInk } from '../../scripts/lib/surface-buttons.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const HEADED = process.argv.includes('--headed')
@@ -326,6 +327,14 @@ try {
   console.log('ob.Pal Link e2e')
   if (DESKTOP) console.log('  --desktop: this run reaches the installed ob.Pal Desktop and injects real input (into its harness window)')
   let { id, popup } = await openPopup(desk)
+  await check('popup and options: button ink within 0.5px at three sizes, Carbon and Light', async () => {
+    const rows = [], opts = await desk.newPage()
+    try {
+      await opts.goto(`chrome-extension://${id}/options.html`)
+      for (const p of [popup, opts]) await visitLinkButtons(p, (_page, size, state, measured) => rows.push(...measured.map(r => ({ size, state, ...r }))))
+      return assertButtonInk(rows)
+    } finally { await opts.close(); await popup.setViewportSize({ width: 1280, height: 800 }) }
+  })
   console.log(`  extension ${id} · ${manifest.name} ${manifest.version} · phone via ${local.origin}`)
 
   let page = desk.pages()[0] ?? (await desk.newPage())

@@ -84,7 +84,7 @@ body { min-height: 100vh; }
 button.phone-row:hover:not(:disabled) { border-color: var(--line-strong); background: var(--fill); }
 .phone-row[aria-checked='false'] .row-ic { border-color: rgb(252 211 77 / 0.35); background: rgb(252 211 77 / 0.1); color: var(--warn-text); }
 .phones .empty { padding: 14px 16px 12px; }
-.phones .notify { margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); border-radius: 0 0 16px 16px; }
+.phones .notify { margin-top: 10px; padding-block: 10.5px; border-top: 1px solid var(--line); border-radius: 0 0 16px 16px; }
 .opts > .ask { margin: 0 0 18px; }
 
 /* The look, and the way to the helper and the pages about the Link. */

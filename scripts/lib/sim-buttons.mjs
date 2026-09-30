@@ -1,6 +1,6 @@
 /** Reach the catalogue and every sim's windows, including their scrolled controls, at the three review sizes. */
 import { readFile } from 'node:fs/promises'
-import { measureButtonInk } from './button-ink.mjs'
+import { measureButtonInk, readButtonInk } from './button-ink.mjs'
 
 export const BUTTON_SIZES = [[390, 844], [844, 390], [1440, 900]]
 export const PHONE_BUTTON_ROUTES = ['arm', 'excavator', 'gimbal', 'jib', 'slider', 'telescope']
@@ -26,10 +26,7 @@ export async function visitButtonStates(page, origin, path, sample) {
   const pill = page.locator('.obpal-chip .pill[aria-expanded="true"]')
   if (await pill.count()) { await pill.focus(); await pill.press('Escape') }
   const take = async state => {
-    await page.evaluate(() => document.fonts.ready)
-    // Let layout, mutation and visibility observers finish across real frames, including on a busy GPU runner.
-    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve)))))
-    await sample(state, await page.evaluate(measureButtonInk))
+    await sample(state, await readButtonInk(page))
   }
   await take('initial')
   const windows = await page.locator('[data-panel]').evaluateAll(els => els.map(el => el.dataset.panel))

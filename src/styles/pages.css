@@ -1,6 +1,7 @@
 /* Content pages on the landing layout: ob.Pal Link (/link/) and the privacy policy (/privacy/). */
 .page-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .page-top nav { display: flex; gap: 6px; }
+.page-top nav a { justify-content: center; }
 .page-top nav a { height: 36px; display: inline-flex; align-items: center; padding: 0 14px; border-radius: 12px; color: var(--secondary); text-decoration: none; font-size: 13.5px; font-weight: 650; border: 1px solid var(--line); background: rgb(var(--hl-rgb) / 0.03); transition: color 0.2s, border-color 0.2s; }
 .page-top nav a:hover { color: var(--ink); border-color: rgb(var(--hl-rgb) / 0.2); }
 .fine { margin: 14px 0 0; font-size: 13px; color: var(--muted); }

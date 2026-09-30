@@ -2,10 +2,20 @@
  * Fit a control's text to its visible glyphs. Cap trimming alone misses descenders ("Try it"), accents and side
  * bearings. The shared label uses the loaded font's metrics for those edges; it never stores a button-specific nudge.
  */
-const controls = 'button, a.kit-action, a.kit-cta, a.dcard-go, a.sim-crumb, .kit-chip, .arm-badge, .sim-badge'
-const skip = 'svg, kbd, sup, .kit-sr, .quick-tray, .quick-tab, .bb-menu, .bb-header'
+import inkCss from '../../styles/ink.css?inline'
+import '../../styles/ink.css'
 
-export function fitControlInk(root: HTMLElement = document.body) {
+const controls = 'button, [role="button"], a.kit-action, a.kit-cta, a.dcard-go, a.sim-crumb, a.btn, .top-nav a, .page-top nav a, .kit-chip, .arm-badge, .sim-badge, .tag, .count, .fact'
+const skip = 'svg, kbd, sup, .kit-sr, .bb-header'
+const fitted = new WeakMap<HTMLElement | ShadowRoot, () => void>()
+
+export function fitControlInk(root: HTMLElement | ShadowRoot = document.body) {
+  const existing = fitted.get(root)
+  if (existing) return existing
+  if (root instanceof ShadowRoot) {
+    const sheet = new CSSStyleSheet(); sheet.replaceSync(inkCss)
+    root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet]
+  }
   const canvas = document.createElement('canvas'), context = canvas.getContext('2d')!
   const cache = new Map<string, Record<string, number>>()
   const baselines = new Map<string, { baseline: number; height: number }>()
@@ -23,13 +33,19 @@ export function fitControlInk(root: HTMLElement = document.body) {
       if (!view.width || !bounds.width || !bounds.height) continue
       const style = getComputedStyle(svg)
       svg.style.translate = `${100 * (view.x + view.width / 2 - bounds.x - bounds.width / 2) / view.width}% ${100 * (view.y + view.height / 2 - bounds.y - bounds.height / 2) / view.height}%`
-      if ((svg.parentElement === button || svg.parentElement?.matches('.kit-select-chev, .kit-select-ic')) && style.backgroundColor === 'rgba(0, 0, 0, 0)' && !parseFloat(style.paddingLeft)) {
+      const owner = svg.parentElement === button ? svg : svg.parentElement?.matches('.kit-select-chev, .kit-select-ic, .kit-seg-ic, .ctl-tab-ic, .gp-chip-ic, .gp-scope-ic') ? svg.parentElement : null
+      const surface = owner && getComputedStyle(owner)
+      const trim = surface && surface.backgroundColor === 'rgba(0, 0, 0, 0)' && surface.backgroundImage === 'none' && surface.boxShadow === 'none' && !parseFloat(surface.borderTopWidth) && !parseFloat(surface.paddingLeft)
+      if (owner && trim) {
         const gutter = parseFloat(style.width) * (1 - bounds.width / view.width) / 2
-        svg.style.marginInline = `${-gutter}px`
-      }
-      if (svg.parentElement === button && getComputedStyle(button).flexDirection === 'column') {
-        svg.style.marginBlock = `${-parseFloat(style.height) * (1 - bounds.height / view.height) / 2}px`
-      } else if (svg.parentElement === button) svg.style.removeProperty('margin-block')
+        if (owner !== svg) svg.style.removeProperty('margin-inline')
+        owner.style.marginInline = `${-gutter}px`
+      } else if (owner) owner.style.removeProperty('margin-inline')
+      const layout = getComputedStyle(button), column = layout.flexDirection === 'column' || layout.display.includes('grid') && layout.gridAutoFlow !== 'column'
+      if (owner && trim && column) {
+        if (owner !== svg) svg.style.removeProperty('margin-block')
+        owner.style.marginBlock = `${-parseFloat(style.height) * (1 - bounds.height / view.height) / 2}px`
+      } else if (owner) owner.style.removeProperty('margin-block')
     }
     const walker = document.createTreeWalker(button, NodeFilter.SHOW_TEXT), nodes: Text[] = []
     while (walker.nextNode()) {
@@ -39,7 +55,9 @@ export function fitControlInk(root: HTMLElement = document.body) {
     for (const node of nodes) {
       let label = node.parentElement!
       if (!label.classList.contains('kit-ink')) {
-        if (label.tagName === 'SPAN' && !label.children.length && !label.matches(controls)) label.classList.add('kit-ink')
+        const painted = label.matches('.badge, .kit-select-badge, .panel-badge, .sims-filters-n, .ns-count b, .sel-thumb, .person')
+        if (painted) label.classList.add('kit-ink-box')
+        if (!painted && /^(SPAN|B|SMALL|EM|I)$/.test(label.tagName) && !label.children.length && !label.matches(controls)) label.classList.add('kit-ink')
         else {
           label = document.createElement('span'); label.className = 'kit-ink'
           node.replaceWith(label); label.append(node)
@@ -79,6 +97,25 @@ export function fitControlInk(root: HTMLElement = document.body) {
       if (lines.length > 1 && style.whiteSpace !== 'nowrap') {
         label.style.setProperty('--ink-width', `${Math.max(...lines.map(line => line.width))}px`)
         label.dataset.inkLines = 'true'
+        // The first line's ascent and the last line's descent bound a wrapped label, rather than the whole string's.
+        const rendered = new Map<string, { start: number; end: number }>()
+        for (let i = 0; i < node.length; i++) {
+          if (/\s/.test(node.data[i])) continue
+          range.setStart(node, i); range.setEnd(node, i + 1)
+          const key = range.getBoundingClientRect().y.toFixed(3), line = rendered.get(key)
+          if (line) line.end = i + 1
+          else rendered.set(key, { start: i, end: i + 1 })
+        }
+        const edges = [...rendered.values()]
+        if (edges.length) {
+          context.font = font; context.letterSpacing = style.letterSpacing === 'normal' ? '0px' : style.letterSpacing
+          const first = context.measureText(text.slice(edges[0].start, edges[0].end)), last = context.measureText(text.slice(edges.at(-1)!.start, edges.at(-1)!.end))
+          label.style.setProperty('--ink-ascent', `${first.actualBoundingBoxAscent}px`)
+          label.style.setProperty('--ink-descent', `${last.actualBoundingBoxDescent}px`)
+          const line = baselines.get(font)!
+          label.style.setProperty('--ink-top', `${first.actualBoundingBoxAscent - line.baseline}px`)
+          label.style.setProperty('--ink-bottom', `${last.actualBoundingBoxDescent - (line.height - line.baseline)}px`)
+        }
       }
     }
   }
@@ -97,6 +134,7 @@ export function fitControlInk(root: HTMLElement = document.body) {
     const button = node.closest<HTMLElement>(controls)
     if (button) add(button)
     for (const el of node.querySelectorAll<HTMLElement>(controls)) add(el)
+    for (const el of [node, ...node.querySelectorAll<HTMLElement>('*')]) if (el.shadowRoot) fitControlInk(el.shadowRoot)
   }
   const observer = new MutationObserver(records => {
     for (const record of records) {
@@ -122,11 +160,17 @@ export function fitControlInk(root: HTMLElement = document.body) {
     for (const button of pending) if (button.isConnected) labels(button)
     pending.clear(); watch()
   }
-  void document.fonts.ready.then(() => { if (active) { scan(root); flush() } })
-  const refresh = () => { cache.clear(); baselines.clear(); scan(root); if (!frame) frame = requestAnimationFrame(flush) }
-  const resize = new ResizeObserver(() => { scan(root); if (!frame) frame = requestAnimationFrame(flush) })
-  resize.observe(root)
+  const scanRoot = () => {
+    if (root instanceof HTMLElement) scan(root)
+    else for (const el of root.children) if (el instanceof HTMLElement) scan(el)
+  }
+  void document.fonts.ready.then(() => { if (active) { scanRoot(); flush() } })
+  const refresh = () => { cache.clear(); baselines.clear(); scanRoot(); if (!frame) frame = requestAnimationFrame(flush) }
+  const resize = new ResizeObserver(() => { scanRoot(); if (!frame) frame = requestAnimationFrame(flush) })
+  resize.observe(root instanceof ShadowRoot ? root.host : root)
   document.fonts.addEventListener('loadingdone', refresh)
   addEventListener('resize', refresh)
-  return () => { active = false; observer.disconnect(); resize.disconnect(); visibility.disconnect(); cancelAnimationFrame(frame); document.fonts.removeEventListener('loadingdone', refresh); removeEventListener('resize', refresh) }
+  const release = () => { active = false; fitted.delete(root); observer.disconnect(); resize.disconnect(); visibility.disconnect(); cancelAnimationFrame(frame); document.fonts.removeEventListener('loadingdone', refresh); removeEventListener('resize', refresh) }
+  fitted.set(root, release)
+  return release
 }

@@ -5,6 +5,11 @@ import { html, setMarkup, type Content } from '../ui/markup'
  */
 import './family.css'
 import './family.js'
+import { fitControlInk } from '../ui/kit/ink'
+
+// All product surfaces share the same glyph fitting, including controls mounted after pairing or opening a sheet.
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => fitControlInk(), { once: true })
+else fitControlInk()
 
 export type FamilyThemeId = 'carbon' | 'navy' | 'violet' | 'wine' | 'onyx' | 'light'
 export interface FamilyProduct { id: string; name: string; category: string; host: string; accent: string }
