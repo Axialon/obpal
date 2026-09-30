@@ -18,6 +18,8 @@
     "check:live": "node scripts/check-live.mjs",
     "indexnow": "node scripts/indexnow.mjs",
     "merge:lane": "node scripts/merge-lane.mjs",
+    "astra:pack": "node scripts/astra/pack.mjs",
+    "astra:intake": "node scripts/astra/intake.mjs",
     "deploy": "pnpm run test && pnpm run build && node scripts/keep-assets.mjs wrangler deploy && node scripts/indexnow.mjs",
     "sync:family": "node scripts/sync-family.mjs",
     "pack:extension": "pnpm run build:extension && pnpm --filter @obpal/extension run pack",
@@ -42,7 +44,8 @@
     "e2e:pages": "vite build && node scripts/e2e-pages.mjs",
     "fonts": "node scripts/fonts.mjs",
     "bench:extension": "vite build && pnpm run build:extension && node extension/scripts/bench.mjs",
-    "icons": "node scripts/brand-icons.mjs"
+    "icons": "node scripts/brand-icons.mjs",
+    "astra:verify": "node scripts/astra/verify.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "1.0.1",
