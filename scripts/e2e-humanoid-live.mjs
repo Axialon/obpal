@@ -23,11 +23,31 @@ const state = (page) =>
     reason: __humanoid.drivers.session.reason,
     checks: __humanoid.drivers.session.checks,
   }))
-const snapshot = (page) => page.evaluate(() => __humanoid.drivers.transport.snapshot())
+const snapshot = (page) => page.evaluate(async () => ({
+  ...await __humanoid.drivers.transport.snapshot(), pageStates: [...window.__driverStates],
+}))
 const faults = (page, faults, pose) =>
   page.evaluate(({ faults, pose }) => __humanoid.drivers.transport.faults(faults, pose), { faults, pose })
 const goals = (s) => s.events.filter((e) => e.kind === 'goal').length
 const region = (page) => page.locator('[data-panel="drivers"]')
+/** A setup retry must prove refusal or lateness, never excuse a lost on-time ACK. */
+export function retryableSetup(attempt, current, snapshot) {
+  if (!snapshot.held) return false
+  const start = attempt.timeOrigin + attempt.at,
+    events = snapshot.events.filter((event) => snapshot.timeOrigin + event.at >= start),
+    held = events.find((event) => event.kind === 'hold')
+  if (held && events.some((event) => event.kind === 'goal' && event.at >= held.at)) return false
+  if (attempt.state === 'observe')
+    return /stale/.test(attempt.reason) && !events.some((event) => event.kind === 'arm')
+  if (!held || !events.some((event) => event.kind === 'arm')) return false
+  if (current.reason.startsWith('Guardian arm acknowledgement timed out')) {
+    const receipt = snapshot.pageTimeline.find((event) => event.kind === 'live' &&
+      event.action.startsWith('receive:') && event.at >= attempt.armedAt)
+    return !!receipt && receipt.at - attempt.armedAt > 50
+  }
+  return current.reason.startsWith('Page missed its deadman renewal') &&
+    held.reason === 'Deadman lease expired' && Number.isFinite(held.deadline) && held.at >= held.deadline
+}
 async function exposedStop(page) {
   const covered = await region(page)
     .locator('[data-stop]')
@@ -49,6 +69,9 @@ export async function runHumanoidLive(local, check) {
     environment: 'Desktop Chromium; phone viewport emulation. Worker guardian and modeled robot watchdog, no hardware.',
     results: [],
     timings: [],
+    cpuRate: Number(process.env.OBPAL_E2E_CPU_RATE) || 1,
+    timelines: [],
+    setupRetries: [],
   }
   const browser = await chromium.launch({
     executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined,
@@ -84,6 +107,19 @@ export async function runHumanoidLive(local, check) {
     await page.goto(`${local.origin}/sim/humanoid/?test=humanoid-live`)
     await page.waitForFunction(() => window.__humanoid && window.__obpal?.pairingUrl)
     await page.waitForFunction(() => __humanoid.actors.every((a) => a.rig.root.userData.prototype === 'blender'))
+    const cdp = await context.newCDPSession(page)
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: report.cpuRate })
+    await page.evaluate(() => {
+      const live = __humanoid.drivers.session, render = live.onChange
+      window.__driverStates = []
+      live.onChange = () => {
+        render()
+        const last = window.__driverStates.at(-1)
+        if (last?.state === live.state && last?.reason === live.reason) return
+        window.__driverStates.push({ at: performance.now(), state: live.state, reason: live.reason })
+        if (window.__driverStates.length > 200) window.__driverStates.shift()
+      }
+    })
     const toggle = page.locator('[data-panel-toggle="drivers"]')
     await toggle.focus()
     await toggle.click()
@@ -106,16 +142,47 @@ export async function runHumanoidLive(local, check) {
       `observe-only: ${JSON.stringify(await state(page))}`,
     )
     await until(async () => (await state(page)).checks.find((c) => c.id === 'controller')?.ok, 'stable guardian')
+    await page.evaluate(() => __humanoid.drivers.transport.trace())
   }
   const arm = async (page) => {
-    await page.keyboard.up('Shift')
-    await region(page).getByLabel('Joint map verified', { exact: true }).check()
-    await region(page).getByLabel('Workspace clear; emergency stop reachable', { exact: true }).check()
-    await page.keyboard.down('Shift')
-    const live = region(page).getByRole('button', { name: 'Go live', exact: true })
-    await until(() => live.isEnabled(), `ready checklist: ${JSON.stringify(await state(page))}`)
-    await live.click()
-    await until(async () => (await state(page)).state === 'live', `live: ${JSON.stringify(await state(page))}`)
+    const kind = await page.evaluate(() => __humanoid.drivers.transport.kind)
+    for (let preparation = 0; preparation < 3; preparation++) {
+      await page.keyboard.up('Shift')
+      await region(page).getByLabel('Joint map verified', { exact: true }).check()
+      await region(page).getByLabel('Workspace clear; emergency stop reachable', { exact: true }).check()
+      await page.keyboard.down('Shift')
+      const live = region(page).getByRole('button', { name: 'Go live', exact: true })
+      await until(() => live.isEnabled(), `ready checklist: ${JSON.stringify(await state(page))}`)
+      // Check and invoke the real DOM action in one task. Automation round trips
+      // must not separate an enabled checklist from the application's recheck.
+      const attempt = await live.evaluate((button) => {
+        const at = performance.now(), session = __humanoid.drivers.session
+        button.click()
+        return { at, timeOrigin: performance.timeOrigin, armedAt: session.armedAt,
+          state: session.state, reason: session.reason }
+      })
+      try {
+        // Observe the acknowledgement in the page rather than losing a short
+        // live interval between Node round trips. Faults still fail immediately.
+        assert(attempt.state !== 'observe', 'The application refused go-live')
+        await page.waitForFunction(() => ['live', 'fault', 'stopped'].includes(__humanoid.drivers.session.state),
+          null, { polling: 5, timeout: 6000 })
+        assert((await state(page)).state === 'live', 'Guardian did not reach live')
+        return
+      } catch (error) {
+        const current = await state(page), s = await snapshot(page)
+        report.timelines.push({ source: 'arming failure', current, snapshot: s })
+        if (preparation < 2 && retryableSetup(attempt, current, s)) {
+          report.setupRetries.push({ kind, preparation, attempt, current })
+          await page.keyboard.up('Shift')
+          // Test preparation only: dispose the held lane, reconnect observe-only,
+          // then reconfirm and press a fresh physical deadman. No runtime retries.
+          await connect(page, kind)
+          continue
+        }
+        throw new Error(`${error.message}: ${JSON.stringify(current)}; events ${JSON.stringify(s.events.slice(-5))}`)
+      }
+    }
   }
   const jog = async (page) => {
     const input = region(page).locator('[data-input]')
@@ -222,24 +289,46 @@ export async function runHumanoidLive(local, check) {
       async () => {
         for (const kind of ['ros', 'g1', 'h1'])
           for (const fault of ['page-freeze', 'socketLost', 'bridgeDead'])
-            for (let repeat = 0; repeat < 4; repeat++) {
+            for (const duration of [120, 260, 500, 800]) {
               await connect(page, kind)
               await arm(page)
-              await jog(page)
-              await sleep(100)
-              if (fault !== 'page-freeze') await faults(page, { [fault]: true })
-              // Blocking the main thread cannot run the page's stop code or renew the lease.
-              await page.evaluate(() => {
-                const end = performance.now() + 260
-                while (performance.now() < end) {
-                  /* Deliberate fault. */
-                }
-              })
-              const s = await snapshot(page),
-                hold = s.events.findLast((e) => /lease expired|bridge lost/.test(e.reason ?? ''))
-              assert(s.held && hold, `${kind}/${fault} missed watchdog: ${JSON.stringify(s.events.slice(-3))}`)
-              report.timings.push({ source: `${kind}:${fault}`, ...hold })
-              assert(hold.delay <= 110, `${kind}/${fault}: hold ${hold.delay.toFixed(2)} ms exceeds 110 ms`)
+              // Snapshot, fault and block are one browser task. An unrelated
+              // render/automation round trip cannot stop the lane beforehand.
+              const sample = await page.evaluate(async ({ fault, duration }) => {
+                const transport = __humanoid.drivers.transport,
+                  before = await transport.snapshot()
+                if (before.held || __humanoid.drivers.session.state !== 'live')
+                  throw new Error('Freeze precondition: guardian and page must both be live')
+                if (fault !== 'page-freeze') await transport.faults({ [fault]: true })
+                const start = performance.now(), end = start + duration
+                while (performance.now() < end) { /* Deliberately starve only the page. */ }
+                const finish = performance.now(), after = await transport.snapshot()
+                return { before, after, start, finish, pageTimeOrigin: performance.timeOrigin,
+                  pageStates: [...window.__driverStates] }
+              }, { fault, duration })
+              const s = sample.after,
+                first = s.events.slice(sample.before.events.length).find((event) => event.kind === 'hold'),
+                expected = fault === 'bridgeDead' ? 'Robot watchdog: bridge lost' : 'Deadman lease expired'
+              report.timelines.push({ source: `${kind}:${fault}:${duration}`, ...sample })
+              assert(s.held && first?.reason === expected,
+                `${kind}/${fault} missed watchdog: ${JSON.stringify(s.events.slice(-3))}`)
+              assert(s.timeline.filter((event) => event.action === 'check')
+                .every((event) => event.reportedAt === event.checkedAt),
+                'Guardian compared a new status sample to an older clock read')
+              const deadline = first.deadline,
+                wake = s.timeline.find((event) => ['poll', 'receive'].includes(event.action) && event.at >= deadline),
+                pageFinish = sample.pageTimeOrigin + sample.finish
+              assert(Number.isFinite(deadline) && first.at >= deadline, 'Watchdog held before its measured deadline')
+              assert(wake && first.at - wake.at <= 10, 'Watchdog did not hold on its first runnable check')
+              assert(s.timeOrigin + first.at < pageFinish, 'Hold depended on the page resuming')
+              assert(!s.events.slice(sample.before.events.length).some((event) => event.kind === 'goal' && event.at >= deadline),
+                'Motion was accepted after lease expiry')
+              const pollDelay = wake.at - deadline
+              // 110 ms remains the on-time scheduling target. Starvation is
+              // measured explicitly; a browser has no finite scheduling bound.
+              if (pollDelay <= 10) assert(first.delay <= 110, `${kind}/${fault}: on-time hold exceeded 110 ms`)
+              report.timings.push({ source: `${kind}:${fault}`, ...first, duration, pollDelay,
+                schedulingTargetMet: first.delay <= 110 })
               const count = goals(s)
               await sleep(80)
               assert(goals(await snapshot(page)) === count, 'Queued traffic revived expired motion')
@@ -466,6 +555,8 @@ export async function runHumanoidLive(local, check) {
       p95Ms: samples[Math.floor(samples.length * 0.95)] ?? null,
       maxMs: samples.at(-1) ?? null,
       boundMs: 110,
+      schedulingMisses: report.timings.filter((sample) => sample.schedulingTargetMet === false).length,
+      timingMeaning: '110 ms is the on-time scheduling target; expiry holds on the first runnable Worker check. No finite bound under OS starvation.',
       unverified: 'Real process/robot watchdogs, stopping distance, network latency and physical phones',
     }
     const buckets = Array.from({ length: 12 }, (_, i) => samples.filter((n) => n >= i * 10 && n < (i + 1) * 10).length)

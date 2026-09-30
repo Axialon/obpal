@@ -18,6 +18,8 @@
     "check:live": "node scripts/check-live.mjs",
     "indexnow": "node scripts/indexnow.mjs",
     "merge:lane": "node scripts/merge-lane.mjs",
+    "lane": "node scripts/lanes/codex.mjs",
+    "ship": "node scripts/ship.mjs",
     "astra:pack": "node scripts/astra/pack.mjs",
     "astra:intake": "node scripts/astra/intake.mjs",
     "deploy": "pnpm run test && pnpm run build && node scripts/keep-assets.mjs wrangler deploy && node scripts/indexnow.mjs",

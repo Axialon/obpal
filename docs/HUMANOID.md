@@ -349,6 +349,50 @@ Evidence is in `artifacts/humanoid/phase-4/`: machine-readable and readable faul
 
 After that layout correction, the focused live-driver suite passed **22/22**, phone **35/35**, shared **7/7** and camera **20/20**. The final 39 hold samples measured p95 **104.8 ms**, maximum **105.4 ms**. Nine-point hit tests keep Stop unobstructed on desktop and phone. Final screenshots and the histogram are in `final-browser/`; the raw runner log is in `final-validation/`. The Desktop guard reported **no new sessions**, with 19 test-browser lines before and after. The two full-sims readiness failures above remain an integration follow-up.
 
+### Watchdog ordering and loaded-browser investigation
+
+The fake guardian previously sampled a check time before constructing its status.
+CPU work could make that new status more than 1 ms newer than the comparison time,
+triggering its own future-timestamp guard as `Guardian status is stale`. Freshness
+now uses one timestamp for the sample and comparison. Expiry is checked before
+feedback and again after validation, before committing motion or renewal. A
+deadline crossed during validation holds instead of extending the old lease.
+Three deterministic regressions cover sampling cost, validation crossing expiry
+and expiry taking priority over stale feedback. Existing arm and hardware adapter
+paths are unchanged.
+
+The loaded-browser tests retain aligned Worker/page clocks and current failure
+states. The old pre-poll `arming` label was not evidence of a stuck session. A
+retained ×4 trace shows the Worker arming about 1.6 ms after the page's command,
+but live status arriving about 103 ms later: the unchanged 50 ms deadline correctly
+refuses it. Test preparation has bounded, recorded retries after safe refusal or
+proved late delivery; each reconnect is observe-only and needs fresh confirmation
+and deadman. Missing or mishandled on-time acknowledgements always fail.
+
+Page freezes vary from 120 to 800 ms. Assertions use the Worker deadline, its first
+runnable check, no accepted expired motion, and hold before page resumption.
+The 110 ms target still applies when checks meet the 10 ms scheduling envelope.
+Arbitrary browser/OS starvation has **no finite in-browser wall-clock bound**;
+real hardware still needs a commissioned robot-side watchdog. Raw runs, including
+preliminary failures and preparation retries, are in `artifacts/humanoid/watchdog/`.
+
+Validation against merged master `cec62e0`: all four typechecks passed, Vitest
+passed **2,558 tests** with 14 skipped, and full sims passed **400/400**. Ten
+focused runs at CDP ×4 passed **5/10 suites, 212/220 checks**; ten unthrottled runs
+passed **10/10 suites, 220/220 checks**. The ×4 failures remain recorded: two
+observe-only setup timeouts, five rearm readiness failures and one goal-cadence
+refusal preceding the intended camera-age fault. Startup and cadence causes are
+not fully isolated; this is not an all-green load-stress result.
+
+The completed watchdog matrices passed in **9/10 ×4 runs and 10/10 unthrottled
+runs**; the remaining ×4 matrix stopped during preparation. Across 685 successful
+watchdog cases and 55 explicit releases, all 740 measured holds met 110 ms:
+×4 p95 **104.8 ms**, maximum **105.7 ms**; unthrottled p95 **104.6 ms**, maximum
+**105.8 ms**. Self-check timestamp skew and scheduling misses were zero. One safe
+preparation retry was recorded at ×4, none unthrottled. These are simulated
+Chromium measurements, not hardware guarantees. Every guarded run reported
+**19 test-browser lines before, 19 after; no new sessions**.
+
 ## Phase 5 review and v3 articulation
 
 The bounded review records twelve ranked findings in

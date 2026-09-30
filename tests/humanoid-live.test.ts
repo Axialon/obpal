@@ -17,7 +17,7 @@ import {
   type BridgeTransport,
   type HumanoidDriver,
 } from '../src/sim/humanoid/drivers'
-import { FakeGuardian, type FakeFaults } from '../src/sim/humanoid/fake-guardian'
+import { FakeGuardian, type FakeFaults, type GuardianTrace } from '../src/sim/humanoid/fake-guardian'
 import { LiveSession } from '../src/sim/humanoid/live'
 import {
   collisionProblem,
@@ -31,7 +31,9 @@ import { neutral } from '../src/sim/humanoid/profile'
 
 async function fixture(kind: DriverKind = 'ros', rosEpoch = 0, timing = { settle: 220, helloDelay: 0 }) {
   let time = 1
-  const now = () => time,
+  let clockCost = 0
+  let trace: (sample: GuardianTrace) => void = () => {}
+  const now = () => (time += clockCost),
     wire: string[] = []
   let guardian: FakeGuardian
   const transport: BridgeTransport = {
@@ -51,7 +53,7 @@ async function fixture(kind: DriverKind = 'ros', rosEpoch = 0, timing = { settle
       guardian.receive(data)
     },
   }
-  guardian = new FakeGuardian(kind, now, (message) => transport.onMessage(message))
+  guardian = new FakeGuardian(kind, now, (message) => transport.onMessage(message), (sample) => trace(sample))
   guardian.rosEpoch = rosEpoch
   const driver = new RosbridgeDriver(fakeProfile(kind), transport, now),
     live = new LiveSession(now)
@@ -101,6 +103,12 @@ async function fixture(kind: DriverKind = 'ros', rosEpoch = 0, timing = { settle
     arm,
     jog,
     now,
+    clockCost: (ms: number) => {
+      clockCost = ms
+    },
+    trace: (callback: typeof trace) => {
+      trace = callback
+    },
     jump: (ms: number) => {
       time += ms
     },
@@ -109,6 +117,44 @@ async function fixture(kind: DriverKind = 'ros', rosEpoch = 0, timing = { settle
 }
 
 describe('humanoid driver fault matrix', () => {
+  it('does not reject its own freshly sampled status when clock reads take CPU time', async () => {
+    const f = await fixture()
+    f.arm()
+    f.clockCost(2)
+    try {
+      f.guardian.tick()
+      expect(f.guardian.held).toBe(false)
+      expect(f.guardian.events.some((event) => event.reason === 'Guardian status is stale')).toBe(false)
+    } finally {
+      f.clockCost(0)
+      await f.live.disconnect()
+    }
+  })
+  it('expires a lease before committing a renewal if validation straddles its deadline', async () => {
+    const f = await fixture()
+    f.arm()
+    f.trace((sample) => {
+      if (sample.action === 'check') f.jump(TIMING.lease + 1)
+    })
+    f.driver.send({
+      kind: 'lease', session: f.driver.session, seq: 9999,
+      issuedAt: f.now(), deadline: f.now() + TIMING.lease, leaseUntil: f.now() + TIMING.lease,
+    })
+    expect(f.guardian.held).toBe(true)
+    expect(f.guardian.events.at(-1)?.reason).toBe('Deadman lease expired')
+    await f.live.disconnect()
+  })
+  it('a starved guardian holds its expired lease before inspecting stale feedback', async () => {
+    const f = await fixture()
+    f.arm()
+    f.guardian.faults.frozenFeedback = true
+    f.jump(300)
+    f.guardian.tick()
+    expect(f.guardian.held).toBe(true)
+    expect(f.guardian.events.at(-1)?.reason).toBe('Deadman lease expired')
+    expect(f.guardian.events.at(-1)?.deadline).toBeLessThanOrEqual(f.now())
+    await f.live.disconnect()
+  })
   it('a late renewal cannot revive a lease between guardian polls', async () => {
     const f = await fixture()
     f.arm()

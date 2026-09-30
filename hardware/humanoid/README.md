@@ -63,6 +63,23 @@ In production the guardian must be a separate local process, with sole control o
 
 The fake guardian runs in a dedicated Worker, so a blocked page cannot renew its lease. Its bridge-death test models the robot watchdog as a separate branch of that Worker. Its plant follows accepted trajectory points without modeling inertia, controller interpolation or actuator dynamics. It proves the state machine, not independent physical processes or a hard real-time scheduler. Browser/OS suspension can exceed a timing target; retained raw measurements must not be described as a hardware guarantee.
 
+Freshness comparisons use the timestamp of the sample being checked, never an
+earlier callback-entry time. Expiry is checked before feedback work and again
+after command validation, before accepting motion or renewal. Crossing a deadline
+during validation holds; it cannot extend the old lease. Expiration revokes the
+rearm token just like an explicit hold.
+
+The 110 ms issuance target assumes an eligible guardian check is scheduled within
+10 ms of expiry. Under arbitrary browser/OS starvation **there is no finite
+in-browser wall-clock bound**. The achievable semantic guarantee is hold on the
+first runnable check of an expired lease, with no subsequent motion accepted and
+a fresh deadman/rearm required. Tests retain the 100 ms lease, 50 ms acknowledgement
+and on-time 110 ms assertions; they also measure scheduling lateness separately.
+Aligned Worker/page traces prove the Worker issued the hold while the page was
+still blocked, rather than accepting a later page Stop as watchdog evidence.
+This does not replace the independently scheduled, commissioned robot-side
+watchdog required for real hardware.
+
 ## Unitree bridge specification
 
 The future local C++ bridge owns `unitree_sdk2`, DDS, CRC/mode requirements, takeover and servo cadence. It interpolates already-capped upper-body trajectories at the commissioned controller rate, reads measured `q`, and reports acquisition age and status through the same guardian contract. It must preserve the vendor locomotion controller and never publish whole-body low-level commands. Test sign/zero offsets, limits and hold strategy are deliberately not vendor calibration.

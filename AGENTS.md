@@ -3,6 +3,7 @@
 Instructions for coding agents, Codex and others, working in this repository. A coordinator hands you a task, reviews your branch, merges it, runs the full checks, deploys and reports to the maintainer. You build the task on your branch, prove it works, and hand back.
 
 ## How to work
+- Repo skills in `.agents/skills/`: `obpal-develop` for lane workflow, `obpal-evidence` for captures and timing, `obpal-models` for Blender assets, and `obpal-review` for self-review. Coordinator commands are in `docs/LANES.md`.
 - The task brief is authorised work. Carry it through to completion without stopping for questions that don't block you: make sensible calls and list them in the hand-back. Ask only when you're truly blocked.
 - Match the surrounding code: comment density and style (plain, precise English doc comments), naming and idiom. TypeScript, three.js and Vite; no new frameworks.
 - Stay inside the task's files. If you need something outside them, say so in the hand-back.
@@ -10,7 +11,7 @@ Instructions for coding agents, Codex and others, working in this repository. A 
 - Write hand-backs and commit messages in plain sentences.
 
 ## Commands
-- Install: `pnpm install --frozen-lockfile`, only when the lockfile moved.
+- Install when dependencies are absent or the lockfile moved: `pnpm install --frozen-lockfile --store-dir "$TEMP/pnpm-store-obpal"` (PowerShell: `"$env:TEMP/pnpm-store-obpal"`).
 - Check: `pnpm run check` (the typecheck of all four configs, then vitest).
 - e2e: `OBPAL_E2E_PORT=<stand-in> OBPAL_E2E_WORKER_PORT=<worker> pnpm run e2e:all -- <suites>`. The suites are code, embed, home, phone, sims, shared, extension, catalogue and pages. In PowerShell, set `$env:OBPAL_E2E_PORT` and `$env:OBPAL_E2E_WORKER_PORT` first.
 - Playwright: when its pinned browser build isn't installed, set `OBPAL_E2E_CHROMIUM` to an installed Chromium; the brief gives the path.

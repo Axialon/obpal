@@ -5,6 +5,8 @@ description: Start an ob.Pal development lane, meaning a background obpal-lane a
 
 # Spawn a lane
 
+In usage-conservation mode, Codex lanes are the default. Follow [codex-lane](../codex-lane/SKILL.md) and use `pnpm run lane -- start` / `resume`; the CLI allocates ports and records rounds. The manual Agent workflow below is for an explicitly chosen Claude lane.
+
 The `obpal-lane` agent (.claude/agents/obpal-lane.md) already knows the rules, the e2e runner, the commit identity check, "merge master before you hand back" and the ≤400-word hand-back. The prompt holds only what is specific to this lane.
 
 1. **Ports.** Pick a free pair and check it (`netstat -ano | findstr :<port>`):

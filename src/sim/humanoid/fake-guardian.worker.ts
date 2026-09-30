@@ -1,5 +1,5 @@
 /** Separate scheduling domain for browser-freeze tests. No socket, DDS or device API exists here. */
-import { FakeGuardian, type FakeFaults } from './fake-guardian'
+import { FakeGuardian, type FakeFaults, type GuardianTrace } from './fake-guardian'
 import type { DriverKind } from './driver-profile'
 import { TIMING } from './drivers'
 
@@ -10,6 +10,13 @@ const scope = globalThis as unknown as {
 }
 let guardian: FakeGuardian | null = null
 let timer: ReturnType<typeof setInterval> | undefined
+let tracing = false
+const timeline: GuardianTrace[] = []
+const trace = (sample: GuardianTrace) => {
+  if (!tracing) return
+  timeline.push(sample)
+  if (timeline.length > 2000) timeline.shift()
+}
 scope.onmessage = (event) => {
   const message = event.data as {
     type: string
@@ -24,11 +31,13 @@ scope.onmessage = (event) => {
       message.kind!,
       () => performance.now(),
       (data) => scope.postMessage({ type: 'wire', data }),
+      trace,
     )
     timer = setInterval(() => guardian!.tick(), TIMING.guardian)
     scope.postMessage({ type: 'ready' })
   } else if (guardian) {
-    if (message.type === 'wire') guardian.receive(message.data!)
+    if (message.type === 'trace') tracing = true
+    else if (message.type === 'wire') guardian.receive(message.data!)
     else if (message.type === 'faults') {
       guardian.faults = message.faults ?? {}
       if (message.pose) Object.assign(guardian.pose, message.pose)
@@ -39,6 +48,11 @@ scope.onmessage = (event) => {
       clearInterval(timer)
       scope.close()
     }
-    if (message.id !== undefined) scope.postMessage({ type: 'snapshot', id: message.id, value: guardian.snapshot() })
+    if (message.id !== undefined)
+      scope.postMessage({
+        type: 'snapshot',
+        id: message.id,
+        value: { ...guardian.snapshot(), timeOrigin: performance.timeOrigin, timeline },
+      })
   }
 }

@@ -30,6 +30,18 @@ export interface DriverEvent {
   seq?: number
   positions?: Angles
   velocities?: Angles
+  deadline?: number
+}
+/** Optional, bounded test traces keep the page and guardian clocks distinguishable. */
+export interface GuardianTrace {
+  action: string
+  at: number
+  checkedAt?: number
+  reportedAt?: number
+  leaseUntil?: number
+  kind?: string
+  seq?: number
+  reason?: string
 }
 export class FakeGuardian {
   readonly profile
@@ -59,6 +71,7 @@ export class FakeGuardian {
     kind: DriverKind,
     private now: () => number,
     private emit: (message: string) => void,
+    private trace: (sample: GuardianTrace) => void = () => {},
   ) {
     this.profile = fakeProfile(kind)
     this.pose = neutral(this.profile.rig)
@@ -79,6 +92,7 @@ export class FakeGuardian {
     if (!this.faults.socketLost && !this.faults.bridgeDead) this.emit(JSON.stringify(message))
   }
   private record(event: DriverEvent) {
+    this.trace({ action: 'event', ...event })
     this.events.push(event)
     if (this.events.length > 4000) this.events.shift()
   }
@@ -95,17 +109,17 @@ export class FakeGuardian {
       this.measured[j.id] = { position, at: now, stamp: now }
     }
   }
-  private reading(): DriverReading {
+  private reading(now = this.now()): DriverReading {
     const mode = this.fault || this.faults.controllerFault ? 'fault' : this.held ? 'hold' : 'live'
     if (mode !== this.lastMode) {
       this.lastMode = mode
-      this.since = this.now()
+      this.since = now
     }
     return {
       session: this.session,
       profileKey: this.key(),
       joints: this.measured,
-      at: this.now(),
+      at: now,
       mode,
       stableSince: this.since,
       guardian: !this.faults.guardianUnhealthy,
@@ -164,7 +178,8 @@ export class FakeGuardian {
       })
     }
   }
-  private hold(reason: string, trigger = this.now()) {
+  private hold(reason: string, trigger = this.now(), deadline?: number) {
+    const at = this.now()
     this.held = true
     this.holdId = `${this.session}:hold:${++this.holdCount}`
     this.leaseUntil = -Infinity
@@ -172,10 +187,11 @@ export class FakeGuardian {
     this.velocity = {}
     this.record({
       kind: 'hold',
-      at: this.now(),
+      at,
       reason,
       strategy: this.profile.stop,
-      delay: Math.max(0, this.now() - trigger),
+      delay: Math.max(0, at - trigger),
+      deadline,
     })
     this.status()
   }
@@ -184,15 +200,35 @@ export class FakeGuardian {
     this.record({ kind: 'reject', at: this.now(), reason })
     this.hold(reason)
   }
+  /** Expiry wins before feedback work or queued traffic can prolong a live lease. */
+  private expired(now: number) {
+    if (this.held || now < this.leaseUntil) return false
+    this.hold('Deadman lease expired', this.lastRenewal, this.leaseUntil)
+    return true
+  }
+  /** Recheck time after validation, before any motion or renewal is committed. */
+  private renew(deadline: number, lease: number) {
+    const now = this.now()
+    if (this.expired(now)) return false
+    if (deadline <= now || lease <= now) {
+      this.reject('Expired or invalid command deadline')
+      return false
+    }
+    this.lastRenewal = now
+    this.leaseUntil = Math.min(lease, deadline, now + TIMING.lease)
+    return true
+  }
   /** Runs independently of the page at 5 ms intervals in the Worker harness. */
   tick() {
     const now = this.now()
+    this.trace({ action: 'poll', at: now, leaseUntil: this.leaseUntil })
     if (this.faults.bridgeDead) {
       if (!this.held && !this.faults.robotWatchdogMissing && now - this.robotFed >= TIMING.lease)
-        this.hold('Robot watchdog: bridge lost', this.robotFed)
+        this.hold('Robot watchdog: bridge lost', this.robotFed, this.robotFed + TIMING.lease)
       return
     }
     this.robotFed = now
+    this.expired(now)
     if (now >= this.nextFeedback) {
       this.nextFeedback = now + TIMING.renewal
       this.measure()
@@ -200,9 +236,14 @@ export class FakeGuardian {
       this.status()
     }
     if (!this.held) {
-      const problem = feedbackProblem(this.profile, this.reading(), now) || collisionProblem(this.profile, this.pose)
-      if (problem) this.reject(problem)
-      else if (now >= this.leaseUntil) this.hold('Deadman lease expired', this.lastRenewal)
+      // One timestamp owns this sample and its freshness comparison. Publishing
+      // feedback may itself take time, so do not compare a new sample to tick entry.
+      const checkedAt = this.now(),
+        read = this.reading(checkedAt),
+        problem = feedbackProblem(this.profile, read, checkedAt) || collisionProblem(this.profile, this.pose)
+      this.trace({ action: 'check', at: this.now(), checkedAt, reportedAt: read.at,
+        leaseUntil: this.leaseUntil, reason: problem })
+      if (!this.expired(this.now()) && problem) this.reject(problem)
     }
   }
   receive(data: string) {
@@ -265,6 +306,7 @@ export class FakeGuardian {
     if (message.op !== 'publish' || ![TOPIC.goal, TOPIC.lease].includes(message.topic as typeof TOPIC.goal)) return
     const m = message.msg ?? {},
       now = this.now()
+    this.trace({ action: 'receive', at: now, kind: String(m.kind), seq: Number(m.seq), leaseUntil: this.leaseUntil })
     if ((m.kind === 'goal') !== (message.topic === TOPIC.goal)) {
       this.reject('Wrong command topic')
       return
@@ -295,12 +337,13 @@ export class FakeGuardian {
       return
     }
     // A renewal arriving between watchdog polls cannot revive an expired lease.
-    if (!this.held && now >= this.leaseUntil) {
-      this.hold('Deadman lease expired', this.lastRenewal)
-      return
-    }
+    if (this.expired(now)) return
     this.seq = Number(m.seq)
-    const problem = feedbackProblem(this.profile, this.reading(), now)
+    const read = this.reading(now),
+      problem = feedbackProblem(this.profile, read, now)
+    this.trace({ action: 'check', at: this.now(), checkedAt: now, reportedAt: read.at,
+      leaseUntil: this.leaseUntil, reason: problem })
+    if (this.expired(this.now())) return
     if (problem) {
       this.reject(problem)
       return
@@ -310,12 +353,13 @@ export class FakeGuardian {
         this.reject('Controller is not ready to arm')
         return
       }
+      if (!this.renew(deadline, lease)) return
       this.held = false
       this.lastGoal = { ...this.pose }
       this.lastGoalAt = issued
       this.velocity = Object.fromEntries(upperJoints(this.profile).map((j) => [j.id, 0]))
-      this.robotFed = now
-      this.record({ kind: 'arm', at: now, seq: this.seq })
+      this.robotFed = this.lastRenewal
+      this.record({ kind: 'arm', at: this.lastRenewal, seq: this.seq })
     } else if (this.held) {
       this.reject('Motion remains latched off')
       return
@@ -375,17 +419,16 @@ export class FakeGuardian {
         this.reject(`Self-collision envelope: ${collision}`)
         return
       }
+      if (!this.renew(deadline, lease)) return
       this.lastGoal = q
       this.velocity = velocity
       this.lastGoalAt = issued
       if (!this.faults.stuck) this.pose = { ...q }
-      this.record({ kind: 'goal', at: now, seq: this.seq, positions: { ...q }, velocities: { ...velocity } })
+      this.record({ kind: 'goal', at: this.lastRenewal, seq: this.seq, positions: { ...q }, velocities: { ...velocity } })
     } else if (m.kind !== 'lease') {
       this.reject('Unknown command')
       return
-    }
-    this.lastRenewal = now
-    this.leaseUntil = Math.min(lease, deadline, now + TIMING.lease)
+    } else if (!this.renew(deadline, lease)) return
     this.status()
   }
   close() {
@@ -393,6 +436,10 @@ export class FakeGuardian {
   }
   snapshot() {
     return {
+      at: this.now(),
+      leaseUntil: this.leaseUntil,
+      lastRenewal: this.lastRenewal,
+      robotFed: this.robotFed,
       held: this.held,
       holdId: this.holdId,
       session: this.session,

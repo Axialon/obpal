@@ -1,6 +1,6 @@
 ---
 name: deploy-and-verify
-description: Deploy ob.Pal to production, then verify the live site in one command. The check covers pages at two widths, the Viewer's pairing code, the /api/code rules, the TURN relay, the security headers and security.txt, and that /link/ shows the release it downloads, using pnpm run deploy and pnpm run check:live. Use when merged work is green and the plan calls for a deploy, or to re-check the live site.
+description: Ship ob.Pal from clean master in the main checkout with pnpm run ship, deploying, checking the live site and publishing the open-source snapshot. Use when merged work is green and deployment is authorized, or to re-check the live site.
 ---
 
 # Deploy and verify
@@ -10,11 +10,11 @@ description: Deploy ob.Pal to production, then verify the live site in one comma
 - `pnpm run e2e:all` passes every suite, and its guard line says "no new sessions".
 - A Durable Object migration or new secrets in the change: confirm the owner has set the secrets.
 
-1. **Deploy:** `pnpm run deploy`. It runs vitest, builds, carries the last two deployed builds' hashed files (`.kept-assets/`, ignored by git) into the new build so pages opened before the deploy still find their chunks, runs `wrangler deploy`, then submits every sitemap URL to IndexNow without failing the deploy if notification fails. Note the version id it prints.
-2. **Verify:** `pnpm run check:live` (about 1.5 min, read only, prints no credentials). It exits 1 on any FAIL. A WARN, such as security.txt expiring within 30 days, doesn't fail it.
+1. **Ship:** `pnpm run ship`. It refuses worktrees, non-master branches and dirty trees. It runs deploy, check:live and the open-source publish in order, stopping on the first failure. Deploy runs vitest and build, carries the retained assets, deploys the Worker and submits sitemap URLs to IndexNow. Ship prints the Worker version, live result and public mirror commit, and appends `.claude/local/ships.log`.
+2. **Re-check only:** `pnpm run check:live` (about 1.5 min, read only, prints no credentials). It exits 1 on any FAIL. A WARN, such as security.txt expiring within 30 days, doesn't fail it.
    - Rerun one part with `-- --only pages|api|turn|headers|release`.
    - Check another deployment with `-- --origin https://…`.
-3. **Record** in the brief: the deployed sha, the version id and check:live's last line. Tell the owner what to test on real devices.
+3. **Record** in the brief: the deployed sha, the version id, check:live's last line and the published commit from ship. Tell the owner what to test on real devices. If ship fails after deploy, inspect the reported step and repair it before intentionally retrying; do not assume the release completed.
 
 **If a check fails:**
 - A page error or a missing header is a bug to fix forward.
