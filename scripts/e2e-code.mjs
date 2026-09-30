@@ -13,7 +13,7 @@
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch. OBPAL_SHOTS=<dir> saves
  * screenshots of the chip on several looks and on a phone.
  */
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join as joinPath } from 'node:path'
 import { chromium, devices } from 'playwright'
@@ -54,6 +54,13 @@ const shot = async (page, name, opts) => { if (SHOTS) await page.screenshot({ pa
 /** Observe the existing candidate envelope and the receiving WebRTC call on both real peers. */
 function watchCompletion() {
   window.__iceEnd = { sent: 0, received: 0 }
+  window.__sealStarts = []
+  setInterval(() => {
+    const box = document.querySelector('.seal-moment') ?? document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.seal-moment')
+    if (!box?.dataset.started) return
+    const at = performance.timeOrigin + Number(box.dataset.started)
+    if (window.__sealStarts.at(-1) !== at) window.__sealStarts.push(at)
+  }, 10)
   const send = WebSocket.prototype.send
   WebSocket.prototype.send = function (data) {
     try { if (JSON.parse(data)?.d?.cand?.candidate === '') window.__iceEnd.sent++ } catch { /* ping */ }
@@ -226,6 +233,7 @@ try {
   }
   const phone = await phoneAt(`${ORIGIN}/p/`)
   let joinedWith = ''
+  let typedSeal = ''
 
   await check('a phone types the code, spaces and all, on the start page and joins; the chip closes and shows a new code at once', async () => {
     const code = await until('a short code', liveCode, 20000)
@@ -240,15 +248,73 @@ try {
     await phone.locator('#code-in').pressSequentially(typed.slice(-1))
     await shot(phone, 'phone-start-typed')
     await phone.locator('.modes').waitFor({ timeout: 25000 })
+    const firstNotice = phone.locator('.seal-moment .seal-first')
+    await firstNotice.waitFor({ state: 'visible', timeout: 5000 })
+    if (!(await firstNotice.textContent()).includes(new URL(ORIGIN).hostname) || !(await firstNotice.textContent()).includes('Connected to the screen showing this seal')) throw new Error('the phone handshake lost its domain notice')
+    if (SHOTS) {
+      const times = []
+      for (const [i, progress] of [0, 0.23, 0.46, 0.73, 0.95].entries()) {
+        await until('the seal handshake frame', () => phone.evaluate(p => Number(document.querySelector('.seal-moment')?.dataset.progress ?? -1) >= p, progress), 5000, 15)
+        await Promise.all([shot(screen, `handshake-screen-${i}`), shot(phone, `handshake-phone-${i}`)])
+        times.push(await phone.evaluate(() => document.querySelector('.seal-moment')?.dataset.progress))
+      }
+      await writeFile(joinPath(SHOTS, 'handshake-frames.json'), JSON.stringify(times))
+    }
     const people = await until('the phone on the screen', () => screen.evaluate(() => window.__obpal.participants.length), 10000)
     const s = await until('the chip closed', async () => { const v = await chipState(); return !v.open && v.status === 'connected' ? v : null }, 5000)
     await sleep(400)
     await shot(screen, 'chip-viewer-connected')
     // Closed with a phone in, it holds no code; the people chip's + opens it again, with a code nobody has used.
     await screen.locator('#chip-invite').click()
+    const opened = await chipState()
+    if (!opened.open) throw new Error(`+ did not open the chip (${JSON.stringify(opened)})`)
     const next = await until('a fresh code', async () => { const c = await liveCode(); return c && c !== code ? c : null }, 5000)
     if (!(await chipState()).open) throw new Error('+ did not open the chip')
     return `typed "${typed}", field read "${shown}"; ${people} on the screen, the chip closed (${s.status}); + opens it with ${next}`
+  })
+
+  const phoneSeal = page => page.evaluate(() => document.querySelector('.connection-seal')?.dataset.seal ?? '')
+  const screenSeal = () => screen.evaluate(() => document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.connection-seal')?.dataset.seal ?? '')
+  await check('typed-code peers show the same seal and schedule their pulse together without blocking input', async () => {
+    await until('the first connected frame', () => phone.locator('.trust-first').count())
+    await shot(phone, 'phone-first-frame')
+    await phone.locator('.trust-compare').click()
+    typedSeal = await until('the phone seal', () => phoneSeal(phone))
+    if (!(await chipState()).open) await screen.locator('#chip-invite').click()
+    await screen.getByRole('button', { name: 'Compare connection seal', exact: true }).click()
+    const host = await until('the screen seal', screenSeal)
+    if (host !== typedSeal) throw new Error(`the seals differ: ${typedSeal} / ${host}`)
+    await shot(screen, 'screen-seal-sheet')
+    await screen.getByRole('button', { name: 'Back to pairing', exact: true }).click()
+    const starts = await until('both seal pulses scheduled', async () => {
+      const values = await Promise.all([screen.evaluate(() => window.__sealStarts[0]), phone.evaluate(() => window.__sealStarts[0])])
+      return values.every(Boolean) ? values : null
+    })
+    if (Math.abs(starts[0] - starts[1]) > 100) throw new Error(`pulse start difference ${Math.abs(starts[0] - starts[1])}ms`)
+    const blocks = await phone.evaluate(() => [...document.querySelectorAll('.seal-moment')].some(e => getComputedStyle(e).pointerEvents !== 'none'))
+    if (blocks) throw new Error('the handshake catches input')
+    if (!(await phone.locator('.link-seal').textContent()).includes('Check both screens show the same seal')) throw new Error('the code comparison instruction is missing')
+    await shot(phone, 'phone-seal-sheet')
+    await phone.getByRole('button', { name: 'Close', exact: true }).click()
+    await phone.getByRole('dialog', { name: 'Connection', exact: true }).waitFor({ state: 'hidden' })
+    await phone.locator('.trust-first .trust-shares').click()
+    await phone.getByRole('dialog', { name: 'What this shares' }).waitFor()
+    const shares = await phone.locator('.shares-sheet').textContent()
+    for (const line of ['Camera frames stay on this phone', 'Pairings and preferences', 'Disconnect any time', 'its own policy']) if (!shares.includes(line)) throw new Error(`missing disclosure: ${line}`)
+    if (await phone.locator('.shares-sheet a[href="/trust/"]').count() !== 1) throw new Error('the trust link is missing')
+    await shot(phone, 'what-this-shares')
+    await phone.getByRole('button', { name: 'Close', exact: true }).click()
+    await phone.locator('.trust-dismiss').click()
+    await phone.locator('.ctl-tab[data-tab="gamepad"]').click()
+    await phone.locator('.gp [data-act="settings"]').click()
+    await phone.locator('#connection-details').click()
+    await phone.getByRole('dialog', { name: 'Connection', exact: true }).waitFor()
+    await phone.getByRole('dialog', { name: 'Settings', exact: true }).waitFor({ state: 'hidden' })
+    if (await phoneSeal(phone) !== typedSeal) throw new Error('gamepad Settings lost the comparison seal')
+    await phone.getByRole('dialog', { name: 'Connection', exact: true }).getByRole('button', { name: 'Close', exact: true }).click()
+    await phone.getByRole('dialog', { name: 'Connection', exact: true }).waitFor({ state: 'hidden' })
+    await phone.locator('.gp [data-act="exit"]').click()
+    return `three named glyphs, ${starts.every(Boolean) ? Math.round(Math.abs(starts[0] - starts[1])) + 'ms start difference' : 'finite sequence settled'}`
   })
 
   await check('both peers signal gathering completion and pass it to addIceCandidate', async () => {
@@ -273,6 +339,10 @@ try {
     await phone.reload()
     await phone.locator('.modes').waitFor({ timeout: 25000 })
     await until('still one on the screen', () => screen.evaluate(() => window.__obpal.participants.length === 1), 10000)
+    await until('new seal after reload', async () => {
+      const seal = await screenSeal()
+      return seal && seal !== typedSeal
+    }, 10000)
     return 'rejoined'
   })
 
@@ -331,6 +401,23 @@ try {
     const misses = statuses.filter((s) => s === 404).length
     if (statuses.at(-1) !== 429 || liveStatus !== 429) throw new Error(`statuses ${statuses.join(',')}, live ${liveStatus}`)
     return `${misses} misses, then 429; the live handle answers 429 too`
+  })
+
+  await check('QR peers independently show a matching seal, including the reduced-motion phone', async () => {
+    const url = await screen.evaluate(() => window.__obpal.pairingUrl)
+    const qrPhone = await phoneAt(`${ORIGIN}/p/`)
+    await qrPhone.emulateMedia({ reducedMotion: 'reduce' })
+    await qrPhone.goto(url)
+    await qrPhone.locator('.modes').waitFor({ timeout: 25000 })
+    await qrPhone.locator('.trust-compare').click()
+    const seal = await until('QR phone seal', () => phoneSeal(qrPhone))
+    const hosts = await screen.evaluate(() => window.__obpal.seals.map(s => s.seal.join('-')))
+    if (!hosts.includes(seal)) throw new Error('the QR phone differs from its screen')
+    await until('reduced-motion settlement', () => qrPhone.locator('.seal-moment[data-settled]').count())
+    const progress = await qrPhone.evaluate(() => document.querySelector('.seal-moment')?.dataset.progress)
+    if (progress !== undefined) throw new Error('the reduced-motion handshake is running a moving timeline')
+    await shot(qrPhone, 'phone-qr-reduced')
+    return 'three named glyphs, a single fade, comparison reachable'
   })
 
   await check('no page errors on the screen', async () => {

@@ -9,6 +9,8 @@
  * by a constructed stylesheet, so it works under a strict Content Security Policy and on pages that enforce Trusted
  * Types.
  */
+import { destroySeal, refreshSeal, sealElement, sealMoment, SEAL_STYLE } from './seal'
+import { communityMarker } from './origin'
 import { formatCode, spokenCode } from '@obpal/core'
 import { luminance, parseColor, toHex, type Rgb } from './color'
 import { markElement } from './mark'
@@ -78,12 +80,12 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, 
 let sheet: CSSStyleSheet | null = null
 function adoptStyle(root: ShadowRoot) {
   if ('adoptedStyleSheets' in root && typeof CSSStyleSheet === 'function' && 'replaceSync' in CSSStyleSheet.prototype) {
-    if (!sheet) { sheet = new CSSStyleSheet(); sheet.replaceSync(STYLE) }
+    if (!sheet) { sheet = new CSSStyleSheet(); sheet.replaceSync(STYLE + SEAL_STYLE) }
     root.adoptedStyleSheets = [sheet]
     return
   }
   const s = document.createElement('style')
-  s.textContent = STYLE
+  s.textContent = STYLE + SEAL_STYLE
   root.appendChild(s)
 }
 
@@ -126,6 +128,12 @@ export class PairingChip {
     conn: HTMLElement; connMs: HTMLElement; facts: HTMLButtonElement; details: HTMLElement
   }
   private isOpen = false
+  private stopMoment = () => {}
+  private seals = h('div', { class: 'seals' })
+  private compare = h('button', { class: 'seal-view', type: 'button', hidden: '' }, 'Compare connection seal')
+  private back = h('button', { class: 'seal-back', type: 'button' }, 'Back to pairing')
+  private sealKey = ''
+  private sealSource = ''
   /** Opened by a click or a key: stays open. Opened by hovering: closes when the pointer leaves. */
   private pinned = false
   private hoverTimer = 0
@@ -176,9 +184,16 @@ export class PairingChip {
     const pill = h('button', { class: 'pill', type: 'button', 'aria-expanded': 'false', 'aria-controls': id }, $.mark, $.label, $.badge, conn, h('span', { class: 'dot', ...hidden }))
     const codeBox = h('div', { class: 'code-box', 'data-wait': '' }, h('span', { class: 'k' }, 'Or type'), $.code, h('span', { class: 'k at' }, 'at ', $.site))
     const side = h('div', { class: 'side' }, codeBox, h('p', { class: 'status' }, h('span', { class: 'sdot', ...hidden }), $.status), facts, $.details, ...($.here ? [$.here] : []))
-    const card = h('div', { class: 'card', id, role: 'group', 'aria-label': 'Pair a phone' }, $.qr, side)
+    const domain = new URL(this.remote.pairingUrl || `https://${this.remote.codeSite}`).hostname
+    const cues = h('div', { class: 'scan-cues' }, h('b', {}, domain), h('p', {}, "Opens in your phone's browser · no app · no account"), h('p', {}, `Check your camera shows ${domain}`))
+    side.append(cues, this.compare)
+    const card = h('div', { class: 'card', id, role: 'group', 'aria-label': 'Pair a phone' }, $.qr, side, this.seals)
+    this.compare.onclick = () => { card.setAttribute('data-seal-view', ''); this.back.focus() }
+    this.back.onclick = () => { card.removeAttribute('data-seal-view'); this.compare.focus() }
     const wrap = h('div', { class: 'wrap', 'data-corner': opts.corner ?? 'bottom-right', 'data-variant': opts.variant ?? 'chip', 'data-s': 'starting' }, pill, card, $.live)
     this.root.appendChild(wrap)
+    const marker = communityMarker(location.origin)
+    if (marker) wrap.append(marker)
     this.$ = { ...$, wrap, pill, card, codeBox, conn, facts }
     this.wire()
     ;(opts.parent ?? document.body).appendChild(this.el)
@@ -224,9 +239,12 @@ export class PairingChip {
     if (this.opts.offset) w.style.setProperty('--obpal-offset', this.opts.offset)
     this.$.mark.replaceChildren(markElement(toHex(this.accent)))
     this.drawQr()
+    this.seals.querySelectorAll<HTMLElement>('.connection-seal').forEach(refreshSeal)
   }
 
   destroy() {
+    this.stopMoment()
+    this.seals.querySelectorAll<HTMLElement>('.connection-seal').forEach(destroySeal)
     for (const [ev, fn] of this.listeners) this.remote.off(ev as 'status', fn as () => void)
     this.listeners = []
     this.observer?.disconnect()
@@ -289,10 +307,16 @@ export class PairingChip {
       this.remote.on(ev, fn)
       this.listeners.push([ev, fn])
     }
+    const reveal = (s: { seal: import('@obpal/core').ConnectionSeal; delayMs: number }) => {
+      this.stopMoment()
+      this.stopMoment = sealMoment(this.root, s.seal, s.delayMs, this.sealSource || this.drawn.url)
+    }
+    this.remote.on('seal', reveal)
+    this.listeners.push(['seal', reveal as (...a: never[]) => void])
     on('status', () => { this.render(); this.syncCode() })
     // A phone is in: the card has done its job (and doesn't come back when a page panel closes).
     on('connect', () => { this.unfold = false; this.setOpen(false) })
-    on('join', () => { this.unfold = false; this.setOpen(false); this.render() })
+    on('join', () => { this.sealSource = this.drawn.url; this.unfold = false; this.setOpen(false); this.render() })
     on('leave', () => this.render())
     on('attention', () => this.render())
     on('disconnect', () => { this.render(); this.syncCode() })
@@ -308,6 +332,7 @@ export class PairingChip {
     this.pinned = open && (pinned || this.pinned)
     if (open === this.isOpen) return
     this.isOpen = open
+    if (!open) this.$.card.removeAttribute('data-seal-view')
     this.$.wrap.toggleAttribute('data-open', open)
     this.$.pill.setAttribute('aria-expanded', String(open))
     this.syncCode()
@@ -348,6 +373,15 @@ export class PairingChip {
     this.watchLinks(n > 0)
     // Only ever an https (or local http) link: the Remote checks its service, and so does this.
     if (this.$.here && /^https:\/\/|^http:\/\/(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(r.pairingUrl)) this.$.here.href = r.pairingUrl
+    const key = r.seals.map(s => `${s.id}:${s.name}:${s.seal.join('-')}`).join('|')
+    if (key !== this.sealKey) {
+      this.sealKey = key
+      this.seals.querySelectorAll<HTMLElement>('.connection-seal').forEach(destroySeal)
+      this.seals.replaceChildren(this.back, ...r.seals.map((s) => h('div', {}, h('b', {}, s.name), sealElement(s.seal), h('p', {}, 'Check both screens show the same seal'))))
+    }
+    this.seals.hidden = !r.seals.length
+    this.compare.hidden = !r.seals.length
+    if (!r.seals.length) this.$.card.removeAttribute('data-seal-view')
     this.drawQr()
   }
 
@@ -575,6 +609,11 @@ function pageScheme(el: Element): 'light' | 'dark' {
 }
 
 const STYLE = `
+.scan-cues,.seals{font-size:11px;line-height:1.5}.scan-cues p,.seals p{margin:3px 0}.scan-cues{color:var(--ink);max-width:220px}.seals{display:none;max-height:50vh;overflow:auto}.seals>div{padding:8px 0}.seals b{font-size:12px}
+.card[data-seal-view]>.qr,.card[data-seal-view]>.side{display:none}.card[data-seal-view]>.seals:not([hidden]){display:block}
+.seal-view,.seal-back{min-height:44px;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:rgb(var(--hl) / .05);color:var(--ink);font:inherit;cursor:pointer}.seal-view[hidden]{display:none}.seal-view:focus-visible,.seal-back:focus-visible{outline:2px solid var(--a);outline-offset:2px}
+.community-build{pointer-events:auto;color:var(--ink);font-size:11px;line-height:1.5;padding:6px 10px;border:1px solid var(--line);border-radius:10px;background:var(--glass)}
+
 :host { display: contents; }
 .wrap {
   --ox: var(--obpal-offset-x, var(--obpal-offset, 16px)); --oy: var(--obpal-offset-y, var(--obpal-offset, 16px)); --ease: cubic-bezier(.2, .8, .2, 1); --base: 18 20 26; --frost-alpha: 1;
@@ -624,7 +663,7 @@ const STYLE = `
 .wrap[data-s=offline] :is(.dot, .sdot) { background: #fb7185; }
 @keyframes obpal-pulse { 50% { opacity: .4; } }
 
-.card { display: flex; align-items: center; gap: 18px; padding: 16px 18px 16px 16px; border-radius: var(--r, 18px); max-width: 100%;
+.card { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; padding: 16px 18px 16px 16px; border-radius: var(--r, 18px); max-width: 460px;
   transform-origin: var(--origin, bottom right); opacity: 0; visibility: hidden; transform: translateY(8px) scale(.96);
   transition: opacity .18s var(--ease), transform .24s var(--ease), visibility 0s linear .24s; }
 .wrap[data-corner^=top] .card { transform: translateY(-8px) scale(.96); }

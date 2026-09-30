@@ -162,7 +162,12 @@ export interface RememberedPhone { id: string; name: string; at: number }
  * The phone link as the popup shows it. url is the pairing URL (QR payload); lan the direct LAN code for the
  * remembered phone lanFor (empty when there is none); pairs the remembered phones, newest first.
  */
-export interface LinkState { status: LinkStatus; url: string; device: string | null; lan: string; lanFor: string | null; pairs: RememberedPhone[] }
+export interface LinkState {
+  status: LinkStatus; url: string; device: string | null; lan: string; lanFor: string | null; pairs: RememberedPhone[]
+  seal?: readonly [number, number, number]
+  /** The verified seal pulse's local start time, epoch ms. An already-open popup joins it once. */
+  sealAt?: number
+}
 
 /**
  * What the phone's link says of itself (Remote.links(), the connection's own statistics), for the popup's badge as the
@@ -211,7 +216,12 @@ export function parseLink(x: unknown): LinkState | null {
   if (!Array.isArray(rawPairs) || rawPairs.length > 32) return null
   const pairs = rawPairs.map(parseRemembered)
   if (pairs.some((p) => !p)) return null
-  return { status: x.status as LinkStatus, url: x.url, device: x.device, lan, lanFor, pairs: pairs as RememberedPhone[] }
+  if (x.seal !== undefined && (!Array.isArray(x.seal) || x.seal.length !== 3 || !x.seal.every(i => Number.isInteger(i) && within(i, 0, 63)))) return null
+  if (x.sealAt !== undefined && (!x.seal || !within(x.sealAt, 0, 1e14))) return null
+  return {
+    status: x.status as LinkStatus, url: x.url, device: x.device, lan, lanFor, pairs: pairs as RememberedPhone[],
+    ...(x.seal ? { seal: [...x.seal] as [number, number, number] } : {}), ...(x.sealAt !== undefined ? { sealAt: x.sealAt as number } : {}),
+  }
 }
 
 /** To the service worker. */

@@ -1,7 +1,7 @@
 /** Live links belong here; the controller surface only ever sends through the active one. */
 import {
-  b64url, DeviceLink, forgetConnection, getPair, listConnections, parsePairingCode, putConnection, removeConnection, roomIdFor, saveInvite,
-  type Caps, type DeviceMsg, type HostMsg, type LinkStats, type LinkStatus, type PairingCode, type StoredConnection,
+  b64url, DeviceLink, encodeLanPairing, encodePairing, forgetConnection, getPair, listConnections, parsePairingCode, putConnection, removeConnection, roomIdFor, saveInvite,
+  type Caps, type DeviceMsg, type HostMsg, type LinkStats, type LinkStatus, type ConnectionSeal, type PairingCode, type StoredConnection,
 } from '@obpal/core'
 
 export type Join = PairingCode | { v: 'code'; code: { handle: string; secret: string; room: string; ticket: string } }
@@ -26,6 +26,7 @@ export interface ConnectionDeps {
   status(status: LinkStatus): void
   message(message: HostMsg): void
   stats(stats: LinkStats): void
+  seal?(s: { seal: ConnectionSeal; delayMs: number; source?: string }): void
   notice?(text: string): void
   create?: (options: ConstructorParameters<typeof DeviceLink>[0]) => DeviceLink
 }
@@ -104,6 +105,8 @@ export class Connections {
     const link = (this.deps.create ?? ((o) => new DeviceLink(o)))(options)
     const row = this.rows.get(id) ?? { id, name: pair?.peerName ?? 'New screen', kind: pair ? 'pc' : 'site', at: Date.now(), ...(pair ? { pairId: pair.id } : {}) }
     const c: Connection = { row, link, values: {} }
+    // Only the finite QR-to-seal effect needs the original modules. Do not put invite bytes in a UI snapshot.
+    let sealSource = join.v === 1 ? encodePairing(join.pairing) : join.v === 2 ? encodeLanPairing(join.lan) : undefined
     this.live.set(id, c)
     this.wanted = id
     // A pending join takes a slot too. Keep the active screen until the new one has proved itself.
@@ -139,6 +142,7 @@ export class Connections {
       this.changed()
     })
     link.on('invite', (fragment) => {
+      sealSource = fragment
       const parsed = parsePairingCode(fragment)
       if (parsed?.v !== 1) return
       this.rememberInvite(c, parsed.pairing)
@@ -154,6 +158,10 @@ export class Connections {
       }
       c.row = { ...c.row, pairId: p.id }
       this.save(c.row)
+    })
+    link.on('seal', (s) => {
+      if (this.active === c) this.deps.seal?.({ ...s, ...(sealSource ? { source: `${this.deps.service}/p/#${sealSource}` } : {}) })
+      sealSource = undefined
     })
     link.on('stats', (s) => {
       if (this.live.get(id) !== c) return

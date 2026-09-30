@@ -12,7 +12,7 @@
  * code pairs nothing later.
  */
 import { Mode, PointerFlag, pointerDelta, Remote, type Frame, type Layout, type PointerState, type ProfileId } from '@obpal/host'
-import type { PadState } from '@obpal/core'
+import type { ConnectionSeal, PadState } from '@obpal/core'
 import { isPcAccess, noticeFor, phoneKeyOf, type PcAccess, type Phone } from './shared/access'
 import { APP_NAME, DEFAULT_MODE, PORT_NAME, SERVICE, isTargetMode } from './shared/constants'
 import { KeyMapper, pcKeys } from './shared/keys'
@@ -507,9 +507,18 @@ function startClock() {
 async function boot() {
   const r = await Remote.create({ appName: APP_NAME, service: SERVICE, layout: layoutFor(suggested), remember: true, rotateInvite: true })
   remote = r
-  const state = (): LinkState => ({ status: r.status, url: r.pairingUrl, device: r.deviceName && r.participants.every(p => p.paused) ? `${r.deviceName} · paused` : r.deviceName, lan: r.lanUrl, lanFor: r.lanFor, pairs: r.remembered })
+  let moment: { seal: ConnectionSeal; at: number } | null = null
+  const state = (): LinkState => {
+    const seal = r.seals[0]?.seal
+    return {
+      status: r.status, url: r.pairingUrl, device: r.deviceName && r.participants.every(p => p.paused) ? `${r.deviceName} · paused` : r.deviceName,
+      lan: r.lanUrl, lanFor: r.lanFor, pairs: r.remembered,
+      ...(seal ? { seal, ...(moment?.seal === seal ? { sealAt: moment.at } : {}) } : {}),
+    }
+  }
   const report = () => void toBg({ to: 'bg', type: 'link', link: state() })
   r.on('status', report)
+  r.on('seal', ({ seal, delayMs }) => { moment = { seal, at: Date.now() + delayMs }; report() })
   r.on('attention', () => { pc.gestures.reset(); report() })
   r.on('lan', report)
   // The invite moved on (a phone paired through it): the popup shows the new QR code.
@@ -523,6 +532,7 @@ async function boot() {
     publishNotice(true)
   })
   r.on('disconnect', () => {
+    moment = null
     pcLetGo()
     report()
   })

@@ -142,7 +142,7 @@ addEventListener('hashchange', () => {
   const code = parsePairingCode(location.hash)
   if (!code) return
   history.replaceState(null, '', location.pathname)
-  void connectTo(code).catch(() => openConnections(true))
+  void connectTo(code).catch(() => openConnections())
 })
 
 /** How the phone came: a code from the URL (scanned), or a short code typed on the start page (PROTOCOL §2b). */
@@ -581,7 +581,7 @@ async function boot(code?: Join) {
   const caps = (): Caps => ({ tier, sensorApi: motionSupported() ? 'events' : 'none', haptics: hapticsKind(), platform: navigator.platform || 'unknown' })
   const name = deviceName()
   const link = new Connections({ service: location.origin, cert: own, caps, name, beforeSwitch: releaseControls, switched: switchSurface,
-    status: onStatus, message: onHost, stats: (s) => linkBadge.update(s), notice: (text) => toast(text) })
+    status: onStatus, message: onHost, stats: (s) => linkBadge.update(s), seal: (s) => linkBadge.reveal(s), notice: (text) => toast(text) })
   const musicWire = new MusicWire(m => { if (link.ready) link.sendCtl(m) })
   const drums = new Drums(musicWire, motion, control)
   const keys = new Keys(musicWire, motion, control, recenterHere)
@@ -602,7 +602,15 @@ async function boot(code?: Join) {
   const strip = new NodeStrip({ send: (id, v) => { if (link.ready) link.sendCtl({ t: 'value', id, v }) }, feel: (strong) => tick(strong), changed: () => render() })
 
   // The top bar's connection badge: encrypted, how the screen was verified, the path and the round trip (./linkbadge.ts).
-  const linkBadge = new LinkBadge()
+  const linkBadge = new LinkBadge(() => {
+    hungUp = true
+    releaseControls()
+    stopHands(); stopBody()
+    link.close()
+    linkBadge.down()
+    surface = null
+    screenMessage({ title: 'Disconnected', art: ICONS.phone, body: 'Reconnect, or scan another code.', action: { label: 'Reconnect', run: () => location.reload() } })
+  })
   const connections = new ConnectionSheet(link)
   let handCamera: CameraView | null = null
   let handTracker: HandTracker | null = null
@@ -703,7 +711,8 @@ async function boot(code?: Join) {
     void connectTo(code).catch((e: Error) => screenMessage({ title: 'Scan again', body: e.message, art: ICONS.phone }))
   } else {
     startPage()
-    if (scanArrival) openConnections(true)
+    // A scan deep link opens the choices; camera activation still needs the phone's own tap.
+    if (scanArrival) openConnections()
     void link.settled().then(() => {
       if (typedArrival || scanArrival) return
       let id = ''
@@ -847,6 +856,7 @@ async function boot(code?: Join) {
     // A host that bounces things (the home page's marbles) asks for tosses: the phone flicked upward, screen level.
     const tosses = new TossDetector()
     motion.onSample = (dt) => {
+      if (permissionReady && motion.q) { const up = motion.up(); linkBadge.tilt(up[0], up[1]) }
       if (anchorOnSample) { anchorOnSample = false; anchor(); control.recenter() }
       if (recenterOnSample) { recenterOnSample = false; recenterPointer() }
       drums.sample()
@@ -1715,6 +1725,7 @@ async function boot(code?: Join) {
         <p class="sheet-k"><b>05</b>More</p>
         <button class="set-row glass" id="buttons-open">${BUTTONS_GLYPH}<span>Buttons<small>Headset, remote, clicker, pad</small></span><span class="set-srcs">${sourceStack(inputs)}</span>${ICONS.right}</button>
         <button class="set-row glass" id="connections-open">${ICONS.phone}<span>Connections<small>Switch, rename or forget a screen</small></span>${ICONS.right}</button>
+        <button class="set-row glass" id="connection-details">${ICONS.lock}<span>Connection details<small>Compare the seal and see what this shares</small></span>${ICONS.right}</button>
         <a class="support-link" href="/sponsor/" target="_blank" rel="noopener">${ICONS.heart}<span>Support ob.Pal</span></a>
         <div class="actions"><button class="btn" id="disc">Disconnect</button><button class="btn primary" id="done">Done</button></div>
       </div>`)
@@ -1722,6 +1733,7 @@ async function boot(code?: Join) {
     // The camera, Connections and Buttons open in the same tap, over Settings as it slides away: the camera starts
     // inside the tap (browsers that tie a camera to a gesture keep it), and each takes over Settings' Back step.
     sheet.querySelector<HTMLButtonElement>('#connections-open')!.onclick = () => { close(true); openConnections() }
+    sheet.querySelector<HTMLButtonElement>('#connection-details')!.onclick = () => { close(true); linkBadge.el.click() }
     sheet.querySelector<HTMLButtonElement>('#scan-open')!.onclick = () => { close(true); openConnections(true) }
     const handSettings = sheet.querySelector<HTMLButtonElement>('#hand-settings')
     if (handSettings) handSettings.onclick = () => { close(true); openHands() }

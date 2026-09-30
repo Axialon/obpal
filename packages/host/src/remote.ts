@@ -1,5 +1,5 @@
 import {
-  b64url, bindMac, candidatesOf, certFingerprint, controllerOf, CONTROLLERS, DEFAULT_SERVICE, encodeLanPairing, encodePairing, equalBytes,
+  connectionSeal, sealSessionContext, type ConnectionSeal, b64url, bindMac, candidatesOf, certFingerprint, controllerOf, CONTROLLERS, DEFAULT_SERVICE, encodeLanPairing, encodePairing, equalBytes,
   fetchIce, forgetPair, ICE_REFRESH_BEFORE_MS, iceRefreshIn, fromB64url, importPairKey, isControllerId, lanAnswerSdp, lanContext, lanIceCredentials, linkInfo, listPairs, loadCertificate, MAX_NODE_ID, MAX_TEXT, MAX_TOSS, Mode, newSecret, PAD_HEADER,
   packetType, BODY_HEADER, HAND_HEADER, POINTER_HEADER, POSE_HEADER, PROTO, putPair, randomBytes, REACH_TIMEOUT_MS, readLocalIce, readMode, roomIdFor, roomSocketUrl, sdpFingerprint, sdpSession, SignalClient,
   withControllers,
@@ -8,6 +8,7 @@ import {
 } from '@obpal/core'
 import { CODE_SECRET_DIGITS, CodePake, isCodeHandle, randomDigits, solveWork } from '@obpal/core'
 import { Stream, type Frame } from './stream'
+import { communityMarker } from './origin'
 import { validSimMessage, type SimMessage } from '@obpal/core'
 
 export type { Frame } from './stream'
@@ -86,7 +87,7 @@ export interface Participant {
 }
 
 /** A connected device's link (Remote.links): who, how it proved itself, and what its connection says of itself. */
-export interface DeviceLinkInfo { id: string; name: string; verified: VerifiedBy; link: LinkInfo }
+export interface DeviceLinkInfo { id: string; name: string; verified: VerifiedBy; link: LinkInfo; seal?: ConnectionSeal }
 
 /** A remembered phone, as shown to people (no key material). */
 export interface PairSummary { id: string; name: string; at: number }
@@ -95,6 +96,8 @@ export interface PairSummary { id: string; name: string; at: number }
 export interface LinkDiag { status: HostStatus; connectedAt: number; firstInputAt: number; direct: boolean }
 
 interface RemoteEvents {
+  /** A verified peer?s public seal, scheduled relative to this screen?s clock. */
+  seal: (s: { id: string; seal: ConnectionSeal; delayMs: number }) => void
   /** A phone paused or resumed this connection. Says nothing about any other screen. */
   attention: (who: Participant) => void
   sim: (message: SimMessage, who: Participant) => void
@@ -144,6 +147,8 @@ interface Peer {
   renegotiating: boolean
   /** How it proved itself when it bound: the QR code's secret, the typed code's exchange, or a remembered pairing. */
   via?: VerifiedBy
+  seal?: ConnectionSeal
+  sealStarted?: boolean
   pc: RTCPeerConnection
   ctl: RTCDataChannel
   st: RTCDataChannel
@@ -244,7 +249,7 @@ export class Remote {
   private held: Record<string, string> = {}
   private scenePending = false
   private handlers: { [K in keyof RemoteEvents]: RemoteEvents[K][] } = {
-    status: [], connect: [], disconnect: [], join: [], leave: [], button: [], text: [], toss: [], value: [], mode: [], recenter: [], pad: [], input: [], claim: [], lan: [], code: [], invite: [], sim: [], attention: [],
+    seal: [], status: [], connect: [], disconnect: [], join: [], leave: [], button: [], text: [], toss: [], value: [], mode: [], recenter: [], pad: [], input: [], claim: [], lan: [], code: [], invite: [], sim: [], attention: [],
   }
   private cards: { el: HTMLElement; status: HTMLElement; qr: HTMLElement; link: HTMLAnchorElement | null; compact: boolean }[] = []
   /** The short code on show (PROTOCOL §2b): the room service's handle, this host's secret, and when it lapses. */
@@ -727,6 +732,15 @@ export class Remote {
         if (peer.lan && m.pair !== peer.lan.pair.id) { this.reject(peer); return }
         if (!equalBytes(new TextEncoder().encode(expected), new TextEncoder().encode(m.mac))) { this.reject(peer); return }
       }
+      if (!peer.fp) return
+      const sealRoom = peer.room ?? { secret: this.secret, roomId: this.roomId }
+      const sealNonce = b64url(randomBytes(16))
+      const context = peer.lan ? lanContext(peer.lan.nonce) : sealRoom.roomId
+      const sealKey = peer.lan?.pair.key ?? sealRoom.secret
+      const [seal, sealProof] = await Promise.all([
+        connectionSeal(peer.fp, this.fp, context, peer.lan?.pair.key, sealNonce),
+        bindMac(sealKey, peer.fp, this.fp, sealSessionContext(context, sealNonce)),
+      ])
       // A remembered phone's new key is made before anything about this bind changes: making it is the one wait.
       const minted = !peer.lan && this.opts.remember ? await this.mintKey() : null
       if (peer.bound || this.peers.get(peer.id) !== peer) return
@@ -735,6 +749,7 @@ export class Remote {
         setTimeout(() => this.dropPeer(peer.id), 200)
         return
       }
+      peer.seal = seal
       peer.bound = true
       peer.via = peer.lan ? 'lan' : 'code' in m ? 'code' : 'qr'
       peer.name = String(m.name || 'Phone').slice(0, 40)
@@ -771,7 +786,7 @@ export class Remote {
       const invite = 'code' in m ? encodePairing({ secret: this.secret, fp: this.fp }) : undefined
       // Through the room service, the phone may renegotiate this connection when its path goes (restart).
       const kind = this.opts.kind ?? (typeof location === 'undefined' ? 'site' : location.protocol === 'chrome-extension:' ? 'pc' : location.pathname.startsWith('/sim/') ? 'sim' : location.pathname.startsWith('/view/') ? 'viewer' : 'site')
-      this.send(peer, { t: 'welcome', proto: PROTO, name: this.opts.appName, layout: this.layout, attention: true, kind, ...(pair ? { pair } : {}), ...(invite ? { invite } : {}), ...(peer.lan ? {} : { restart: true }) })
+      this.send(peer, { t: 'welcome', sealNonce, sealProof, proto: PROTO, name: this.opts.appName, layout: this.layout, attention: true, kind, ...(pair ? { pair } : {}), ...(invite ? { invite } : {}), ...(peer.lan ? {} : { restart: true }) })
       // A shared scene's settings so far, and this participant's colour (a device wears it as its accent).
       if (this.shared) this.send(peer, { t: 'state', values: { ...this.values, color: peer.color } })
       // Paired through the invite: it moves on, so the code that paired this device pairs nobody else.
@@ -783,6 +798,12 @@ export class Remote {
       this.renderCards()
       this.sceneChanged()
       void this.prepareLan()
+      return
+    }
+    if (m.t === 'seal-ready' && peer.bound && peer.seal && !peer.sealStarted && Number.isFinite(m.t0)) {
+      peer.sealStarted = true
+      this.send(peer, { t: 'seal-start', t0: m.t0 })
+      this.emit('seal', { id: peer.id, seal: peer.seal, delayMs: 350 })
       return
     }
     if (!this.listening(peer)) return
@@ -985,12 +1006,11 @@ export class Remote {
   /** Everyone controlling the scene, oldest (the lead) first. */
   get participants(): Participant[] { return this.bound().map((p) => this.participant(p)) }
 
-  /**
-   * Each connected device's link, oldest first, from the connection's own statistics: its path, ICE's round trip and
-   * DTLS (linkInfo), and how the device proved itself when it bound. For a connection badge that claims only this.
-   */
+  /** Current verified seals, without waiting for network statistics. */
+  get seals() { return this.bound().flatMap((p) => p.seal ? [{ id: p.id, name: p.name, verified: p.via ?? 'qr', seal: p.seal }] : []) }
+
   async links(): Promise<DeviceLinkInfo[]> {
-    return Promise.all(this.bound().map(async (p) => ({ id: p.id, name: p.name, verified: p.via ?? 'qr', link: await linkInfo(p.pc) })))
+    return Promise.all(this.bound().map(async (p) => ({ id: p.id, name: p.name, verified: p.via ?? 'qr', seal: p.seal, link: await linkInfo(p.pc) })))
   }
 
   private freeColor(peer: Peer): string {
@@ -1185,6 +1205,12 @@ export class Remote {
     qr.setAttribute('role', 'img')
     qr.setAttribute('aria-label', 'QR code to pair your phone')
     const body = node(card, 'div', 'obpal-body')
+    const domain = new URL(this.service).hostname
+    node(body, 'b', 'obpal-domain', domain)
+    node(body, 'p', 'obpal-cues', "Opens in your phone's browser · no app · no account")
+    node(body, 'p', 'obpal-cues', `Check your camera shows ${domain}`)
+    const marker = communityMarker(location.origin)
+    if (marker) body.append(marker)
     const title = node(body, 'div', 'obpal-title')
     if (compact) glyph(node(title, 'span', 'obpal-ic'), true)
     node(title, 'span', 'obpal-title-text')

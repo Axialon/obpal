@@ -1,4 +1,6 @@
 export { Remote, DEFAULT_LAYOUT, PARTICIPANT_COLORS, type DeviceLinkInfo, type Frame, type HostStatus, type Participant, type RemoteOptions } from './remote'
+export { sealElement, sealMoment, destroySeal, tiltSeal, refreshSeal, sealPoints, SEAL_STYLE } from './seal'
+export { DotField, type DotFieldOptions, type DotPoint, type DotEffect } from './dot-field'
 export { Claims } from './claims'
 export { BodyInput, BODY_STALE_MS, type BodyFrame } from './body'
 export { GAMEPAD_ID, installGamepadShim, toStandardGamepad, type VirtualGamepad } from './gamepad'

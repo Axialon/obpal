@@ -6,7 +6,7 @@ wire formats are in [PROTOCOL.md](PROTOCOL.md).
 
 This is the state on 29 September 2026, with the ob.Pal Link 1.6.0 items of §8. File references point into this
 repository as it was then. §11 covers updates and downloads, §12 physical control, and §13 what an independent review
-should test. §14 covers local camera processing.
+should test. §14 covers local camera processing. §15 covers the connection seal and origin marker.
 
 ## 1. The connection path
 
@@ -618,3 +618,40 @@ The branded camera requests video only, after a tap. QR decoding and MediaPipe H
 Closing, backgrounding or leaving the camera stops its tracks and workers, including streams whose permission resolves after close. Switching or pausing a connection stops hand input before routing to another host. A host drops late packets and expires a silent hand after 250 ms. Hand tracking does not grant device ownership or arm approval; the arm still requires its held control and Stop still latches until that control is released.
 
 Scanning accepts only canonical pairing links on the current deployment and complete ten-digit codes. QR contents are never opened as arbitrary URLs. The optional synthetic landmark seam is restricted to loopback origins with an explicit `camera-test=1` query and is for local browser verification only.
+
+## 15. The connection seal and origin marker
+
+The [trust page](https://obpal.blackboxes.net/trust/) lists the upstream domain, download channels and source links.
+On a connected phone and screen, the connection seal is three dot symbols with spoken names. **Check both screens
+show the same seal.** This is especially useful after entering a ten-digit code: compare all three symbols and names
+with the screen you meant to control. On a mismatch, disconnect and pair again.
+
+**What it derives from.** The seal is an independent, domain-separated HKDF projection of the authenticated connection
+binding, the ordered device and host certificate fingerprints, the pairing context and a fresh host session nonce.
+Online pairing uses the verified binding; remembered LAN pairing uses the pairing key. The host sends a fresh 16-byte
+nonce in `welcome.sealNonce` and a `sealProof` made by the existing binding MAC over
+`sealSessionContext(context, nonce)`, whose context is `${context}\0seal:${nonce}`. For QR pairing the phone pins the
+host fingerprint and the host verifies the phone's original binding HMAC. Typed-code peers verify the CPace proofs
+and the phone validates the resulting invite. The phone then verifies the fresh nonce proof and derives the seal locally;
+the three indices are not an unauthenticated value supplied by the peer.
+
+The HKDF info is separate from the existing authentication derivations (`obpal connection seal v1`). A new authenticated
+connection derives a fresh seal, including when certificates and remembered pairings persist. With only 18 bits,
+unrelated sessions can occasionally show the same symbols. An ICE restart retains the
+current session's seal. The implementation is in `packages/core/src/seal.ts`, with its uses in
+`packages/core/src/device.ts` and `packages/host/src/remote.ts`.
+
+**What the comparison means.** The three indices carry 18 bits in total. Matching symbols are a short comparison aid,
+not proof that a site, a build or its operator is legitimate, and not an independent security assessment. The seal does
+not increase the entropy of a typed code, replace its one-attempt limit, or make a malicious endpoint trustworthy.
+A copy can reproduce the artwork or change the UI that displays it. The underlying binding checks, domain and download
+channel still matter. Its pulse is decorative: any phase alignment from local clocks and round-trip timing is approximate,
+not a promise of synchronized wall clocks.
+
+**The origin marker.** A deployment outside `https://obpal.blackboxes.net` shows a fork or mirror marker; loopback
+development and the published Link extension's exact `chrome-extension://jnnpcnoilofjaffabnhecfokjjknlemg` origin are
+exempt. Other extension origins receive a community marker. The embedded pairing chip checks the containing page's
+origin, even when it uses the official pairing service. This helps honest operators distinguish deployments. A malicious copy can
+remove the marker, so it is not a certificate or a guarantee of authenticity. See `packages/host/src/origin.ts` and
+`src/ui/trust-origin.ts`. The [draft name and logo policy](../TRADEMARKS.md) asks forks to use their own branding; the
+code remains MIT licensed.

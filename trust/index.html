@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en" class="site">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0a0718" />
+    <meta name="description" content="Check ob.Pal's domain, downloads and source, compare the connection seal on both screens, and read the code behind its privacy promises." />
+    <title>Trust and the connection seal · ob.Pal</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/plus-jakarta-sans-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/src/styles/fonts.css" />
+    <link rel="stylesheet" href="/src/family/family.css" />
+    <link rel="stylesheet" href="/src/styles/base.css" />
+    <link rel="stylesheet" href="/src/styles/site.css" />
+    <link rel="stylesheet" href="/src/styles/landing.css" />
+    <script type="module" src="/src/trust/main.ts"></script>
+  </head>
+  <body>
+    <header class="top">
+      <div class="top-in">
+        <a class="logo" href="/" aria-label="ob.Pal"><span class="mark-slot" data-mark></span><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span></a>
+        <button class="switch-btn" id="t-switch" type="button" aria-label="Blackboxes apps" title="Blackboxes apps"></button>
+        <nav class="top-nav" aria-label="Site">
+          <a href="/sim/">Sims</a><a href="/link/">Link</a><a href="/catalogue/">Catalogue</a><a href="/#build">Build</a><a href="/donate/">Donate</a>
+        </nav>
+        <button class="top-menu" id="t-menu" type="button" aria-label="Menu"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10" /></svg></button>
+        <a class="btn primary top-go" href="/view/">Open the viewer</a>
+      </div>
+    </header>
+    <div class="bb-menu bb-glass switcher" id="switcher" aria-label="Blackboxes apps" hidden></div>
+    <nav class="bb-menu bb-glass site-menu" id="site-menu" aria-label="Site" hidden>
+      <a class="bb-menu-item" href="/sim/">Sims</a><a class="bb-menu-item" href="/link/">ob.Pal Link</a><a class="bb-menu-item" href="/catalogue/">Catalogue</a><a class="bb-menu-item" href="/#build">Build with it</a><a class="bb-menu-item" href="/donate/">Donate</a>
+    </nav>
+    <main class="trust">
+      <section class="trust-hero" aria-labelledby="trust-title">
+        <canvas class="trust-field" id="trust-field" aria-hidden="true"></canvas>
+        <div class="trust-hero-in">
+          <p class="eyebrow">ob.Pal · Trust</p>
+          <h1 id="trust-title">Know your<br />ob.Pal.</h1>
+          <p class="trust-lede">Check where it came from.<br />Compare the seal on both screens.</p>
+          <a class="trust-jump" href="#checks">The checks <span aria-hidden="true">↓</span></a>
+        </div>
+        <p class="trust-hero-note">Illustration · no active connection</p>
+      </section>
+
+      <div class="trust-body">
+        <section class="trust-section" id="checks" aria-labelledby="checks-title">
+          <p class="eyebrow">01 · The source</p>
+          <h2 id="checks-title">Check where it came from.</h2>
+          <dl class="trust-sources">
+            <div><dt>Website</dt><dd>Check the address bar: <a href="https://obpal.blackboxes.net">obpal.blackboxes.net</a>.</dd></div>
+            <div><dt>ob.Pal Link</dt><dd>Use the <a href="https://chromewebstore.google.com/detail/obpal-link/jnnpcnoilofjaffabnhecfokjjknlemg">Chrome Web Store listing</a>. Its item ID is <code>jnnpcnoilofjaffabnhecfokjjknlemg</code>.</dd></div>
+            <div><dt>Code and packages</dt><dd><a href="https://github.com/Axialon/obpal">Axialon/obpal on GitHub</a>, in the <a href="https://github.com/Axialon">Axialon</a> organization. On npm: <a href="https://www.npmjs.com/package/@obpal/core">@obpal/core</a> and <a href="https://www.npmjs.com/package/@obpal/host">@obpal/host</a>.</dd></div>
+          </dl>
+        </section>
+
+        <section class="trust-section trust-compare" aria-labelledby="seal-title">
+          <div>
+            <p class="eyebrow">02 · The connection</p>
+            <h2 id="seal-title">Check both screens show the same seal.</h2>
+            <p>Especially when you type a code: compare all three symbols and their names on your phone and the screen you intend to control. If they differ, disconnect and pair again.</p>
+            <p class="trust-fine">The seal is a short, 18-bit comparison aid for this connection. It is not proof that a site or build is legitimate. <a href="https://github.com/Axialon/obpal/blob/main/spec/SECURITY.md#15-the-connection-seal-and-origin-marker">How it works</a>.</p>
+          </div>
+          <figure class="trust-examples">
+            <div class="trust-glyphs" aria-label="Example symbols: comet, anchor, leaf">
+              <span><canvas data-example-glyph="0" aria-hidden="true"></canvas><b>Comet</b></span>
+              <span><canvas data-example-glyph="1" aria-hidden="true"></canvas><b>Anchor</b></span>
+              <span><canvas data-example-glyph="2" aria-hidden="true"></canvas><b>Leaf</b></span>
+            </div>
+            <figcaption>Illustration · no active connection</figcaption>
+          </figure>
+        </section>
+
+        <section class="trust-section" aria-labelledby="promises-title">
+          <p class="eyebrow">03 · The promises</p>
+          <h2 id="promises-title">Words you can check.</h2>
+          <ul class="trust-promises">
+            <li id="promise-accounts"><b>No accounts.</b><span>Pair a phone with a screen. <a href="https://github.com/Axialon/obpal/blob/main/worker/index.ts">Connection service</a></span></li>
+            <li id="promise-tracking"><b>No ads or tracking.</b><span>No advertising or analytics scripts. <a href="https://github.com/Axialon/obpal/blob/main/vite.config.ts">Page security policy</a></span></li>
+            <li id="promise-telemetry"><b>No automatic user telemetry.</b><span>Request invocation logs are disabled; operational error logs remain. <a href="https://github.com/Axialon/obpal/blob/main/wrangler.jsonc">Logging configuration</a></span></li>
+            <li id="promise-feedback"><b>Feedback is your choice.</b><span>Contact us only if you choose to. <a href="/privacy/#contact">What contact involves</a></span></li>
+            <li id="promise-camera"><b>Camera frames stay on the capturing device.</b><span>Tracking can send landmarks to your paired screen. <a href="https://github.com/Axialon/obpal/blob/main/src/controller/scanner.ts">Camera code</a> · <a href="https://github.com/Axialon/obpal/blob/main/tests/scanner.test.ts">Tests</a></span></li>
+            <li id="promise-open"><b>Open source.</b><span>The code is <a href="https://github.com/Axialon/obpal/blob/main/LICENSE">MIT licensed</a>. <a href="https://github.com/Axialon/obpal/blob/main/TRADEMARKS.md">The name and logo have separate terms</a>.</span></li>
+          </ul>
+          <p class="trust-fine">Control input is not stored by ob.Pal. Saved screens and preferences stay on this device. <a href="https://github.com/Axialon/obpal/blob/main/packages/core/src/store.ts">Local pairing storage</a> · <a href="/privacy/">Privacy policy</a></p>
+        </section>
+
+        <section class="trust-section trust-forks" aria-labelledby="forks-title">
+          <p class="eyebrow">04 · Copies and forks</p>
+          <h2 id="forks-title">A label has limits.</h2>
+          <p>A fork or mirror can show an origin marker so you know you opened a different deployment. This helps honest forks explain themselves. A malicious copy can remove the marker. Check the domain and compare the connection seal yourself.</p>
+          <p class="trust-fine"><a href="https://github.com/Axialon/obpal/blob/main/packages/host/src/origin.ts">Origin marker code</a> · <a href="https://github.com/Axialon/obpal/blob/main/TRADEMARKS.md">Fork naming policy (draft)</a></p>
+        </section>
+        <footer class="trust-foot"><a href="/">ob.Pal</a><a href="/privacy/">Privacy</a><a href="https://github.com/Axialon/obpal">Source</a><a href="https://github.com/Axialon/obpal/blob/main/spec/SECURITY.md">Security notes</a></footer>
+      </div>
+    </main>
+  </body>
+</html>

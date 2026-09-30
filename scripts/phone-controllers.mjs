@@ -13,7 +13,7 @@
  *     that lights one and that the screen drives, and the same layout rules at 360 px too.
  */
 import { devices } from 'playwright'
-import { join } from 'node:path'
+import { join as joinPath } from 'node:path'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 async function until(what, fn, timeout = 15000) {
@@ -180,7 +180,7 @@ export async function phoneControllers({ browser, origin, check, shots }) {
       if (!/doesn’t take typing/.test(why)) throw new Error(`the tip said "${why}"`)
       // The press was a question, not a switch.
       if ((await v.cards()).find((x) => x.id === 'face.keyboard').on) throw new Error('the long press picked it')
-      if (shots) await v.phone.screenshot({ path: join(shots, 'phone-catalogue-why.png') })
+      if (shots) await v.phone.screenshot({ path: joinPath(shots, 'phone-catalogue-why.png') })
       await v.shut()
       return `${s.length} slots; fits ${Object.entries(fits).map(([k, f]) => `${k.slice(5)} ${f}`).join(', ')}; "${why}"`
     })
@@ -248,7 +248,7 @@ export async function phoneControllers({ browser, origin, check, shots }) {
         }
         await p.catalogue()
         await look(z, 'catalogue')
-        if (shots) await p.phone.screenshot({ path: join(shots, `phone-catalogue-${z.width}x${z.height}.png`) })
+        if (shots) await p.phone.screenshot({ path: joinPath(shots, `phone-catalogue-${z.width}x${z.height}.png`) })
         await p.shut()
         for (const [label, open, close] of extra) { await open(); await look(z, label); await close() }
       }
@@ -300,7 +300,7 @@ export async function phoneControllers({ browser, origin, check, shots }) {
       const why = await until('the reason', () => rover.phone.evaluate(() => document.querySelector('.ctl-tip.in')?.textContent ?? ''), 3000)
       await rover.cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
       if (!/doesn’t take 3D motion/.test(why)) throw new Error(`the tip said "${why}"`)
-      if (shots) await rover.phone.screenshot({ path: join(shots, 'phone-catalogue-rover.png') })
+      if (shots) await rover.phone.screenshot({ path: joinPath(shots, 'phone-catalogue-rover.png') })
       await rover.shut()
       return got
     })
@@ -339,7 +339,7 @@ export async function phoneControllers({ browser, origin, check, shots }) {
       const lit = await strip()
       const ringed = await digger.phone.locator('.ns-item.in').evaluateAll((l) => l.map((b) => b.dataset.part).join())
       if (!lit.includes('set:reach*') || ringed !== 'boom,stick') throw new Error(`after a tap on Reach: ${lit}, ringed ${ringed}`)
-      if (shots) await digger.phone.screenshot({ path: join(shots, 'phone-strip-excavator.png') })
+      if (shots) await digger.phone.screenshot({ path: joinPath(shots, 'phone-strip-excavator.png') })
       const shown = await layouts(digger, [[null, 'trackpad with its node strip']], [], [{ name: '360×640', width: 360, height: 640, angle: 0 }, ...SIZES])
       return `${lit}; ${shown}`
     })

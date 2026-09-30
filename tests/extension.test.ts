@@ -279,6 +279,15 @@ describe('messages: validation', () => {
     expect(parseLink({ ...link, url: 'https://evil.example/p/#1.abc.def' })).toBeNull()
     expect(parseLink({ ...link, status: 'paired' })).toBeNull()
     expect(parseLink({ ...link, device: 'x'.repeat(61) })).toBeNull()
+    expect(parseLink({ ...link, seal: [0, 31, 63] })?.seal).toEqual([0, 31, 63])
+    for (const seal of [[0, 64, 1], [0, -1, 1], [0, 1.5, 1], [0, 1], '0-1-2']) expect(parseLink({ ...link, seal })).toBeNull()
+    const pulse = { ...link, status: 'connected', seal: [0, 31, 63], sealAt: 1_900_000_000_350 }
+    expect(parseLink(pulse)).toEqual(pulse)
+    expect(parseBgRequest({ to: 'bg', type: 'link', link: pulse })).toEqual({ to: 'bg', type: 'link', link: pulse })
+    // The deadline is public local timing, carried only alongside a valid seal; expiry belongs to the popup.
+    expect(parseLink({ ...pulse, sealAt: 0 })?.sealAt).toBe(0)
+    expect(parseLink({ ...link, sealAt: pulse.sealAt })).toBeNull()
+    for (const sealAt of [-1, Infinity, NaN, 1e14 + 1, 'soon', null]) expect(parseLink({ ...pulse, sealAt })).toBeNull()
     expect(parseLink({ status: 'starting', url: '', device: 'Pixel' })).toEqual({ status: 'starting', url: '', device: 'Pixel', lan: '', lanFor: null, pairs: [] })
     // The direct LAN code and remembered phones travel with the link state.
     const id = 'A'.repeat(22)

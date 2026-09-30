@@ -116,3 +116,5 @@ a { color: var(--accent-text); }
 
 /* The inline logo mark (icons.ts mountMarks) takes the place the logo image had. */
 .mark-slot { display: inline-grid; flex: none; }
+
+.community-build{position:fixed;z-index:60;bottom:max(10px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);max-width:calc(100vw - 24px);padding:7px 12px;border:1px solid var(--frost-edge);border-radius:12px;background:var(--frost);color:var(--ink);font-size:11px;text-align:center;text-decoration:underline;text-underline-offset:3px;backdrop-filter:var(--frost-blur)}

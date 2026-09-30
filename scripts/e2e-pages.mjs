@@ -5,6 +5,8 @@
  *   - breaks no Content Security Policy directive (scripts/csp-watch.mjs) and throws no error;
  *   - has its policy: the page's own <meta> one and the headers' frame-ancestors one;
  *   - takes its fonts from this origin, never from a font service, and they load.
+ * The trust page also keeps its source links, phone layout and reduced-motion dots; its origin marker is checked
+ * on a community and the official address, with every response fetched from the local worker.
  * Then the quick-actions tray on each kind of page (scripts/e2e-quick.mjs), and the Viewer open across a deploy
  * (src/ui/recover.ts): its lazy QR chunk is asked for after a pretend deploy (scripts/lib/deploy-sim.mjs) has
  * removed the old build's chunks, and the page reloads once into the new build; it doesn't when the chunks are kept,
@@ -13,6 +15,7 @@
  */
 import { fileURLToPath } from 'node:url'
 import { readdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { chromium, devices } from 'playwright'
 import { cspCheck, cspViolations } from './csp-watch.mjs'
 import { startWorker } from './local-worker.mjs'
@@ -22,8 +25,9 @@ import { nextBuild } from './lib/deploy-sim.mjs'
 
 const PORT = Number(process.env.OBPAL_E2E_WORKER_PORT) || 5179
 const HEADED = process.argv.includes('--headed')
+const SHOTS = process.env.OBPAL_SHOTS || ''
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
-const PAGES = ['/', '/p/', '/view/', '/sim/', '/sim/arm/', '/sim/arena/', '/sim/humanoid/', '/sim/device/', '/embed/', '/link/', '/catalogue/', '/buttons/', '/sponsor/', '/donate/', '/privacy/']
+const PAGES = ['/', '/p/', '/view/', '/sim/', '/sim/arm/', '/sim/arena/', '/sim/humanoid/', '/sim/device/', '/embed/', '/link/', '/catalogue/', '/buttons/', '/sponsor/', '/donate/', '/privacy/', '/trust/']
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const results = []
 async function check(name, fn) {
@@ -146,6 +150,104 @@ try {
       } finally {
         await ctx.close()
       }
+    })
+  }
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+    await check(`/trust/ has source links, no overflow and static reduced-motion dots at ${viewport.width}x${viewport.height}`, async () => {
+      const ctx = await browser.newContext({ viewport, reducedMotion: 'reduce' })
+      try {
+        // Count only the hero's paints, so an unrelated page affordance cannot hide a looping dot renderer.
+        await ctx.addInitScript(() => {
+          const clear = CanvasRenderingContext2D.prototype.clearRect
+          window.__trustPaints = 0
+          CanvasRenderingContext2D.prototype.clearRect = function (...args) {
+            if (this.canvas.id === 'trust-field') window.__trustPaints++
+            return clear.apply(this, args)
+          }
+        })
+        const page = await ctx.newPage()
+        await page.goto(worker.origin + '/trust/')
+        await page.evaluate(() => document.fonts.ready)
+        if (await page.locator('link[rel="canonical"]').getAttribute('href') !== 'https://obpal.blackboxes.net/trust/') throw new Error('trust canonical')
+        const backings = {
+          accounts: ['worker/index.ts'], tracking: ['vite.config.ts'], telemetry: ['wrangler.jsonc'],
+          feedback: ['/privacy/#contact'], camera: ['src/controller/scanner.ts', 'tests/scanner.test.ts'],
+          open: ['LICENSE', 'TRADEMARKS.md'],
+        }
+        for (const [promise, files] of Object.entries(backings)) {
+          const row = page.locator(`#promise-${promise}`)
+          if (!await row.isVisible()) throw new Error(`promise missing: ${promise}`)
+          const links = await row.locator('a').evaluateAll(nodes => nodes.map(node => node.getAttribute('href')))
+          for (const file of files) {
+            const href = file.startsWith('/') ? file : `https://github.com/Axialon/obpal/blob/main/${file}`
+            if (!links.includes(href)) throw new Error(`${promise}: backing ${href} missing`)
+          }
+        }
+        if (await page.locator('[data-example-glyph]').count() !== 3 || !await page.getByText('Illustration · no active connection', { exact: true }).count()) throw new Error('illustrations are not identified')
+        if (!await page.getByRole('heading', { name: 'Check both screens show the same seal.', exact: true }).isVisible()) throw new Error('comparison instruction missing')
+        if (!await page.getByText('A malicious copy can remove the marker.', { exact: false }).isVisible()) throw new Error('removable marker limitation missing')
+        if (await page.locator('body > .community-build').count()) throw new Error('loopback development marked as a community build')
+        for (const theme of ['carbon', 'light']) {
+          await setSurface(page, theme)
+          await sleep(300)
+          const start = await page.evaluate(() => window.__trustPaints)
+          await sleep(300)
+          const layout = await page.evaluate(() => {
+            const hero = document.querySelector('.trust-hero')
+            const canvas = document.querySelector('#trust-field')
+            const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data
+            return {
+              overflow: document.documentElement.scrollWidth - innerWidth,
+              paints: window.__trustPaints,
+              dots: pixels.some((value, i) => i % 4 === 3 && value > 0),
+              animations: hero.getAnimations({ subtree: true }).filter(animation => animation.playState === 'running').length,
+            }
+          })
+          if (layout.overflow > 0) throw new Error(`${theme}: horizontal overflow ${layout.overflow}px`)
+          if (!start || layout.paints !== start || !layout.dots || layout.animations) throw new Error(`${theme}: reduced-motion hero ${JSON.stringify(layout)}, started with ${start} paints`)
+          if (SHOTS) await page.screenshot({ path: join(SHOTS, `trust-${viewport.width}-${theme}.png`), fullPage: true })
+        }
+        return 'canonical; six backed promises; three illustrations; both themes; painted and idle'
+      } finally { await ctx.close() }
+    })
+  }
+  for (const [origin, marked] of [['https://community.example.invalid', true], ['https://obpal.blackboxes.net', false]]) {
+    await check(`/trust/ ${marked ? 'discloses a community build' : 'keeps the exact official origin unmarked'}`, async () => {
+      const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce', serviceWorkers: 'block' })
+      try {
+        const elsewhere = []
+        // Catch every request before network access. The fake address is only a browser origin, never a remote host.
+        await ctx.route('**/*', async route => {
+          const url = new URL(route.request().url())
+          if (url.origin !== origin) {
+            elsewhere.push(url.href)
+            return route.abort()
+          }
+          const response = await route.fetch({ url: new URL(url.pathname + url.search, worker.origin).href, maxRedirects: 0 })
+          return route.fulfill({ response })
+        })
+        const page = await ctx.newPage()
+        const errors = []
+        page.on('pageerror', error => errors.push(error.message))
+        await page.goto(origin + '/trust/')
+        await setSurface(page, 'light')
+        await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight))
+        const marker = page.locator('body > .community-build')
+        if (await marker.count() !== Number(marked)) throw new Error(`origin marker count for ${origin}`)
+        if (marked) {
+          if (!await marker.isVisible() || await marker.textContent() !== 'Community build: not run by ob.Pal') throw new Error('community marker is not visible or clear')
+          if (await marker.getAttribute('href') !== 'https://obpal.blackboxes.net/trust/') throw new Error('community marker trust link')
+          const visible = await marker.evaluate(node => {
+            const box = node.getBoundingClientRect()
+            return box.top >= 0 && box.bottom <= innerHeight && box.left >= 0 && box.right <= innerWidth
+          })
+          if (!visible) throw new Error('community marker left the phone viewport after scrolling')
+          if (SHOTS) await page.screenshot({ path: join(SHOTS, 'community-build.png') })
+        }
+        if (elsewhere.length) throw new Error(`nonlocal request blocked: ${elsewhere.join(', ')}`)
+        if (errors.length) throw new Error(`origin page errors: ${errors.join(' | ')}`)
+        return 'HTML, assets and fonts served only by the local worker'
+      } finally { await ctx.close() }
     })
   }
   for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {

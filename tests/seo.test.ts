@@ -22,6 +22,19 @@ describe('search pages', () => {
     expect(found.every(([, url, date]) => pages.has(new URL(url).pathname) && date === '2026-09-28')).toBe(true)
     for (const id of DEVICE_IDS) expect(xml).toContain(`/sim/${id}/`)
     expect(xml).not.toContain('/sim/device/')
+    expect(xml).toContain('https://obpal.blackboxes.net/trust/')
+  })
+
+  it('builds an indexable trust page with its own canonical address', () => {
+    const html = readText('trust/index.html')
+    expect(INDEXABLE_PAGES).toContain('/trust/')
+    expect(readText('vite.config.ts')).toContain("trust: 'trust/index.html'")
+    // The build inserts the canonical tag; duplicating it in source breaks the page's single address.
+    expect(html).not.toContain('rel="canonical"')
+    const graph = structuredData('/trust/', SIMS)['@graph'] as Record<string, unknown>[]
+    expect(graph.some(node => JSON.stringify(node).includes('https://obpal.blackboxes.net/trust/'))).toBe(true)
+    expect(html).not.toContain('noindex')
+    expect(html).toContain('name="description"')
   })
 
   it('builds JSON-LD with schema.org types and no empty fields', () => {

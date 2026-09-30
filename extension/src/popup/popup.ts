@@ -18,6 +18,7 @@ import '../../../src/styles/base.css'
 import '../ui/link.css'
 import './popup.css'
 import { renderSVG } from 'uqr'
+import { destroySeal, sealElement, sealMoment, SEAL_STYLE } from '@obpal/host'
 import { ICONS, LOGO_WORD } from '../../../src/ui/icons'
 import { accessOf, askFor, parseAnswers, parsePhone, type Answers, type Phone } from '../shared/access'
 import { DEFAULT_MODE, isTargetMode, TARGET_MODES, type TargetMode } from '../shared/constants'
@@ -121,16 +122,19 @@ app.innerHTML = `
     <span class="conn" id="conn">
       <span class="status" id="status" role="status"><i aria-hidden="true"></i><span id="status-t"></span><b id="device-name" hidden></b></span>
       <span class="facts" id="facts" hidden>${ICONS.lock}<span id="facts-t"></span></span>
+      <button id="seal-open" class="seal-open" type="button" aria-expanded="false" aria-controls="link-seal" hidden>Seal</button>
       <button class="unpair" id="unpair" type="button" title="Disconnect" aria-label="Disconnect the phone" hidden>${ICONS.close}</button>
     </span>
     <button class="icon-btn" id="look" type="button" title="Surface and colour" aria-label="Surface and colour">${ICONS.palette}</button>
   </header>
+  <div class="seal-popup glass" id="link-seal" hidden><b>Connection seal</b><div id="seal-glyphs"></div><p>Check both screens show the same seal</p></div>
   <div class="bb-menu bb-glass look-menu" id="look-menu" aria-label="Surface and colour" hidden></div>
   <div class="grid">
     <section class="card pair rise" id="pair" style="--i:1" aria-label="Phone">
       <div class="scan" id="scan">
         <div class="qr" id="qr" role="img" aria-label="Pairing QR code"></div>
         <p class="scan-hint" id="scan-hint">${ICONS.phone}<span id="scan-t">Scan with your phone</span></p>
+        <p class="scan-check"><b>obpal.blackboxes.net</b><br />Opens in your phone's browser · no app · no account<br />Check your camera shows obpal.blackboxes.net<br /><a href="https://obpal.blackboxes.net/trust/" target="_blank" rel="noopener">How to check ob.Pal</a></p>
         <div class="codes" id="codes" role="radiogroup" aria-label="Which code to show" hidden>
           <button class="code" type="button" role="radio" data-code="cloud" title="Through ob.Pal (needs internet)">${LINK_ICONS.cloud}<span>Online</span></button>
           <button class="code" type="button" role="radio" data-code="lan" title="Direct over Wi-Fi, no internet needed (remembered phones only)">${LINK_ICONS.lan}<span>Direct</span></button>
@@ -188,6 +192,20 @@ const askEl = askCard((key, allow) => void send({ to: 'bg', type: 'answer', key,
 app.insertBefore(askEl, app.querySelector('.grid'))
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement
+const sealStyle = document.createElement('style')
+sealStyle.textContent = SEAL_STYLE
+document.head.append(sealStyle)
+let stopMoment = () => {}
+$('seal-open').addEventListener('click', () => {
+  const show = $('link-seal').hidden
+  $('link-seal').hidden = !show
+  $('seal-open').setAttribute('aria-expanded', String(show))
+})
+addEventListener('pagehide', () => {
+  stopMoment()
+  const seal = $('seal-glyphs').querySelector<HTMLElement>('.connection-seal')
+  if (seal) destroySeal(seal)
+}, { once: true })
 const tabBtn = $('tab') as HTMLButtonElement
 const allBtn = $('all') as HTMLButtonElement
 const chips = [...app.querySelectorAll<HTMLButtonElement>('.chip')]
@@ -196,6 +214,22 @@ const codeBtns = [...app.querySelectorAll<HTMLButtonElement>('.code')]
 radioGroup(app.querySelector('.chips') as HTMLElement)
 radioGroup($('codes'))
 let qrFor: string | null = null
+let momentFor: string | null = null
+let momentReady = false
+const momentKey = (link: LinkState | null) => link?.seal && link.sealAt !== undefined ? `${link.seal.join('-')}:${link.sealAt}` : null
+
+/** Only a fresh storage event joins the pulse; opening the popup later keeps the comparison seal. */
+function revealSeal() {
+  const link = state.link
+  if (link?.status !== 'connected' || !link.seal) { stopMoment(); momentFor = null; return }
+  const key = momentKey(link)
+  if (!key || key === momentFor) return
+  momentFor = key
+  const delayMs = link.sealAt! - Date.now()
+  if (delayMs < 0 || delayMs > 350) return
+  stopMoment()
+  stopMoment = sealMoment(document.body, link.seal, delayMs, qrFor && qrFor !== 'offline' ? qrFor : undefined)
+}
 
 const RESTRICTED = /^https:\/\/(chromewebstore\.google\.com|chrome\.google\.com\/webstore|microsoftedge\.microsoft\.com\/addons)/i
 const scriptable = (url: string | undefined) => !!url && /^(https?|file):/i.test(url) && !RESTRICTED.test(url)
@@ -227,6 +261,13 @@ function render() {
   $('device-name').hidden = !connected
   $('device-name').textContent = link?.device || 'Phone'
   $('unpair').hidden = !connected
+  $('seal-open').hidden = !connected || !link?.seal
+  const oldSeal = $('seal-glyphs').querySelector<HTMLElement>('.connection-seal')
+  if (oldSeal?.dataset.seal !== link?.seal?.join('-')) {
+    if (oldSeal) destroySeal(oldSeal)
+    $('seal-glyphs').replaceChildren(...(connected && link?.seal ? [sealElement(link.seal)] : []))
+  }
+  if (!connected || !link?.seal) { $('link-seal').hidden = true; $('seal-open').setAttribute('aria-expanded', 'false') }
   renderFacts()
   app.classList.toggle('linked', connected)
   $('pair').hidden = connected
@@ -623,6 +664,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (changes.link) {
       const was = state.link?.status
       state.link = parseLink(changes.link.newValue)
+      if (momentReady) revealSeal()
       if (state.link?.status !== was) void pollFacts()
     }
     if (changes.frames) state.frames = parseFrames(changes.frames.newValue)
@@ -663,6 +705,8 @@ async function init() {
   state.allSites = allSites
   state.pcPermission = pcPermission
   render()
+  momentFor = momentKey(state.link)
+  momentReady = true
   settle()
   void pollFacts()
   setInterval(() => void pollFacts(), FACTS_MS)

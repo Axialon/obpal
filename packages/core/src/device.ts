@@ -1,5 +1,6 @@
 import type { Caps, DeviceMsg, HostMsg, PairGrant, SignalIn, SignalPayload } from './messages'
 import { CodePake } from './code'
+import { connectionSeal, sealSessionContext, type ConnectionSeal } from './seal'
 import {
   b64url, bindMac, equalBytes, fromB64url, importPairKey, lanContext, lanIceCredentials, lanOfferSdp, mungeIce, parsePairing, roomIdFor, sdpFingerprint,
   type LanPairing, type Pairing, type SavedInvite,
@@ -32,9 +33,12 @@ export interface LinkStats {
   /** What the connection's own statistics say: its path in detail, ICE's round trip, DTLS. */
   link?: LinkInfo
   verified?: VerifiedBy
+  seal?: ConnectionSeal
 }
 
 export interface DeviceLinkEvents {
+  /** The locally computed seal, with the pulse scheduled relative to this device?s clock. */
+  seal: (s: { seal: ConnectionSeal; delayMs: number }) => void
   status: (s: LinkStatus) => void
   message: (m: HostMsg) => void
   stats: (s: LinkStats) => void
@@ -107,6 +111,8 @@ const netInfo = () => (typeof navigator === 'undefined' ? undefined : (navigator
 export class DeviceLink {
   status: LinkStatus = 'signaling'
   private roomId = ''
+  seal: ConnectionSeal | null = null
+  private sealPing: number | null = null
   private sig: SignalClient | null = null
   private pc: RTCPeerConnection | null = null
   private ctl: RTCDataChannel | null = null
@@ -133,7 +139,7 @@ export class DeviceLink {
   private rttMs: number | null = null
   /** When the last pong came (performance.now()): a path that stops answering is looked for again (poll). */
   private pongAt = 0
-  private handlers: { [K in keyof DeviceLinkEvents]: DeviceLinkEvents[K][] } = { status: [], message: [], stats: [], pair: [], invite: [] }
+  private handlers: { [K in keyof DeviceLinkEvents]: DeviceLinkEvents[K][] } = { seal: [], status: [], message: [], stats: [], pair: [], invite: [] }
   /** By short code: the host's fingerprint as its answer gave it, and this side of the exchange. */
   private hostFp: Uint8Array | null = null
   private pake: CodePake | null = null
@@ -458,6 +464,7 @@ export class DeviceLink {
       : 'saved' in o ? [o.saved.key, o.saved.fp, this.roomId, undefined]
         : [o.pairing.secret, o.pairing.fp, this.roomId, undefined]
     const [mac, name] = await Promise.all([bindMac(key, fpDevice, fpHost, context), o.name])
+    if (this.pc !== pc) return
     this.sendCtl({ t: 'hello', proto: PROTO, caps: o.caps(), mac, name, pair })
   }
 
@@ -470,6 +477,7 @@ export class DeviceLink {
     // from a host that skipped the exchange. Only its refusal is heard.
     if ('code' in this.opts && !this.codeProven && m.t !== 'lock') return
     if (m.t === 'welcome') {
+      const welcomedPeer = this.pc
       mark('obpal:welcome')
       if (this.lanTimer) { clearTimeout(this.lanTimer); this.lanTimer = null }
       this.canRestart = m.restart === true && !this.direct
@@ -479,7 +487,9 @@ export class DeviceLink {
       const { pair, name } = m
       // By short code, the invite comes first: it is the pairing a grant is remembered with.
       void ('code' in this.opts ? this.takeInvite(m.invite) : Promise.resolve()).then(() => {
-        if (pair && ('pairing' in this.opts || 'saved' in this.opts) && this.opts.remember && this.status !== 'closed') void this.remember(pair, name)
+        if (this.pc !== welcomedPeer || this.status !== 'connected') return
+        void this.takeSeal(m)
+        if (pair && ('pairing' in this.opts || 'saved' in this.opts) && this.opts.remember) void this.remember(pair, name)
       })
     }
     if (m.t === 'lock' && m.reason === 'rejected' && 'code' in this.opts) {
@@ -488,6 +498,14 @@ export class DeviceLink {
       this.sig?.close()
       this.setStatus('code-wrong')
       this.emit('message', m)
+      return
+    }
+    if (m.t === 'seal-start') {
+      if (this.status === 'connected' && this.seal && this.sealPing !== null && m.t0 === this.sealPing) {
+        const rtt = Math.max(0, performance.now() - this.sealPing)
+        this.sealPing = null
+        this.emit('seal', { seal: this.seal, delayMs: Math.max(0, 350 - rtt / 2) })
+      }
       return
     }
     if (m.t === 'pong') { this.rttMs = Math.round(performance.now() - m.t0); this.pongAt = performance.now() }
@@ -503,12 +521,15 @@ export class DeviceLink {
   /** The host's share and confirmation: check it, then confirm back. A wrong code shows up here first. */
   private async confirmCode(m: Extract<HostMsg, { t: 'pake' }>) {
     const pake = this.pake
-    const fpDevice = sdpFingerprint(this.pc?.localDescription?.sdp)
+    const pc = this.pc
+    const opts = this.opts
+    const fpDevice = sdpFingerprint(pc?.localDescription?.sdp)
     if (!pake || !fpDevice || !this.hostFp || !('code' in this.opts)) return
     this.pake = null
     let share: Uint8Array
     try { share = fromB64url(m.y) } catch { share = new Uint8Array() }
     const macs = await pake.confirm(share, fpDevice, this.hostFp)
+    if (this.pc !== pc || this.opts !== opts) return
     const enc = new TextEncoder()
     if (!macs || typeof m.mac !== 'string' || !equalBytes(enc.encode(m.mac), enc.encode(macs.theirs))) {
       this.teardown()
@@ -526,10 +547,33 @@ export class DeviceLink {
    */
   private async takeInvite(invite: string | undefined) {
     const o = this.opts
+    const pc = this.pc
     const p = invite ? parsePairing(invite) : null
-    if (!p || !('code' in o) || !this.hostFp || !equalBytes(p.fp, this.hostFp) || (await roomIdFor(p.secret)) !== this.roomId) return
+    if (!p || !('code' in o) || !this.hostFp || !equalBytes(p.fp, this.hostFp) || (await roomIdFor(p.secret)) !== this.roomId || this.pc !== pc || this.opts !== o) return
     this.opts = { service: o.service, pairing: p, remember: o.remember, caps: o.caps, name: o.name, cert: o.cert }
     this.emit('invite', invite!)
+  }
+
+  /** The public session nonce is MAC-bound to the identities before it affects a displayed seal. */
+  private async takeSeal(m: Extract<HostMsg, { t: 'welcome' }>) {
+    const pc = this.pc
+    const o = this.opts
+    const fpDevice = sdpFingerprint(pc?.localDescription?.sdp)
+    if (!pc || !fpDevice || 'code' in o || !m.sealNonce || !m.sealProof) return
+    const [key, fpHost, context] = 'lan' in o
+      ? [o.pair.key, o.pair.peerFp, lanContext(o.lan.nonce)]
+      : 'saved' in o ? [o.saved.key, o.saved.fp, this.roomId] : [o.pairing.secret, o.pairing.fp, this.roomId]
+    try {
+      const expected = await bindMac(key, fpDevice, fpHost, sealSessionContext(context, m.sealNonce))
+      const enc = new TextEncoder()
+      if (!equalBytes(enc.encode(expected), enc.encode(m.sealProof))) return
+      const seal = await connectionSeal(fpDevice, fpHost, context, 'lan' in o ? key : undefined, m.sealNonce)
+      if (this.pc !== pc || this.status !== 'connected') return
+      this.seal = seal
+      this.sealPing = performance.now()
+      this.sendCtl({ t: 'seal-ready', t0: this.sealPing })
+      void this.poll()
+    } catch { /* Older or malformed peers do not get a seal. Input remains available. */ }
   }
 
   /** The host's pairing grant, kept: its key as a non-extractable key (importPairKey), and the bytes let go. */
@@ -643,7 +687,7 @@ export class DeviceLink {
     this.sendCtl({ t: 'ping', t0: performance.now() })
     const link = await linkInfo(this.pc)
     const path = link.path === 'relay' ? 'relay' : link.path === 'unknown' ? 'unknown' : 'direct'
-    this.emit('stats', { path, rttMs: this.rttMs, link, verified: this.verifiedBy })
+    this.emit('stats', { path, rttMs: this.rttMs, link, verified: this.verifiedBy, ...(this.seal ? { seal: this.seal } : {}) })
   }
 
   private teardown() {
@@ -658,6 +702,8 @@ export class DeviceLink {
     this.pendingCands = []
     this.answeredOffer = null
     this.hostFp = null
+    this.seal = null
+    this.sealPing = null
     this.pake = null
     // A new connection has to prove the code again (the old one's proof was for its own DTLS session).
     this.codeProven = false

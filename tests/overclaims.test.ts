@@ -26,7 +26,7 @@ const NPM_PUBLISHED = true
 const PAGES = [
   'index.html', 'p/index.html', 'view/index.html', 'sponsor/index.html', 'donate/index.html', 'link/index.html', 'privacy/index.html',
   'sim/index.html', 'sim/arm/index.html', 'sim/arena/index.html', 'sim/device/index.html', 'catalogue/index.html', 'embed/index.html',
-  'buttons/index.html',
+  'buttons/index.html', 'trust/index.html',
 ]
 
 /** Store art copy is written in HTML and the screenshot captions in render.mjs. */
@@ -40,15 +40,17 @@ const COPY = [
   ...PAGES, 'public/llms.txt', 'public/llms-full.txt', 'extension/README.md', 'extension/store/listing.md', ...STORE_ART, 'extension/package.json',
   'extension/vite.config.ts', 'extension/src/options/options.ts', 'extension/src/popup/popup.ts', 'src/landing/main.ts',
   'src/catalogue/data.ts', 'packages/core/src/catalogue.ts', 'src/controller/main.ts', 'src/sim/arm/main.ts',
+  'packages/host/src/chip.ts', 'packages/host/src/seal.ts', 'packages/host/src/origin.ts', 'packages/host/src/remote.ts', 'src/controller/linkbadge.ts',
+  'src/ui/trust-origin.ts', 'src/ui/shares.ts', 'src/trust/main.ts', 'TRADEMARKS.md', 'spec/SECURITY.md',
 ]
 
 /** The words of `COPY` that aren't code: what the code in it imports from our own packages is no claim about npm. */
-const PROSE = COPY.filter((f) => !f.endsWith('.ts'))
+const PROSE = COPY.filter((f) => !f.endsWith('.ts') && !f.startsWith('spec/'))
 
 /** What developers read: the repository's and the packages' READMEs and the specs, where an example is the API. */
 const DOCS = [
   'README.md', 'desktop/README.md', 'packages/core/README.md', 'packages/host/README.md', 'packages/core/src/messages.ts',
-  'spec/CATALOGUE.md', 'spec/PROTOCOL.md', 'spec/STYLE-3D.md', 'spec/MESSAGING.md', 'hardware/arduino/obpal-arm/obpal-arm.ino',
+  'spec/CATALOGUE.md', 'spec/PROTOCOL.md', 'spec/STYLE-3D.md', 'spec/MESSAGING.md', 'spec/SECURITY.md', 'hardware/arduino/obpal-arm/obpal-arm.ino',
 ]
 
 /** The entities HTML writes that these files use. */
@@ -137,6 +139,14 @@ const LIMITS = /\blimit(?:s|ations)?\b/i
 /** How macOS is put where it isn't shipped. */
 const NOT_SHIPPED = /coming soon|preview/i
 
+/** Trust copy includes developer notes, where an attack or a limitation may be explained without making a promise. */
+const TRUST_COPY = [...COPY, 'README.md']
+/** Explicitly negative wording, kept close enough that another sentence cannot qualify an affirmative claim. */
+const NEGATIVE_PROOF = /\b(?:not|never|no|isn't|doesn't|cannot|can't)(?: (?:a|an|the|any|independent|conclusive|absolute|certificate|or|and)){0,6} (?:proof|prove(?:s)?|guarantee(?:s|d)?|guaranteed|certif(?:y|ies))\b$/i
+const NEGATIVE_CAMERA = /\b(?:never|not|no|don't|doesn't)(?: (?:uploaded|recorded|sent|or|nor|and)){0,5} (?:upload(?:ed|s)?|record(?:ed|s)?|sent|send)\b$/i
+/** Only the current sentence may negate a claim; a disclaimer in an earlier sentence is not enough. */
+const negated = (near: string, claim: string, negative: RegExp) => negative.test(`${near.slice(0, -claim.length).split(/[.!?;]/).at(-1) ?? ''}${claim}`.replace(/,\s*/g, ' '))
+
 const RULES: Rule[] = [
   { id: 'npm-copy', name: 'no page or listing shows the npm import while the package is unpublished', claim: NPM_LINE, files: PROSE, when: 'unpublished' },
   {
@@ -163,12 +173,35 @@ const RULES: Rule[] = [
   },
   {
     id: 'stop', name: 'an emergency stop is called a software hold wherever it is named',
-    claim: /\be-stop\b|\bemergency[- ]stop\b|\bsafety stop\b/i, files: [...COPY, ...DOCS], near: [240, 240], ok: (near) => /\bsoftware hold\b/i.test(near),
+    claim: /\be-stop\b|\b(?:a machine's own |(?:its )?power switch or )?emergency[- ]stop\b|\bsafety stop\b/i, files: [...COPY, ...DOCS], near: [240, 240],
+    ok: (near, _all, claim) => /\bsoftware hold\b/i.test(near) || /\ba machine's own |\bpower switch or /i.test(claim),
   },
   { id: 'metres', name: 'the 3D position is never given “in metres”', claim: /\bin met(?:re|er)s\b/i, files: COPY },
   {
     id: 'real-arms', name: 'real arms are called experimental wherever a page offers them',
     claim: /\breal[- ]arms?\b/i, files: PROSE, near: [300, 300], ok: (near) => /\bexperimental\b/i.test(near),
+  },
+  {
+    id: 'seal-proof', name: 'a seal or marker never promises a legitimate build or guaranteed security', files: TRUST_COPY,
+    claim: /\b(?:seal|marker|badge)\b[^.!?]{0,90}\b(?:guarantee(?:s|d)?|certif(?:y|ies)|prove(?:s)?|(?:is|offers|gives|provides) (?:a |the |conclusive |absolute )?proof)\b|\b(?:guaranteed|100%|completely|perfectly) (?:safe|secure|private|authentic)\b/i,
+    near: [25, 0], ok: (near, _all, claim) => negated(near, claim, NEGATIVE_PROOF),
+  },
+  {
+    id: 'marker-removable', name: 'the fork marker is never described as impossible to remove or forge', files: TRUST_COPY,
+    claim: /\b(?:marker|badge)\b[^.!?]{0,60}\b(?:cannot|can't|can never|impossible to)\b[^.!?]{0,30}\b(?:remove|hide|copy|forge)[\w]*\b|\b(?:tamper-proof|unremovable|unforgeable) (?:marker|badge)\b/i,
+  },
+  {
+    id: 'storage-absolute', name: 'copy never says that nothing is stored when local pairings and preferences are kept', files: TRUST_COPY,
+    claim: /\b(?:nothing(?: else)?|no data|no information) (?:(?:is|are|gets?|ever) ){0,2}(?:stored|saved|kept)\b|\bwe (?:never|don't|do not) (?:store|save|keep) (?:anything|any data)\b/i,
+  },
+  {
+    id: 'camera-upload', name: 'camera frames are never offered for upload or recording, even with permission', files: TRUST_COPY,
+    claim: /\bcamera (?:frames|images)\b[^.!?]{0,90}\b(?:upload(?:ed|s)?|record(?:ed|s)?|sent to (?:our |the )?(?:server|cloud))\b|\b(?:upload(?:ed|s)?|record(?:ed|s)?)\b[^.!?]{0,60}\bcamera (?:frames|images)\b/i,
+    near: [30, 0], ok: (near, _all, claim) => negated(near, claim, NEGATIVE_CAMERA),
+  },
+  {
+    id: 'host-storage', name: 'copy makes no storage promise for the apps and integrations a person controls', files: TRUST_COPY,
+    claim: /\b(?:hosts?|screens?|integrations?|websites?|apps?|both devices)\b[^.!?]{0,45}\b(?:cannot|can't|can never|never|doesn't|does not|do not)\b[^.!?]{0,25}\b(?:store|record|log|keep)\b[^.!?]{0,25}\b(?:input|typing|controls?)\b|\bno (?:host|screen|integration|website|app) can (?:store|record|log|keep) (?:input|typing)\b/i,
   },
 ]
 
@@ -214,8 +247,69 @@ describe('overclaims', () => {
     expect(count('mac-docs', 'a.md', 'Windows, and a macOS preview that is awaiting a first Mac test.')).toBe(0)
     expect(count('stop', 'a.html', '<p>The e-stop holds it where it is.</p>')).toBe(1)
     expect(count('stop', 'a.html', '<p>Stop is a software hold, not an emergency stop.</p>')).toBe(0)
+    expect(count('stop', 'a.md', "A machine's own emergency stop stays within reach.")).toBe(0)
     expect(count('metres', 'a.html', '<code>// the hand, in metres</code>')).toBe(1)
     expect(count('real-arms', 'a.html', '<p>Built for real arms.</p>')).toBe(1)
     expect(count('real-arms', 'a.html', '<p>Real arms are experimental, and not yet tested on hardware.</p>')).toBe(0)
+    // A nearby disclaimer cannot excuse an affirmative guarantee, or a permission-based camera upload.
+    expect(count('seal-proof', 'a.html', '<p>The seal proves this is an official build.</p>')).toBe(1)
+    expect(count('seal-proof', 'a.html', '<p>The seal is proof of an official build.</p>')).toBe(1)
+    expect(count('seal-proof', 'a.md', 'The seal guarantees security. It is a comparison aid.')).toBe(1)
+    expect(count('seal-proof', 'a.md', 'Not proof of identity. The seal guarantees security.')).toBe(1)
+    expect(count('seal-proof', 'a.md', 'The seal is not proof of identity and guarantees security.')).toBe(1)
+    expect(count('seal-proof', 'a.md', 'The seal is a comparison aid, not proof that a build is legitimate.')).toBe(0)
+    expect(count('seal-proof', 'a.md', 'A seal is never a guarantee of authenticity.')).toBe(0)
+    expect(count('seal-proof', 'a.md', 'The badge shows only on a bound link, and binding takes that proof.')).toBe(0)
+    expect(count('marker-removable', 'a.ts', "label: 'The official marker cannot be removed'")).toBe(1)
+    expect(count('marker-removable', 'a.html', '<p>A malicious copy can remove the marker.</p>')).toBe(0)
+    expect(count('storage-absolute', 'a.html', '<h1>Nothing else is kept.</h1>')).toBe(1)
+    expect(count('storage-absolute', 'a.ts', "note: 'No data is ever stored'")).toBe(1)
+    expect(count('storage-absolute', 'a.md', 'Control input is not stored. Saved screens and preferences stay on this device.')).toBe(0)
+    expect(count('camera-upload', 'a.html', '<p>Camera frames are uploaded only with your permission.</p>')).toBe(1)
+    expect(count('camera-upload', 'a.md', 'Camera frames are never uploaded or recorded.')).toBe(0)
+    expect(count('camera-upload', 'a.md', 'Camera frames are never uploaded. Camera frames are recorded with consent.')).toBe(1)
+    expect(count('camera-upload', 'a.md', 'Camera frames are never uploaded but are recorded locally.')).toBe(1)
+    expect(count('host-storage', 'a.html', '<p>No host can store input.</p>')).toBe(1)
+    expect(count('host-storage', 'a.md', 'Websites never record your typing.')).toBe(1)
+    expect(count('host-storage', 'a.md', 'Control input is not stored by ob.Pal. An integration decides what its own page does with input.')).toBe(0)
+  })
+
+  it('keeps every trust promise tied to its implementation or privacy explanation', () => {
+    const html = readText('trust/index.html')
+    const backings: Record<string, readonly string[]> = {
+      accounts: ['worker/index.ts'], tracking: ['vite.config.ts'], telemetry: ['wrangler.jsonc'],
+      feedback: ['/privacy/#contact'], camera: ['src/controller/scanner.ts', 'tests/scanner.test.ts'],
+      open: ['LICENSE', 'TRADEMARKS.md'],
+    }
+    for (const [promise, links] of Object.entries(backings)) {
+      const row = new RegExp(`<li id="promise-${promise}">([\\s\\S]*?)</li>`).exec(html)?.[1]
+      expect(row, promise).toBeDefined()
+      for (const link of links) expect(row, promise).toContain(link.startsWith('/') ? `href="${link}"` : `href="https://github.com/Axialon/obpal/blob/main/${link}"`)
+    }
+    expect(html).toContain('Saved screens and preferences stay on this device.')
+    expect(html).toContain('A malicious copy can remove the marker.')
+    expect(html).toContain('Check both screens show the same seal.')
+    const popup = readText('extension/src/popup/popup.ts')
+    const scan = /<div class="scan" id="scan">([\s\S]*?)<div class="codes"/.exec(popup)?.[1]
+    expect(scan).toContain('id="qr"')
+    expect(scan).toContain("phone's browser · no app · no account")
+    expect(scan).toContain('obpal.blackboxes.net')
+    expect(scan).toContain('Check your camera shows obpal.blackboxes.net')
+    expect(popup).toContain('Check both screens show the same seal')
+    expect(readText('wrangler.jsonc')).toMatch(/"invocation_logs"\s*:\s*false/)
+    // A new endpoint or remote script requires reviewing the no-tracking promise, rather than silently expanding it.
+    const service = readText('worker/index.ts')
+    expect([...service.matchAll(/url\.pathname === '([^']+)'/g)].map((m) => m[1])).toEqual(['/api/health', '/api/ice', '/api/code', '/sim/device/'])
+    expect(service).toContain('PAYMENT_ROUTES.includes(url.pathname)')
+    expect(readText('worker/payments.ts')).toContain("PAYMENT_ROUTES = ['/api/payments/config', '/api/donations/live', '/api/checkout', '/api/donate', '/api/webhooks/stripe', '/api/webhooks/sponsors']")
+    expect(readText('vite.config.ts')).toContain("'script-src': [\"'self'\"]")
+    expect(readText('src/controller/scanner.ts')).toMatch(/getUserMedia\(\{ audio: false, video:/)
+    expect(readText('src/controller/main.ts')).toContain('if (scanArrival) openConnections()')
+    expect(readText('src/controller/main.ts')).not.toContain('catch(() => openConnections(true))')
+    for (const file of ['src/controller/scanner.ts', 'src/controller/hand-worker.ts', 'src/controller/body-worker.ts']) {
+      expect(readText(file), file).not.toMatch(/\bMediaRecorder\b|\.addTrack\(|\bsendBeacon\b|\bXMLHttpRequest\b|\bWebSocket\b|method:\s*['"]POST['"]/)
+    }
+    expect(readText('packages/core/src/store.ts')).toContain("createObjectStore('connections'")
+    expect(readText('packages/core/src/store.ts')).toContain("createObjectStore('pairs'")
   })
 })

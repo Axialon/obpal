@@ -150,6 +150,8 @@ export type DeviceMsg =
   | { t: 'recenter' }
   /** Claim a node listed in `scene` (null releases what this device holds). */
   | { t: 'claim'; node: string | null }
+  /** Cosmetic pulse timing only; never carries the seal or authenticates a peer. */
+  | { t: 'seal-ready'; t0: number }
   | { t: 'ping'; t0: number }
   /** This phone is using (true), or keeping idle (false), this connection alone. Older hosts ignore it. */
   | { t: 'attention'; active: boolean }
@@ -164,12 +166,13 @@ export type HostMsg =
    * restart: the host takes ICE restarts, a later offer on this connection (PROTOCOL §1), so a device whose path went
    * can find a new one without building the connection again.
    */
-  | { t: 'welcome'; proto: number; name: string; layout: Layout; pair?: PairGrant; invite?: string; restart?: boolean; attention?: boolean; kind?: import('./store').ScreenKind }
+  | { t: 'welcome'; proto: number; name: string; layout: Layout; pair?: PairGrant; invite?: string; sealNonce?: string; sealProof?: string; restart?: boolean; attention?: boolean; kind?: import('./store').ScreenKind }
   /** The short-code exchange (PROTOCOL §2b): the host's share and its confirmation. */
   | { t: 'pake'; y: string; mac: string }
   | { t: 'layout'; layout: Layout }
   | { t: 'state'; values: Record<string, number | boolean | string> }
   | { t: 'feedback'; haptic?: 'tick' | 'bump'; toast?: string }
+  | { t: 'seal-start'; t0: number }
   | { t: 'pong'; t0: number }
   /**
    * A shared scene: who is in it, what can be controlled (omitted when unchanged) and who holds what (node id ->

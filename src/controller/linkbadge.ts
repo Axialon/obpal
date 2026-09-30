@@ -5,7 +5,9 @@
  * remembered pairing), the path (direct, or relayed) and the round trip. The badge is a lock, the path's colour and the
  * round trip; a tap opens a line on each. Built from elements, never parsed markup.
  */
-import type { LinkStats, VerifiedBy } from '@obpal/core'
+import type { ConnectionSeal, LinkStats, VerifiedBy } from '@obpal/core'
+import { destroySeal, sealElement, sealMoment, SEAL_STYLE, tiltSeal } from '@obpal/host'
+import { showShares } from '../ui/shares'
 import { sheetExits } from './sheet'
 
 const NS = 'http://www.w3.org/2000/svg'
@@ -59,31 +61,85 @@ export class LinkBadge {
   private readonly ms: HTMLElement
   private stats: LinkStats | null = null
   private sheet: { body: HTMLElement; close: () => void } | null = null
+  private stopMoment = () => {}
+  private closeShares = () => {}
+  private first: HTMLElement | null = null
+  private firstObserver: MutationObserver | null = null
+  private seal: ConnectionSeal | null = null
 
-  constructor() {
+  constructor(private readonly disconnect: () => void = () => {}) {
     this.ms = h('span', { class: 'lb-ms' })
     this.el = h('button', { class: 'link-badge glass', type: 'button', 'data-state': 'down', 'aria-haspopup': 'dialog', 'aria-label': 'Connection' },
       LOCK(), h('i', { 'aria-hidden': 'true' }), this.ms)
     this.el.addEventListener('click', () => this.open())
+    const style = document.createElement('style')
+    style.textContent = SEAL_STYLE
+    document.head.append(style)
+    addEventListener('pagehide', () => { this.stopMoment(); this.closeShares(); this.clearFirst(); this.clearSeal() }, { once: true })
   }
 
   /** Take the top bar's slot for it. */
   mount(slot: HTMLElement) {
     slot.replaceWith(this.el)
+    this.placeFirst()
     this.render()
   }
 
   /** What the link says now (every couple of seconds while it's up). */
   update(s: LinkStats) {
     this.stats = s
+    if (s.seal && s.seal.join('-') !== this.seal?.join('-')) this.seal = s.seal
     this.render()
   }
 
   /** The link isn't up (reconnecting, waiting for the screen): the badge vouches for nothing until it is again. */
   down() {
     this.stats = null
+    this.seal = null
+    this.stopMoment()
+    this.clearFirst()
     this.render()
   }
+
+  /** The UI starts only after the phone verified the fresh session proof. */
+  reveal(s: { seal: ConnectionSeal; delayMs: number; source?: string }) {
+    this.seal = s.seal
+    this.stopMoment()
+    this.clearFirst()
+    const domain = h('span', { class: 'trust-domain', 'aria-label': `Encrypted connection; ${location.hostname}` }, LOCK(), location.hostname)
+    const words = h('span', {}, 'Connected to the screen showing this seal')
+    // Gamepad hides the usual bar, so the transient handshake carries the same first-frame notice too.
+    this.stopMoment = sealMoment(document.body, s.seal, s.delayMs, s.source, h('div', { class: 'seal-first' }, domain.cloneNode(true), words.cloneNode(true)))
+    const compare = h('button', { type: 'button', class: 'trust-compare', 'aria-label': 'Compare connection seal' }, words)
+    compare.onclick = () => this.open()
+    const shares = h('button', { type: 'button', class: 'trust-shares' }, 'What this shares')
+    shares.onclick = () => { this.closeShares(); this.closeShares = showShares(this.disconnect) }
+    const dismiss = h('button', { type: 'button', class: 'trust-dismiss', 'aria-label': 'Dismiss connection notice' }, CLOSE())
+    dismiss.onclick = () => this.clearFirst()
+    this.first = h('div', { class: 'trust-first glass', role: 'status' }, domain, compare, shares, dismiss)
+    this.firstObserver = new MutationObserver(() => this.placeFirst())
+    this.firstObserver.observe(document.getElementById('app') ?? document.body, { childList: true, subtree: true })
+    this.placeFirst()
+    this.render()
+  }
+
+  tilt(x: number, y: number) {
+    this.sheet?.body.querySelectorAll<HTMLElement>('.connection-seal').forEach(row => tiltSeal(row, x, y))
+  }
+  private placeFirst() {
+    if (!this.first) return
+    const bar = this.el.closest('.bar')
+    const gate = document.querySelector('.gate-card')
+    if (bar?.isConnected) {
+      if (this.first.previousElementSibling !== bar) bar.after(this.first)
+      this.firstObserver?.disconnect()
+    } else if (gate) {
+      if (this.first.parentElement !== gate) gate.prepend(this.first)
+      this.firstObserver?.disconnect()
+    }
+  }
+  private clearFirst() { this.firstObserver?.disconnect(); this.firstObserver = null; this.first?.remove(); this.first = null }
+  private clearSeal() { this.sheet?.body.querySelectorAll<HTMLElement>('.connection-seal').forEach(destroySeal) }
 
   private render() {
     const s = this.stats
@@ -108,7 +164,7 @@ export class LinkBadge {
       h('p', { class: 'link-foot' }, 'The room service only passes the handshake along. It never sees the code’s secret, or anything you send.'))
     const wrap = h('div', { class: 'sheet-wrap' }, card)
     let exits = () => {}
-    const close = () => { exits(); this.sheet = null; wrap.classList.add('out'); setTimeout(() => wrap.remove(), 200) }
+    const close = () => { exits(); this.clearSeal(); this.sheet = null; wrap.classList.add('out'); setTimeout(() => wrap.remove(), 200) }
     x.addEventListener('click', close)
     this.sheet = { body, close }
     this.fill(body)
@@ -118,6 +174,10 @@ export class LinkBadge {
 
   private fill(body: HTMLElement) {
     const s = this.stats
+    const seal = this.seal ?? s?.seal
+    const previous = body.querySelector<HTMLElement>('.connection-seal')
+    const same = !!seal && previous?.dataset.seal === seal.join('-')
+    if (!same) this.clearSeal()
     const row = (ic: SVGSVGElement, title: string, detail: string, tone = '') =>
       h('div', { class: 'link-row', ...(tone ? { 'data-tone': tone } : {}) }, h('span', { class: 'lr-ic' }, ic), h('span', {}, h('b', {}, title), h('small', {}, detail)))
     if (!s || s.link?.secure === false) {
@@ -132,6 +192,9 @@ export class LinkBadge {
       row(PATH(), pathTitle, pathDetail, s.path === 'relay' ? 'warn' : ''),
       ...(s.rttMs != null ? [row(CLOCK(), `Round trip ${s.rttMs} ms`, s.link?.rttMs != null ? `The network’s own share: ${s.link.rttMs} ms.` : 'From this phone to the screen and back.')] : []),
     ]
-    body.replaceChildren(...rows)
+    if (seal) rows.unshift(h('div', { class: 'link-seal' }, h('b', {}, 'Connection seal'), same ? previous! : sealElement(seal), h('small', {}, 'Check both screens show the same seal')))
+    const shares = h('button', { type: 'button', class: 'btn' }, 'What this shares')
+    shares.onclick = () => { this.sheet?.close(); this.closeShares(); this.closeShares = showShares(this.disconnect) }
+    body.replaceChildren(...rows, shares)
   }
 }

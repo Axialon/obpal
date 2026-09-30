@@ -3,6 +3,7 @@
  * ob.Pal's default accent is lime; a visitor can choose another independently. UI colours come from the family CSS tokens, while
  * the 3D stage colours (backdrop gradient and ground grid) live here because three.js needs them as values.
  */
+import './trust-origin'
 import { html } from './markup'
 
 import { family, type FamilyThemeId } from '../family'

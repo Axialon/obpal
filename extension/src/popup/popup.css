@@ -91,6 +91,9 @@ html.in-tab .pop { width: auto; max-width: 720px; margin: 0 auto; padding: 16px;
 .scan-hint.direct .ic { color: rgb(var(--haze-rgb)); }
 [data-bb-theme='light'] .scan-hint.direct .ic { color: #6d4fc7; }
 .scan-hint.warn, .scan-hint.warn .ic { color: var(--warn-text); }
+.scan-check { margin: 0; max-width: 220px; text-align: center; color: var(--secondary); font-size: 11px; line-height: 1.45; }
+.scan-check b { font-weight: 650; }
+.scan-check a { color: var(--accent-text); text-underline-offset: 3px; }
 
 /* Which code: online through ob.Pal, or direct over the local network. The lit half slides to the one shown. */
 .codes { position: relative; display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border-radius: 999px; border: 1px solid var(--line); background: var(--fill); }
@@ -237,3 +240,4 @@ html.in-tab .pop { width: auto; max-width: 720px; margin: 0 auto; padding: 16px;
 @media (prefers-reduced-motion: reduce) {
   .qr.sweep::after, .qr:hover::after, .conn[data-s='connected'] .status i::after, .says.new { animation: none; }
 }
+.seal-open{border:1px solid var(--line);border-radius:10px;background:var(--glass);color:var(--accent-text);font:600 11px var(--font);padding:5px 7px}.seal-popup{padding:12px;margin:0 14px 12px;border-radius:20px;text-align:center}.seal-popup[hidden]{display:none}.seal-popup p{font-size:12px;color:var(--secondary);margin:2px 0}

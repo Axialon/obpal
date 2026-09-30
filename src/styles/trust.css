@@ -1,0 +1,56 @@
+/* A full-width dot illustration, followed by the checks and their source links. */
+.trust-hero { position: relative; min-height: min(660px, calc(100svh - 64px)); overflow: clip; background: var(--hero-top); }
+.trust-hero-in { position: relative; z-index: 1; max-width: 1180px; margin: 0 auto; padding: clamp(56px, 9vw, 110px) 28px 80px; pointer-events: none; }
+.trust-hero h1 { margin: 14px 0 24px; font: 800 clamp(64px, 8vw, 108px)/0.96 var(--font-display); letter-spacing: -0.065em; }
+.trust-lede { margin: 0; font-size: clamp(18px, 2vw, 23px); line-height: 1.55; color: var(--secondary); }
+.trust-jump { display: inline-flex; align-items: center; gap: 20px; margin-top: 28px; min-height: 44px; color: var(--accent-text); font-weight: 700; text-decoration: none; pointer-events: auto; }
+.trust-jump span { transition: transform 180ms var(--ease); }
+.trust-jump:hover span { transform: translateY(4px); }
+.trust-field { position: absolute; top: 30%; right: -6%; width: 56%; height: auto; aspect-ratio: 37 / 11; color: var(--accent); opacity: 0.8; }
+.trust-hero-note { position: absolute; right: 28px; bottom: 20px; margin: 0; color: var(--muted); font-size: 12px; }
+.trust-body { max-width: 1040px; margin: 0 auto; padding: 0 28px; }
+.trust-section { padding: 58px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 92px; }
+.trust-section h2 { margin: 0 0 22px; max-width: 630px; font: 750 clamp(28px, 3.5vw, 40px)/1.16 var(--font-display); letter-spacing: -0.04em; text-wrap: balance; }
+.trust-section p { max-width: 670px; color: var(--secondary); font-size: 16px; line-height: 1.65; }
+.trust-section .eyebrow { font-size: 12px; color: var(--accent-text); }
+.trust a { text-underline-offset: 4px; }
+.trust-sources { display: grid; gap: 20px; margin: 0; }
+.trust-sources > div { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 28px; }
+.trust-sources dt { color: var(--ink); font-weight: 700; }
+.trust-sources dd { margin: 0; color: var(--secondary); overflow-wrap: anywhere; }
+.trust-sources code { font: 12px var(--font-data); }
+.trust-compare { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 50px; align-items: center; }
+.trust-examples { margin: 0; }
+.trust-glyphs { display: flex; gap: 14px; justify-content: space-between; }
+.trust-glyphs span { display: grid; gap: 16px; justify-items: center; }
+.trust-glyphs canvas { display: block; width: 88px; height: 88px; color: var(--accent); }
+.trust-glyphs b { font-size: 13px; font-weight: 600; color: var(--secondary); }
+.trust-examples figcaption { margin-top: 24px; text-align: center; color: var(--muted); font-size: 12px; }
+.trust-promises { margin: 0; padding: 0; list-style: none; display: grid; }
+.trust-promises li { display: grid; grid-template-columns: 310px minmax(0, 1fr); gap: 28px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+.trust-promises li:last-child { border-bottom: 0; }
+.trust-promises b { font-weight: 650; }
+.trust-promises span { color: var(--secondary); }
+.trust-section .trust-fine { font-size: 13px; color: var(--muted); }
+.trust-forks p { max-width: 760px; }
+.trust-foot { display: flex; flex-wrap: wrap; gap: 24px; padding: 30px 0 48px; font-size: 13px; }
+.trust-foot a { color: var(--secondary); }
+@media (prefers-reduced-motion: no-preference) {
+  .trust-hero-in { animation: trust-arrive 420ms var(--ease) both; }
+  @keyframes trust-arrive { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+}
+@media (max-width: 800px) {
+  .trust-compare { grid-template-columns: 1fr; gap: 24px; }
+  .trust-examples { max-width: 340px; }
+  .trust-promises li { grid-template-columns: 240px minmax(0, 1fr); }
+}
+@media (max-width: 560px) {
+  .trust-hero { min-height: 620px; }
+  .trust-hero-in { padding: 42px 24px 220px; }
+  .trust-hero h1 { font-size: 64px; }
+  .trust-field { top: auto; right: 6%; bottom: 60px; width: 88%; opacity: 0.65; }
+  .trust-hero-note { right: 24px; }
+  .trust-body { padding: 0 24px; }
+  .trust-section { padding: 38px 0; }
+  .trust-sources > div, .trust-promises li { grid-template-columns: 1fr; gap: 5px; }
+}

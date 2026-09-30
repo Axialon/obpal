@@ -11,6 +11,8 @@ Your phone is the controller: robots, drones, games, music and your computer, wi
 
 **Live:** https://obpal.blackboxes.net. Open [/view](https://obpal.blackboxes.net/view/) or a [sim](https://obpal.blackboxes.net/sim/) on a computer, then scan the code with your phone.
 
+[Check the source and connection seal](https://obpal.blackboxes.net/trust/): verify the domain or download channel, then compare the seal on both devices, especially after typing a code. The seal is a short comparison aid, not proof that a build is legitimate.
+
 ## How it works
 
 ```
@@ -102,6 +104,6 @@ The viewer catalogue includes brand models: Club V Crew insignia (CVC, CC, K9C, 
 
 ## License
 
-The code is MIT licensed; see [LICENSE](LICENSE). The Club V Crew insignia and wordmark models in `public/models/cvc` are brand assets and aren't covered by it; see [their notice](public/models/cvc/NOTICE.md).
+The code is MIT licensed; see [LICENSE](LICENSE). The ob.Pal name and logo have a separate [draft fork naming policy](TRADEMARKS.md). The Club V Crew insignia and wordmark models in `public/models/cvc` are brand assets and aren't covered by it; see [their notice](public/models/cvc/NOTICE.md).
 
 Contact: [hello@obpal.blackboxes.net](mailto:hello@obpal.blackboxes.net)

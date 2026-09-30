@@ -253,6 +253,55 @@ async function openPopup(ctx) {
   return { id, popup }
 }
 const linkOf = (popup) => popup.evaluate(async () => (await chrome.storage.session.get('link')).link ?? null)
+/** Compare the authenticated seal through each side's persistent UI, then leave the controls clear. */
+async function compareSeal(popup, phone) {
+  const seal = await until('the extension seal deadline', async () => {
+    const link = await linkOf(popup)
+    const value = link?.seal
+    return Array.isArray(value) && value.length === 3 && value.every(i => Number.isInteger(i) && i >= 0 && i < 64) && Number.isFinite(link.sealAt) ? value.join('-') : null
+  }, 10000)
+  const pulse = await until('the popup seal pulse starts', () => popup.evaluate(() => {
+    const moments = document.querySelectorAll('.seal-moment')
+    const moment = moments[0]
+    if (!moment?.dataset.started) return null
+    const box = moment.getBoundingClientRect()
+    const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+    return { count: moments.length, pointer: getComputedStyle(moment).pointerEvents, blocks: !!hit?.closest('.seal-moment'), hidden: moment.getAttribute('aria-hidden') }
+  }), 5000, 50)
+  if (pulse.count !== 1 || pulse.pointer !== 'none' || pulse.blocks || pulse.hidden !== 'true') throw new Error(`popup pulse catches input or repeats: ${JSON.stringify(pulse)}`)
+  const open = popup.getByRole('button', { name: 'Seal', exact: true })
+  await open.waitFor({ state: 'visible', timeout: 5000 })
+  await open.click()
+  const panel = popup.locator('#link-seal')
+  const connection = phone.getByRole('dialog', { name: 'Connection', exact: true })
+  try {
+    await panel.waitFor({ state: 'visible', timeout: 3000 })
+    await phone.locator('.link-badge').click()
+    await connection.waitFor({ state: 'visible', timeout: 3000 })
+    const phoneSeal = connection.locator('.connection-seal')
+    const popupSeal = panel.locator('.connection-seal')
+    await Promise.all([phoneSeal.waitFor({ state: 'visible', timeout: 10000 }), popupSeal.waitFor({ state: 'visible', timeout: 10000 })])
+    await until('both comparison seals', async () => (await phoneSeal.getAttribute('data-seal')) === seal && (await popupSeal.getAttribute('data-seal')) === seal, 10000)
+    const names = await phoneSeal.locator('.seal-names small').allTextContents()
+    const hostNames = await popupSeal.locator('.seal-names small').allTextContents()
+    if (names.length !== 3 || JSON.stringify(names) !== JSON.stringify(hostNames)) throw new Error(`seal labels differ: ${names.join(', ')} / ${hostNames.join(', ')}`)
+    for (const row of [phoneSeal, popupSeal]) {
+      await row.locator('canvas').waitFor({ state: 'visible', timeout: 3000 })
+      await until('visible seal dots', () => row.locator('canvas').evaluate(canvas => {
+        if (!canvas.width || !canvas.height) return false
+        const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data
+        return pixels.some((value, index) => index % 4 === 3 && value > 0)
+      }), 3000)
+    }
+    return `${names.join(', ')} (popup pulse scheduled; input clear)`
+  } finally {
+    if (await connection.isVisible()) {
+      await connection.getByRole('button', { name: 'Close', exact: true }).click()
+      await connection.waitFor({ state: 'detached', timeout: 3000 })
+    }
+    if (await panel.isVisible()) { await open.click(); await panel.waitFor({ state: 'hidden', timeout: 3000 }) }
+  }
+}
 const enable = (popup, tabId) => popup.evaluate((t) => chrome.runtime.sendMessage({ to: 'bg', type: 'enable', tabId: t, on: true }), tabId)
 const setTarget = (popup, mode) => popup.evaluate((m) => chrome.runtime.sendMessage({ to: 'bg', type: 'mode', mode: m }), mode)
 /** What the extension keeps: storage.session / storage.local by key. */
@@ -294,10 +343,14 @@ try {
 
   await check('pairs by QR link', async () => {
     const t0 = Date.now()
+    await popup.bringToFront()
     await phone.goto(onPhone(pairing))
     await phone.locator('.modes').waitFor({ timeout: 20000 })
     await until('popup shows connected', () => popup.evaluate(() => document.getElementById('status')?.dataset.s === 'connected'), 15000)
-    return `${new URL(pairing).host}, controls in ${Date.now() - t0} ms`
+    const controlsMs = Date.now() - t0
+    const seal = await compareSeal(popup, phone)
+    await page.bringToFront()
+    return `${new URL(pairing).host}, controls in ${controlsMs} ms; phone and popup seal ${seal}`
   })
 
   // ---- the invite moves on once a phone pairs (spec/SECURITY.md §8, L2) ----
@@ -636,10 +689,15 @@ try {
       await phone.locator('#pad-wheel').waitFor({ state: 'visible', timeout: 5000 })
       from = frames().length
       {
-        await clearHints()
-        const [x, y] = await centre('#pad-wheel')
-        await touches('touchStart', [[x, y - 60]])
-        for (let i = 1; i <= 10; i++) { await touches('touchMove', [[x, y - 60 + i * 8]]); await sleep(30) }
+          await clearHints()
+          const box = await phone.locator('#pad-wheel').boundingBox()
+          if (!box || box.height < 24) throw new Error(`no usable scroll strip: ${JSON.stringify(box)}`)
+          const x = box.x + box.width / 2, y = box.y + box.height * 0.2
+          const travel = Math.min(80, box.height * 0.6)
+          const hit = await phone.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.id, { x, y })
+          if (hit !== 'pad-wheel') throw new Error(`the scroll strip is covered by ${hit}`)
+          await touches('touchStart', [[x, y]])
+          for (let i = 1; i <= 10; i++) { await touches('touchMove', [[x, y + i * travel / 10]]); await sleep(30) }
         await touches('touchEnd', [])
       }
       await until('the scroll strip scrolls down', () => frames().slice(from).some((f) => f.w?.[1] > 0))
@@ -899,6 +957,7 @@ try {
     phone = await phoneCtx.newPage()
     ;({ touches, centre, clearHints, tap, hold } = await touchOn(phoneCtx, phone))
     const t0 = Date.now()
+    await popup.bringToFront()
     await phone.goto(onPhone(lanUrl), { waitUntil: 'commit' })
     await phone.locator('#app').waitFor({ timeout: 10000 })
     const tPage = Date.now() - t0
@@ -911,13 +970,15 @@ try {
     const link = await until('extension connected', async () => { const l = await linkOf(popup); return l?.status === 'connected' ? l : null }, 10000, 50)
     const diag = await popup.evaluate(() => chrome.runtime.sendMessage({ to: 'bg', type: 'diag' }))
     if (!diag?.direct) throw new Error(`not a direct link: ${JSON.stringify(diag)}`)
+    const seal = await compareSeal(popup, phone)
+    await page.bringToFront()
     await tap('.modes [data-tab=gamepad]')
     await phone.locator('.gp-f[data-k=a]').waitFor({ timeout: 5000 })
     await hold('.gp-f[data-k=a]', () => until('A pressed', () => page.evaluate(() => window.__pad()?.pressed[0] === true)))
     await until('A released', () => page.evaluate(() => window.__pad()?.pressed[0] === false))
     const path = await phone.evaluate(() => document.getElementById('sig')?.dataset.q)
     if (SHOTS) await phone.screenshot({ path: join(SHOTS, 'phone-offline.png') })
-    return `${link.device}: page from cache in ${tPage} ms, controls in ${tControls} ms (link: start ${marks.start} → open ${marks.open} → welcome ${marks.welcome} ms), ${path} path, input arrives`
+    return `${link.device}: page from cache in ${tPage} ms, controls in ${tControls} ms (link: start ${marks.start} → open ${marks.open} → welcome ${marks.welcome} ms), ${path} path, input arrives; phone and popup seal ${seal}`
   })
 
   await check('the direct code is single-use: a fresh one replaces it', async () => {
