@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://obpal.blackboxes.net/pack-controller-layout.schema.json",
+  "title": "controller-layout pack body",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "controllers": {
+      "type": "array",
+      "maxItems": 9,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "face.gamepad",
+          "face.wheel",
+          "face.wii",
+          "face.mouse",
+          "face.trackpad",
+          "face.hand",
+          "face.keyboard",
+          "face.drums",
+          "face.keys"
+        ]
+      },
+      "minItems": 1
+    },
+    "profile": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,31}/[a-z][a-z0-9-]{1,31}$"
+    }
+  },
+  "required": [
+    "controllers"
+  ]
+}

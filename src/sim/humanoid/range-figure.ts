@@ -14,7 +14,6 @@ export class RangeFigure {
   private scene = previewScene()
   private camera = new THREE.PerspectiveCamera(27, 1, 0.05, 30)
   private rig: Rig | null = null
-  private rigs = new Map<string, Rig>()
   private glass = new THREE.MeshPhysicalMaterial({ color: '#384c51', metalness: 0.45, roughness: 0.26, clearcoat: 0.6 })
   private active = new THREE.MeshPhysicalMaterial({
     color: '#c6ff34',
@@ -24,6 +23,8 @@ export class RangeFigure {
     roughness: 0.22,
     clearcoat: 1,
   })
+  private softGlass = new THREE.MeshStandardMaterial({ color: '#384c51', metalness: .15, roughness: .8 })
+  private softActive = new THREE.MeshStandardMaterial({ color: '#c6ff34', emissive: '#c6ff34', emissiveIntensity: .1, roughness: .7 })
 
   constructor() {
     this.el.className = 'range-figure'
@@ -45,11 +46,15 @@ export class RangeFigure {
       this.scene.environment = environment(this.renderer)
     }
     if (this.rig?.profile.id === profile.id) return
-    if (this.rig) this.scene.remove(this.rig.root)
-    this.rig = this.rigs.get(profile.id) ?? new Rig(profile)
-    this.rigs.set(profile.id, this.rig)
+    this.hide()
+    this.rig = new Rig(profile)
     this.rig.load()
     this.scene.add(this.rig.root)
+  }
+  hide() {
+    this.rig?.dispose()
+    this.rig = null
+    this.renderer?.renderLists.dispose()
   }
 
   draw(now: number, step: CalibrationStep, progress: number, accent: string, reduced: boolean) {
@@ -77,13 +82,17 @@ export class RangeFigure {
     rig.pose(q)
     this.active.color.set(accent)
     this.active.emissive.set(accent)
+    this.softActive.color.set(accent)
+    this.softActive.emissive.set(accent)
     rig.root.traverse((object) => {
       const mesh = object as THREE.Mesh
       if (!mesh.isMesh) return
       let node: THREE.Object3D | null = mesh.parent
       while (node && !node.userData.joint && !rig.pivots.has(node.name)) node = node.parent
       const id = node?.userData.joint ?? node?.name
-      mesh.material = step.joints.includes(id) ? this.active : this.glass
+      mesh.material = rig.profile.face
+        ? (step.joints.includes(id) ? this.softActive : this.softGlass)
+        : (step.joints.includes(id) ? this.active : this.glass)
     })
     renderer.render(this.scene, this.camera)
     const ctx = this.arc.getContext('2d')!

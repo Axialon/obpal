@@ -1,0 +1,47 @@
+{
+  "version": "1.0.0",
+  "author": {
+    "name": "ob.Pal",
+    "url": "https://github.com/Axialon/obpal"
+  },
+  "license": "MIT",
+  "source": "https://github.com/Axialon/obpal/tree/main/catalogue",
+  "requires": {
+    "catalogue": "1.0.0",
+    "controllers": [
+      "face.gamepad"
+    ]
+  },
+  "created": "2026-09-30",
+  "id": "obpal/tesana-flight",
+  "kind": "mapping",
+  "name": "Tesana flight buttons",
+  "description": "Fly on Tesana with familiar buttons.",
+  "attribution": "Tesana flight buttons by ob.Pal · MIT",
+  "body": {
+    "site": "tesana.com",
+    "controller": "face.gamepad",
+    "buttons": {
+      "key:Space": "a",
+      "key:Escape": "menu"
+    },
+    "controls": {
+      "a": {
+        "kind": "gamepad",
+        "button": 0
+      },
+      "lt": {
+        "kind": "gamepad",
+        "button": 6
+      },
+      "rt": {
+        "kind": "gamepad",
+        "button": 7
+      },
+      "menu": {
+        "kind": "key",
+        "code": "Escape"
+      }
+    }
+  }
+}

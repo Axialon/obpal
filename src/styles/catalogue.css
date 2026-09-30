@@ -62,3 +62,36 @@
 .bld-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
 @media (max-width: 860px) { .bld { grid-template-columns: 1fr; } .bld-out { position: static; } .bld-form { grid-template-columns: 1fr; } }
 .top-nav a[aria-current='page'] { color: var(--ink); background: rgb(var(--hl-rgb) / 0.06); }
+
+/* Community data previews stay inside their card at phone widths. */
+#community-packs { margin-top: 20px; }
+#community-packs code, #pack-credits li { overflow-wrap: anywhere; }
+#community-packs pre { max-height: 240px; overflow: auto; white-space: pre-wrap; font-size: 12px; }
+.pack-preview { width: 100%; max-height: 180px; object-fit: contain; border-radius: 12px; }
+.pack-credit { color: var(--ink); font-size: 13px; }
+#pack-credits { display: grid; gap: 16px; }
+#pack-credits span { display: block; color: var(--secondary); }
+#pack-credits a { margin-right: 12px; }
+
+#community > .fld { display: grid; gap: 8px; max-width: 440px; color: var(--secondary); font-size: 13px; }
+#pack-search { width: 100%; min-height: 44px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--frost); color: var(--ink); font: inherit; }
+.pack-handoff svg { width: min(180px, 100%); height: auto; }
+
+/* Packs lead with their kind and one action; details wait behind a disclosure. */
+#community-packs .pack-card { gap: 10px; background: var(--frost); border-color: var(--frost-edge); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); box-shadow: var(--frost-shadow); }
+.pack-art { position: relative; display: grid; place-items: center; min-height: 116px; border-radius: 14px; background: rgb(var(--hl-rgb) / 0.04); }
+.pack-art > .st { position: absolute; top: 10px; right: 10px; }
+.pack-kind { display: grid; place-items: center; color: var(--accent-text); }
+.pack-kind .ic { width: 48px; height: 48px; }
+.pack-art:has(img) .pack-kind { position: absolute; bottom: 10px; left: 10px; z-index: 1; }
+.pack-art:has(img) .pack-kind .ic { width: 24px; height: 24px; }
+#community-packs .pack-purpose { flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#community-packs .pack-credit { flex: none; color: var(--secondary); font-size: 12.5px; }
+#community-packs .pack-primary { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; margin-top: auto; text-align: center; }
+.pack-options > summary { min-height: 44px; display: flex; align-items: center; gap: 8px; color: var(--secondary); font-size: 13px; cursor: pointer; }
+.pack-options > summary::before { content: '+'; }
+.pack-options[open] > summary::before { content: '−'; }
+.pack-option-list { display: grid; gap: 10px; }
+.pack-option-list summary, .pack-option-list > a { display: flex; align-items: center; min-height: 44px; gap: 6px; cursor: pointer; }
+.pack-option-list p { padding: 10px 0; }
+.pack-option-list pre { margin: 10px 0 0; }

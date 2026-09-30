@@ -2,10 +2,12 @@ import { type Content, html, insertMarkup, setMarkup } from '../ui/markup'
 import '../styles/gamepad.css'
 import {
   addStick as mixAdd, emptyPad, emptyPointer, encodePad, encodePointer, flyVector, isProfileId, mixStick, MOTION_UTILITIES, offeredMotion,
-  PAD_BYTES, PadButton, PadFlag, POINTER_BYTES, PointerFlag, PROFILE_IDS, PROFILES, rateToUnit, resolveProfile, ROUTES, shapeVector, Utility,
-  utilityKey, wheelVector,
-  type Contribution, type MotionUtility, type Profile, type ProfileId, type ProfileOverrides, type Route, type UtilitySettings,
+  PAD_BYTES, PadButton, PadFlag, POINTER_BYTES, PointerFlag, PROFILE_IDS, PROFILES, rateToUnit, ROUTES, shapeVector, Utility,
+  utilityKey, wheelVector, resolveProfileSpec, packCredit, packProfileId,
+  type Contribution, type MotionUtility, type ProfileSpec, type ProfileId, type ProfileOverrides, type Route, type UtilitySettings,
 } from '@obpal/core'
+import { cachedPacks, loadCommunityPacks, communityPacks } from '../catalogue/packs'
+import { phoneProfile, phoneProfilePack, phoneProfiles, phoneMapping, selectPhoneMapping, requestedPhonePack, clearPackArrival } from './packs'
 import { toUi, uiRect } from './uiframe'
 import { sheetExits } from './sheet'
 import { feedbackEnabled, gamepadFeedback, hapticsKind, tick } from './haptics'
@@ -129,7 +131,7 @@ export interface Composed {
  * Each utility is shaped by its own gain, curve and invert, then mixed into the stick its route names; a stick with
  * motion on it gets one deadzone jump so small deliberate motions land past the game's deadzone.
  */
-export function composeSticks(left: Vec2, right: Vec2, m: MotionInputs, profile: Profile, gain = 1): Composed {
+export function composeSticks(left: Vec2, right: Vec2, m: MotionInputs, profile: ProfileSpec, gain = 1): Composed {
   const L: Contribution[] = []
   const R: Contribution[] = []
   let mouse: [number, number] | null = null
@@ -154,9 +156,9 @@ export function composeSticks(left: Vec2, right: Vec2, m: MotionInputs, profile:
 export const profileKey = (host: string, suggested: string | null) => `obpal.profile.${host}|${suggested ?? ''}`
 
 /** The profile in effect: the user's choice for this host and suggestion, else the host's suggestion, else default. */
-export function activeProfile(chosen: string | null, suggested: string | null | undefined): ProfileId {
-  if (isProfileId(chosen)) return chosen
-  if (isProfileId(suggested)) return suggested
+export function activeProfile(chosen: string | null, suggested: string | null | undefined, community: readonly string[] = []): string {
+  if (isProfileId(chosen) || (chosen && community.includes(chosen))) return chosen!
+  if (isProfileId(suggested) || (suggested && community.includes(suggested))) return suggested!
   return 'default'
 }
 
@@ -363,7 +365,10 @@ export interface GamepadDeps {
   /** Enter fullscreen where the platform allows it; called from a pointerup. */
   fullscreen?: () => void
   /** The profile in effect changed: the host suggested another, or the person picked one. */
-  profile?: (id: ProfileId) => void
+  profile?: (id: string) => void
+  mapping?: () => void
+  /** A host opts into exact simulation packs; the phone sends identity, never commands or joint limits. */
+  modePack?: (id: string, version: string) => void
   /** Share the neutral with calibrated sim workspaces when a motion utility starts. */
   position?: () => void
   recenter?: () => void
@@ -371,7 +376,7 @@ export interface GamepadDeps {
 }
 
 /** What the host declared about itself: its name, and the catalogue fields of its layout. */
-export interface HostInfo { name: string; profile?: string; utilities?: string[] }
+export interface HostInfo { name: string; profile?: string; utilities?: string[]; modePacks?: string[]; rig?: string }
 
 /**
  * Gamepad mode: a full-screen Xbox-style controller (floating sticks with click, D-pad, ABXY, bumpers, analog triggers,
@@ -445,8 +450,9 @@ export class GamepadMode {
   private readonly turns = new TurnWatch()
   private offered: MotionUtility[] = [...MOTION_UTILITIES]
   private host: HostInfo = { name: '' }
-  private profileId: ProfileId = 'default'
-  private profile: Profile = PROFILES.default
+  private profileId = 'default'
+  private profile: ProfileSpec = PROFILES.default
+  private profileChoice = 0
   private inputs: MotionInputs = { rates: null, tilt: null }
   private mouseAcc: Vec2 = [0, 0]
   private readonly smoother = new GyroSmoother()
@@ -464,6 +470,13 @@ export class GamepadMode {
       else this.relevel()
     })
     addEventListener('resize', () => { for (const f of this.remeasures) f() })
+    cachedPacks()
+    const choice = this.profileChoice
+    void loadCommunityPacks().then(() => {
+      if (this.profileChoice === choice) this.setHost(this.host)
+      else this.applyProfile(phoneProfile(this.profileId) ? this.profileId : 'default')
+      this.deps.mapping?.()
+    })
     this.applyProfile(this.profileId)
   }
 
@@ -525,9 +538,10 @@ export class GamepadMode {
    * choice for this screen, as a pick in the profile sheet is; a switch the phone makes by itself isn't.
    */
   setWheel(on: boolean, remember = true) {
-    if (on === (this.profileId === 'driving')) return
-    const suggested = isProfileId(this.host.profile) ? this.host.profile : null
-    const id: ProfileId = on ? 'driving' : suggested && suggested !== 'driving' ? suggested : 'default'
+    if (on === this.wheelInUse) return
+    this.profileChoice++
+    const suggested = this.host.profile && phoneProfile(this.host.profile) ? this.host.profile : null
+    const id = on ? 'driving' : suggested && suggested !== 'driving' && phoneProfile(suggested)?.controller !== 'face.wheel' ? suggested : 'default'
     if (remember) this.chooseProfile(id)
     else { this.applyProfile(id); this.changed() }
   }
@@ -541,8 +555,11 @@ export class GamepadMode {
     this.offered = offeredMotion(h.utilities)
     for (const u of [...this.on]) if (!this.offered.includes(u)) this.on.delete(u)
     for (const u of [...this.pending]) if (!this.offered.includes(u)) this.pending.delete(u)
-    const suggested = isProfileId(h.profile) ? h.profile : null
-    this.applyProfile(activeProfile(store.get(profileKey(h.name, suggested)), suggested))
+    const suggested = h.profile && phoneProfile(h.profile) ? h.profile : null
+    const arrival = requestedPhonePack()
+    const requested = arrival ? phoneProfilePack(arrival) : undefined
+    const chosen = requested?.id ?? store.get(profileKey(h.name, suggested))
+    this.applyProfile(activeProfile(chosen, suggested, phoneProfiles().map((p) => p.id)))
     this.renderChips()
   }
 
@@ -760,22 +777,24 @@ export class GamepadMode {
 
   // ---- profiles and the motion chips --------------------------------------------------
 
-  private overrides(id: ProfileId): ProfileOverrides {
+  private overrides(id: string): ProfileOverrides {
     try { return (JSON.parse(store.get(`obpal.motion.${id}`) ?? '{}') as ProfileOverrides) ?? {} } catch { return {} }
   }
 
   /** The profile in effect (CATALOGUE §3), which the phone names in mode{p}. */
-  get profileInUse(): ProfileId { return this.profileId }
+  get profileInUse(): string { const pack = phoneProfilePack(this.profileId); return pack ? packProfileId(pack) : this.profileId }
+  /** A checked wheel profile uses the wheel face, even when its id is a community namespace. */
+  get wheelInUse(): boolean { return this.profileId === 'driving' || this.profile.controller === 'face.wheel' }
 
   /**
    * Make a profile current. Its `on` utilities the host offers switch on (CATALOGUE §3): at once where the phone can drive
    * them, else with its first motion sample (a phone whose sensors start late, or wait for Start). The rest stay as they
    * were.
    */
-  private applyProfile(id: ProfileId) {
+  private applyProfile(id: string) {
     const changed = id !== this.profileId
     this.profileId = id
-    this.profile = resolveProfile(id, this.overrides(id))
+    this.profile = resolveProfileSpec(phoneProfile(id) ?? PROFILES.default, this.overrides(id))
     if (changed) {
       this.pending.clear()
       for (const u of this.profile.on) if (this.offered.includes(u) && !this.on.has(u)) this.pending.add(u)
@@ -793,9 +812,13 @@ export class GamepadMode {
   }
 
   /** The user picked a profile: remembered for this host and suggestion; picking the suggestion itself forgets the choice. */
-  private chooseProfile(id: ProfileId) {
-    const suggested = isProfileId(this.host.profile) ? this.host.profile : null
+  private chooseProfile(id: string) {
+    this.profileChoice++
+    const suggested = this.host.profile && phoneProfile(this.host.profile) ? this.host.profile : null
     store.set(profileKey(this.host.name, suggested), id === suggested ? null : id)
+    clearPackArrival()
+    this.releaseAll()
+    this.sendNeutral()
     this.applyProfile(id)
     this.changed()
   }
@@ -805,7 +828,7 @@ export class GamepadMode {
     const over = this.overrides(this.profileId)
     over[key] = { ...over[key], ...patch }
     store.set(`obpal.motion.${this.profileId}`, JSON.stringify(over))
-    this.profile = resolveProfile(this.profileId, over)
+    this.profile = resolveProfileSpec(phoneProfile(this.profileId) ?? PROFILES.default, over)
     if (this.on.has(Utility.steer) && patch.route) this.tilt.capture(this.deps.motion.up())
     this.paintChips()
     this.changed()
@@ -815,7 +838,7 @@ export class GamepadMode {
     const over = this.overrides(this.profileId)
     delete over[utilityKey(u)]
     store.set(`obpal.motion.${this.profileId}`, JSON.stringify(over))
-    this.profile = resolveProfile(this.profileId, over)
+    this.profile = resolveProfileSpec(phoneProfile(this.profileId) ?? PROFILES.default, over)
     this.paintChips()
     this.changed()
   }
@@ -856,7 +879,7 @@ export class GamepadMode {
   private turnWheel() {
     const w = this.el?.querySelector<HTMLElement>('.gp-wheel i')
     if (!w) return
-    const deg = this.profileId === 'driving' && this.inputs.tilt ? Math.round(clamp(this.inputs.tilt[0], -1, 1) * 900) / 10 : 0
+    const deg = this.wheelInUse && this.inputs.tilt ? Math.round(clamp(this.inputs.tilt[0], -1, 1) * 900) / 10 : 0
     if (deg === this.wheelTurn) return
     this.wheelTurn = deg
     w.style.transform = `rotate(${deg}deg)`
@@ -865,7 +888,7 @@ export class GamepadMode {
   private paintChips() {
     const el = this.el
     if (!el) return
-    el.classList.toggle('as-wheel', this.profileId === 'driving')
+    el.classList.toggle('as-wheel', this.wheelInUse)
     const route = (u: MotionUtility) => this.profile[utilityKey(u)].route
     el.querySelectorAll<HTMLElement>('[data-chip]').forEach((c) => {
       const u = c.dataset.chip as MotionUtility
@@ -876,7 +899,9 @@ export class GamepadMode {
     })
     const prof = el.querySelector<HTMLElement>('[data-act="profile"]')
     if (prof) {
-      setMarkup(prof, html`${ICONS[PROFILE_ICON[this.profileId]]}<span>${this.profile.name}</span>`)
+      const pack = phoneProfilePack(this.profileId), mapping = phoneMapping(this.host.name)
+      setMarkup(prof, html`${ICONS[PROFILE_ICON[this.profileId as ProfileId] ?? 'gamepad']}<span>${this.profile.name}${pack ? html`<small class="pack-credit">${packCredit(pack)}</small>` : ''}${mapping ? html`<small class="pack-credit">${mapping.name} · ${packCredit(mapping)}</small>` : ''}</span>`)
+      prof.title = [pack?.attribution, mapping?.attribution].filter(Boolean).join(' ? ')
       prof.setAttribute('aria-label', `Profile: ${this.profile.name}`)
     }
     const centre = el.querySelector<HTMLElement>('[data-act="centre"]')
@@ -963,25 +988,51 @@ export class GamepadMode {
   /** The profile picker: the built-ins, the host's suggestion marked. */
   private openProfiles() {
     const suggested = isProfileId(this.host.profile) ? this.host.profile : null
-    const cells = PROFILE_IDS.map((id) => {
-      const p = PROFILES[id]
+    const cells = [...PROFILE_IDS, ...phoneProfiles().map((p) => p.id)].map((id) => {
+      const p = phoneProfile(id)!
+      const pack = phoneProfilePack(id)
       return html`<button class="pick" data-profile="${id}" aria-selected="${id === this.profileId}" title="${p.for}">
-        <span class="pick-art">${ICONS[PROFILE_ICON[id]]}</span><span class="pick-name">${p.name}</span>${id === suggested ? html`<span class="pick-tag">suggested</span>` : ''}</button>`
+        <span class="pick-art">${ICONS[PROFILE_ICON[id as ProfileId] ?? 'gamepad']}</span><span class="pick-name">${p.name}</span>${pack ? html`<small class="pack-credit">${pack.attribution}</small>` : ''}${id === suggested ? html`<span class="pick-tag">suggested</span>` : ''}</button>`
     })
+    const otherPacks = communityPacks().filter((p) => !p.deprecated && (p.kind === 'mode' || p.kind === 'mapping'))
     const wrap = this.openSheet('Profile', html`
-      <div class="sheet-title"><i class="gp-chip-ic">${ICONS[PROFILE_ICON[this.profileId]]}</i><h2>Profile</h2><span class="sheet-sub">${this.host.name || ''}</span></div>
+      <div class="sheet-title"><i class="gp-chip-ic">${ICONS[PROFILE_ICON[this.profileId as ProfileId] ?? 'gamepad']}</i><h2>Profile</h2><span class="sheet-sub">${this.host.name || ''}</span></div>
       <div class="pick-grid profiles">${cells}</div>
-      <p class="pick-for" id="gp-for">${PROFILES[this.profileId].for}</p>`)
+      <p class="pick-for" id="gp-for">${this.profile.for}</p>
+      <h3>Community mappings and moves</h3>
+      <div class="pick-grid profiles">${otherPacks.map((p) => html`<button class="pick" data-pack="${p.id}" disabled="${(p.kind === 'mapping' && (!p.body.buttons || p.body.controller !== 'face.gamepad')) || p.kind === 'mode' && (p.body.rig !== this.host.rig || !this.host.modePacks?.includes(`${p.id}@${p.version}`))}">
+        <span class="pick-name">${p.name}</span><small class="pack-credit">${p.attribution}</small>
+        <small>${p.kind === 'mapping' ? `For ${p.body.site}; ${p.body.buttons ? 'apply phone input bindings' : 'site outputs for a matching host'}` : 'Requires a screen that offers this simulation move'}</small></button>`)}</div>
+      <button class="pick" data-clear-mapping>Clear community mapping</button>
+      <p role="status" id="gp-pack-status"></p>
+      <a href="/catalogue/#credits" target="_blank" rel="noopener">Pack credits and sources</a>`)
     wrap.querySelectorAll<HTMLElement>('[data-profile]').forEach((b) => {
       b.onclick = () => {
         tick()
-        this.chooseProfile(b.dataset.profile as ProfileId)
+        this.chooseProfile(b.dataset.profile!)
         wrap.querySelectorAll<HTMLElement>('[data-profile]').forEach((c) => c.setAttribute('aria-selected', String(c === b)))
         wrap.querySelector('#gp-for')!.textContent = this.profile.for
-        setMarkup(wrap.querySelector('.sheet-title .gp-chip-ic')!, ICONS[PROFILE_ICON[this.profileId]])
+        setMarkup(wrap.querySelector('.sheet-title .gp-chip-ic')!, ICONS[PROFILE_ICON[this.profileId as ProfileId] ?? 'gamepad'])
         setTimeout(() => this.closeSheet(), 260)
       }
     })
+    wrap.querySelectorAll<HTMLElement>('[data-pack]').forEach((b) => {
+      b.onclick = () => {
+        const pack = otherPacks.find((p) => p.id === b.dataset.pack)!
+        if (pack.kind === 'mapping' && pack.body.buttons && pack.body.controller === 'face.gamepad') {
+          this.releaseAll(); this.sendNeutral()
+          selectPhoneMapping(pack.id, this.host.name); clearPackArrival(); this.deps.mapping?.(); this.paintChips()
+          wrap.querySelector('#gp-pack-status')!.textContent = `Applied · ${pack.attribution}`
+        } else if (pack.kind === 'mode' && this.host.rig === pack.body.rig && this.host.modePacks?.includes(`${pack.id}@${pack.version}`)) {
+          this.deps.modePack?.(pack.id, pack.version)
+          wrap.querySelector('#gp-pack-status')!.textContent = `Requested · ${pack.attribution}`
+        }
+      }
+    })
+    wrap.querySelector<HTMLElement>('[data-clear-mapping]')!.onclick = () => {
+      this.releaseAll(); this.sendNeutral(); selectPhoneMapping('', this.host.name); this.deps.mapping?.(); this.paintChips()
+      wrap.querySelector('#gp-pack-status')!.textContent = 'Community mapping cleared'
+    }
   }
 
   // ---- pad controls ------------------------------------------------------------------------

@@ -32,6 +32,7 @@ import { startLocal } from '../extension/e2e/local.mjs'
 import { phoneConnections } from './phone-connections.mjs'
 import { phoneControllers } from './phone-controllers.mjs'
 import { phoneCamera } from './phone-camera.mjs'
+import { runPhonePacks } from './lib/packs-ui.mjs'
 import { phoneRecovery } from './phone-recovery.mjs'
 
 const HEADED = process.argv.includes('--headed')
@@ -322,6 +323,7 @@ try {
   await phoneCamera({ browser: sb, origin: local.origin, check, shots: SHOTS })
   await phoneRecovery({ browser: sb, origin: local.origin, check, shots: SHOTS })
   await phoneControllers({ browser: sb, origin: local.origin, check, shots: SHOTS })
+  await runPhonePacks({ browser: sb, origin: local.origin, check })
   await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {
   console.error(e)

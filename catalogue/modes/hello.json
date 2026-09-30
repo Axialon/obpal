@@ -1,0 +1,45 @@
+{
+  "version": "1.0.0",
+  "author": {
+    "name": "ob.Pal",
+    "url": "https://github.com/Axialon/obpal"
+  },
+  "license": "MIT",
+  "source": "https://github.com/Axialon/obpal/tree/main/catalogue",
+  "requires": {
+    "catalogue": "1.0.0",
+    "controllers": [
+      "face.gamepad"
+    ]
+  },
+  "created": "2026-09-30",
+  "id": "obpal/hello",
+  "kind": "mode",
+  "name": "Hello",
+  "description": "Turn the robot’s head to say hello.",
+  "attribution": "Hello by ob.Pal · MIT",
+  "body": {
+    "rig": "humanoid-v1",
+    "duration": 2,
+    "frames": [
+      {
+        "at": 0,
+        "joints": {
+          "head.yaw": 0
+        }
+      },
+      {
+        "at": 1,
+        "joints": {
+          "head.yaw": 0.3
+        }
+      },
+      {
+        "at": 2,
+        "joints": {
+          "head.yaw": 0
+        }
+      }
+    ]
+  }
+}

@@ -29,6 +29,8 @@ export interface RigProfile {
   chains: readonly Chain[]
   height: number
   calibrationId?: string
+  model?: 'cairn-i' | 'cairn-ii' | 'rill-i' | 'rill-ii' | 'hush-i' | 'hush-ii'
+  face?: { horizon: boolean; centre: number }
   /** Original sim-only tendon envelopes; driver reference profiles omit these. */
   compliance?: {
     stiffness: number
@@ -209,6 +211,46 @@ export const MORROW: RigProfile = {
     offset: s.offset.map((n) => n * scale) as Vec3,
   })),
 }
+/** Original soft-cover forms share the calibration and tendon contract, with their own proportions. */
+function softProfile(name: 'cairn' | 'rill' | 'hush', form: 'i' | 'ii'): RigProfile {
+  const scale = form === 'i' ? 1.73 / 1.8 : 1
+  return {
+    ...HUMANOID,
+    id: `${name}-${form}-v1`,
+    model: `${name}-${form}`,
+    calibrationId: HUMANOID.id,
+    height: 1.8 * scale,
+    face: { horizon: name === 'rill', centre: (name === 'hush' ? 0.196 : 0.185) * scale },
+    compliance: { stiffness: 225, damping: 27, wristTravel: 1.3, ankleTravel: 1.45, fingers: [0.70, 1.02, 0.78] },
+    joints: joints.map((joint) => ({
+      ...joint,
+      offset: joint.offset.map((n, axis) =>
+        axis === 0 && joint.id.endsWith('.arm.roll')
+          ? Math.sign(n) * (form === 'i' ? 0.225 : 0.26) * scale
+          : axis === 0 && joint.id.endsWith('.leg.roll')
+            ? Math.sign(n) * (form === 'i' ? 0.18 : 0.15) * scale
+            : n * scale,
+      ) as Vec3,
+    })),
+    chains: chains.map((chain) => ({ ...chain, lengths: [chain.lengths[0] * scale, chain.lengths[1] * scale] })),
+    skins: skins.map((skin) => ({ ...skin, size: skin.size.map((n) => n * scale) as Vec3, offset: skin.offset.map((n) => n * scale) as Vec3 })),
+  }
+}
+export const SOFT_PROFILES = {
+  cairn: [softProfile('cairn', 'i'), softProfile('cairn', 'ii')],
+  rill: [softProfile('rill', 'i'), softProfile('rill', 'ii')],
+  hush: [softProfile('hush', 'i'), softProfile('hush', 'ii')],
+} as const
+export const ROBOTS = [
+  { id: 'keel', name: 'Keel', forms: [KEEL] },
+  { id: 'morrow', name: 'Morrow', forms: [MORROW] },
+] as const
+const SOFT_ROBOTS = [
+  { id: 'cairn', name: 'Cairn', forms: SOFT_PROFILES.cairn },
+  { id: 'rill', name: 'Rill', forms: SOFT_PROFILES.rill },
+  { id: 'hush', name: 'Hush', forms: SOFT_PROFILES.hush },
+] as const
+export const robotRoster = (preview = false) => preview ? [...ROBOTS, ...SOFT_ROBOTS] : ROBOTS
 export const mirrorAngles = (p: RigProfile, q: Angles): Angles =>
   Object.fromEntries(
     p.joints.map((j) => {

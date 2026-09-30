@@ -98,6 +98,7 @@ export class WalkthroughView {
     d.addEventListener('close', () => {
       this.walk.active = false
       cancelAnimationFrame(this.tick)
+      this.figure.hide()
     })
     this.refresh()
   }

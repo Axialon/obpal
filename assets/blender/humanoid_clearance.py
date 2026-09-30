@@ -13,7 +13,7 @@ def tree(obj):
                                [tuple(face.vertices) for face in obj.data.polygons])
 
 
-def machine_openings(nodes, morrow, low):
+def machine_openings(nodes, morrow, low, material='obsidian', extended=False):
     pairs = []
     machined = set()
     for parent in nodes.values():
@@ -44,20 +44,36 @@ def machine_openings(nodes, morrow, low):
             fixed = nodes[side+'.'+parent] if parent.startswith(('arm.', 'leg.')) else nodes[parent]
             pairs.append((nodes[side+'.'+hinge], nodes[side+'.'+leaf], fixed, axis, limits))
     pairs.append((nodes['head.pitch'], nodes['head.pitch'], nodes['spine.roll'], 0, (-35, 45)))
+    if extended:
+        for hinge, axis, limits in [('spine.yaw', 1, (-35, 35)), ('spine.pitch', 0, (-20, 30)), ('spine.roll', 2, (-20, 20))]:
+            pairs.append((nodes[hinge], nodes['spine.roll'], nodes['pelvis'], axis, limits))
+        pairs.append((nodes['head.yaw'], nodes['head.pitch'], nodes['spine.roll'], 1, (-60, 60)))
+        for side in ['left', 'right']:
+            for hinge, leaf, parent, axis, limits in [
+                ('arm.wrist.pitch', 'arm.wrist.yaw', 'arm.elbow', 0, (-45, 45)),
+                ('arm.wrist.roll', 'arm.wrist.yaw', 'arm.elbow', 1, (-90, 90)),
+                ('arm.wrist.yaw', 'arm.wrist.yaw', 'arm.elbow', 2, (-35, 35)),
+                ('leg.ankle.pitch', 'leg.ankle.roll', 'leg.knee', 0, (-35, 25)),
+                ('leg.ankle.roll', 'leg.ankle.roll', 'leg.knee', 2, (-20, 20)),
+            ]:
+                pairs.append((nodes[side+'.'+hinge], nodes[side+'.'+leaf], nodes[side+'.'+parent], axis, limits))
     for moving, leaf, parent, axis, limits in pairs:
-        shells = [o for o in parent.children if o.type == 'MESH' and o.data.materials[0].name == 'obsidian']
-        sources = [o for o in leaf.children if o.type == 'MESH' and o.data.materials[0].name == 'obsidian']
+        shells = [o for o in parent.children if o.type == 'MESH' and o.data.materials[0].name == material
+                  and not o.get('softBearing')
+                  and not (extended and moving.name.startswith('spine_') and o.get('softWaistBridge'))]
+        sources = [o for o in leaf.children if o.type == 'MESH' and o.data.materials[0].name == material and not o.get('softBearing')]
         cutters = []
         for source in sources:
             cutter = source.copy()
             cutter.data = source.data.copy()
             bpy.context.collection.objects.link(cutter)
             for vertex in cutter.data.vertices:
-                vertex.co += vertex.normal*.008
+                vertex.co += vertex.normal*(.010 if extended else .008)
             cutter.data.update()
             cutters.append(cutter)
-        for step in range(17):
-            moving.rotation_euler[axis] = math.radians(limits[0]+(limits[1]-limits[0])*step/16)
+        steps = 33 if extended else 17
+        for step in range(steps):
+            moving.rotation_euler[axis] = math.radians(limits[0]+(limits[1]-limits[0])*step/(steps-1))
             bpy.context.view_layer.update()
             for cutter in cutters:
                 cutter_tree = tree(cutter)

@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://obpal.blackboxes.net/pack-profile.schema.json",
+  "title": "profile pack body",
+  "$ref": "/profile.schema.json"
+}

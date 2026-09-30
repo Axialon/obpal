@@ -11,6 +11,8 @@ import { loadSims } from './scripts/lib/load-sims.mjs'
 import { cloudflare } from '@cloudflare/vite-plugin'
 import { checkProfile, CONTROLLER_ID, CONTROLLER_IDS, CONTROLLERS, MOTION_UTILITIES, PROFILE_IDS, PROFILE_LIMITS, PROFILES, ROUTES, utilityKey } from './packages/core/src/catalogue'
 import { APP_ACTIONS, BUTTON_TARGET, DEFAULT_BUTTONS, INPUT_ID, INPUT_OPTIONS, KEY_TARGETS, SMART_BUTTONS } from './packages/core/src/buttons'
+import { checkPack, packProfileId, PACK_LIMITS, PACK_VERSION, type Pack } from './packages/core/src/packs'
+import { HUMANOID } from './src/sim/humanoid/profile'
 import { Mode } from './packages/core/src/state'
 import { BRIDGE_ROWS, EMBED, REPO, SYSTEM_ROWS, UTILITY_ROWS } from './src/catalogue/data'
 import { DEVICE_MODELS, prototypeUrl } from './src/sim/kit/models'
@@ -227,17 +229,30 @@ function embedScript(): Plugin {
  * The control catalogue as files for people and AI agents, made from the code so they can't drift from it:
  * /catalogue.json (utilities, controllers, routes, built-in and community profiles, button bindings, systems, bridges) and
  * /profile.schema.json.
- * Community profiles are catalogue/profiles/<id>.json; the build checks each with checkProfile() and stops on a bad one.
+ * Packs in catalogue/{profiles,mappings,modes,scenes} are checked with checkPack(); invalid data stops the build.
  */
 function catalogueFiles(): Plugin {
-  const community = () => {
-    const dir = join(root, 'catalogue/profiles')
-    return readdirSync(dir).filter((f) => f.endsWith('.json')).sort().map((f) => {
-      const { profile, errors } = checkProfile(JSON.parse(readFileSync(join(dir, f), 'utf8')))
-      if (!profile) throw new Error(`catalogue/profiles/${f}: ${errors.join('; ')}`)
-      if (`${profile.id}.json` !== f) throw new Error(`catalogue/profiles/${f}: name the file ${profile.id}.json`)
-      return profile
-    })
+  const community = (): Pack[] => {
+    const packs: Pack[] = []
+    const rigs = { [HUMANOID.id]: Object.fromEntries(HUMANOID.joints.map((j) => [j.id, j.limits])) }
+    for (const [folder, kind] of Object.entries({ profiles: 'profile', mappings: 'mapping', modes: 'mode', scenes: 'scene-link' })) {
+      const dir = join(root, 'catalogue', folder)
+      for (const f of readdirSync(dir).filter((f) => f.endsWith('.json')).sort()) {
+        const { pack, errors } = checkPack(JSON.parse(readFileSync(join(dir, f), 'utf8')), { rigs })
+        if (!pack) throw new Error(`catalogue/${folder}/${f}: ${errors.join('; ')}`)
+        if (pack.kind !== kind || `${pack.id.split('/')[1]}.json` !== f) throw new Error(`catalogue/${folder}/${f}: wrong kind or file name`)
+        if (packs.some((p) => p.id === pack.id)) throw new Error(`Duplicate pack: ${pack.id}`)
+        if (pack.kind === 'profile' && packs.some((p) => p.kind === 'profile' && packProfileId(p) === packProfileId(pack))) throw new Error(`Duplicate profile wire alias: ${pack.id}`)
+        if (pack.preview) {
+          const image = readFileSync(join(root, 'public', pack.preview.url))
+          const raster = image.subarray(0, 12).toString('hex')
+          if (image.length !== pack.preview.bytes || !(/^(89504e470d0a1a0a|ffd8ff)/.test(raster) || (raster.startsWith('52494646') && raster.endsWith('57454250')))) throw new Error(`${pack.id}: preview must be a raster matching its declared bytes`)
+        }
+        packs.push(pack)
+      }
+    }
+    if (packs.length > PACK_LIMITS.packs) throw new Error('Community catalogue: at most 512 packs')
+    return packs
   }
   const settings = (routes: readonly string[]) => ({
     type: 'object',
@@ -256,7 +271,7 @@ function catalogueFiles(): Plugin {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     $id: 'https://obpal.blackboxes.net/profile.schema.json',
     title: 'ob.Pal controller profile',
-    description: `A named set of motion settings, and optionally button bindings, a phone applies (CATALOGUE §3). Check one with checkProfile() in @obpal/core, then add it as catalogue/profiles/<id>.json in ${REPO}.`,
+    description: `A named set of motion settings, and optionally button bindings, a phone applies (CATALOGUE §3). Check one with checkProfile() in @obpal/core, then wrap it in a pack in catalogue/profiles/<name>.json in ${REPO}.`,
     type: 'object',
     required: ['id', 'name', 'for', 'on', 'aim', 'steer', 'point'],
     additionalProperties: false,
@@ -279,11 +294,13 @@ function catalogueFiles(): Plugin {
   const modeName = new Map(Object.entries(Mode).map(([name, m]) => [m, name]))
   const catalogue = () => ({
     name: 'ob.Pal control catalogue',
+    version: PACK_VERSION,
+    packSchema: 'https://obpal.blackboxes.net/pack.schema.json',
     about: 'ob.Pal makes any phone the controller for what’s on a screen, with no app. This is everything such a phone can drive, and how: utilities, the controllers built from them, the routes motion takes, profiles, control systems and bridges, and the embed that puts ob.Pal on any page.',
     spec: `${REPO}/blob/main/spec/CATALOGUE.md`,
     protocol: `${REPO}/blob/main/spec/PROTOCOL.md`,
     profileSchema: 'https://obpal.blackboxes.net/profile.schema.json',
-    addProfile: `Check it with checkProfile() in @obpal/core (or the builder at https://obpal.blackboxes.net/catalogue/#build), then add catalogue/profiles/<id>.json to ${REPO} in a pull request, or open an issue with the JSON.`,
+    addProfile: `Check it with checkProfile() in @obpal/core (or the builder at https://obpal.blackboxes.net/catalogue/#build), then add an attributed pack in catalogue/profiles/<name>.json to ${REPO} in a pull request, or open an issue with the JSON.`,
     utilities: UTILITY_ROWS,
     // What a person picks on the phone (CATALOGUE §9.1): hosts suggest them in layout.controllers, the embed's `modes`
     // names them, and phones say which one they use in mode{c}.
@@ -308,7 +325,11 @@ function catalogueFiles(): Plugin {
     bridges: BRIDGE_ROWS,
     embed: EMBED,
   })
-  const files = (): Record<string, string> => ({ '/catalogue.json': JSON.stringify(catalogue(), null, 2), '/profile.schema.json': JSON.stringify(schema(), null, 2) })
+  const files = (): Record<string, string> => {
+    const data = JSON.stringify(catalogue(), null, 2)
+    if (new TextEncoder().encode(data).length > PACK_LIMITS.catalogueBytes) throw new Error('Community catalogue: at most 2 MiB')
+    return { '/catalogue.json': data, '/profile.schema.json': JSON.stringify(schema(), null, 2) }
+  }
   return {
     name: 'obpal-catalogue-files',
     configureServer(server) {

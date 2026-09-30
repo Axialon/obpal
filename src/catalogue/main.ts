@@ -1,16 +1,18 @@
 /**
  * The control catalogue page (/catalogue/): the utilities, profiles, control systems and bridges, from the same data
  * the phone and hosts use, and a builder for a new controller profile, checked with checkProfile() as the build is.
- */import { type Content, setMarkup, html } from '../ui/markup'
+ */
+import { type Content, setMarkup, html } from '../ui/markup'
 
 import { applyTheme, initialTheme } from '../ui/themes'
 import { calmMarks, mountMarks } from '../ui/icons'
 import { mountTopBar } from '../landing/topbar'
 import { mountQuick } from '../ui/quick'
 import {
-  APP_ACTIONS, checkProfile, Controller, CONTROLLER_IDS, CONTROLLERS, INPUT_OPTIONS, isControllerId, KEY_TARGETS, MOTION_UTILITIES, optionOf,
+  APP_ACTIONS, checkProfile, checkPack, PACK_VERSION, packCredit, type Pack, Controller, CONTROLLER_IDS, CONTROLLERS, INPUT_OPTIONS, isControllerId, KEY_TARGETS, MOTION_UTILITIES, optionOf,
   PROFILE_IDS, PROFILE_LIMITS, PROFILES, ROUTES, targetLabel, utilityKey, type ControllerId, type InputSource, type MotionUtility, type ProfileSpec,
 } from '@obpal/core'
+import { mountCommunity } from './community'
 import { BRIDGE_ROWS, proposeUrl, SYSTEM_ROWS, UTILITY_ROWS, type CatalogueRow } from './data'
 
 applyTheme(initialTheme())
@@ -23,7 +25,8 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 const NAMES: Record<MotionUtility, string> = { 'motion.aim': 'Aim', 'motion.steer': 'Steer', 'motion.point': 'Point' }
 
 /** Community profiles (catalogue/profiles/*.json), checked when built. */
-const community = Object.values(import.meta.glob<ProfileSpec>('../../catalogue/profiles/*.json', { eager: true, import: 'default' }))
+const community = Object.values(import.meta.glob<Pack<'profile'>>('../../catalogue/profiles/*.json', { eager: true, import: 'default' })).map((p) => p.body)
+mountCommunity()
 
 function rows(id: string, list: CatalogueRow[]) {
   setMarkup($(id), list.map((r) => html`
@@ -48,7 +51,7 @@ rows('systems', SYSTEM_ROWS)
 rows('bridges', BRIDGE_ROWS)
 
 const routeLine = (p: ProfileSpec) => MOTION_UTILITIES.map((u) => html`<span><i>${NAMES[u]}</i>${p[utilityKey(u)].route}</span>`)
-setMarkup($('profiles'), [...PROFILE_IDS.map((id) => ({ p: PROFILES[id] as ProfileSpec, from: 'Built in' })), ...community.map((p) => ({ p, from: 'Community' }))]
+setMarkup($('profiles'), [...PROFILE_IDS.map((id) => ({ p: PROFILES[id] as ProfileSpec, from: 'Built in' })), ...community.map((p) => ({ p, from: packCredit(Object.values(import.meta.glob<Pack<'profile'>>('../../catalogue/profiles/*.json', { eager: true, import: 'default' })).find((pack) => pack.body.id === p.id)!) }))]
   .map(({ p, from }) => html`
     <article class="cat-card">
       <header><b>${p.name}</b><span class="st ${from === 'Community' ? 'com' : ''}">${from}</span></header>
@@ -152,7 +155,7 @@ function read(): unknown {
   }))
   const buttons = readButtons()
   return {
-    id: $<HTMLInputElement>('pid').value.trim(),
+    id: $<HTMLInputElement>('pid').value.trim().split('/').at(-1),
     name: $<HTMLInputElement>('pname').value.trim(),
     for: $<HTMLInputElement>('pfor').value.trim(),
     on: [...$('on').querySelectorAll<HTMLInputElement>('input:checked')].map((b) => b.value),
@@ -169,15 +172,24 @@ function update() {
     out.textContent = input.name === 'deadzone' ? fmt(Number(input.value)) : `${fmt(Number(input.value))}×`
   }
   const draft = read()
-  const { profile, errors } = checkProfile(draft)
-  json = JSON.stringify(profile ?? draft, null, 2)
+  const { profile, errors: profileErrors } = checkProfile(draft)
+  const packDraft = {
+    id: $<HTMLInputElement>('pid').value.trim(), version: $<HTMLInputElement>('pversion').value.trim(), kind: 'profile',
+    name: $<HTMLInputElement>('pname').value.trim(), description: $<HTMLInputElement>('pfor').value.trim(),
+    author: { name: $<HTMLInputElement>('pauthor').value.trim() }, license: $<HTMLSelectElement>('plicense').value,
+    attribution: $<HTMLInputElement>('pcredit').value.trim(), created: new Date().toISOString().slice(0, 10),
+    requires: { catalogue: PACK_VERSION, controllers: [bctl.value] }, body: profile ?? draft,
+  }
+  const { pack, errors: packErrors } = checkPack(packDraft)
+  const errors = [...new Set([...profileErrors, ...packErrors])]
+  json = JSON.stringify(pack ?? packDraft, null, 2)
   $('json').textContent = json
   setMarkup($('errs'), errors.map((e) => html`<li>${e}</li>`))
-  const ok = !!profile
+  const ok = !!pack
   const propose = $<HTMLAnchorElement>('propose')
   propose.classList.toggle('off', !ok)
   propose.setAttribute('aria-disabled', String(!ok))
-  if (ok) propose.href = proposeUrl(profile.name, json)
+  if (pack) propose.href = proposeUrl(pack.name, json)
   else propose.removeAttribute('href')
   $<HTMLButtonElement>('save').disabled = !ok
 }

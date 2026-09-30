@@ -17,7 +17,8 @@ import { Seats } from '../devices/seats'
 import { startSimScene, type SimScene } from '../scene'
 import { mountSimPanels, numberSections } from '../ui/panels'
 import { mountSound } from '../audio/session'
-import { HUMANOID, KEEL, MORROW, clamp } from './profile'
+import { HUMANOID, KEEL, MORROW, robotRoster, clamp } from './profile'
+import { softPreview } from './preview'
 import { forward } from './ik'
 import { Rig, arena } from './rig'
 import { Retargeter, FootBalance, type Retargeted } from './retarget'
@@ -33,6 +34,14 @@ import { DriverPanel } from './driver-panel'
 import { upperJoints } from './driver-profile'
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
+const previewSoft = softPreview(location.search)
+const robots = robotRoster(previewSoft)
+if (previewSoft) {
+  const meta = document.querySelector<HTMLMetaElement>('meta[name="robots"]') ?? document.createElement('meta')
+  meta.name = 'robots'
+  meta.content = 'noindex, follow'
+  document.head.append(meta)
+}
 applyTheme(initialTheme())
 mountMarks()
 mountTopBar()
@@ -187,7 +196,70 @@ function choose(index: number) {
     .forEach((b) => b.setAttribute('aria-pressed', String(Number(b.dataset.seat) === selected)))
   $('mirror').toggleAttribute('checked', actors[selected].retarget.mirror)
   ;($('mirror') as HTMLInputElement).checked = actors[selected].retarget.mirror
+  refreshRobotChoice()
 }
+
+const robotChoice = $('robot-choice') as HTMLSelectElement
+for (const robot of robots) {
+  const option = document.createElement('option')
+  option.value = robot.id
+  option.textContent = robot.name
+  robotChoice.append(option)
+}
+function refreshRobotChoice() {
+  const actor = actors[selected]
+  const robot = robots.find((robot) => robot.forms.some((profile) => profile.id === actor.control.profile.id))!
+  robotChoice.value = robot.id
+  $('robot-forms').hidden = robot.forms.length === 1
+  document.querySelectorAll<HTMLButtonElement>('[data-form]').forEach((button) => {
+    button.setAttribute('aria-pressed', String(robot.forms[Number(button.dataset.form)]?.id === actor.control.profile.id))
+  })
+}
+/** A seat keeps its claim and calibration; a new form starts from a bounded rest pose. */
+function changeRobot(id: string, form = 0) {
+  const robot = robots.find((robot) => robot.id === id)
+  const profile = robot?.forms[form]
+  if (!robot || !profile) return
+  const actor = actors[selected]
+  const holder = sim?.claims.holder(actor.id)
+  if (holder && holder !== 'host') { sim?.note(`${actor.name} is held by ${sim.nameOf(holder)}`); refreshRobotChoice(); return }
+  if (profile.id === actor.control.profile.id) return
+  if (walkthrough.dialog.open) walkthrough.dialog.close()
+  keys.clear()
+  const control = new ActorControl(profile)
+  control.position.copy(actor.control.position)
+  control.yaw = actor.control.yaw
+  if (actor.control.stopped) control.stop()
+  const retarget = new Retargeter(profile)
+  retarget.data = actor.retarget.data
+  retarget.setMirror(actor.retarget.mirror)
+  actor.rig.dispose()
+  actor.name = robot.name
+  actor.control = control
+  actor.retarget = retarget
+  actor.rig = new Rig(profile, selected)
+  actor.tendons = new Tendons(profile)
+  actor.fingers = new FingerInput()
+  actor.balance.reset()
+  actor.last = null
+  actor.generation = -1
+  actor.offset.set(0, 0, 0)
+  contacts.resetMotion()
+  actor.rig.pose(control.q, control.position, control.yaw)
+  stage.scene.add(actor.rig.root)
+  actor.rig.load()
+  const seat = document.querySelector<HTMLButtonElement>(`[data-seat="${selected}"]`)!
+  seat.textContent = robot.name
+  if (profile.model) seat.setAttribute('aria-label', `${robot.name}, seat ${selected + 1}, Form ${form ? 'II' : 'I'}`)
+  else seat.removeAttribute('aria-label')
+  sim?.setNodes(actors.map((a) => ({ id: a.id, name: a.name, kind: 'slot', group: 'Robots' })))
+  refreshRobotChoice()
+}
+robotChoice.onchange = () => changeRobot(robotChoice.value)
+document.querySelectorAll<HTMLButtonElement>('[data-form]').forEach((button) => {
+  button.onclick = () => changeRobot(robotChoice.value, Number(button.dataset.form))
+})
+refreshRobotChoice()
 document
   .querySelectorAll<HTMLButtonElement>('[data-seat]')
   .forEach((b) => (b.onclick = () => choose(Number(b.dataset.seat))))
@@ -354,6 +426,7 @@ const test =
   ['humanoid', 'humanoid-live', 'load'].includes(new URLSearchParams(location.search).get('test') ?? '')
 const injected = new Map<number, BodyInput>()
 let inspecting = false
+const faceMotion = matchMedia('(prefers-reduced-motion: reduce)')
 stage.onFrame = (t, dt) => {
   for (const actor of actors)
     for (const shadow of actor.shadows) {
@@ -375,6 +448,7 @@ stage.onFrame = (t, dt) => {
     const a = actors[i],
       owner = sim?.claims.holder(a.id) ?? (localActive && selected === i ? 'host' : '')
     a.rig.detail(stage.camera.position)
+    a.rig.face(t, !!a.last?.tracked && !a.control.stopped, faceMotion.matches)
     if (owner !== a.owner) {
       const lost = !!a.owner && !owner
       a.owner = owner
@@ -533,6 +607,7 @@ if (test)
       injectLocal: (state: BodyState) => localBody.receive(encodeBody(state)),
       localCaptureOrigin,
       actors,
+      changeRobot: (index: number, id: string, form = 0) => { choose(index); changeRobot(id, form) },
       camera: stage.camera,
       /** Loopback-only stills and joint sweeps use the actual live renderer and skins. */
       inspect: () => {

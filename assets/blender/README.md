@@ -14,6 +14,7 @@ Blender 5.2.2 runs headlessly, with `BLENDER` pointing to its executable:
 & $env:BLENDER -b --factory-startup --python-exit-code 1 --python assets/blender/dog.py
 & $env:BLENDER -b --factory-startup --python-exit-code 1 --python assets/blender/studio.py
 & $env:BLENDER -b --factory-startup --python-exit-code 1 --python assets/blender/humanoids.py
+& $env:BLENDER -b --factory-startup --python-exit-code 1 --python assets/blender/humanoids_soft.py -- --cache
 & $env:BLENDER -b --factory-startup --python-exit-code 1 --python assets/blender/humanoid_arena.py
 ```
 
@@ -64,6 +65,30 @@ sweeps; it is not a physical self-collision solver for arbitrary simultaneous
 angles or manufacturing certification. `scripts/humanoid-model-proof.mjs` adds
 the actual three.js desktop/phone views and per-joint sweep sheets to the guarded
 humanoid e2e run, again writing only to the test's temporary directory.
+
+`humanoids_soft.py` authors Cairn, Rill and Hush in forms I (1.73 m) and II (1.80 m),
+without changing Keel or Morrow. Mineral elastomer and technical knit use original,
+texture-free matte materials; satin graphite joints and curved smoked face panels
+have no clearcoat. Rounded heads and five-finger, three-phalange tendon frames
+remain protected through simplification. Closed internal sleeves bridge every
+folding limb. The extended cuts sample 33 positions with a 10 mm margin, including
+spine, wrist and ankle axes. The independent audit keeps the original envelope
+radii and samples 65 positions per axis, across all six forms and both LODs.
+
+The optional `--cache` saves the unmerged authored scenes under ignored artifacts.
+It lets the audit and renderer use the same geometry without repeating Boolean
+authoring. Run `audit_humanoids.py -- --soft --cache` and
+`render_soft_humanoids.py -- --cache` after the build. The renderer writes four
+3840 x 2160 body views, two head studies and front/side silhouettes for each form
+under `artifacts/humanoid-third/renders/`. `--finish-cache --cache` refreshes small
+hand/foot geometry, Hush's raised knit lip and the final cover-normal treatment.
+Planar dissolution keeps socket boundaries while freeing detail for the hands;
+an upper-waist trim stays inside the unchanged spine audit envelope. Tests validate the
+compressed assets, rather than relying on these authoring caches.
+
+`scripts/humanoid-soft-comparisons.mjs` assembles the concept/model and head boards,
+silhouette sheet and review index after the renders. It records compressed asset
+budgets and verifies Keel/Morrow's four GLBs against master byte for byte.
 
 Coordinates are metres, Y up, in the original procedural model's local frame. The export disables
 Blender's axis conversion intentionally. Named empty objects are the moving pivots; material names

@@ -1,9 +1,51 @@
 {
-  "id": "crane",
+  "version": "1.0.0",
+  "author": {
+    "name": "ob.Pal",
+    "url": "https://github.com/Axialon/obpal"
+  },
+  "license": "MIT",
+  "source": "https://github.com/Axialon/obpal/tree/main/catalogue",
+  "requires": {
+    "catalogue": "1.0.0",
+    "controllers": [
+      "face.gamepad"
+    ]
+  },
+  "created": "2026-09-30",
+  "id": "obpal/crane",
+  "kind": "profile",
   "name": "Crane",
-  "for": "Lifting with a steady yoke: slow tilt, fine aim",
-  "on": [],
-  "aim": { "route": "stick.right", "gain": 0.6, "curve": 1.6, "deadzone": 0.15, "invertY": false, "edgeTurn": false },
-  "steer": { "route": "stick.fly", "gain": 0.8, "curve": 1.4, "deadzone": 0.2, "invertY": false, "edgeTurn": false },
-  "point": { "route": "pointer", "gain": 1, "curve": 1, "deadzone": 0.2, "invertY": false, "edgeTurn": false }
+  "description": "Lift and aim with a steady tilt.",
+  "attribution": "Crane by ob.Pal · MIT",
+  "body": {
+    "id": "crane",
+    "name": "Crane",
+    "for": "Lifting with a steady yoke: slow tilt, fine aim",
+    "on": [],
+    "aim": {
+      "route": "stick.right",
+      "gain": 0.6,
+      "curve": 1.6,
+      "deadzone": 0.15,
+      "invertY": false,
+      "edgeTurn": false
+    },
+    "steer": {
+      "route": "stick.fly",
+      "gain": 0.8,
+      "curve": 1.4,
+      "deadzone": 0.2,
+      "invertY": false,
+      "edgeTurn": false
+    },
+    "point": {
+      "route": "pointer",
+      "gain": 1,
+      "curve": 1,
+      "deadzone": 0.2,
+      "invertY": false,
+      "edgeTurn": false
+    }
+  }
 }

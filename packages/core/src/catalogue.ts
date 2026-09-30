@@ -103,7 +103,11 @@ export const utilityKey = (id: MotionUtility): 'aim' | 'steer' | 'point' => (id 
 
 /** A built-in profile with a user's overrides applied; unknown routes fall back to the built-in one. */
 export function resolveProfile(id: ProfileId, over: ProfileOverrides = {}): Profile {
-  const base = PROFILES[id]
+  return resolveProfileSpec(PROFILES[id], over) as Profile
+}
+
+/** Apply bounded user overrides to a checked community or built-in profile. */
+export function resolveProfileSpec(base: ProfileSpec, over: ProfileOverrides = {}): ProfileSpec {
   const merge = (key: 'aim' | 'steer' | 'point', utility: MotionUtility): UtilitySettings => {
     const o = over[key] ?? {}
     const routes = ROUTES[utility]

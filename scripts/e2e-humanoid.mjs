@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { cspCheck } from './csp-watch.mjs'
 import { modelProof } from './humanoid-model-proof.mjs'
 import { tendonProof } from './humanoid-tendon-proof.mjs'
+import { softProof } from './humanoid-soft-proof.mjs'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const assert = (ok, message) => {
@@ -126,7 +127,7 @@ export async function runHumanoid(local, check) {
         throw e
       }
     })
-  const open = async (mobile = false) => {
+  const open = async (mobile = false, preview = false) => {
     const ctx = await browser.newContext({
       ...(mobile ? devices['Pixel 7'] : { viewport: { width: 1440, height: 900 } }),
       ignoreHTTPSErrors: true,
@@ -135,7 +136,7 @@ export async function runHumanoid(local, check) {
     const page = await ctx.newPage(),
       errors = pageErrors
     page.on('pageerror', (e) => errors.push(e.message))
-    await page.goto(`${local.origin}/sim/humanoid/?test=humanoid`)
+    await page.goto(`${local.origin}/sim/humanoid/?test=humanoid${preview ? '&preview=soft' : ''}`)
     await page.waitForFunction(() => window.__humanoid && window.__obpal?.pairingUrl, { timeout: 20000 })
     await page.waitForFunction(() => window.__humanoid.actors.every((a) => a.rig.root.userData.prototype === 'blender'))
     await controls(page)
@@ -143,6 +144,7 @@ export async function runHumanoid(local, check) {
   }
   try {
     await run('authored model views in the live renderer', () => modelProof(browser, local.origin, directory))
+    await run('soft roster forms and face signatures in the live renderer', () => softProof(browser, local.origin, directory))
     if (process.env.OBPAL_HUMANOID_MODEL_PROOF_ONLY === '1') return
     await run('sim tendon curl and jab yield and settle', () => tendonProof(browser, local.origin, directory))
     if (process.env.OBPAL_HUMANOID_TENDON_PROOF_ONLY === '1') return
@@ -647,7 +649,9 @@ export async function runHumanoid(local, check) {
       }
     })
     await run('two authored actors stay within the measured PC frame and draw budgets', async () => {
-      const perf = await open()
+      const perf = await open(false, true)
+      await perf.page.evaluate(() => { window.__humanoid.changeRobot(0, 'cairn', 1); window.__humanoid.changeRobot(1, 'rill', 1) })
+      await perf.page.waitForFunction(() => window.__humanoid.actors.every(a => a.rig.root.userData.lods === 2))
       await perf.page.evaluate(installFixture)
       await perf.page.evaluate(() => {
         window.fixture.two = true

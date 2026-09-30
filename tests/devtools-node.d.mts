@@ -1,6 +1,7 @@
 /** See devtools-node.mjs. */
 export const root: string
 export function readText(rel: string): string
+export function packFiles(): string[]
 export function readBytes(rel: string): Uint8Array
 export function bytes(s: string): Uint8Array
 export function makeTarball(files: Record<string, string | Uint8Array>, opts?: { folder?: string; pax?: boolean; links?: string[] }): Uint8Array

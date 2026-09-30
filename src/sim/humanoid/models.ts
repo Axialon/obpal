@@ -3,10 +3,28 @@ import * as THREE from 'three'
 import { finishPrototype } from '../kit/prototype'
 import { obsidian, smokedGlass } from '../kit/surfaces'
 import type { RigProfile } from './profile'
+import { forgetPrototype, type Prototype } from '../kit/models'
+import { softDesktop, softPhone } from './soft-materials'
 
 // glTF animation names cannot contain dots; the anatomical IDs remain unchanged.
 export const pivotName = (id: string) => id.replaceAll('.', '_')
-export const modelName = (profile: RigProfile) => (profile.id === 'morrow-v1' ? 'morrow' : 'keel')
+export const modelName = (profile: RigProfile) => profile.model ?? (profile.id === 'morrow-v1' ? 'morrow' : 'keel')
+const users = new Map<Prototype, number>()
+export function retainSkin(profile: RigProfile) {
+  const primary = modelName(profile)
+  const names: Prototype[] = [primary, `${primary}-lod`]
+  for (const name of names) users.set(name, (users.get(name) ?? 0) + 1)
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    for (const name of names) {
+      const count = (users.get(name) ?? 1) - 1
+      if (count) users.set(name, count)
+      else { users.delete(name); forgetPrototype(name) }
+    }
+  }
+}
 
 // Coarse-pointer Viewers omit the second specular lobe. The same shell colour,
 // roughness and environment reflection keep the material hierarchy on phones.
@@ -21,13 +39,14 @@ const mobileFinishes = Object.fromEntries(
     return [name, material]
   }),
 )
-export function finishHumanoid(scene: THREE.Group) {
+export function finishHumanoid(scene: THREE.Group, signal?: THREE.Material) {
   const mobile = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches
-  finishPrototype(scene, mobile ? mobileFinishes : {})
+  const soft = mobile ? softPhone : softDesktop
+  finishPrototype(scene, { ...(mobile ? mobileFinishes : {}), ...soft, softSignal: signal ?? soft.softAccent })
 }
 
 /** Reject a whole asset before touching a live rig, including rotated or scaled frames. */
-export function modelPivots(scene: THREE.Group, profile: RigProfile) {
+export function modelPivots(scene: THREE.Group, profile: RigProfile, signal?: THREE.Material) {
   const nodes = new Map<string, THREE.Object3D>()
   const validate = (id: string, offset: readonly number[], parent?: THREE.Object3D) => {
     const name = pivotName(id)
@@ -58,6 +77,6 @@ export function modelPivots(scene: THREE.Group, profile: RigProfile) {
     const second = validate(`${chain.id}.tips`, [0, -0.035 * scale, 0], first)
     validate(`${chain.id}.distal`, [0, -0.029 * scale, 0], second)
   }
-  finishHumanoid(scene)
+  finishHumanoid(scene, signal)
   return nodes
 }

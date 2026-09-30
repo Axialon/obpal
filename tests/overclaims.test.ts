@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readText } from './devtools-node.mjs'
+import { readText, packFiles } from './devtools-node.mjs'
 
 /**
  * The site says only what ships (spec/MESSAGING.md, voice rule 5). These checks read the words the public meets, on the
@@ -36,7 +36,9 @@ const STORE_ART = [
 ]
 
 /** What visitors read: the pages, the summaries written for AI readers, Link's README and store listing, and the strings the scripts add. */
+const PACK_COPY = packFiles()
 const COPY = [
+  ...PACK_COPY, 'src/catalogue/main.ts', 'src/catalogue/community.ts', 'src/catalogue/packs.ts', 'src/controller/packs.ts', 'packages/core/src/packs.ts',
   ...PAGES, 'public/llms.txt', 'public/llms-full.txt', 'extension/README.md', 'extension/store/listing.md', ...STORE_ART, 'extension/package.json',
   'extension/vite.config.ts', 'extension/src/options/options.ts', 'extension/src/popup/popup.ts', 'src/landing/main.ts',
   'src/catalogue/data.ts', 'packages/core/src/catalogue.ts', 'src/controller/main.ts', 'src/sim/arm/main.ts',
@@ -50,6 +52,7 @@ const PROSE = COPY.filter((f) => !f.endsWith('.ts') && !f.startsWith('spec/'))
 
 /** What developers read: the repository's and the packages' READMEs and the specs, where an example is the API. */
 const DOCS = [
+  'spec/PACKS.md', 'CONTRIBUTING.md', ...['profiles', 'mappings', 'modes', 'scenes'].map((f) => `catalogue/${f}/README.md`),
   'README.md', 'desktop/README.md', 'packages/core/README.md', 'packages/host/README.md', 'packages/core/src/messages.ts',
   'spec/CATALOGUE.md', 'spec/PROTOCOL.md', 'spec/STYLE-3D.md', 'spec/MESSAGING.md', 'spec/SECURITY.md', 'hardware/arduino/obpal-arm/obpal-arm.ino',
 ]
@@ -63,6 +66,10 @@ const ENTITY: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', 
  */
 function plain(file: string, source: string): string {
   let s = source
+  if (PACK_COPY.includes(file)) {
+    const p = JSON.parse(source)
+    s = [p.id, p.version, p.name, p.description, p.author?.name, p.attribution, p.deprecated?.reason, p.kind === 'profile' ? p.body?.name : '', p.kind === 'profile' ? p.body?.for : ''].filter(Boolean).join('. ')
+  }
   if (/\.(?:html|md)$/.test(file)) {
     s = s.replace(/<!--[\s\S]*?-->/g, ' ').replace(/<style\b[\s\S]*?<\/style>/gi, ' ').replace(/<script\b(?![^>]*ld\+json)[\s\S]*?<\/script>/gi, ' ')
     s = s.replace(/<\/?[a-z][^>]*>/gi, (tag) => {
@@ -149,6 +156,8 @@ const NEGATIVE_CAMERA = /\b(?:never|not|no|don't|doesn't)(?: (?:uploaded|recorde
 const negated = (near: string, claim: string, negative: RegExp) => negative.test(`${near.slice(0, -claim.length).split(/[.!?;]/).at(-1) ?? ''}${claim}`.replace(/,\s*/g, ' '))
 
 const RULES: Rule[] = [
+  { id: 'pack-status', name: 'pack display text cannot claim project status', files: PACK_COPY,
+    claim: /\bofficial\b|\b(?:approved|endorsed|certified|verified)\s+(?:by\s+)?ob[. ]?pal\b|\bob[. ]?pal\s+(?:approved|endorsed|certified|verified)\b/i },
   { id: 'npm-copy', name: 'no page or listing shows the npm import while the package is unpublished', claim: NPM_LINE, files: PROSE, when: 'unpublished' },
   {
     id: 'npm-docs', name: 'a README or spec that shows the npm import says the package isn’t on npm yet',

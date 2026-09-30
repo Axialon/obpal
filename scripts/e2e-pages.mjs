@@ -21,6 +21,7 @@ import { cspCheck, cspViolations } from './csp-watch.mjs'
 import { startWorker } from './local-worker.mjs'
 import { checkFrost, setSurface } from './lib/frost.mjs'
 import { runQuick } from './e2e-quick.mjs'
+import { runPackCatalogue } from './lib/packs-ui.mjs'
 import { nextBuild } from './lib/deploy-sim.mjs'
 
 const PORT = Number(process.env.OBPAL_E2E_WORKER_PORT) || 5179
@@ -409,6 +410,7 @@ try {
       return `${seen.loads} loads, ${seen.errors.length} errors, and it stopped`
     })
   })
+  await runPackCatalogue({ browser, origin: worker.origin, check })
   await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {
   console.error(e)

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://obpal.blackboxes.net/pack-scene-link.schema.json",
+  "title": "scene-link pack body",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "url": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://[^/@\\s]+(?:/[^\\s]*)?$",
+      "maxLength": 500
+    }
+  },
+  "required": [
+    "url"
+  ]
+}

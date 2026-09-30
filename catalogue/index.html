@@ -52,7 +52,7 @@
         <h1>Everything a phone can drive.</h1>
         <p class="lede">Every controller your phone can be, from gamepad to drum kit. Build your own profile.</p>
         <div class="cta">
-          <a class="btn primary" href="#build">Build a profile</a>
+          <a class="btn primary" href="#build">Build a profile pack</a>
           <a class="btn" href="/embed/">Embed it</a>
           <a class="btn" href="/catalogue.json">catalogue.json</a>
         </div>
@@ -84,13 +84,31 @@
         <div class="cat-grid" id="bridges"></div>
       </section>
 
+      <section class="cat-sec" id="community" aria-labelledby="h-community">
+        <h2 id="h-community">Community packs</h2>
+        <p class="sub">Attributed controllers, mappings, simulation moves and scene links. Community scenes open as separate sites; they carry no ob.Pal trust marks or seal.</p>
+        <label class="fld"><span>Search community packs</span><input id="pack-search" type="search" placeholder="Name, author or kind"></label>
+        <div class="cat-grid" id="community-packs" aria-live="polite"></div>
+        <p id="pack-status" role="status">Loading packs…</p>
+        <p><a href="#credits">Pack credits</a></p>
+      </section>
+      <section class="cat-sec" id="credits" aria-labelledby="h-credits">
+        <h2 id="h-credits">Pack credits</h2>
+        <p class="sub">The credit for every published pack, including deprecated versions still listed.</p>
+        <ul id="pack-credits"></ul>
+      </section>
+
       <section class="cat-sec builder" id="build" aria-labelledby="h-build">
-        <h2 id="h-build">Build a profile</h2>
+        <h2 id="h-build">Build a profile pack</h2>
         <p class="sub">Start from a built-in, tune it and check it. Then copy it, save it, or propose it for the catalogue.</p>
         <div class="bld">
           <form class="bld-form" id="bld" autocomplete="off">
             <label class="fld"><span>Start from</span><select id="base"></select></label>
-            <label class="fld"><span>Id</span><input id="pid" placeholder="my-profile" spellcheck="false" /></label>
+            <label class="fld"><span>Id</span><input id="pid" placeholder="your-name/my-profile" spellcheck="false" /></label>
+            <label class="fld"><span>Author</span><input id="pauthor" maxlength="80" placeholder="Your display name"></label>
+            <label class="fld"><span>Version</span><input id="pversion" value="1.0.0" spellcheck="false"></label>
+            <label class="fld"><span>Licence</span><select id="plicense"><option>MIT</option><option>CC-BY-4.0</option><option>CC0-1.0</option></select></label>
+            <label class="fld wide"><span>Attribution shown wherever used</span><input id="pcredit" maxlength="160" placeholder="My profile by Your display name ? MIT"></label>
             <label class="fld"><span>Name</span><input id="pname" placeholder="My profile" /></label>
             <label class="fld wide"><span>For</span><input id="pfor" placeholder="What it is for, in one line" /></label>
             <fieldset class="bld-on"><legend>Switch on when it applies</legend><div id="on"></div></fieldset>
@@ -103,14 +121,14 @@
             </fieldset>
           </form>
           <div class="bld-out">
-            <pre id="json" aria-label="The profile as JSON"></pre>
+            <pre id="json" aria-label="The pack as JSON"></pre>
             <ul class="errs" id="errs" aria-live="polite"></ul>
             <div class="bld-actions">
               <button class="btn" id="copy" type="button">Copy</button>
               <button class="btn" id="save" type="button">Save .json</button>
-              <a class="btn primary" id="propose" target="_blank" rel="noopener">Propose it</a>
+              <a class="btn primary" id="propose" target="_blank" rel="noopener">Propose pack</a>
             </div>
-            <p class="fine">For AI agents: check it against <a href="/profile.schema.json">profile.schema.json</a> (or <code>checkProfile()</code> in <code>@obpal/core</code>), then add <code>catalogue/profiles/&lt;id&gt;.json</code> in a pull request. <a href="/llms.txt">llms.txt</a> has the rest.</p>
+            <p class="fine">For AI agents: check it against <a href="/pack.schema.json">pack.schema.json</a> (or <code>checkPack()</code> in <code>@obpal/core</code>), then add <code>catalogue/profiles/&lt;name&gt;.json</code> in a pull request. <a href="https://github.com/Axialon/obpal/blob/main/spec/PACKS.md">The pack standard</a> covers the other kinds.</p>
           </div>
         </div>
       </section>

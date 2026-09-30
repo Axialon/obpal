@@ -36,6 +36,10 @@ export interface Layout {
   controllers?: string[]
   /** Catalogue utilities the host accepts (CATALOGUE §1); absent means all of them. */
   utilities?: string[]
+  /** Exact id@version simulation mode packs offered by this host; never a physical-driver capability. */
+  modePacks?: string[]
+  /** The maintained simulation rig used to check mode pack joints. */
+  rig?: string
   /** A catalogue profile the host suggests for what it controls right now (CATALOGUE §3). */
   profile?: string
   /**

@@ -36,6 +36,8 @@
         <header class="kit-card-head"><span class="kit-card-n">01</span><h2 class="kit-card-title">Your seat</h2></header>
         <div class="sim-actions" id="seat-actions"><button class="kit-action" data-seat="0" aria-pressed="true">Keel</button><button class="kit-action" data-seat="1" aria-pressed="false">Morrow</button></div>
         <p id="seat-owner" class="sim-lede">Choose a seat, then move or pair a phone.</p>
+        <label class="humanoid-robot">Robot <select class="kit-select" id="robot-choice" aria-label="Robot for this seat"></select></label>
+        <div class="sim-actions humanoid-forms" id="robot-forms" role="group" aria-label="Body form" hidden><span>Form:</span><button class="kit-action" type="button" data-form="0" aria-label="Body form I" aria-pressed="true">I</button><button class="kit-action" type="button" data-form="1" aria-label="Body form II" aria-pressed="false">II</button></div>
         <div class="sim-actions"><button class="kit-action" id="local-body">Body camera</button><button class="kit-action" id="range-calibrate">Calibrate reach</button></div>
         <label class="sim-auto"><input id="mirror" type="checkbox" checked /> Mirror movement</label>
       </section>

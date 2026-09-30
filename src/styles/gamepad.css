@@ -257,3 +257,12 @@ html.gp-mode .hint { display: none !important; }
   .gp { row-gap: var(--sp-2); }
   .gp-center { margin-top: 2%; }
 }
+
+/* Credits travel with community profile chips and picker choices. */
+.gp [data-act="profile"] .pack-credit { display: block; font-size: 10px; line-height: 1.3; }
+.gp-sheet .pack-credit { display: block; font-size: 11px; line-height: 1.4; color: var(--secondary); }
+.gp-sheet .pick small { overflow-wrap: anywhere; }
+.gp-sheet .pick:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.gp-sheet .pick-grid.profiles { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); }
+.gp-sheet .pick small { display: block; font-size: 10px; line-height: 1.4; }

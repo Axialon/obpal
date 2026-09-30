@@ -1,0 +1,525 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://obpal.blackboxes.net/pack.schema.json",
+  "title": "ob.Pal community pack",
+  "description": "Data only; also use checkPack() for byte caps, joint limits, compatibility, bindings and status claims.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,31}/[a-z][a-z0-9-]{1,31}$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(?=.{1,64}$)(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:0|[1-9]\\d*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "kind": {
+      "enum": [
+        "profile",
+        "mapping",
+        "mode",
+        "scene-link",
+        "controller-layout",
+        "experience"
+      ]
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40,
+      "pattern": "^[^<>\\r\\n]+$"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^[^<>\\r\\n]+$"
+    },
+    "author": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[^<>\\r\\n]+$"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://[^/@\\s]+(?:/[^\\s]*)?$",
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "license": {
+      "enum": [
+        "MIT",
+        "CC-BY-4.0",
+        "CC0-1.0"
+      ]
+    },
+    "source": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://[^/@\\s]+(?:/[^\\s]*)?$",
+      "maxLength": 500
+    },
+    "attribution": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[^<>\\r\\n]+$"
+    },
+    "requires": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "catalogue": {
+          "const": "1.0.0"
+        },
+        "controllers": {
+          "type": "array",
+          "maxItems": 9,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "face.gamepad",
+              "face.wheel",
+              "face.wii",
+              "face.mouse",
+              "face.trackpad",
+              "face.hand",
+              "face.keyboard",
+              "face.drums",
+              "face.keys"
+            ]
+          }
+        }
+      },
+      "required": [
+        "catalogue",
+        "controllers"
+      ]
+    },
+    "preview": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^/packs/previews/[a-z0-9-]+\\.(png|jpg|webp)$"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 262144
+        }
+      },
+      "required": [
+        "url",
+        "bytes"
+      ]
+    },
+    "created": {
+      "type": "string",
+      "format": "date"
+    },
+    "deprecated": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[^<>\\r\\n]+$"
+        },
+        "replacement": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,31}/[a-z][a-z0-9-]{1,31}$"
+        }
+      },
+      "required": [
+        "reason"
+      ]
+    },
+    "body": {}
+  },
+  "required": [
+    "id",
+    "version",
+    "kind",
+    "name",
+    "description",
+    "author",
+    "license",
+    "attribution",
+    "requires",
+    "created",
+    "body"
+  ],
+  "$defs": {
+    "profile": {
+      "$ref": "/profile.schema.json"
+    },
+    "mapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "site": {
+          "type": "string",
+          "maxLength": 253,
+          "pattern": "^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+[a-z]{2,}$"
+        },
+        "controller": {
+          "enum": [
+            "face.gamepad",
+            "face.wheel",
+            "face.wii",
+            "face.mouse",
+            "face.trackpad",
+            "face.hand",
+            "face.keyboard",
+            "face.drums",
+            "face.keys"
+          ]
+        },
+        "buttons": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": {
+            "pattern": "^(key:(#\\d{1,3}|[A-Za-z0-9]{1,32})|media:[a-z]{2,24}|pad:(raw:)?(b\\d{1,2}|a\\d{1,2}[+-])|back)$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^(?:[a-z0-9.-]+|key-[A-Za-z0-9]+|tray:[a-zA-Z0-9._-]+|app:[a-z-]+)$"
+          }
+        },
+        "controls": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 64,
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "code"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "key"
+                  },
+                  "code": {
+                    "type": "string",
+                    "pattern": "^(Key[A-Z]|Digit[0-9]|Arrow(Up|Down|Left|Right)|Space|Enter|Escape|Tab|Backspace|Delete|Home|End|Page(Up|Down)|Shift(Left|Right)|Control(Left|Right)|Alt(Left|Right)|F([1-9]|1[0-2]))$"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "button"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "mouse"
+                  },
+                  "button": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "button"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "gamepad"
+                  },
+                  "button": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 16
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "site",
+        "controller",
+        "controls"
+      ]
+    },
+    "mode": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rig": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[^<>\\r\\n]+$"
+        },
+        "duration": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 30
+        },
+        "frames": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 120,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 30
+              },
+              "joints": {
+                "type": "object",
+                "minProperties": 1,
+                "maxProperties": 64,
+                "propertyNames": {
+                  "pattern": "^[a-z][a-z0-9.-]{0,63}$"
+                },
+                "additionalProperties": {
+                  "type": "number"
+                }
+              }
+            },
+            "required": [
+              "at",
+              "joints"
+            ]
+          }
+        }
+      },
+      "required": [
+        "rig",
+        "duration",
+        "frames"
+      ]
+    },
+    "scene-link": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://[^/@\\s]+(?:/[^\\s]*)?$",
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "url"
+      ]
+    },
+    "controller-layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "controllers": {
+          "type": "array",
+          "maxItems": 9,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "face.gamepad",
+              "face.wheel",
+              "face.wii",
+              "face.mouse",
+              "face.trackpad",
+              "face.hand",
+              "face.keyboard",
+              "face.drums",
+              "face.keys"
+            ]
+          },
+          "minItems": 1
+        },
+        "profile": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,31}/[a-z][a-z0-9-]{1,31}$"
+        }
+      },
+      "required": [
+        "controllers"
+      ]
+    },
+    "experience": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "packs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{1,31}/[a-z][a-z0-9-]{1,31}$"
+              },
+              "version": {
+                "type": "string",
+                "pattern": "^(?=.{1,64}$)(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:0|[1-9]\\d*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+              }
+            },
+            "required": [
+              "id",
+              "version"
+            ]
+          }
+        }
+      },
+      "required": [
+        "packs"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "profile"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "$ref": "#/$defs/profile"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "mapping"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "$ref": "#/$defs/mapping"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "mode"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "$ref": "#/$defs/mode"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "scene-link"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "$ref": "#/$defs/scene-link"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "controller-layout"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "$ref": "#/$defs/controller-layout"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "experience"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "body": {
+            "$ref": "#/$defs/experience"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "id": {
+            "pattern": "^obpal/"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "author": {
+            "properties": {
+              "name": {
+                "const": "ob.Pal"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

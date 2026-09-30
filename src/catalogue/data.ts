@@ -92,4 +92,4 @@ export const EMBED = {
 }
 /** Where a person proposes a profile: a GitHub issue with its JSON (an agent can open a pull request instead). */
 export const proposeUrl = (name: string, json: string) =>
-  `${REPO}/issues/new?labels=profile&title=${encodeURIComponent(`Profile: ${name}`)}&body=${encodeURIComponent(`A controller profile for the catalogue.\n\n\`\`\`json\n${json}\n\`\`\`\n`)}`
+  `${REPO}/issues/new?labels=pack&title=${encodeURIComponent(`Pack: ${name}`)}&body=${encodeURIComponent(`An attributed data pack for the catalogue.\n\n\`\`\`json\n${json}\n\`\`\`\n`)}`

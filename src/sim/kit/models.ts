@@ -8,6 +8,8 @@ import type { Group, Mesh } from 'three'
 export type Prototype = 'drone' | 'so101' | 'rover' | 'arm5' | 'six' | 'scara' | 'delta' | 'desk' | 'helicopter' | 'plane'
   | 'kart' | 'boat' | 'tank' | 'forklift' | 'excavator' | 'slotcars' | 'planetary' | 'submarine' | 'vacuum' | 'film-camera' | 'gimbal' | 'ptz' | 'dog' | 'studio'
   | 'keel' | 'morrow' | 'keel-lod' | 'morrow-lod' | 'humanoid-arena'
+  | 'cairn-i' | 'cairn-ii' | 'rill-i' | 'rill-ii' | 'hush-i' | 'hush-ii'
+  | 'cairn-i-lod' | 'cairn-ii-lod' | 'rill-i-lod' | 'rill-ii-lod' | 'hush-i-lod' | 'hush-ii-lod'
 
 /** The mesh each robot arm kind wears (?kind=): its own id. The five-axis arm is the page's default. */
 export const ARM_MODELS: readonly Prototype[] = ['arm5', 'so101', 'six', 'scara', 'delta', 'desk']
@@ -39,6 +41,24 @@ export function pageModels(pathname: string, search: string): readonly Prototype
 export type DownloadStage = 'fetching' | 'decoding' | 'ready' | 'failed'
 interface Download { started: number; stage: DownloadStage; scene: Promise<Group | null> }
 const downloads = new Map<Prototype, Download>()
+
+/** Humanoids release their shared geometry when their last active rig leaves. */
+export function forgetPrototype(name: Prototype) {
+  const download = downloads.get(name)
+  downloads.delete(name)
+  void download?.scene.then((scene) => {
+    const geometries = new Set<import('three').BufferGeometry>()
+    const materials = new Set<import('three').Material>()
+    scene?.traverse((node) => {
+      const mesh = node as Mesh
+      if (!mesh.isMesh) return
+      geometries.add(mesh.geometry)
+      for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) materials.add(material)
+    })
+    for (const geometry of geometries) geometry.dispose()
+    for (const material of materials) material.dispose()
+  })
+}
 
 /**
  * Starts the mesh's download and its decoder at once, and only once: the mesh and the code that reads it arrive side by

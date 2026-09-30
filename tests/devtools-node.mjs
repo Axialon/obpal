@@ -5,7 +5,7 @@
  * .claude/settings.json runs it, through a real shell.
  */
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -93,3 +93,6 @@ export function runHook(shell, flags, command, input) {
   try { decision = JSON.parse(r.stdout).hookSpecificOutput.permissionDecision } catch { /* nothing on stdout: let through */ }
   return { status: r.status, decision }
 }
+
+/** Every community pack, including its displayed text, is part of the public copy surface. */
+export const packFiles = () => ['profiles', 'mappings', 'modes', 'scenes'].flatMap((folder) => readdirSync(join(root, 'catalogue', folder)).filter((f) => f.endsWith('.json')).map((f) => `catalogue/${folder}/${f}`))

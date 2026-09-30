@@ -1,3 +1,4 @@
+import { showPackArrival } from './packs'
 import { controllerWorkerURL, type Content, insertMarkup, html, setMarkup } from '../ui/markup'
 import { family } from '../family'
 import '../styles/base.css'
@@ -169,7 +170,9 @@ function startPage() {
       <button class="btn primary big" id="code-go" type="submit" disabled>Connect</button>
       <p class="code-say" id="code-say" role="status"></p>
     </form>
+    <p id="pack-arrival" class="start-foot" role="status" hidden></p>
     <p class="start-foot">Nothing on the screen yet? Open <b>${location.host}/view</b> there.</p>`)
+  showPackArrival()
   const form = document.getElementById('code-form') as HTMLFormElement
   const input = document.getElementById('code-in') as HTMLInputElement
   const go = document.getElementById('code-go') as HTMLButtonElement
@@ -552,7 +555,7 @@ async function boot(code?: Join) {
    * The catalogue controller this phone uses now (CATALOGUE §9.1), which `mode{c}` tells the screen. The gamepad with
    * the Driving profile is the steering wheel.
    */
-  const controllerNow = (): ControllerId => controllerOn(tab, { point: mouseOn() ? 'mouse' : 'wii', wheel: gamepad.profileInUse === 'driving' })
+  const controllerNow = (): ControllerId => controllerOn(tab, { point: mouseOn() ? 'mouse' : 'wii', wheel: gamepad.wheelInUse })
   /** The screen's first suggested controller opens once, on the first welcome; after that the person's choice stands. */
   let suggestionTaken = false
   /** The face of the first controller the screen suggests (layout.controllers) that its modes let this phone show. */
@@ -612,7 +615,9 @@ async function boot(code?: Join) {
   const gamepad = new GamepadMode({
     motion, settings, t0, send: (b) => link.sendState(b), toast, openSettings, fullscreen: goFullscreen, exit: () => { tab = lastTab; setMode() },
     // A new profile on the gamepad tells the screen, as mode{p}.
-    profile: () => { if (surface && mode === Mode.gamepad) sendMode() },
+    profile: () => { buttons.changed(); if (surface && mode === Mode.gamepad) sendMode() },
+    mapping: () => buttons.changed(),
+    modePack: (id, version) => { if (link.ready) link.sendCtl({ t: 'value', id: 'pack-mode', v: `${id}@${version}` }) },
     position: () => control.recenter(),
     recenter: recenterHere, scope: toggleControlScope,
     controllers: () => switcher.open(),
@@ -1029,7 +1034,7 @@ async function boot(code?: Join) {
     else if (m.t === 'layout') { layout = m.layout; syncMotion() }
     // The catalogue side of the layout: which motion utilities the host takes, and the profile it suggests for what it controls.
     if (m.t === 'welcome' || m.t === 'layout') {
-      gamepad.setHost({ name: hostName, profile: layout.profile, utilities: layout.utilities })
+      gamepad.setHost({ name: hostName, profile: layout.profile, utilities: layout.utilities, modePacks: layout.modePacks, rig: layout.rig })
       keyboard.offered(layout.tray.some((c) => c.type === 'keyboard'))
     } else if (m.t === 'state') {
       if ('music.sync' in m.values) musicWire.reply(m.values['music.sync'])
@@ -1340,7 +1345,7 @@ async function boot(code?: Join) {
     if (next && next !== was) {
       const c = choiceFor(next)!
       if (c.point) pointFace = c.point
-      if (c.wheel !== undefined && c.wheel !== (gamepad.profileInUse === 'driving')) gamepad.setWheel(c.wheel, false)
+      if (c.wheel !== undefined && c.wheel !== gamepad.wheelInUse) gamepad.setWheel(c.wheel, false)
       if (c.face !== tab) { if (tab !== 'gamepad') lastTab = tab; tab = c.face }
       // Said when the screen changed what it takes under a controller it had been told about, not on first joining.
       if (sentController === was) toast(`${CONTROLLERS[was].name} isn’t on ${screenName()} now`)

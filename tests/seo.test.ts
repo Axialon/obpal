@@ -12,6 +12,10 @@ const noEmpty = (value: unknown): boolean => {
 }
 
 describe('search pages', () => {
+  it('keeps soft preview models out of catalogue markup, search data and the sitemap', () => {
+    const publicContent = catalogueMarkup(SIMS, id => id) + JSON.stringify(structuredData('/sim/humanoid/', SIMS)) + sitemapXml(SIMS)
+    expect(publicContent).not.toMatch(/\b(cairn|rill|hush)\b|preview=soft/i)
+  })
   it('allows crawlers and points them at every canonical sim URL', () => {
     expect(robotsTxt()).toContain(`Content-Signal: ${AI_SIGNALS}`)
     expect(robotsTxt()).toContain('Sitemap: https://obpal.blackboxes.net/sitemap.xml')

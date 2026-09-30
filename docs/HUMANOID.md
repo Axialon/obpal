@@ -447,6 +447,94 @@ latency, cable forces and hardware compliance remain **unverified**. The hardwar
 leg lock is unchanged and does not gate practice legs. Adjacent-shell audits and
 synthetic motion tests do not certify hardware clearances or physical balance.
 
+## Preview models
+
+Cairn, Rill and Hush exist as pipeline previews with two body forms, face lights,
+tendon hands, LODs and on-demand loading. Their current meshes are pending the H2
+model stage. They are hidden from the default roster, catalogue, SEO and sitemap.
+Open `/sim/humanoid/?preview=soft` to opt in for the current browser session only;
+session storage remembers the opt-in, and preview pages carry `noindex`.
+Keel and Morrow remain the unchanged default roster.
+
+## Soft model pipeline (2026-09-30)
+
+Cairn, Rill and Hush are three original robots, inspired by XPeng IRON's soft,
+human-proportioned presentation. They contain no vendor marks or copied geometry.
+The owner approved all three concept directions and a second body form for each.
+Cairn uses mineral elastomer, a rounded smoked face panel and two soft eyes;
+Rill uses ash technical knit and one horizon light; Hush uses charcoal knit with
+a sculpted hood and a recessed two-eye visor. These are default names pending
+owner review. Cove remains reserved for the octopus. Keel and Morrow retain their
+original models, profiles and finishes.
+
+Each preview roster entry offers **Form I / II**, with accessible neutral body-form
+labels. Form I is 1.73 m with a narrower shoulder span and fuller hips; form II is
+1.80 m with broader shoulders, narrower hips and a flatter chest. Both preserve the
+same head and finish within their direction. The selected seat changes its whole
+profile, tendon state, retargeter and visual skin together, retains its claim,
+calibration, position and Stop state, and resets to a bounded rest pose. Driver
+reference profiles remain independent of these practice choices.
+
+The Blender source is `humanoids_soft.py`. Hero and distant meshes preserve all
+31 axes and the same named five-finger tendon frames. Three linked phalanges curl
+at 0.70/1.02/0.78 radians; a two-frame opposable thumb completes each hand.
+Closed inner sleeves bridge machined articulation clearances. The extended sweep
+adds spine, wrist and ankle axes at 33 cutting samples with 10 mm expansion; the
+independent 65-sample audit retains the existing nested-bearing envelope radii.
+Its scope is adjacent exterior covers through independent axes, not arbitrary
+simultaneous whole-body collision or physical manufacturing clearance.
+
+Soft finishes use cover roughness 0.86/0.94, satin graphite 0.54 and smoked glass
+0.30, with zero clearcoat and no image textures. Desktop materials add a small
+procedural normal perturbation, filtered at screen scale, and a cheap sheen lobe.
+Phones use standard materials with the same colour, metalness and roughness.
+The face shader projects its signal onto the curved panel, with deterministic blink, glance and a small
+listening pulse while tracked. Reduced motion holds the signal open, centred and
+steady. Each rig owns its own light uniforms.
+
+The initial two seats still open as Keel and Morrow. New robots download only
+when selected. Hero and distant geometry are reference counted and disposed when
+their last rig leaves; calibration figures release their rig on close. The scene
+therefore retains only active actors and an explicitly open demonstration.
+All twelve compressed assets must fit the existing 25k/10k triangle and 1.5 MB
+hero contracts; the live two-actor stage must stay below 65k triangles and 120 draws.
+
+| New asset | Hero bytes / triangles / batches | Distant bytes / triangles / batches |
+| --- | ---: | ---: |
+| Cairn I | 327,784 / 24,361 / 46 | 160,968 / 9,836 / 46 |
+| Cairn II | 327,184 / 24,287 / 46 | 157,628 / 9,841 / 46 |
+| Rill I | 321,668 / 23,798 / 45 | 160,528 / 9,836 / 45 |
+| Rill II | 321,012 / 23,742 / 45 | 160,708 / 9,835 / 45 |
+| Hush I | 330,984 / 24,704 / 45 | 160,224 / 9,862 / 45 |
+| Hush II | 330,132 / 24,642 / 45 | 160,900 / 9,877 / 45 |
+
+Both forms and LODs pass **24,180 independent clearance poses with zero exterior
+crossings**, without increasing the bearing envelopes. The compressed-mesh tests
+also check **7,200 limb-centre samples** in straight, halfway and folded poses,
+all named pivots, finite outward corner normals and separated finger bands.
+Small phalanges, shoes and the head keep explicit tessellation budgets. Socket
+planes dissolve before cover smoothing; Hush's knit lip stands above the visor.
+
+The final five-minute Cairn II / Rill II hero run collected 17,899 frames over
+300,215 ms on Chromium/ANGLE D3D11 and an RTX 4090. P95 logic was 0.70 ms, render
+submission 0.90 ms and GPU work 2.616 ms, with 102 draws, 55,597 triangles and
+DPR 1. The component p95 work sum is 4.216 ms, not a measured combined percentile;
+the p95 browser frame interval was 16.80 ms including refresh scheduling.
+The two-actor PC work and scene budgets pass.
+
+After merging master `f9f5374`, all four typechecks and 2,338 unit tests pass
+(14 skipped). The first full sims run passed 382/382; the integrated run passed
+381/382 with a slotcars slow-load readiness timeout. That unchanged check passed
+1/1 in isolation, without relaxing its timeout or assertions. Pages passes 64/64.
+The Desktop guard reports 19 test-browser lines before and after: **no new sessions**.
+Both suite attempts and the isolated rerun remain in the evidence folder.
+
+Evidence belongs in ignored `artifacts/humanoid-third/`: the concept sheets,
+all six forms' four 4K body views and two head views, concept/model comparisons,
+silhouettes, actual desktop/phone captures, clearance data and five-minute PC
+measurements. Phone captures are emulated; physical-phone fps, thermal behavior
+and simultaneous camera inference remain unverified.
+
 ## Open decisions — decided by the owner (2026-09-30)
 
 1. **Decided:** Keel and Morrow, including their names, are approved for phase 3. An octopus bot follows in a separately planned phase 6, after humanoid models and motion testing. Rig geometry, joints and chains remain profile data; nothing octopus-specific ships now.

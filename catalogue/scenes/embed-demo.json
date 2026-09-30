@@ -1,0 +1,24 @@
+{
+  "version": "1.0.0",
+  "author": {
+    "name": "ob.Pal",
+    "url": "https://github.com/Axialon/obpal"
+  },
+  "license": "MIT",
+  "source": "https://github.com/Axialon/obpal/tree/main/catalogue",
+  "requires": {
+    "catalogue": "1.0.0",
+    "controllers": [
+      "face.gamepad"
+    ]
+  },
+  "created": "2026-09-30",
+  "id": "obpal/embed-demo",
+  "kind": "scene-link",
+  "name": "Host embed demo",
+  "description": "Try a phone-controlled scene.",
+  "attribution": "Host embed demo by ob.Pal · MIT",
+  "body": {
+    "url": "https://obpal.blackboxes.net/embed/"
+  }
+}

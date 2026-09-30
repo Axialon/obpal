@@ -9,7 +9,10 @@ import { HUMANOID } from './profile'
 import { presetPose } from './controls'
 import { loadPrototype, finishPrototype, retirePrototype } from '../kit/prototype'
 import { holdRig } from '../kit/reveal'
-import { modelName, modelPivots } from './models'
+import { modelName, modelPivots, retainSkin } from './models'
+import { FaceLight } from './face'
+import { softPhone } from './soft-materials'
+import type { RigHold } from '../kit/reveal'
 import type { Grip } from './fingers'
 import { fingerAngles } from './tendons'
 
@@ -20,6 +23,11 @@ export class Rig {
   private skins: THREE.Group[][] = []
   private level = 0
   private loaded = false
+  private disposed = false
+  private hold?: RigHold
+  private release?: () => void
+  private fallbackMaterials: THREE.Material[] = []
+  readonly faceLight = this.profile.face ? new FaceLight(this.profile) : null
   private grips: Grip = { left: 0, right: 0 }
   private fingers: {
     side: keyof Grip
@@ -33,15 +41,19 @@ export class Rig {
     readonly profile: RigProfile,
     readonly variant = 0,
   ) {
-    const shell = plastic(variant ? '#3b4549' : '#252b32'),
-      trim = plastic('#11171d')
+    const soft = !!profile.face
+    const shell = soft ? softPhone[profile.model!.split('-')[0]+'Cover'].clone() : plastic(variant ? '#3b4549' : '#252b32'),
+      trim = soft ? softPhone.softCore.clone() : plastic('#11171d')
     const lime = new THREE.MeshStandardMaterial({
       color: '#c6ff34',
       emissive: '#c6ff34',
       emissiveIntensity: 0.3,
-      roughness: 0.35,
+      roughness: soft ? .65 : .35,
     })
-    const glass = plastic('#455c63')
+    const glass = soft ? softPhone.softGlass.clone() : plastic('#455c63')
+    const jointMetal = soft ? softPhone.softGraphite.clone() : metal
+    this.fallbackMaterials = [shell, trim, lime, glass]
+    if (soft) this.fallbackMaterials.push(jointMetal)
     for (const j of profile.joints) {
       const pivot = new THREE.Group()
       pivot.name = j.id
@@ -49,7 +61,7 @@ export class Rig {
       this.pivots.set(j.id, pivot)
       ;(j.parent ? this.pivots.get(j.parent)! : this.root).add(pivot)
     }
-    const materials = { shell, trim, glass, accent: lime, metal }
+    const materials = { shell, trim, glass, accent: lime, metal: jointMetal }
     for (const skin of profile.skins) {
       const mesh = skin.axle
         ? new THREE.Mesh(
@@ -68,8 +80,10 @@ export class Rig {
     if (this.loaded) return
     this.loaded = true
     const name = modelName(this.profile)
-    const hold = holdRig(name, [this.root])
+    this.release = retainSkin(this.profile)
+    const hold = this.hold = holdRig(name, [this.root])
     void loadPrototype(name).then((scene) => {
+      if (this.disposed) return
       if (!scene) {
         hold.fallback()
         return
@@ -77,7 +91,7 @@ export class Rig {
       hold.install(() => this.install(scene, 0))
       if (this.root.userData.prototype !== 'blender') return
       void loadPrototype(`${name}-lod`).then((low) => {
-        if (low) {
+        if (low && !this.disposed) {
           try {
             this.install(low, 1)
           } catch {
@@ -88,7 +102,7 @@ export class Rig {
     })
   }
   private install(scene: THREE.Group, level: number) {
-    const nodes = modelPivots(scene, this.profile)
+    const nodes = modelPivots(scene, this.profile, this.faceLight?.material)
     const jointNodes = new Set(nodes.values())
     const groups = [...nodes].map(([id, node]) => {
       const group = new THREE.Group()
@@ -118,7 +132,18 @@ export class Rig {
     this.root.userData.lods = this.skins.filter(Boolean).length
     this.grip(this.grips)
   }
-  /** Collective fingers suit these three- and four-finger hands, with bounded knuckle travel. */
+  /** Cancel late installs and release only this rig's resources; shared soft skins are reference counted. */
+  dispose() {
+    if (this.disposed) return
+    this.disposed = true
+    this.hold?.cancel()
+    retirePrototype(this.root)
+    this.release?.()
+    this.faceLight?.dispose()
+    for (const material of this.fallbackMaterials) material.dispose()
+  }
+  face(seconds: number, tracking: boolean, reduced: boolean) { this.faceLight?.step(seconds, tracking, reduced) }
+  /** A collective tendon curls the three phalanges and linked opposable thumb. */
   grip(value: Grip) {
     this.grips = value
     for (const { side, first, tip, distal, thumb, thumbTip } of this.fingers) {

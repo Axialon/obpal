@@ -276,6 +276,8 @@ The watchdog stops manual rod, mount, arm, slider and jib movement. Already rele
 
 ## 8. Adding to the catalogue
 
+Community data is standardised and attributed by [PACKS.md](PACKS.md): envelopes, kinds, limits, compatibility and review.
+
 The **Music studio** (`studio`, Music; `/sim/device/?d=studio`) adds eight seats:
 drum kit, hand drums, electronic pads, warm synth, piano, marimba, Air and a second
 percussion station. Its live preview is silent. It offers `face.drums` then
@@ -295,10 +297,12 @@ A new utility, bridge or control system needs all of the following:
 
 ## 9. The catalogue on the device
 
-**Status: the contract and the picker are built; the rest is design.**
+Community data is standardised and attributed by [PACKS.md](PACKS.md): envelopes, kinds, limits, compatibility and review.
+
+**Status: the contract, picker and attributed community pack loading are built; remaining design is listed below.**
 - **Built:** the controller ids (§9.1), `layout.controllers` (§9.2) and `mode{m, c?, p?}` (§9.4), in `@obpal/core` (`CONTROLLERS`, `withControllers`, `layoutControllers`, `readMode`) and `@obpal/host`, and in PROTOCOL §3. The phone names its controller and profile in `mode`, and opens the first controller the host suggests. The embed (`<obpal-remote modes="face.wii face.trackpad">`) names controllers by these ids.
 - **Built (2026-09-28):** the picker (§9.3): the controller bar and the catalogue sheet, with each controller rated for the screen (`src/controller/ratings.ts`, `switcher.ts`).
-- **Design, not built:** several devices per person (§9.5), profiles beyond the built-ins (§9.6), and the picker's pins, profile chips and bridged row.
+- **Design, not built:** several devices per person (§9.5), host-authored profile imports (§9.6), and the picker's pins and bridged row. Community profiles, phone mappings and compatible mode pack selection ship under [PACKS.md](PACKS.md).
 
 The phone's bar shows the controllers themselves (the old tabs Rotate, Point, 3D and Gamepad are the Trackpad, the Wii remote or the air mouse, the 3D hand and the gamepad or the steering wheel). The catalogue's routes and profiles (§2–3) reach the gamepad's motion chips, and the steering wheel is the gamepad on the Driving profile. This section makes the catalogue itself what a person picks from while connected: any controller the host takes, tuned by a profile, on one device or several. PLAN §10 places the work (step 5b).
 
@@ -361,7 +365,7 @@ Planned catalogue entries don't show on a device; the /catalogue/ page lists the
 ### 9.3 The picker
 
 - **The bar.** One slot per face the host takes, in the order of its best controller, each an icon, and the one in use named: the Wii remote and the air mouse share the pointing slot, the gamepad and the wheel the gamepad's, so the bar never holds two of one face and keeps its order when a variant is picked. The last slot is **More** (a grid), which opens the picker. The keyboard opens from the tray, beside any controller. Built.
-- **The picker** is a glass sheet like the tray's pickers. Controller cards sit in a grid, those the screen takes first (best first), then the ones it doesn't, dimmed. A card is a large glyph in its fit gauge and a name. What it's for, or why it's out, shows on a long press. One tap switches, and the face rises in. The gamepad, which fills the screen, has its own button for the picker, and a way back drawn as the controller it came from. Built, without pins and profile chips.
+- **The picker** is a glass sheet like the tray's pickers. Controller cards sit in a grid, those the screen takes first (best first), then the ones it doesn't, dimmed. A card is a large glyph in its fit gauge and a name. What it's for, or why it's out, shows on a long press. One tap switches, and the face rises in. The gamepad, which fills the screen, has its own button for the picker, and a way back drawn as the controller it came from. Built; community profile and mapping credits appear in the gamepad profile chip and picker. Pins remain planned.
 - **Connected** (§9.5): controllers bridged through this device sit in a row at the top, each with Use and Stop.
 - **Profiles** (§9.6): a row of chips under the grid, for the chosen controller.
 - **Pin:** a long press on a card offers "Keep in the bar".
@@ -410,14 +414,14 @@ Planned:
   - community profiles from /catalogue.json, kept for offline use;
   - **Mine**, the person's own.
 
-  Today the device knows only the five built-ins, and it ignores a suggestion it doesn't know. Planned, it takes any profile that passes `checkProfile()`.
+  The phone loads checked community profile packs from /catalogue.json, caches them for offline use and shows author, licence and attribution in the picker. Gamepad and wheel profiles are offered beside the five built-ins; other profile surfaces remain planned. See [PACKS.md](PACKS.md).
 - **Mine.** The /catalogue/ builder gains **Use on my phone**.
   - On a phone, it saves to the phone's own profiles. The controller page shares them, because both pages are on obpal.blackboxes.net.
   - On a computer, it shows a QR code that carries the profile to the phone in the URL fragment, so the profile never reaches a server.
   - Changes made on the phone (a long press on a chip) are saved per profile, as today.
 - **Wider profiles.** A profile tunes the Gamepad's three motion utilities, and names the controller it tunes (`controller`) with its button bindings (`buttons`, §3: built 2026-09-27). It will grow with it: the Wii remote's gain and edge turn, the trackpad's speed. `checkProfile()` and /profile.schema.json stay the one check.
 - **On the host: mappings.** What a control finally does belongs to the host (§3). Some hosts already carry that as data: ob.Pal Link's Keys and whole-PC tables (`DEFAULT_KEYS` and `DESKTOP_KEYS` in `extension/src/shared/keys.ts`), and its per-site suggestions (`sites.ts`).
-  - Planned, mappings become catalogue entries too, as `catalogue/mappings/<id>.json`, checked at build like profiles. A mapping says what each catalogue control does for one site or program: a key, the mouse, a gamepad button.
+  - Mappings ship as attributed packs in `catalogue/mappings/<name>.json`, checked at build and selectable on the phone. They name a site, controller, control-to-key/mouse/gamepad outputs and optional phone input bindings; automatic Link adoption remains planned. See [PACKS.md](PACKS.md).
   - A host offers its mappings as an ordinary `select` in the tray, so switching one needs no new wire.
   - People share mappings the way Steam Input configurations are shared ([RESEARCH-DEVICES.md](RESEARCH-DEVICES.md)).
 

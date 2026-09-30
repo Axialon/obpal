@@ -1,4 +1,9 @@
 /* Layout only; material, type and interaction states come from the family glass kit. */
+.humanoid-robot { display: flex; gap: 12px; align-items: center; margin: 12px 0; font: 500 12px var(--bb-font-ui); color: var(--bb-ink-2); }
+.humanoid-robot .kit-select { flex: 1; min-width: 0; }
+.humanoid-forms { align-items: center; font: 500 12px var(--bb-font-ui); color: var(--bb-ink-2); }
+.humanoid-forms[hidden] { display: none; }
+.humanoid-forms .kit-action { min-width: 56px; min-height: 44px; justify-content: center; }
 .humanoid-strip { position: fixed; top: 84px; left: 50%; transform: translateX(-50%); z-index: 3; display: flex; align-items: center; gap: 18px; max-width: calc(100vw - 100px); padding: 10px 18px; border-radius: var(--bb-radius, 20px); font: 600 12px var(--bb-font-ui); white-space: nowrap; }
 .humanoid-strip b { font: 700 19px var(--bb-font-data); color: var(--bb-accent-text); }
 .humanoid-strip span:last-child { overflow: hidden; text-overflow: ellipsis; color: var(--bb-ink-2); }

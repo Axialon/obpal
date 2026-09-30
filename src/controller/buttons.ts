@@ -11,13 +11,15 @@
  *  - badges on bound controls.
  * The person's own changes are kept per profile and controller in `obpal.buttons.<profile id>`, and the smart defaults
  * per kind and controller beside them, in `obpal.buttons.smart`.
- */import { type Content, html, setMarkup } from '../ui/markup'
+ */
+import { type Content, html, setMarkup } from '../ui/markup'
 
 import {
-  badgeOf, CONTROLLERS, describeBindings, DEVICE_KINDS, hostButtons, INPUT_OPTIONS, inferKind, inputsFor, isInputId, isProfileId,
-  isTarget, KEY_TARGETS, offerOf, optionOf, PROFILES, resolveButtons, smartButtons, sourceOf, tapsOnly, targetLabel,
+  badgeOf, CONTROLLERS, describeBindings, DEVICE_KINDS, hostButtons, INPUT_OPTIONS, inferKind, inputsFor, isInputId,
+  isTarget, KEY_TARGETS, offerOf, optionOf, resolveButtons, smartButtons, sourceOf, tapsOnly, targetLabel,
   type ControllerId, type DeviceKind, type InputSource, type Layout,
 } from '@obpal/core'
+import { phoneProfile, phoneMapping } from './packs'
 import { ICONS } from '../ui/icons'
 import { groupOf, type PhysicalInputs } from './inputs'
 import { sheetExits } from './sheet'
@@ -170,9 +172,10 @@ export class Buttons {
   bindings(controller: string = this.deps.controller()): Record<string, string> {
     const layout = this.deps.layout()
     const id = this.deps.profile()
-    const p = isProfileId(id) ? PROFILES[id] : undefined
+    const p = phoneProfile(id)
+    const mapping = phoneMapping(this.deps.hostName())
     const fromProfile = p && (p.controller ?? 'face.gamepad') === controller ? p.buttons : undefined
-    return resolveButtons(controller, [this.smart(controller), hostButtons(layout, controller), fromProfile, this.mine(controller)], offerOf(layout))
+    return resolveButtons(controller, [this.smart(controller), hostButtons(layout, controller), fromProfile, ...(mapping?.body.controller === controller && mapping.body.buttons ? [mapping.body.buttons] : []), this.mine(controller)], offerOf(layout))
   }
 
   /** Bindings changed (or the controller or the layout did): Back's arming follows, and the badges. */
