@@ -19,4 +19,4 @@ export function matchesLane(process: LaneProcess, lane: Identity, others?: Ident
 export function stopTrees(processes: LaneProcess[], lane: Identity, others: Identity[]): { root: LaneProcess; tree: LaneProcess[] }[]
 export function guardCleanup(base: string, target: string): string
 export function removeLaneTree(base: string, target: string): void
-export function codexArgs(lane: Identity & { model: string; effort: string }, round: { final: string }, roots: string[], env: Record<string, string>, resume?: boolean): string[]
+export function codexArgs(lane: Identity & { model: string; effort: string; search?: boolean }, round: { final: string }, roots: string[], env: Record<string, string>, resume?: boolean): string[]

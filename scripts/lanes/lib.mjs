@@ -89,6 +89,8 @@ export async function withLedger(file, action) {
 export function codexArgs(lane, round, roots, env, resume = false) {
   const args = resume ? ['exec', 'resume', lane.threadId] : ['exec', '-C', lane.worktree, '-s', 'workspace-write']
   args.push('-m', lane.model, '-c', `model_reasoning_effort=${JSON.stringify(lane.effort)}`)
+  // Research lanes get Codex's live web search; it runs on the model's side, not through the sandboxed shell.
+  if (lane.search) args.push('-c', 'web_search="live"')
   if (resume) args.push('-c', 'sandbox_mode="workspace-write"', '-c', `sandbox_workspace_write.writable_roots=${JSON.stringify([lane.worktree, ...roots])}`)
   else for (const root of roots) args.push('--add-dir', root)
   for (const [key, value] of Object.entries(env)) if (value) args.push('-c', `shell_environment_policy.set.${key}=${JSON.stringify(value)}`)

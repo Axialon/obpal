@@ -16,7 +16,7 @@ const win = process.platform === 'win32'
 const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true }).trim()
 const read = file => existsSync(file) ? readFileSync(file, 'utf8') : ''
 const help = `pnpm run lane -- <command>
-start <name> --prompt <file> [--model gpt-6.1-sol] [--effort high|xhigh] [--ports auto|a/b] [--base master] [--blender] [--extra-dir <dir>]
+start <name> --prompt <file> [--model gpt-6.1-sol] [--effort high|xhigh] [--ports auto|a/b] [--base master] [--blender] [--search] [--extra-dir <dir>]
 resume <name> --prompt <file> [--model <model>] [--effort <effort>]
 status [name] [--json] | wait <name> [--timeout <minutes>] | stop <name> [--dry-run]
 cleanup <name> [--force] | ports | brief`
@@ -28,7 +28,7 @@ function options(argv) {
     if (arg === '--') continue
     if (!arg.startsWith('--')) { positional.push(arg); continue }
     const key = arg.slice(2)
-    if (['json', 'dry-run', 'force', 'blender', 'help'].includes(key)) { opts[key] = true; continue }
+    if (['json', 'dry-run', 'force', 'blender', 'search', 'help'].includes(key)) { opts[key] = true; continue }
     if (!['prompt', 'model', 'effort', 'ports', 'base', 'extra-dir', 'timeout'].includes(key)) throw new Error(`Unknown option ${arg}`)
     const value = argv[++i]
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${arg}`)
@@ -160,7 +160,7 @@ async function main() {
         const ports = await allocatePorts(opts.ports || 'auto', ledger.lanes)
         const worktree = guardCleanup(base, join(base, `codex-${name}`))
         if (existsSync(worktree)) throw new Error('Worktree already exists')
-        await launch(ledger, { name, worktree, branch: `codex/${name}`, ports, model: opts.model || 'gpt-6.1-sol', effort: opts.effort || 'high', blender: Boolean(opts.blender), extraDirs: opts.extraDirs, rounds: [], createdAt: new Date().toISOString(), threadId: null }, opts, cfg, false)
+        await launch(ledger, { name, worktree, branch: `codex/${name}`, ports, model: opts.model || 'gpt-6.1-sol', effort: opts.effort || 'high', blender: Boolean(opts.blender), search: Boolean(opts.search), extraDirs: opts.extraDirs, rounds: [], createdAt: new Date().toISOString(), threadId: null }, opts, cfg, false)
       } else {
         const lane = find(ledger, name)
         const state = snapshot(lane, ledger.lanes, processes())

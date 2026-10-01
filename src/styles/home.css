@@ -66,7 +66,7 @@ html.field3d .hero::after { opacity: 0; }
   --block: calc(var(--dx) / 4) calc(var(--dy) / 4) 0 0 var(--side-1), calc(var(--dx) / 2) calc(var(--dy) / 2) 0 0 var(--side-2),
     calc(var(--dx) * 3 / 4) calc(var(--dy) * 3 / 4) 0 0 var(--side-3), var(--dx) var(--dy) 0 0 var(--side-4), var(--dx) calc(var(--dy) + 1px) 0 0 var(--foot), var(--floor);
   box-shadow: var(--block), inset 0 1px 0 rgb(var(--hl-rgb) / 0.12); }
-.hero .cta .btn.primary { --side-1: var(--accent2); --side-2: color-mix(in srgb, var(--accent2) 67%, var(--bb-accent-strong)); --side-3: color-mix(in srgb, var(--accent2) 33%, var(--bb-accent-strong)); --side-4: var(--bb-accent-strong);
+.hero .cta .btn.primary { --edge: color-mix(in srgb, var(--bb-accent) 55%, var(--bb-accent-strong)); --side-1: var(--edge); --side-2: color-mix(in srgb, var(--edge) 67%, var(--bb-accent-strong)); --side-3: color-mix(in srgb, var(--edge) 33%, var(--bb-accent-strong)); --side-4: var(--bb-accent-strong);
   --foot: rgb(var(--accent-rgb) / 0.35); --floor: calc(var(--dx) * 1.3) calc(var(--dy) + 14px) 30px -8px rgb(var(--accent-rgb) / 0.32);
   box-shadow: var(--block), inset 0 1px 0 rgb(255 255 255 / 0.45); }
 /* The hint is centred by its transform, so it rocks about its middle from there. */

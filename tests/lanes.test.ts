@@ -133,4 +133,7 @@ it('builds start and resume arguments without unsupported resume flags or shell 
   for (const flag of ['-s', '--add-dir', '-p', '-C']) expect(resume).not.toContain(flag)
   expect(resume).toContain(`sandbox_workspace_write.writable_roots=${JSON.stringify([alpha.worktree, ...roots])}`)
   expect(resume).toContain(`shell_environment_policy.set.BLENDER=${JSON.stringify(env.BLENDER)}`)
+  expect(start).not.toContain('web_search="live"')
+  expect(codexArgs({ ...alpha, search: true }, round, roots, env)).toContain('web_search="live"')
+  expect(codexArgs({ ...alpha, search: true }, round, roots, env, true)).toContain('web_search="live"')
 })

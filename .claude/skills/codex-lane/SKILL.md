@@ -11,7 +11,7 @@ Default to `gpt-6.1-sol` with `high`; use `xhigh` for difficult reasoning, motio
 
 Write a prompt file in ignored local storage. Include the owner's words, the observable outcome, owned files, excluded files, dependencies/contracts, acceptance checks and required evidence. Reuse [the prompt template](../spawn-lane/prompt-template.md), omitting its manual port header. Do not put credentials in prompts.
 
-1. `pnpm run lane -- start <name> --prompt <file> [--effort xhigh] [--blender]`. Machine paths belong in environment variables or `.claude/local/lanes.config.json`.
+1. `pnpm run lane -- start <name> --prompt <file> [--effort xhigh] [--blender] [--search]`. Use `--search` for research lanes that need the web. Machine paths belong in environment variables or `.claude/local/lanes.config.json`.
 2. Use `status` and one background `wait <name> --timeout <minutes>` per lane. Wait exits on final, failure, stall or a dead process. A capacity failure is a failed turn; read the error and intentionally resume later. A timed-out waiter leaves the lane running.
 3. `resume <name> --prompt <follow-up-file>` retains the thread and writes a new round. Tell the lane which master changes to merge. Stop a live or stalled lane before resuming. Use `stop --dry-run` when investigating a hung process; the CLI refuses the desktop app and other lane identities.
 4. `brief` regenerates `.claude/local/lanes.md`. Reference it from the coordination brief; maintain task scope and merge order in prose separately.

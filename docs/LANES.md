@@ -2,11 +2,12 @@
 
 Run the coordinator commands from the checkout whose ledger you want to use. Paths are resolved without changing the caller's working directory. The coordinator normally uses the main checkout. Each checkout owns ignored `.claude/local/lanes.json`, round files and `lanes.md`; do not mix ledgers or manually share allocations between checkouts. Busy ports are always probed.
 
-On first run the CLI creates `.claude/local/lanes.config.json` from the environment and prints its location. Configure `chromiumPath`, `blenderPath`, `extraWritableDirs` (an array), and `scratchDir`. `OBPAL_E2E_CHROMIUM`, `BLENDER` and `OBPAL_LANES_SCRATCH` override those settings. `OBPAL_CODEX_BIN` can select a native Codex executable. Paths belong only in this ignored config or the environment. `--blender` requires a configured Blender path.
+On first run the CLI creates `.claude/local/lanes.config.json` from the environment and prints its location. Configure `chromiumPath`, `blenderPath`, `extraWritableDirs` (an array), and `scratchDir`. `OBPAL_E2E_CHROMIUM`, `BLENDER` and `OBPAL_LANES_SCRATCH` override those settings. `OBPAL_CODEX_BIN` can select a native Codex executable. Paths belong only in this ignored config or the environment. `--blender` requires a configured Blender path. `--search` gives a research lane Codex's live web search (it runs on the model's side; the sandboxed shell still has no network).
 
 ```text
 pnpm run lane -- start feature --prompt .claude/local/feature.md
 pnpm run lane -- start models --prompt .claude/local/models.md --blender --effort xhigh
+pnpm run lane -- start research --prompt .claude/local/research.md --search
 pnpm run lane -- resume feature --prompt .claude/local/feature-follow-up.md
 pnpm run lane -- status [name] [--json]
 pnpm run lane -- wait feature --timeout 60

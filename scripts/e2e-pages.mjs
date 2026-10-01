@@ -14,7 +14,7 @@
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch.
  */
 import { fileURLToPath } from 'node:url'
-import { readdirSync } from 'node:fs'
+import { mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { chromium, devices } from 'playwright'
 import { cspCheck, cspViolations } from './csp-watch.mjs'
@@ -30,6 +30,8 @@ const PORT = Number(process.env.OBPAL_E2E_WORKER_PORT) || 5179
 const HEADED = process.argv.includes('--headed')
 const SHOTS = process.env.OBPAL_SHOTS || ''
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
+const ONLY = process.env.OBPAL_E2E_PAGES_ONLY || ''
+if (ONLY && ONLY !== 'try') throw new Error(`unknown pages selector: ${ONLY}`)
 const PAGES = ['/', '/p/', '/view/', '/sim/', '/sim/arm/', '/sim/arena/', '/sim/humanoid/', '/sim/device/', '/embed/', '/link/', '/link/desktop/', '/link/try/', '/catalogue/', '/buttons/', '/sponsor/', '/donate/', '/privacy/', '/trust/']
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const results = []
@@ -44,6 +46,110 @@ async function check(name, fn) {
   }
 }
 
+async function runTry(browser, origin) {
+  const observations = []
+  if (SHOTS) mkdirSync(SHOTS, { recursive: true })
+  for (const mode of ['reduced', 'unavailable', 'lost']) {
+    for (const width of [1280, 390]) {
+      const ctx = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 800 }, deviceScaleFactor: 1, reducedMotion: mode === 'reduced' ? 'reduce' : 'no-preference' })
+      try {
+        await ctx.addInitScript(({ mode }) => {
+          window.__tryPad = null
+          Object.defineProperty(navigator, 'getGamepads', { value: () => [window.__tryPad] })
+          if (mode === 'unavailable') {
+            const context = HTMLCanvasElement.prototype.getContext
+            HTMLCanvasElement.prototype.getContext = function (type, ...args) {
+              return type.startsWith('webgl') ? null : context.call(this, type, ...args)
+            }
+          }
+        }, { mode })
+        const page = await ctx.newPage()
+        const errors = []
+        page.on('pageerror', error => errors.push(error.message))
+        await page.goto(origin + '/link/try/')
+        await page.evaluate(() => document.fonts.ready)
+        const state = page.locator('#demo-state')
+        const waitText = text => page.waitForFunction(text => document.querySelector('#demo-state').textContent.includes(text), text)
+        await waitText('enable This tab')
+        if (await state.getAttribute('role') !== 'status' || await state.getAttribute('aria-live') !== 'polite' || await state.getAttribute('aria-atomic') !== 'true') throw new Error('feedback is not one atomic polite status')
+        if (mode === 'lost') {
+          await page.waitForFunction(() => Number(document.querySelector('#link-space').dataset.dotFrames) > 0)
+          const lost = await page.locator('#link-space').evaluate(canvas => {
+            const extension = canvas.getContext('webgl2')?.getExtension('WEBGL_lose_context')
+            extension?.loseContext()
+            return !!extension
+          })
+          if (!lost) throw new Error('cannot exercise actual WebGL context loss')
+        }
+        const feedbackMode = mode === 'reduced' ? 'reduced' : 'unavailable'
+        await page.waitForFunction(mode => document.querySelector('#demo-state').dataset.feedbackMode === mode, feedbackMode)
+        if (mode !== 'reduced') await page.locator('#link-flat').waitFor({ state: 'visible' })
+        const guidance = await page.locator('#demo-guidance').textContent()
+        if (!guidance.includes(mode === 'reduced' ? 'stays still with reduced motion' : 'motion is unavailable')) throw new Error('movement guidance is not qualified')
+        await page.evaluate(() => { window.__tryPad = { connected: true, axes: [0, 0] } })
+        await waitText('Left stick is neutral')
+        await sleep(300)
+        const frames = await page.locator('#link-space').getAttribute('data-dot-frames')
+        await page.evaluate(() => { window.__tryPad.axes = [0.7, 0] })
+        await waitText('Left stick input detected')
+        if (SHOTS) await page.screenshot({ path: join(SHOTS, `${mode}-${width}-input.png`), fullPage: true })
+        await page.evaluate(() => {
+          window.__tryWrites = 0
+          window.__tryObserver = new MutationObserver(records => { window.__tryWrites += records.length })
+          window.__tryObserver.observe(document.querySelector('#demo-state'), { childList: true, characterData: true, subtree: true })
+          window.__tryPad.axes = [-0.8, 0.5]
+        })
+        await sleep(250)
+        const heldWrites = await page.evaluate(() => window.__tryWrites)
+        if (heldWrites !== 0) throw new Error('held input repeatedly mutates the live-region text')
+        if (mode === 'reduced' && frames !== await page.locator('#link-space').getAttribute('data-dot-frames')) throw new Error('reduced-motion input animates the constellation')
+        await page.getByRole('button', { name: 'Reset view', exact: true }).click()
+        await waitText('Left stick input detected')
+        await page.evaluate(() => { window.__tryPad.axes = [0, 0] })
+        await waitText('Left stick released. Input is neutral')
+        if (SHOTS) await page.screenshot({ path: join(SHOTS, `${mode}-${width}-neutral.png`), fullPage: true })
+        await page.evaluate(() => { window.__tryPad = null })
+        await waitText('Controller disconnected')
+        await sleep(100)
+        await page.getByRole('button', { name: 'Reset view', exact: true }).click()
+        await waitText('Controller disconnected')
+        if (await page.locator('#link-space').getAttribute('data-pad-input') !== 'false') throw new Error('stale input marker after disconnect')
+        // Playwright disables bfcache: dispatch its persisted lifecycle, then also navigate back normally.
+        for (let i = 0; i < 2; i++) {
+          await page.evaluate(() => {
+            dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }))
+            window.__tryPad = { connected: true, axes: [0, 0] }
+          })
+          await waitText('paused')
+          await page.evaluate(() => dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })))
+          await waitText('Left stick is neutral')
+        }
+        await page.evaluate(() => { window.__tryPad.axes = [0.6, 0] })
+        await waitText('Left stick input detected')
+        const reset = page.getByRole('button', { name: 'Reset view', exact: true })
+        await reset.focus()
+        if (!await reset.evaluate(node => node === document.activeElement && node.getBoundingClientRect().height >= 44)) throw new Error('Reset focus or target lost')
+        const back = page.getByRole('link', { name: 'Back to the Link guide', exact: true })
+        await back.focus()
+        if (!await back.evaluate(node => node === document.activeElement) || await back.getAttribute('href') !== '/link/') throw new Error('Back to Link unavailable')
+        if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) throw new Error(`overflow at ${width}px`)
+        observations.push({ mode, width, dpr: 1, guidance, input: await state.textContent(), liveWritesDuringHeldInput: heldWrites })
+        await page.evaluate(() => window.__tryObserver.disconnect())
+        await page.goto(origin + '/privacy/')
+        await page.goBack()
+        await waitText('enable This tab')
+        await page.evaluate(() => { window.__tryPad = { connected: true, axes: [0.4, 0] } })
+        await waitText('Left stick input detected')
+        if (errors.length) throw new Error(errors.join(' | '))
+      } catch (error) { throw new Error(`${mode}, ${width}px: ${error.message}`) }
+      finally { await ctx.close() }
+    }
+  }
+  if (SHOTS) writeFileSync(join(SHOTS, 'try-observations.json'), JSON.stringify({ browser: browser.version(), observations }, null, 2))
+  cspCheck()
+  return '6 scenarios: reduced motion, unavailable/lost WebGL; 1280px and 390px; input, release, disconnect, reset and history'
+}
+
 let worker = null
 let browser = null
 let exitCode = 0
@@ -51,6 +157,9 @@ try {
   worker = await startWorker({ port: PORT })
   console.log(`ob.Pal pages e2e (${worker.origin})`)
   browser = await chromium.launch({ executablePath, headless: !HEADED })
+  if (ONLY === 'try') {
+    await check('Try keeps readable controller feedback without constellation motion', () => runTry(browser, worker.origin))
+  } else {
   await guardSiteButtons(browser, worker.origin, SITE_BUTTON_ROUTES.filter(([name]) => name !== 'home'), check)
   await check('IndexNow key is served at its matching public URL', async () => {
     const file = readdirSync(fileURLToPath(new URL('../public/', import.meta.url))).find(name => /^[a-f0-9]{32}\.txt$/.test(name))
@@ -487,6 +596,7 @@ try {
   await runGraphicsRecoveryLayouts(browser, worker.origin, check)
   await runPackCatalogue({ browser, origin: worker.origin, check })
   await check('no Content Security Policy violations on any page', cspCheck)
+  }
 } catch (e) {
   console.error(e)
   exitCode = 1
