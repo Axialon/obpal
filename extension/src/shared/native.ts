@@ -12,6 +12,7 @@
  * phone's keyboard goes beside them, in order on the same port, as text requests.
  * See spec/PROTOCOL.md § Native messaging frames.
  */
+import { DESKTOP_GUIDE_URL } from './desktop-guide'
 import { MAX_TEXT } from '@obpal/core'
 import type { KeyName, KeysOutput, MouseButton } from './keys'
 
@@ -26,7 +27,7 @@ export const PC_PAGE_PORT_NAME = 'obpal-link/pc-page'
 export const NATIVE_HEARTBEAT_MS = 250
 /** Where to get the helper. */
 export const MAC_ACCESSIBILITY = 'Allow ob.Pal Desktop in System Settings, then Privacy & Security, then Accessibility.'
-export const DESKTOP_URL = 'https://github.com/Axialon/obpal-link/tree/main/desktop#readme'
+export const DESKTOP_URL = DESKTOP_GUIDE_URL
 
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x)
 const fin = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)

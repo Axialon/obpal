@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en" class="site">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0a0718" />
+    <meta name="description" content="A Gamepad API demo for ob.Pal Link: pair your phone, enable this tab, then move the left stick to turn the dot constellation." />
+    <title>Try ob.Pal Link with the dot demo</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/plus-jakarta-sans-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/src/styles/fonts.css" />
+    <link rel="stylesheet" href="/src/family/family.css" />
+    <link rel="stylesheet" href="/src/styles/base.css" />
+    <link rel="stylesheet" href="/src/styles/site.css" />
+    <link rel="stylesheet" href="/src/styles/landing.css" />
+    <link rel="stylesheet" href="/src/styles/pages.css" />
+    <script type="module" src="/src/landing/site.ts"></script>
+    <script type="module" src="/src/link/try.ts"></script>
+  </head>
+  <body>
+        <header class="top">
+      <div class="top-in">
+        <a class="logo" href="/" aria-label="ob.Pal"><span class="mark-slot" data-mark></span><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span></a>
+        <button class="switch-btn" id="t-switch" type="button" aria-label="Blackboxes apps" title="Blackboxes apps"></button>
+        <nav class="top-nav" aria-label="Site">
+          <a href="/sim/">Sims</a>
+          <a href="/link/" aria-current="page">Link</a>
+          <a href="/catalogue/">Catalogue</a>
+          <a href="/#build">Build</a>
+          <a href="/donate/">Donate</a>
+        </nav>
+        <button class="top-menu" id="t-menu" type="button" aria-label="Menu">
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10" /></svg>
+        </button>
+        <a class="btn primary top-go" href="/view/">Open the viewer</a>
+      </div>
+    </header>
+    <div class="bb-menu bb-glass switcher" id="switcher" aria-label="Blackboxes apps" hidden></div>
+    <nav class="bb-menu bb-glass site-menu" id="site-menu" aria-label="Site" hidden>
+      <a class="bb-menu-item" href="/sim/">Sims</a>
+      <a class="bb-menu-item" href="/link/" aria-current="page">ob.Pal Link</a>
+      <a class="bb-menu-item" href="/catalogue/">Catalogue</a>
+      <a class="bb-menu-item" href="/#build">Build with it</a>
+      <a class="bb-menu-item" href="/donate/">Donate</a>
+    </nav>
+    <main class="land journey"><section class="hero"><p class="eyebrow">Link · Gamepad API demo</p><h1>Make the dots move.</h1><p class="lede">Your left stick turns the constellation. Let go to stop.</p><p class="guide-status" id="demo-state" role="status">Open Link, pair a phone, choose Controller and enable This tab.</p><figure class="constellation demo-scene"><canvas id="link-space" aria-label="Dot constellation controlled with the Gamepad API"></canvas><canvas id="link-flat" aria-hidden="true" hidden></canvas><div class="device-labels"><span>Phone</span><span>Browser</span><span>PC <small>optional</small></span></div></figure><button class="btn" id="demo-reset" type="button">Reset view</button><p class="fine">This demo reads standard Gamepad API axes. It also accepts a physical gamepad. Pointer input gives a preview.</p><a href="/link/">Back to the Link guide</a></section>      <footer class="foot">Part of <a href="/">ob.Pal</a> and the <a href="https://ecosystem.blackboxes.net">Blackboxes</a> ecosystem. <a href="https://github.com/Axialon/obpal">Source</a> · <a href="https://github.com/Axialon/obpal-link">Releases</a> · <a href="/privacy/">Privacy</a> · <a href="mailto:hello@obpal.blackboxes.net">hello@obpal.blackboxes.net</a></footer>
+    </main>
+  </body>
+</html>

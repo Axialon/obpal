@@ -35,6 +35,13 @@ The steps in the Developer Dashboard, in order. What to paste is in [listing.md]
 7. **Test instructions:** paste the reviewer notes from listing.md.
 8. **Submit for review.** Reviews take from a few days to a few weeks. Choose to publish by hand after approval if you'd like the site to link to the listing the same day.
 
+## Updating a published item
+
+1. `pnpm run store:extension` writes `extension/release/obpal-link-<version>-store.zip` (no key; the item already has its ID).
+2. If an earlier version is still pending review, the dashboard won't take a new package: choose **Cancel review** on the item first. The published version stays live meanwhile.
+3. **Package:** upload the new zip. **Store listing** and **Privacy practices:** paste any blocks from listing.md that changed since the last upload, and replace the images when they changed. **Test instructions:** paste them again.
+4. **Submit for review**, then update `status.json`.
+
 ## After approval
 
 - **Delete the first-upload zip** (`%USERPROFILE%\.obpal-keys\store\`): the store has the key now. Keep `extension-key.pem` itself, as safely as before.

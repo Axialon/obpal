@@ -24,7 +24,7 @@ const NPM_PUBLISHED = true
 
 /** Every page the site builds (vite.config.ts), as its file in the build. */
 const PAGES = [
-  'index.html', 'p/index.html', 'view/index.html', 'sponsor/index.html', 'donate/index.html', 'link/index.html', 'privacy/index.html',
+  'index.html', 'p/index.html', 'view/index.html', 'sponsor/index.html', 'donate/index.html', 'link/index.html', 'link/desktop/index.html', 'link/try/index.html', 'privacy/index.html',
   'sim/index.html', 'sim/arm/index.html', 'sim/arena/index.html', 'sim/device/index.html', 'catalogue/index.html', 'embed/index.html',
   'buttons/index.html', 'trust/index.html',
 ]
@@ -157,6 +157,9 @@ const NEGATIVE_CAMERA = /\b(?:never|not|no|don't|doesn't)(?: (?:uploaded|recorde
 const negated = (near: string, claim: string, negative: RegExp) => negative.test(`${near.slice(0, -claim.length).split(/[.!?;]/).at(-1) ?? ''}${claim}`.replace(/,\s*/g, ' '))
 
 const RULES: Rule[] = [
+  { id: 'link-viewers', name: 'Link never promises every 3D viewer', claim: /\bany 3D viewer/i, files: COPY },
+  { id: 'link-panic', name: 'Link panic copy names phone input rather than all activity', claim: /\bstops (?:everything|it all)\b/i, files: ['link/index.html', 'link/desktop/index.html', 'extension/store/listing.md', ...STORE_ART, 'extension/src/popup/popup.ts', 'extension/src/options/options.ts'] },
+  { id: 'link-rumble', name: 'Link rumble copy qualifies phone and browser support', claim: /\brumble(?: reaches your phone| works|[.!])?/i, files: ['link/index.html', 'extension/store/listing.md', ...STORE_ART], near: [120, 160], ok: near => /\b(?:vibration|supported|support)\b/i.test(near) },
   { id: 'pack-status', name: 'pack display text cannot claim project status', files: PACK_COPY,
     claim: /\bofficial\b|\b(?:approved|endorsed|certified|verified)\s+(?:by\s+)?ob[. ]?pal\b|\bob[. ]?pal\s+(?:approved|endorsed|certified|verified)\b/i },
   { id: 'npm-copy', name: 'no page or listing shows the npm import while the package is unpublished', claim: NPM_LINE, files: PROSE, when: 'unpublished' },
@@ -309,7 +312,7 @@ describe('overclaims', () => {
     const popup = readText('extension/src/popup/popup.ts')
     const scan = /<div class="scan" id="scan">([\s\S]*?)<div class="codes"/.exec(popup)?.[1]
     expect(scan).toContain('id="qr"')
-    expect(scan).toContain("phone's browser · no app · no account")
+    expect((scan ?? "").replaceAll("’", "'")).toContain("phone's browser · no app · no account")
     expect(scan).toContain('obpal.blackboxes.net')
     expect(scan).toContain('Check your camera shows obpal.blackboxes.net')
     expect(popup).toContain('Check both screens show the same seal')

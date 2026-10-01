@@ -29,6 +29,7 @@ import { runAudio } from './e2e-audio.mjs'
 import { runTemporal } from './e2e-temporal.mjs'
 import { runWarmup } from './e2e-warmup.mjs'
 import { runGraphicsRecovery, runGraphicsRecoveryLayouts } from './e2e-graphics-recovery.mjs'
+import { runSmoothness } from './e2e-smoothness.mjs'
 import { runLoad } from './e2e-load.mjs'
 import { simsStrip } from './sims-strip.mjs'
 import { runPanels } from './e2e-panels.mjs'
@@ -168,6 +169,8 @@ try {
     try { await runGraphicsRecoveryLayouts(browser, local.origin, check) } finally { await browser.close() }
   }
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'graphics-recovery') await runGraphicsRecovery(local, check)
+  else if (process.env.OBPAL_E2E_SIMS_ONLY === 'smoothness') await runSmoothness(local, check)
+  else if (process.env.OBPAL_E2E_SIMS_ONLY === 'temporal') await runTemporal(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'warm-up') await runWarmup(local, check)
   else if (ONLY_BUTTONS) await runSimButtons(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'humanoid-live') await runHumanoidLive(local, check)
@@ -533,6 +536,7 @@ try {
   closers.length = 0
   // The node strip on an arm and the excavator: switching parts mid-drag (./sims-strip.mjs), with its own browser.
   await simsStrip({ origin: local.origin, check, executablePath, headed: HEADED, shots: SHOTS })
+  await runSmoothness(local, check, { ids: ['pendulum'] })
   await runTemporal(local, check)
   await runWarmup(local, check)
   await runGraphicsRecovery(local, check)

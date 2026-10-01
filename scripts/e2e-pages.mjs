@@ -30,7 +30,7 @@ const PORT = Number(process.env.OBPAL_E2E_WORKER_PORT) || 5179
 const HEADED = process.argv.includes('--headed')
 const SHOTS = process.env.OBPAL_SHOTS || ''
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
-const PAGES = ['/', '/p/', '/view/', '/sim/', '/sim/arm/', '/sim/arena/', '/sim/humanoid/', '/sim/device/', '/embed/', '/link/', '/catalogue/', '/buttons/', '/sponsor/', '/donate/', '/privacy/', '/trust/']
+const PAGES = ['/', '/p/', '/view/', '/sim/', '/sim/arm/', '/sim/arena/', '/sim/humanoid/', '/sim/device/', '/embed/', '/link/', '/link/desktop/', '/link/try/', '/catalogue/', '/buttons/', '/sponsor/', '/donate/', '/privacy/', '/trust/']
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const results = []
 async function check(name, fn) {
@@ -156,6 +156,77 @@ try {
       }
     })
   }
+  await check('Link dot surfaces remount after cached-page return, and steady pointer input stops drawing', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+    try {
+      await ctx.addInitScript(() => {
+        window.__installPaints = 0
+        const clear = CanvasRenderingContext2D.prototype.clearRect
+        CanvasRenderingContext2D.prototype.clearRect = function (...args) {
+          if (this.canvas.id === 'install-dots') window.__installPaints++
+          return clear.apply(this, args)
+        }
+      })
+      const page = await ctx.newPage()
+      await page.goto(worker.origin + '/link/')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForFunction(() => Number(document.querySelector('#link-space').dataset.dotFrames) > 0 || !document.querySelector('#link-flat').hidden)
+      // Playwright disables the back/forward cache; exercise the browser's persisted lifecycle explicitly.
+      await page.evaluate(() => {
+        dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }))
+        dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
+      })
+      await sleep(300)
+      const space = page.locator('#link-space')
+      if (await space.isVisible()) {
+        const box = await space.boundingBox()
+        const before = Number(await space.getAttribute('data-dot-frames'))
+        await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.3)
+        await page.waitForFunction(n => Number(document.querySelector('#link-space').dataset.dotFrames) > n, before)
+        await space.evaluate(canvas => {
+          const box = canvas.getBoundingClientRect()
+          canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: box.x + box.width * 0.8, clientY: box.y + box.height * 0.3 }))
+        })
+        await sleep(1500)
+        const rested = await space.getAttribute('data-dot-frames')
+        await space.evaluate(canvas => {
+          const box = canvas.getBoundingClientRect()
+          for (let i = 0; i < 30; i++) canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: box.x + box.width * 0.8, clientY: box.y + box.height * 0.3 }))
+        })
+        await sleep(300)
+        if (rested !== await space.getAttribute('data-dot-frames')) throw new Error('a steady input keeps the hero drawing')
+      } else if (!await page.locator('#link-flat').isVisible()) throw new Error('flat fallback lost on return')
+      await page.goto(worker.origin + '/link/desktop/')
+      await page.waitForFunction(() => window.__installPaints > 0)
+      const before = await page.evaluate(() => window.__installPaints)
+      await page.evaluate(() => {
+        dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }))
+        dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
+      })
+      await page.waitForFunction(n => window.__installPaints > n, before)
+      const returned = await page.evaluate(() => window.__installPaints)
+      await page.evaluate(() => document.documentElement.dataset.bbAccent = 'turquoise')
+      await page.waitForFunction(n => window.__installPaints > n, returned)
+      await ctx.addInitScript(() => {
+        const context = HTMLCanvasElement.prototype.getContext
+        HTMLCanvasElement.prototype.getContext = function (type, ...args) {
+          return type.startsWith('webgl') ? null : context.call(this, type, ...args)
+        }
+      })
+      await page.goto(worker.origin + '/link/')
+      await page.locator('#link-flat').waitFor({ state: 'visible' })
+      await page.evaluate(() => document.fonts.ready)
+      await sleep(300)
+      const flat = page.locator('#link-flat')
+      const colorBefore = await flat.evaluate(canvas => canvas.toDataURL())
+      await page.evaluate(() => { document.documentElement.dataset.bbTheme = 'light'; document.documentElement.dataset.bbAccent = 'turquoise' })
+      await page.waitForFunction(before => document.querySelector('#link-flat').toDataURL() !== before, colorBefore)
+      await page.setViewportSize({ width: 390, height: 844 })
+      await sleep(300)
+      if (await flat.evaluate(canvas => Math.abs(canvas.width / devicePixelRatio - canvas.getBoundingClientRect().width) > 1)) throw new Error('fallback backing size did not follow resize')
+      return 'persisted hide/show; idle hero; flat panel and WebGL fallback refresh theme and size'
+    } finally { await ctx.close() }
+  })
   for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
     await check(`/trust/ has source links, no overflow and static reduced-motion dots at ${viewport.width}x${viewport.height}`, async () => {
       const ctx = await browser.newContext({ viewport, reducedMotion: 'reduce' })

@@ -9,7 +9,7 @@ import { readBytes, readText } from './devtools-node.mjs'
 
 /** Every page the site builds (vite.config.ts), as its file in the build. */
 const PAGES = [
-  'index.html', 'p/index.html', 'view/index.html', 'sponsor/index.html', 'donate/index.html', 'link/index.html', 'privacy/index.html',
+  'index.html', 'p/index.html', 'view/index.html', 'sponsor/index.html', 'donate/index.html', 'link/index.html', 'link/desktop/index.html', 'link/try/index.html', 'privacy/index.html',
   'sim/index.html', 'sim/arm/index.html', 'sim/arena/index.html', 'sim/device/index.html', 'catalogue/index.html', 'embed/index.html',
   'buttons/index.html',
 ]

@@ -80,6 +80,14 @@ const deny = readDenyWords(root)
 const found = []
 const { lines, binary } = addedLines(git(['-c', 'core.quotePath=false', 'diff', '-U0', '--no-color', '--no-ext-diff', '-M', `${target}...${branch}`]))
 for (const l of lines) for (const f of scanText(l.text, { deny })) found.push({ path: l.path, line: l.line, ...f })
+// Binaries (images, models, audio, fonts) are probed for the local paths, personal addresses and private words that
+// tools write into metadata, like a render's file path. The snapshot export runs the same probe.
+const BINARY_RULES = PRIVATE_RULES.filter((r) => ['windows-path', 'home-path', 'personal-email'].includes(r.id))
+for (const p of binary) {
+  const blob = spawnSync('git', ['cat-file', 'blob', `${branch}:${p}`], { cwd: root, maxBuffer: 256 << 20 }).stdout
+  if (!blob?.length) continue
+  for (const f of scanText(blob.toString('latin1'), { rules: BINARY_RULES, deny })) found.push({ path: p, ...f, what: `${f.what} in binary data` })
+}
 const names = git(['-c', 'core.quotePath=false', 'diff', '--name-only', '--diff-filter=ACR', '-M', '-z', `${target}...${branch}`]).split('\0').filter(Boolean)
 for (const p of names) {
   const why = riskyPath(p)
@@ -115,7 +123,7 @@ const rows = []
 rows.push(['review', 'ok', `${commits.length} commit${commits.length > 1 ? 's' : ''}, ${stat.files} files, +${stat.added} -${stat.deleted}${lockChanged ? ', lockfile changed' : ''}`])
 if (behind) rows.push(['', 'WARN', `${branch} is ${behind} commit${behind > 1 ? 's' : ''} behind ${target} (the lane didn't merge it before handing back)`])
 if (publicCommits) rows.push(['', 'WARN', `${publicCommits} commit${publicCommits > 1 ? 's' : ''} by the public identity ${PUBLIC_EMAIL}`])
-rows.push(['scan', 'clean', `${lines.length} added lines, ${names.length} new files, ${messages.length} messages${binary.length ? `; ${binary.length} binary files unscanned` : ''}${deny.length ? '' : '; no .open-source-deny here'}`])
+rows.push(['scan', 'clean', `${lines.length} added lines, ${names.length} new files, ${messages.length} messages${binary.length ? `; ${binary.length} binary files probed` : ''}${deny.length ? '' : '; no .open-source-deny here'}`])
 for (const f of allowed) rows.push(['', 'allowed', `${where(f)} ${f.what} (--allow)`])
 
 function summary(code) {

@@ -1,4 +1,5 @@
 import { glyphDots, SEAL_GLYPHS, sealNames, type ConnectionSeal } from '@obpal/core'
+import { DOT_TIMING, dotTimeline } from './dot-tokens'
 import { encode } from 'uqr'
 import { DotField, type DotPoint } from './dot-field'
 
@@ -26,7 +27,7 @@ export function sealElement(seal: ConnectionSeal): HTMLElement {
     labels.append(label)
   }
   row.append(canvas, labels)
-  const field = new DotField(canvas, { points: sealPoints(seal), surface: 'transparent' })
+  const field = new DotField(canvas, { points: sealPoints(seal), surface: 'transparent', scale: 'seal', preservePoints: true })
   fields.set(row, field)
   const point = (event: PointerEvent) => {
     const rect = canvas.getBoundingClientRect()
@@ -79,7 +80,7 @@ export function sealMoment(parent: HTMLElement | ShadowRoot, seal: ConnectionSea
     for (const token of ['--a', '--ink', '--line', '--edge']) box.style.setProperty(token, style.getPropertyValue(token))
     box.style.setProperty('--s', style.getPropertyValue('--glass'))
   }
-  const field = new DotField(canvas, { points: sealPoints(seal), surface: 'transparent', idle: false })
+  const field = new DotField(canvas, { points: sealPoints(seal), surface: 'transparent', scale: 'seal', preservePoints: true, idle: false })
   if (url) {
     const qr = encode(url, { ecc: 'Q', border: 0 })
     const points: DotPoint[] = []
@@ -94,12 +95,14 @@ export function sealMoment(parent: HTMLElement | ShadowRoot, seal: ConnectionSea
   let fade: Animation | undefined
   const start = setTimeout(() => {
     const started = performance.now()
+    const timeline = dotTimeline(Date.now())
+    box.dataset.timeline = JSON.stringify(timeline)
     box.style.removeProperty('opacity')
     box.dataset.started = String(started)
     if (reduced.matches) {
       field.handshake(1)
       box.dataset.settled = ''
-      fade = box.animate?.([{ opacity: 0 }, { opacity: 1 }], { duration: 180 })
+      fade = box.animate?.([{ opacity: 0 }, { opacity: 1 }], { duration: DOT_TIMING.fade })
       return
     }
     const frame = (now: number) => {

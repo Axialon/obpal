@@ -1,15 +1,17 @@
 {
   "item": "jnnpcnoilofjaffabnhecfokjjknlemg",
   "state": "Published",
-  "updated": "2026-09-30",
+  "updated": "2026-10-01",
   "done": [
     "The item exists with Link's fixed ID, from the first upload that carried the key",
     "Link 1.6.1 uploaded, with the store listing, privacy practices (Location, Web history and User activity), distribution and reviewer notes",
     "Submitted for review on 28 September 2026",
-    "Link 1.6.1 published on 30 September 2026 at https://chromewebstore.google.com/detail/obpal-link/jnnpcnoilofjaffabnhecfokjjknlemg"
+    "Link 1.6.1 published on 30 September 2026 at https://chromewebstore.google.com/detail/obpal-link/jnnpcnoilofjaffabnhecfokjjknlemg",
+    "Link 1.6.2 submitted for review on 30 September 2026"
   ],
   "next": [
-    "Upload 1.6.2 (extension/release/obpal-link-1.6.2-store.zip) with the current listing from pnpm run store:kit",
-    "Publish the 1.6.2 update"
+    "Cancel the pending 1.6.2 review (1.7.0 carries everything in it), or wait for it to finish",
+    "Upload 1.7.0 (extension/release/obpal-link-1.7.0-store.zip) with the listing, privacy practices, images and reviewer notes from pnpm run store:kit",
+    "Publish the 1.7.0 update"
   ]
 }

@@ -241,3 +241,9 @@ html.in-tab .pop { width: auto; max-width: 720px; margin: 0 auto; padding: 16px;
   .qr.sweep::after, .qr:hover::after, .conn[data-s='connected'] .status i::after, .says.new { animation: none; }
 }
 .seal-open{border:1px solid var(--line);border-radius:10px;background:var(--glass);color:var(--accent-text);font:600 11px var(--font);padding:5px 7px}.seal-popup{padding:12px;margin:0 14px 12px;border-radius:20px;text-align:center}.seal-popup[hidden]{display:none}.seal-popup p{font-size:12px;color:var(--secondary);margin:2px 0}
+
+/* A question owns this moment; the underlying waiting summary stays out of its way. */
+.pop:has(.ask:not([hidden])) .pc-state { display: none; }
+.pop .link-journey { margin: 0; }
+/* A QR stays still while it can be scanned. */
+.qr.sweep::after, .qr:hover::after, .conn[data-s='connected'] .status i::after { animation: none; }

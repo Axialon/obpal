@@ -1,3 +1,4 @@
+import { LINK_TRY_URL } from '../shared/desktop-guide'
 /**
  * Popup: the ob.Pal lockup with the link's status, and the controls: what the phone drives (Controller / 3D / Keys /
  * PC), and where: this tab (with the optional "All sites" permission), or for the PC target, ob.Pal Desktop: the whole
@@ -41,7 +42,7 @@ const NATIVE_PERMISSION: chrome.permissions.Permissions = { permissions: ['nativ
  */
 const MODES: Record<TargetMode, { label: string; sub: string; says: string; icon: string }> = {
   gamepad: { label: 'Controller', sub: 'Gamepad API', says: 'A virtual gamepad for Gamepad API games', icon: LINK_ICONS.gamepad },
-  viewer: { label: '3D', sub: '3D viewers', says: 'Drag to rotate, pan and zoom a 3D view', icon: ICONS.cube },
+  viewer: { label: '3D', sub: 'Compatible viewers', says: 'Drag, pan and zoom compatible page viewers', icon: ICONS.cube },
   keys: { label: 'Keys', sub: 'WASD · arrows', says: 'WASD, arrows, action keys and the mouse', icon: LINK_ICONS.keys },
   pc: { label: 'PC', sub: 'This computer', says: 'This computer’s mouse and keyboard, through ob.Pal Desktop', icon: LINK_ICONS.pc },
 }
@@ -127,14 +128,16 @@ app.innerHTML = `
     </span>
     <button class="icon-btn" id="look" type="button" title="Surface and colour" aria-label="Surface and colour">${ICONS.palette}</button>
   </header>
-  <div class="seal-popup glass" id="link-seal" hidden><b>Connection seal</b><div id="seal-glyphs"></div><p>Check both screens show the same seal</p></div>
+  <div class="seal-popup glass" id="link-seal" hidden><b>Connection seal</b><div id="seal-glyphs"></div><p id="seal-facts"></p><p>Check both screens show the same seal</p></div>
   <div class="bb-menu bb-glass look-menu" id="look-menu" aria-label="Surface and colour" hidden></div>
+  <ol class="link-journey" aria-label="Pair, enable, try"><li id="journey-pair">Pair <small>Scan with your phone</small></li><li id="journey-enable">Enable <small>This tab is separate</small></li><li>Try <small>A first demo</small></li></ol>
   <div class="grid">
     <section class="card pair rise" id="pair" style="--i:1" aria-label="Phone">
+      <p class="pair-title">Pair a phone</p>
       <div class="scan" id="scan">
         <div class="qr" id="qr" role="img" aria-label="Pairing QR code"></div>
         <p class="scan-hint" id="scan-hint">${ICONS.phone}<span id="scan-t">Scan with your phone</span></p>
-        <p class="scan-check"><b>obpal.blackboxes.net</b><br />Opens in your phone's browser · no app · no account<br />Check your camera shows obpal.blackboxes.net<br /><a href="https://obpal.blackboxes.net/trust/" target="_blank" rel="noopener">How to check ob.Pal</a></p>
+        <p class="scan-check"><b>obpal.blackboxes.net</b><br />Opens in your phone’s browser · no app · no account<br />Check your camera shows obpal.blackboxes.net<br /><a href="https://obpal.blackboxes.net/trust/" target="_blank" rel="noopener">How to check ob.Pal</a></p>
         <div class="codes" id="codes" role="radiogroup" aria-label="Which code to show" hidden>
           <button class="code" type="button" role="radio" data-code="cloud" title="Through ob.Pal (needs internet)">${LINK_ICONS.cloud}<span>Online</span></button>
           <button class="code" type="button" role="radio" data-code="lan" title="Direct over Wi-Fi, no internet needed (remembered phones only)">${LINK_ICONS.lan}<span>Direct</span></button>
@@ -143,6 +146,7 @@ app.innerHTML = `
       </div>
     </section>
     <section class="card controls rise" style="--i:2" aria-label="Controls">
+      <p class="controls-label">Choose the input route</p>
       <div class="chips" role="radiogroup" aria-label="What the phone controls">
         ${TARGET_MODES.map((m) => `<button class="chip" type="button" role="radio" aria-checked="false" data-mode="${m}" title="${MODES[m].label}: ${MODES[m].says}">${MODES[m].icon}<span class="chip-t"><b>${MODES[m].label}</b><small>${MODES[m].sub}</small></span></button>`).join('')}
       </div>
@@ -155,7 +159,7 @@ app.innerHTML = `
       <div class="pc swap" id="pc" hidden>
         <div class="pc-helper" id="pc-helper" hidden>
           <span class="pc-ver" id="pc-ver"></span>
-          <span class="pc-panic" id="pc-panic" title="The panic key: it stops everything at once" hidden></span>
+          <span class="pc-panic" id="pc-panic" title="The panic key: it stops keyboard and mouse input from the phone" hidden></span>
           <button class="icon-btn" id="pc-list" type="button" title="Allowed programs" aria-label="Allowed programs">${ICONS.settings}</button>
         </div>
         <div class="pc-state">
@@ -173,11 +177,14 @@ app.innerHTML = `
           ${GESTURES.map((g) => `<div class="lg" role="group" aria-label="${g.name}"><p class="eyebrow">${g.name}</p><div class="lg-row">${g.items.map(([icon, what, how, title]) => `<span class="lg-i" title="${title}">${icon}<b>${what}</b><small>${how}</small></span>`).join('')}</div></div>`).join('')}
         </div>
       </div>
+      <details class="advanced" id="advanced"><summary>More access · optional</summary>
       <button class="row swap" id="all" type="button" role="switch" aria-checked="false" title="Reach game frames hosted on other sites, and keep control across navigation">
         <span class="row-ic">${LINK_ICONS.globe}</span>
         <span class="row-t"><b>All sites</b><small>Frames from other sites</small></span>
         <span class="sw" aria-hidden="true"><i></i></span>
       </button>
+      </details>
+      <div class="try-route" id="try-route"><span><b>Try the dot demo</b><small>Open it, then choose Controller and enable This tab in Link.</small></span><button class="btn" type="button" id="try-demo">Try</button></div>
       <p class="note swap" id="note" role="alert" hidden></p>
     </section>
   </div>`
@@ -192,6 +199,7 @@ const askEl = askCard((key, allow) => void send({ to: 'bg', type: 'answer', key,
 app.insertBefore(askEl, app.querySelector('.grid'))
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement
+$('try-demo').addEventListener('click', () => void chrome.tabs.create({ url: LINK_TRY_URL }))
 const sealStyle = document.createElement('style')
 sealStyle.textContent = SEAL_STYLE
 document.head.append(sealStyle)
@@ -254,6 +262,11 @@ function render() {
   const link = state.link
   const status = link?.status ?? 'starting'
   const connected = status === 'connected'
+  $('journey-pair').dataset.done = String(connected)
+  const enabled = state.mode === 'pc' ? state.pc.link === 'ready' && state.pc.status?.enabled === true && !state.pc.config?.paused && !state.pc.status?.panic && connectedPhone() !== null && accessOf(state.answers, connectedPhone()!.key) === 'allow' : state.tab !== null && state.tab === state.current?.id
+  $('journey-enable').dataset.done = String(enabled)
+  $('journey-enable').querySelector('small')!.textContent = state.mode === 'pc' ? 'Allow phone + program scope' : enabled ? 'This tab is enabled' : 'This tab is off'
+  $('try-route').hidden = state.mode === 'pc'
   // Connected, the phone itself is the status: its name, lit, with × to disconnect; the pairing card steps aside.
   $('status').dataset.s = status
   $('conn').dataset.s = status
@@ -322,6 +335,8 @@ function render() {
     says.classList.add('new')
   }
   allBtn.setAttribute('aria-checked', String(state.allSites))
+  $('advanced').hidden = state.mode === 'pc'
+  if (state.allSites) ($('advanced') as HTMLDetailsElement).open = true
   renderPc()
 
   const note = $('note')
@@ -370,6 +385,7 @@ function renderFacts() {
   const path = f.path === 'relay' && f.relay ? `Relayed through TURN over ${f.relay.toUpperCase()}, which can’t read it` : PATH[f.path][1]
   const dtls = [f.dtls, f.cipher].filter(Boolean).join(', ')
   el.title = [`Encrypted end to end${dtls ? ` (${dtls})` : ''}`, VERIFIED[f.verified], path, ...(rtt ? [`${rtt} round trip`] : [])].join('\n')
+  $('seal-facts').textContent = el.title.replaceAll('\n', ' · ')
 }
 
 /** Remembered phones as chips: tap one to make the direct code for it, × to forget it. */
@@ -496,7 +512,7 @@ function renderPc() {
   box.hidden = !actions.length
 }
 
-/** Above the PC card, once ob.Pal Desktop answers: its version, the panic key that stops everything, and the list. */
+/** Above the PC card, once ob.Pal Desktop answers: its version, the panic key that stops phone input, and the list. */
 function renderHelper() {
   const pc = state.pc
   const ready = state.pcPermission && pc.link === 'ready'

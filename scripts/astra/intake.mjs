@@ -57,7 +57,12 @@ export function patchPaths(text, entries) {
   return paths
 }
 
-export function verifyStage({ root, returned, request }) {
+/**
+ * With `pinned`, a drifted master is not a refusal: the preconditions are checked against the pinned
+ * tree instead of the checkout, and the stage is applied on the pinned commit. The coordinator's
+ * merge brings it onto master and reruns the checks there.
+ */
+export function verifyStage({ root, returned, request, pinned = false }) {
   const r = loadArchive(returned), q = loadArchive(request), m = r.manifest, input = q.manifest
   if (m.kind !== 'stage' || input.kind !== 'request') throw new Error('Wrong exchange kind')
   stageId(m.stage)
@@ -65,7 +70,7 @@ export function verifyStage({ root, returned, request }) {
     || !m.input?.hashes || !exact(Object.keys(m.input.hashes), Object.keys(input.source_hashes))
     || Object.entries(input.source_hashes).some(([p, hash]) => m.input.hashes[p] !== hash)) throw new Error('Return does not match retained request or input hashes')
   const currentMaster = masterSha(root)
-  if (currentMaster !== input.master_sha) throw new Error(`Master drift: expected ${input.master_sha}, actual ${currentMaster}; request a fresh stage`)
+  if (currentMaster !== input.master_sha && !pinned) throw new Error(`Master drift: expected ${input.master_sha}, actual ${currentMaster}; request a fresh stage, or intake on the pinned base with --pinned`)
   for (const name of required) if (!r.members[name]) throw new Error(`Required member missing: ${name}`)
   for (const name of Object.keys(r.members)) {
     if (![...required, 'MANIFEST.json'].includes(name) && !/^patches\/[a-zA-Z0-9_-]+\.patch$/.test(name) && !name.startsWith('files/')) throw new Error(`Unexpected archive member: ${name}`)
@@ -89,7 +94,9 @@ export function verifyStage({ root, returned, request }) {
     if (isNew ? existingLower.has(p.toLowerCase()) || pre.before[p] !== null
       : !entry || !input.export_scope.paths.includes(p) || pre.before[p] !== input.source_hashes[p]) throw new Error(`Invalid pinned precondition: ${p}`)
     if (isNew && (!globMatch(p, input.export_scope.globs) || input.export_scope.trimmed.some((t) => t.path === p))) throw new Error(`New path outside export scope: ${p}`)
-    const path = beneath(root, p), bytes = existsSync(path) ? readFileSync(path) : null, current = bytes ? sha256(bytes) : null
+    const path = beneath(root, p)
+    const bytes = pinned ? (entry ? git(root, ['cat-file', 'blob', entry.blob]) : null) : existsSync(path) ? readFileSync(path) : null
+    const current = bytes ? sha256(bytes) : null
     // Git's clean conversion reconciles LF/CRLF checkouts with the pinned blobs. Arbitrary content drift still fails.
     const gitEquivalent = bytes && entry && git(root, ['hash-object', `--path=${p}`, '--stdin'], bytes).toString().trim() === entry.blob
     if (current !== pre.before[p] && !gitEquivalent) drift.push(`${p}: expected ${pre.before[p] ?? 'absent'}, actual ${current ?? 'absent'}`)
@@ -110,7 +117,7 @@ export function verifyStage({ root, returned, request }) {
     || new Set([...patched, ...files.map((p) => p.slice(6))]).size !== touched.length) throw new Error('Patch/file inventory differs from declared paths')
   scanMembers(r.members, denyWords(root))
   const suites = namedSuites(r.members['TESTS.md'].toString())
-  return { ...r, touched, patches, files, suites, base: currentMaster }
+  return { ...r, touched, patches, files, suites, base: pinned ? input.master_sha : currentMaster, master: currentMaster }
 }
 
 /** A failed three-way apply is left in its isolated lane for review, never committed or auto-resolved. */
@@ -192,7 +199,9 @@ async function localRun(root, argv, env) {
       else stop('Log size cap reached; process tree stopped, evidence incomplete')
     }
     child.stdout.on('data', collect); child.stderr.on('data', collect)
-    const timer = setTimeout(() => stop('Gate timed out; process tree stopped'), 30 * 60_000)
+    // The full sims suite alone runs past half an hour on a loaded machine; the other gates finish in minutes.
+    const minutes = argv[1] === 'e2e:all' ? 120 : 30
+    const timer = setTimeout(() => stop(`Gate timed out after ${minutes} minutes; process tree stopped`), minutes * 60_000)
     const interrupt = () => stop('Verification interrupted; process tree stopped')
     process.once('SIGINT', interrupt); process.once('SIGTERM', interrupt)
     child.once('error', (e) => { chunks.push(Buffer.from(e.message)); stopped = 'Gate could not start' })
@@ -215,7 +224,7 @@ async function portsFree(ports) {
 export const intake = (options) => exchange({ ...options, mode: 'intake' })
 export const verification = (options) => exchange({ ...options, mode: 'verify' })
 
-async function exchange({ root, returned, request, stage: requestedStage, mode, outbox, port, workerPort, run = localRun }) {
+async function exchange({ root, returned, request, stage: requestedStage, mode, outbox, port, workerPort, pinned = false, run = localRun }) {
   const steps = [], members = {}, redactions = [], deviations = []
   let logBudget = 8 << 20
   let stage = 'rejected', base = masterSha(root), head = null, lane = null, verified = null, commits = [], privateRefused = false
@@ -251,13 +260,15 @@ async function exchange({ root, returned, request, stage: requestedStage, mode, 
       }
       const input = loadArchive(request).manifest
       stage = stageId(input.stage); message_budget = input.message_budget
-      verified = verifyStage({ root, returned, request }); base = verified.base
-      record('preflight', { exit_code: 0, log: 'Archive hashes, retained request, pinned master, scope, before hashes and path safety verified.\n' })
+      verified = verifyStage({ root, returned, request, pinned }); base = verified.base
+      const onPin = verified.master !== base
+      if (onPin) deviations.push(`Applied on the pinned base ${base}; master is ${verified.master}. The coordinator's merge brings it onto master and reruns the checks.`)
+      record('preflight', { exit_code: 0, log: `Archive hashes, retained request, ${onPin ? 'pinned base (master drifted)' : 'pinned master'}, scope, before hashes and path safety verified.\n` })
       const destination = beneath(root, `.claude/worktrees/astra-${stage}`)
       if (existsSync(destination)) throw new Error('Stage worktree already exists; use a fresh stage id')
-      git(root, ['worktree', 'add', '-b', `astra/${stage}`, destination, 'master'])
+      git(root, ['worktree', 'add', '-b', `astra/${stage}`, destination, onPin ? base : 'master'])
       lane = destination
-      if (masterSha(root) !== base || git(lane, ['rev-parse', 'HEAD']).toString().trim() !== base) throw new Error('Master changed during worktree creation')
+      if ((!onPin && masterSha(root) !== base) || git(lane, ['rev-parse', 'HEAD']).toString().trim() !== base) throw new Error('Master changed during worktree creation')
       head = applyStage(lane, verified); commits = [{ sha: head, subject: `Apply Astra stage ${stage} as received` }]
       record('apply', { exit_code: 0, log: `${verified.patches.length} patches applied with git apply --3way; ${verified.files.length} new files added.\nCommitted ${head}.\n` })
       steps.at(-1).status = 'applied'
@@ -384,10 +395,10 @@ ${messageBudgetLine(message_budget)} This is the request's budget checkpoint; th
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const { opts, positional } = args(process.argv.slice(2), ['request', 'outbox'])
-    if (positional.length !== 1) throw new Error('Usage: astra:intake -- <returned.zip> [--request <original.zip>] [--outbox <dir>]')
+    const { opts, positional } = args(process.argv.slice(2), ['request', 'outbox'], ['pinned'])
+    if (positional.length !== 1) throw new Error('Usage: astra:intake -- <returned.zip> [--request <original.zip>] [--outbox <dir>] [--pinned]')
     const report = await intake({ root: process.cwd(), returned: resolve(positional[0]), request: opts.request ? resolve(opts.request) : undefined,
-      outbox: resolve(opts.outbox ?? defaultOutbox()) })
+      outbox: resolve(opts.outbox ?? defaultOutbox()), pinned: opts.pinned === true })
     console.log(json(report)); process.exitCode = report.result === 'review-required' ? 0 : 1
   } catch (e) { console.error(`astra:intake: ${e.message}`); process.exitCode = 1 }
 }

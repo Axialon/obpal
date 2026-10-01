@@ -197,8 +197,12 @@ try {
     const g = await rects()
     if (meets(g.panel, g.pill)) throw new Error(`the panel (to ${g.panel.b}) reaches the chip (from ${g.pill.y})`)
     // Reset, the panel's last control, is where a click finds it; so is the stage where the card would open.
-    const reset = await screen.evaluate(() => { const b = document.getElementById('lt-reset'); b.scrollIntoView({ block: 'nearest' }); const r = b.getBoundingClientRect(); return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.id })
+    await screen.locator('#lt-presets [data-preset="soft"]').click()
+    // The shared ink label is part of its button; an overlay outside that button must still fail the hit check.
+    const reset = await screen.evaluate(() => { const b = document.getElementById('lt-reset'); b.scrollIntoView({ block: 'nearest' }); const r = b.getBoundingClientRect(); return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest('button')?.id })
     if (reset !== 'lt-reset') throw new Error(`a click on Reset reaches ${reset}`)
+    await screen.locator('#lt-reset').click()
+    if (await screen.locator('#lt-presets [data-preset="studio"]').getAttribute('aria-pressed') !== 'true') throw new Error('Reset did not restore Studio lighting')
     const through = await screen.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.id || document.elementFromPoint(x, y)?.className, { x: g.card.x + 20, y: (g.card.y + g.card.b) / 2 })
     if (through !== 'scene') throw new Error(`where the card would open, a click reaches ${through}`)
     // A mouse resting on the chip doesn't open the card over the panel.

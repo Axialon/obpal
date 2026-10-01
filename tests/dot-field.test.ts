@@ -16,7 +16,7 @@ function surface(width = 100, height = 60, reduced = false) {
   const context = {
     globalAlpha: 1, fillStyle: '',
     clearRect() { shapes.length = 0 },
-    fillRect() { backgrounds.push(context.fillStyle) }, setTransform() {},
+    fillRect() { backgrounds.push(context.fillStyle) }, setTransform: vi.fn(),
     beginPath() { path.length = 0 },
     moveTo() {},
     arc(x: number, y: number, radius: number) { path.push({ x, y, radius, square: false }) },
@@ -50,7 +50,7 @@ function surface(width = 100, height = 60, reduced = false) {
     disconnect() { intersectionDisconnected = true }
   })
   return {
-    canvas, shapes, backgrounds, tokens, raf, animation, media,
+    canvas, context, shapes, backgrounds, tokens, raf, animation, media,
     resize(w: number, h: number) { width = w; height = h; resize() },
     intersect(on: boolean) { intersect(on) },
     hidden(value: boolean) { Object.defineProperty(document, 'hidden', { value, writable: true }); document.dispatchEvent(new Event('visibilitychange')) },
@@ -98,18 +98,18 @@ describe('the shared round dot field', () => {
     const s = surface(28, 28)
     const field = new DotField(s.canvas, { points: glyphDots(26), idle: false })
     expect(s.shapes.length).toBe(glyphDots(26).length)
-    expect(s.shapes.every(p => p.radius > 0.99 && p.radius < 1)).toBe(true)
+    expect(s.shapes.every(p => Math.abs(p.radius - 28 / 11 * 0.32) < 0.001)).toBe(true)
     for (const a of s.shapes) for (const b of s.shapes) {
       if (a !== b) expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThan(a.radius + b.radius)
     }
     s.resize(64, 64)
-    expect(s.shapes.every(p => p.radius === 2.1)).toBe(true)
+    expect(s.shapes.every(p => Math.abs(p.radius - 64 / 11 * 0.32) < 0.001)).toBe(true)
     field.destroy()
   })
 
   it('ends finite effects without idle redraws and pauses work while offscreen or hidden', () => {
     const s = surface()
-    const field = new DotField(s.canvas)
+    const field = new DotField(s.canvas, { idle: true })
     field.effect('shimmer', 200)
     s.step(100)
     expect(s.raf.size).toBe(1)
@@ -127,19 +127,21 @@ describe('the shared round dot field', () => {
     s.step(600)
     s.hidden(false)
     expect(s.raf.size).toBe(0)
-    expect(s.animation.pause).toHaveBeenCalled()
+    expect(s.animation.cancel).toHaveBeenCalled()
     field.destroy()
   })
 
   it('parts and brightens nearby dots once per input while resting without RAF work', () => {
     const s = surface(100, 60)
-    const field = new DotField(s.canvas, { points: [{ x: 0.4, y: 0.5 }, { x: 0.9, y: 0.5 }] })
+    const field = new DotField(s.canvas, { decorative: true, points: [{ x: 0.4, y: 0.5 }, { x: 0.9, y: 0.5 }] })
     const near = s.shapes.find(p => p.x === 40)!
     field.pointer(45, 30)
+    s.step(200)
     const parted = s.shapes.find(p => p.x < 40)!
     expect(parted.alpha).toBeGreaterThan(near.alpha)
     expect(s.raf.size).toBe(0)
     field.pointer(null)
+    s.step(520)
     expect(s.shapes.some(p => p.x === 40)).toBe(true)
     field.destroy()
   })
@@ -187,6 +189,20 @@ describe('the shared round dot field', () => {
     field.destroy()
   })
 
+  it('keeps light-glass bead tokens readable and resolves each point role separately', () => {
+    const s = surface()
+    s.tokens['--bb-accent-text'] = '#426b0d'
+    s.tokens['--bb-ink-3'] = '#64748b'
+    s.tokens['--bb-aurora'] = '36 27 70'
+    s.canvas.closest = () => ({ getAttribute: () => 'light' }) as unknown as Element
+    const field = new DotField(s.canvas, { points: [{ x: 0.25, y: 0.5, role: 'light' }, { x: 0.75, y: 0.5, role: 'muted' }] })
+    expect(field.resolvedTokens.colors.light).toBe('#426b0d')
+    expect(field.resolvedTokens.colors.depth).toBe('rgb(36,27,70)')
+    expect(s.shapes.find(p => p.x === 25)!.color).toBe('#426b0d')
+    expect(s.shapes.find(p => p.x === 75)!.color).toBe('#64748b')
+    field.destroy()
+  })
+
   it('finishes every finite effect and remains idle after its last frame', () => {
     for (const kind of ['assemble', 'ripple', 'shimmer', 'handshake'] as const) {
       const s = surface()
@@ -214,6 +230,31 @@ describe('the shared round dot field', () => {
     field.setPoints()
     expect(field.dotCount).toBeGreaterThan(0)
     expect(field.dotCount).toBeLessThanOrEqual(300)
+    field.destroy()
+  })
+
+  it('keeps every seal cell fixed under pointer input, even above the decorative cap', () => {
+    const s = surface(360, 80)
+    const points = Array.from({ length: 363 }, (_, i) => ({ x: i / 363, y: 0.5 }))
+    const field = new DotField(s.canvas, { points, preservePoints: true, scale: 'seal', idle: false })
+    const positions = () => s.shapes.map(p => [p.x, p.y]).sort((a, b) => a[0] - b[0])
+    const before = positions()
+    const alpha = s.shapes.find(p => p.x === points[101].x * 360)!.alpha
+    field.pointer(100, 40)
+    expect(field.dotCount).toBe(363)
+    expect(positions()).toEqual(before)
+    expect(s.shapes.find(p => p.x === points[101].x * 360)!.alpha).toBeGreaterThan(alpha)
+    expect(s.raf.size).toBe(0)
+    field.destroy()
+  })
+
+  it('derives backing transforms from fractional bounds and caps DPR at three', () => {
+    const s = surface(100.25, 60.35)
+    vi.stubGlobal('devicePixelRatio', 4)
+    const field = new DotField(s.canvas, { idle: false })
+    expect(s.canvas.width).toBe(301)
+    expect(s.canvas.height).toBe(181)
+    expect(s.context.setTransform).toHaveBeenLastCalledWith(301 / 100.25, 0, 0, 181 / 60.35, 0, 0)
     field.destroy()
   })
 

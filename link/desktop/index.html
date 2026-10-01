@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en" class="site">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0a0718" />
+    <meta name="description" content="Download and set up ob.Pal Desktop for Windows, then choose which phones and programs can receive input through Link." />
+    <title>Set up ob.Pal Desktop on Windows</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/plus-jakarta-sans-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/src/styles/fonts.css" />
+    <link rel="stylesheet" href="/src/family/family.css" />
+    <link rel="stylesheet" href="/src/styles/base.css" />
+    <link rel="stylesheet" href="/src/styles/site.css" />
+    <link rel="stylesheet" href="/src/styles/landing.css" />
+    <link rel="stylesheet" href="/src/styles/pages.css" />
+    <script type="module" src="/src/landing/site.ts"></script>
+    <script type="module" src="/src/link/desktop.ts"></script>
+  </head>
+  <body>
+        <header class="top">
+      <div class="top-in">
+        <a class="logo" href="/" aria-label="ob.Pal"><span class="mark-slot" data-mark></span><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span></a>
+        <button class="switch-btn" id="t-switch" type="button" aria-label="Blackboxes apps" title="Blackboxes apps"></button>
+        <nav class="top-nav" aria-label="Site">
+          <a href="/sim/">Sims</a>
+          <a href="/link/" aria-current="page">Link</a>
+          <a href="/catalogue/">Catalogue</a>
+          <a href="/#build">Build</a>
+          <a href="/donate/">Donate</a>
+        </nav>
+        <button class="top-menu" id="t-menu" type="button" aria-label="Menu">
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10" /></svg>
+        </button>
+        <a class="btn primary top-go" href="/view/">Open the viewer</a>
+      </div>
+    </header>
+    <div class="bb-menu bb-glass switcher" id="switcher" aria-label="Blackboxes apps" hidden></div>
+    <nav class="bb-menu bb-glass site-menu" id="site-menu" aria-label="Site" hidden>
+      <a class="bb-menu-item" href="/sim/">Sims</a>
+      <a class="bb-menu-item" href="/link/" aria-current="page">ob.Pal Link</a>
+      <a class="bb-menu-item" href="/catalogue/">Catalogue</a>
+      <a class="bb-menu-item" href="/#build">Build with it</a>
+      <a class="bb-menu-item" href="/donate/">Donate</a>
+    </nav>
+    <main class="land journey"><section class="hero companion-hero"><p class="eyebrow">ob.Pal Desktop · optional · Windows</p><h1>A phone.<br />Your PC, by permission.</h1><p class="lede">Install Desktop. Return to Link. Choose what to allow.</p><figure class="install-diagram"><canvas id="install-dots" aria-hidden="true"></canvas><figcaption>Phone → Link in your browser → optional Desktop</figcaption></figure><p class="guide-status" id="guide-status" role="status">Open Link to check Desktop. This page has not checked the helper.</p><button class="btn" id="desktop-check" type="button" hidden>Check in Link</button><p class="fine" id="guide-detail">Add and pin ob.Pal Link first. The page only receives its helper status; it cannot control your PC.</p></section>
+<section class="journey-flow install-flow" aria-label="Desktop setup"><article><span class="step-number">01</span><h2>Download</h2><p>Get the Windows x64 zip from the project’s releases. Unzip it into a folder you’ll keep.</p><a class="btn primary" href="https://github.com/Axialon/obpal-link/releases/latest/download/obpal-desktop-windows-x64.zip">Download for Windows</a><a class="text-link" href="https://github.com/Axialon/obpal-link/releases/latest">Review the release</a></article><article><span class="step-number">02</span><h2>Read the warning</h2><p>Desktop is unsigned. Windows may show an unknown publisher or SmartScreen warning. Signing is being investigated.</p><p class="fine">Proceed only after checking the source and release. If your organization blocks unsigned apps, ask its administrator; don’t bypass its policy.</p></article><article><span class="step-number">03</span><h2>Install, then check</h2><p>Double-click <b>install.cmd</b> in the extracted folder. Read the command window for errors. Leave the folder in place.</p><p class="fine">Back in Link, choose <b>PC</b> and grant native-messaging permission when asked. Link then checks the helper.</p></article></section>
+<section class="route-choices"><div><p class="eyebrow">A separate permission</p><h2>Allow this phone?</h2><p>Pair your phone in Link. Compare its connection seal, then choose Allow or Deny when it asks for PC access. Allowing the phone does not enable every program.</p><p>Choose an allowed program, or turn on <b>Whole PC</b> in Link’s PC settings. You can deny the phone later in Phones.</p></div><div><p class="eyebrow">Keep a way to stop</p><h2>Stay in control.</h2><p>The default panic key is <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Backspace</kbd>. Check Link reports it as available before enabling PC input. It stops keyboard and mouse input from the phone.</p><p>Link also has <b>Pause all</b> and per-program removal.</p><a class="btn" href="/link/">Back to Link · pair, enable, try</a></div></section>
+<section class="note-card"><h2>Update or remove</h2><p>Switch Link away from PC and close its settings before replacing Desktop’s files. To remove it, run <b>uninstall.cmd</b> in its folder; it removes the helper, its settings and that folder.</p><a href="https://github.com/Axialon/obpal-link/tree/main/desktop#readme">Read Desktop’s source and install notes</a></section>      <footer class="foot">Part of <a href="/">ob.Pal</a> and the <a href="https://ecosystem.blackboxes.net">Blackboxes</a> ecosystem. <a href="https://github.com/Axialon/obpal">Source</a> · <a href="https://github.com/Axialon/obpal-link">Releases</a> · <a href="/privacy/">Privacy</a> · <a href="mailto:hello@obpal.blackboxes.net">hello@obpal.blackboxes.net</a></footer>
+    </main>
+  </body>
+</html>

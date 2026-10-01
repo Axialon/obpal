@@ -306,6 +306,7 @@ describe('check:live: release truth, the /link/ label against the download', () 
 
   it('reads the version /link/ shows, and the tag and files of GitHub\'s latest release', () => {
     expect(linkVersionLabel(page('1.6.1'))).toBe('1.6.1')
+    expect(linkVersionLabel('<p class="fine">ob.Pal Link · 1.7.0 · free, MIT licensed</p>')).toBe('1.7.0')
     expect(linkVersionLabel('<p>Get ob.Pal Link</p>')).toBeNull()
     expect(latestRelease({ tag_name: 'v1.6.1', assets: files('1.6.1').map((name) => ({ name, size: 1 })) })).toEqual({ tag: 'v1.6.1', assets: files('1.6.1') })
     expect(latestRelease({ message: 'Not Found' })).toBeNull()

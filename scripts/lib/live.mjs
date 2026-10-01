@@ -89,11 +89,12 @@ export function linkInstallChecks(html) {
 export const RELEASE_ASSETS = (version) => ['obpal-link.zip', `obpal-link-${version}.zip`, 'obpal-desktop-windows-x64.zip']
 
 /**
- * The version /link/ shows ("Version 1.6.1 · free, …"), or null. The build writes it from extension/package.json
- * (vite.config.ts), while the download is GitHub's latest release, so the two can differ.
+ * The version /link/ shows ("ob.Pal Link · 1.7.0 · free, …", or the older "Version 1.6.1 · free, …"), or null. The
+ * build writes it from extension/package.json (vite.config.ts), while the download is GitHub's latest release, so the
+ * two can differ.
  */
 export function linkVersionLabel(html) {
-  return /\bVersion\s+(\d+\.\d+\.\d+)\b/.exec(html)?.[1] ?? null
+  return /\b(?:Version|ob\.Pal Link\s+·)\s+(\d+\.\d+\.\d+)\b/.exec(html)?.[1] ?? null
 }
 
 /**

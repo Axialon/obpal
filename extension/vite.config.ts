@@ -38,6 +38,7 @@ const define = { __OBPAL_SERVICE__: JSON.stringify(SERVICE) }
  * it runs before the first paint; a module script is deferred and may run after it.
  */
 const CLASSIC_SCRIPTS = [
+  { entry: 'src/content/desktop-guide.ts', file: 'desktop-guide.js', name: 'obpalDesktopGuide' },
   { entry: 'src/content/bridge.ts', file: 'bridge.js', name: 'obpalLinkBridge' },
   { entry: 'src/content/page.ts', file: 'page.js', name: 'obpalLinkPage' },
   { entry: 'src/ui/first-paint.ts', file: 'first-paint.js', name: 'obpalLinkFirstPaint' },
@@ -75,6 +76,7 @@ const manifest = {
   optional_permissions: ['nativeMessaging', 'notifications'],
   host_permissions: [`${SERVICE}/*`],
   optional_host_permissions: ['<all_urls>'],
+  content_scripts: [{ matches: [`${SERVICE}/link/desktop/*`], js: ['desktop-guide.js'], run_at: 'document_idle' }],
   // Bundled code only: no eval, no remote scripts; network limited to the ob.Pal service.
   content_security_policy: {
     extension_pages: `script-src 'self'; object-src 'self'; connect-src 'self' ${SERVICE} ${SERVICE.replace(/^http/, 'ws')}`,

@@ -26,23 +26,25 @@ Your phone as a controller for websites: gamepad, 3D mouse or keys. Add ob.Pal D
 Your phone as a controller for websites in your browser. Scan a QR code and the controller opens in your phone's browser: no app, no account.
 
 What your phone becomes
-• Controller: a standard gamepad for browser games that read the Gamepad API, with rumble.
-• 3D: drag to rotate, two fingers to pan, pinch to zoom.
+• Controller: a standard gamepad for browser games that read the Gamepad API, with rumble where phone and browser vibration are supported.
+• 3D: drag to rotate, two fingers to pan, pinch to zoom in compatible page viewers.
 • Keys: WASD on the left stick, arrow keys on the D-pad, Space, Enter and more on the buttons, the mouse on the right stick.
 • Motion: turn to aim, tilt to steer, or point at the screen like a remote.
 • Buttons: a headset, Bluetooth keyboard, clicker or gamepad can press the controller's buttons, and so can Back on Android.
 
 Your whole PC, with ob.Pal Desktop for Windows
-• Your phone is the mouse and keyboard, in every window or only the programs you allow: tap to click, two fingers to scroll, pinch to zoom.
+• Your phone is the mouse and keyboard, in every window or only the programs you allow: tap to click, two fingers to scroll, pinch to zoom where the app supports it.
 • Type with the phone's own keyboard. It offers to when a text field has the focus, and learns nothing from password fields.
 • The PC asks once before a new phone can control it: Allow or Deny, changeable in the options.
-• Ctrl + Alt + Backspace stops everything.
+• Ctrl + Alt + Backspace stops keyboard and mouse input from the phone.
 The helper is optional; Link asks to talk to it only when you choose PC. It isn't code-signed yet, so Windows may warn about it.
 
 How it works
+Pin ob.Pal Link from the Extensions menu after adding it.
 1. Click the ob.Pal Link icon on the page you want to control.
 2. Scan the QR code with your phone's camera.
-3. Turn on "This tab" and pick Controller, 3D, Keys or PC.
+3. Turn on "This tab" and choose Controller, 3D or Keys. PC control is set up separately, with ob.Pal Desktop.
+New to it? Try in Link opens a dot demo: choose Controller, turn on "This tab" there and move the left stick.
 The popup shows the connection: a lock, direct or relayed, and the round trip. A phone you've paired once can also connect directly over your Wi-Fi when the internet is down, if your network lets devices reach each other.
 Works in Chrome, Edge, Brave and Vivaldi (Chromium 120 or later). Other Chromium browsers may work, but aren't tested.
 
@@ -50,8 +52,9 @@ Private by design
 • No accounts, analytics, ads or remote code.
 • Phone and computer talk over encrypted WebRTC; the ob.Pal service only introduces them.
 • Each QR code pairs once, so an old photo of it can't connect.
+• Link and your phone show the same connection seal, three symbols, so you can check it's your phone that connected.
 • Pairing keys can't be read out, on the phone or in Link.
-• Link acts only in the tab you switch on, or on the PC where you allow it. It doesn't read pages, your history or what you type on the computer.
+• Input acts only in the tab you switch on, or on the PC where you allow it. Link reads page geometry and focus to deliver input; it does not collect page content or browsing history. On ob.Pal's own Desktop install page, Link tells the page only whether the helper is connected and its version.
 Privacy policy: https://obpal.blackboxes.net/privacy/
 
 Try the phone controller without the extension in ob.Pal's sims, from robot arms to a music studio for eight phones: https://obpal.blackboxes.net/sim/
@@ -99,7 +102,7 @@ An MV3 service worker can't hold a WebRTC connection. An offscreen document (rea
 `storage`
 
 ```text
-chrome.storage.local remembers what the phone drives (Controller, 3D, Keys or PC), the look the user picked for the popup and options page (a surface and an accent), and the user's Allow or Deny for each phone that asked to control the PC (the phone's pairing key or certificate fingerprint, its name, the answer and when; the newest 64). chrome.storage.session, which the browser clears when it closes, holds the controlled tab, the connection status and pairing code shown in the popup, the connected phone (its key and name), the phone the PC is asking about and the target that phone had before it chose PC, the frames from other sites in the controlled page (how many, and the host name of one, so the popup can suggest All sites), and, for the PC target, the state ob.Pal Desktop reports for the popup and options page. Nothing in it leaves the computer.
+chrome.storage.local remembers what the phone drives (Controller, 3D, Keys or PC), the look the user picked for the popup and options page (a surface and an accent), and the user's Allow or Deny for each phone that asked to control the PC (the phone's pairing key or certificate fingerprint, its name, the answer and when; the newest 64). chrome.storage.session, which the browser clears when it closes, holds the controlled tab, the connection status, connection seal and pairing code shown in the popup, the connected phone (its key and name), the phone the PC is asking about and the target that phone had before it chose PC, the frames from other sites in the controlled page (how many, and the host name of one, so the popup can suggest All sites), and, for the PC target, the state ob.Pal Desktop reports for the popup and options page. Nothing in it leaves the computer.
 ```
 
 `activeTab`
@@ -117,7 +120,7 @@ Injects the extension's two bundled scripts into the tab the user turned on: an 
 Host permission `https://obpal.blackboxes.net/*`
 
 ```text
-The ob.Pal service that pairs the phone with the computer: the extension opens a WebSocket to a pairing room there to exchange the WebRTC connection setup with the phone, and fetches short-lived relay (TURN) credentials for networks that block direct connections. The extension talks to no other server.
+The ob.Pal service that pairs the phone with the computer: the extension opens a WebSocket to a pairing room there to exchange the WebRTC connection setup with the phone, and fetches short-lived relay (TURN) credentials for networks that block direct connections. On the top-level /link/desktop/ install guide only, a bundled content script shows the helper's existing connection status and version, and an explicit Check in Link click opens extension settings. This exposes no phone identity, pairing code, input, program list or native error to the page, and does not connect to the helper. The extension talks to no other server.
 ```
 
 Optional host permission `<all_urls>`
@@ -179,8 +182,8 @@ The details:
 ## Test instructions tab (notes for the reviewer)
 
 ```text
-No login needed. Click the ob.Pal Link icon and scan its QR code with any phone camera (no app). No phone: open the QR code's link in another window in DevTools device mode; each code pairs once. Turn on "This tab", then pick a mode:
-- Controller: getGamepads() shows "ob.Pal Controller".
+No login needed. Click the ob.Pal Link icon and scan its QR code with any phone camera (no app). No phone: open the QR link in DevTools device mode; each code pairs once. Turn on "This tab", then pick a mode:
+- Controller: getGamepads() shows "ob.Pal Controller"; try it on obpal.blackboxes.net/link/try/
 - 3D: drag on the phone to turn obpal.blackboxes.net/view/
 - Keys: A presses Space.
 PC mode needs the optional Windows helper; without it, Link says so. Source: github.com/Axialon/obpal

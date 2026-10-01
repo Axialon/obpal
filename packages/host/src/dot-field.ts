@@ -1,8 +1,16 @@
+import { DOT_MATERIAL, DOT_TIMING, dotEase, resolveDotTokens, type DotRole, type DotScale, type DotTokens } from './dot-tokens'
+
 /** A position normalized to the canvas, from 0 to 1 on each axis. */
-export interface DotPoint { x: number; y: number }
+export interface DotPoint { x: number; y: number; role?: DotRole }
 export interface DotFieldOptions {
   /** Omit for a grid; an empty array leaves the canvas clear. */
   points?: readonly DotPoint[]
+  scale?: DotScale
+  role?: DotRole
+  diameter?: number
+  /** Seal samples keep every cell. Displacement is opt-in for decorative fields only. */
+  preservePoints?: boolean
+  decorative?: boolean
   spacing?: number
   maxDots?: number
   /** Concrete CSS colours. Otherwise the canvas inherits the family or shadow chip tokens. */
@@ -18,9 +26,10 @@ const ease = (n: number) => { const t = clamp(n); return t * t * (3 - 2 * t) }
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 const TAU = Math.PI * 2
 const BANDS = 12
+const ROLES: readonly DotRole[] = ['active', 'light', 'ink', 'muted', 'depth']
 
 interface Effect { kind: DotEffect; start: number; duration: number }
-interface Dot { x: number; y: number; phase: number }
+interface Dot { x: number; y: number; phase: number; role?: DotRole }
 interface Paint { x: number; y: number; radius: number; square: boolean }
 
 /**
@@ -34,7 +43,7 @@ export class DotField {
   private readonly motion: MediaQueryList | null
   private readonly resizeObserver: ResizeObserver | null
   private readonly intersectionObserver: IntersectionObserver | null
-  private readonly bands: Paint[][] = Array.from({ length: BANDS }, () => [])
+  private readonly bands: Paint[][] = Array.from({ length: BANDS * ROLES.length }, () => [])
   private readonly paints: Paint[] = []
   private points?: DotPoint[]
   private source: DotPoint[] = []
@@ -44,10 +53,13 @@ export class DotField {
   private dpr = 1
   private accent = ''
   private surface = ''
+  private tokens!: DotTokens
   private radius = 2
   private sourceRadius = 2
   private at: { x: number; y: number } | null = null
   private light = { x: 0, y: 0 }
+  private part: { start: number; duration: number; from: number; to: number } | null = null
+  private strength = 0
   private playing: Effect | null = null
   private progress: number | null = null
   private frame = 0
@@ -57,13 +69,15 @@ export class DotField {
   private opacity: Animation | null = null
 
   get frames() { return this.rendered }
+  get resolvedTokens() { return this.tokens }
+  get normalizedPoints(): readonly DotPoint[] { return this.points ?? this.dots.map(p => ({ x: p.x / this.width, y: p.y / this.height })) }
   get dotCount() { return this.dots.length }
 
   constructor(private readonly canvas: HTMLCanvasElement, private readonly options: DotFieldOptions = {}) {
     this.context = canvas.getContext('2d')
     this.limit = clamp(Math.floor(options.maxDots ?? 300) || 300, 1, 300)
-    this.spacing = Math.max(4, Number.isFinite(options.spacing) ? options.spacing! : 16)
-    this.points = options.points ? this.normalize(options.points) : undefined
+    this.spacing = Math.max(4, Number.isFinite(options.spacing) ? options.spacing! : resolveDotTokens(canvas, options.scale).pitch)
+    this.points = options.points ? this.normalize(options.points, options.preservePoints ? 4096 : this.limit) : undefined
     this.motion = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null
     this.motion?.addEventListener('change', this.motionChanged)
     canvas.ownerDocument.addEventListener('visibilitychange', this.visibilityChanged)
@@ -88,14 +102,14 @@ export class DotField {
     const count = Math.min(valid.length, limit)
     return Array.from({ length: count }, (_, i) => {
       const p = valid[Math.floor(i * valid.length / count)]
-      return { x: clamp(p.x), y: clamp(p.y) }
+      return { x: clamp(p.x), y: clamp(p.y), ...(p.role && ROLES.includes(p.role) ? { role: p.role } : {}) }
     })
   }
 
   /** Switch between a normalized glyph and the adaptive grid. */
   setPoints(points?: readonly DotPoint[]) {
     if (this.dead) return
-    this.points = points ? this.normalize(points) : undefined
+    this.points = points ? this.normalize(points, this.options.preservePoints ? 4096 : this.limit) : undefined
     this.layout()
     this.draw(performance.now())
   }
@@ -117,9 +131,10 @@ export class DotField {
       points = []
       for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) points.push({ x: (x + 0.5) / cols, y: (y + 0.5) / rows })
     }
-    this.dots = points.map((p, i) => ({ x: p.x * this.width, y: p.y * this.height, phase: ((i * 137 + 17) % 997) / 997 }))
-    const radius = this.points ? this.gridPitch(this.points) * 0.39 : this.spacing * 0.14
-    this.radius = Math.min(2.1, radius, this.width / 8, this.height / 8)
+    this.dots = points.map((p, i) => ({ x: p.x * this.width, y: p.y * this.height, role: p.role, phase: ((i * 137 + 17) % 997) / 997 }))
+    const diameter = this.options.diameter ?? this.tokens.diameter
+    const radius = this.points && this.tokens.scale === 'seal' ? Math.min(diameter, this.gridPitch(this.points) * 0.64) / 2 : diameter / 2
+    this.radius = Math.min(radius, this.width / 8, this.height / 8)
     this.measureSource()
   }
 
@@ -143,14 +158,14 @@ export class DotField {
   resize = () => {
     if (this.dead) return
     const rect = this.canvas.getBoundingClientRect()
-    const dpr = Math.max(1, Number.isFinite(globalThis.devicePixelRatio) ? globalThis.devicePixelRatio : 1)
+    const dpr = clamp(Number.isFinite(globalThis.devicePixelRatio) ? globalThis.devicePixelRatio : 1, 1, 3)
     if (this.width === rect.width && this.height === rect.height && this.dpr === dpr) return
     this.width = Math.max(0, rect.width)
     this.height = Math.max(0, rect.height)
     this.dpr = dpr
     this.canvas.width = Math.round(this.width * dpr)
     this.canvas.height = Math.round(this.height * dpr)
-    this.context?.setTransform(dpr, 0, 0, dpr, 0, 0)
+    this.context?.setTransform(this.width ? this.canvas.width / this.width : 1, 0, 0, this.height ? this.canvas.height / this.height : 1, 0, 0)
     this.layout()
     this.visibilityChanged()
   }
@@ -158,25 +173,23 @@ export class DotField {
   /** Resolve family tokens again after a theme change, including the pairing chip's shadow tokens. */
   refresh() {
     if (this.dead) return
-    const style = getComputedStyle(this.canvas)
-    const token = (...names: string[]) => names.map(name => style.getPropertyValue(name).trim()).find(value =>
-      value && (typeof CSS === 'undefined' ? !/(?:gradient|url)\(/.test(value) : CSS.supports('color', value)),
-    )
-    this.accent = this.options.accent || token('--a', '--bb-accent-text', '--bb-accent', '--accent') || style.color
-    this.surface = this.options.surface || token('--s', '--glass', '--bb-surface', '--bb-sheet') || 'transparent'
+    this.tokens = resolveDotTokens(this.canvas, this.options.scale ?? (this.options.points ? 'seal' : 'base'))
+    this.accent = this.options.accent || this.tokens.colors[this.options.role ?? 'active']
+    this.surface = this.options.surface || this.tokens.surface
+    this.layout()
     this.draw(performance.now())
   }
 
   /** Run a finite effect. The handshake takes 1.2 seconds unless a synchronized caller drives it manually. */
-  effect(kind: DotEffect, duration = kind === 'handshake' ? 1200 : 700) {
+  effect(kind: DotEffect, duration: number = DOT_TIMING[kind]) {
     if (this.dead) return
     this.stopFrame()
+    this.opacity?.cancel(); this.opacity = null
     this.progress = null
     this.playing = this.reduced ? null : { kind, start: performance.now(), duration: Math.max(1, Number.isFinite(duration) ? duration : 700) }
     if (this.reduced) {
       this.draw(performance.now())
-      this.opacity?.cancel()
-      this.opacity = this.canvas.animate?.([{ opacity: 0 }, { opacity: 1 }], { duration: 180, iterations: 1 }) ?? null
+      this.opacity = this.canvas.animate?.([{ opacity: 0 }, { opacity: 1 }], { duration: DOT_TIMING.fade, iterations: 1 }) ?? null
       if (!this.visible) this.opacity?.pause()
     } else {
       this.draw(performance.now())
@@ -189,8 +202,18 @@ export class DotField {
     if (this.dead || this.reduced) return
     const at = x === null || !Number.isFinite(x) || !Number.isFinite(y) ? null : { x, y: y! }
     if (this.at?.x === at?.x && this.at?.y === at?.y) return
-    this.at = at
-    this.draw(performance.now())
+    if (this.options.decorative) {
+      const now = performance.now()
+      this.stopFrame(); this.playing = null
+      this.opacity?.cancel(); this.opacity = null
+      if (at) this.at = at
+      this.part = { start: now, duration: at ? DOT_TIMING.partIn : DOT_TIMING.partOut, from: this.strength, to: at ? 1 : 0 }
+      this.draw(now); this.schedule()
+    } else {
+      this.at = at
+      this.opacity?.cancel(); this.opacity = null
+      this.draw(performance.now())
+    }
   }
 
   /** Light coordinates from already permitted motion input, normalized from -1 to 1. No sensor is requested. */
@@ -207,13 +230,14 @@ export class DotField {
     if (this.dead || !Number.isFinite(progress)) return
     this.stopFrame()
     this.playing = null
+    this.opacity?.cancel(); this.opacity = null
     this.progress = this.reduced ? 1 : clamp(progress)
     this.draw(performance.now())
   }
 
   private stopFrame() { if (this.frame) cancelAnimationFrame(this.frame); this.frame = 0 }
   private schedule() {
-    if (this.visible && this.playing && !this.frame) this.frame = requestAnimationFrame(now => {
+    if (this.visible && (this.playing || this.part) && !this.frame) this.frame = requestAnimationFrame(now => {
       this.frame = 0
       this.draw(now)
       this.schedule()
@@ -231,6 +255,8 @@ export class DotField {
     this.stopFrame()
     this.playing = null
     this.at = null
+    this.part = null
+    this.strength = 0
     this.light = { x: 0, y: 0 }
     if (this.reduced && this.progress !== null) this.progress = 1
     this.breathe()
@@ -239,8 +265,8 @@ export class DotField {
 
   private breathe() {
     this.opacity?.cancel()
-    this.opacity = !this.reduced && this.options.idle !== false
-      ? this.canvas.animate?.([{ opacity: 0.8 }, { opacity: 1 }, { opacity: 0.8 }], { duration: 6400, iterations: Infinity }) ?? null
+    this.opacity = !this.reduced && this.options.idle === true
+      ? this.canvas.animate?.([{ opacity: 0.86 }, { opacity: 1 }, { opacity: 0.86 }], { duration: DOT_TIMING.breathe, iterations: 2 }) ?? null
       : null
     if (!this.visible) this.opacity?.pause()
   }
@@ -253,6 +279,11 @@ export class DotField {
     context.globalAlpha = 1
     context.clearRect(0, 0, this.width, this.height)
     if (this.surface !== 'transparent') { context.fillStyle = this.surface; context.fillRect(0, 0, this.width, this.height) }
+    if (this.part) {
+      const p = clamp((now - this.part.start) / this.part.duration)
+      this.strength = lerp(this.part.from, this.part.to, dotEase(p))
+      if (p === 1) { if (!this.part.to) this.at = null; this.part = null }
+    }
     const effect = this.playing
     const t = effect ? clamp((now - effect.start) / effect.duration) : 1
     const handshake = this.progress ?? (effect?.kind === 'handshake' ? t : null)
@@ -284,42 +315,47 @@ export class DotField {
           const wave = (p - 0.72) / 0.28
           const distance = Math.hypot(x - this.width / 2, y - this.height / 2) / diagonal
           const ring = Math.exp(-(((distance - wave * 0.65) / 0.12) ** 2)) * Math.sin(wave * Math.PI)
-          radius *= 1 + ring * 0.65
+          radius *= 1 + ring * 0.2
           alpha += ring * 0.24
         }
         if (i >= sourceCount) alpha *= ease((p - 0.22) / 0.5)
         if (i >= this.dots.length) alpha *= 1 - ease((p - 0.42) / 0.2)
       } else if (effect?.kind === 'assemble') {
-        const f = ease((t - (dot?.phase ?? 0) * 0.16) / 0.84)
+        const f = dotEase((t - (dot?.phase ?? 0) * 0.125) / 0.875, true)
         x = lerp(this.width / 2, x, f); y = lerp(this.height / 2, y, f)
         alpha *= f
       } else if (effect?.kind === 'ripple') {
         const distance = Math.hypot(x - this.width / 2, y - this.height / 2) / diagonal
-        const ring = Math.exp(-(((distance - t * 0.65) / 0.1) ** 2)) * Math.sin(t * Math.PI)
-        radius *= 1 + ring * 0.7
+        const ring = Math.exp(-(((distance - dotEase(t, true) * 0.65) / 0.1) ** 2)) * Math.sin(t * Math.PI)
+        radius *= 1 + ring * 0.2
         alpha += ring * 0.4
       } else if (effect?.kind === 'shimmer') {
-        const shine = Math.exp(-(((x / this.width - t * 1.4 + 0.2) / 0.12) ** 2)) * Math.sin(t * Math.PI)
+        const shine = Math.exp(-(((x / this.width - dotEase(t) * 1.4 + 0.2) / 0.12) ** 2)) * Math.sin(t * Math.PI)
         alpha += shine * 0.5
       }
-      if (this.at && !this.reduced && handshake === null) {
+      if (this.options.decorative && this.at && !this.reduced && handshake === null) {
         const dx = x - this.at.x, dy = y - this.at.y, distance = Math.hypot(dx, dy)
-        const influence = Math.max(0, 1 - distance / 54) ** 2
-        if (distance > 0) { x += dx / distance * influence * 11; y += dy / distance * influence * 11 }
+        const influence = Math.max(0, 1 - distance / DOT_MATERIAL.touchRadius) ** 2 * this.strength
+        if (distance > 0) { x += dx / distance * influence * Math.min(DOT_MATERIAL.maxTouch, this.spacing * 0.45); y += dy / distance * influence * Math.min(DOT_MATERIAL.maxTouch, this.spacing * 0.45) }
         alpha += influence * 0.52
+      }
+      if (!this.options.decorative && this.at && !this.reduced && handshake === null) {
+        alpha += Math.max(0, 1 - Math.hypot(x - this.at.x, y - this.at.y) / DOT_MATERIAL.touchRadius) ** 2 * 0.24
       }
       if (!this.reduced) alpha += ((x / this.width - 0.5) * this.light.x + (y / this.height - 0.5) * this.light.y) * 0.2
       if (alpha <= 0) continue
-      const band = Math.round(clamp(alpha) * (BANDS - 1))
+      const role = ROLES.indexOf(dot?.role ?? this.options.role ?? 'active')
+      const band = role * BANDS + Math.round(clamp(alpha) * (BANDS - 1))
       const paint = this.paints[i] ?? (this.paints[i] = { x, y, radius, square })
       paint.x = x; paint.y = y; paint.radius = radius; paint.square = square
       this.bands[band].push(paint)
     }
     context.fillStyle = this.accent
-    // Twelve paths rather than one fill operation per dot keeps the CPU and raster work bounded.
-    for (let b = 0; b < BANDS; b++) {
+    // Twelve opacity paths per used semantic role keep the CPU and raster work bounded.
+    for (let b = 0; b < this.bands.length; b++) {
       if (!this.bands[b].length) continue
-      context.globalAlpha = b / (BANDS - 1)
+      context.fillStyle = this.options.accent || this.tokens.colors[ROLES[Math.floor(b / BANDS)]]
+      context.globalAlpha = b % BANDS / (BANDS - 1)
       context.beginPath()
       for (const dot of this.bands[b]) {
         if (dot.square) context.rect(dot.x - dot.radius, dot.y - dot.radius, dot.radius * 2, dot.radius * 2)

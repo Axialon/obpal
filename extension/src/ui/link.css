@@ -43,6 +43,24 @@
   --r-card: 24px;
   --spring: cubic-bezier(0.3, 1.35, 0.5, 1);
 }
+
+/* One quiet route diagram. Dot states supplement the labels and never sit behind permission controls. */
+.link-journey { list-style: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 14px 16px; margin: 0 0 14px; border: 1px solid var(--line); border-radius: 20px; background: var(--card-bg); box-shadow: var(--card-shadow); gap: 14px; }
+.link-journey li { position: relative; padding-left: 18px; min-width: 0; font: 650 12px/1.3 var(--font); }
+.link-journey li::before { content: ''; position: absolute; top: 4px; left: 0; width: 5px; height: 5px; border-radius: 50%; background: var(--secondary); }
+.link-journey li[data-done='true']::before { background: var(--accent-text); }
+.link-journey small { display: block; margin-top: 5px; color: var(--secondary); font: 500 10px/1.4 var(--font); }
+.pair-title, .controls-label { margin: 0 0 12px; color: var(--ink); font: 650 12px var(--font); }
+.pair-title { text-align: center; }
+.controls-label { padding: 4px 8px 0; }
+.try-route { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-top: 1px solid var(--line); }
+.try-route > span { flex: 1; min-width: 0; }
+.try-route b { display: block; font: 650 12px var(--font); }
+.try-route small { display: block; margin-top: 4px; color: var(--secondary); font: 500 10px/1.4 var(--font); }
+.try-route .btn { min-height: 44px; }
+.pc-safety { margin: 0 0 24px; color: var(--secondary); font-size: 12px; line-height: 1.7; }
+.seal-popup #seal-facts { max-width: 460px; margin: 10px auto; line-height: 1.6; }
+@media (max-width: 430px) { .link-journey { gap: 8px; padding: 14px 12px; } }
 [data-bb-theme='carbon'] { --glow-rgb: 92 62 245; --glow-a: 0.2; }
 [data-bb-theme='violet'] { --glow-a: 0.42; }
 [data-bb-theme='light'] {
@@ -242,3 +260,5 @@ html:not(.settled) *, html:not(.settled) *::before, html:not(.settled) *::after 
   .rise { animation: none; }
   .swap { transition: none; }
 }
+
+.advanced summary { cursor: pointer; padding: 12px; min-height: 44px; color: var(--secondary); font-size: 12px; }

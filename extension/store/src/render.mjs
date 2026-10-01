@@ -7,7 +7,7 @@
  *
  * The screenshots are made of real renders at 150%: the built extension (extension/dist) in Chromium, its popup laid
  * out as the popup (640 px wide), and the phone controller of the site build (dist/client), paired with the extension
- * through the real signaling service the way the extension's e2e test pairs them. What the popup shows is written into
+ * through the assigned local signaling worker the way the extension's e2e test pairs them. What the popup shows is written into
  * chrome.storage the way the service worker writes it, and the popup is shown an ordinary web page in front
  * (example.com addresses).
  *
@@ -26,7 +26,9 @@
  */
 import { existsSync, statSync } from 'node:fs'
 import { copyFile, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { createServer } from 'node:net'
+import { startLocal } from '../../e2e/local.mjs'
+import { resolveChromium } from '../../../scripts/lib/browser.mjs'
 import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium, devices } from 'playwright'
@@ -61,7 +63,10 @@ const SHOWN = 1.5
  */
 const CLEAN = ['--disable-lcd-text', '--force-color-profile=srgb']
 const SERVICE = 'https://obpal.blackboxes.net'
-const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
+const { path: executablePath } = await resolveChromium()
+let local
+const temporary = resolve(repo, 'artifacts/store-art')
+await mkdir(temporary, { recursive: true })
 // Two browsers on one machine: real host candidates instead of mDNS names, so WebRTC connects over loopback.
 const RTC_ARGS = ['--disable-features=WebRtcHideLocalIpsWithMdns']
 const PAGE = '#0b0b0c'
@@ -143,7 +148,7 @@ const NO_HOST = 'net.blackboxes.obpal.store_art_none'
 
 /** A copy of the build that can't reach an installed ob.Pal Desktop: no key (another ID), and a native host that doesn't exist. */
 async function safeCopy() {
-  const ext = await mkdtemp(join(tmpdir(), 'obpal-store-ext-'))
+  const ext = await mkdtemp(join(temporary, 'obpal-store-ext-'))
   await cp(dist, ext, { recursive: true })
   const file = join(ext, 'manifest.json')
   const m = JSON.parse(await readFile(file, 'utf8'))
@@ -161,11 +166,13 @@ async function safeCopy() {
     if (next !== src) { renamed++; await writeFile(p, next) }
   }
   for (const f of await readdir(ext, { recursive: true })) {
-    if (/\.(js|json|html)$/.test(f) && new RegExp(`${REAL_HOST.replace(/\./g, '\\.')}(?![.\\w])`).test(await readFile(join(ext, f), 'utf8'))) {
+    if (statSync(join(ext, f)).isFile() && new RegExp(`${REAL_HOST.replace(/\./g, '\\.')}(?![.\\w])`).test(await readFile(join(ext, f), 'utf8'))) {
       throw new Error(`${f} still names ${REAL_HOST}: not safe to load`)
     }
   }
   if (!renamed) throw new Error(`no file names ${REAL_HOST}: the build changed, check the rename before loading it`)
+  if ('key' in JSON.parse(await readFile(file, 'utf8'))) throw new Error('unsafe manifest key')
+  console.log('Guarded store copy: no key; host renamed; all files checked')
   return ext
 }
 
@@ -211,12 +218,12 @@ async function capture(captures) {
   if (!existsSync(join(dist, 'manifest.json'))) throw new Error('no extension build: pnpm run build:extension')
   if (!existsSync(join(site, 'p', 'index.html'))) throw new Error('no site build: pnpm exec vite build')
   const ext = await safeCopy()
-  const profile = await mkdtemp(join(tmpdir(), 'obpal-store-profile-'))
+  const profile = await mkdtemp(join(temporary, 'obpal-store-profile-'))
   const desk = await chromium.launchPersistentContext(profile, {
     executablePath, headless: true, viewport: { width: 1280, height: 800 }, deviceScaleFactor: SHOWN,
-    args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`, ...RTC_ARGS, ...CLEAN],
+    args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`, ...RTC_ARGS, ...CLEAN, ...local.serviceArgs],
   })
-  const phones = await chromium.launch({ executablePath, headless: true, args: [...RTC_ARGS, ...CLEAN] })
+  const phones = await chromium.launch({ executablePath, headless: true, args: [...RTC_ARGS, ...CLEAN, ...local.serviceArgs] })
   try {
     await desk.addInitScript(fakeTab)
     const worker = desk.serviceWorkers()[0] ?? (await desk.waitForEvent('serviceworker'))
@@ -277,7 +284,7 @@ async function capture(captures) {
     await session({ tab: 4242 })
     await popup('popup-pair', { tab: 'https://play.example.com/', qr: `${SERVICE}/` })
 
-    // The phone: this checkout's controller (dist/client) at the service's address; signaling goes to the real service.
+    // The phone: this checkout's controller (dist/client) at the service's address; signaling uses the guarded local worker.
     // In landscape it's 740 × 360 (a Galaxy S9's screen), which at 150% fits the screenshot whole.
     const phoneCtx = await phones.newContext({ ...devices['Pixel 7 landscape'], viewport: LAND, deviceScaleFactor: SHOWN, serviceWorkers: 'block' })
     await phoneCtx.route(`${SERVICE}/**`, (route) => {
@@ -309,8 +316,8 @@ async function capture(captures) {
     }
     const phoneShot = async (name) => { await sleep(700); await clean(); await sleep(400); await phone.screenshot({ path: shot(name) }); console.log(`  captured ${name}`) }
 
-    await phone.goto(ready.url)
-    await phone.locator('.modes').waitFor({ timeout: 30000 })
+    await phone.goto(ready.url.replace(SERVICE, local.origin))
+    await phone.locator('.modes').waitFor({ timeout: 30000 }).catch(async error => { await phone.screenshot({ path: join(captures, 'phone-timeout.png') }); await writeFile(join(captures, 'phone-timeout.txt'), await phone.locator('body').innerText()); throw error })
     const live = await until('the phone connected', async () => { const l = await read('session', 'link'); return l?.status === 'connected' ? l : null }, 20000)
     const connected = { ...live, device: DEVICE }
 
@@ -395,21 +402,21 @@ const SHOTS = [
   },
   {
     title: 'A *gamepad* for browser games',
-    sub: 'For browser games that read the Gamepad API. Rumble reaches your phone.',
+    sub: 'For browser games that read the Gamepad API. Rumble needs phone and browser vibration support.',
     cap: above,
     light: { x: 120, y: 330, w: 1040, h: 560 },
     items: [{ src: 'phone-gamepad', kind: 'phone', x: 69, y: 200 }],
   },
   {
     title: 'Rotate, pan and zoom in *3D*',
-    sub: 'Drag to rotate, two fingers to pan, pinch to zoom in 3D viewers on the page.',
+    sub: 'Drag to rotate, two fingers to pan, pinch to zoom in compatible page viewers.',
     cap: above,
     light: { x: 120, y: 330, w: 1040, h: 560 },
     items: [{ src: 'phone-rotate', kind: 'phone', x: 69, y: 200 }],
   },
   {
     title: 'Your *whole PC*, with ob.Pal Desktop',
-    sub: 'On Windows, every window or only the programs you allow. Ctrl + Alt + Backspace stops it all.',
+    sub: 'On Windows, control allowed programs or Whole PC. Elevated apps may refuse input.',
     cap: above,
     light: { x: 120, y: 330, w: 1040, h: 560 },
     // Down to the trackpad's gestures; the frame's edge cuts it below them.
@@ -417,7 +424,7 @@ const SHOTS = [
   },
   {
     title: 'Your PC’s *mouse and keyboard*',
-    sub: 'Point, tap and scroll, and type with your phone’s own keyboard. When a text field has the focus, your phone offers it.',
+    sub: 'Point, tap and scroll. In supported text fields, Link can offer typing with your phone’s keyboard.',
     cap: { x: 64, y: 226, w: 462 },
     light: { x: 440, y: 160, w: 880, h: 760 },
     // The phone rising from the frame's edge, which cuts it at the top of its keyboard (UPRIGHT).
@@ -440,10 +447,19 @@ async function screenshots(browser, captures) {
 // ---- run --------------------------------------------------------------------------------------------------------------
 
 await mkdir(out, { recursive: true })
+const desktopLog = join(process.env.APPDATA || '', 'obpal', 'desktop.log')
+const logBefore = existsSync(desktopLog) ? await readFile(desktopLog) : Buffer.alloc(0)
+const kept = process.env.OBPAL_STORE_CAPTURES ? resolve(process.env.OBPAL_STORE_CAPTURES) : null
+if (doShots && !kept) {
+  for (const port of [Number(process.env.OBPAL_E2E_PORT), Number(process.env.OBPAL_E2E_WORKER_PORT)]) {
+    if (!Number.isInteger(port) || port < 1) throw new Error('Assign both e2e ports for store captures')
+    await new Promise((ok, fail) => { const server = createServer(); server.once('error', fail); server.listen(port, '127.0.0.1', () => server.close(ok)) })
+  }
+  local = await startLocal()
+}
 const browser = await chromium.launch({ executablePath, headless: true, args: CLEAN })
 /** Renders kept by an earlier run (OBPAL_STORE_KEEP_CAPTURES), to lay the screenshots out again without capturing. */
-const kept = process.env.OBPAL_STORE_CAPTURES ? resolve(process.env.OBPAL_STORE_CAPTURES) : null
-const captures = kept ?? (await mkdtemp(join(tmpdir(), 'obpal-store-captures-')))
+const captures = kept ?? (await mkdtemp(join(temporary, 'obpal-store-captures-')))
 try {
   console.log(`ob.Pal Link store art -> ${out}`)
   if (doArt) await art(browser)
@@ -453,6 +469,11 @@ try {
   }
 } finally {
   await browser.close()
+  await local?.close()
+  const logAfter = existsSync(desktopLog) ? await readFile(desktopLog) : Buffer.alloc(0)
+  const fresh = logAfter.subarray(logBefore.length).toString('utf8')
+  if (/browser:.*ms-playwright/i.test(fresh)) throw new Error('Guard failed: installed helper recorded a capture session')
+  console.log('ob.Pal Desktop log: no new sessions')
   if (!kept) {
     if (process.env.OBPAL_STORE_KEEP_CAPTURES) console.log(`  renders kept in ${captures}`)
     else await rm(captures, { recursive: true, force: true }).catch(() => {})

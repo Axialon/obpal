@@ -19,8 +19,8 @@ export function askCard(answer: (key: string, allow: boolean) => void): HTMLElem
   el.innerHTML = `
     <span class="ask-ic" aria-hidden="true">${ICONS.phone}</span>
     <div class="ask-text">
-      <h2 id="ask-t"><b></b> wants to control this PC</h2>
-      <p id="ask-d">Mouse, keyboard and typing, through ob.Pal Desktop</p>
+      <h2 id="ask-t">Allow this phone? <b></b></h2>
+      <p id="ask-d">PC mouse, keyboard and typing. Program scope is a separate choice.</p>
     </div>
     <div class="ask-actions">
       <button class="btn primary" type="button" data-allow="true">Allow</button>

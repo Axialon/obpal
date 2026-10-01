@@ -1,7 +1,7 @@
 import { pageUrl, SITE } from './preview.mjs'
 
 export const AI_SIGNALS = 'search=yes, ai-input=yes, ai-train=yes'
-export const INDEXABLE_PAGES = ['/', '/view/', '/sim/', '/sim/arm/', '/sim/arena/', '/sim/humanoid/', '/embed/', '/link/', '/catalogue/', '/buttons/', '/sponsor/', '/donate/', '/privacy/', '/trust/']
+export const INDEXABLE_PAGES = ['/', '/view/', '/sim/', '/sim/arm/', '/sim/arena/', '/sim/humanoid/', '/embed/', '/link/', '/link/desktop/', '/link/try/', '/catalogue/', '/buttons/', '/sponsor/', '/donate/', '/privacy/', '/trust/']
 
 export const simUrl = (card) => card.href?.startsWith('/sim/device/') ? `/sim/${card.id}/` : card.href ? new URL(card.href, SITE).pathname : null
 export const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])

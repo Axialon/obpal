@@ -11,7 +11,7 @@ Install when dependencies are absent or the lockfile moved: `pnpm install --froz
 
 Use only the assigned stand-in and worker ports. Check availability before starting servers; stop every server you start. Run browser suites through `pnpm run e2e:all -- <suites>`, with `OBPAL_E2E_PORT`, `OBPAL_E2E_WORKER_PORT` and the brief's `OBPAL_E2E_CHROMIUM` set. In PowerShell set `$env:OBPAL_E2E_PORT` and `$env:OBPAL_E2E_WORKER_PORT` first. Suites: code, embed, home, phone, sims, shared, extension, catalogue, pages. The runner's helper guard must report **no new sessions**.
 
-Run only suites touched by the change and the brief. A suspected flake gets one isolated rerun of the failing suite with the same environment; retain both results. A second failure needs investigation, not repeated retries. Use Playwright's Chromium; never use the owner's Chrome, `--desktop`, or helper tests with `--include-ignored`.
+Run only suites touched by the change and the brief. A suspected flake gets one isolated rerun of the failing suite with the same environment; retain both results. For sims, rerun only the failing group with `OBPAL_E2E_SIMS_ONLY` (buttons, temporal, warm-up, smoothness, panels, humanoid, humanoid-live, tracking, graphics-recovery, graphics-layouts) instead of the full 37-minute suite. A second failure needs investigation, not repeated retries. Use Playwright's Chromium; never use the owner's Chrome, `--desktop`, or helper tests with `--include-ignored`.
 
 Keep captures and logs under ignored `artifacts/<task>/before/` and `after/`; tests write fixtures to temporary folders. Load `obpal-evidence` for visual or timing proof, `obpal-models` for authored geometry and `obpal-review` before hand-back.
 

@@ -4,6 +4,7 @@ import { darkTitanium, gunmetal } from '../kit/surfaces'
 import { pov, service, tiledDeck } from '../kit/precision'
 import { batch, metal } from '../kit'
 import { PendulumLogic } from './pendulum'
+import { physicsOverlay } from '../physics/debug'
 import { block, disc, playFrame, rod, showcase } from './parts'
 import { caption, part } from './optics.view'
 import type { Stage } from './stage'
@@ -32,7 +33,8 @@ function lab(scene: THREE.Scene, logic: PendulumLogic) {
   const graph = new THREE.Mesh(new THREE.PlaneGeometry(4.8, 1.5), new THREE.MeshBasicMaterial({ map: texture })); graph.name = 'live-angle-trace'; graph.position.set(0, 1.85, -0.95); scene.add(graph)
   let last = -1
   return { step(t: number, colorsHeld: readonly (string | null)[] = []) {
-    models.forEach((m, n) => { const u = logic.units[n]; m.pivot.rotation.z = u.angle; m.line.scale.y = u.length; m.line.position.y = -u.length / 2; m.bob.position.y = -u.length; wear(m.light, colorsHeld[n] ?? null) })
+    const rendered = logic.renderState()
+    models.forEach((m, n) => { const u = rendered[n]; m.pivot.rotation.z = u.angle; m.line.scale.y = u.length; m.line.position.y = -u.length / 2; m.bob.position.y = -u.length; wear(m.light, colorsHeld[n] ?? null) })
     if (Math.floor(t * 15) === last) return false
     last = Math.floor(t * 15)
     ctx.fillStyle = '#152330'; ctx.fillRect(0, 0, 1024, 320)
@@ -47,7 +49,9 @@ function lab(scene: THREE.Scene, logic: PendulumLogic) {
 }
 export function createView(stage: Stage, logic: PendulumLogic): DeviceView {
   const m = lab(stage.scene, logic)
-  return { framing: playFrame([0, 1.8, 0], 3.1, [0.18, 0.25, 1.15]), overview: playFrame([0, 1.5, 0], 3.6), inspect: () => playFrame([-1.65, 2, 0], 0.8), update: (colors, t) => { if (m.step(t, colors)) stage.view.invalidate() } }
+  const host = stage.renderer.domElement?.parentElement
+  const debug = host && new URLSearchParams(location.search).get('physics') === 'debug' ? physicsOverlay(host, () => logic.physicsDiagnostics()) : null
+  return { framing: playFrame([0, 1.8, 0], 3.1, [0.18, 0.25, 1.15]), overview: playFrame([0, 1.5, 0], 3.6), inspect: () => playFrame([-1.65, 2, 0], 0.8), update: (colors, t) => { debug?.update(t); if (m.step(t, colors)) stage.view.invalidate() } }
 }
 export function preview() {
   const l = new PendulumLogic()

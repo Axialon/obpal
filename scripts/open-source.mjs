@@ -61,7 +61,16 @@ const PATTERNS = [
   [/\bgh[pousr]_[A-Za-z0-9]{30,}/, 'a GitHub token'],
   [/"database_id":\s*"[0-9a-f-]{36}"/, 'a D1 database id'],
 ]
-const TEXT = /\.(ts|tsx|js|mjs|cjs|json|jsonc|md|html|css|svg|txt|yml|yaml|toml|webmanifest|gitignore)$|^[^.]+$/
+// Every file is scanned, whatever its extension: text in full, and binaries (images, models, audio, fonts) for the
+// local paths, personal addresses and private words that tools write into metadata, such as a render's file path.
+const BINARY_RULES = PRIVATE_RULES.filter((r) => ['windows-path', 'home-path', 'personal-email'].includes(r.id)).map((r) => [r.re, r.what])
+// Third-party binaries we ship verbatim carry their builders' paths (MediaPipe's WebAssembly has OpenCV's). They are
+// exempt from the binary probe only while byte-identical to the copy in their npm package.
+const VENDORED = {
+  'public/models/vision_wasm_internal.wasm': 'node_modules/@mediapipe/tasks-vision/wasm/vision_wasm_internal.wasm',
+  'public/models/vision_wasm_nosimd_internal.wasm': 'node_modules/@mediapipe/tasks-vision/wasm/vision_wasm_nosimd_internal.wasm',
+}
+const vendored = (rel, bytes) => VENDORED[rel] && existsSync(join(root, VENDORED[rel])) && readFileSync(join(root, VENDORED[rel])).equals(bytes)
 const problems = []
 function scan(dir) {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -69,10 +78,12 @@ function scan(dir) {
     if (e.isDirectory()) { if (e.name !== '.git') scan(p); continue }
     const rel = relative(out, p).split('\\').join('/')
     if (/\.(pem|key|p12|pfx)$/i.test(rel) || /(^|\/)\.(env|dev\.vars)/.test(rel)) { problems.push(`${rel}: key or env file`); continue }
-    if (!TEXT.test(e.name) || statSync(p).size > 4 << 20) continue
-    const text = ALLOW.reduce((t, a) => t.split(a).join(''), readFileSync(p, 'utf8'))
-    for (const [re, what] of PATTERNS) if (re.test(text)) problems.push(`${rel}: ${what}`)
-    for (const word of deny) if (text.toLowerCase().includes(word.toLowerCase())) problems.push(`${rel}: a private word from .open-source-deny`)
+    if (statSync(p).size > 64 << 20) { problems.push(`${rel}: larger than 64 MB, too large to scan`); continue }
+    const bytes = readFileSync(p), binary = bytes.subarray(0, 8192).includes(0)
+    if (binary && vendored(rel, bytes)) continue
+    const text = ALLOW.reduce((t, a) => t.split(a).join(''), bytes.toString(binary ? 'latin1' : 'utf8'))
+    for (const [re, what] of binary ? BINARY_RULES : PATTERNS) if (re.test(text)) problems.push(`${rel}: ${what}${binary ? ' (in binary data)' : ''}`)
+    for (const word of deny) if (text.toLowerCase().includes(word.toLowerCase())) problems.push(`${rel}: a private word from .open-source-deny${binary ? ' (in binary data)' : ''}`)
   }
 }
 scan(out)

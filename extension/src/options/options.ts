@@ -47,9 +47,11 @@ app.innerHTML = `
     <p class="lede">Your phone as this computer’s mouse and keyboard: in every window, or only in the programs you allow.</p>
     <div class="helper" id="helper" hidden>
       <span class="helper-ver" id="helper-ver"></span>
-      <span class="helper-panic" id="helper-panic" title="The panic key stops everything at once"></span>
+      <span class="helper-panic" id="helper-panic" title="The panic key stops keyboard and mouse input from the phone"></span>
     </div>
   </section>
+  <ol class="link-journey" aria-label="PC setup"><li>Pair <small>In Link’s popup</small></li><li>Allow <small>Per phone, below</small></li><li>Enable <small>A program or Whole PC</small></li></ol>
+  <p class="pc-safety">PC permission is separate from This tab. Check the helper’s panic-key status before enabling input; Pause all remains available.</p>
   <p class="note swap" id="note" role="alert" hidden></p>
   <div class="layout">
     <div class="col">

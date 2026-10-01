@@ -10,6 +10,7 @@
  *    answered for yet gets the popup's prompt, a badge, and a notification when those are allowed.
  */
 import { NATIVE_PERMISSION, NativeBridge } from './native'
+import { guideRequest, guideStatus } from './shared/desktop-guide'
 import {
   accessOf, askFor, parseAnswers, parsePhone, withAnswer, withoutAnswer, type Answers, type Phone,
 } from './shared/access'
@@ -18,7 +19,7 @@ import {
   allowedFrom, linkConfig, parseBgRequest, parseLink, senderKind,
   type BgRequest, type BridgeRequest, type LinkConfig, type LinkState, type OffscreenRequest,
 } from './shared/messages'
-import { NATIVE_PORT_NAME, parseNativeFrame, parseNativeText, PC_PAGE_PORT_NAME } from './shared/native'
+import { EMPTY_PC, NATIVE_PORT_NAME, parseNativeFrame, parseNativeText, parsePcState, PC_PAGE_PORT_NAME } from './shared/native'
 
 const OFFSCREEN_PATH = 'offscreen.html'
 const BRIDGE_JS = 'bridge.js'
@@ -378,6 +379,12 @@ async function handle(msg: BgRequest, sender: chrome.runtime.MessageSender): Pro
 }
 
 chrome.runtime.onMessage.addListener((raw: unknown, sender, respond) => {
+  const guide = guideRequest(raw, sender, chrome.runtime.id)
+  if (guide) {
+    if (guide === 'desktop-guide-open') void chrome.runtime.openOptionsPage().then(() => respond({ ok: true }), () => respond({ ok: false }))
+    else void chrome.storage.session.get('pc').then(({ pc }) => respond(guideStatus(parsePcState(pc) ?? EMPTY_PC)), () => respond(guideStatus(EMPTY_PC)))
+    return true
+  }
   const msg = parseBgRequest(raw)
   if (!msg) return false
   const kind = senderKind({ id: sender.id, url: sender.url, tabId: sender.tab?.id }, SELF)

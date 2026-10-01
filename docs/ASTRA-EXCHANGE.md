@@ -162,6 +162,11 @@ covering exactly the touched paths; new files use null. Intake accepts Git-equiv
 checkout. Any other content drift or a moved master refuses the entire stage before creating a lane. Repack against
 the current checkpoint; do not edit the preconditions to bypass the refusal.
 
+When only master has moved, `astra:intake -- <zip> --pinned` avoids spending Astra messages on a repack: the
+preconditions are checked against the pinned tree instead of the checkout, the lane branches from the pinned commit,
+and the drift is recorded as a deviation. Verification runs on that pinned lane; the coordinator's merge then brings the
+stage onto master and reruns typecheck, vitest and the named suites there.
+
 The exact paths in patches and `files/` must match the three disjoint path lists. Patches use canonical Git headers and
 full before blob ids, no renames or mode-only changes. Existing paths must be exported; new paths must match the request
 globs. `files/` carries declared new files only. Binary patch hunks must use bounded literals; binary delta hunks are

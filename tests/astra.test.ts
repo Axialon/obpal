@@ -41,12 +41,12 @@ function fixture(stage = 'fixture', globs = ['*.txt'], options: Partial<Paramete
   return { root, outbox, base, pack, request, returned, members, metadata, save }
 }
 
-async function receive(f: ReturnType<typeof fixture>) {
+async function receive(f: ReturnType<typeof fixture>, pinned = false) {
   const keys = ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL']
   const old = keys.map((key) => env[key])
   env.GIT_AUTHOR_NAME = env.GIT_COMMITTER_NAME = 'Fixture'
   env.GIT_AUTHOR_EMAIL = env.GIT_COMMITTER_EMAIL = 'fixture@example.test'
-  try { return await intake({ ...f, run: () => { throw new Error('Intake must never execute returned code') } }) }
+  try { return await intake({ ...f, pinned, run: () => { throw new Error('Intake must never execute returned code') } }) }
   finally { keys.forEach((key, i) => { if (old[i] === undefined) delete env[key]; else env[key] = old[i] }) }
 }
 
@@ -310,6 +310,16 @@ describe('Astra return intake', { timeout: 30_000 }, () => {
     const f = fixture()
     writeFileSync(join(f.root, 'other.txt'), 'new checkpoint\n'); commit(f.root, 'Advance master')
     expect(() => verifyStage(f)).toThrow('Master drift')
+  })
+  it('applies on the pinned base with --pinned when master drifted, checking preconditions against the pin', async () => {
+    const f = fixture('pinned')
+    writeFileSync(join(f.root, 'value.txt'), 'moved on master\n'); commit(f.root, 'Advance master over the touched file')
+    const received = await receive(f, true)
+    expect(received.result).toBe('review-required')
+    expect(received.deviations.join('\n')).toContain(`pinned base ${f.base}`)
+    const lane = join(f.root, '.claude', 'worktrees', 'astra-pinned')
+    expect(git(lane, ['rev-parse', 'HEAD~1']).toString().trim()).toBe(f.base)
+    expect(git(f.root, ['show', 'master:value.txt']).toString()).toBe('moved on master\n')
   })
   it('accepts an absent new fixture with null before hash and refuses files/ overwrites', () => {
     const f = fixture()

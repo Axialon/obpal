@@ -68,6 +68,13 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const HEADED = process.argv.includes('--headed')
 // Screenshots: --shots=<dir>, or OBPAL_E2E_SHOTS (through e2e:all, which passes its environment on).
 const SHOTS = process.argv.find((a) => a.startsWith('--shots='))?.slice(8) ?? process.env.OBPAL_E2E_SHOTS
+/** Optional journey evidence, after the behavior assertion has passed. */
+async function shot(page, name) {
+  if (!SHOTS) return
+  await mkdir(SHOTS, { recursive: true })
+  await page.evaluate(() => document.fonts.ready)
+  await page.screenshot({ path: join(SHOTS, `${name}.png`), fullPage: true })
+}
 const DESKTOP = process.argv.includes('--desktop')
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
 const HARNESS = process.env.OBPAL_E2E_HARNESS || resolve(root, '..', 'desktop', 'target', 'release', 'obpal-harness.exe')
@@ -397,6 +404,59 @@ try {
     if (!connected.some((p) => /ob\.Pal/.test(p))) throw new Error('no gamepadconnected event')
     if (pad.mapping !== 'standard') throw new Error(`mapping ${pad.mapping}`)
     return pad.id
+  })
+
+  await check('Try opens the compatible demo without enabling it; phone input arrives only after enable', async () => {
+    const created = desk.waitForEvent('page')
+    await popup.locator('#try-demo').click()
+    const demo = await created
+    try {
+      await demo.waitForURL(`${SERVICE}/link/try/`)
+      await demo.locator('#demo-state').waitFor()
+      const still = await popup.evaluate(async () => (await chrome.storage.session.get('tab')).tab)
+      if (still !== tabId) throw new Error('Try changed the input target without permission')
+      const demoTab = await popup.evaluate(async url => (await chrome.tabs.query({ url }))[0]?.id, `${SERVICE}/link/try/`)
+      await enable(popup, demoTab)
+      await demo.bringToFront()
+      // As with a physical controller, the shim exposes a newly enabled pad on its first deliberate press.
+      await hold('.gp-f[data-k=a]', () => until('demo detects controller', () => demo.locator('#demo-state').textContent().then(t => t.includes('Controller detected'))))
+      await clearHints()
+      const [x, y] = await centre('.gp-stick[data-stick="0"]')
+      await touches('touchStart', [[x, y]])
+      try {
+        await touches('touchMove', [[x + 48, y]])
+        await until('demo receives left stick', () => demo.locator('canvas').first().getAttribute('data-pad-input'))
+      } finally { await touches('touchEnd', []) }
+      await until('held input released on demo', () => demo.evaluate(() => Array.from(navigator.getGamepads()).some(p => p && Math.abs(p.axes[0]) < 0.02)))
+      await shot(demo, 'try-demo-controller')
+    } finally {
+      await enable(popup, tabId); await demo.close(); await page.bringToFront()
+      await hold('.gp-f[data-k=a]', () => until('original controller restored', () => page.evaluate(() => window.__pad()?.pressed[0])))
+      await until('original button released', () => page.evaluate(() => window.__pad()?.pressed[0] === false))
+    }
+    return 'explicit tab enable; real phone stick; release observed'
+  })
+
+  await check('Desktop companion reports only existing status and opens PC settings on an explicit click', async () => {
+    const guide = await desk.newPage()
+    const previous = await popup.evaluate(async () => (await chrome.storage.session.get('pc')).pc)
+    try {
+      await guide.goto(`${SERVICE}/link/desktop/`)
+      for (const link of ['off', 'missing', 'ready']) {
+        const pc = { link, version: link === 'ready' ? '0.3.0' : null, hotkey: null, error: 'private native detail', desktopCap: false, config: null, status: null, stats: null }
+        await popup.evaluate(pc => chrome.storage.session.set({ pc }), pc)
+        await guide.waitForFunction(status => document.getElementById('guide-status')?.dataset.helper === status, link)
+        const text = await guide.locator('#guide-status').textContent()
+        if (text.includes('private native detail')) throw new Error('private native error exposed')
+        if (link === 'off' && !text.includes('not been checked')) throw new Error('off was diagnosed as missing')
+        await shot(guide, `companion-status-${link}`)
+      }
+      const opened = desk.waitForEvent('page')
+      await guide.locator('#desktop-check').click()
+      const settings = await opened
+      try { await settings.waitForURL(`chrome-extension://${id}/options.html`) } finally { await settings.close() }
+    } finally { await guide.close(); if (previous) await popup.evaluate(pc => chrome.storage.session.set({ pc }), previous); await page.bringToFront() }
+    return 'not checked / missing / connected; no native input or permission exposed'
   })
 
   // ---- synthetic motion: a pose (W3C alpha / beta / gamma, degrees) and turn rates (degrees/second) at 60 Hz ----

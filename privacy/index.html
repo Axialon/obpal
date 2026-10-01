@@ -74,13 +74,14 @@
           <li><b>Typing passes straight through.</b> What you type on the phone's keyboard goes over the encrypted connection to the extension and on to ob.Pal Desktop, which types it. Neither keeps it. For a password field, the phone uses a password field too, so nothing is suggested, learned or kept.</li>
           <li><b>Remembered phones stay on your devices.</b> After you pair a phone online, the extension and the phone each keep a pairing key and the other device's connection certificate fingerprint (the extension also keeps the phone's name and when you paired it), so the phone can connect directly over your local network when the internet is down. None of it leaves the device, and you can forget a phone in the popup or in the phone's settings.</li>
           <li><b>Talks only to ob.Pal and your phone.</b> Its only network use is the ob.Pal service (for pairing and relay credentials) and the connection to your phone. For PC, it also talks to ob.Pal Desktop, on the same computer. It loads no remote code and has no analytics.</li>
+          <li><b>The connection seal stays between your devices.</b> The three symbols Link and your phone show are worked out on each device from the encrypted connection itself. They're a way to check you paired the right phone. They aren't sent anywhere, and Link keeps them only with the connection status, until the browser closes.</li>
         </ul>
         <table class="perms">
           <tr><th>Permission</th><th>Why</th></tr>
           <tr><td>Offscreen document</td><td>Keeps the connection to your phone open (extension service workers can't hold one).</td></tr>
           <tr><td>Storage</td><td>Remembers your chosen mode and your answer for each phone that asked to control your PC and, until the browser closes, the controlled tab and the connection status.</td></tr>
           <tr><td>Active tab, scripting</td><td>When you click the extension on a page, it can control that page, and only that page.</td></tr>
-          <tr><td>obpal.blackboxes.net</td><td>Pairing and relay credentials.</td></tr>
+          <tr><td>obpal.blackboxes.net</td><td>Pairing and relay credentials. On ob.Pal's Desktop install page only, it tells the page whether ob.Pal Desktop is connected and its version, nothing else.</td></tr>
           <tr><td>All sites (optional, off by default)</td><td>Only if you turn it on: reaches game frames served from other domains and keeps control across navigation. You can turn it off again in the popup.</td></tr>
           <tr><td>Native messaging (optional, off by default)</td><td>Only if you pick the PC target, or turn on PC control in its options: talks to ob.Pal Desktop on your computer.</td></tr>
           <tr><td>Notifications (optional, off by default)</td><td>Only if you turn on <b>Notify me</b> in its options: when a phone asks to control your PC while the popup is closed, a notification asks you, with Allow and Deny. It shows nothing else.</td></tr>
