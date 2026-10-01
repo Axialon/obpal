@@ -1,4 +1,4 @@
-/** Gate only measured coverage. The first migration supplies pendulum-specific stability limits. */
+/** Gate only measured coverage. Migrated sims supply their own stability limits. */
 export function smoothnessVerdict(result) {
   const failures = [], gaps = [], m = result.motion
   if (result.error) gaps.push(result.error)
@@ -17,6 +17,9 @@ export function smoothnessVerdict(result) {
     const p = m.physics
     if (!p?.supported) gaps.push('physics probe not implemented for this sim')
     else if (['maxAngle', 'maxSpeed', 'restJitter', 'invalidFrames'].some(k => !Number.isFinite(p[k]) || p[k] < 0)) failures.push('invalid physics measurements')
+    else if (p.model === 'marblerun') {
+      if (!Number.isFinite(p.maxExtent) || p.maxExtent < 0 || p.maxExtent > 1.450001 || p.maxSpeed > 5.000001 || p.restJitter > .0001 || p.invalidFrames > 0) failures.push('marble run stability bounds exceeded')
+    }
     else if (p.maxAngle > 1.400001 || p.maxSpeed > 5.000001 || p.restJitter > .0001 || p.invalidFrames > 0) failures.push('pendulum stability bounds exceeded')
   }
   return { status: failures.length ? 'fail' : gaps.length ? 'incomplete' : 'pass', failures, gaps }

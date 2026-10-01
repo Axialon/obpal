@@ -22,6 +22,8 @@ import { CalibratedControl } from './control-space'
 import { CONTROL_SPACES } from '../control-space'
 import { WiiPointer } from './pointing'
 import { MouseFace } from './mouseface'
+import { bindPress, PressOwners } from './press'
+import { thumbRegion } from './thumb'
 import { ScrollWheel } from './wheel'
 import { KeyboardDock } from './keyboard'
 import { LinkBadge } from './linkbadge'
@@ -278,6 +280,13 @@ async function boot(code?: Join) {
     /** What 3D follows: the phone's own sensors (the default, Wii-style), its camera (Android WebXR) or a glow for the screen's camera. */
     track3d: (['motion', 'xr', 'glow'].includes(store.get('obpal.track3d') ?? '') ? store.get('obpal.track3d') : 'motion') as 'motion' | 'xr' | 'glow',
   }
+  const oneHand = {
+    mouse: store.get('obpal.onehand.mouse') === '1',
+    wii: store.get('obpal.onehand.wii') === '1',
+    trackpad: store.get('obpal.onehand.trackpad') === '1',
+  }
+  let thumbScroll = store.get('obpal.thumbscroll') === '1'
+  let thumbMotion = store.get('obpal.thumbmotion') === '1'
   // ---- screen lock (while steering with motion) and hardware buttons ----
   const lock = new OrientationLock()
   /** Whether the lock came from turning the gyro on (and so goes with it). */
@@ -380,6 +389,13 @@ async function boot(code?: Join) {
   /** Set when the surface is built: the Wii face's A and B, held or released. */
   let wiiA: (down: boolean) => void = () => {}
   let wiiB: (down: boolean) => void = () => {}
+  let aPress: PressOwners | null = null
+  let bPress: PressOwners | null = null
+  let rightPress: PressOwners | null = null
+  let wiiWheel: ScrollWheel | null = null
+  const releasePointing = () => { aPress?.reset(); bPress?.reset(); rightPress?.reset(); wiiWheel?.reset() }
+  window.addEventListener('blur', releasePointing)
+  document.addEventListener('visibilitychange', () => { if (document.hidden) releasePointing() })
   // ---- physical buttons: keys, headset, pads and Back, each pressing what it's bound to (./buttons.ts) ----
   const inputs = new PhysicalInputs()
   /** A button held as the 3D hand's deadman (its `hold` control): as a thumb on the pad. */
@@ -786,6 +802,7 @@ async function boot(code?: Join) {
     buttonHold = false
     wiiA(false); wiiB(false)
     mouseFace.reset()
+    releasePointing()
     padWheel?.reset()
     pad?.reset()
     keyboard.close()
@@ -1184,6 +1201,8 @@ async function boot(code?: Join) {
         <div class="pad glass" id="pad" aria-label="Trackpad">
           <div class="pad-part glass" id="pad-part" hidden><span class="pp-dot"></span><span class="pp-name"></span><span class="pp-tag"></span><button class="pp-x" aria-label="Release part">${ICONS.close}</button></div>
           <div class="gestures" id="gestures" aria-hidden="true"></div>
+          <button class="thumb-settings" aria-label="Settings" hidden>${ICONS.settings}</button>
+          <p class="thumb-pad-hint" hidden>Tap to click · hold for right click</p>
           <div class="pad-wheel" id="pad-wheel" role="button" aria-label="Scroll wheel · turn it to scroll" hidden></div>
           <div class="level" id="level" aria-hidden="true"><div class="level-ring"></div><div class="level-dot" id="level-dot"></div></div>
           <div class="hold-spot" id="hold-spot" aria-hidden="true" hidden><i>${ICONS.hand}</i></div>
@@ -1199,8 +1218,12 @@ async function boot(code?: Join) {
             <button class="wii-round" id="wii-minus" aria-label="Zoom out">−</button>
             <button class="wii-round home" id="wii-home" aria-label="Centre the pointer">${ICONS.center}</button>
             <button class="wii-round" id="wii-plus" aria-label="Zoom in">+</button>
+            <button class="thumb-settings" aria-label="Settings" hidden>${ICONS.settings}</button>
           </div>
           <button class="wii-b" id="wii-b" aria-label="B: hold to grab"><b>B</b><span>hold to grab</span></button>
+          <button class="wii-right" id="wii-right" aria-label="Right click" hidden>${ICONS['mouse-right']}</button>
+          <div class="wii-wheel mouse-wheel" id="wii-wheel" role="button" aria-label="Scroll wheel · turn to scroll" hidden></div>
+          <p class="thumb-hint" hidden>A selects · B grabs</p>
         </div>
         <div class="mouse" id="mouse" hidden>${mouseFace.html()}</div>
         <div class="tray" id="tray"></div>
@@ -1224,8 +1247,15 @@ async function boot(code?: Join) {
     drums.mount(surface)
     keys.mount(surface)
     mouseFace.bind(document.getElementById('mouse')!)
+    surface.querySelectorAll<HTMLElement>('.thumb-settings').forEach(el => {
+      el.addEventListener('pointerdown', e => e.stopPropagation())
+      el.addEventListener('click', openSettings)
+    })
     keyboard.bind(app)
     // The trackpad's scroll wheel along its edge, for a screen that drives a mouse pointer (Layout.wheel).
+    padWheel?.destroy()
+    pad?.destroy()
+    wiiWheel?.destroy()
     padWheel = new ScrollWheel(document.getElementById('pad-wheel')!, {
       turn: (v) => link.sendCtl({ t: 'value', id: 'mouse-wheel', v }),
       notch: () => { if (hapticsKind() === 'vibrate') navigator.vibrate(3) },
@@ -1234,12 +1264,17 @@ async function boot(code?: Join) {
     pad.onTap = (kind) => {
       // In 3D the thumb rests on the pad as the deadman: a long or double press there means nothing.
       if (mode === Mode.track && kind !== 'tap') return
-      link.sendCtl({ t: 'btn', id: 'pad', ev: kind })
+      // Thumb taps are immediate paired mouse clicks: a quick second tap must not add a third click.
+      if (pad?.thumbOn) {
+        const id = kind === 'long' ? 'mouse-right' : 'mouse-left'
+        link.sendCtl({ t: 'btn', id, ev: 'down' })
+        link.sendCtl({ t: 'btn', id, ev: 'up' })
+      } else link.sendCtl({ t: 'btn', id: 'pad', ev: kind })
       tick(kind !== 'tap')
       if (mode === Mode.point) dismissHint('point')
     }
     pad.onTouchChange = (touching) => {
-      document.getElementById('pad')!.classList.toggle('active', touching)
+      document.getElementById('pad')?.classList.toggle('active', touching)
       // Releasing controls before a camera dialog must not put a late fullscreen layer over it.
       if (touching) { goFullscreen(); pump(16.7) }
     }
@@ -1293,17 +1328,15 @@ async function boot(code?: Join) {
     // A also reports going down and up, for hosts that act on a hold (the PC: hold A to right-click, press and aim to drag).
     const aBtn = document.getElementById('wii-a')!
     let aDown = false
-    wiiA = (down: boolean) => {
+    const a = (down: boolean) => {
       if (down === aDown) return
       aDown = down
+      if (down) tick()
       link.sendCtl({ t: 'btn', id: 'wii-a', ev: down ? 'down' : 'up' })
     }
-    aBtn.addEventListener('pointerdown', (e) => {
-      try { aBtn.setPointerCapture(e.pointerId) } catch { /* not a live pointer */ }
-      wiiA(true)
-    })
-    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) aBtn.addEventListener(ev, () => wiiA(false))
-    aBtn.addEventListener('contextmenu', (e) => e.preventDefault())
+    aPress = new PressOwners(a)
+    wiiA = down => aPress!.set('hardware', down)
+    bindPress(aBtn, aPress)
     tapBtn('wii-plus', 'wii-plus')
     tapBtn('wii-minus', 'wii-minus')
     document.getElementById('wii-home')!.addEventListener('click', () => { tick(); recenterPointer(); dismissHint('point') })
@@ -1316,14 +1349,14 @@ async function boot(code?: Join) {
       if (down) tick(true)
       link.sendCtl({ t: 'btn', id: 'wii-b', ev: down ? 'down' : 'up' })
     }
-    wiiB = b
-    bBtn.addEventListener('pointerdown', (e) => {
-      e.preventDefault()
-      try { bBtn.setPointerCapture(e.pointerId) } catch { /* not a live pointer */ }
-      b(true)
+    bPress = new PressOwners(b)
+    wiiB = down => bPress!.set('hardware', down)
+    bindPress(bBtn, bPress)
+    rightPress = new PressOwners(down => { if (down) tick(); link.sendCtl({ t: 'btn', id: 'mouse-right', ev: down ? 'down' : 'up' }) })
+    bindPress(document.getElementById('wii-right')!, rightPress)
+    wiiWheel = new ScrollWheel(document.getElementById('wii-wheel')!, {
+      turn: v => link.sendCtl({ t: 'value', id: 'mouse-wheel', v }), notch: () => tick(),
     })
-    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) bBtn.addEventListener(ev, () => b(false))
-    bBtn.addEventListener('contextmenu', (e) => e.preventDefault())
     const ppx = document.querySelector<HTMLButtonElement>('#pad-part .pp-x')!
     ppx.addEventListener('pointerdown', (e) => e.stopPropagation())
     ppx.addEventListener('click', (e) => { e.stopPropagation(); tick(); link.sendCtl({ t: 'btn', id: 'part-release', ev: 'tap' }) })
@@ -1366,12 +1399,30 @@ async function boot(code?: Join) {
       styleSeg.value = settings.style
     }
     const pointing = mode === Mode.point && tier !== Tier.touch
+    const thumbFace = pointing ? (mouseOn() ? 'mouse' : 'wii') : 'trackpad'
+    const thumbOn = (pointing || controllerNow() === Controller.trackpad) && oneHand[thumbFace]
+    surface.classList.toggle('one-hand', thumbOn)
+    surface.classList.toggle('thumb-motion', controllerNow() === Controller.trackpad && (oneHand.trackpad || thumbMotion))
+    surface.querySelectorAll<HTMLElement>('.thumb-settings').forEach(el => { el.hidden = !thumbOn })
+    const region = thumbRegion(uiSize().w, uiSize().h, settings.left)
+    surface.style.setProperty('--thumb-width', `${region.width}px`)
+    surface.style.setProperty('--thumb-height', `${region.height}px`)
+    surface.style.setProperty('--thumb-align', region.align)
+    surface.style.setProperty('--thumb-primary', region.primary)
+    surface.style.setProperty('--thumb-auxiliary', region.auxiliary)
+    pad?.setThumb(controllerNow() === Controller.trackpad && (oneHand.trackpad || thumbMotion))
+    document.querySelector<HTMLElement>('.thumb-pad-hint')!.hidden = !pad?.thumbOn
+    document.getElementById('wii-right')!.hidden = !pointing || mouseOn() || !oneHand.wii
+    document.getElementById('wii-wheel')!.hidden = !pointing || mouseOn() || !oneHand.wii
+    document.querySelector<HTMLElement>('.thumb-hint')!.hidden = !pointing || mouseOn() || !oneHand.wii
     const mouseFaceEl = document.getElementById('mouse')!
     if (!mouseFaceEl.hidden && !(pointing && mouseOn())) mouseFace.reset()
     mouseFaceEl.hidden = !(pointing && mouseOn())
-    document.getElementById('wii')!.hidden = !pointing || mouseOn()
+    const wiiEl = document.getElementById('wii')!
+    if (!wiiEl.hidden && (!pointing || mouseOn())) releasePointing()
+    wiiEl.hidden = !pointing || mouseOn()
     const wheelEl = document.getElementById('pad-wheel')!
-    const wheelOn = !!layout.wheel && !pointing && mode !== Mode.track
+    const wheelOn = (!!layout.wheel || thumbScroll && controllerNow() === Controller.trackpad) && !pointing && mode !== Mode.track
     if (!wheelEl.hidden && !wheelOn) padWheel?.reset()
     wheelEl.hidden = !wheelOn
     document.getElementById('pad')!.hidden = pointing
@@ -1777,6 +1828,13 @@ async function boot(code?: Join) {
         <p class="sheet-k"><b>03</b>Colour${seatColor ? html`<small> · yours in this scene</small>` : ''}</p>
         <div class="accent-row" role="radiogroup" aria-label="Colour">${family.ACCENTS.map((a) => html`<button class="bb-accent${a.id === 'product' ? ' product' : ''}" role="radio" data-accent="${a.id}" aria-checked="${family.getAccent() === a.id}" aria-label="${a.id === 'product' ? 'ob.Pal lime (default)' : a.name}" style="--sw:${a.color ?? '#c6ff34'}">${family.icons.check}</button>`)}</div>
         <p class="sheet-k"><b>04</b>Holding it</p>
+        ${([Controller.mouse, Controller.wii, Controller.trackpad] as ControllerId[]).includes(controllerNow()) ? html`
+          <label class="row sw-row"><span>One hand</span><input type="checkbox" class="kit-switch" role="switch" id="one-hand"></label>
+          <p class="meta">Controls low, under your thumb · remembered for this controller.</p>
+          ${controllerNow() === Controller.trackpad ? html`
+            <label class="row sw-row"><span>Thumb motion</span><input type="checkbox" class="kit-switch" role="switch" id="thumb-motion"></label>
+            <p class="meta">Fast arcs travel farther. Rest at an edge after moving to keep going. Tap to click; two fingers or hold for right click.</p>
+            <label class="row sw-row"><span>Thumb scroll strip</span><input type="checkbox" class="kit-switch" role="switch" id="thumb-scroll"></label>` : ''}` : ''}
         <label class="row sw-row"><span>Left-handed</span><input type="checkbox" class="kit-switch" role="switch" id="left"></label>
         <label class="row sw-row"><span>Lock rotation while motion steers</span><input type="checkbox" class="kit-switch" role="switch" id="lockgyro"></label>
         <div class="row track3d" role="radiogroup" aria-label="3D position comes from"><span>3D position comes from</span>${(['motion', 'xr', 'glow'] as const).map((w) => html`<button class="way-opt" role="radio" data-way="${w}" aria-checked="${shownWay() === w}" aria-disabled="${w === 'xr' && !trackOk}" title="${{ motion: 'Estimated from the phone’s own motion', xr: 'Its camera, through space (Android)', glow: 'A glow for the screen’s camera' }[w]}">${ICONS[{ motion: 'gyro', xr: 'camera', glow: 'glow' }[w]]}<span>${{ motion: 'Motion', xr: 'Camera', glow: 'Glow' }[w]}</span></button>`)}${trackOk ? '' : html`<small class="way-why">${CAMERA_3D_NEEDS}</small>`}</div>
@@ -1811,10 +1869,31 @@ async function boot(code?: Join) {
     smooth.value = String(settings.smooth)
     family.syncRanges(sheet)
     left.checked = settings.left
+    const one = sheet.querySelector<HTMLInputElement>('#one-hand')
+    const face = controllerNow() === Controller.mouse ? 'mouse' : controllerNow() === Controller.wii ? 'wii' : 'trackpad'
+    if (one) {
+      one.checked = oneHand[face]
+      one.onchange = () => {
+        mouseFace.reset(); releasePointing(); pad?.reset()
+        oneHand[face] = one.checked
+        store.set(`obpal.onehand.${face}`, one.checked ? '1' : '0')
+        const motion = sheet.querySelector<HTMLInputElement>('#thumb-motion')
+        if (motion) { motion.checked = one.checked || thumbMotion; motion.disabled = one.checked }
+        render()
+      }
+    }
+    const thumb = sheet.querySelector<HTMLInputElement>('#thumb-motion')
+    if (thumb) {
+      thumb.checked = oneHand.trackpad || thumbMotion
+      thumb.disabled = oneHand.trackpad
+      thumb.onchange = () => { thumbMotion = thumb.checked; store.set('obpal.thumbmotion', thumb.checked ? '1' : '0'); render() }
+    }
+    const scroll = sheet.querySelector<HTMLInputElement>('#thumb-scroll')
+    if (scroll) { scroll.checked = thumbScroll; scroll.onchange = () => { thumbScroll = scroll.checked; store.set('obpal.thumbscroll', scroll.checked ? '1' : '0'); render() } }
     show()
     gain.oninput = () => { settings.gain = Number(gain.value); store.set('obpal.gain', gain.value); show() }
     smooth.oninput = () => { settings.smooth = Number(smooth.value); store.set('obpal.smooth', smooth.value); applySmooth(); show() }
-    left.onchange = () => { settings.left = left.checked; store.set('obpal.left', left.checked ? '1' : '0'); surface?.classList.toggle('left', left.checked) }
+    left.onchange = () => { settings.left = left.checked; store.set('obpal.left', left.checked ? '1' : '0'); surface?.classList.toggle('left', left.checked); render() }
     const lockgyro = sheet.querySelector<HTMLInputElement>('#lockgyro')!
     lockgyro.checked = settings.lockWithGyro
     lockgyro.onchange = () => { settings.lockWithGyro = lockgyro.checked; store.set('obpal.lockgyro', lockgyro.checked ? '1' : '0') }

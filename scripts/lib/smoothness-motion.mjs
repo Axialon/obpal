@@ -6,19 +6,23 @@ export async function prepareSmoothness(context) {
   await context.route('**/__smoothness_three.js', route => route.fulfill({ contentType: 'text/javascript', body: core }))
 }
 
-export async function measureSmoothnessMotion(page, { pendulum = false } = {}) {
-  return page.evaluate(async ({ pendulum }) => {
+export async function measureSmoothnessMotion(page, { pendulum = false, marblerun = false } = {}) {
+  return page.evaluate(async ({ pendulum, marblerun }) => {
     const { Box3, Frustum, Matrix4, Vector3 } = await import('/__smoothness_three.js')
     const experience = window.__presence?.experience
     if (!experience) throw new Error('No instrumentable sim experience')
     const { renderer, scene, overview: camera } = experience
     const controls = window.__device?.stage.controls ?? experience.orbit
     const logic = window.__device?.logic
-    if (pendulum && (!logic?.physicsDiagnostics || !logic?.renderState)) throw new Error('Pendulum foundation probe is missing')
+    const physics = pendulum || marblerun
+    if (physics && (!logic?.physicsDiagnostics || !logic?.renderState)) throw new Error('Fixed-step foundation probe is missing')
     const next = () => new Promise(requestAnimationFrame)
-    if (pendulum) logic.units.forEach((_, n) => logic.home(n))
+    if (physics) logic.units.forEach((_, n) => logic.home(n))
     for (let n = 0; n < 90; n++) await next()
-    const roots = pendulum ? [1, 2, 3].map(n => scene.getObjectByName(`pendulum-${n}`)) : [scene]
+    const marbleRoots = []
+    if (marblerun) scene.traverse(o => { if (o.isMesh && (o.name === 'marble' || o.name.startsWith('companion-marble-'))) marbleRoots.push(o) })
+    if (marblerun && marbleRoots.length !== 6) throw new Error('Expected six marble bodies')
+    const roots = marblerun ? marbleRoots : pendulum ? [1, 2, 3].map(n => scene.getObjectByName(`pendulum-${n}`)) : [scene]
     if (roots.some(r => !r)) throw new Error('Expected model root is missing')
     function visible(o) {
       for (let p = o; p; p = p.parent) {
@@ -46,8 +50,8 @@ export async function measureSmoothnessMotion(page, { pendulum = false } = {}) {
     const projection = new Matrix4(), frustum = new Frustum(), box = new Box3(), corner = new Vector3()
     const frames = [], issues = [], gaps = []
     let hidden = 0, missingDraws = 0, changedGeometry = 0, nonFinite = 0, motionFrames = 0, renderedMotionFrames = 0, totalRotation = 0
-    let maxAngle = 0, maxSpeed = 0, restJitter = 0, motionSeconds = 0
-    const invalidBefore = pendulum ? logic.physicsDiagnostics().invalidFrames : 0
+    let maxExtent = 0, maxAngle = 0, maxSpeed = 0, restJitter = 0, motionSeconds = 0
+    const invalidBefore = physics ? logic.physicsDiagnostics().invalidFrames : 0
     const note = (kind, mesh) => { if (issues.length < 100) issues.push({ kind, part: mesh.name || mesh.uuid, frame: frames.length }) }
     try {
       for (const [phase, duration] of [['rest', 1000], ['motion', 10000], ['rest-again', 1000]]) {
@@ -55,8 +59,15 @@ export async function measureSmoothnessMotion(page, { pendulum = false } = {}) {
           if (phase === 'motion') logic.units.forEach(u => { u.omega = 1.4 })
           else logic.units.forEach((_, n) => logic.home(n))
         }
-        const begin = performance.now(); let previous = begin
-        while (performance.now() - begin < duration) {
+        if (marblerun) logic.units.forEach((_, n) => logic.home(n))
+        const resting = marblerun ? logic.renderState() : null
+        const begin = performance.now(); let previous = begin, pushes = 0
+        // Include the RAF which reaches the duration; probe work between frames is not captured motion.
+        while (previous - begin < duration) {
+          if (marblerun && phase === 'motion') {
+            const due = Math.min(20, Math.floor((performance.now() - begin) / 100) + 1)
+            while (pushes < due) { logic.units.forEach((_, n) => logic.push(n)); pushes++ }
+          }
           const beforeDraw = renderer.info.render.frame
           drawn.clear()
           if (phase === 'motion') {
@@ -99,6 +110,16 @@ export async function measureSmoothnessMotion(page, { pendulum = false } = {}) {
               if (phase !== 'motion') restJitter = Math.max(restJitter, Math.abs(u.angle), Math.abs(u.omega), Math.abs(p.angle))
             }
           }
+          if (marblerun) {
+            const poses = logic.renderState()
+            logic.units.forEach((u, n) => [u, ...u.marbles].forEach((m, j) => {
+              const p = poses[n].marbles[j], home = resting[n].marbles[j]
+              if (![m.x, m.z, m.vx, m.vz, m.rollX, m.rollZ, p.x, p.z, p.rollX, p.rollZ].every(Number.isFinite)) nonFinite++
+              maxExtent = Math.max(maxExtent, Math.abs(m.x), Math.abs(m.z), Math.abs(p.x), Math.abs(p.z))
+              maxSpeed = Math.max(maxSpeed, Math.hypot(m.vx, m.vz))
+              if (phase !== 'motion') restJitter = Math.max(restJitter, Math.hypot(p.x - home.x, p.z - home.z), Math.hypot(m.vx, m.vz))
+            }))
+          }
           frames.push({ phase, dt, rendered })
           if (frames.length > 12000) throw new Error('Motion capture exceeded its bounded frame inventory')
         }
@@ -107,14 +128,15 @@ export async function measureSmoothnessMotion(page, { pendulum = false } = {}) {
       for (const { mesh, original, wrapper } of hooks) if (mesh.onBeforeRender === wrapper) mesh.onBeforeRender = original
       if (controls?.rotate && !controls.target) controls.rotate(-totalRotation, 0, false)
       else { camera.position.copy(start); camera.quaternion.copy(startQ); controls?.update() }
-      if (pendulum) logic.units.forEach((_, n) => logic.home(n))
+      if (physics) logic.units.forEach((_, n) => logic.home(n))
     }
     gaps.sort((a, b) => a - b)
     const percentile = p => gaps[Math.floor((gaps.length - 1) * p)] ?? NaN
     return { frames: frames.length, motionSeconds, motionFrames, renderedMotionFrames,
       p95: percentile(.95), p99: percentile(.99), maxGap: gaps.at(-1) ?? NaN,
       hidden, missingDraws, changedGeometry, nonFinite, rigidMeshes: rigid.length, unsupportedMeshes: selected.length - rigid.length,
-      physics: { supported: pendulum, maxAngle, maxSpeed, restJitter, invalidFrames: pendulum ? logic.physicsDiagnostics().invalidFrames - invalidBefore : 0 },
-      samples: frames, issues, instrumentation: 'RAF timing and rigid mesh submissions; no framebuffer preservation. Not per-part pixel visibility or skinned vertex coverage.' }
-  }, { pendulum })
+      physics: { supported: physics, model: marblerun ? 'marblerun' : 'pendulum', maxExtent, maxAngle, maxSpeed, restJitter, invalidFrames: physics ? logic.physicsDiagnostics().invalidFrames - invalidBefore : 0 },
+      samples: frames, issues, scope: marblerun ? 'Six moving glass spheres and their rigid colour ribbons; static instanced track outside this motion probe.' : 'Authored model roots',
+      instrumentation: 'RAF timing and rigid mesh submissions; no framebuffer preservation. Not per-part pixel visibility or skinned vertex coverage.' }
+  }, { pendulum, marblerun })
 }

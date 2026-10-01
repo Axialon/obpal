@@ -153,6 +153,9 @@ export interface DeviceEvent {
     impulse?: number
     materials?: readonly [import('../audio/events').Material, import('../audio/events').Material]
     action?: string
+    source?: string
+    glass?: import('../audio/events').SoundEvent['glass']
+    pitch?: number
   }
 }
 

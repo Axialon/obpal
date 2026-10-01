@@ -23,6 +23,9 @@ export interface SoundEvent {
   bank?: number
   velocity?: Position
   action?: string
+  /** Dedicated glass sphere/contact voices; pitch includes the marble's stable detuning. */
+  glass?: 'clack' | 'track' | 'roll' | 'drag'
+  pitch?: number
 }
 
 export class SoundBus {
@@ -35,9 +38,10 @@ export const unit = (v: number) => Number.isFinite(v) ? Math.max(0, Math.min(1, 
 
 export function deviceEvent(e: DeviceEvent, source: string, at: Position, who?: string): SoundEvent {
   return {
-    kind: e.kind === 'bump' || e.kind === 'fall' ? 'contact' : 'action', source, at, who,
+    kind: e.kind === 'bump' || e.kind === 'fall' ? 'contact' : 'action', source: e.audio?.source ? `${source}:${e.audio.source}` : source, at, who,
     strength: unit(e.strength ?? (e.kind === 'fall' ? 1 : e.kind === 'score' ? 0.6 : 0.3)),
     speed: e.audio?.speed, impulse: e.audio?.impulse, materials: e.audio?.materials,
     action: e.audio?.action ?? (e.kind === 'score' ? 'score' : 'tick'),
+    glass: e.audio?.glass, pitch: e.audio?.pitch,
   }
 }

@@ -1,4 +1,4 @@
-/** Report the whole family; only the migrated pendulum is an enforced gate. Use the existing guarded sims runner. */
+/** Report the whole family; the migrated pendulum and marble run is an enforced gate. Use the existing guarded sims runner. */
 import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,8 +7,11 @@ import { prepareWarmup, measureWarmup, warmupFailure } from './lib/warmup.mjs'
 import { prepareSmoothness, measureSmoothnessMotion } from './lib/smoothness-motion.mjs'
 import { smoothnessVerdict } from './lib/smoothness-report.mjs'
 import { SMOOTHNESS_SIMS } from './lib/smoothness-catalogue.mjs'
+import { runMarbleControls } from './e2e-marble-controls.mjs'
 
 export async function runSmoothness(local, check, { ids = null } = {}) {
+  ids ??= process.env.OBPAL_SMOOTHNESS_IDS?.split(',').filter(Boolean) ?? null
+  if (ids?.some(id => !SMOOTHNESS_SIMS.some(([known]) => known === id))) throw new Error('Unknown smoothness sim id')
   const out = await mkdtemp(join(tmpdir(), 'obpal-smoothness-')), results = []
   const phone = process.env.OBPAL_SMOOTHNESS_SIZE === 'phone'
   const size = phone ? { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true }
@@ -17,7 +20,7 @@ export async function runSmoothness(local, check, { ids = null } = {}) {
     args: ['--ignore-certificate-errors', '--autoplay-policy=no-user-gesture-required'] })
   try {
     for (const [id, path] of SMOOTHNESS_SIMS.filter(([id]) => !ids || ids.includes(id))) {
-      const row = { id, path, size, enforced: id === 'pendulum', error: null }
+      const row = { id, path, size, enforced: id === 'pendulum' || id === 'marblerun', error: null }
       const url = `${local.origin}${path}${path.includes('?') ? '&' : '?'}test=vr`
       let context
       try {
@@ -34,7 +37,7 @@ export async function runSmoothness(local, check, { ids = null } = {}) {
         const errors = []; page.on('pageerror', error => errors.push(error.message))
         await page.goto(url, { waitUntil: 'networkidle' })
         await page.waitForFunction(() => window.__presence?.experience, null, { timeout: 30000 })
-        row.motion = await measureSmoothnessMotion(page, { pendulum: id === 'pendulum' })
+        row.motion = await measureSmoothnessMotion(page, { pendulum: id === 'pendulum', marblerun: id === 'marblerun' })
         if (errors.length) row.error = errors.join('; ')
       } catch (error) { row.error = String(error?.message ?? error) }
       finally { await context?.close() }
@@ -49,6 +52,7 @@ export async function runSmoothness(local, check, { ids = null } = {}) {
       })
       else console.log(`  report-only: ${id}: ${row.verdict.status}`)
     }
+    if (results.some(row => row.id === 'marblerun')) await runMarbleControls(browser, local, check, out)
   } finally { await browser.close(); console.log(`  Smoothness measurements: ${out}`) }
   return { out, results }
 }

@@ -40,14 +40,21 @@ export class ScrollWheel {
   private turned = 0
   private spin: { v: number; at: number } | null = null
   private raf = 0
+  private readonly events = new AbortController()
 
   constructor(private readonly el: HTMLElement, private readonly deps: WheelDeps) {
-    el.addEventListener('pointerdown', this.down)
-    el.addEventListener('pointermove', this.move)
-    el.addEventListener('pointerup', this.up)
-    el.addEventListener('pointercancel', this.up)
-    el.addEventListener('contextmenu', (e) => e.preventDefault())
+    const options = { signal: this.events.signal }
+    el.addEventListener('pointerdown', this.down, options)
+    el.addEventListener('pointermove', this.move, options)
+    el.addEventListener('pointerup', this.up, options)
+    el.addEventListener('pointercancel', this.up, options)
+    el.addEventListener('lostpointercapture', this.up, options)
+    window.addEventListener('blur', () => this.reset(), options)
+    document.addEventListener('visibilitychange', () => { if (document.hidden) this.reset() }, options)
+    el.addEventListener('contextmenu', (e) => e.preventDefault(), options)
   }
+
+  destroy() { this.reset(); this.events.abort() }
 
   /** Stop and let go of everything (hidden, or the screen went away). */
   reset() {
@@ -91,7 +98,7 @@ export class ScrollWheel {
     clearTimeout(f.timer)
     this.f = null
     this.el.classList.remove('turning')
-    if (f.mode === 'wait') this.deps.tap?.()
+    if (f.mode === 'wait' && e.type === 'pointerup') this.deps.tap?.()
     else if (f.mode === 'hold') this.deps.hold?.(false)
     else if (Math.abs(f.v) > FREE_SPIN && e.type === 'pointerup') this.startSpin(f.v)
     else this.flush()

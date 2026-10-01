@@ -138,7 +138,7 @@ export class SimSound {
     s.filter.frequency.setTargetAtTime(airCutoff(distance, s.cutoff, this.profile.space === 'underwater'), t, 0.06)
     for (const feed of s.feeds) feed.source.playbackRate.setTargetAtTime(feed.rate * doppler, t, 0.05)
   }
-  private release(s: Strip, immediate = false) {
+  private release(s: Strip, immediate = false, fade = 0.018) {
     const t = this.context!.currentTime
     for (const feed of s.feeds) {
       feed.source.onended = () => {
@@ -146,8 +146,8 @@ export class SimSound {
         if (!s.source) this.disconnect(s)
       }
       hold(feed.gain.gain, t)
-      feed.gain.gain.linearRampToValueAtTime(0, t + (immediate ? 0.003 : 0.018))
-      feed.source.stop(t + (immediate ? 0.005 : 0.022))
+      feed.gain.gain.linearRampToValueAtTime(0, t + (immediate ? 0.003 : fade))
+      feed.source.stop(t + (immediate ? 0.005 : fade + 0.004))
     }
     s.feeds = []; s.source = null
   }
@@ -223,6 +223,27 @@ export class SimSound {
       this.contactsAt.set(e.source, now)
     }
     const strength = e.speed === undefined ? unit(e.strength) : impactGain(e.speed, e.impulse)
+    if (e.kind === 'sustain' && (e.glass === 'roll' || e.glass === 'drag')) {
+      if (this.reduced) return
+      const drag = e.glass === 'drag', key = `${e.source}:${e.glass}`
+      const active = this.budget.slots.findIndex(s => s.active && s.key === key)
+      if (strength < 0.005) {
+        if (active >= 0 && this.strips[active].source) {
+          this.release(this.strips[active], false, drag ? 0.12 : 0.06); this.budget.release(active)
+        }
+        return
+      }
+      // At most two thin singing modes, sharing no more than a small fraction of the click level.
+      const voices = this.budget.slots.map((s, n) => ({ ...s, n })).filter(s => s.active && s.key.endsWith(':drag'))
+      const gain = (drag ? 0.12 : 0.024) * strength
+      if (drag && active < 0 && voices.length >= 2) {
+        const quiet = voices.sort((a, b) => a.level - b.level)[0]
+        if (gain < quiet.level * 1.2) return
+        this.release(this.strips[quiet.n]); this.budget.release(quiet.n)
+      }
+      this.play(key, e.at, drag ? this.buffers!.glassDrag() : this.buffers!.glassRoll(), gain, 1, true, e.pitch ?? 1, drag ? 6500 : 3800, undefined, e.velocity)
+      return
+    }
     if (strength < 0.015) return
     if (e.kind === 'motor' || e.kind === 'sustain') {
       if (this.reduced) return
@@ -237,6 +258,11 @@ export class SimSound {
       this.play(`${e.source}:${e.kind}`, e.at, buffer, model.gain * (e.kind === 'sustain' ? 0.45 * strength : 1), e.who ? e.kind === 'motor' ? 5 : 3 : 1, true, rate, model.cutoff,
         layered ? { buffer: this.buffers!.machine(tuning, model.machine, true), blend: recorded ? 0.12 + model.body * 0.13 : model.body, rate: model.bodyRate } : undefined, e.velocity, e.spatialGroup, model.machine === 'servo' ? 3 : Infinity)
     } else if (e.kind === 'contact' || e.kind === 'footstep') {
+      if (e.glass === 'clack' || e.glass === 'track') {
+        const clack = e.glass === 'clack'
+        this.play(e.source, e.at, clack ? this.buffers!.glassClack() : this.buffers!.glassTrack(), strength * (clack ? 0.65 : 0.5), e.who ? 4 : 2, false, (e.pitch ?? 1) * (0.97 + strength * 0.1), (clack ? 8500 : 6500) + strength * 3500)
+        return
+      }
       const [a, b] = e.materials ?? this.profile.materials
       const foot = e.kind === 'footstep', bank = this.samples!
       const foley = foot ? bank.get(this.scheduled % 2 ? 'foot-a' : 'foot-b') : a === 'water' || b === 'water' ? null : bank.get('body') ?? bank.get('wood')
@@ -268,7 +294,8 @@ export class SimSound {
     for (let i = 0; i < this.strips.length; i++) {
       const s = this.strips[i]
       if (s.source && s.loop && s.until < c.currentTime) {
-        for (const feed of s.feeds) { feed.gain.gain.setTargetAtTime(0, c.currentTime, 0.015); feed.source.stop(c.currentTime + 0.06) }
+        const fade = this.budget.slots[i].key.endsWith(':drag') ? 0.04 : 0.015
+        for (const feed of s.feeds) { feed.gain.gain.setTargetAtTime(0, c.currentTime, fade); feed.source.stop(c.currentTime + fade * 4) }
         s.loop = false
       }
       if (s.source) this.spatial(s)

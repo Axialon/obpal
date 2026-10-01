@@ -25,11 +25,13 @@ it('requires a connected track, then finishes a tilt run and retains its best ti
   expect(l.units[0].finished).toBe(true); expect(l.units[0].best).toBeGreaterThan(0)
   const best = l.units[0].best; l.home(0); expect(l.units[0].best).toBe(best)
 })
-it('stops a disconnected marble and clock and keeps motion inside the channel', () => {
+it('coasts a disconnected marble with its race clock and keeps motion inside the channel', () => {
   const l = new MarblerunLogic(), i = restInput()
   l.units[0].running = true; i.drag = [30, 80]; l.step([i], 0.05)
   i.quiet = true; const { x, z, time } = l.units[0]; l.step([i], 9)
-  expect(l.units[0]).toMatchObject({ x, z, time, vx: 0, vz: 0 })
+  expect(l.units[0].time).toBeGreaterThan(time)
+  expect(Math.hypot(l.units[0].x - x, l.units[0].z - z)).toBeGreaterThan(0)
+  expect(Math.hypot(l.units[0].vx, l.units[0].vz)).toBeGreaterThan(0)
   expect(inChannel(l.units[0].track, x, z)).toBe(true)
 })
 

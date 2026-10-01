@@ -51,6 +51,37 @@ export class SoundBuffers {
       return (ring * (1 - m.noise) * Math.exp(-t * 7 / m.decay) + low * m.noise * Math.exp(-t * 12 / m.decay)) * Math.min(1, t * 1500) * 0.6
     }, 1, -20)
   }
+  /** Sphere modes are high and short; the track has a lower, separately damped glass ring. */
+  glassClack() {
+    return this.make('glass:clack', 0.13, (t, n) => {
+      const modes = Math.sin(tau * 3150 * t) * Math.exp(-t / 0.013)
+        + 0.48 * Math.sin(tau * 4977 * t) * Math.exp(-t / 0.009)
+        + 0.22 * Math.sin(tau * 7314 * t) * Math.exp(-t / 0.006)
+      return (modes + n * 0.09 * Math.exp(-t / 0.0015)) * Math.min(1, t * 5000)
+    }, 1, -23)
+  }
+  glassTrack() {
+    return this.make('glass:track', 0.22, (t, n) => (Math.sin(tau * 2240 * t) * Math.exp(-t / 0.024)
+      + 0.38 * Math.sin(tau * 3671 * t) * Math.exp(-t / 0.015)
+      + 0.17 * Math.sin(tau * 6048 * t) * Math.exp(-t / 0.011)
+      + n * 0.05 * Math.exp(-t / 0.002)) * Math.min(1, t * 3500), 1, -25)
+  }
+  glassDrag() {
+    // A quiet bowed mode, with breath and irregular beating instead of alarm-like harmonics.
+    let breath = 0
+    return this.make('glass:drag', 4.15, (t, n) => {
+      breath += 0.04 * (n - breath)
+      const phase = tau * 2700 * t + 0.015 * Math.sin(tau * 3.7 * t)
+      return (Math.sin(phase) * 0.7 + Math.sin(phase * 1.013) * 0.14 + Math.sin(phase * 1.587) * 0.07 + breath * 0.04) * (0.85 + 0.1 * Math.sin(tau * 1.7 * t))
+    }, 1, -26, true)
+  }
+  glassRoll() {
+    let low = 0
+    return this.make('glass:roll', 4.15, (t, n) => {
+      low += 0.09 * (n - low)
+      return low * 0.38 + (n - low) * 0.025 + Math.sin(tau * 1860 * t) * (0.014 + 0.01 * Math.sin(tau * 31 * t))
+    }, 1, -30, true)
+  }
   machine(tuning: Tuning, machine: Machine, loaded = false) {
     const hz = machine === 'roll' ? 37 : machine === 'tracks' ? 24 : machine === 'water' ? 23 : machine === 'air' ? 17 : tuning.hz
     let low = 0, smooth = 0
@@ -101,6 +132,7 @@ export class SoundBuffers {
     return this.machine({ machine: 'air', category: 'passive', hz: 40, mesh: 3, level: 1, samples: 'none' }, kind === 'water' ? 'water' : 'air')
   }
   action(action: string) {
+    if (action === 'glass-launch') return this.make('glass:launch', 0.09, t => Math.sin(tau * 1450 * t) * Math.exp(-t / 0.012) * Math.min(1, t * 2000), 1, -28)
     if (action === 'horn') return this.make('action:horn', 0.3, t => (Math.sin(t * 330 * tau) + Math.sin(t * 440 * tau)) * 0.2 * Math.min(1, t * 100, (0.3 - t) * 100), 1, -20)
     if (action === 'fire') {
       let low = 0

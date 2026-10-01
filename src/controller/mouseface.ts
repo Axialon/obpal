@@ -10,6 +10,8 @@
 import type { DeviceMsg } from '@obpal/core'
 import { ICONS } from '../ui/icons'
 import { ScrollWheel } from './wheel'
+import { bindPress, PressOwners } from './press'
+import { toUi, uiRect } from './uiframe'
 
 export interface MouseFaceDeps {
   send(m: DeviceMsg): void
@@ -23,8 +25,15 @@ export class MouseFace {
   private wheel: ScrollWheel | null = null
   private down = new Set<'left' | 'right'>()
   private holding = false
+  private presses = {
+    left: new PressOwners(down => this.changeButton('left', down)),
+    right: new PressOwners(down => this.changeButton('right', down)),
+  }
 
-  constructor(private readonly deps: MouseFaceDeps) {}
+  constructor(private readonly deps: MouseFaceDeps) {
+    window.addEventListener('blur', () => this.reset())
+    document.addEventListener('visibilitychange', () => { if (document.hidden) this.reset() })
+  }
 
   html(): Content {
     return html`
@@ -32,6 +41,7 @@ export class MouseFace {
         <button class="mouse-round" id="mouse-zoom-out" aria-label="Zoom out">${ICONS['zoom-out']}</button>
         <button class="mouse-round home" id="mouse-home" aria-label="Centre the pointer">${ICONS.center}</button>
         <button class="mouse-round" id="mouse-zoom-in" aria-label="Zoom in">${ICONS['zoom-in']}</button>
+        <button class="thumb-settings" aria-label="Settings" hidden>${ICONS.settings}</button>
       </div>
       <div class="mouse-shell">
         <button class="mouse-btn left" id="mouse-left" aria-label="Left click · hold and aim to drag">${ICONS['mouse-left']}</button>
@@ -44,6 +54,8 @@ export class MouseFace {
   }
 
   bind(root: HTMLElement) {
+    this.reset()
+    this.wheel?.destroy()
     this.root = root
     const $ = (id: string) => root.querySelector<HTMLElement>(`#${id}`)!
     const tap = (id: string, send: string) => $(id).addEventListener('click', () => { this.deps.feel('press'); this.deps.send({ t: 'btn', id: send, ev: 'tap' }) })
@@ -52,14 +64,24 @@ export class MouseFace {
     $('mouse-home').addEventListener('click', () => { this.deps.feel('press'); this.deps.recenter() })
     for (const side of ['left', 'right'] as const) {
       const el = $(`mouse-${side}`)
-      el.addEventListener('pointerdown', (e) => {
-        e.preventDefault()
-        try { el.setPointerCapture(e.pointerId) } catch { /* not a live pointer */ }
-        this.button(side, true)
-      })
-      for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) el.addEventListener(ev, () => this.button(side, false))
-      el.addEventListener('contextmenu', (e) => e.preventDefault())
+      bindPress(el, this.presses[side])
     }
+    // The groove is decoration except for the wheel: its empty area belongs to the nearest half.
+    const seam = root.querySelector<HTMLElement>('.mouse-seam')!
+    const seamSide = new Map<number, 'left' | 'right'>()
+    seam.addEventListener('pointerdown', e => {
+      if ((e.target as Element).closest('#mouse-wheel')) return
+      e.preventDefault()
+      const r = uiRect(seam)
+      const side = toUi(e.clientX, e.clientY).x < r.left + r.width / 2 ? 'left' : 'right'
+      seamSide.set(e.pointerId, side)
+      try { seam.setPointerCapture(e.pointerId) } catch { /* not a live pointer */ }
+      this.presses[side].set(e.pointerId, true)
+    })
+    for (const type of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) seam.addEventListener(type, e => {
+      const side = seamSide.get(e.pointerId)
+      if (side) { this.presses[side].set(e.pointerId, false); seamSide.delete(e.pointerId) }
+    })
     this.wheel = new ScrollWheel($('mouse-wheel'), {
       turn: (v) => this.deps.send({ t: 'value', id: 'mouse-wheel', v }),
       notch: () => this.deps.feel('notch'),
@@ -70,6 +92,10 @@ export class MouseFace {
 
   /** Left or Right, pressed or let go (also from a hardware button). */
   button(side: 'left' | 'right', down: boolean) {
+    this.presses[side].set('hardware', down)
+  }
+
+  private changeButton(side: 'left' | 'right', down: boolean) {
     if (down === this.down.has(side)) return
     if (down) this.down.add(side)
     else this.down.delete(side)
@@ -90,7 +116,8 @@ export class MouseFace {
 
   /** Let go of everything (the face was hidden, or the screen went away). */
   reset() {
-    for (const side of [...this.down]) this.button(side, false)
+    this.presses.left.reset()
+    this.presses.right.reset()
     this.wheel?.reset()
     if (this.holding) this.hold(false)
   }

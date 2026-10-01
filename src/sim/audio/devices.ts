@@ -2,7 +2,7 @@ import type { DeviceEvent, DeviceLogic } from '../devices/types'
 import { deviceEvent, unit, type Position, type SoundEvent } from './events'
 import type { SimSound } from './engine'
 
-/** Reused motion samples and event envelopes: no allocations in the steady motion sampler. */
+/** Reused unit motion samples and event envelopes, with optional per-body profile voices. */
 export class DeviceSound {
   private states: { data: Float64Array; prev: Float64Array; at: [number, number, number]; velocity: [number, number, number]; event: SoundEvent; ready: boolean }[]
   private last = -Infinity
@@ -22,6 +22,7 @@ export class DeviceSound {
       read(this.logic, n, s.data)
       for (let i = 0; i < 3; i++) s.at[i] = s.data[i]
       if (!sample) return
+      this.sound.profile.motion?.(this.logic, n, event => this.sound.bus.emit({ ...event, who: this.owner(n) }))
       let motion = 0
       if (s.ready) for (let i = 7; i < 11; i++) motion += Math.abs(s.data[i] - s.prev[i]) / dt
       for (let i = 0; i < 3; i++) s.velocity[i] = s.ready ? (s.data[i] - s.prev[i]) / dt : 0

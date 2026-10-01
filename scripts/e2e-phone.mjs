@@ -34,6 +34,7 @@ import { phoneControllers } from './phone-controllers.mjs'
 import { phoneCamera } from './phone-camera.mjs'
 import { runPhonePacks } from './lib/packs-ui.mjs'
 import { phoneRecovery } from './phone-recovery.mjs'
+import { phonePointing } from './phone-pointing.mjs'
 import { visitPhoneButtons, assertButtonInk } from './lib/surface-buttons.mjs'
 
 const HEADED = process.argv.includes('--headed')
@@ -72,6 +73,8 @@ try {
   console.log('ob.Pal phone lock and hardware buttons e2e')
   const sb = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
   closers.push(sb)
+  await phonePointing({ browser: sb, origin: local.origin, check, shots: SHOTS, baseline: process.env.OBPAL_POINTING_BASELINE === '1' })
+  if (process.env.OBPAL_POINTING_ONLY !== '1') {
   await check('all controller faces, dock, camera and connection sheets: button ink within 0.5px at three sizes, Carbon and Light', async () => {
     const rows = []
     await visitPhoneButtons(sb, local.origin, (_page, size, state, measured) => rows.push(...measured.map(r => ({ size, state, ...r }))))
@@ -331,6 +334,7 @@ try {
   await phoneControllers({ browser: sb, origin: local.origin, check, shots: SHOTS })
   await runPhonePacks({ browser: sb, origin: local.origin, check })
   await check('no Content Security Policy violations on any page', cspCheck)
+  }
 } catch (e) {
   console.error(e)
   exitCode = 1

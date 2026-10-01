@@ -32,6 +32,11 @@ export function smoothnessCases(test: (name: string, run: () => void) => unknown
     ]
     for (const mutate of mutations) { const r = good(); mutate(r); assert.equal(smoothnessVerdict(r).status, 'fail') }
   })
+  test('smoothness: marble probes reject escaped bodies and missing extent measurements', () => {
+    const r: any = good(); r.motion.physics.model = 'marblerun'; r.motion.physics.maxExtent = 1.4
+    assert.equal(smoothnessVerdict(r).status, 'pass')
+    for (const extent of [1.5, NaN, undefined]) { r.motion.physics.maxExtent = extent; assert.equal(smoothnessVerdict(r).status, 'fail') }
+  })
   test('smoothness: catalogue covers every registered device and all six arm kinds without duplicate ids', () => {
     const source = readFileSync(new URL('../src/sim/devices/registry.ts', import.meta.url), 'utf8')
     const modules = [...source.matchAll(/view:\s*\(\)\s*=>\s*import\('\.\/([\w-]+)\.view'\)/g)].map(m => m[1])

@@ -17,3 +17,10 @@ export function materialPair(a: Material, b: Material) {
   const x = MATERIALS[a], y = MATERIALS[b]
   return { hz: Math.sqrt(x.hz * y.hz), decay: Math.sqrt(x.decay * y.decay), noise: (x.noise + y.noise) / 2 }
 }
+
+/** Slip in metres per second, load relative to the sphere's supported weight. A loaded hit suppresses singing. */
+export function glassDragParameters(slip: number, load: number) {
+  const speed = Number.isFinite(slip) ? Math.max(0, slip) : 0
+  const light = Number.isFinite(load) ? unit((1.3 - Math.max(0, load)) / 0.3) : 0
+  return { strength: Math.min(0.2, Math.max(0, speed - 0.12) * 0.3) * light, rate: 0.72 + Math.min(1.5, speed) * 0.48 }
+}

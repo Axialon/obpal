@@ -52,7 +52,7 @@ export const TUNING: Record<string, Tuning> = {
   football: tune('scrape', 'table', 63, 2, 0.7, 'wood'),
   airhockey: tune('scrape', 'table', 45, 2, 0.7, 'wood'),
   pinball: tune('roll', 'table', 72, 4, 0.85),
-  marblerun: tune('roll', 'table', 93, 3, 0.6, 'wood'),
+  marblerun: tune('roll', 'table', 93, 3, 0.6, 'none'),
   maze: tune('roll', 'table', 78, 2, 0.55, 'wood'),
   arena: tune('roll', 'table', 48, 4, 0.9),
   viewer: tune('passive', 'passive', 95, 2, 0.4),

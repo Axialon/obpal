@@ -2,8 +2,10 @@ import { impactGain } from './materials'
 import { unit, type SoundEvent } from './events'
 
 export function hapticOf(e: SoundEvent) {
+  if (e.glass === 'roll' || e.glass === 'drag') return null
   const s = e.speed === undefined ? unit(e.strength) : impactGain(e.speed, e.impulse)
   if (s < 0.035) return null
+  if (e.glass === 'clack') return { strong: s * 0.7, weak: s * 0.25, ms: Math.round(18 + s * 25) }
   if (e.kind === 'contact') return { strong: s * 0.85, weak: s * 0.4, ms: Math.round(20 + s * 100) }
   if (e.kind === 'footstep') return { strong: s * 0.34, weak: s * 0.13, ms: 22 }
   if (e.kind === 'motor' && e.texture === 'servo') {
