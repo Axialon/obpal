@@ -1,11 +1,25 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { encodePose, PoseFlag, type PoseState } from '@obpal/core'
+import { encodePose, encodeState, emptyState, Flag, PoseFlag, type PoseState } from '@obpal/core'
 import { Stream } from '../packages/host/src/stream'
 
 afterEach(() => vi.useRealTimers())
 
 const pose: PoseState = { flags: PoseFlag.tracked | PoseFlag.touching, seq: 10, t: 0, p: [0, 0, 0], q: [0, 0, 0, 1], gen: 1, source: 'camera' }
 const stream = () => new Stream({ mode: () => {}, pad: () => {}, input: () => {} })
+
+it('activity ignores neutral heartbeats, expires, and never consumes motion deltas', () => {
+  vi.useFakeTimers({ toFake: ['performance'] })
+  const s = stream()
+  s.onState(encodeState(emptyState()))
+  expect(s.inputActive).toBe(false)
+  s.consume(performance.now(), true)
+  s.onState(encodeState({ ...emptyState(), seq: 1, flags: Flag.touching, aim: [12, 4] }))
+  expect(s.inputActive).toBe(true)
+  expect(s.inputActive).toBe(true)
+  expect(s.consume(performance.now() + 30, true).aim).toEqual([12, 4])
+  vi.advanceTimersByTime(301)
+  expect(s.inputActive).toBe(false)
+})
 
 describe('the pose stream', () => {
   it.each(['camera', 'model', 'unknown'] as const)('exposes the %s source to hosts', (source) => {

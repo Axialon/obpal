@@ -1,11 +1,12 @@
 /** Buildable channels on two tilt tables. Times belong to the current track, not to a previous layout. */
 import { Controller, Mode, PadButton } from '@obpal/core'
 import { Machine, action, timestep } from './common'
-import { axis, clamp, slopeOf } from './input'
+import { axis, clamp, slopeOf, stick } from './input'
 import type { DeviceInput, DeviceSpec } from './types'
 import { planar } from '../vr/intent'
 import { FixedWorld } from '../physics/world'
 import { MarblerunAdapter, cupSurface } from '../physics/marblerun'
+import { startState } from './marblerun.start'
 
 export const MARBLERUN_SPEC: DeviceSpec = {
   category: 'games',
@@ -52,12 +53,17 @@ export function inChannel(track: readonly (TrackPiece | null)[], x: number, z: n
   return trackEnds(p).some(d => d === 0 ? dx >= 0 && Math.abs(dz) <= w : d === 1 ? dz >= 0 && Math.abs(dx) <= w : d === 2 ? dx <= 0 && Math.abs(dz) <= w : dz <= 0 && Math.abs(dx) <= w)
 }
 const companions = () => [marble(1, -0.99, 0.05), marble(2, -0.82, 0.06)]
-const fresh = () => ({ ...marble(0, -1.16), marbles: companions(), track: runTrack(), cursorX: 2, cursorZ: 2, kind: 0, turn: 0, tiltX: 0, tiltZ: 0, running: false, time: 0, best: 0, finished: false, actions: 0, revision: 0 })
+const fresh = () => ({ ...marble(0, -1.16), marbles: companions(), start: startState(true), track: runTrack(), cursorX: 2, cursorZ: 2, kind: 0, turn: 0, tiltX: 0, tiltZ: 0, running: false, time: 0, best: 0, finished: false, actions: 0, revision: 0 })
 export class MarblerunLogic extends Machine {
+  constructor(private readonly calm = false) {
+    super()
+    this.units.forEach((_, n) => this.home(n))
+  }
   readonly spec = MARBLERUN_SPEC
   readonly units = [fresh(), fresh()]
   private slopes = [[0, 0], [0, 0]]
   private zeros = [[0, 0], [0, 0]]
+  private touchCursor = [false, false]
   private readonly adapter = new MarblerunAdapter(this.units,
     (n, x, z, radius) => inChannel(this.units[n].track, x, z, radius),
     ({ board: n, source, a, b, speed }) => {
@@ -88,30 +94,43 @@ export class MarblerunLogic extends Machine {
     const u = this.units[n], speed = Math.hypot(u.vx, u.vz), reserve = Math.max(0, 1 - (speed / 2.8) ** 2)
     const length = Math.hypot(x, z), scale = length > .65 ? .65 / length : 1
     if (!Number.isFinite(length)) return
+    u.start.phase = 'controlled'
     u.vx += x * scale * reserve; u.vz += z * scale * reserve; u.actions++
   }
-  home(n: number) {
+  home(n: number, calm = this.calm) {
     Object.assign(this.units[n], { cursorX: 2, cursorZ: 2, x: -1.16, z: 0, vx: 0, vz: 0, spinX: 0, spinZ: 0, rollX: 0, rollZ: 0, slip: 0, normalForce: 0, marbles: companions(), tiltX: 0, tiltZ: 0, running: false, time: 0, finished: false })
+    const u = this.units[n]
+    u.start = startState(calm)
+    ;[u, ...u.marbles].forEach((m, j) => {
+      // A queue on the existing left channel, with room to see each body before release.
+      m.x = calm ? -1.16 + [0, -.105, .115][j] : -.8 + j * .16
+      m.z = calm ? 0 : [0, -.035, .035][j]
+    })
     this.adapter.reset(n); this.world.snap(); this.simulated = this.adapter.capture()
-    this.zeros[n] = [...this.slopes[n]]
+    this.zeros[n] = [0, 0]
+    this.touchCursor[n] = false
   }
   step(inputs: readonly (DeviceInput | null)[], delta: number) {
     const dt = timestep(delta)
     this.units.forEach((u, n) => {
       const raw = inputs[n], i = raw && !raw.quiet ? raw : null
       if (i) this.slopes[n] = i.hold ? slopeOf(i.hold) : i.mode === Mode.tilt ? [...i.tilt] : [0, 0]
+      if (i?.recentred) this.zeros[n] = [...this.slopes[n]]
+      if (i?.recentred || i?.positioned) this.touchCursor[n] = false
       if (raw?.presses.includes('run') || i && (i.padPressed & (1 << PadButton.Y))) {
         u.running = !u.running; u.actions++
-        if (u.running) { u.finished = false; u.time = 0; this.zeros[n] = [...this.slopes[n]] }
+        if (u.running) { u.finished = false; u.time = 0 }
         const run = u.running
         if (run) this.events.push({ unit: n, kind: 'tick', audio: { action: 'glass-launch', at: marblePosition(n, u, 0, 0) } })
       }
       if (raw?.presses.includes('push')) this.push(n)
       if (!u.running) {
         if (i) {
+          // A drag chooses the build cell until Home or recentring; automatic tilt must not steal it back.
+          if (!i.pad && (i.drag[0] || i.drag[1])) this.touchCursor[n] = true
           const [x, z] = planar(i.controlFrame, i.pad ? axis(i.pad.axes[0]) * dt * 3 : i.drag[0] * 0.025, i.pad ? axis(i.pad.axes[1]) * dt * 3 : i.drag[1] * 0.025)
           u.cursorX = clamp(u.cursorX + x, 0, 4); u.cursorZ = clamp(u.cursorZ + z, 0, 4)
-          if (i.space && !i.pad) { const [ax, az] = planar(i.controlFrame, i.space.aim[0] * 2, -i.space.aim[1] * 2); u.cursorX = clamp(2 + ax, 0, 4); u.cursorZ = clamp(2 + az, 0, 4) }
+          if (i.space && !i.pad && !this.touchCursor[n]) { const [ax, az] = planar(i.controlFrame, i.space.aim[0] * 2, -i.space.aim[1] * 2); u.cursorX = clamp(2 + ax, 0, 4); u.cursorZ = clamp(2 + az, 0, 4) }
         }
         if (raw?.presses.includes('turn') || i && (i.padPressed & (1 << PadButton.B))) u.turn = (u.turn + 1) % 4
         if (raw?.presses.includes('piece') || i && (i.padPressed & (1 << PadButton.X))) u.kind = (u.kind + 1) % 2
@@ -135,13 +154,15 @@ export class MarblerunLogic extends Machine {
         }
       }
       let x = 0, z = 0
-      if (u.running && i) {
-        x = clamp(i.pad ? axis(i.pad.axes[0]) : this.slopes[n][0] - (i.space ? 0 : this.zeros[n][0]), -1, 1)
-        z = clamp(i.pad ? axis(i.pad.axes[1]) : this.slopes[n][1] - (i.space ? 0 : this.zeros[n][1]), -1, 1)
+      if (i && (u.running || i.mode === Mode.tilt || i.hold)) {
+        ;[x, z] = i.pad ? [axis(i.pad.axes[0]), axis(i.pad.axes[1])] : stick(this.slopes[n][0] - (i.space ? 0 : this.zeros[n][0]), this.slopes[n][1] - (i.space ? 0 : this.zeros[n][1]))
         ;[x, z] = planar(i.controlFrame, x, z)
       }
       const follow = 1 - Math.exp(-12 * dt)
+      if (Math.hypot(x, z) > .03) u.start.phase = 'controlled'
       u.tiltX += (x - u.tiltX) * follow; u.tiltZ += (z - u.tiltZ) * follow
+      if (!x && Math.abs(u.tiltX) < 1e-5) u.tiltX = 0
+      if (!z && Math.abs(u.tiltZ) < 1e-5) u.tiltZ = 0
     })
     this.world.advance(delta)
     this.simulated = this.adapter.capture()

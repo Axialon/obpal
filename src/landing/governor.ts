@@ -147,6 +147,7 @@ export class Governor {
   private decideAfter = DWELL_S
   /** Frame times alone won't step below this (a step down here didn't help). */
   private floor: number
+  private workFrames = 0
 
   constructor(steps: Step[], opts: { level?: number; window?: number } = {}) {
     this.steps = steps
@@ -157,6 +158,17 @@ export class Governor {
 
   /** The step to draw at. */
   get step(): Step { return this.steps[this.level] }
+
+  /** Submission and physics must leave headroom for scrolling before an entire refresh is missed. */
+  work(ms: number): number {
+    if (!Number.isFinite(ms) || ms < 0) return this.level
+    this.workFrames = ms > 6 ? this.workFrames + 1 : 0
+    if (this.workFrames >= 3 && this.level < this.steps.length - 1) {
+      this.workFrames = 0
+      this.go(this.level + 1)
+    }
+    return this.level
+  }
 
   /**
    * One drawn frame: the time since the one before (s), and the GPU's time for an earlier frame when a measurement

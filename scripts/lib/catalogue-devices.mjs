@@ -6,7 +6,7 @@ export const deviceExercises = [
   { id: 'pendulum', face: 'face.trackpad', drag: ['#pad', 50, -15], field: 'length', key: 'Space', button: 'actions', home: [['length', 1.2], ['angle', 0], ['omega', 0]] },
   { id: 'telescope', face: 'face.wii', turn: true, field: 'pan', key: 'Space', button: 'actions', home: [['pan', 0], ['elevation', 0.4], ['zoom', 1]] },
   { id: 'planetary', face: 'face.gamepad', drag: ['.gp-stick[data-stick="0"]', 15, -50], field: 'z', key: 'Space', button: 'actions', home: [['x', -2], ['z', 3], ['v', 0]] },
-  { id: 'marblerun', face: 'face.trackpad', drag: ['#pad', 45, -20], field: 'cursorX', key: 'Space', button: 'actions', home: [['cursorX', 2], ['cursorZ', 2], ['x', -1.16]] },
+  { id: 'marblerun', face: 'face.trackpad', drag: ['#pad', 45, -20], field: 'cursorX', key: 'Space', button: 'actions', home: [['cursorX', 2], ['cursorZ', 2]] },
   { id: 'football', face: 'face.gamepad', drag: ['.gp-stick[data-stick="0"]', 45, -40], field: 'x', key: 'Space', button: 'actions', home: [['x', 0], ['angle', 0]] },
   { id: 'pinball', face: 'face.gamepad', hold: '.gp-trig[data-trig="1"]', field: 'balls', key: 'KeyN', button: 'actions', home: [['x', 0.59], ['z', 1.05], ['plunger', 0]] },
   { id: 'airhockey', face: 'face.trackpad', drag: ['#pad', 65, -25], field: 'x', key: 'Space', button: 'actions', home: [['x', 0], ['z', 1.05]] },

@@ -22,6 +22,7 @@ import { startWorker } from './local-worker.mjs'
 import { checkFrost, setSurface } from './lib/frost.mjs'
 import { runQuick } from './e2e-quick.mjs'
 import { runPackCatalogue } from './lib/packs-ui.mjs'
+import { runViewerScene } from './lib/viewer-scene.mjs'
 import { nextBuild } from './lib/deploy-sim.mjs'
 import { guardSiteButtons, SITE_BUTTON_ROUTES } from './lib/surface-buttons.mjs'
 import { runGraphicsRecoveryLayouts } from './e2e-graphics-recovery.mjs'
@@ -594,6 +595,7 @@ try {
     })
   })
   await runGraphicsRecoveryLayouts(browser, worker.origin, check)
+  await runViewerScene(browser, worker.origin, check)
   await runPackCatalogue({ browser, origin: worker.origin, check })
   await check('no Content Security Policy violations on any page', cspCheck)
   }

@@ -11,20 +11,22 @@
 
 /* ---- hero ---------------------------------------------------------------------------------------------------- */
 
-.hero { position: relative; isolation: isolate; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; max-width: none; min-height: min(900px, 100svh); margin-top: calc(-1 * var(--top-h)); padding: calc(var(--top-h) + 40px) 0 120px; overflow: clip; }
-.hero::before { content: ''; position: absolute; inset: 0; z-index: -2; pointer-events: none;
+.hero { position: relative; isolation: auto; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; max-width: none; min-height: min(900px, 100svh); margin-top: calc(-1 * var(--top-h)); padding: calc(var(--top-h) + 40px) 0 120px; overflow: clip; }
+.hero::before { content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
   background:
     radial-gradient(60% 55% at 80% 12%, rgb(var(--uv-rgb) / 0.5), transparent 70%),
     radial-gradient(45% 45% at 8% 92%, rgb(var(--haze-rgb) / 0.16), transparent 70%),
     radial-gradient(30% 30% at 58% 58%, rgb(var(--accent-rgb) / 0.05), transparent 70%),
     linear-gradient(180deg, var(--hero-top) 0%, var(--page) 88%); }
 /* The stage floor: a faint grid of points that fades out toward the edges. */
-.hero::after { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+.hero::after { content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
   background-image: radial-gradient(rgb(var(--haze-rgb) / 0.2) 1px, transparent 1.3px); background-size: 30px 30px;
   -webkit-mask-image: radial-gradient(75% 65% at 50% 45%, #000 25%, transparent 78%); mask-image: radial-gradient(75% 65% at 50% 45%, #000 25%, transparent 78%); }
 /* The 3D field lies over the hero's words and buttons (it lets every click through): the marbles roll over the page,
    and onto its buttons. The code to scan stays above it, a glass card the marbles pass under. */
-.hero-stage { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; pointer-events: none; }
+.hero-stage { position: fixed; inset: 0; z-index: 8; width: 100%; height: 100svh; pointer-events: none; }
+.field-toggle { position: fixed; z-index: 21; left: max(12px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); min-height: 36px; padding: 0 12px; font-size: 12px; opacity: 0.8; }
+.field-toggle:hover, .field-toggle:focus-visible { opacity: 1; }
 .hero-in { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 56px; width: min(1180px, 100% - 2 * var(--gut)); margin: 0 auto; }
 .hero-copy { position: relative; z-index: 1; min-width: 0; }
 .hero h1 { margin: 0 0 24px; max-width: 11.5ch; font: 800 clamp(46px, 7.2vw, 104px)/0.98 var(--font-display); letter-spacing: -0.045em; text-wrap: balance; }
@@ -35,6 +37,7 @@
 .hero-stage { opacity: 0; transition: opacity 0.6s var(--ease) 0.18s; }
 html.field3d .hero h1.lit { color: transparent; }
 html.field3d .hero-stage { opacity: 1; }
+.hero-stage[hidden] { display: none; }
 /* The 3D field brings its own dots, which answer the marbles; the page's still ones step aside. */
 .hero::after { transition: opacity 0.6s var(--ease); }
 html.field3d .hero::after { opacity: 0; }
@@ -52,16 +55,15 @@ html.field3d .hero::after { opacity: 0; }
    below that its side, as tall as the block stands on screen and leaning the way it's seen (--pad-dx, --pad-dy: from
    the middle of its top's near edge down to the floor, from the field): lit along its top edge, darker toward the
    floor (four bands, each upper one laid over those below it), then a shadow on the floor. A marble near one lights
-   it where it is, in its own colour, brighter the nearer; its weight sinks it a touch (the script moves it with
-   `translate`, and --sink shows that much less side), and a knock rocks it (the script's `rotate`, seen through the
-   perspective here). --pad-room leaves room below each for its side: about as tall as it stands (0.3 em of the
+   it where it is, in its own colour, brighter the nearer. The blocks stay still while the marbles move.
+   --pad-room leaves room below each for its side: about as tall as it stands (0.3 em of the
    headline's type). */
-.hero { --pad-room: calc(0.15 * clamp(46px, 7.2vw, 104px)); perspective: 1200px; perspective-origin: 50% 85%; }
+.hero { --pad-room: calc(0.15 * clamp(46px, 7.2vw, 104px)); perspective: none; }
 .hero .cta { perspective: 700px; }
 .hero .cta .btn, .hero .qi { position: relative; }
 .hero .cta .btn, .hero-hint, .hero-sound, .hero .qi { isolation: isolate;
   --dx: var(--pad-dx, 0px); --dy: max(0px, var(--pad-dy, 0px) - var(--sink, 0px));
-  --side-1: rgb(var(--haze-rgb) / 0.06); --side-2: rgb(var(--haze-rgb) / 0.045); --side-3: rgb(var(--haze-rgb) / 0.035); --side-4: rgb(var(--haze-rgb) / 0.13);
+  --side-1: rgb(var(--haze-rgb) / 0.14); --side-2: rgb(var(--haze-rgb) / 0.11); --side-3: rgb(var(--haze-rgb) / 0.08); --side-4: rgb(var(--haze-rgb) / 0.22);
   --foot: rgb(var(--hl-rgb) / 0.1); --floor: calc(var(--dx) * 1.3) calc(var(--dy) + 12px) 24px -10px rgb(0 0 0 / 0.75);
   --block: calc(var(--dx) / 4) calc(var(--dy) / 4) 0 0 var(--side-1), calc(var(--dx) / 2) calc(var(--dy) / 2) 0 0 var(--side-2),
     calc(var(--dx) * 3 / 4) calc(var(--dy) * 3 / 4) 0 0 var(--side-3), var(--dx) var(--dy) 0 0 var(--side-4), var(--dx) calc(var(--dy) + 1px) 0 0 var(--foot), var(--floor);
@@ -69,7 +71,7 @@ html.field3d .hero::after { opacity: 0; }
 .hero .cta .btn.primary { --edge: color-mix(in srgb, var(--bb-accent) 55%, var(--bb-accent-strong)); --side-1: var(--edge); --side-2: color-mix(in srgb, var(--edge) 67%, var(--bb-accent-strong)); --side-3: color-mix(in srgb, var(--edge) 33%, var(--bb-accent-strong)); --side-4: var(--bb-accent-strong);
   --foot: rgb(var(--accent-rgb) / 0.35); --floor: calc(var(--dx) * 1.3) calc(var(--dy) + 14px) 30px -8px rgb(var(--accent-rgb) / 0.32);
   box-shadow: var(--block), inset 0 1px 0 rgb(255 255 255 / 0.45); }
-/* The hint is centred by its transform, so it rocks about its middle from there. */
+/* The hint stays centred by its transform. */
 .hero-hint { transform-origin: 0 50%; }
 .hero .cta .btn::before, .hero-hint::before, .hero-sound::before, .hero .qi::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
   background: radial-gradient(84px circle at var(--orb-x, 50%) var(--orb-y, 50%), rgb(var(--orb-rgb, 198 255 52) / 0.55), rgb(var(--orb-rgb, 198 255 52) / 0.14) 42%, transparent 72%);
@@ -81,7 +83,7 @@ html.field3d .hero::after { opacity: 0; }
 .qi .ic { width: 18px; height: 18px; }
 
 /* Try it right here: a real pairing code (computers only), in glass lit from above. */
-.pair { position: relative; z-index: 3; width: 300px; padding: 20px; border-radius: 30px; border: 1px solid var(--line);
+.pair { position: relative; z-index: 9; width: 300px; padding: 20px; border-radius: 30px; border: 1px solid var(--line);
   background: var(--frost);
   -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur);
   box-shadow: 0 40px 80px -40px rgb(0 0 0 / 0.8), inset 0 1px 0 rgb(var(--hl-rgb) / 0.12); }
@@ -111,7 +113,7 @@ html.field3d .hero::after { opacity: 0; }
    wants before a page may sound, it says so, and asks softly a few times. */
 .hero-sound { position: absolute; right: max(var(--gut), 24px); bottom: calc(26px + var(--pad-room)); z-index: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 44px; height: 44px; padding: 0 14px; border-radius: 999px; font: 650 13.5px/1 var(--font);
   border: 1px solid var(--line); background: var(--frost); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); color: var(--secondary); cursor: pointer;
-  transition: color 0.2s var(--ease), border-color 0.2s var(--ease), box-shadow 0.3s var(--ease), transform 0.2s var(--ease); }
+  transition: color 0.2s var(--ease), border-color 0.2s var(--ease); }
 .hero-sound:hover { color: var(--ink); border-color: rgb(var(--accent-rgb) / 0.45); }
 .hero-sound:active { transform: scale(0.94); }
 .hero-sound[data-state="on"] { color: var(--accent-text); border-color: rgb(var(--accent-rgb) / 0.4); box-shadow: var(--block, 0 0 transparent), 0 0 0 4px rgb(var(--accent-rgb) / 0.08), 0 8px 24px -10px rgb(var(--accent-rgb) / 0.55); }
@@ -284,3 +286,12 @@ html.phone .top-menu { margin-left: auto; }
 .home-faq article { border-top: 1px solid var(--frost-edge); padding: 20px 0; }
 .home-faq h3 { margin: 0 0 8px; font-size: 18px; }
 .home-faq p { margin: 0; line-height: 1.6; color: var(--muted); }
+
+/* The marbles provide the ambient motion; the page remains a stable reading surface. */
+.home .scene, .home .rise { opacity: 1; transform: none; transition: border-color 0.3s, box-shadow 0.3s; }
+.home .scene.held .scene-art { transform: none; }
+.home .pair-qr, .home .hero-hint, .home .hero-sound { animation: none; }
+@media (prefers-reduced-motion: reduce) { .hero-stage { transition: none; } }
+
+.home .scene.field-hit, .home .build-card.field-hit { border-color: var(--accent-text); }
+.home h2.field-hit { text-shadow: 0 0 12px rgb(var(--accent-rgb) / 0.2); }

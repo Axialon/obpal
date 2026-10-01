@@ -1,14 +1,17 @@
 /** The sim button audit shares its traversal and font measurements with the before/after evidence script. */
+import { tempScope } from './lib/temp.mjs'
 import { chromium } from 'playwright'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buttonRoutes, BUTTON_SIZES, PHONE_BUTTON_ROUTES, visitButtonStates, visitNodeButtons } from './lib/sim-buttons.mjs'
 import { measureButtonInk, inkError, inkSummary } from './lib/button-ink.mjs'
 
 export async function runSimButtons(local, check) {
+  const temps = tempScope()
+  try {
   const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM })
-  const out = await mkdtemp(join(tmpdir(), 'obpal-button-ink-')), rows = []
+  const out = await temps.make(join(tmpdir(), 'obpal-button-ink-')), rows = []
   try {
     await check('button ink: a late SVG receives its spacing without a resize', async () => {
       const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, ignoreHTTPSErrors: true, reducedMotion: 'reduce' })
@@ -87,4 +90,6 @@ export async function runSimButtons(local, check) {
     await writeFile(join(out, 'measurements.json'), JSON.stringify({ summary: inkSummary(rows), rows }, null, 2))
     console.log(`Button ink measurements: ${out}`)
   }
+
+  } finally { await temps.cleanup() }
 }

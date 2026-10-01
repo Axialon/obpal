@@ -31,6 +31,7 @@ import { fileURLToPath } from 'node:url'
 import { resolveChromium, shortPath } from './lib/browser.mjs'
 import { DEFAULT_PORT, DEFAULT_WORKER_PORT, failures, knownSuites, listeningPids, newSessionLines, parseArgs, parseResult, suitePorts, suiteTimeout } from './lib/e2e.mjs'
 import { formatDuration, formatTable } from './lib/report.mjs'
+import { tempScope } from './lib/temp.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -125,6 +126,8 @@ const out = resolve(opts.out || join(tmpdir(), `obpal-e2e-${new Date().toISOStri
 mkdirSync(out, { recursive: true })
 const env = {
   ...process.env,
+  OBPAL_E2E_EVIDENCE_ROOT: process.env.OBPAL_E2E_EVIDENCE_ROOT || out,
+  ...(process.argv.includes('--keep-logs') ? { OBPAL_KEEP_TEMP: '1' } : {}),
   OBPAL_E2E_PORT: String(Number(process.env.OBPAL_E2E_PORT) || DEFAULT_PORT),
   OBPAL_E2E_WORKER_PORT: String(Number(process.env.OBPAL_E2E_WORKER_PORT) || DEFAULT_WORKER_PORT),
   ...(browser.path ? { OBPAL_E2E_CHROMIUM: browser.path } : {}),
@@ -159,6 +162,10 @@ for (const suite of opts.suites) {
     stopped = 'a port stayed busy'
     continue
   }
+  const temps = tempScope({ keep: env.OBPAL_KEEP_TEMP === '1' })
+  const suiteTemp = await temps.make(join(tmpdir(), 'obpal-e2e-suite-'))
+  const suiteEnv = { ...env, TEMP: suiteTemp, TMP: suiteTemp, TMPDIR: suiteTemp }
+  try {
   const logPath = join(out, `${suite}.log`)
   const fd = openSync(logPath, 'w')
   const sizeBefore = logSize()
@@ -167,7 +174,7 @@ for (const suite of opts.suites) {
   let timedOut = false
   const timeoutMin = suiteTimeout(suite, opts, env)
   const code = await new Promise((r) => {
-    current = spawn('pnpm', ['run', `e2e:${suite}`], { cwd: root, env, shell: win, stdio: ['ignore', fd, fd], windowsHide: true, detached: !win })
+    current = spawn('pnpm', ['run', `e2e:${suite}`], { cwd: root, env: suiteEnv, shell: win, stdio: ['ignore', fd, fd], windowsHide: true, detached: !win })
     const timer = setTimeout(() => { timedOut = true; killTree(current) }, timeoutMin * 60_000)
     current.on('error', () => { clearTimeout(timer); r(-1) })
     current.on('exit', (c) => { clearTimeout(timer); r(c ?? -1) })
@@ -200,6 +207,11 @@ for (const suite of opts.suites) {
     }
   }
   rows.push([suite, guard?.suite === suite ? 'GUARD' : result, tests, formatDuration(ms), note])
+  } finally {
+    if (current) { await killTree(current); current = null }
+    if (worker !== null) await stopLeftoverWorker(worker)
+    await temps.cleanup()
+  }
 }
 
 // ---- the summary ---------------------------------------------------------------------------------------------------
@@ -211,6 +223,7 @@ if (logAtEnd) {
   const count = (buf) => newSessionLines(buf, 0, markers).length
   console.log(`\nob.Pal Desktop log: ${count(logAtStart ?? Buffer.alloc(0))} test-browser lines before, ${count(logAtEnd)} after; ${fresh.length ? `${fresh.length} NEW` : 'no new sessions'}`)
 }
+else console.log('\nob.Pal Desktop guard: no new sessions (no helper log present)')
 if (guard) {
   const bar = '!'.repeat(78)
   console.error(`\n${bar}\n  A TEST BROWSER REACHED THE INSTALLED ob.Pal Desktop during e2e:${guard.suite}. The run stopped there.`)

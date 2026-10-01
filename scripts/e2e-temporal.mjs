@@ -1,5 +1,6 @@
 /** Surface stability across the sim family. Measurements and optional captures always go to a fresh temporary folder. */
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { tempScope } from './lib/temp.mjs'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
@@ -17,7 +18,9 @@ export const TEMPORAL_SIMS = [
 ]
 
 export async function runTemporal(local, check, { ids = null, captures = [] } = {}) {
-  const out = await mkdtemp(join(tmpdir(), 'obpal-temporal-'))
+  const temps = tempScope()
+  try {
+  const out = await temps.make(join(tmpdir(), 'obpal-temporal-'))
   const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true })
   const results = []
   try {
@@ -66,6 +69,8 @@ export async function runTemporal(local, check, { ids = null, captures = [] } = 
   await writeFile(join(out, 'measurements.json'), JSON.stringify(results, null, 2))
   console.log(`  Surface measurements: ${out}`)
   return { out, results }
+
+  } finally { await temps.cleanup() }
 }
 
 /** The home cards are SVG, with a 3D hero above them. Reduced motion holds their stories at rest; pointer input still plays them. */

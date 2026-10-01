@@ -1,14 +1,15 @@
 /** Sphere contacts on authored channels, integrated by the engine-neutral fixed clock. */
 import type { Marble } from '../devices/marblerun'
 import type { PhysicsAdapter } from './world'
+import { advanceStart, releaseTime, type MarbleStart } from '../devices/marblerun.start'
 
-export const CUP = { x: -1.16, inner: .12, outer: .16, stiffness: 16 }
+export const CUP = { x: -1.16, inner: .16, outer: .21, stiffness: 16 }
 /** A shallow concave floor with a rounded lip. The same profile supplies mesh height and gravity. */
 export function cupSurface(x: number, z: number) {
   const dx = x - CUP.x, r = Math.hypot(dx, z), k = CUP.stiffness / 9.81
   let height = 0, slope = 0
   if (r <= CUP.inner) { height = .5 * k * r * r; slope = k * r }
-  else if (r < CUP.outer) {
+  else if (r < CUP.outer - 1e-12) {
     const width = CUP.outer - CUP.inner, t = (r - CUP.inner) / width
     const y = .5 * k * CUP.inner ** 2, d = k * CUP.inner * width
     height = (2 * t ** 3 - 3 * t ** 2 + 1) * y + (t ** 3 - 2 * t ** 2 + t) * d
@@ -16,7 +17,7 @@ export function cupSurface(x: number, z: number) {
   }
   return { height, gx: r ? slope * dx / r : 0, gz: r ? slope * z / r : 0 }
 }
-interface Board extends Marble { marbles: Marble[]; tiltX: number; tiltZ: number }
+interface Board extends Marble { marbles: Marble[]; tiltX: number; tiltZ: number; start: MarbleStart }
 export interface MarblePose { x: number; z: number; radius: number; rollX: number; rollZ: number }
 export interface BoardPose { tiltX: number; tiltZ: number; marbles: MarblePose[] }
 export interface MarbleContact { board: number; source: string; a: Marble; b?: Marble; speed: number }
@@ -54,17 +55,23 @@ export class MarblerunAdapter implements PhysicsAdapter<BoardPose[]> {
   step(dt: number) {
     this.boards.forEach((u, n) => {
       const bodies = [u, ...u.marbles]
+      const starting = u.start.phase === 'feeding' || u.start.phase === 'settling'
+      // Sleep a settled cup as a contact island. An impulse or tilt wakes it immediately.
+      if (!starting && !u.tiltX && !u.tiltZ && bodies.every(m => !m.vx && !m.vz && !m.spinX && !m.spinZ)) return
       // A sphere travels at most a fraction of its radius between contact tests, including fast test inputs.
       const speed = Math.max(...bodies.map(m => Math.hypot(m.vx, m.vz)))
       const count = Math.max(1, Math.min(128, Math.ceil(speed * dt / (Math.min(...bodies.map(m => m.radius)) * .35))))
       const h = dt / count
       for (let s = 0; s < count; s++) {
         for (const m of bodies) {
+          if (starting && u.start.elapsed < releaseTime(m.id)) continue
           const surface = cupSurface(m.x, m.z), v = Math.hypot(m.vx, m.vz)
-          const damping = Math.exp(-(.75 + .8 * Math.exp(-((v / .06) ** 2)) + .16 * v) * h / 2)
+          const inCup = Math.hypot(m.x - CUP.x, m.z) < CUP.inner
+          const damping = Math.exp(-(.75 + .8 * Math.exp(-((v / .06) ** 2)) + .16 * v + (starting && inCup ? 8 : 0)) * h / 2)
           m.vx *= damping; m.vz *= damping; m.spinX *= damping; m.spinZ *= damping
           m.vx += (u.tiltX * 3 - 9.81 * surface.gx) * h / 2
           m.vz += (u.tiltZ * 3 - 9.81 * surface.gz) * h / 2
+          if (starting && !inCup) m.vx -= 6 * h
           m.normalForce = m.mass * 9.81 * Math.cos(Math.hypot(u.tiltX, u.tiltZ) * .08)
           for (const axis of ['x', 'z'] as const) {
             const velocity = axis === 'x' ? m.vx : m.vz, travel = velocity * h
@@ -94,6 +101,7 @@ export class MarblerunAdapter implements PhysicsAdapter<BoardPose[]> {
         }
         for (let a = 0; a < bodies.length; a++) for (let b = a + 1; b < bodies.length; b++) {
           const p = bodies[a], q = bodies[b], dx = q.x - p.x, dz = q.z - p.z, distance = Math.hypot(dx, dz), radius = p.radius + q.radius
+          if (starting && (u.start.elapsed < releaseTime(p.id) || u.start.elapsed < releaseTime(q.id))) continue
           const source = `pair:${p.id}:${q.id}`, key = `${n}:${source}`
           if (distance > radius + .012) { this.pairs.delete(key); continue }
           if (distance > radius) continue
@@ -113,6 +121,9 @@ export class MarblerunAdapter implements PhysicsAdapter<BoardPose[]> {
           m.rollX += m.spinZ / m.radius * h; m.rollZ -= m.spinX / m.radius * h
         }
       }
+      const resting = bodies.every(m => Math.hypot(m.x - CUP.x, m.z) < CUP.inner && Math.hypot(m.vx, m.vz, m.spinX, m.spinZ) < .012)
+      advanceStart(u.start, dt, resting && Math.hypot(u.tiltX, u.tiltZ) < .001)
+      if (starting && u.start.phase === 'settled') bodies.forEach(m => { m.vx = m.vz = m.spinX = m.spinZ = m.slip = 0 })
     })
     this.clock += dt; this.afterStep(dt)
   }

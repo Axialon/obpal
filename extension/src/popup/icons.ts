@@ -4,6 +4,9 @@ const s = (d: string) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"
 const tip = (x: number, y: number, r = 3.1) => `<circle cx="${x}" cy="${y}" r="${r}" fill="currentColor" stroke="none"/>`
 
 export const LINK_ICONS = {
+  scan: s('<rect x="4" y="6" width="16" height="13" rx="3"/><circle cx="12" cy="12" r="3"/><path d="m8 6 1-2h6l1 2"/>'),
+  noApp: s('<rect x="7" y="3" width="10" height="18" rx="2"/><path d="m4 4 16 16"/>'),
+  noAccount: s('<circle cx="12" cy="8" r="3"/><path d="M5 20v-2a7 7 0 0 1 14 0M4 4l16 16"/>'),
   gamepad: s('<path d="M7.2 7.2h9.6a4.2 4.2 0 0 1 4.1 3.4l.9 4.6a2.5 2.5 0 0 1-4.3 2.2l-2.1-2.3H8.6l-2.1 2.3a2.5 2.5 0 0 1-4.3-2.2l.9-4.6a4.2 4.2 0 0 1 4.1-3.4Z"/><path d="M7.8 9.9v3.2M6.2 11.5h3.2"/><path d="M15.4 10.4h.01M17.4 12.4h.01" stroke-width="2.6"/>'),
   keys: s('<rect x="2.8" y="6" width="18.4" height="12" rx="2.6"/><path d="M6.6 9.6h.01M9.8 9.6h.01M13 9.6h.01M16.2 9.6h.01M6.6 12.4h.01M17.4 12.4h.01" stroke-width="2.4"/><path d="M9 14.9h6"/>'),
   globe: s('<circle cx="12" cy="12" r="8.6"/><path d="M3.4 12h17.2"/><path d="M12 3.4c2.3 2.3 3.4 5.2 3.4 8.6s-1.1 6.3-3.4 8.6c-2.3-2.3-3.4-5.2-3.4-8.6s1.1-6.3 3.4-8.6Z"/>'),

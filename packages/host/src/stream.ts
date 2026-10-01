@@ -184,6 +184,13 @@ export class Stream {
 
   onBody(data: ArrayBuffer) { if (this.body.receive(data)) this.hooks.input() }
 
+  /** Read-only activity for connection UI; never consumes or changes input accumulators. */
+  get inputActive(): boolean {
+    const now = performance.now(), state = this.latest, pad = this.padState
+    return (!!state && now - this.stateAt < 300 && (!!(state.flags & (Flag.touching | Flag.clutch)) || !!state.buttons || state.joy.some(value => Math.abs(value) > 0.01) || state.tilt.some(value => Math.abs(value) > 0.01)))
+      || (!!pad && now - this.padAt < PAD_STALE_MS && (!!pad.buttons || pad.axes.some(value => Math.abs(value) > 0.01) || pad.triggers.some(value => value > 0.01)))
+  }
+
   private get padLive() { return !!this.padState && performance.now() - this.padAt < 1500 }
 
   /** Latest controller state, neutral after a short silence, null once the pad expires. */

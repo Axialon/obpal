@@ -104,6 +104,8 @@ export async function runPhonePacks({ browser, origin, check, shots = process.en
       })
       const arrival = new URL(invite); arrival.searchParams.set('pack', 'obpal/crane')
       await page.goto(arrival.href)
+      await page.waitForFunction(() => document.body.classList.contains('live') || !!document.querySelector('#gate #start'), null, { timeout: 25000 })
+      if (await page.locator('#gate #start').count()) await page.locator('#gate #start').click()
       await page.waitForFunction(() => document.body.classList.contains('live'), null, { timeout: 25000 })
       const chip = page.locator('.gp:not([hidden]) [data-act="profile"]')
       await until(async () => (await chip.textContent()).includes('by ob.Pal · MIT'))

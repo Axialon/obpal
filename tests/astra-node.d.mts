@@ -1,5 +1,7 @@
 import type { Bytes } from '../scripts/astra/zip.mjs'
 export function mkdtempSync(prefix: string): string
+export function cleanupFixtures(): Promise<void>
+export function moveFixtureFile(source: string, destination: string): string
 export function mkdirSync(path: string, options?: { recursive?: boolean }): string | undefined
 export function readFileSync(path: string): Bytes
 export function readFileSync(path: string, encoding: string): string

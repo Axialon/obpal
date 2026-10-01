@@ -1,5 +1,6 @@
-/** Report the whole family; the migrated pendulum and marble run is an enforced gate. Use the existing guarded sims runner. */
-import { mkdtemp, writeFile } from 'node:fs/promises'
+/** Report the whole family; the migrated pendulum and marble run are enforced gates. Use the existing guarded sims runner. */
+import { tempScope } from './lib/temp.mjs'
+import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
@@ -8,11 +9,14 @@ import { prepareSmoothness, measureSmoothnessMotion } from './lib/smoothness-mot
 import { smoothnessVerdict } from './lib/smoothness-report.mjs'
 import { SMOOTHNESS_SIMS } from './lib/smoothness-catalogue.mjs'
 import { runMarbleControls } from './e2e-marble-controls.mjs'
+import { runMarbleMobile } from './e2e-marble-mobile.mjs'
 
 export async function runSmoothness(local, check, { ids = null } = {}) {
+  const temps = tempScope({ keep: true })
+  try {
   ids ??= process.env.OBPAL_SMOOTHNESS_IDS?.split(',').filter(Boolean) ?? null
   if (ids?.some(id => !SMOOTHNESS_SIMS.some(([known]) => known === id))) throw new Error('Unknown smoothness sim id')
-  const out = await mkdtemp(join(tmpdir(), 'obpal-smoothness-')), results = []
+  const out = await temps.make(join(process.env.OBPAL_E2E_EVIDENCE_ROOT || tmpdir(), 'obpal-smoothness-')), results = []
   const phone = process.env.OBPAL_SMOOTHNESS_SIZE === 'phone'
   const size = phone ? { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true }
     : { viewport: { width: 960, height: 640 }, deviceScaleFactor: 1 }
@@ -52,7 +56,12 @@ export async function runSmoothness(local, check, { ids = null } = {}) {
       })
       else console.log(`  report-only: ${id}: ${row.verdict.status}`)
     }
-    if (results.some(row => row.id === 'marblerun')) await runMarbleControls(browser, local, check, out)
+    if (results.some(row => row.id === 'marblerun')) {
+      await runMarbleControls(browser, local, check, out)
+      await runMarbleMobile(browser, local, check, out)
+    }
   } finally { await browser.close(); console.log(`  Smoothness measurements: ${out}`) }
   return { out, results }
+
+  } finally { await temps.cleanup() }
 }

@@ -27,6 +27,7 @@ export interface SwitcherDeps {
   toast: (text: string) => void
   hand?: () => void
   body?: () => void
+  tilt?: () => void
 }
 
 /**
@@ -44,7 +45,7 @@ function fitRing(fit: number, size: number, dots: number, thickness: number): HT
 export function fitWords(r: Rating, host: string): string {
   if (!r.fit) return r.why
   if (r.best) return `Best for ${host}`
-  return r.fit === 2 ? `Suits ${host}` : `Works on ${host}`
+  return r.fit === 2 ? `Good for ${host}` : `Works on ${host}`
 }
 
 /** A controller's fit gauge around its icon, with its marks: best, needs motion, not here. */
@@ -83,6 +84,7 @@ export class Switcher {
   private sorted: Rating[] = []
   private current: ControllerId = 'face.trackpad'
   private typing = false
+  private universal = false
   private host = 'This screen'
   private sheet: HTMLElement | null = null
   /** What the open catalogue's cards were drawn from: they're drawn again only when it changes, never under a finger. */
@@ -113,7 +115,8 @@ export class Switcher {
    * The screen's ratings (best first) and the controller in use changed, or might have: redraw the bar's slots when
    * they differ, mark the one in use, and refresh an open catalogue.
    */
-  render(sorted: Rating[], current: ControllerId, host: string, typing: boolean, camera = false, handActive = false, body = false, bodyActive = false) {
+  render(sorted: Rating[], current: ControllerId, host: string, typing: boolean, camera = false, handActive = false, body = false, bodyActive = false, universal = false) {
+    this.universal = universal
     this.sorted = sorted
     this.current = current
     this.host = host
@@ -154,7 +157,7 @@ export class Switcher {
 
   /** The cards' inputs, as one string: the ratings, the one in use, the keyboard, the screen's name. */
   private get drawnFrom() {
-    return `${this.sorted.map((r) => `${r.id}${r.fit}${r.best ? '*' : ''}${r.needsMotion ? 'm' : ''}`).join()}|${this.current}|${this.typing}|${this.host}`
+    return `${this.sorted.map((r) => `${r.id}${r.fit}${r.best ? '*' : ''}${r.needsMotion ? 'm' : ''}`).join()}|${this.current}|${this.typing}|${this.host}|${this.universal}`
   }
 
   /** Open the catalogue. */
@@ -168,9 +171,10 @@ export class Switcher {
       <div class="ctl-list" role="radiogroup" aria-label="Controllers"></div>
       <footer class="ctl-legend" aria-hidden="true">
         <span><i class="ctl-mark ctl-best">${ICONS.best}</i>Best</span>
-        <span>${fitRing(2, 24, 9, 4)}Fit</span>
+        <span>${fitRing(2, 24, 9, 4)}Good</span>
+        <span>${fitRing(1, 24, 9, 4)}Works</span>
         <span class="ctl-legend-need"><i class="ctl-mark ctl-need">${ICONS.gyro}</i>Motion</span>
-        <span><i class="ctl-mark ctl-no">${ICONS.ban}</i>Not here</span>
+        <span class="ctl-legend-no"><i class="ctl-mark ctl-no">${ICONS.ban}</i>Not here</span>
       </footer>
       <p class="ctl-tip" role="status" aria-live="polite" hidden></p>
     </div>`)
@@ -208,14 +212,16 @@ export class Switcher {
     const out = this.sorted.filter((r) => r.fit === 0)
     // The legend names the motion mark only where a card wears it (a phone without motion sensors).
     wrap.querySelector<HTMLElement>('.ctl-legend-need')!.hidden = !ready.some((r) => r.needsMotion)
+    wrap.querySelector<HTMLElement>('.ctl-legend-no')!.hidden = this.universal
     const card = (r: Rating) => html`<button type="button" class="ctl-card" role="radio" data-c="${r.id}" data-fit="${r.fit}" aria-checked="false" aria-disabled="${r.fit === 0}">${gauge(r)}<span class="ctl-name">${CONTROLLERS[r.id].name}</span></button>`
     setMarkup(list, [
       html`<p class="ctl-k"><b>01</b>Ready here</p>`,
-      html`<div class="ctl-grid">${ready.map(card)}</div>`,
+      html`<div class="ctl-grid">${ready.map(card)}${this.universal ? ['tilt', 'hand', 'body'].map(id => html`<button type="button" class="ctl-card" data-extra="${id}" data-fit="1" aria-label="${id === 'tilt' ? 'Tilt' : id === 'hand' ? 'Hand camera' : 'Body camera'}. Works on ${this.host}"><span class="ctl-gauge" aria-hidden="true">${fitRing(1, 76, 24, 5.4)}<span class="ctl-disc">${ICONS[id === 'tilt' ? 'tilt' : id === 'hand' ? 'hand' : 'camera']}</span></span><span class="ctl-name">${id === 'tilt' ? 'Tilt' : id === 'hand' ? 'Hand' : 'Body'}</span></button>`) : ''}</div>`,
       out.length ? html`<p class="ctl-k"><b>02</b>Not on this screen</p>` : '',
       out.length ? html`<div class="ctl-grid">${out.map(card)}</div>` : '',
     ])
-    list.querySelectorAll<HTMLButtonElement>('.ctl-card').forEach((b) => {
+    list.querySelectorAll<HTMLButtonElement>('[data-extra]').forEach(b => { b.onclick = () => { const id = b.dataset.extra; this.close(); if (id === 'tilt') this.deps.tilt?.(); else if (id === 'hand') this.deps.hand?.(); else this.deps.body?.() } })
+    list.querySelectorAll<HTMLButtonElement>('.ctl-card[data-c]').forEach((b) => {
       const id = b.dataset.c as ControllerId
       const r = this.sorted.find((x) => x.id === id)!
       const inUse = id === this.current || (id === 'face.keyboard' && this.typing)

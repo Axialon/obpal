@@ -112,6 +112,7 @@ export class Parts {
       )
       halo.renderOrder = 999
       halo.visible = false
+      halo.name = `selection-${id}`
       this.scene.add(halo)
       h = { id, color: color ?? '#c6ff34', hovered: null, selected: null, halo, haloOpacity: 0, flash: 0, fade: null, busy: 0 }
       this.hands.set(id, h)
@@ -177,6 +178,11 @@ export class Parts {
     for (const h of this.hands.values()) {
       if (h.selected?.root === root) this.select(null, h)
       if (h.hovered?.root === root) { h.hovered = null; this.hooks.changed(h) }
+      if (h.fade?.root === root) {
+        h.fade = null
+        h.flash = h.haloOpacity = h.busy = 0
+        h.halo.visible = false
+      }
     }
     for (const o of [...this.live.keys()]) if (inside(o, m.wrap)) this.live.delete(o)
     this.models.delete(root)

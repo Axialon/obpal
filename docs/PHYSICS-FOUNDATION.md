@@ -1,9 +1,10 @@
 # Physics foundation: implemented proof and remaining F0 contract
 
-**Status: partial, not ready to start F1.** This return supplies a real fixed-step adapter and pendulum migration,
-not the requested complete rigid/articulated/vehicle/buoyant engine. No Rapier dependency or mock wrapper is
-present. Do not infer implementation from the continuation design below. See [SIMS-PROGRAMME](SIMS-PROGRAMME.md)
-for the audit/roadmap and the return pack's TESTS.md for executed versus pending gates.
+**Status: F0 pendulum proof retained; F0-R backend implementation awaits native/browser integration acceptance.**
+The pendulum remains the only migrated playable. The detailed sections below describe the original F0 proof,
+including its historical measurements; they are not new F0-R browser results. The three candidate backends,
+provisional selection, supported body kinds, measurement definitions and current verification limits now live in
+[PHYSICS-BACKENDS](PHYSICS-BACKENDS.md). F1 stays gated until the coordinator's actual F0-R acceptance.
 
 ## Implemented data flow
 
@@ -135,26 +136,17 @@ intentional visibility/swap semantics and its own physical invariants before enf
 do not automatically select six soft forms, occupy arena seats or validate every imported model. Those are
 explicit continuation gaps, not silent passes.
 
-## F0-R closure: exact implementation still required
+## F0-R implementation and remaining acceptance
 
-Request a new stage ID against the coordinator's accepted master after this partial is reviewed; include the
-actual dependency environment and before files. Do not start humanoid physics on this scalar adapter alone.
+The bounded runtime, original custom solver, real Rapier and browser-only PhysX adapters, identical physical
+fixtures, Node assertions and guarded browser comparison are implemented in the F0-R packet. They are not
+an additional playable migration. See [PHYSICS-BACKENDS](PHYSICS-BACKENDS.md) for the exact selection rule,
+unsupported features, memory/download accounting and complete runner commands.
 
-1. Benchmark one pinned Apache-2.0 Rapier build against a small custom constraint solver on the same host:
-   pendulum, stacked rigid blocks, motorised two-link chain/cone limits, wheeled body and partially submerged hull.
-   Record cold compressed/decoded size, WASM init, peak memory, CPU p50/p95/p99/tick, contact penetration, constraint
-   error, drift, sleeping behaviour and equal-tick replay. Use identical masses/colliders/tolerances/workloads and
-   multiple runs; report every unsupported case rather than comparing incompatible features. Prefer Rapier when
-   it meets the agreed budget. Only the chosen engine is a new dependency; update the lock and credit together.
-2. Implement real lazy-loaded backend creation/disposal, rigid body mass/inertia/collider validation, motorised
-   articulated joints with tested swing/twist cone limits, wheels with suspension/traction and primitive-volume
-   buoyancy/drag with force-at-point torque. Types/descriptors alone do not meet this acceptance. Keep world/body
-   IDs stable and make tests exercise actual falling/contact, motor settling, rolling load and floating trim.
-3. Test negative/non-finite parameters, broken async initialization, disposal/re-entry, body/step/force budgets,
-   quaternion sign/wrap, saturated motors, sleep/wake, energy under damping, deterministic tick ordering and overload.
-   A failed backend must not half-advance a recoverable world; define an explicit fault/reset contract.
-4. Close the proof's browser evidence and add cold/slow/failed asset cases. Extend motion coverage for skinned/
-   instanced/deforming parts and intended LOD switches before promising a reusable all-model no-pop gate. Keep
-   report-only gaps visible. No other sim migration is needed to finish F0.
-5. Run the pinned private scan, overclaims, canonical check and guarded sims/pages/catalogue/shared suites;
-   capture desktop/phone reports and reconcile red results. Only then call F0 complete and release the F1 brief.
+Native dependencies were not installed or executed in Astra's sandbox. The return pack preserves its actual
+custom-solver proof and exact blockers. The coordinator must run canonical types/tests, both-profile three-way
+comparison and the unchanged pendulum smoothness/control/guest/no-canvas tests. Retain the provisional selection
+until the measured rule selects a production-capable candidate; no report-only or missing-data pass closes F0-R.
+The lockfile and package manifest remain the request's already-pinned versions. Only the coordinator promotes
+the selected engine from development to production dependencies after review. The original smoothness coverage
+limits above remain limits; this packet does not claim moving/skinned geometry or all-sim visibility certification.

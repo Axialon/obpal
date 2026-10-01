@@ -122,6 +122,7 @@ export async function phoneRecovery({ browser, origin, check, shots }) {
         const { phone } = p
         if (!remembered) {
           await phone.locator('#gate #start').waitFor({ timeout: 25000 })
+          await until('a persistent seal in the motion-permission gate', () => phone.locator('.gate-card .trust-first .seal-compact').isVisible(), 8000)
           await phone.locator('#gate #start').click()
           await until('the gate gone', () => phone.evaluate(() => !document.getElementById('gate')), 8000)
         }

@@ -116,3 +116,10 @@ export function requestMotionPermission(): Promise<'granted' | 'denied' | 'promp
 }
 
 export const motionSupported = () => typeof window !== 'undefined' && 'DeviceOrientationEvent' in window
+
+/** Permission APIs require a tap; their presence is capability detection, not platform detection. */
+export function motionPermissionRequired() {
+  type Req = { requestPermission?: unknown }
+  const w = window as unknown as { DeviceMotionEvent?: Req; DeviceOrientationEvent?: Req }
+  return typeof w.DeviceMotionEvent?.requestPermission === 'function' || typeof w.DeviceOrientationEvent?.requestPermission === 'function'
+}

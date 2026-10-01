@@ -412,6 +412,7 @@ function post(l: Link, m: ToPage) {
 }
 
 let lastTick = 0
+let sealActivityAt = -Infinity
 
 // A relative pointer (Aim routed to the mouse) as a turn rate: the change between packets over the device's own clock.
 let lastPtr: PointerState | null = null
@@ -439,6 +440,11 @@ function tick() {
   const f = r.consume(now) // consume every tick so deltas never pile up
   const pad = r.pad
   const ptr = r.pointer
+  // A read-only popup pulse carries no input data and never enters the page-routing port.
+  if (f.connected && (f.touching || !!pad?.buttons || f.aim.some(Boolean) || f.pad1.some(Boolean) || f.pad2.some(Boolean) || !!f.zoom || !!f.twist) && now - sealActivityAt > 700) {
+    sealActivityAt = now
+    void chrome.runtime.sendMessage({ to: 'seal-ui', type: 'activity' }).catch(() => {})
+  }
   // The PC only for a phone it let in; one it hasn't hears why, when it tries.
   if (onPc()) pcTick(f, pad, ptr, now)
   else if (config.mode === 'pc' && (f.touching || !!pad?.buttons)) heldBack()

@@ -113,6 +113,8 @@ export function measureButtonInk({ surfaces = false } = {}) {
       return e.matches('img, .swatch, .tile-art, .pick-art, .ctl-gauge') || s.backgroundColor !== 'rgba(0, 0, 0, 0)' || s.backgroundImage !== 'none' || s.boxShadow !== 'none'
     }).map(e => box(e.getBoundingClientRect()))
     for (const svg of el.querySelectorAll('svg')) if (rendered(svg) && getComputedStyle(svg).backgroundColor !== 'rgba(0, 0, 0, 0)') decorations.push(box(svg.getBoundingClientRect()))
+    // The seal is a raster graphic in the control's visible group, just like its image or device mark.
+    for (const canvas of el.querySelectorAll('.connection-seal canvas')) if (rendered(canvas)) decorations.push(box(canvas.getBoundingClientRect()))
     const labelInk = union(texts), iconInk = union(icons), groupInk = union([...texts, ...icons, ...decorations])
     const point = centre(groupInk ?? button), hit = el.getRootNode().elementFromPoint(point.x, point.y)
     const occluded = surfaces && (!hit || !el.contains(hit))

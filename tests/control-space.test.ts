@@ -203,17 +203,20 @@ describe('reachable sim workspaces', () => {
     l.step([input(0.4, 0)], 1 / 60)
     expect(l.units[0].playing).toBe(false)
   })
-  it('selects all marble-run cells and eases towards the phone neutral after a run starts', () => {
+  it('selects all marble-run cells and keeps tilt active across Run/build', () => {
     const l = new MarblerunLogic()
     l.step([mapDeviceSpace('marblerun', input(-1, 1), 0)], 1 / 60)
     expect([l.units[0].cursorX, l.units[0].cursorZ]).toEqual([0, 0])
+    const before = [l.units[0].tiltX, l.units[0].tiltZ]
     l.step([mapDeviceSpace('marblerun', { ...input(0.6, -0.4), presses: ['run'] }, 0)], 1 / 60)
     const follow = 1 - Math.exp(-12 / 60)
-    expect(l.units[0].tiltX).toBeCloseTo(.6 * follow)
-    expect(l.units[0].tiltZ).toBeCloseTo(-.4 * follow)
+    const magnitude = Math.hypot(.6, -.4), gain = (magnitude - .12) / (.88 * magnitude)
+    expect(l.units[0].tiltX).toBeCloseTo(before[0] + (.6 * gain - before[0]) * follow)
+    expect(l.units[0].tiltZ).toBeCloseTo(before[1] + (-.4 * gain - before[1]) * follow)
+    const moving = [l.units[0].tiltX, l.units[0].tiltZ]
     l.step([mapDeviceSpace('marblerun', input(), 0)], 1 / 60)
-    expect(l.units[0].tiltX).toBeCloseTo(.6 * follow * (1 - follow))
-    expect(l.units[0].tiltZ).toBeCloseTo(-.4 * follow * (1 - follow))
+    expect(l.units[0].tiltX).toBeCloseTo(moving[0] * (1 - follow))
+    expect(l.units[0].tiltZ).toBeCloseTo(moving[1] * (1 - follow))
   })
   it('never moves the opposing football rods', () => {
     const l = new FootballLogic(), before = structuredClone(l.rods)

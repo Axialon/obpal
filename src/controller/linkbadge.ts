@@ -2,11 +2,11 @@
  * The connection badge in the controller's top bar, and its sheet. It says only what the link itself shows: that it is
  * encrypted end to end (DTLS between this phone and the screen, so nothing between them, the room service or a relay,
  * can read or change it), how this phone knew the screen was the right one (the QR code, the code typed, or a
- * remembered pairing), the path (direct, or relayed) and the round trip. The badge is a lock, the path's colour and the
- * round trip; a tap opens a line on each. Built from elements, never parsed markup.
+ * remembered pairing), the path (direct, or relayed) and the round trip. The badge uses the seal as its connected
+ * signal; a tap opens the full comparison and a line on each fact. Built from elements, never parsed markup.
  */
 import type { ConnectionSeal, LinkStats, VerifiedBy } from '@obpal/core'
-import { destroySeal, sealElement, sealMoment, SEAL_STYLE, tiltSeal } from '@obpal/host'
+import { destroySeal, sealElement, landSeal, SEAL_STYLE, tiltSeal, DotLoader, DOT_LOADER_STYLE } from '@obpal/host'
 import { showShares } from '../ui/shares'
 import { sheetExits } from './sheet'
 
@@ -66,21 +66,50 @@ export class LinkBadge {
   private first: HTMLElement | null = null
   private firstObserver: MutationObserver | null = null
   private seal: ConnectionSeal | null = null
+  private compact: HTMLElement | null = null
+  private momentUntil = 0
+  private loader = new DotLoader({ size: 34, label: 'Reconnecting to the screen' })
+  private slot: HTMLElement | null = null
+  private readonly layoutObserver: MutationObserver
 
   constructor(private readonly disconnect: () => void = () => {}) {
     this.ms = h('span', { class: 'lb-ms' })
     this.el = h('button', { class: 'link-badge glass', type: 'button', 'data-state': 'down', 'aria-haspopup': 'dialog', 'aria-label': 'Connection' },
-      LOCK(), h('i', { 'aria-hidden': 'true' }), this.ms)
+      LOCK(), this.loader.el, this.ms)
+    this.loader.finish()
     this.el.addEventListener('click', () => this.open())
     const style = document.createElement('style')
-    style.textContent = SEAL_STYLE
+    style.textContent = SEAL_STYLE + DOT_LOADER_STYLE + `
+.bar .link-badge,.gp .link-badge{width:126px;padding:0 8px;justify-content:center;gap:6px}
+.bar .link-badge{width:clamp(78px,calc(100cqw - 188px),126px)}
+.bar .link-badge .connection-seal{width:100%;min-width:0;grid-template-columns:minmax(0,1fr)}
+.bar .link-badge .connection-seal canvas{width:100%}
+.bar .host-name{min-width:44px}
+.link-badge.has-seal>.ic,.link-badge.has-seal>.lb-ms,.link-badge.has-seal>.dot-loader{display:none}
+.link-badge .dot-loader>i{position:static;box-shadow:none;background:currentColor;width:16%;height:auto}
+.link-badge .connection-seal{--seal-ink:var(--bb-ink,var(--ink));background:var(--bb-sheet,var(--sheet))}
+.link-badge .lb-ms{display:none}
+.bar .host-t{min-width:0}
+.gp .link-badge{display:inline-flex;justify-content:center;gap:6px;padding:0 8px}
+.gp .link-badge .lb-ms{display:none}
+.trust-first .seal-compact{display:none}
+.trust-first .trust-compare{min-width:0}
+.trust-first .trust-compare>span{flex:0 1 auto;min-width:0;white-space:normal;text-align:center}
+.gate-card .trust-first .seal-compact{display:inline-grid}
+.gate-card .trust-first .trust-compare{display:grid;grid-column:1/-1;justify-items:center;gap:6px}
+`
     document.head.append(style)
-    addEventListener('pagehide', () => { this.stopMoment(); this.closeShares(); this.clearFirst(); this.clearSeal() }, { once: true })
+    this.layoutObserver = new MutationObserver(() => this.placeStatus())
+    this.layoutObserver.observe(document.getElementById('app') ?? document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] })
+    addEventListener('pagehide', () => { this.loader.destroy(); this.layoutObserver.disconnect(); this.stopMoment(); this.closeShares(); this.clearFirst(); this.clearSeal(); if (this.compact) destroySeal(this.compact) }, { once: true })
   }
 
   /** Take the top bar's slot for it. */
   mount(slot: HTMLElement) {
-    slot.replaceWith(this.el)
+    this.slot = slot
+    slot.style.display = 'contents'
+    slot.replaceChildren(this.el)
+    this.placeStatus()
     this.placeFirst()
     this.render()
   }
@@ -93,24 +122,26 @@ export class LinkBadge {
   }
 
   /** The link isn't up (reconnecting, waiting for the screen): the badge vouches for nothing until it is again. */
-  down() {
+  down(state = 'down') {
     this.stats = null
     this.seal = null
     this.stopMoment()
     this.clearFirst()
     this.render()
+    this.el.dataset.state = state
+    if (state === 'connecting' || state === 'reconnecting') this.loader.start()
+    else this.loader.finish()
   }
 
   /** The UI starts only after the phone verified the fresh session proof. */
   reveal(s: { seal: ConnectionSeal; delayMs: number; source?: string }) {
     this.seal = s.seal
     this.stopMoment()
+    this.momentUntil = performance.now() + s.delayMs + 1200
     this.clearFirst()
     const domain = h('span', { class: 'trust-domain', 'aria-label': `Encrypted connection; ${location.hostname}` }, LOCK(), location.hostname)
     const words = h('span', {}, 'Connected to the screen showing this seal')
-    // Gamepad hides the usual bar, so the transient handshake carries the same first-frame notice too.
-    this.stopMoment = sealMoment(document.body, s.seal, s.delayMs, s.source, h('div', { class: 'seal-first' }, domain.cloneNode(true), words.cloneNode(true)))
-    const compare = h('button', { type: 'button', class: 'trust-compare', 'aria-label': 'Compare connection seal' }, words)
+    const compare = h('button', { type: 'button', class: 'trust-compare', 'aria-label': 'Compare connection seal' }, sealElement(s.seal, true), words)
     compare.onclick = () => this.open()
     const shares = h('button', { type: 'button', class: 'trust-shares' }, 'What this shares')
     shares.onclick = () => { this.closeShares(); this.closeShares = showShares(this.disconnect) }
@@ -121,9 +152,11 @@ export class LinkBadge {
     this.firstObserver.observe(document.getElementById('app') ?? document.body, { childList: true, subtree: true })
     this.placeFirst()
     this.render()
+    if (this.compact) this.stopMoment = landSeal(this.compact, s.delayMs, s.source)
   }
 
   tilt(x: number, y: number) {
+    if (this.compact && performance.now() >= this.momentUntil) tiltSeal(this.compact, x, y)
     this.sheet?.body.querySelectorAll<HTMLElement>('.connection-seal').forEach(row => tiltSeal(row, x, y))
   }
   private placeFirst() {
@@ -138,17 +171,34 @@ export class LinkBadge {
       this.firstObserver?.disconnect()
     }
   }
-  private clearFirst() { this.firstObserver?.disconnect(); this.firstObserver = null; this.first?.remove(); this.first = null }
+  private clearFirst() {
+    this.firstObserver?.disconnect(); this.firstObserver = null
+    this.first?.querySelectorAll<HTMLElement>('.connection-seal').forEach(destroySeal)
+    this.first?.remove(); this.first = null
+  }
+  /** Gamepad uses its own chrome; keep the same connection status beside its motion controls. */
+  private placeStatus() {
+    const target = document.querySelector('.surface.gp-on .gp-motion') ?? this.slot
+    if (target?.isConnected && this.el.parentElement !== target) target.append(this.el)
+  }
   private clearSeal() { this.sheet?.body.querySelectorAll<HTMLElement>('.connection-seal').forEach(destroySeal) }
 
   private render() {
     const s = this.stats
-    const up = !!s && s.link?.secure !== false
+    const up = !!this.seal || (!!s && s.link?.secure !== false)
     this.el.dataset.state = up ? 'up' : 'down'
     this.el.dataset.path = s?.path === 'relay' ? 'relay' : 'direct'
-    this.ms.textContent = up && s!.rttMs != null ? `${s!.rttMs} ms` : ''
+    this.ms.textContent = up && s?.rttMs != null ? `${s.rttMs} ms` : ''
+    const seal = this.seal ?? s?.seal
+    if (this.compact?.dataset.seal !== seal?.join('-')) {
+      if (this.compact) { destroySeal(this.compact); this.compact.remove() }
+      this.compact = seal ? sealElement(seal, true) : null
+      if (this.compact) this.el.append(this.compact)
+    }
+    this.el.classList.toggle('has-seal', !!this.compact)
+    if (this.compact) this.loader.finish()
     this.el.setAttribute('aria-label', up
-      ? `Encrypted${s!.verified ? ', verified' : ''}, ${pathWords(s!)[0].toLowerCase()}${s!.rttMs != null ? `, ${s!.rttMs} ms round trip` : ''}. Connection details`
+      ? `Encrypted${s?.verified ? ', verified' : ''}${s ? `, ${pathWords(s)[0].toLowerCase()}` : ''}${s?.rttMs != null ? `, ${s.rttMs} ms round trip` : ''}. ${this.compact?.getAttribute('aria-label') ?? 'Connection details'}. Compare both screens`
       : 'Not connected. Connection details')
     if (this.sheet) this.fill(this.sheet.body)
   }
@@ -180,6 +230,12 @@ export class LinkBadge {
     if (!same) this.clearSeal()
     const row = (ic: SVGSVGElement, title: string, detail: string, tone = '') =>
       h('div', { class: 'link-row', ...(tone ? { 'data-tone': tone } : {}) }, h('span', { class: 'lr-ic' }, ic), h('span', {}, h('b', {}, title), h('small', {}, detail)))
+    if (seal && !s) {
+      const shares = h('button', { type: 'button', class: 'btn' }, 'What this shares')
+      shares.onclick = () => { this.sheet?.close(); this.closeShares(); this.closeShares = showShares(this.disconnect) }
+      body.replaceChildren(h('div', { class: 'link-seal' }, h('b', {}, 'Connection seal'), same ? previous! : sealElement(seal), h('small', {}, 'Check both screens show the same seal')), row(PATH(), 'Finding the path', 'Connection statistics appear when the link reports them.'), shares)
+      return
+    }
     if (!s || s.link?.secure === false) {
       body.replaceChildren(row(PATH(), 'Not connected', 'Once the phone and the screen are linked again, this says how.', 'off'))
       return

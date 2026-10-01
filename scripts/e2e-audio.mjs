@@ -1,6 +1,7 @@
 /** Real audio, physics and addressed controller feedback. Captures are written only to a temporary directory. */
+import { tempScope } from './lib/temp.mjs'
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -31,7 +32,9 @@ async function saveRecording(page, path) {
 }
 
 export async function runAudio(local, check) {
-  const out = await mkdtemp(join(tmpdir(), 'obpal-audio3d-'))
+  const temps = tempScope()
+  try {
+  const out = await temps.make(join(tmpdir(), 'obpal-audio3d-'))
   const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, args })
   const measurements = []
   const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 800 } })
@@ -90,9 +93,17 @@ export async function runAudio(local, check) {
     const touches = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 1 }] })
     const drive = async (selector, dx, dy, ms) => {
       await page.evaluate(() => document.querySelectorAll('.hint').forEach(e => e.remove()))
-      const b = await page.locator(selector).first().boundingBox()
-      assert.ok(b, `visible ${selector}`)
-      const x = b.x + b.width / 2, y = b.y + b.height / 2
+      const point = await page.locator(selector).first().evaluate(target => {
+        const b = target.getBoundingClientRect()
+        // Inset face buttons and D-pad own the stick's centre. Drive its uncovered floating-stick background.
+        for (const fy of [.5, .2, .8]) for (const fx of [.5, .2, .8]) {
+          const x = b.x + b.width * fx, y = b.y + b.height * fy, hit = document.elementFromPoint(x, y)
+          if (target.classList.contains('gp-stick') ? hit === target : hit && target.contains(hit)) return { x, y }
+        }
+        return null
+      })
+      assert.ok(point, `uncovered touch target ${selector}`)
+      const { x, y } = point
       await touches('touchStart', x, y)
       for (let i = 0; i < ms / 40; i++) { await touches('touchMove', x + dx + i % 2, y + dy); await sleep(40) }
       await touches('touchEnd')
@@ -283,6 +294,8 @@ export async function runAudio(local, check) {
     await writeFile(join(out, 'measurements.json'), JSON.stringify(measurements, null, 2))
     console.log(`  Audio evidence: ${out}`)
   }
+
+  } finally { await temps.cleanup() }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

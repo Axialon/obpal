@@ -3,6 +3,7 @@ import { devices } from 'playwright'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { readButtonInk, inkError } from './lib/button-ink.mjs'
+import { readControlOverlaps } from './lib/control-hitboxes.mjs'
 
 export async function phonePointing({ browser, origin, check, shots, baseline = false }) {
   for (const device of ['Pixel 7', 'iPhone 13']) {
@@ -35,6 +36,7 @@ export async function phonePointing({ browser, origin, check, shots, baseline = 
       await screen.waitForFunction(() => !!window.__obpal?.pairingUrl)
       await screen.evaluate(() => { window.__received = []; window.__obpal.on('button', e => window.__received.push({ t: 'btn', id: e.id, ev: e.ev })) })
       await phone.goto(await screen.evaluate(() => window.__obpal.pairingUrl))
+      if (device === 'iPhone 13') await phone.locator('#gate #start').click()
       await phone.waitForFunction(() => document.body.classList.contains('live'))
       await phone.waitForTimeout(1000)
       const cdp = await ctx.newCDPSession(phone)
@@ -119,6 +121,51 @@ export async function phonePointing({ browser, origin, check, shots, baseline = 
         }
       }
       if (!baseline) {
+        await check(`${device}: the hit-area guard detects a tray covering the mouse face`, async () => {
+          const saved = await phone.locator('#tray').getAttribute('style')
+          try {
+            await phone.evaluate(() => {
+              const r = document.querySelector('.mouse-shell').getBoundingClientRect()
+              document.querySelector('#tray').style.cssText = `position:fixed;left:${r.left}px;top:${r.bottom - 60}px;width:${r.width}px;height:60px;z-index:100`
+            })
+            const overlaps = await readControlOverlaps(phone)
+            if (!overlaps.some(row => /mouse-(left|right)|mouse-seam/.test(row) && /tray-btn/.test(row))) throw new Error('the overlapping tray escaped the guard')
+          } finally {
+            await phone.locator('#tray').evaluate((el, style) => style === null ? el.removeAttribute('style') : el.setAttribute('style', style), saved)
+          }
+          return 'intentional collision rejected; layout restored'
+        })
+        await check(`${device}: pointing faces keep separate hit areas at 360–430 px, portrait and landscape, with either hand and one-hand on or off`, async () => {
+          const bad = []
+          let layouts = 0
+          for (const face of ['mouse', 'wii', 'trackpad']) {
+            await choose(face)
+            for (const one of [false, true]) for (const left of [false, true]) {
+              await phone.locator('#gear').evaluate(el => el.click())
+              await phone.locator('#one-hand').setChecked(one)
+              await phone.locator('#left').setChecked(left)
+              await settingsDone()
+              for (let width = 360; width <= 430; width += 10) for (const land of [false, true]) {
+                const size = land ? { width: 664, height: width } : { width, height: 664 }
+                await phone.setViewportSize(size)
+                await cdp.send('Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: devices[device].deviceScaleFactor, mobile: true, screenOrientation: { type: land ? 'landscapePrimary' : 'portraitPrimary', angle: land ? 90 : 0 } })
+                await phone.waitForTimeout(100)
+                layouts++
+                for (const overlap of await readControlOverlaps(phone)) bad.push(`${face} ${size.width}×${size.height} one=${one} left=${left}: ${overlap}`)
+                if (shots && width === 390) await phone.screenshot({ path: join(shots, `${device}-${face}-hit-${one ? 'one' : 'two'}-${left ? 'left' : 'right'}-${land ? 'landscape' : 'portrait'}.png`) })
+              }
+            }
+            await phone.setViewportSize({ width: 390, height: 844 })
+            await cdp.send('Emulation.clearDeviceMetricsOverride')
+            await phone.locator('#gear').evaluate(el => el.click())
+            await phone.locator('#one-hand').uncheck()
+            await phone.locator('#left').uncheck()
+            await settingsDone()
+          }
+          if (shots) await writeFile(join(shots, `${device}-hit-areas.json`), JSON.stringify({ layouts, bad }, null, 2))
+          if (bad.length) throw new Error(bad.slice(0, 12).join('; '))
+          return `${layouts} layouts, sampled every 8 px including touch extensions`
+        })
         for (const face of ['mouse', 'wii', 'trackpad']) {
           await choose(face)
           await phone.locator('#gear').evaluate(el => el.click())
@@ -200,7 +247,9 @@ export async function phonePointing({ browser, origin, check, shots, baseline = 
           }
         }
         await check(`${device}: one-hand preferences and handedness survive reload`, async () => {
-          await phone.reload(); await phone.waitForFunction(() => document.body.classList.contains('live')); await phone.waitForTimeout(1000)
+          await phone.reload()
+          if (device === 'iPhone 13') await phone.locator('#gate #start').click()
+          await phone.waitForFunction(() => document.body.classList.contains('live')); await phone.waitForTimeout(1000)
           for (const face of ['mouse', 'wii', 'trackpad']) {
             await choose(face)
             if (!await phone.locator('.surface.one-hand.left').count()) throw new Error(`${face} preference lost`)

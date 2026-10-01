@@ -1,0 +1,18 @@
+.local-control { display: grid; gap: 12px; padding: 14px; }
+.local-choices, .local-actions { display: grid; gap: 8px; }
+.local-choice, .local-actions .kit-action { min-height: 44px; width: 100%; justify-content: center; text-align: center; }
+.local-choice[aria-pressed="true"] { border-color: var(--bb-accent); background: rgb(var(--bb-accent-rgb) / .1); }
+.local-choice svg, .local-actions svg { width: 18px; height: 18px; flex: 0 0 18px; }
+.local-unit { display: grid; gap: 6px; }
+.local-unit select { width: 100%; min-height: 44px; color: inherit; background: rgb(var(--bb-surface-rgb)); border: 1px solid var(--bb-line); border-radius: 12px; padding: 8px 12px; text-align: center; }
+.local-unit button.local-select { width: 100%; min-height: 44px; text-align: center; justify-content: center; }
+.local-select .kit-select-v { flex: 0 1 auto; }
+.local-status { font-size: 12px; text-align: center; margin: 0; }
+.local-bindings { position: fixed; z-index: 80; left: 50%; top: 90px; transform: translateX(-50%); width: min(440px, calc(100vw - 24px)); max-height: calc(100dvh - 110px); overflow-y: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 12px; border-radius: 18px; }
+.local-bindings > .kit-icon-action, .local-binding-hint { grid-column: 1 / -1; }
+.local-bindings[hidden], .local-choice[hidden] { display: none; }
+.local-binding { display: flex; justify-content: center; align-items: center; gap: 6px; min-height: 36px; color: inherit; background: transparent; border: 1px solid var(--bb-line); border-radius: 8px; font: inherit; font-size: 12px; }
+.local-binding-hint { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; font-size: 12px; }
+.local-binding-hint svg { width: 18px; height: 18px; }
+.local-bindings kbd { border: 1px solid var(--bb-line); border-radius: 5px; min-width: 23px; padding: 3px 6px; text-align: center; font: 11px var(--bb-mono, monospace); background: rgb(var(--bb-surface-rgb) / .8); }
+.local-control :focus-visible, canvas:focus-visible { outline: 2px solid var(--bb-accent); outline-offset: 3px; }

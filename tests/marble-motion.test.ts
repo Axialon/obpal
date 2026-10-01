@@ -6,7 +6,7 @@ import { applyDevice, captureDevice } from '../src/sim/vr/snapshot'
 
 const dt = 1 / 240
 function flat() {
-  const logic = new MarblerunLogic(), u = logic.units[0]
+  const logic = new MarblerunLogic(true), u = logic.units[0]
   u.track[12] = { kind: 0, turn: 0 }
   u.x = -.6; u.marbles[0].x = .4; u.marbles[1].x = .8
   return { logic, u }
@@ -81,7 +81,7 @@ it('conserves two-sphere momentum and uses glass restitution at a collision', ()
 })
 
 it('keeps a resting cup and a touching flat queue exactly still without contact chatter', () => {
-  const logic = new MarblerunLogic(), u = logic.units[0], q = u.marbles[0], r = u.marbles[1]
+  const logic = new MarblerunLogic(true), u = logic.units[0], q = u.marbles[0], r = u.marbles[1]
   q.x = -.6; r.x = q.x + q.radius + r.radius
   const initial = logic.renderState()
   for (let n = 0; n < 2400; n++) logic.step([], dt)
@@ -103,7 +103,7 @@ it('substeps fast marbles, interpolates fixed ticks and preserves shared guest p
   const pose = logic.renderState()[0].marbles[0]
   expect(pose.x).toBeGreaterThanOrEqual(Math.min(before, u.x))
   expect(pose.x).toBeLessThanOrEqual(Math.max(before, u.x))
-  const guest = new MarblerunLogic(), reference = guest.units[0].marbles[0]
+  const guest = new MarblerunLogic(true), reference = guest.units[0].marbles[0]
   applyDevice(guest, captureDevice(logic))
   expect(guest.units[0].marbles[0]).toBe(reference)
   expect(guest.renderState()[0].marbles[0]).toMatchObject({ x: u.x, z: u.z, rollX: u.rollX, rollZ: u.rollZ })

@@ -1,6 +1,7 @@
 import { setMarkup, html, insertMarkup } from '../ui/markup'
 import { applyTheme, initialTheme } from '../ui/themes'
 import { calmMarks, mountMarks } from '../ui/icons'
+import { fitControlInk } from '../ui/kit/ink'
 import { mountTopBar } from './topbar'
 import { dropQuickAction, mountQuick, quickAction } from '../ui/quick'
 import { openPairCamera, phoneCamera } from '../ui/camera'
@@ -13,11 +14,12 @@ import type { Frame, Remote } from '@obpal/host'
 import { armScene, desktopScene, H, playScene, pointScene, togetherScene, turnScene, W, type Point, type Scene, type SceneMode } from './scenes'
 
 applyTheme(initialTheme())
-// The logo is the page's one ambient motion; a phone lets it settle after two orbits.
+const releaseInk = fitControlInk()
+releaseInk()
+fitControlInk(document.body, { defer: fn => window.setTimeout(fn, 0), cancel: id => clearTimeout(id) })
+// The marbles provide the ambient motion; logos stay still.
 mountMarks()
-// The footer's logo stays still: one orbiting logo on the page is enough.
-const foot = document.querySelector('.site-foot')
-if (foot) calmMarks(foot, 0)
+calmMarks(document.body, 0)
 mountTopBar()
 
 const still = matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -85,9 +87,9 @@ quickAction(desk ? {
   id: 'scan', group: 'primary', label: 'Scan a code', hint: 'Connect to the screen in front of you', icon: 'frame',
   run: openPairCamera,
 })
-mountQuick()
+mountQuick({ scroll: false, defer: fn => window.setTimeout(fn, 0) })
 // For the end-to-end test (scripts/e2e-home.mjs), as the viewer exposes its own.
-Object.assign(window, { __home: { tips: () => hero.tips(), dot: () => hero.dot(), pads: () => hero.pads(), outline: (id: string) => hero.outline(id), gfx: () => hero.gfx(), audio: () => hero.audio(), drop: (x: number, y: number) => hero.drop(x, y), counters: () => hero.counters(), gaps: () => hero.gaps(), steps: () => hero.steps(), sim: () => hero.sim() } })
+Object.assign(window, { __home: { tips: () => hero.tips(), dot: () => hero.dot(), pads: () => hero.pads(), outline: (id: string) => hero.outline(id), gfx: () => hero.gfx(), audio: () => hero.audio(), drop: (x: number, y: number) => hero.drop(x, y), counters: () => hero.counters(), gaps: () => hero.gaps(), steps: () => hero.steps(), activity: () => hero.activity(), sim: () => hero.sim() } })
 if (debug.size) void import('./debug').then(({ mountDebug }) => mountDebug(debug, { audio: () => hero.audio(), gfx: () => hero.gfx() }))
 
 if (desk) {
@@ -507,21 +509,14 @@ function playByTouch(host: HTMLElement, on: Touching) {
 if (matchMedia('(pointer: coarse)').matches) {
   for (const l of lives) if (!l.scene.modes) insertMarkup(captionOf(l.host).querySelector('.scene-k')!, 'afterend', html`<span class="play-cue" aria-hidden="true"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.6" /><circle cx="12" cy="12" r="7" opacity=".45" /></svg><span class="play-cue-t"><span>Hold to play</span><span>Tilt or hold to play</span></span></span>`)
 } else {
-  // A light follows the mouse across the cards, and their rims catch it.
-  let raf = 0
-  let at: PointerEvent | null = null
+  // Pointer lights are event work; the marble ticker is the home's only animation frame.
   document.addEventListener('pointermove', (e) => {
     if (e.pointerType !== 'mouse') return
-    at = e
-    if (raf) return
-    raf = requestAnimationFrame(() => {
-      raf = 0
-      const card = (at?.target as Element | null)?.closest?.<HTMLElement>('.scene, .build-card')
-      if (!card || !at) return
-      const r = card.getBoundingClientRect()
-      card.style.setProperty('--mx', `${(at.clientX - r.left).toFixed(0)}px`)
-      card.style.setProperty('--my', `${(at.clientY - r.top).toFixed(0)}px`)
-    })
+    const card = (e.target as Element | null)?.closest?.<HTMLElement>('.scene, .build-card')
+    if (!card) return
+    const r = card.getBoundingClientRect()
+    card.style.setProperty('--mx', `${(e.clientX - r.left).toFixed(0)}px`)
+    card.style.setProperty('--my', `${(e.clientY - r.top).toFixed(0)}px`)
   }, { passive: true })
 }
 
@@ -606,10 +601,12 @@ addActor((now, dt) => {
     const pointing = modes ? !!l.kept : !!l.pointer && (l.down || now - l.pointerAt < HOLD_MS)
     const tilted = !modes && !pointing && !!l.tilt && now - l.tiltAt < HOLD_MS
     const turning = !!l.scene.turn && (tiltOn() || remoteTurn)
-    if (!pointing && !tilted && !turning && still) continue
+    const rally = l.host.dataset.scene === 'play'
+    if (!pointing && !tilted && !turning && (still || (hero.enabled && !rally))) continue
     l.t += dt
     l.scene.step(dt, pointing ? (modes ? l.kept!.p : l.pointer) : tilted ? l.tilt : null, l.t)
     busy = true
   }
-  return busy
+  const sceneChanged = hero.sceneActive(busy)
+  return busy || sceneChanged
 })

@@ -180,4 +180,5 @@ if (!tc.ok || !vt.ok || rows.some((r) => r[0] === 'install' && r[1] === 'FAIL'))
   rows.push(['after', '', `the merge ${sha} stays; fix forward, or undo it with git reset --hard ${before.slice(0, 7)} (it discards the merge)`])
   summary(1)
 }
+console.log('Cleanup: review pnpm run reap -- --dry-run, then pnpm run reap when the selection is safe.')
 summary(0)

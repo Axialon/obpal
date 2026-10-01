@@ -127,12 +127,26 @@ export class CameraView {
     const zoom = this.control('Change camera zoom', '', () => {})
     zoom.textContent = '1×'
     zoom.dataset.cameraZoom = ''
+    const zoomCluster = element('div', 'camera-zoom-cluster glass')
+    zoomCluster.hidden = true
+    const slider = element('input', 'camera-zoom-slider')
+    slider.type = 'range'; slider.min = '1'; slider.max = '3'; slider.step = '.05'; slider.value = '1'; slider.disabled = true
+    slider.dataset.cameraZoomSlider = ''; slider.setAttribute('aria-label', 'Camera zoom')
+    const ticks = element('span', 'camera-zoom-ticks')
+    ticks.setAttribute('aria-hidden', 'true')
+    for (let i = 0; i < 3; i++) ticks.append(element('i'))
+    const zoomRange = element('div', 'camera-zoom-range')
+    zoomRange.append(slider, ticks)
+    const focus = this.control('Focus camera', 'point', () => {})
+    focus.dataset.cameraFocus = ''; focus.hidden = true
+    zoomCluster.append(zoom, zoomRange, focus, torch)
     const typed = element('button', 'camera-type glass', body ? 'Close camera' : hand ? 'Use phone motion' : 'Enter a code')
     typed.type = 'button'
     typed.dataset.cameraType = ''
     typed.dataset.tip = body ? 'Close the camera' : hand ? 'Close the camera and use the phone sensors' : 'Type the ten digits shown on your screen'
     typed.onclick = () => { this.close('type'); options.typed() }
-    headTools.prepend(torch, zoom)
+    if (hand || body) headTools.prepend(torch, zoom)
+    else tools.append(zoomCluster)
     if (hand) {
       tools.append(typed)
       const labels = options.hold ? [['hand', 'Tool'], ['pinch', 'Gripper']] : [['hand', 'Hover'], ['grip', 'Orbit'], ['pinch', 'Grab']]
@@ -195,7 +209,14 @@ export class CameraView {
     foot.append(deadman, tools, this.island)
     this.dialog.append(this.video, this.overlay, shade, head, this.guide, foot, this.metrics)
     this.scanner = new Scanner(this.video, torch, (text) => this.say(body ? text.replace(/Show your hand/g, 'Keep your shoulders and hips in view').replace(/[Uu]se phone motion/g, 'close the camera') : text), (text, corners) => this.found(text, corners), {
-      scan: !hand && !body, zoom, fps: body ? 30 : undefined, ended: body ? () => this.close() : undefined,
+      scan: !hand && !body, zoom, zoomSlider: !hand && !body ? slider : undefined, focus: !hand && !body ? focus : undefined,
+      zoomChanged: !hand && !body ? (level, digital) => {
+        zoomCluster.hidden = false
+        ticks.querySelectorAll('i').forEach((tick, i) => tick.dataset.active = String(level >= i + 1 - .05))
+        this.dialog.dataset.zoom = String(level)
+        this.overlay.style.setProperty('--scan-zoom', String(digital))
+      } : undefined,
+      fps: body ? 30 : undefined, ended: body ? () => this.close() : undefined,
       facing: (mirrored, canFlip) => { this.dialog.dataset.mirrored = String(mirrored); flip.hidden = !canFlip },
       state: (state) => {
         if (body && state !== 'ready') { this.preparation++; this.fingersOff(); options.reset?.() }
@@ -347,7 +368,8 @@ export class CameraView {
       const box = this.guide.getBoundingClientRect()
       const mirrored = this.video.dataset.mirrored === 'true'
       const ordered = mirrored ? [corners[1], corners[0], corners[3], corners[2]] : corners
-      const mapped = ordered.map(p => coverPoint(p.x * this.video.videoWidth, p.y * this.video.videoHeight, this.video.videoWidth, this.video.videoHeight, this.dialog.clientWidth, this.dialog.clientHeight, mirrored))
+      const digital = Number(this.video.style.getPropertyValue('--scan-zoom')) || 1
+      const mapped = ordered.map(p => coverPoint((.5 + (p.x - .5) * digital) * this.video.videoWidth, (.5 + (p.y - .5) * digital) * this.video.videoHeight, this.video.videoWidth, this.video.videoHeight, this.dialog.clientWidth, this.dialog.clientHeight, mirrored))
       Object.assign(this.guide.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px`, transform: 'none' })
       void this.guide.offsetWidth
       const left = Math.min(...mapped.map(p => p.x)), top = Math.min(...mapped.map(p => p.y))

@@ -289,8 +289,14 @@ const ahead = (ids: readonly string[], a: ControllerId, b: ControllerId) => {
  */
 export function withControllers<L extends Layout>(layout: L): L {
   const ids = Array.isArray(layout.controllers) ? layout.controllers.filter(isControllerId) : []
-  if (!ids.length) return layout
+  if (!ids.length && !layout.universal) return layout
   const out: L = { ...layout }
+  if (layout.universal) {
+    if (!ids.length) out.controllers = layoutControllers(layout)
+    out.modes = [...new Set(CONTROLLER_IDS.flatMap(c => CONTROLLERS[c].modes))]
+    out.utilities = [...new Set([...Object.values(Utility), ...(layout.utilities ?? [])])]
+    if (!out.tray.some(c => c.type === 'keyboard')) out.tray = [...out.tray, KEYBOARD_CONTROL]
+  }
   if (!out.modes) out.modes = [...new Set(ids.flatMap((c) => CONTROLLERS[c].modes))]
   if (!out.point && ahead(ids, Controller.mouse, Controller.wii)) out.point = 'mouse'
   if (!out.profile && ahead(ids, Controller.wheel, Controller.gamepad)) out.profile = 'driving'

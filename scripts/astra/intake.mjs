@@ -1,4 +1,6 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { tempScope } from '../lib/temp.mjs'
+import { finishIntake, retainedRequests } from './layout.mjs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
@@ -225,6 +227,8 @@ export const intake = (options) => exchange({ ...options, mode: 'intake' })
 export const verification = (options) => exchange({ ...options, mode: 'verify' })
 
 async function exchange({ root, returned, request, stage: requestedStage, mode, outbox, port, workerPort, pinned = false, run = localRun }) {
+  const temps = tempScope()
+  try {
   const steps = [], members = {}, redactions = [], deviations = []
   let logBudget = 8 << 20
   let stage = 'rejected', base = masterSha(root), head = null, lane = null, verified = null, commits = [], privateRefused = false
@@ -249,10 +253,11 @@ async function exchange({ root, returned, request, stage: requestedStage, mode, 
   try {
     if (mode === 'intake') {
       outbox ??= defaultOutbox()
+      stage = stageId(loadArchive(returned).manifest.stage)
       // The trusted retained request is never located using a path provided by the returned manifest.
       if (!request) {
         const digest = loadArchive(returned).manifest.input?.archive_sha256
-        const matches = readdirSync(outbox).filter((n) => /^obpal-.*-Request-.*\.zip$/.test(n)).map((n) => join(outbox, n))
+        const matches = retainedRequests(outbox)
           .filter((p) => statSync(p).isFile() && statSync(p).size <= LIMITS.archive)
           .filter((p) => sha256(readFileSync(p)) === digest)
         if (matches.length !== 1) throw new Error('Retained request not uniquely found; supply --request <original.zip>')
@@ -279,8 +284,9 @@ async function exchange({ root, returned, request, stage: requestedStage, mode, 
       writeFileSync(reviewPath, review.markdown, { flag: 'wx' })
       writeFileSync(join(evidence, 'stage.json'), json({ schema_version: 1, stage, base, head,
         touched: verified.touched, suites: verified.suites, outbox, message_budget,
-        review_sha256: sha256(review.markdown), lock_changed: review.lockChanged }), { flag: 'wx' })
-      return { path: reviewPath, result: 'review-required', steps, head, branch: `astra/${stage}`, deviations }
+        review_sha256: sha256(review.markdown), lock_changed: review.lockChanged, received_sha256: sha256(readFileSync(returned)) }), { flag: 'wx' })
+      const moved = finishIntake(outbox, returned, stage, true)
+      return { path: reviewPath, result: 'review-required', steps, head, branch: `astra/${stage}`, deviations, ...moved }
     }
     stage = stageId(requestedStage)
     const evidence = beneath(root, `artifacts/astra/${stage}`)
@@ -314,9 +320,11 @@ async function exchange({ root, returned, request, stage: requestedStage, mode, 
     let scanned = true
     try { scanMembers(snapshot, deny) } catch (e) { scanned = false; privateRefused = true; record('private-scan', { exit_code: 1, log: e.message }) }
     if (scanned) record('private-scan', { exit_code: 0, log: `${Object.keys(snapshot).length} changed/new files scanned; deleted files have no remaining content.\n` })
-    const runtimeLogs = mkdtempSync(join(tmpdir(), 'obpal-astra-runtime-'))
+    const runtimeLogs = temps.makeSync(join(tmpdir(), 'obpal-astra-runtime-'))
     const env = { ...process.env, OBPAL_E2E_PORT: String(port ?? ''), OBPAL_E2E_WORKER_PORT: String(workerPort ?? ''),
       WRANGLER_LOG_PATH: runtimeLogs, WRANGLER_SEND_METRICS: 'false' }
+    env.OBPAL_E2E_EVIDENCE_ROOT = join(evidence, 'runtime-evidence')
+    mkdirSync(env.OBPAL_E2E_EVIDENCE_ROOT, { recursive: true })
     // Never inherit a production upstream or an override that could disable the Desktop guard.
     delete env.OBPAL_E2E_UPSTREAM; delete env.OBPAL_DESKTOP_LOG
     let ready = scanned
@@ -336,7 +344,7 @@ async function exchange({ root, returned, request, stage: requestedStage, mode, 
       }
       if (ready && verified.suites.length) {
         await portsFree([Number(port), Number(workerPort)])
-        const logs = mkdtempSync(join(tmpdir(), 'obpal-astra-e2e-'))
+        const logs = temps.makeSync(join(tmpdir(), 'obpal-astra-e2e-'))
         record('e2e', await run(lane, ['run', 'e2e:all', '--', ...verified.suites, '--out', logs], env), `pnpm run e2e:all -- ${verified.suites.join(' ')}`)
         for (const suite of verified.suites) {
           const log = join(logs, `${suite}.log`)
@@ -389,8 +397,15 @@ async function exchange({ root, returned, request, stage: requestedStage, mode, 
 Working within the message budget
 ${messageBudgetLine(message_budget)} This is the request's budget checkpoint; the owner's ledger records subsequent usage. Each round trip costs Astra one message. Plan internally, resolve questions from the pack/GitHub, list assumptions and report actual self-checks. If needed, include a coherent partial with a precise continuation plan in this message.\n`
   members['ASTRA_START.txt'] = prompt
-  const path = saveExchange(outbox ?? defaultOutbox(), stage, 'Return', archive(members, { kind: 'result', stage, result, message_budget }), prompt)
-  return { path, result, steps, head, branch: lane ? `astra/${stage}` : null, deviations }
+  let path = saveExchange(outbox ?? defaultOutbox(), stage, 'Return', archive(members, { kind: 'result', stage, result, message_budget,
+    ...(mode === 'intake' && returned && existsSync(returned) ? { received_sha256: sha256(readFileSync(returned)) } : {}) }), prompt, { upload: mode !== 'intake' })
+  let moved = {}
+  if (mode === 'intake' && returned && existsSync(returned)) {
+    moved = finishIntake(outbox ?? defaultOutbox(), returned, stage, false, path)
+    path = moved.refusalPath
+  }
+  return { path, result, steps, head, branch: lane ? `astra/${stage}` : null, deviations, ...moved }
+  } finally { await temps.cleanup() }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

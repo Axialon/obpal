@@ -136,9 +136,13 @@ try {
     const s = await until('the phone holds a shape', async () => { const v = await state(); return v.people.length && v.shapes.cube.holder ? v : null }, 20000)
     for (const e of ['obpal-connect', 'obpal-join']) if (!s.events.includes(e)) throw new Error(`the page heard ${s.events.join(', ')}`)
     if (s.shapes.cube.holder !== s.people[0].id) throw new Error(`cube held by ${s.shapes.cube.holder}`)
-    await until('the chip closed once the phone was in', async () => !(await state()).open, 5000)
+    await until('the QR footprint keeps its matching seal once the phone is in', async () => {
+      const seal = screen.locator('.seal-stage .connection-seal').first()
+      if (!(await state()).open || !(await seal.isVisible())) return false
+      return await seal.getAttribute('data-seal') === await phone.page.locator('.link-badge .connection-seal').getAttribute('data-seal')
+    }, 5000)
     await until('the phone shows what it holds', () => phone.page.evaluate(() => document.querySelector('#pad-part .pp-name')?.textContent === 'Cube'), 8000)
-    return `${s.people[0].name} holds the cube; the chip closed`
+    return `${s.people[0].name} holds the cube; the QR footprint keeps its matching seal`
   })
 
   await check('the phone says which controller it uses (mode{c}): the trackpad, then the Wii remote', async () => {

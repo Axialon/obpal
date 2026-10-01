@@ -71,10 +71,11 @@ const clock = () => new Date().toLocaleTimeString('en-GB', { hour12: false })
 
 export async function startSimScene(o: SimOptions): Promise<SimScene> {
   mountBodyCapture()
+  o.layout = { ...o.layout, universal: true }
   const remote = await Remote.create({ appName: o.appName, layout: o.layout, seats: 8 })
   holdForPhone(remote)
   const query = new URLSearchParams(location.search)
-  const control = new ControlSession(remote, query.get('d') ?? (location.pathname.includes('/arm/') ? `arm-${query.get('kind') ?? 'arm5'}` : location.pathname.includes('/humanoid/') ? 'humanoid' : 'arena'))
+  const control = new ControlSession(remote, query.get('d') ?? (location.pathname.includes('/marblerun/') ? 'marblerun' : location.pathname.includes('/arm/') ? `arm-${query.get('kind') ?? 'arm5'}` : location.pathname.includes('/humanoid/') ? 'humanoid' : 'arena'))
   const claims = new Claims()
   const approved = new Set<string>()
   const pending = new Set<string>()
@@ -96,7 +97,8 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   const autoAllow = $('auto-allow') as HTMLInputElement | null
   let approvalHeld = false
   const waived = () => !!autoAllow?.checked && !approvalHeld
-  const allowed = (id: string) => !o.approval || approved.has(id) || waived()
+  const visitor = (id: string) => people.get(id)?.caps?.platform === 'scene'
+  const allowed = (id: string) => !visitor(id) && (!o.approval || approved.has(id) || waived())
   const holdApproval = (held: boolean) => {
     if (held === approvalHeld) return
     approvalHeld = held
@@ -131,8 +133,8 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
       note(`${lead.name}: ${CONTROLLERS[next].name}`)
     },
   })
-  const nameOf = (id: string | undefined) => (!id ? '' : id === 'host' ? 'The screen' : people.get(id)?.name ?? 'Someone')
-  const colorOf = (id: string | undefined) => (!id ? '' : id === 'host' ? family.accentColor() : people.get(id)?.color ?? '')
+  const nameOf = (id: string | undefined) => (!id ? '' : id === 'host' ? 'The screen' : id.startsWith('local:') ? 'Local player' : people.get(id)?.name ?? 'Someone')
+  const colorOf = (id: string | undefined) => (!id ? '' : id === 'host' || id.startsWith('local:') ? family.accentColor() : people.get(id)?.color ?? '')
 
   const log = (text: string, color?: string) => {
     const list = $('log')
@@ -154,6 +156,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   }
 
   const take = (node: string, who: string, force = false): boolean => {
+    if (visitor(who)) return false
     const r = claims.take(node, who, force)
     const name = nodeName(node)
     if (!r.ok) {
@@ -203,8 +206,8 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
       dot.style.setProperty('--c', p.color)
       dot.textContent = initials(p.name)
       li.querySelector('b')!.textContent = p.name
-      li.querySelector('small')!.textContent = !allowed(p.id) ? 'Waiting for you to let them in' : node ? `Holding ${nodeName(node)}` : 'Free'
-      if (!allowed(p.id)) {
+      li.querySelector('small')!.textContent = visitor(p.id) ? 'Watching' : !allowed(p.id) ? 'Waiting for you to let them in' : node ? `Holding ${nodeName(node)}` : 'Free'
+      if (!visitor(p.id) && !allowed(p.id)) {
         const ok = document.createElement('button')
         ok.className = 'allow'
         ok.textContent = 'Let in'
@@ -235,7 +238,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   remote.on('join', (p) => {
     people.set(p.id, p)
     log(`${p.name} joined`, p.color)
-    if (o.approval && !allowed(p.id)) {
+    if (!visitor(p.id) && o.approval && !allowed(p.id)) {
       pending.add(p.id)
       note(`${p.name} wants to take part: let them in from People`)
       $('people').hidden = false
@@ -254,6 +257,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
     o.left?.(p)
   })
   remote.on('claim', ({ node }, who) => {
+    if (visitor(who.id)) return
     if (!allowed(who.id)) { remote.feedback({ haptic: 'bump', toast: 'Waiting for the screen to let you in' }, who.id); return }
     if (node === null) { release(who.id); return }
     if (!nodes.some((n) => n.id === node)) { remote.feedback({ haptic: 'bump', toast: 'That’s not in this scene' }, who.id); return }

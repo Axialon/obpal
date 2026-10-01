@@ -305,7 +305,7 @@ export class Tradeoff {
         slots.push({ key: best.key, ratio: len / local.get(best.key)!.length() })
       }
       if (new Set(slots.map((s) => s.key)).size !== rigs.length) return
-      m.geometry = m.geometry.clone() // cached glTF scenes share geometry: reshape a private copy
+      // Each loaded model owns its geometry, so the hull can be reshaped in place.
       found = { mesh: m, geo: m.geometry, slots }
     })
     this.hull = found

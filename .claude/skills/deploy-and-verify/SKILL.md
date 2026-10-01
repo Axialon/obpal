@@ -21,3 +21,5 @@ description: Ship ob.Pal from clean master in the main checkout with pnpm run sh
 - If the deploy broke the site, rolling back (`npx wrangler rollback`) is the coordinator's call. Tell the owner what and why.
 
 Never touch the apex domains or other projects on the account. The guard blocks wrangler commands that name them.
+
+Maintenance: `pnpm run ship` takes a verified backup after publication. Configure the private backup repository in ignored `.claude/local/maintenance.config.json`; development history must never go to the public snapshot remote. Review `pnpm run reap -- --dry-run` before reclaiming merged lanes and old temp folders. Reap preserves branches and archives dirty changes off drive before removal. Lane start warns below the configured free-space floor. See [docs/LANES.md](../../../docs/LANES.md) for commands.

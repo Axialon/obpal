@@ -1,6 +1,7 @@
 /** Calibrated spaces driven by real phone UI and synthetic W3C sensor events over WebRTC. */
+import { tempScope } from './lib/temp.mjs'
 import { chromium, devices } from 'playwright'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -16,7 +17,9 @@ async function until(fn, label, ms = 15000) {
 }
 
 export async function runControl(local, check) {
-  const dir = await mkdtemp(join(tmpdir(), 'obpal-control-'))
+  const temps = tempScope()
+  try {
+  const dir = await temps.make(join(tmpdir(), 'obpal-control-'))
   console.log(`  Control space measurements and captures: ${dir}`)
   const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true, args: ['--disable-features=WebRtcHideLocalIpsWithMdns', '--ignore-certificate-errors', '--disable-background-timer-throttling', '--disable-renderer-backgrounding'] })
   const errors = [], open = new Set(), report = {}
@@ -290,6 +293,8 @@ export async function runControl(local, check) {
     await browser.close()
   }
   return dir
+
+  } finally { await temps.cleanup() }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

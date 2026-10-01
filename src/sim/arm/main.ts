@@ -33,6 +33,9 @@ import { applyTheme, initialTheme } from '../../ui/themes'
 import { mountMarks } from '../../ui/icons'
 import { mountTopBar } from '../../landing/topbar'
 import { startSimScene, type SimScene } from '../scene'
+import { LocalControls } from '../local-controls'
+import { mapFaceInput } from '../face-input'
+import { restInput } from '../devices/types'
 import { simView } from '../view'
 import {
   calibrateHome, defaultCalibration, FeetechDriver, firstOutOfLimits, fromRaw, hasSerial, RosDriver, ROS_DEFAULTS, SerialTextDriver, toRaw,
@@ -573,6 +576,15 @@ function howTo(node: string) {
 }
 
 let sim: SimScene | null = null
+const genericEvents = new Map<string, { presses: string[]; values: { id: string; v: number | boolean | string }[]; text: string }>()
+const localArms = new Set<string>()
+const eventsOf = (id: string) => { let e = genericEvents.get(id); if (!e) { e = { presses: [], values: [], text: '' }; genericEvents.set(id, e) }; return e }
+const localControls = new LocalControls({
+  id: `arm:${KIND.id}`, canvas: renderer.domElement, units: () => arms.map(a => ({ id: a.id, name: a.name })), tray: layout.tray,
+  phone: () => document.getElementById('chip-invite')?.click(),
+  controllerWindow: () => { if (sim?.remote.pairingUrl) window.open(sim.remote.pairingUrl, '_blank', 'noopener') },
+  hardware: () => arms.some(a => !!a.hw?.live), orbit: enabled => { controls.enabled = enabled },
+})
 /** When each participant's input last arrived: the watchdog stops what it drives 200 ms after its input goes quiet. */
 const lastInput = new Map<string, number>()
 const lastButtons = new Map<string, number>()
@@ -666,7 +678,10 @@ if (!shared.guest) void startSimScene({
   sim = s
   shared.connect(s.remote)
   s.remote.on('input', (who) => lastInput.set(who.id, performance.now()))
+  s.remote.on('value', (v, who) => eventsOf(who.id).values.push(v))
+  s.remote.on('text', (v, who) => { eventsOf(who.id).text += v.s })
   s.remote.on('button', ({ id, ev }, who) => {
+    if (ev === 'tap' || ev === 'down') eventsOf(who.id).presses.push(id)
     if (id === 'estop') { estop(who.id); return }
     if (id === 'wii-a' && ev !== 'tap') return
     if (s.control.scope(who.id) === 'scene' && (id === 'control.take' || id === 'wii-a')) {
@@ -951,13 +966,22 @@ function dropAim(id: string) {
 
 /** Once a frame: take every participant's input, and move the pointers of those in Point. */
 const handCursors = new Map<string, HandCursor>()
-function readInputs(now: number) {
+function readInputs(now: number, dt: number) {
   frames.clear()
   const s = sim
   if (!s) return
   for (const [id, cursor] of handCursors) if (!s.remote.participants.some(p => p.id === id)) { cursor.el.remove(); handCursors.delete(id) }
   for (const p of s.remote.participants) {
     const f = s.remote.consumeOf(p.id, now)
+    const native = layout.controllers ?? []
+    if (!native.includes(p.controller ?? 'face.trackpad') || f.body || eventsOf(p.id).text || eventsOf(p.id).presses.some(id => id.startsWith('key-'))) {
+      const raw = { ...restInput(p.controller, f.mode), pad: f.mode === Mode.gamepad ? s.remote.padOf(p.id) : null, touching: f.touching, drag: f.pad1, pan: f.pad2, pinch: f.zoom, twist: f.twist, tilt: f.tilt, hold: f.clutch ? f.qRel : null,
+        point: f.mode === Mode.point ? { x: innerWidth / 2, y: innerHeight / 2, yaw: -f.aim[0], pitch: f.aim[1], off: false } : null,
+        held: aims.get(p.id)?.b ? new Set(['wii-b']) : new Set<string>(), pose: f.pose, hand: f.hand, body: f.body, space: s.control.aim(p.id) ?? undefined, ...eventsOf(p.id) }
+      const mapped = mapFaceInput('arm', native, raw, dt)
+      if (mapped.pad && now - (lastInput.get(p.id) ?? 0) < 200) xrDrives.set(p.id, { pad: mapped.pad, at: now })
+    }
+    genericEvents.delete(p.id)
     if (f.hand || handCursors.has(p.id)) {
       let cursor = handCursors.get(p.id)
       if (!cursor) {
@@ -1233,7 +1257,7 @@ function stepArm(a: Arm, now: number, dt: number) {
   const hw = a.hw
   // Connected but not live: the twin follows the real arm, and nobody drives it.
   const mirror = !!hw && !hw.live
-  const armWho = s?.claims.holder(a.id)
+  const armWho = s?.claims.holder(a.id) ?? (localArms.has(a.id) ? `local:${a.id}` : undefined)
   // What the holder's node strip chose (PROTOCOL §3a): on the trackpad, the one finger drives those joints, the rest hold.
   const focus = armWho && armWho !== 'host' && s ? s.focus.of(armWho) : null
   const frame = focus ? frames.get(armWho!) : undefined
@@ -1371,7 +1395,24 @@ function loop(now: number) {
   const dt = last ? Math.min(0.05, (now - last) / 1000) : 0
   last = now
   if (!shared.guest) {
-    readInputs(now)
+    readInputs(now, dt)
+    const localFrames = localControls.frames(n => {
+      const a = arms[n]
+      return !a || !!sim?.claims.holder(a.id) && sim.claims.holder(a.id) !== 'host' || a.joints.some(j => { const who = sim?.claims.holder(j.node); return !!who && who !== 'host' })
+    }, dt)
+    for (const id of [...localArms]) if (![...localFrames.keys()].some(n => arms[n]?.id === id)) {
+      const a = arms.find(a => a.id === id); if (a) settle(a)
+      localArms.delete(id); xrDrives.delete(`local:${id}`); lastInput.delete(`local:${id}`)
+    }
+    for (const [n, input] of localFrames) {
+      const a = arms[n]
+      if (!a || !input.pad || !sim) continue
+      const who = `local:${a.id}`
+      localArms.add(a.id); xrDrives.set(who, { pad: input.pad, at: now }); lastInput.set(who, now)
+      if (input.presses.includes('estop')) estop(who)
+      if (input.presses.includes('home') || input.padPressed & (1 << PadButton.Guide)) homeArm(a, who)
+      if (input.presses.includes('grip')) toggleGrip(a)
+    }
     for (const a of arms) stepArm(a, now, dt)
     updateBlocks(dt)
   }

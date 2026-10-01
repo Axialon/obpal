@@ -7,6 +7,8 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { allocatePorts, STAND_INS, WORKERS, portFree, withLedger, parseEvents, laneState, matchesLane, stopTrees, guardCleanup, removeLaneTree, sleep, codexArgs } from './lib.mjs'
 import { formatTable, formatDuration } from '../lib/report.mjs'
+import { freeGb, settings } from '../lib/maintenance.mjs'
+import { digestLane } from './digest.mjs'
 
 const root = resolve(fileURLToPath(new URL('../..', import.meta.url)))
 const local = join(root, '.claude/local')
@@ -18,8 +20,8 @@ const read = file => existsSync(file) ? readFileSync(file, 'utf8') : ''
 const help = `pnpm run lane -- <command>
 start <name> --prompt <file> [--model gpt-6.1-sol] [--effort high|xhigh] [--ports auto|a/b] [--base master] [--blender] [--search] [--extra-dir <dir>]
 resume <name> --prompt <file> [--model <model>] [--effort <effort>]
-status [name] [--json] | wait <name> [--timeout <minutes>] | stop <name> [--dry-run]
-cleanup <name> [--force] | ports | brief`
+status [name] [--json] | digest <name> | wait <name> [--timeout <minutes>] | stop <name> [--dry-run]
+cleanup <name> [--force] [--discard-artifacts] | ports | brief`
 
 function options(argv) {
   const positional = [], opts = { extraDirs: [] }
@@ -28,7 +30,7 @@ function options(argv) {
     if (arg === '--') continue
     if (!arg.startsWith('--')) { positional.push(arg); continue }
     const key = arg.slice(2)
-    if (['json', 'dry-run', 'force', 'blender', 'search', 'help'].includes(key)) { opts[key] = true; continue }
+    if (['json', 'dry-run', 'force', 'blender', 'search', 'help', 'discard-artifacts'].includes(key)) { opts[key] = true; continue }
     if (!['prompt', 'model', 'effort', 'ports', 'base', 'extra-dir', 'timeout'].includes(key)) throw new Error(`Unknown option ${arg}`)
     const value = argv[++i]
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${arg}`)
@@ -148,14 +150,20 @@ async function launch(ledger, lane, opts, cfg, resume) {
 async function main() {
   const { command, name, opts, positional } = options(process.argv.slice(2))
   if (!command || opts.help) { console.log(help); return }
-  if (!['start', 'resume', 'status', 'wait', 'stop', 'cleanup', 'ports', 'brief'].includes(command)) throw new Error(`Unknown command ${command}`)
+  if (!['start', 'resume', 'status', 'digest', 'wait', 'stop', 'cleanup', 'ports', 'brief'].includes(command)) throw new Error(`Unknown command ${command}`)
   if (positional.length > 2 || (['ports', 'brief'].includes(command) && name)) throw new Error('Unexpected argument')
   if (!['status', 'ports', 'brief'].includes(command) && !/^[a-z][a-z0-9-]{0,47}$/.test(name || '')) throw new Error('Lane name must be lowercase letters, digits and hyphens, starting with a letter')
+  if (command === 'digest') {
+    console.log(JSON.stringify(await digestLane(process.env.OBPAL_DIGEST_LOCAL || local, name)))
+    return
+  }
   const cfg = config()
   if (['start', 'resume'].includes(command)) {
     if (!opts.prompt) throw new Error('--prompt is required')
     await withLedger(ledgerFile, async ledger => {
       if (command === 'start') {
+        const maintenance = settings(root), available = freeGb(maintenance.freeSpaceRoot)
+        if (available < maintenance.ensureFreeGb) console.warn(`Low free space: ${available.toFixed(1)} GB; floor ${maintenance.ensureFreeGb} GB. Review pnpm run reap -- --dry-run.`)
         if (ledger.lanes.some(l => l.name === name)) throw new Error('Lane name already recorded; choose another name')
         const ports = await allocatePorts(opts.ports || 'auto', ledger.lanes)
         const worktree = guardCleanup(base, join(base, `codex-${name}`))
@@ -188,7 +196,13 @@ async function main() {
     if (!Number.isFinite(minutes) || minutes <= 0) throw new Error('Timeout must be positive minutes')
     const deadline = Date.now() + minutes * 60_000
     for (;;) {
-      const [row] = await statuses(name)
+      // A long cleanup (archiving a lane's evidence) can hold the ledger past the lock timeout; a waiter keeps waiting.
+      let row
+      try { [row] = await statuses(name) }
+      catch (error) {
+        if (!/ledger is locked/.test(error.message) || Date.now() >= deadline) throw error
+        await sleep(5000); continue
+      }
       if (row.state !== 'running') {
         console.log(formatTable(headers, [cells(row)]))
         if (row.failed) console.log(row.failed)
@@ -241,11 +255,10 @@ async function main() {
       }
       const nested = git(['worktree', 'list', '--porcelain']).split('\n').filter(l => l.startsWith('worktree ')).map(l => l.slice(9)).filter(p => p !== target && relative(target, p) && !relative(target, p).startsWith('..') && !relative(target, p).includes(':'))
       if (nested.length) throw new Error('Clean up registered nested worktrees individually first')
-      removeLaneTree(base, target)
+      removeLaneTree(base, target, { discardArtifacts: Boolean(opts['discard-artifacts']), maintenance: settings(root), laneName: lane.name })
       git(['worktree', 'prune', '--expire', 'now'])
-      git(['branch', '-D', lane.branch])
       lane.cleanedAt = new Date().toISOString()
-      console.log(`Cleaned ${name}; ports released`)
+      console.log(`Cleaned ${name}; ports released; branch retained. Review pnpm run reap -- --dry-run for further cleanup.`)
     }
   })
 }

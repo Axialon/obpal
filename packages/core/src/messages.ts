@@ -26,6 +26,8 @@ export type HardwareKey = 'primary' | 'secondary' | 'next' | 'prev'
 export interface Layout {
   v: 1
   tray: TrayControl[]
+  /** Sims with a generic DeviceInput adapter accept every face; controllers remain recommendations. */
+  universal?: boolean
   /** Modes the host supports, in display order. */
   modes?: ModeId[]
   /**

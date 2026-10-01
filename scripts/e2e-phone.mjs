@@ -22,7 +22,8 @@
  * phone-connections, phone-camera, phone-controllers and phone-recovery run inside this suite, so `e2e:all -- phone` covers them.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch. OBPAL_SHOTS=<dir> saves screens.
  */
-import { mkdtemp, rm } from 'node:fs/promises'
+import { tempScope, keepTemp } from './lib/temp.mjs'
+import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join as joinPath } from 'node:path'
 import { chromium, devices } from 'playwright'
@@ -32,10 +33,15 @@ import { startLocal } from '../extension/e2e/local.mjs'
 import { phoneConnections } from './phone-connections.mjs'
 import { phoneControllers } from './phone-controllers.mjs'
 import { phoneCamera } from './phone-camera.mjs'
+import { phoneConnectUx } from './phone-connect-ux.mjs'
 import { runPhonePacks } from './lib/packs-ui.mjs'
 import { phoneRecovery } from './phone-recovery.mjs'
 import { phonePointing } from './phone-pointing.mjs'
+import { runUniversalFaces } from './e2e-local-control.mjs'
 import { visitPhoneButtons, assertButtonInk } from './lib/surface-buttons.mjs'
+
+const temps = tempScope()
+try {
 
 const HEADED = process.argv.includes('--headed')
 const SHOTS = process.env.OBPAL_SHOTS || ''
@@ -75,6 +81,7 @@ try {
   closers.push(sb)
   await phonePointing({ browser: sb, origin: local.origin, check, shots: SHOTS, baseline: process.env.OBPAL_POINTING_BASELINE === '1' })
   if (process.env.OBPAL_POINTING_ONLY !== '1') {
+  await phoneConnectUx({ browser: sb, origin: local.origin, check })
   await check('all controller faces, dock, camera and connection sheets: button ink within 0.5px at three sizes, Carbon and Light', async () => {
     const rows = []
     await visitPhoneButtons(sb, local.origin, (_page, size, state, measured) => rows.push(...measured.map(r => ({ size, state, ...r }))))
@@ -113,7 +120,7 @@ try {
   const invite = await until('invite', () => screen.evaluate(() => window.__obpal?.pairingUrl || ''), 20000)
   await screen.evaluate(() => { window.__btns = []; window.__obpal.on('button', (e) => window.__btns.push(`${e.id}:${e.ev}`)) })
 
-  dir = await mkdtemp(joinPath(tmpdir(), 'obpal-phone-'))
+  dir = await temps.make(joinPath(tmpdir(), 'obpal-phone-'))
   const ctx = await chromium.launchPersistentContext(dir, { ...devices['Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS })
   closers.push(ctx)
   // No native orientation lock in this run (as on an iPhone): the controller must lock by counter-rotating itself.
@@ -332,6 +339,7 @@ try {
   await phoneCamera({ browser: sb, origin: local.origin, check, shots: SHOTS })
   await phoneRecovery({ browser: sb, origin: local.origin, check, shots: SHOTS })
   await phoneControllers({ browser: sb, origin: local.origin, check, shots: SHOTS })
+  await runUniversalFaces(sb, local.origin, check, process.env.OBPAL_E2E_EVIDENCE_ROOT)
   await runPhonePacks({ browser: sb, origin: local.origin, check })
   await check('no Content Security Policy violations on any page', cspCheck)
   }
@@ -341,8 +349,10 @@ try {
 } finally {
   await Promise.allSettled(closers.map((c) => c.close()))
   await local.close()
-  if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {})
+  if (dir) await (keepTemp() ? Promise.resolve() : rm(dir, { recursive: true, force: true })).catch(() => {})
 }
 const failed = results.filter((r) => !r.ok)
 console.log(failed.length || exitCode ? `FAILED ${failed.length}/${results.length}` : `passed ${results.length}/${results.length}`)
-process.exit(failed.length || exitCode ? 1 : 0)
+process.exitCode = (failed.length || exitCode ? 1 : 0)
+
+} finally { await temps.cleanup() }

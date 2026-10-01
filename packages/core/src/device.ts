@@ -184,6 +184,7 @@ export class DeviceLink {
     this.iceReady = fetchIce(service, this.roomId).then((set) => this.takeIce(set))
     this.sig = new SignalClient(roomSocketUrl(service, this.roomId, 'device'))
     this.sig.onmessage = (m) => this.onSignal(m)
+    this.sig.onfull = () => { this.teardown(); this.setStatus('full') }
     this.sig.onstatus = (open, reachable) => {
       if (open) { mark('obpal:signal'); return }
       if (this.status === 'connected') return

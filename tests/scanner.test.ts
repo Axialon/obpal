@@ -25,6 +25,65 @@ function workerFrames() {
 }
 
 describe('camera lifetime', () => {
+  it('coalesces zoom requests, keeps decoding during constraints, and stops late zoom work', async () => {
+    vi.useFakeTimers()
+    const slider = { disabled: true, value: '1', setAttribute: vi.fn() } as unknown as HTMLInputElement
+    const changed = vi.fn(), c = camera({ zoomSlider: slider, zoomChanged: changed })
+    c.track.getCapabilities.mockReturnValue({ torch: false, zoom: { min: 1, max: 3, step: .1 } } as MediaTrackCapabilities & { torch: boolean })
+    const waiting = deferred<void>()
+    c.track.applyConstraints.mockImplementation(() => waiting.promise)
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: async () => c.stream } })
+    const detect = vi.fn(async () => [])
+    workerFrames()
+    vi.stubGlobal('BarcodeDetector', class { static async getSupportedFormats() { return ['qr_code'] }; detect = detect })
+    await c.scanner.start()
+    for (const level of ['1.5', '2', '2.5']) { slider.value = level; slider.oninput!.call(slider, {} as InputEvent) }
+    await vi.advanceTimersByTimeAsync(600)
+    expect(c.track.applyConstraints).toHaveBeenCalledExactlyOnceWith({ advanced: [{ zoom: 2.5 }] })
+    expect(detect.mock.calls.length).toBeGreaterThan(3)
+    expect(changed).toHaveBeenLastCalledWith(2.5, 2.5)
+    c.scanner.stop(); waiting.resolve(); await Promise.resolve()
+    expect(vi.getTimerCount()).toBe(0)
+    expect(slider.disabled).toBe(true)
+  })
+
+  it('falls back to digital zoom when a hardware constraint fails and keeps the worker reading', async () => {
+    vi.useFakeTimers()
+    const slider = { disabled: true, value: '1', setAttribute: vi.fn() } as unknown as HTMLInputElement
+    const changed = vi.fn(), c = camera({ zoomSlider: slider, zoomChanged: changed }), { worker, canvas } = workerFrames()
+    c.track.getCapabilities.mockReturnValue({ torch: false, zoom: { min: 1, max: 3, step: .1 } } as MediaTrackCapabilities & { torch: boolean })
+    c.track.applyConstraints.mockRejectedValue(new Error('Unavailable'))
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: async () => c.stream } })
+    await c.scanner.start()
+    slider.value = '2'; slider.oninput!.call(slider, {} as InputEvent)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(c.say).toHaveBeenLastCalledWith('This camera could not change zoom. Using digital zoom.')
+    expect(changed).toHaveBeenLastCalledWith(2, 2)
+    worker.onmessage!.call(worker, { data: { id: 1, text: null } } as MessageEvent)
+    await vi.advanceTimersByTimeAsync(125)
+    expect(worker.postMessage).toHaveBeenCalledTimes(2)
+    expect([canvas.width, canvas.height]).toEqual([640, 360])
+    worker.onmessage!.call(worker, { data: { id: 2, text: '1234567890', corners: [{ x: .1, y: .1 }] } } as MessageEvent)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(c.found).toHaveBeenCalledExactlyOnceWith('1234567890', [{ x: .3, y: .3 }])
+    c.scanner.stop()
+  })
+
+  it('keeps the existing honest zoom error in hand mode, which has no digital scan preview', async () => {
+    vi.useFakeTimers()
+    const zoom = { hidden: true, textContent: '1×' } as unknown as HTMLButtonElement
+    const c = camera({ scan: false, zoom })
+    c.track.getCapabilities.mockReturnValue({ torch: false, zoom: { min: 1, max: 2, step: .1 } } as MediaTrackCapabilities & { torch: boolean })
+    c.track.applyConstraints.mockRejectedValue(new Error('Unavailable'))
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: async () => c.stream } })
+    await c.scanner.start()
+    zoom.onclick!.call(zoom, {} as PointerEvent)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(c.say).toHaveBeenLastCalledWith('This camera could not change zoom.')
+    expect(zoom.textContent).toBe('1×')
+    c.scanner.stop()
+  })
+
   it('closes immediately and stops a stream whose permission arrives after close', async () => {
     const c = camera(), permission = deferred<MediaStream>()
     const getUserMedia = vi.fn((_constraints: MediaStreamConstraints) => permission.promise)
@@ -58,7 +117,7 @@ describe('camera lifetime', () => {
     expect(c.found).not.toHaveBeenCalled()
     expect(vi.getTimerCount()).toBe(0)
   })
-  it('hand mode uses the same stream at the camera’s available rate and never loads a QR reader', async () => {
+  it('hand mode uses the same stream at the cameraâ€™s available rate and never loads a QR reader', async () => {
     vi.useFakeTimers()
     const ready = vi.fn(), native = vi.fn()
     const c = camera({ scan: false, ready })

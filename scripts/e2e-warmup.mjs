@@ -1,12 +1,15 @@
 /** Eight seconds of presented startup frames at the standard desktop and phone sizes. */
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { tempScope } from './lib/temp.mjs'
+import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { measureWarmup, prepareWarmup, warmupFailure, WARMUP_SIMS, WARMUP_SIZES } from './lib/warmup.mjs'
 
 export async function runWarmup(local, check, { home = false } = {}) {
-  const out = await mkdtemp(join(tmpdir(), 'obpal-warmup-'))
+  const temps = tempScope()
+  try {
+  const out = await temps.make(join(tmpdir(), 'obpal-warmup-'))
   const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true,
     args: ['--ignore-certificate-errors', '--autoplay-policy=no-user-gesture-required'] })
   try {
@@ -27,4 +30,6 @@ export async function runWarmup(local, check, { home = false } = {}) {
     }
   } finally { await browser.close() }
   console.log(`  Warm-up measurements: ${out}`)
+
+  } finally { await temps.cleanup() }
 }

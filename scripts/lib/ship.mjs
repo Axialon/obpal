@@ -29,5 +29,6 @@ export function runShip(run) {
   const remote = step('published commit lookup', 'git', ['ls-remote', 'https://github.com/Axialon/obpal.git', 'refs/heads/main'])
   const published = /^([a-f0-9]{40})\s+refs\/heads\/main\s*$/i.exec(stripAnsi(remote).trim())?.[1]
   if (!published) throw new Error('published commit lookup failed: no main ref')
+  step('backup', 'node', ['scripts/backup.mjs', '--label', 'ship'])
   return { version, check, published }
 }

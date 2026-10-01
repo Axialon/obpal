@@ -1,6 +1,6 @@
 # Sims programme: source audit and bounded migration plan
 
-Status: **F0 partial foundation**, not programme completion. Audit baseline is exported private master
+Status: **F0 pendulum proof accepted; F0-R backend implementation pending native/browser integration acceptance**, not programme completion. Audit baseline is exported private master
 `8b3e6d0ed26afd05712b66fb5ec62c6dbb12796c`, mirrored by public snapshot
 `1ac64107e3b884e1920696148d95c2bf674598ae`. The supplied checkpoint is not a new test run.
 The H1 brief is included as an appendix to the supplied TASK, rather than as a separate H1-brief file.
@@ -192,7 +192,7 @@ programme allowance, not permission for each wave to add a different engine.
 
 | Stage / wave | Scope and dependencies | Acceptance boundary | Risk / size | References |
 | --- | --- | --- | --- | --- |
-| F0-R: close this partial | After review of this return: measured engine comparison, real rigid/articulated/vehicle/buoyant backends, complete stability/visibility probes. No further sim migration. | Execute canonical check and pendulum gate; all four body kinds must move/contact in tests, not merely exist as interfaces; browser cold-start/asset/error cases. | High / L, split into engine and coverage packets | R1, R8, R9 |
+| F0-R: backend closure | Three adapters, one provisional selection, shared real fixtures and automatic Node/browser comparison now implemented; see PHYSICS-BACKENDS. No further migration. | Native compilation/fixtures, both-profile measured selection, canonical regressions and unchanged pendulum gate remain integration gates. Missing evidence is not acceptance. | High / L; runtime, proof and docs patches | R1, R8, R9, R17 |
 | F1: humanoid pilot | Only after F0-R acceptance. Active ragdoll, anatomical limits, contact-supported locomotion, phone BODY source selection; existing models. | Stance, push/recovery/fall/get-up, no hover >5 mm at rest, meaningful two-actor motion and phone seat tests. | High / L; F1a/b/c below | R2, R3, R4, R5 |
 | H2: humanoid models | After F1 freezes model/physics binding, independent of arm migration. Keel/Morrow first, then each preview family in separate asset packets. | Silhouette, materials, all pivots/LODs, combined-pose clearance and moving coverage; no physics or driver changes. | High / L with S/M mesh packets | R2-R5 for functional anatomy, original shells |
 | A1: first arm dynamics | After F0-R; one five-axis simulated arm and its blocks/gripper. | Servo tracking and limited forces, payload contact/slip, deterministic resets and no hardware changes. | High / M | R6, R7 |
@@ -209,6 +209,12 @@ rather than postponing visible humanoid improvements until every vehicle migrate
 rewriting every sim; opt-in is maintained throughout.
 
 ## Ready brief 1: F1 humanoid pilot (refined H1 appendix)
+
+**Release gate:** the F0-R return alone does not release this brief. Require real Rapier/PhysX browser
+measurements, a both-profile selected engine, canonical green tests and retained pendulum evidence. The F0-R
+25 mm contact / 0.03 rad compliant-cone comparison floors are not F1's 5 mm anatomical/contact acceptance;
+F1a must tighten and prove those limits in the actual humanoid. Unsupported compound colliders, nonzero initial
+PhysX link velocities or CCD need an explicit bounded extension before relying on them, not a silent fallback.
 
 **Start only after F0-R is accepted.** Preserve the owner's whole-body/phone-camera goal; do not reduce this to
 placing feet on a plane or adding cosmetic sway. Scope is simulated humanoids plus their BODY input/source UI,
@@ -319,3 +325,93 @@ render interpolation and arm5-specific smoothness/physics tests. No USB/serial c
 
 Other arm kinds, new meshes, new engine dependencies, full hydraulic actuators, changes to hardware/control packet
 contracts, automatic approval/merge/deploy, or claims of industrial safety from browser simulation.
+
+
+## Parked brief N1: Newton reference motion (not implemented)
+
+Purpose: obtain independent, reproducible reference trajectories for humanoid gait, arm settling and the
+pendulum, then compare browser motion without treating a second simulation as measured biological truth.
+Requires accepted F0-R, and F1's body/joint mapping for the gait comparison. No Newton runtime reaches a browser
+or phone; no policy training or asset import is authorised by this brief alone. References: R18, R2/R7/R19.
+
+**Execution environment.** Plan a dedicated Linux x86-64 NVIDIA-GPU machine. Newton 1.3.0's documented floor is
+Python 3.10 (3.11+ recommended), compute capability 5.0+, driver 545+ with CUDA 12 (550+/CUDA 12.4 recommended);
+Warp supplies its CUDA runtime. This is an upstream minimum, not a promise that every humanoid workload fits.
+Record actual GPU model/VRAM, driver, OS, Python, Newton/Warp versions and package lock. Pin versions and solver
+configuration before comparing; do not silently mix CUDA/solver defaults. CPU-only Newton exists but is not the
+selected GPU reference profile. [Requirements](https://newton-physics.github.io/newton/1.3.0/guide/installation.html).
+
+**Work.** Use original or separately cleared articulated descriptions with named frames, SI masses/inertias,
+collision layers, joint cones and bounded motor law matched to the browser. Do not copy branded geometry to
+make the numerical comparison. Run repeated fixed-seed, fixed-tick trials: passive pendulum release and damping;
+one arm target step with payload and settle; one contact-supported gait with a scheduled bounded push. Separate
+retarget/policy differences from integration differences. Sample both engines at common timestamps, using
+shortest-arc quaternion interpolation only for comparison, not rewriting authoritative trajectories.
+
+**Files returned.** `REFERENCE.json` records source/content hashes, licences, coordinate transform, parameter
+provenance, seeds, solver/substep settings, units and machine versions. `models/*.json` contains the cleared
+numeric description; `trajectories/{pendulum,arm,gait}.jsonl` contains tick/time, body IDs, world pose/velocities,
+joint coordinates/targets, contact points/normal impulses and energy. `inputs/*.jsonl` records commanded events.
+`metrics.json` and a human report give repeatability, trajectory RMSE/max error, settling, contact penetration,
+foot slip and energy drift with explicit unsupported fields. Include checksums and short synchronised videos;
+no raw camera capture, account paths or proprietary CAD. Bundle only files within the new request's scope.
+
+**Acceptance.** Re-running the pinned recipe reproduces recorded tolerances on that same environment. Browser
+physics gates read the exact reference files and report each metric and unit, rejecting missing data and frame
+mismatches. Do not choose tolerances after seeing a desired pass: predeclare per-fixture tolerances in the N1
+request and report deviations. A mismatch prompts parameter/coordinate/solver diagnosis, not a blind retune.
+Both simulations may be wrong relative to hardware; claims stay simulation-to-simulation. No hardware drivers,
+wire changes, deployment or new browser physics dependency.
+
+## Parked brief N2: phone to Isaac Sim through ROS 2 (not implemented)
+
+Owner choice: **ROS 2 first, full control in simulation**. Implement a local, explicitly selected simulation
+bridge that translates existing ob.Pal control intent into ROS 2 commands for an allowlisted Isaac articulation.
+Do not alter PAD/POSE/HAND/BODY packets, permissions, driver contracts or physical-device command paths.
+Simulation joint coverage may include legs/base where the selected sim supports them; it does not lift the
+existing hardware driver's upper-joint restriction. Keep that simulation-only branch unmistakable in UI/status.
+
+**Proposed graph and topics.** Namespace each robot under `/obpal/isaac/<robot>`; these names are this design,
+not claimed pre-existing ob.Pal endpoints. Remap Isaac's `joint_states` publisher and `joint_command` subscriber
+to that namespace, using `sensor_msgs/msg/JointState` names/positions/velocities with validated frame/units maps.
+Select one command mode per joint, never simultaneous conflicting position and velocity goals. For mobile bases,
+remap `cmd_vel` (`geometry_msgs/msg/Twist`) into the simulated differential-drive controller and observe
+`nav_msgs/msg/Odometry`; return `/clock` and required TF/state for display and timestamps. Isaac's documented
+joint-control graph connects Joint State publication/subscription to an Articulation Controller; the bridge must
+verify the selected articulation root and joint inventory, not guess from mesh names.
+[Joint control](https://docs.isaacsim.omniverse.nvidia.com/6.0.0/ros2_tutorials/tutorial_ros2_manipulation.html).
+
+**Ownership and limits.** Reuse the existing session/profile-key/sequence/deadline/lease/hold semantics at the
+local translation boundary; do not invent a bypass that publishes directly from an unclaimed phone. Mirror
+`src/sim/humanoid/drivers.ts::TIMING`: measured feedback <=100 ms old, captured input <=150 ms, 100 ms lease,
+20 ms renewal, 5 ms guardian cadence, 50 ms acknowledgement budget, 200 ms stable interval and at most 30 Hz
+goals. Time limits use monotonic wall time, not `/clock`: a paused simulation must not keep a stale command live.
+Mirror `safety.ts` finite measured radians, exact profile/joint inventory, exclusive ownership, no fault,
+required guardian/robot-watchdog proof, and limits inside the selected rig. Joint motion obeys the stricter
+profile cap or 0.5 rad/s and 1 rad/s2, with braking distance to limits and dt in (0, 0.05] s. These are existing
+conservative driver envelopes to preserve, **not a hardware certification**. For the simulated mobile base,
+propose a new explicit conservative profile cap of 0.25 m/s and 0.5 rad/s yaw (design defaults, not existing
+driver constants); bound acceleration in that profile and reject a bridge with no declared limits.
+
+A local bridge must acknowledge software hold: zero base velocity and measured-position hold or the selected
+controlled-damping strategy for joints. Deadman release, source switch/loss, stale state, sequence replay,
+map mismatch, missed lease/acknowledgement, ROS disconnect, stopped `/clock` or ownership loss all request hold
+and disarm. No reconnect auto-resume or replay of queued goals. Enforce latest-only delivery and expiry at the
+application layer even with a QoS history of one; DDS delivery success is not evidence of executed hold. Configure
+explicit compatible ROS 2 QoS with the chosen Isaac release and prove disconnection/stale-command cases. Use a
+simulation-only ROS domain and robot allowlist; no shared hardware ROS graph or auto-discovered endpoint.
+
+**Demonstration and returned evidence.** Start with the cleared Panda arm and TurtleBot3 base references from
+R19, no copied assets in this F0-R packet. A claimed phone moves multiple arm joints/gripper and drives/turns the
+simulated base while state/ownership and software-hold reasons are visible. Then show the full simulated joint
+set for the selected humanoid without enabling the hardware lane. Record session-sequenced intent, ROS commands,
+measured state, wall/sim timestamps, receive-to-visible latency and hold acknowledgement latency; export a
+redacted ROS bag or JSONL traces, graph/topic/QoS map, version/asset-licence manifest and a concise video.
+
+**Acceptance.** Automated fake-bridge cases plus real Isaac/ROS 2 demonstration prove all limits, duplicate/out-of-order
+rejection, source/seat isolation, pause/disconnect/deadman holds and explicit re-arm. Goals at stale feedback,
+wrong maps, missing ownership or failed watchdog proof never reach the robot topic. Inject stalled ROS and
+paused simulation separately; verify the wall-time guardian still expires. Full simulation control must not
+change any hardware safety test or packet bytes. Require a new pinned request, the selected Isaac-compatible
+ROS 2 distribution, available GPU resources and coordinator-assigned endpoints before implementation. No
+physical robot, deployment, registry or Desktop input work.

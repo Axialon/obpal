@@ -504,8 +504,9 @@ function release(obj: THREE.Object3D) {
   for (const s of sessions) {
     if (s.root !== obj) continue
     s.dispose()
-    break
+    return true
   }
+  return false
 }
 
 // ---- the Local panel -------------------------------------------------------------------------------

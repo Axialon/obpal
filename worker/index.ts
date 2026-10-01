@@ -149,7 +149,13 @@ export class Room extends DurableObject<Env> {
   async fetch(req: Request): Promise<Response> {
     const role: Tag['role'] = new URL(req.url).searchParams.get('role') === 'host' ? 'host' : 'device'
     if (role === 'host' && this.ctx.getWebSockets('host').length > 0) return new Response('Room already has a host', { status: 409 })
-    if (role === 'device' && this.ctx.getWebSockets('device').length >= 8) return new Response('Room is full', { status: 429 })
+    if (role === 'device' && this.ctx.getWebSockets('device').length >= 8) {
+      // Browsers hide failed upgrade bodies. Reject over an unregistered socket so clients can read the reason.
+      const { 0: client, 1: server } = new WebSocketPair()
+      server.accept()
+      server.close(4008, 'full')
+      return new Response(null, { status: 101, webSocket: client })
+    }
 
     const { 0: client, 1: server } = new WebSocketPair()
     const id = crypto.randomUUID().slice(0, 8)

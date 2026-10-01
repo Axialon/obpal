@@ -3,6 +3,8 @@ import type { Remote } from '@obpal/host'
 import { ConeGeometry, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, SphereGeometry, BoxGeometry, Vector3, Quaternion } from 'three'
 import type { Ride } from './rigs'
 import { PropWorld, validVector, distance, type Body, type Collider, type V3 } from './world'
+import { ICONS } from '../../ui/icons'
+import '../../styles/presence.css'
 
 export interface Pose { p: V3; q: [number, number, number, number] }
 export interface PresenceInput { ride: string; active: boolean; head: Pose; hands: Pose[]; grab: boolean; pad: PadState | null }
@@ -26,7 +28,16 @@ export class SharedPresence {
   readonly group = new Group()
   readonly people = new Map<string, Person>()
   id = 'host'
-  status = 'Local scene'
+  private statusText = 'Local scene'
+  private chip: HTMLElement | null = null
+  get status() { return this.statusText }
+  set status(text: string) {
+    if (text === this.statusText) return
+    this.statusText = text
+    if (!this.chip) return
+    this.chip.dataset.state = text.toLowerCase().replaceAll(' ', '-')
+    this.chip.querySelector('.guest-state')!.textContent = text
+  }
   colors: (string | null)[] = []
   private link: DeviceLink | null = null
   private remote: Remote | null = null
@@ -42,6 +53,14 @@ export class SharedPresence {
   constructor(readonly adapter: SceneAdapter) {
     this.group.name = 'shared-presence'
     if (this.guest) {
+      document.body.classList.add('presence-guest')
+      this.chip = document.createElement('div')
+      this.chip.className = 'kit-chip guest-status'
+      this.chip.setAttribute('role', 'status')
+      this.chip.setAttribute('aria-live', 'polite')
+      this.chip.innerHTML = `${ICONS.view}<span>Watching</span><i class="guest-dot" aria-hidden="true"></i><span class="guest-state"></span>`
+      document.body.append(this.chip)
+      this.status = 'Connecting'
       const key = `obpal.scene:${location.pathname}${location.search.replace(/[?&]test=vr/g, '')}`
       let fragment = location.hash
       try { if (fragment) sessionStorage.setItem(key, fragment); else fragment = sessionStorage.getItem(key) ?? '' } catch { /* private storage */ }
@@ -60,11 +79,11 @@ export class SharedPresence {
           this.people.clear()
           d.people.filter(validPresence).forEach(p => this.people.set(p.id, p))
           this.colors = d.colors
-          this.status = 'Shared scene'
+          this.status = 'Live'
         }
       })
       this.link.on('status', s => {
-        this.status = s === 'connected' ? 'Waiting for the scene' : s
+        this.status = s === 'connected' ? 'Waiting for host' : s === 'waiting-host' ? this.frames >= 0 ? 'Host left' : 'Waiting for host' : s === 'full' ? 'Room full' : s === 'removed' ? 'Removed' : s === 'closed' ? 'Host left' : s === 'unreachable' ? 'Connection lost' : 'Connecting'
         if (s === 'connected') { this.frames = -1; this.link!.sendCtl({ t: 'sim', v: 1, kind: 'watch', seq: ++this.seq, data: null }); this.joinedAt = performance.now() }
         else { this.people.clear(); this.world.bodies.forEach(b => { b.owner = null }); }
       })
@@ -79,7 +98,9 @@ export class SharedPresence {
       const peer = this.subscribers.get(who.id)
       if (!peer || m.seq <= peer.seq || !validPresence(m.data)) return
       peer.seq = m.seq; peer.at = performance.now()
-      this.accept(who.id, who.color, m.data, peer.at)
+      // Visitors retain their pose for presence, but never drive or grab through a watch link.
+      const input = m.data as unknown as PresenceInput
+      this.accept(who.id, who.color, { ...input, grab: false, pad: null }, peer.at)
     })
     remote.on('leave', who => { this.subscribers.delete(who.id); this.people.delete(who.id); this.previousGrab.delete(who.id); this.world.release(who.id, false) })
   }
@@ -123,13 +144,13 @@ export class SharedPresence {
     }
     if (now - this.sent >= 50) {
       this.sent = now
-      if (this.guest && this.lastInput) this.link?.sendCtl({ t: 'sim', v: 1, kind: 'input', seq: ++this.seq, data: value(this.lastInput) })
+      if (this.guest && this.lastInput) this.link?.sendCtl({ t: 'sim', v: 1, kind: 'input', seq: ++this.seq, data: value({ ...this.lastInput, grab: false, pad: null }) })
       if (!this.guest && this.subscribers.size) {
         const msg: SimMessage = { t: 'sim', v: 1, kind: 'frame', seq: ++this.seq, data: value({ state: this.adapter.capture(), bodies: this.world.bodies, people: [...this.people.values()], colors: this.colors }) }
         for (const id of this.subscribers.keys()) this.remote?.sendSim(msg, id)
       }
     }
-    if (this.guest && this.frames < 0 && this.joinedAt && now - this.joinedAt > 5000) this.status = 'Waiting for a compatible host'
+    if (this.guest && this.link?.ready && this.frames < 0 && this.joinedAt && now - this.joinedAt > 5000) this.status = 'Waiting for host'
     this.draw()
   }
   private draw() {

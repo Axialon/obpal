@@ -7,8 +7,7 @@
  * Never deploys anything.
  */
 import { spawn, spawnSync } from 'node:child_process'
-import { rmSync } from 'node:fs'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { tempScope } from './lib/temp.mjs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -28,28 +27,39 @@ async function answers(origin) {
 export async function startWorker({ port = 5179 } = {}) {
   const origin = `http://127.0.0.1:${port}`
   if (await answers(origin)) throw new Error(`something already answers on port ${port}; stop it, or pick another port`)
-  const state = await mkdtemp(join(tmpdir(), 'obpal-worker-'))
+  const temps = tempScope({ fallback: false }) // the worker must stop before its state is removed
+  const state = await temps.make(join(tmpdir(), 'obpal-worker-'))
+  let output = ''
   const child = spawn('npx', ['wrangler', 'dev', '--port', String(port), '--ip', '127.0.0.1', '--persist-to', state, '--var', 'TURN_SECRET:local-e2e-address-key', '--show-interactive-dev-session=false'], {
-    cwd: root, shell: true, stdio: 'ignore', windowsHide: true,
+    cwd: root, shell: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
   })
+  const capture = chunk => { output = (output + chunk).slice(-16_384) }
+  child.stdout.on('data', capture); child.stderr.on('data', capture)
+  let launchError
+  child.on('error', error => { launchError = error })
   // On exit only synchronous work runs: kill the tree and drop the state folder this run made.
   const onExit = () => {
     if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore', windowsHide: true })
     else child.kill('SIGTERM')
-    try { rmSync(state, { recursive: true, force: true }) } catch { /* still held by the dying worker: the temp folder keeps it */ }
+    temps.cleanupSync()
   }
   process.once('exit', onExit)
-  const close = async () => {
+  let closing
+  const close = () => closing ??= (async () => {
     process.off('exit', onExit)
     if (process.platform === 'win32') await new Promise((r) => spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore', windowsHide: true }).on('exit', r))
     else child.kill('SIGTERM')
     for (let i = 0; i < 20 && (await answers(origin)); i++) await sleep(250)
-    await rm(state, { recursive: true, force: true }).catch(() => {})
-  }
-  const end = Date.now() + 90_000
-  while (!(await answers(origin))) {
-    if (child.exitCode !== null || Date.now() > end) { await close(); throw new Error('the local worker did not start') }
-    await sleep(500)
-  }
-  return { origin, close }
+    await temps.cleanup()
+  })()
+  let started = false
+  try {
+    const end = Date.now() + 90_000
+    while (!(await answers(origin))) {
+      if (launchError || child.exitCode !== null || Date.now() > end) throw new Error(`the local worker did not start${output ? `:\n${output.trim()}` : ''}`)
+      await sleep(500)
+    }
+    started = true
+    return { origin, close }
+  } finally { if (!started) await close() }
 }

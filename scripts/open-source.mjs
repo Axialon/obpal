@@ -9,14 +9,16 @@
  *
  * The development history and author identities stay private; public commits use the GitHub noreply address.
  *
- *   node scripts/open-source.mjs            export and scan only (prints where the export is)
+ *   node scripts/open-source.mjs            export and scan, then remove the export
+ *   node scripts/open-source.mjs --keep-logs retain the export for inspection
  *   node scripts/open-source.mjs --publish  also commit and push it to github.com/Axialon/obpal
  *
  * Private words to scan for (names, emails, account ids), one per line, go in `.open-source-deny` next to this
  * repo's root. That file is gitignored, so the scanner itself reveals nothing.
  */
+import { tempScope } from './lib/temp.mjs'
 import { execFileSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -28,11 +30,14 @@ const AUTHOR = ['-c', 'user.name=Axialon', '-c', 'user.email=axialon@users.norep
 const publish = process.argv.includes('--publish')
 const git = (args, cwd = root) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 << 20 })
 
+const temps = tempScope()
+async function main() {
+try {
 // ---- 1. export ----------------------------------------------------------------------------------------------------
 // Tracked files only, and never the local-only ones even if one got tracked (.claude/settings.local.json, .claude/local/,
 // local-* skills and agents, CLAUDE.local.md: see scripts/lib/scan.mjs).
 const files = git(['ls-files', '-z']).split('\0').filter((f) => f && !isLocalOnly(f))
-const out = mkdtempSync(join(tmpdir(), 'obpal-open-source-'))
+const out = temps.makeSync(join(tmpdir(), 'obpal-open-source-'))
 for (const f of files) {
   mkdirSync(dirname(join(out, f)), { recursive: true })
   copyFileSync(join(root, f), join(out, f))
@@ -89,13 +94,13 @@ function scan(dir) {
 scan(out)
 if (problems.length) {
   console.error(`Not publishing: ${problems.length} problem(s) in the export (${out})\n  ${problems.join('\n  ')}`)
-  process.exit(1)
+  process.exitCode = 1; return
 }
 console.log(`Export clean: ${files.length} files, ${deny.length} private words checked -> ${out}`)
-if (!publish) process.exit(0)
+if (!publish) return
 
 // ---- 4. publish -------------------------------------------------------------------------------------------------
-const work = mkdtempSync(join(tmpdir(), 'obpal-public-'))
+const work = temps.makeSync(join(tmpdir(), 'obpal-public-'))
 let exists = true
 try { execFileSync('gh', ['repo', 'view', PUBLIC_REPO], { stdio: 'ignore' }) } catch { exists = false }
 if (exists) git(['clone', '--quiet', `https://github.com/${PUBLIC_REPO}.git`, work], tmpdir())
@@ -106,7 +111,7 @@ for (const f of files) {
   copyFileSync(join(out, f), join(work, f))
 }
 git(['add', '-A'], work)
-if (!git(['status', '--porcelain'], work).trim()) { console.log('Public repository already up to date.'); process.exit(0) }
+if (!git(['status', '--porcelain'], work).trim()) { console.log('Public repository already up to date.'); return }
 const version = JSON.parse(readFileSync(join(root, 'extension/package.json'), 'utf8')).version
 git([...AUTHOR, 'commit', '--quiet', '-m', `ob.Pal snapshot (ob.Pal Link ${version})`], work)
 if (!exists) {
@@ -115,3 +120,7 @@ if (!exists) {
     '--homepage', 'https://obpal.blackboxes.net'], { stdio: 'inherit' })
 } else git(['push', '--quiet', 'origin', 'main'], work)
 console.log(`Published to https://github.com/${PUBLIC_REPO}`)
+
+} finally { await temps.cleanup() }
+}
+await main()

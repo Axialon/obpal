@@ -1,6 +1,7 @@
 /** Worker-backed driver faults, real DOM controls and measured hold timings. Never connects to hardware. */
+import { tempScope } from './lib/temp.mjs'
 import { chromium, devices } from 'playwright'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { installFixture } from './e2e-humanoid.mjs'
@@ -64,7 +65,9 @@ async function exposedStop(page) {
 }
 
 export async function runHumanoidLive(local, check) {
-  const directory = await mkdtemp(join(tmpdir(), 'obpal-humanoid-live-'))
+  const temps = tempScope()
+  try {
+  const directory = await temps.make(join(tmpdir(), 'obpal-humanoid-live-'))
   const report = {
     environment: 'Desktop Chromium; phone viewport emulation. Worker guardian and modeled robot watchdog, no hardware.',
     results: [],
@@ -574,4 +577,6 @@ export async function runHumanoidLive(local, check) {
     await writeFile(join(directory, 'report.json'), JSON.stringify(report, null, 2))
     console.log(`  Humanoid live evidence: ${directory}`)
   }
+
+  } finally { await temps.cleanup() }
 }

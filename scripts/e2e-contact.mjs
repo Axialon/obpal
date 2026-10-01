@@ -1,16 +1,20 @@
 /** Geometry contacts while real test phones drive each catalogue entry. All output is temporary. */
+import { tempScope } from './lib/temp.mjs'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:net'
-import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
+import { readFile, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { chromium, devices } from 'playwright'
 import { startLocal } from '../extension/e2e/local.mjs'
 import { deviceExercises } from './lib/catalogue-devices.mjs'
 
+const temps = tempScope()
+try {
+
 const baseline = process.argv.includes('--baseline')
 const only = process.argv.find(a => a.startsWith('--only='))?.slice(7).split(',')
-const out = await mkdtemp(join(tmpdir(), 'obpal-contact-'))
+const out = await temps.make(join(tmpdir(), 'obpal-contact-'))
 const arms = ['arm5', 'six', 'scara', 'delta', 'desk', 'so101']
 const registry = await readFile('src/sim/devices/registry.ts', 'utf8')
 const ids = [...registry.matchAll(/entry\(\{ spec: (\w+)_SPEC/g)].map(m => m[1].toLowerCase())
@@ -255,3 +259,5 @@ try {
 console.log(`Contact evidence: ${out}`)
 console.log(`${report.length - failures.length}/${report.length} passed`)
 process.exitCode = failures.length ? 1 : 0
+
+} finally { await temps.cleanup() }

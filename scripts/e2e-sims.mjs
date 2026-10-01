@@ -16,7 +16,8 @@
  * --only=panels (or OBPAL_E2E_SIMS_ONLY=panels) runs just the window checks, also through e2e:all's guard.
  * --only=buttons (or OBPAL_E2E_SIMS_ONLY=buttons) checks rendered control ink and accessible icon names at three sizes.
  */
-import { mkdtemp, rm } from 'node:fs/promises'
+import { tempScope, keepTemp } from './lib/temp.mjs'
+import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join as joinPath } from 'node:path'
 import { chromium, devices } from 'playwright'
@@ -29,7 +30,11 @@ import { runAudio } from './e2e-audio.mjs'
 import { runTemporal } from './e2e-temporal.mjs'
 import { runWarmup } from './e2e-warmup.mjs'
 import { runGraphicsRecovery, runGraphicsRecoveryLayouts } from './e2e-graphics-recovery.mjs'
+import { runPhysicsBench } from './e2e-physics-bench.mjs'
 import { runSmoothness } from './e2e-smoothness.mjs'
+import { runMarbleMobile } from './e2e-marble-mobile.mjs'
+import { runMarbleControls } from './e2e-marble-controls.mjs'
+import { runLocalControl, runUniversalFaces } from './e2e-local-control.mjs'
 import { runLoad } from './e2e-load.mjs'
 import { simsStrip } from './sims-strip.mjs'
 import { runPanels } from './e2e-panels.mjs'
@@ -38,6 +43,9 @@ import { runArmLive } from './e2e-arm-live.mjs'
 import { runHumanoid } from './e2e-humanoid.mjs'
 import { runHumanoidLive } from './e2e-humanoid-live.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
+
+const temps = tempScope()
+try {
 
 const HEADED = process.argv.includes('--headed')
 const ONLY_TRACKING = process.argv.includes('--only=tracking') || process.env.OBPAL_E2E_SIMS_ONLY === 'tracking'
@@ -68,7 +76,7 @@ async function check(name, fn) {
   }
 }
 
-const local = await startLocal()
+const local = await startLocal({ dist: process.env.OBPAL_E2E_LOCAL_CONTROL_BASELINE_DIST })
 const closers = []
 const profiles = []
 let exitCode = 0
@@ -86,7 +94,7 @@ async function screenAt(path, init) {
   return { page, invite, errors }
 }
 async function phone(invite, { xr = true, way = 'motion' } = {}) {
-  const dir = await mkdtemp(joinPath(tmpdir(), 'obpal-sim-'))
+  const dir = await temps.make(joinPath(tmpdir(), 'obpal-sim-'))
   profiles.push(dir)
   const ctx = await chromium.launchPersistentContext(dir, { ...devices['Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS })
   closers.push(ctx)
@@ -164,11 +172,26 @@ async function phone(invite, { xr = true, way = 'motion' } = {}) {
 }
 
 try {
-  if (process.env.OBPAL_E2E_SIMS_ONLY === 'graphics-layouts') {
+  if (['local-control', 'local-control-before'].includes(process.env.OBPAL_E2E_SIMS_ONLY)) await runLocalControl(local, check, { baseline: process.env.OBPAL_E2E_SIMS_ONLY === 'local-control-before' })
+  else if (process.env.OBPAL_E2E_SIMS_ONLY === 'local-faces') {
+    const browser = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
+    try { await runUniversalFaces(browser, local.origin, check, `${process.env.OBPAL_E2E_EVIDENCE_ROOT || 'artifacts/local-control'}/after`) } finally { await browser.close() }
+  }
+  else if (process.env.OBPAL_E2E_SIMS_ONLY === 'audio') await runAudio(local, check)
+  else if (process.env.OBPAL_E2E_SIMS_ONLY === 'graphics-layouts') {
     const browser = await chromium.launch({ executablePath, headless: true, args: RTC_ARGS })
     try { await runGraphicsRecoveryLayouts(browser, local.origin, check) } finally { await browser.close() }
   }
+  else if (process.env.OBPAL_E2E_SIMS_ONLY === 'marble-mobile') {
+    const browser = await chromium.launch({ executablePath, headless: true, args: RTC_ARGS })
+    const evidence = tempScope({ keep: true })
+    const out = await evidence.make(joinPath(process.env.OBPAL_E2E_EVIDENCE_ROOT || tmpdir(), 'obpal-marble-mobile-'))
+    try { await runMarbleControls(browser, local, check, out); await runMarbleMobile(browser, local, check, out) }
+    finally { await browser.close(); console.log(`  Marble mobile measurements: ${out}`) }
+  }
+  else if (process.env.OBPAL_E2E_SIMS_ONLY === 'vr') await runVR(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'graphics-recovery') await runGraphicsRecovery(local, check)
+  else if (process.env.OBPAL_E2E_SIMS_ONLY === 'physics-bench' || process.argv.includes('--only=physics-bench')) await runPhysicsBench(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'smoothness') await runSmoothness(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'temporal') await runTemporal(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'warm-up') await runWarmup(local, check)
@@ -178,6 +201,7 @@ try {
   else if (ONLY_PANELS) await runPanels(local, check)
   else {
   console.log('ob.Pal sims e2e')
+  await runPhysicsBench(local, check)
   // ---- robot arm ----
   // The screen's camera: a picture the test paints, with a phone glowing in it (window.__fakeCam).
   const arm = await screenAt('/sim/arm/', () => {
@@ -551,6 +575,7 @@ try {
   await runHumanoid(local, check)
   await runHumanoidLive(local, check)
   await runSimButtons(local, check)
+  await runLocalControl(local, check)
   }
   }
   await check('no Content Security Policy violations on any page', cspCheck)
@@ -560,8 +585,10 @@ try {
 } finally {
   await Promise.allSettled(closers.map((c) => c.close()))
   await local.close()
-  await Promise.allSettled(profiles.map((d) => rm(d, { recursive: true, force: true })))
+  await Promise.allSettled(profiles.map((d) => (keepTemp() ? Promise.resolve() : rm(d, { recursive: true, force: true }))))
 }
 const failed = results.filter((r) => !r.ok)
 console.log(failed.length || exitCode ? `FAILED ${failed.length}/${results.length}` : `passed ${results.length}/${results.length}`)
-process.exit(failed.length || exitCode ? 1 : 0)
+process.exitCode = (failed.length || exitCode ? 1 : 0)
+
+} finally { await temps.cleanup() }

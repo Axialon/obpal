@@ -12,7 +12,8 @@ import * as THREE from 'three'
 import { PadButton, type Participant } from '@obpal/host'
 import { family } from '../../family'
 import { applyTheme, initialTheme, themeById } from '../../ui/themes'
-import { mountMarks } from '../../ui/icons'
+import { ICONS, mountMarks } from '../../ui/icons'
+import { setMarkup } from '../../ui/markup'
 import { mountTopBar } from '../../landing/topbar'
 import { startSimScene, type SimScene } from '../scene'
 import { faceGlyph, faceName, faceShort } from '../faces'
@@ -34,6 +35,9 @@ import { iconAction } from '../../ui/kit/action'
 import { syncActionState } from '../action-state'
 import { mountQuick, quickAction, quickViews } from '../../ui/quick'
 import { startScene } from '../kit/recovery'
+import { MarblePhone } from './marblerun.phone'
+import { LocalControls } from '../local-controls'
+import { mapFaceInput, recommendedFaces } from '../face-input'
 
 startScene(async () => {
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
@@ -81,6 +85,59 @@ const deviceSound = sound ? new DeviceSound(logic, sound, n => sim?.claims.holde
 let following = true
 let followedUnit = 0
 const presence = devicePresence(logic, stage, () => view, () => sim)
+const localUnits = new Set<number>()
+let localSignature = ''
+const local = presence.shared.guest ? null : new LocalControls({
+  id: spec.id, canvas: stage.renderer.domElement, units: () => units, tray: spec.tray,
+  phone: () => document.getElementById('chip-invite')?.click(),
+  controllerWindow: () => { if (sim?.remote.pairingUrl) window.open(sim.remote.pairingUrl, '_blank', 'noopener') },
+  orbit: enabled => { if (!(spec.id === 'marblerun' && matchMedia('(pointer: coarse)').matches)) stage.controls.enabled = enabled },
+})
+const marblePhone = spec.id === 'marblerun' && !presence.shared.guest && matchMedia('(pointer: coarse)').matches ? new MarblePhone() : null
+let marbleMotionButton: HTMLButtonElement | null = null
+if (marblePhone) {
+  const dock = document.createElement('div'); dock.className = 'marble-phone glass'; dock.setAttribute('role', 'toolbar'); dock.setAttribute('aria-label', 'Marble controls')
+  marbleMotionButton = document.createElement('button'); marbleMotionButton.type = 'button'; marbleMotionButton.className = 'kit-action marble-motion'
+  const label = document.createElement('span'); label.textContent = marblePhone.state
+  setMarkup(marbleMotionButton, ICONS.tilt)
+  marbleMotionButton.append(label); marbleMotionButton.onclick = () => { void marblePhone.enable() }
+  dock.append(marbleMotionButton)
+  for (const [id, icon, name] of [['recentre', 'center', 'Recentre tilt'], ['run', 'play', 'Run / build'], ['home', 'home', 'Home']]) {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'kit-action'; b.dataset.marble = id
+    if (id === 'recentre') b.title = 'Tap here or hold the board to recentre tilt'
+    iconAction(b, icon, name)
+    b.onclick = () => { if (id === 'recentre') marblePhone.recenter(); else marblePhone.press(id) }; dock.append(b)
+  }
+  document.body.append(dock)
+  // Dragging and tapping keep working when sensors are absent or permission is refused.
+  stage.controls.enabled = false
+  let finger: { id: number; x: number; y: number; travel: number; at: number } | null = null
+  const canvas = stage.renderer.domElement
+  canvas.addEventListener('pointerdown', e => { finger = { id: e.pointerId, x: e.clientX, y: e.clientY, travel: 0, at: performance.now() }; canvas.setPointerCapture(e.pointerId) })
+  canvas.addEventListener('pointermove', e => { if (!finger || finger.id !== e.pointerId) return; const x = e.clientX - finger.x, y = e.clientY - finger.y; finger.travel += Math.hypot(x, y); marblePhone.move(x, y); finger.x = e.clientX; finger.y = e.clientY })
+  canvas.addEventListener('pointerup', e => {
+    if (finger?.id !== e.pointerId) return
+    if (finger.travel < 8) { if (performance.now() - finger.at >= 550) marblePhone.recenter(); else marblePhone.press('place') }
+    finger = null
+  })
+  canvas.addEventListener('pointercancel', () => { finger = null })
+  addEventListener('pagehide', () => marblePhone.stop(), { once: true })
+}
+function directMarbleInput(perUnit: (DeviceInput | null)[]) {
+  if (!marblePhone) return
+  const input = marblePhone.read()
+  // Local play only owns the free first board; a paired participant retains its claim.
+  if (!sim?.claims.holder(units[0].id)) {
+    if (input.presses.includes('home')) { marblePhone.recenter(); logic.home(0); input.recentred = true; input.tilt = [0, 0] }
+    perUnit[0] = input
+  }
+  const text = sim?.claims.holder(units[0].id) ? 'Phone controller has Track 1' : marblePhone.state
+  marbleMotionButton!.parentElement!.querySelectorAll<HTMLButtonElement>('button').forEach(b => { b.disabled = !!sim?.claims.holder(units[0].id) })
+  const label = marbleMotionButton!.querySelector('span:last-child')!
+  if (label.textContent !== text) label.textContent = text
+  marbleMotionButton!.title = text
+  marbleMotionButton!.setAttribute('aria-pressed', String(text === 'Tilt active'))
+}
 /** The parts each unit's holder drives on its own, ringed on the model (./halo.ts). */
 const halos = new PartHalos((n, part) => view?.partAt?.(n, part) ?? null)
 numberSections(document.querySelector('.dev-panel')!)
@@ -99,7 +156,7 @@ let shownFace = spec.controllers[0]
 function renderFaces() {
   const using = new Map<string, string[]>()
   for (const p of sim?.remote.participants ?? []) if (p.controller) using.set(p.controller, [...(using.get(p.controller) ?? []), p.color])
-  $('dev-faces').replaceChildren(...spec.controllers.map((c, i) => {
+  $('dev-faces').replaceChildren(...recommendedFaces(spec.controllers).map((c, i) => {
     const b = document.createElement('button')
     b.type = 'button'
     b.className = `dev-face${i === 0 ? ' first' : ''}`
@@ -113,7 +170,7 @@ function renderFaces() {
     b.onclick = () => { shownFace = c; renderFaces() }
     return b
   }))
-  $('dev-how').textContent = spec.how[shownFace] ?? ''
+  $('dev-how').textContent = spec.how[shownFace] ?? 'Works here · movement, aim and actions use the shared mapping'
 }
 renderFaces()
 
@@ -126,18 +183,20 @@ function renderUnits() {
   const people = new Map((sim?.remote.participants ?? []).map((p) => [p.id, p]))
   const rows = units.map((u, n) => {
     const who = held[u.id]
+    const locallyDriven = !who && localUnits.has(n)
     const p = who ? people.get(who) : undefined
     const li = document.createElement('li')
-    li.classList.toggle('held', !!who)
+    li.classList.toggle('held', !!who || locallyDriven)
     li.dataset.unit = u.id
     li.innerHTML = '<span class="dot" aria-hidden="true"></span><span class="nn"><b></b><small></small></span><span class="nv"></span>'
     // The unit's number in a ring, in its holder's colour while someone drives it.
     li.querySelector('.dot')!.textContent = String(n + 1)
     if (who) li.style.setProperty('--c', sim!.colorOf(who))
+    else if (locallyDriven) li.style.setProperty('--c', sim!.colorOf(`local:${n}`))
     li.querySelector('b')!.textContent = u.name
     const small = li.querySelector('small')!
     if (p?.controller) small.insertAdjacentHTML('afterbegin', faceGlyph(p.controller))
-    small.append(who ? sim!.nameOf(who) : 'Free')
+    small.append(who ? sim!.nameOf(who) : locallyDriven ? local?.input.source === 'gamepad' ? 'Local gamepad' : 'Local keyboard' : 'Free')
     // What their trackpad drives on its own, when it isn't the whole unit.
     const chosen = who && who !== 'host' ? sim!.focus.of(who).part : ''
     const named = chosen && (spec.sets?.find((x) => x.id === chosen) ?? spec.parts?.find((x) => x.id === chosen))
@@ -380,7 +439,16 @@ if (!presence.shared.guest) void startSimScene({
       const who = s.claims.holder(u.id)
       return who ? inputs.get(who) ?? null : null
     })
+    directMarbleInput(perUnit)
     presence.inputs(perUnit, inputs)
+    const localFrames = local?.frames(n => !!s.claims.holder(units[n]?.id), dt)
+    const signature = `${local?.input.source}:${[...(localFrames?.keys() ?? [])].join(',')}`
+    if (signature !== localSignature) {
+      localSignature = signature
+      localUnits.clear(); for (const n of localFrames?.keys() ?? []) localUnits.add(n)
+      renderUnits()
+    }
+    for (const [n, input] of localFrames ?? []) perUnit[n] = input
     for (const [who, i] of inputs) {
       const was = seen[who]
       seen[who] = { face: i.face, mode: i.mode, touching: i.touching, touchFrames: (was?.touchFrames ?? 0) + (i.touching ? 1 : 0), frames: (was?.frames ?? 0) + 1, drag: [(was?.drag[0] ?? 0) + i.drag[0], (was?.drag[1] ?? 0) + i.drag[1]], tilt: [...i.tilt], point: !!i.point, spot: i.spot, presses: [...(was?.presses ?? []), ...i.presses].slice(-12) }
@@ -393,13 +461,14 @@ if (!presence.shared.guest) void startSimScene({
         logic.home(n)
         const who = s.claims.holder(units[n].id)!
         if (s.control.calibrated(who)) { s.control.position(who); perUnit[n] = null }
-        s.remote.feedback({ haptic: 'tick', toast: `${units[n].name} went home` }, who)
+        if (who) s.remote.feedback({ haptic: 'tick', toast: `${units[n].name} went home` }, who)
         s.log(`${s.nameOf(who)} sent ${units[n].name} home`, s.colorOf(who))
       }
     })
     // What each holder's node strip chose: the one finger drives those parts, and the rest hold (./focus.ts).
     const focus = units.map((u) => { const who = s.claims.holder(u.id); return who && who !== 'host' ? s.focus.of(who) : null })
     perUnit.forEach((inp, n) => { if (inp && focus[n]) perUnit[n] = routeParts(spec, inp, focus[n]!, dt) })
+    perUnit.forEach((inp, n) => { if (inp) perUnit[n] = mapFaceInput(spec.id, spec.controllers, inp, dt) })
     logic.step(perUnit, dt)
     if (logic.actionState) syncActionState(s.remote, who => {
       const n = unitOf(s.claims.held(who))
@@ -426,7 +495,7 @@ if (!presence.shared.guest) void startSimScene({
     })
     if (halos.update(ringed, t, dt)) stage.view.invalidate()
     if (following && view?.follow) {
-      const active = perUnit.findIndex((i) => i && !i.quiet && (i.touching || i.held.size || i.presses.length || i.pose?.touching || i.pad && [...i.pad.axes, ...i.pad.triggers].some((v) => Math.abs(v) > 0.04)))
+      const active = perUnit.findIndex((i) => i && !i.quiet && (i.touching || i.held.size || i.presses.length || i.pose?.touching || spec.id === 'marblerun' && (i.space?.active || !!i.hold || Math.hypot(...i.tilt) > .01) || i.pad && [...i.pad.axes, ...i.pad.triggers].some((v) => Math.abs(v) > 0.04)))
       if (active >= 0) followedUnit = active
       stage.follow(view.follow(followedUnit))
     }
@@ -437,7 +506,7 @@ if (!presence.shared.guest) void startSimScene({
 
 stage.onFrame = (t, dt) => {
   // Before the scene is up the device idles, so the stage never stands empty.
-  if (!presence.shared.guest) logic.step(units.map(() => null), dt)
+  if (!presence.shared.guest) { const inputs = units.map((): DeviceInput | null => null); directMarbleInput(inputs); logic.step(inputs, dt) }
   deviceSound?.update(performance.now(), presence.shared.guest ? [] : logic.drain())
   view?.update(presence.shared.guest ? presence.shared.colors : units.map(() => null), t, dt)
 }

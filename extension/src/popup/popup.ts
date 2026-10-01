@@ -3,8 +3,8 @@ import { LINK_TRY_URL } from '../shared/desktop-guide'
  * Popup: the ob.Pal lockup with the link's status, and the controls: what the phone drives (Controller / 3D / Keys /
  * PC), and where: this tab (with the optional "All sites" permission), or for the PC target, ob.Pal Desktop: the whole
  * PC, or the program in front (allow it, or see what is being controlled), with the gestures that drive it. While no
- * phone is connected the pairing QR sits beside the controls; once one is, it is the status in the bar (its name, and
- * × to disconnect) and the controls have the popup to themselves. The palette button picks the surface and colour
+ * phone is connected the pairing QR sits beside the controls; once one is, its dots become the persistent seal in
+ * that same area. The palette button picks the surface and colour
  * (../ui/look.ts). It renders from storage (written by the service worker) and asks the worker to change things.
  *
  * Two kinds of code: the online one (through the room service) and, for a remembered phone, a direct LAN code
@@ -18,8 +18,8 @@ import { family } from '../../../src/family'
 import '../../../src/styles/base.css'
 import '../ui/link.css'
 import './popup.css'
-import { renderSVG } from 'uqr'
-import { destroySeal, sealElement, sealMoment, SEAL_STYLE } from '@obpal/host'
+import { destroySeal, sealElement, SealSurface, SEAL_STYLE, SEAL_SURFACE_STYLE, DOT_LOADER_STYLE } from '@obpal/host'
+import { brandedQrElement, qrDotPoints } from '../../../packages/host/src/qr'
 import { ICONS, LOGO_WORD } from '../../../src/ui/icons'
 import { accessOf, askFor, parseAnswers, parsePhone, type Answers, type Phone } from '../shared/access'
 import { DEFAULT_MODE, isTargetMode, TARGET_MODES, type TargetMode } from '../shared/constants'
@@ -137,7 +137,8 @@ app.innerHTML = `
       <div class="scan" id="scan">
         <div class="qr" id="qr" role="img" aria-label="Pairing QR code"></div>
         <p class="scan-hint" id="scan-hint">${ICONS.phone}<span id="scan-t">Scan with your phone</span></p>
-        <p class="scan-check"><b>obpal.blackboxes.net</b><br />Opens in your phone’s browser · no app · no account<br />Check your camera shows obpal.blackboxes.net<br /><a href="https://obpal.blackboxes.net/trust/" target="_blank" rel="noopener">How to check ob.Pal</a></p>
+        <div class="pair-icons"><span role="img" aria-label="Scan with your phone’s camera" title="Scan with your phone’s camera">${LINK_ICONS.scan}</span><span role="img" aria-label="No app needed" title="No app needed">${LINK_ICONS.noApp}</span><span role="img" aria-label="No account needed" title="No account needed">${LINK_ICONS.noAccount}</span><span role="img" aria-label="Encrypted, peer to peer" title="Encrypted, peer to peer">${ICONS.lock}</span></div>
+        <details class="scan-check"><summary aria-label="Pairing details">${ICONS.help}</summary><b>obpal.blackboxes.net</b><br />Opens in your phone’s browser · no app · no account<br />Check your camera shows obpal.blackboxes.net<br /><a href="https://obpal.blackboxes.net/trust/" target="_blank" rel="noopener">How to check ob.Pal</a></details>
         <div class="codes" id="codes" role="radiogroup" aria-label="Which code to show" hidden>
           <button class="code" type="button" role="radio" data-code="cloud" title="Through ob.Pal (needs internet)">${LINK_ICONS.cloud}<span>Online</span></button>
           <button class="code" type="button" role="radio" data-code="lan" title="Direct over Wi-Fi, no internet needed (remembered phones only)">${LINK_ICONS.lan}<span>Direct</span></button>
@@ -201,16 +202,35 @@ app.insertBefore(askEl, app.querySelector('.grid'))
 const $ = (id: string) => document.getElementById(id) as HTMLElement
 $('try-demo').addEventListener('click', () => void chrome.tabs.create({ url: LINK_TRY_URL }))
 const sealStyle = document.createElement('style')
-sealStyle.textContent = SEAL_STYLE
+sealStyle.textContent = SEAL_STYLE + SEAL_SURFACE_STYLE + DOT_LOADER_STYLE + `
+.seal-popup:not([data-expanded]){padding:6px 12px}
+.seal-popup:not([data-expanded])>b,.seal-popup:not([data-expanded])>p{display:none}
+#seal-glyphs{display:grid;place-items:center;min-height:44px;cursor:pointer;border-radius:12px}
+#seal-glyphs:focus-visible{outline:2px solid var(--bb-accent-text);outline-offset:2px}
+`
 document.head.append(sealStyle)
-let stopMoment = () => {}
+const surface = new SealSurface({ add: () => {}, compare: () => { $('link-seal').hidden = false; if (!$('link-seal').hasAttribute('data-expanded')) $('seal-open').click() } })
+$('qr').removeAttribute('role')
+$('qr').replaceChildren(surface.el)
+document.querySelector('.pair-icons')!.append(surface.addControl)
+chrome.runtime.onMessage.addListener((message, sender) => {
+  if (sender.id === chrome.runtime.id && message?.to === 'seal-ui' && message.type === 'activity') surface.activity()
+})
 $('seal-open').addEventListener('click', () => {
-  const show = $('link-seal').hidden
+  const show = !$('link-seal').hasAttribute('data-expanded')
+  $('link-seal').toggleAttribute('data-expanded', show)
   $('link-seal').hidden = !show
+  $('seal-glyphs').querySelector('.connection-seal')?.classList.toggle('seal-compact', !show)
   $('seal-open').setAttribute('aria-expanded', String(show))
 })
+// The visible compact seal opens the same comparison as the labelled header control.
+$('seal-glyphs').setAttribute('role', 'button')
+$('seal-glyphs').setAttribute('tabindex', '0')
+$('seal-glyphs').setAttribute('aria-label', 'Compare connection seal')
+$('seal-glyphs').onclick = () => $('seal-open').click()
+$('seal-glyphs').onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); $('seal-open').click() } }
 addEventListener('pagehide', () => {
-  stopMoment()
+  surface.destroy()
   const seal = $('seal-glyphs').querySelector<HTMLElement>('.connection-seal')
   if (seal) destroySeal(seal)
 }, { once: true })
@@ -229,14 +249,14 @@ const momentKey = (link: LinkState | null) => link?.seal && link.sealAt !== unde
 /** Only a fresh storage event joins the pulse; opening the popup later keeps the comparison seal. */
 function revealSeal() {
   const link = state.link
-  if (link?.status !== 'connected' || !link.seal) { stopMoment(); momentFor = null; return }
+  if (link?.status !== 'connected' || !link.seal) { momentFor = null; return }
   const key = momentKey(link)
   if (!key || key === momentFor) return
   momentFor = key
   const delayMs = link.sealAt! - Date.now()
-  if (delayMs < 0 || delayMs > 350) return
-  stopMoment()
-  stopMoment = sealMoment(document.body, link.seal, delayMs, qrFor && qrFor !== 'offline' ? qrFor : undefined)
+  // Storage delivery may arrive just after the deadline; join its current phase rather than losing the effect.
+  if (delayMs > 350) return
+  surface.reveal('phone', delayMs)
 }
 
 const RESTRICTED = /^https:\/\/(chromewebstore\.google\.com|chrome\.google\.com\/webstore|microsoftedge\.microsoft\.com\/addons)/i
@@ -262,12 +282,13 @@ function render() {
   const link = state.link
   const status = link?.status ?? 'starting'
   const connected = status === 'connected'
+  app.querySelector('.pair-title')!.textContent = connected ? 'Connection seal' : 'Pair a phone'
   $('journey-pair').dataset.done = String(connected)
   const enabled = state.mode === 'pc' ? state.pc.link === 'ready' && state.pc.status?.enabled === true && !state.pc.config?.paused && !state.pc.status?.panic && connectedPhone() !== null && accessOf(state.answers, connectedPhone()!.key) === 'allow' : state.tab !== null && state.tab === state.current?.id
   $('journey-enable').dataset.done = String(enabled)
   $('journey-enable').querySelector('small')!.textContent = state.mode === 'pc' ? 'Allow phone + program scope' : enabled ? 'This tab is enabled' : 'This tab is off'
   $('try-route').hidden = state.mode === 'pc'
-  // Connected, the phone itself is the status: its name, lit, with × to disconnect; the pairing card steps aside.
+  // The name and disconnect control stay in the bar; the QR footprint holds the connection seal.
   $('status').dataset.s = status
   $('conn').dataset.s = status
   $('status-t').textContent = STATUS[status]
@@ -278,12 +299,16 @@ function render() {
   const oldSeal = $('seal-glyphs').querySelector<HTMLElement>('.connection-seal')
   if (oldSeal?.dataset.seal !== link?.seal?.join('-')) {
     if (oldSeal) destroySeal(oldSeal)
-    $('seal-glyphs').replaceChildren(...(connected && link?.seal ? [sealElement(link.seal)] : []))
+    $('seal-glyphs').replaceChildren(...(connected && link?.seal ? [sealElement(link.seal, !$('link-seal').hasAttribute('data-expanded'))] : []))
   }
-  if (!connected || !link?.seal) { $('link-seal').hidden = true; $('seal-open').setAttribute('aria-expanded', 'false') }
+  $('seal-glyphs').setAttribute('aria-label', `${$('seal-glyphs').querySelector('.connection-seal')?.getAttribute('aria-label') ?? 'Connection seal'}. Compare both screens`)
+  $('link-seal').hidden = !connected || !link?.seal || !$('link-seal').hasAttribute('data-expanded')
+  if (!connected || !link?.seal) { $('link-seal').removeAttribute('data-expanded'); $('seal-open').setAttribute('aria-expanded', 'false') }
   renderFacts()
   app.classList.toggle('linked', connected)
-  $('pair').hidden = connected
+  $('pair').hidden = false
+  surface.sync(connected && link?.seal ? [{ id: 'phone', name: link.device || 'Phone', seal: link.seal }] : [])
+  if (connected && link?.seal && !momentReady) surface.settle()
   // Answered, the question goes, and the focus it had moves on to the target chosen.
   showAsk(askEl, askFor(state.mode, connectedPhone(), state.answers, state.pcPermission), () => chips.find((c) => c.getAttribute('aria-checked') === 'true')?.focus())
   const code = shownCode()
@@ -291,15 +316,15 @@ function render() {
   const qr = $('qr')
   // No code while offline with nobody remembered: say so in its place, rather than seem to be still making one.
   const qrKey = code.url || (status === 'offline' ? 'offline' : '')
-  if (!connected && qrKey !== qrFor) {
+  if (qrKey !== qrFor) {
     qrFor = qrKey
-    qr.innerHTML = code.url ? renderSVG(code.url, { ecc: code.kind === 'lan' ? 'L' : 'M', border: 1, blackColor: '#0a0a0a', whiteColor: '#ffffff' }) : status === 'offline' ? `<span class="qr-off">${LINK_ICONS.cloudOff}</span>` : '<span class="qr-wait"></span>'
-    // A new code: a scan line sweeps down it once.
-    qr.classList.remove('sweep')
-    if (code.url) {
-      void qr.offsetWidth
-      qr.classList.add('sweep')
-    }
+    if (code.url) surface.setQr(brandedQrElement(code.url), qrDotPoints(code.url))
+    else if (status === 'offline') {
+      const symbol = document.createElement('span')
+      symbol.className = 'qr-off'; symbol.setAttribute('role', 'img'); symbol.setAttribute('aria-label', 'No internet. Pairing code unavailable.')
+      symbol.innerHTML = LINK_ICONS.cloudOff
+      surface.setPlaceholder(symbol)
+    } else surface.loading()
   }
   qr.classList.toggle('off', !code.url && status === 'offline')
   qr.dataset.kind = code.kind

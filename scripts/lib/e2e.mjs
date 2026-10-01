@@ -34,6 +34,7 @@ export function parseArgs(argv, known) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--') continue
+    else if (a === '--keep-logs') continue // temp scopes inherit this through OBPAL_KEEP_TEMP
     else if (a === '--help' || a === '-h') opts.help = true
     else if (a === '--suites') names.push(...(argv[++i] ?? '').split(','))
     else if (a.startsWith('--suites=')) names.push(...a.slice(9).split(','))

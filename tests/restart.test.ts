@@ -75,10 +75,10 @@ class FakeWS {
   sent: string[] = []
   onopen: (() => void) | null = null
   onmessage: ((e: { data: string }) => void) | null = null
-  onclose: (() => void) | null = null
+  onclose: ((e: { code: number }) => void) | null = null
   constructor(readonly url: string) { FakeWS.all.push(this) }
   send(d: string) { this.sent.push(d) }
-  close() { this.readyState = 3; this.onclose?.() }
+  close() { this.readyState = 3; this.onclose?.({ code: 1000 }) }
   open() { this.readyState = 1; this.onopen?.() }
   receive(m: object) { this.onmessage?.({ data: JSON.stringify(m) }) }
 }

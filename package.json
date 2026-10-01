@@ -19,6 +19,7 @@
     "indexnow": "node scripts/indexnow.mjs",
     "merge:lane": "node scripts/merge-lane.mjs",
     "lane": "node scripts/lanes/codex.mjs",
+    "triage": "node scripts/lanes/triage.mjs",
     "ship": "node scripts/ship.mjs",
     "astra:pack": "node scripts/astra/pack.mjs",
     "astra:intake": "node scripts/astra/intake.mjs",
@@ -47,9 +48,13 @@
     "fonts": "node scripts/fonts.mjs",
     "bench:extension": "vite build && pnpm run build:extension && node extension/scripts/bench.mjs",
     "icons": "node scripts/brand-icons.mjs",
-    "astra:verify": "node scripts/astra/verify.mjs"
+    "astra:verify": "node scripts/astra/verify.mjs",
+    "backup": "node scripts/backup.mjs",
+    "reap": "node scripts/reap.mjs",
+    "astra:tidy": "node scripts/astra/tidy.mjs"
   },
   "dependencies": {
+    "@dimforge/rapier3d-compat": "0.21.0",
     "@mediapipe/tasks-vision": "1.0.1",
     "@obpal/core": "workspace:*",
     "@obpal/host": "workspace:*",
@@ -61,7 +66,6 @@
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.58.0",
     "@cloudflare/workers-types": "^5.20260924.1",
-    "@dimforge/rapier3d-compat": "0.21.0",
     "@types/three": "^0.186.0",
     "@zxing/library": "0.21.3",
     "clipper-lib": "6.4.2",

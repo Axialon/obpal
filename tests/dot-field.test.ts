@@ -62,6 +62,19 @@ function surface(width = 100, height = 60, reduced = false) {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('the shared round dot field', () => {
+  it('resolves tokens when a detached field first gets its live size', () => {
+    const s = surface(0, 0)
+    const field = new DotField(s.canvas, { points: [{ x: 0.5, y: 0.5 }], scale: 'seal', preservePoints: true })
+    s.tokens['--ob-dot-active'] = '#426b0d'
+    s.resize(98, 30.8)
+    expect(s.shapes.every(p => p.color === '#426b0d' && p.alpha >= 10 / 11)).toBe(true)
+    field.tilt(-1, -1)
+    expect(s.shapes.every(p => p.alpha >= 10 / 11)).toBe(true)
+    field.setSource([{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }])
+    field.handshake(0.8)
+    expect(s.shapes).toHaveLength(1)
+    field.destroy()
+  })
   it('centres a repeatable grid, respects its dot limit and sizes pixels for the display', () => {
     const s = surface(100, 60)
     const field = new DotField(s.canvas, { spacing: 20, maxDots: 10 })
@@ -243,7 +256,8 @@ describe('the shared round dot field', () => {
     field.pointer(100, 40)
     expect(field.dotCount).toBe(363)
     expect(positions()).toEqual(before)
-    expect(s.shapes.find(p => p.x === points[101].x * 360)!.alpha).toBeGreaterThan(alpha)
+    expect(alpha).toBe(1)
+    expect(s.shapes.find(p => p.x === points[101].x * 360)!.alpha).toBe(1)
     expect(s.raf.size).toBe(0)
     field.destroy()
   })

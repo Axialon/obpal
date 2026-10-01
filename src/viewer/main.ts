@@ -18,6 +18,7 @@ import { GlowFollower, handMove, headingOf, Mode, PairingChip, PointerFlag, Remo
 import { poseRelativeInView } from '@obpal/core'
 import { CATALOG, CATEGORIES, DEFAULT_ITEM, LOCAL_CATEGORY, type CatalogItem } from './catalog'
 import { localFolder } from './local-folder'
+import { disposeModel } from './model-resources'
 import { applyGamepad, type GamepadContext } from './gamepad-input'
 import { ViewerHandInput } from './hand-input'
 import { handGrabs } from '../ui/hand-control'
@@ -44,6 +45,7 @@ mountBodyCapture()
 const D2R = Math.PI / 180
 const GROUND_Y = -1.62
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
+const guestScene = new URLSearchParams(location.search).get('join') === '1'
 const store = {
   get: (k: string) => { try { return localStorage.getItem(k) } catch { return null } },
   set: (k: string, v: string) => { try { localStorage.setItem(k, v) } catch { /* private mode */ } },
@@ -82,7 +84,11 @@ const key = new THREE.DirectionalLight(0xfff1e0, 1.35)
 key.position.set(3.5, 5, 4.5)
 const rim = new THREE.DirectionalLight(0x9cc3ff, 1.5)
 rim.position.set(-4.5, 2.5, -4.5)
-scene.add(key, rim, new THREE.HemisphereLight(0xd4e4ff, 0x0a1220, 0.22))
+const fill = new THREE.HemisphereLight(0xd4e4ff, 0x0a1220, 0.22)
+key.name = 'studio-key'
+rim.name = 'studio-rim'
+fill.name = 'studio-fill'
+scene.add(key, rim, fill)
 
 const camera = new THREE.PerspectiveCamera(38, 1, 0.01, 500)
 const controls = new CameraControls(camera, canvas)
@@ -124,6 +130,7 @@ const grid = new THREE.Mesh(
 )
 grid.rotation.x = -Math.PI / 2
 grid.position.y = GROUND_Y
+grid.name = 'studio-grid'
 scene.add(grid)
 
 const shadow = new THREE.Mesh(
@@ -143,9 +150,11 @@ const shadow = new THREE.Mesh(
 )
 shadow.rotation.x = -Math.PI / 2
 shadow.position.y = GROUND_Y + 0.003
+shadow.name = 'studio-shadow'
 scene.add(shadow)
 
 const holder = new THREE.Group()
+holder.name = 'viewer-models'
 scene.add(holder)
 
 // Parts of the current model: hover cards, selection and per-part manipulation, for the screen and each device.
@@ -310,7 +319,6 @@ function resetView() {
 // ---- catalogue: rail of collections, tiles of models --------------------------------
 
 const loader = new GLTFLoader()
-const cache = new Map<string, Promise<{ scene: THREE.Group; clips: THREE.AnimationClip[] }>>()
 let current: CatalogItem | null = null
 let activeCat = CATEGORIES[0].id
 let loadToken = 0
@@ -365,6 +373,7 @@ function renderTiles(animate = false) {
     const b = document.createElement('button')
     b.className = 'tile'
     b.dataset.id = item.id
+    b.disabled = guestScene
     b.dataset.tip = item.subtitle
     setMarkup(b, html`<span class="tile-art">${art('', undefined, item.icon, item.glyph)}</span><span class="tile-name"></span>`)
     b.querySelector('.tile-name')!.textContent = item.name
@@ -372,6 +381,7 @@ function renderTiles(animate = false) {
     // Add alongside what's already in the scene (shift-click does the same).
     const add = document.createElement('span')
     add.className = 'tile-add'
+    add.hidden = guestScene
     add.setAttribute('role', 'button')
     add.setAttribute('aria-label', `Add ${item.name} to the scene`)
     add.dataset.tip = 'Add to scene'
@@ -425,7 +435,7 @@ function renderScene(animate = true) {
       chip.querySelector('.sc-name')!.textContent = e.name
       chip.querySelector('.sc-x')!.setAttribute('aria-label', `Remove ${e.name}`) // file names are user data: never through innerHTML
       ;(chip.querySelector('.sc-pick') as HTMLButtonElement).onclick = () => { parts.select(sel === e.obj ? null : parts.objectPart(e.obj)); renderScene(false) }
-      ;(chip.querySelector('.sc-x') as HTMLButtonElement).onclick = () => { removeObject(e); renderScene(false) }
+      ;(chip.querySelector('.sc-x') as HTMLButtonElement).onclick = () => { if (!guestScene) { removeObject(e); renderScene(false) } }
       return chip
     }))
     const tools = document.createElement('div')
@@ -456,9 +466,10 @@ function calm<T extends THREE.Object3D>(root: T): T {
 }
 
 /** Open a catalogue model (replacing the scene), or add it alongside what's there. */
-async function selectItem(item: CatalogItem, add = false) {
+async function selectItem(item: CatalogItem, add = false, fromHost = false) {
+  if (guestScene && !fromHost) return
   const token = add ? loadToken : ++loadToken
-  const loading = setTimeout(() => { $('loading').hidden = false; $('loading-text').textContent = item.name }, 160)
+  const loading = setTimeout(() => { if (token === loadToken) { $('loading').hidden = false; $('loading-text').textContent = item.name } }, 160)
   try {
     let obj: THREE.Object3D
     let clips: THREE.AnimationClip[] = []
@@ -470,12 +481,12 @@ async function selectItem(item: CatalogItem, add = false) {
       obj = calm(g.scene)
       clips = g.animations
     } else {
-      if (!cache.has(item.id)) cache.set(item.id, loader.loadAsync(item.src!).then((g) => ({ scene: calm(g.scene), clips: g.animations })))
-      const g = await cache.get(item.id)!
-      obj = g.scene.clone(true)
-      clips = g.clips
+      // Each displayed root owns its resources; HTTP caching still avoids repeated downloads.
+      const g = await loader.loadAsync(item.src!)
+      obj = calm(g.scene)
+      clips = g.animations
     }
-    if (token !== loadToken) { localFolder.release(obj); return } // a newer pick won (frees a Local file's resources)
+    if (token !== loadToken) { releaseModel(obj); return }
     current = item
     if (add && sceneObjects.length) addAlongside(obj, clips, item, item.name, item.category)
     else showOnly(obj, clips, item, item.name, item.category)
@@ -483,7 +494,7 @@ async function selectItem(item: CatalogItem, add = false) {
     remote?.setValues({ model: item.id })
     store.set('obpal.view.model', item.id)
   } catch (e) {
-    cache.delete(item.id)
+    if (token !== loadToken) return
     console.error(e)
     note(`Couldn't load ${item.name}`)
   } finally {
@@ -493,6 +504,7 @@ async function selectItem(item: CatalogItem, add = false) {
 }
 
 function stepItem(dir: number) {
+  if (guestScene) return
   const i = Math.max(0, CATALOG.findIndex((x) => x.id === current?.id))
   void selectItem(CATALOG[(i + dir + CATALOG.length) % CATALOG.length])
 }
@@ -525,11 +537,13 @@ function addObject(obj: THREE.Object3D, clips: THREE.AnimationClip[], item: Cata
   const size = box.getSize(new THREE.Vector3())
   obj.position.sub(box.getCenter(new THREE.Vector3()))
   const wrap = new THREE.Group()
+  wrap.name = `model:${item?.id ?? name}`
   wrap.add(obj)
   wrap.scale.setScalar(OBJECT_SIZE / (size.length() || 1))
   holder.add(wrap)
   const e: SceneObject = { item, name, catId, obj, wrap, size, mixer: null, tradeoff: null, tags: null, shadow: shadow.clone(), pop: 1 }
   e.shadow.visible = false
+  e.shadow.name = 'model-contact-shadow'
   scene.add(e.shadow)
   parts.add(obj, wrap, item?.id ?? null, name)
   // A Blackboxes engine is a live trade-off model: its pillars re-solve as they move, with their own value tags.
@@ -562,10 +576,16 @@ function removeObject(e: SceneObject) {
   e.tradeoff?.dispose()
   e.tags?.remove()
   e.mixer?.stopAllAction()
+  e.mixer?.uncacheRoot(e.obj)
   holder.remove(e.wrap)
   scene.remove(e.shadow)
   $('tags').hidden = !sceneObjects.some((o) => o.tradeoff)
-  localFolder.release(e.obj) // a Local folder file: revoke its object URLs, free its GPU memory
+  releaseModel(e.obj)
+}
+
+/** Local sessions also own object URLs; other loads own just their model resources. */
+function releaseModel(obj: THREE.Object3D) {
+  if (!localFolder.release(obj)) disposeModel(obj)
 }
 
 /** Opening a model: it replaces the whole scene. */
@@ -587,7 +607,7 @@ function addAlongside(obj: THREE.Object3D, clips: THREE.AnimationClip[], item: C
   centreRow()
   renderScene()
   frameModel()
-  hint('scene', () => document.querySelector('#scene-strip .sc-chip'), 'Pick a name to move that whole object · × removes it', { place: 'top', delay: 900 })
+  if (!guestScene) hint('scene', () => document.querySelector('#scene-strip .sc-chip'), 'Pick a name to move that whole object · × removes it', { place: 'top', delay: 900 })
 }
 
 const halfWidth = (e: SceneObject) => (e.size.x * e.wrap.scale.x) / 2
@@ -625,6 +645,7 @@ function keepOnly(keep: SceneObject | undefined) {
 // ---- files ------------------------------------------------------------------
 
 async function loadFile(file: File, add = false) {
+  const token = add ? loadToken : ++loadToken
   const ext = file.name.split('.').pop()?.toLowerCase()
   const url = URL.createObjectURL(file)
   try {
@@ -645,10 +666,12 @@ async function loadFile(file: File, add = false) {
     } else {
       return note(`Can't open .${ext ?? '?'} files yet. Try GLB, STL or OBJ.`)
     }
+    if (token !== loadToken) { releaseModel(obj); return }
     if (add && sceneObjects.length) addAlongside(obj, clips, null, file.name, null)
-    else { loadToken++; current = null; showOnly(obj, clips, null, file.name, null) }
+    else { current = null; showOnly(obj, clips, null, file.name, null) }
     remote?.feedback({ toast: `Opened ${file.name}` })
   } catch (e) {
+    if (token !== loadToken) return
     console.error(e)
     note(`Couldn't open ${file.name}`)
   } finally {
@@ -666,7 +689,12 @@ addEventListener('drop', (e) => {
 })
 /** Several files at once make one scene; holding shift adds them to the current one. */
 async function openFiles(files: File[], add = false) {
-  for (const [i, f] of files.entries()) await loadFile(f, add || i > 0)
+  if (guestScene) return
+  const token = add ? loadToken : loadToken + 1
+  for (const [i, f] of files.entries()) {
+    await loadFile(f, add || i > 0)
+    if (token !== loadToken) break
+  }
 }
 const fileInput = $<HTMLInputElement>('file')
 $('open').onclick = () => fileInput.click()
@@ -805,6 +833,7 @@ function buildMore() {
   const menu = $('more')
   menu.replaceChildren()
   document.querySelectorAll<HTMLElement>('#tools .tool.t2').forEach((src) => {
+    if (guestScene && src.id === 't-spin') return
     const b = document.createElement('button')
     b.className = 'more-tile'
     b.setAttribute('role', 'menuitem')
@@ -841,14 +870,14 @@ addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase()
   if (k === 'g') { view.grid = !view.grid; applyView() }
   else if (k === 'b') { view.glow = !view.glow; applyView() }
-  else if (k === 's') { view.spin = !view.spin; applyView() }
+  else if (k === 's' && !guestScene) { view.spin = !view.spin; applyView() }
   else if (k === 'f') frameModel()
-  else if (k === 'r') resetView()
+  else if (k === 'r' && !guestScene) resetView()
   else if (k === 'arrowright' || k === ']') stepItem(1)
   else if (k === 'arrowleft' || k === '[') stepItem(-1)
   else if (k === 'c') setCatalog($('catalog').dataset.state === 'rail')
   else if (k === 'escape') { parts.select(null); toggleLighting(false); toggleThemes(false); renderScene(false) }
-  else if ((k === 'delete' || k === 'backspace') && parts.selected?.kind === 'object' && sceneObjects.length > 1) {
+  else if (!guestScene && (k === 'delete' || k === 'backspace') && parts.selected?.kind === 'object' && sceneObjects.length > 1) {
     const e = sceneObjects.find((o) => o.obj === parts.selected!.root)
     if (e) { removeObject(e); renderScene(false) }
   }
@@ -1591,7 +1620,11 @@ async function restoreScene(fallback: CatalogItem) {
   try { ids = JSON.parse(store.get('obpal.view.scene') ?? '[]') } catch { /* old or bad value */ }
   const items = (Array.isArray(ids) ? ids : []).map((id) => CATALOG.find((i) => i.id === id)).filter((i): i is CatalogItem => !!i)
   if (items.length < 2) return selectItem(fallback)
-  for (const [i, item] of items.entries()) await selectItem(item, i > 0)
+  const token = loadToken + 1
+  for (const [i, item] of items.entries()) {
+    await selectItem(item, i > 0)
+    if (token !== loadToken) break
+  }
 }
 
 // ---- boot -------------------------------------------------------------------
@@ -1615,7 +1648,21 @@ const sharedPresence = new SharedPresence({
     if (sceneObjects.map(e => e.item?.id ?? '').join(',') !== wanted) {
       if (presenceLoading !== wanted) {
         presenceLoading = wanted
-        void (async () => { for (const [i, id] of s.models.entries()) { const item = CATALOG.find(c => c.id === id && !c.load); if (item) await selectItem(item, i > 0) } })()
+        if (!s.models.length) {
+          ++loadToken
+          for (const entry of [...sceneObjects]) removeObject(entry)
+          parts.clear(); current = null; renderScene()
+          return
+        }
+        void (async () => {
+          const token = loadToken + 1
+          for (const [i, id] of s.models.entries()) {
+            if (presenceLoading !== wanted) break
+            const item = CATALOG.find(c => c.id === id && !c.load)
+            if (item) await selectItem(item, i > 0, true)
+            if (token !== loadToken) break
+          }
+        })()
       }
       return
     }
@@ -1624,7 +1671,6 @@ const sharedPresence = new SharedPresence({
   },
 })
 scene.add(sharedPresence.group)
-if (!sharedPresence.guest) { sharedPresence.world.add('ball', [0.7, 0.18, 0.8], 0.18); sharedPresence.world.add('block', [-0.6, 0.18, 0.8], 0.18) }
 const experience = new Experience(renderer, scene, camera, viewerRides, sharedPresence, controls)
 experience.addEventListener('camerachange', () => { if (experience.immersive) pairChip?.collapse() })
 Object.assign(window, { __activeSceneCamera: () => experience.activeCamera })
@@ -1637,8 +1683,10 @@ quickViews([
   { name: 'Framed', show: inOverview(frameModel) },
   { name: 'First person', show: () => document.querySelector<HTMLButtonElement>('.presence-controls .presence-enter')?.click(), current: () => experience.mode === 'first-person', phone: true },
 ])
-quickAction({ id: 'open', group: 'page', label: 'Open a model', icon: 'folder', run: () => fileInput.click() })
-quickAction({ id: 'reset', group: 'page', label: 'Reset the view', hint: 'The model upright, the camera home', icon: 'reset', run: inOverview(resetView) })
+if (!guestScene) {
+  quickAction({ id: 'open', group: 'page', label: 'Open a model', icon: 'folder', run: () => fileInput.click() })
+  quickAction({ id: 'reset', group: 'page', label: 'Reset the view', hint: 'The model upright, the camera home', icon: 'reset', run: inOverview(resetView) })
+}
 mountQuick()
 
 setTheme(theme, false)
@@ -1654,10 +1702,12 @@ stageInset = insetTarget = measureInset() // start centred beside the panel inst
 applyStageInset()
 applyView()
 // Local folder catalogue: offers a remembered folder again (never prompts on load); keeps the Local panel and the phone in sync.
-void localFolder.init({ note, changed: (items) => { if (activeCat === LOCAL_CATEGORY) renderTiles(); if (items) syncPhoneModels() } })
-void restoreScene(saved)
+if (!guestScene) {
+  void localFolder.init({ note, changed: (items) => { if (activeCat === LOCAL_CATEGORY) renderTiles(); if (items) syncPhoneModels() } })
+  void restoreScene(saved)
+}
 renderer.setAnimationLoop(loop)
-hint('catalog', () => $('catalog'), 'Choose a model, or drop in your own file', { place: 'right', delay: 3800 })
+if (!guestScene) hint('catalog', () => $('catalog'), 'Choose a model, or drop in your own file', { place: 'right', delay: 3800 })
 hint('tools', () => $('tools'), 'Grid, glow, spin, frame and reset', { place: 'bottom', delay: 7000 })
 if (!sharedPresence.guest) startRemote().catch((e) => {
   console.error(e)

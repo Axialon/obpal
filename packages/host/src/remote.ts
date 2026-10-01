@@ -72,7 +72,7 @@ const MAX_KEPT_ROOMS = 8
 type CodeHello = Extract<DeviceMsg, { t: 'hello'; code: string }>
 
 /**
- * A device in the scene (CATALOGUE §5). The lead is the oldest; while it holds nothing it drives the shared view.
+ * A device in the scene (CATALOGUE §5). The lead is the oldest controller phone; while it holds nothing it drives the shared view.
  * `controller`: the catalogue controller it uses now (CATALOGUE §9.1), as it says in `mode{c}` or, from a device that
  * doesn't say, as its mode implies; `profile`: the profile it applies, where it says (`mode{p}`).
  * Who it is, for a host that keeps something per device (ob.Pal Link's answer to "may this phone control the PC"):
@@ -353,6 +353,9 @@ export class Remote {
    * finished connecting have to scan again.
    */
   async resetInvite() {
+    // Keep the authenticated peers' signalling room for reload and ICE restart, just as automatic rotation does.
+    const connected = this.bound().find(peer => !peer.room && !peer.lan)
+    if (connected) { this.moveInvite(connected, this.sig); await this.moving; return }
     const old = this.sig
     this.secret = newSecret()
     old.onmessage = () => {}
@@ -755,9 +758,9 @@ export class Remote {
       peer.name = String(m.name || 'Phone').slice(0, 40)
       peer.caps = m.caps ?? null
       peer.since = Date.now()
-      if (this.shared) {
+      if (this.shared || peer.caps?.platform === 'scene') {
         peer.color = this.freeColor(peer)
-        if (!this.active) this.active = peer
+        this.active = this.leadPhone()
       } else {
         const prev = this.active
         if (prev && prev !== peer) {
@@ -994,6 +997,12 @@ export class Remote {
     return [...this.peers.values()].filter((p) => p.bound).sort((a, b) => a.since - b.since)
   }
 
+  /** Scene visitors watch; the oldest controller phone holds the shared view. */
+  private leadPhone(): Peer | null {
+    if (this.active?.bound && this.active.caps?.platform !== 'scene') return this.active
+    return this.bound().find(p => p.caps?.platform !== 'scene') ?? null
+  }
+
   private participant(p: Peer): Participant {
     return {
       id: p.id, name: p.name, color: p.color, lead: p === this.active, since: p.since, caps: p.caps,
@@ -1003,7 +1012,7 @@ export class Remote {
     }
   }
 
-  /** Everyone controlling the scene, oldest (the lead) first. */
+  /** Everyone in the scene, oldest first; visitors never hold the lead. */
   get participants(): Participant[] { return this.bound().map((p) => this.participant(p)) }
 
   /** Current verified seals, without waiting for network statistics. */
@@ -1030,6 +1039,8 @@ export class Remote {
   get pad(): PadState | null { return this.active?.stream.pad ?? null }
   /** Where the device in control (the lead) points (PROTOCOL §6) while a pointing utility is on, else null. */
   get pointer(): PointerState | null { return this.active?.stream.pointer ?? null }
+  /** Activity without consuming a participant's input; neutral heartbeats do not count. */
+  inputActive(who: string): boolean { const peer = this.peers.get(who); return !!peer?.bound && !peer.paused && peer.stream.inputActive }
 
   /** Read the device in control's (the lead's) input for this frame. Call once per rendered frame. */
   consume(now = performance.now()): Frame {
@@ -1162,7 +1173,7 @@ export class Remote {
     p.bound = false
     // What it held is free again.
     for (const [node, holder] of Object.entries(this.held)) if (holder === id) delete this.held[node]
-    if (this.active === p) this.active = this.shared ? this.bound()[0] ?? null : null
+    if (this.active === p) this.active = this.shared ? this.leadPhone() : null
     this.deviceName = this.active?.name ?? null
     this.emit('leave', who)
     this.renderCards()

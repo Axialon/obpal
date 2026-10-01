@@ -41,8 +41,12 @@
 .camera-video { object-fit: cover; cursor: crosshair; opacity: 0; transition: opacity 160ms var(--bb-ease-out); }
 .camera-video.has-frame { opacity: 1; }
 .camera-video[data-mirrored='true'] { transform: scaleX(-1); }
+.obpal-camera[data-mode='scan'] .camera-video { touch-action: none; transform: scale(var(--scan-zoom, 1)); }
+.obpal-camera[data-mode='scan'] .camera-video[data-mirrored='true'] { transform: scale(calc(-1 * var(--scan-zoom, 1)), var(--scan-zoom, 1)); }
 .obpal-camera[data-mode='scan'] .camera-overlay { object-fit: cover; }
 .obpal-camera[data-mode='scan'][data-mirrored='true'] .camera-overlay { transform: scaleX(-1); }
+.obpal-camera[data-mode='scan'] .camera-overlay { transform: scale(var(--scan-zoom, 1)); }
+.obpal-camera[data-mode='scan'][data-mirrored='true'] .camera-overlay { transform: scale(calc(-1 * var(--scan-zoom, 1)), var(--scan-zoom, 1)); }
 .camera-overlay { color: var(--bb-accent); transition: opacity 200ms linear; }
 .camera-overlay[data-lost='true'] { opacity: 0; }
 .camera-overlay, .camera-shade { pointer-events: none; }
@@ -91,6 +95,13 @@
 .camera-chip[data-active='true'] { color: var(--bb-accent-ink); background: var(--bb-accent); }
 .camera-chips[data-lost='true'] .camera-chip { opacity: .4; }
 .camera-tools { display: flex; max-width: 100%; justify-content: center; gap: 12px; }
+.camera-zoom-cluster { display: flex; align-items: center; gap: 8px; width: min(360px, calc(100vw - 32px)); padding: 8px; border-radius: 28px; }
+.camera-zoom-cluster[hidden] { display: none; }
+.camera-zoom-range { flex: 1; min-width: 80px; position: relative; display: grid; place-items: center; }
+.camera-zoom-slider { width: 100%; height: 44px; margin: 0; accent-color: var(--bb-accent); touch-action: pan-x; }
+.camera-zoom-ticks { position: absolute; bottom: 0; left: 8px; right: 8px; display: flex; justify-content: space-between; pointer-events: none; }
+.camera-zoom-ticks i { width: 3px; height: 3px; border-radius: 50%; background: var(--bb-ink-2); opacity: .4; }
+.camera-zoom-ticks i[data-active='true'] { background: var(--bb-accent); opacity: 1; }
 .obpal-camera[data-mode='hand']:not([data-state='unavailable']) .camera-tools, .camera-tools:empty, .camera-deadman:empty { display: none; }
 .camera-type { min-height: 44px; flex: none; padding: 0 15px; border-radius: 22px; font-size: 12px; font-weight: 650; }
 .camera-deadman { align-self: flex-start; margin: 0 16px 76px; display: flex; flex-direction: row-reverse; gap: 10px; align-items: center; }

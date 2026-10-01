@@ -23,6 +23,24 @@ export async function runMarbleControls(browser, local, check, out) {
         await phone.locator('.ctl-card[data-c="face.trackpad"]').click()
       }
       await phone.locator('#tray [data-id="push"]').waitFor()
+      // Real controller packets must activate motion without another Motion-chip tap.
+      const orientation = async gamma => {
+        await phone.evaluate(gamma => {
+          window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 0, beta: 60, gamma }))
+          window.dispatchEvent(new DeviceMotionEvent('devicemotion', { rotationRate: { alpha: 0, beta: 0, gamma: 0 } }))
+        }, gamma)
+      }
+      await orientation(0)
+      await phone.waitForFunction(() => document.getElementById('gyro')?.getAttribute('aria-pressed') === 'true')
+      await orientation(35)
+      await screen.waitForFunction(() => window.__device.logic.units.some(u => Math.abs(u.tiltX) > .12 || Math.abs(u.tiltZ) > .12))
+      // A holder tilting the second board must bring that board's companions into view without a drag first.
+      await screen.evaluate(() => window.__sim.claims.take('marblerun2', window.__obpal.participants[0].id))
+      await screen.waitForFunction(() => Math.abs(window.__device.stage.controls.target.x - 3.8) < .001)
+      await phone.locator('#center').click()
+      await screen.waitForFunction(() => window.__device.logic.units.every(u => Math.hypot(u.tiltX,u.tiltZ) < .001))
+      await phone.locator('#gyro').click()
+      await screen.evaluate(() => window.__sim.claims.take('marblerun1', window.__obpal.participants[0].id))
       for (const [width, height] of BUTTON_SIZES) {
         const size = `${width}x${height}`, state = 'tray'
         await phone.setViewportSize({ width, height }); await phone.evaluate(() => document.fonts.ready)
@@ -75,5 +93,32 @@ export async function runMarbleControls(browser, local, check, out) {
     } finally { await phoneContext.close(); await screenContext.close() }
     await writeFile(join(out, 'marble-controls.json'), JSON.stringify(rows, null, 2))
     return `20 real tray pushes and touch drag at ${sizes.size} emulated sizes; release coasts`
+  })
+  await check('marblerun iOS controller: permission is requested by Start, denial leaves working touch controls', async () => {
+    const screenContext = await browser.newContext({ ignoreHTTPSErrors: true })
+    const phoneContext = await browser.newContext({ viewport:{width:390,height:844}, hasTouch:true,isMobile:true,ignoreHTTPSErrors:true, userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1' })
+    try {
+      await phoneContext.addInitScript(() => {
+        window.__motionRequests = 0
+        const deny = async () => { window.__motionRequests++; return 'denied' }
+        DeviceOrientationEvent.requestPermission = deny
+        DeviceMotionEvent.requestPermission = deny
+        for (const key of ['gyro','models','more','point','lock','track','level']) sessionStorage.setItem(`obpal.hint.${key}`,'1')
+      })
+      const screen = await screenContext.newPage(), phone = await phoneContext.newPage()
+      await screen.goto(`${local.origin}/sim/marblerun/`)
+      await screen.waitForFunction(() => !!window.__obpal?.pairingUrl)
+      await phone.goto(await screen.evaluate(() => window.__obpal.pairingUrl))
+      await phone.locator('#start').waitFor()
+      if (await phone.evaluate(() => window.__motionRequests) !== 0) throw new Error('iOS motion was requested before a tap')
+      await phone.locator('#start').click()
+      await phone.locator('#tray [data-id=push]').waitFor()
+      if (await phone.evaluate(() => window.__motionRequests) !== 2) throw new Error('Both sensor permissions were not requested in Start')
+      const count = await screen.evaluate(() => window.__device.logic.units.reduce((sum,u) => sum+u.actions,0))
+      await phone.locator('#tray [data-id=push]').click()
+      await screen.waitForFunction(before => window.__device.logic.units.reduce((sum,u) => sum+u.actions,0) > before,count)
+      if (await phone.locator('#gyro').getAttribute('aria-pressed') !== 'false') throw new Error('Denied motion is shown active')
+      await phone.screenshot({path:join(out,'marble-ios-denied-touch.png')})
+    } finally { await phoneContext.close(); await screenContext.close() }
   })
 }

@@ -1,4 +1,75 @@
 import { DOT_MATERIAL, DOT_TIMING, dotEase, resolveDotTokens, type DotRole, type DotScale, type DotTokens } from './dot-tokens'
+import { contrast, parseColor } from './color'
+
+const clocks = new WeakMap<Document, { listeners: Set<(now: number) => boolean>; raf: number; schedule: () => void }>()
+/** Finite subscribers share one frame request. Returning false releases the subscription. */
+export function dotClock(tick: (now: number) => boolean, doc: Document = document): () => void {
+  let clock = clocks.get(doc)
+  if (!clock) {
+    const current = { listeners: new Set<(now: number) => boolean>(), raf: 0, schedule: () => {} }
+    const frame = (now: number) => {
+      current.raf = 0
+      for (const listener of [...current.listeners]) if (!listener(now)) current.listeners.delete(listener)
+      current.schedule()
+    }
+    current.schedule = () => {
+      if (doc.hidden) { doc.defaultView!.cancelAnimationFrame(current.raf); current.raf = 0 }
+      else if (current.listeners.size && !current.raf) current.raf = doc.defaultView!.requestAnimationFrame(frame)
+    }
+    doc.addEventListener('visibilitychange', current.schedule)
+    clocks.set(doc, current); clock = current
+  }
+  const current = clock
+  current.listeners.add(tick)
+  current.schedule()
+  return () => {
+    current.listeners.delete(tick)
+    if (!current.listeners.size) { doc.defaultView!.cancelAnimationFrame(current.raf); current.raf = 0 }
+  }
+}
+
+export const DOT_LOADER_STYLE = `.dot-loader{display:flex;align-items:center;justify-content:center;gap:12%;width:var(--dot-loader-size,48px);height:var(--dot-loader-size,48px);color:var(--seal-ink,var(--bb-accent-text,var(--ink,currentColor)))}.dot-loader>i{display:block;flex:none;width:16%;aspect-ratio:1;border-radius:50%;background:currentColor}`
+
+/** A stable three-dot loader. State updates never restart its phase or change its measured box. */
+export class DotLoader {
+  readonly el = document.createElement('span')
+  private dots = Array.from({ length: 3 }, () => document.createElement('i'))
+  private stop = () => {}
+  private running = false
+  private motion = matchMedia('(prefers-reduced-motion: reduce)')
+  private visible = true
+  private observer: IntersectionObserver | null = null
+  constructor(options: { size?: number; label?: string } = {}) {
+    this.el.className = 'dot-loader'
+    this.el.style.setProperty('--dot-loader-size', `${Math.max(16, options.size ?? 48)}px`)
+    this.el.setAttribute('role', 'status')
+    this.el.setAttribute('aria-label', options.label ?? 'Loading')
+    this.dots.forEach(dot => dot.setAttribute('aria-hidden', 'true'))
+    this.el.append(...this.dots)
+    this.motion.addEventListener('change', this.sync)
+    document.addEventListener('visibilitychange', this.sync)
+    this.observer = typeof IntersectionObserver === 'function' ? new IntersectionObserver(entries => { this.visible = entries.some(entry => entry.isIntersecting); this.sync() }) : null
+    this.observer?.observe(this.el)
+    this.start()
+  }
+  start() { if (!this.running) { this.running = true; this.el.setAttribute('aria-busy', 'true'); this.sync() } }
+  finish() { this.running = false; this.el.setAttribute('aria-busy', 'false'); this.sync() }
+  private sync = () => {
+    this.stop()
+    this.dots.forEach(dot => { dot.style.transform = 'none'; dot.style.opacity = '1' })
+    if (!this.running || this.motion.matches || document.hidden || !this.visible) return
+    this.stop = dotClock(now => {
+      if (!this.running) return false
+      if (this.el.isConnected) this.dots.forEach((dot, i) => {
+        const wave = (1 + Math.sin(now / 180 - i * 0.8)) / 2
+        dot.style.transform = `translate3d(0,${-wave * 22}%,0) scale(${0.85 + wave * 0.15})`
+        dot.style.opacity = String(0.7 + wave * 0.3)
+      })
+      return true
+    })
+  }
+  destroy() { this.finish(); this.observer?.disconnect(); this.motion.removeEventListener('change', this.sync); document.removeEventListener('visibilitychange', this.sync) }
+}
 
 /** A position normalized to the canvas, from 0 to 1 on each axis. */
 export interface DotPoint { x: number; y: number; role?: DotRole }
@@ -18,6 +89,8 @@ export interface DotFieldOptions {
   surface?: string
   /** The idle breath animates compositor opacity, without drawing any new frames. */
   idle?: boolean
+  /** Align a resting canvas origin once to backing pixels; moving flight canvases leave this off. */
+  pixelAligned?: boolean
 }
 export type DotEffect = 'assemble' | 'ripple' | 'shimmer' | 'handshake'
 
@@ -43,6 +116,7 @@ export class DotField {
   private readonly motion: MediaQueryList | null
   private readonly resizeObserver: ResizeObserver | null
   private readonly intersectionObserver: IntersectionObserver | null
+  private readonly tokenObserver: MutationObserver | null
   private readonly bands: Paint[][] = Array.from({ length: BANDS * ROLES.length }, () => [])
   private readonly paints: Paint[] = []
   private points?: DotPoint[]
@@ -67,6 +141,7 @@ export class DotField {
   private intersecting = true
   private dead = false
   private opacity: Animation | null = null
+  private aligned = { x: 0, y: 0 }
 
   get frames() { return this.rendered }
   get resolvedTokens() { return this.tokens }
@@ -89,6 +164,10 @@ export class DotField {
       this.visibilityChanged()
     }) : null
     this.intersectionObserver?.observe(canvas)
+    this.tokenObserver = typeof MutationObserver === 'function' ? new MutationObserver(() => this.refresh()) : null
+    if (canvas.ownerDocument.documentElement) this.tokenObserver?.observe(canvas.ownerDocument.documentElement, {
+      attributes: true, attributeFilter: ['class', 'style', 'data-bb-theme', 'data-bb-accent', 'data-bb-product'],
+    })
     this.refresh()
     this.resize()
     this.breathe()
@@ -133,7 +212,7 @@ export class DotField {
     }
     this.dots = points.map((p, i) => ({ x: p.x * this.width, y: p.y * this.height, role: p.role, phase: ((i * 137 + 17) % 997) / 997 }))
     const diameter = this.options.diameter ?? this.tokens.diameter
-    const radius = this.points && this.tokens.scale === 'seal' ? Math.min(diameter, this.gridPitch(this.points) * 0.64) / 2 : diameter / 2
+    const radius = this.points && this.tokens.scale === 'seal' ? Math.min(diameter, this.gridPitch(this.points) * (this.options.preservePoints ? 0.9 : 0.64)) / 2 : diameter / 2
     this.radius = Math.min(radius, this.width / 8, this.height / 8)
     this.measureSource()
   }
@@ -157,8 +236,12 @@ export class DotField {
   /** Fit the backing pixels to the element and the display, without changing its CSS size. */
   resize = () => {
     if (this.dead) return
-    const rect = this.canvas.getBoundingClientRect()
+    let rect = this.canvas.getBoundingClientRect()
     const dpr = clamp(Number.isFinite(globalThis.devicePixelRatio) ? globalThis.devicePixelRatio : 1, 1, 3)
+    if (this.options.pixelAligned && this.canvas.style && rect.width > 0) {
+      const height = `${Math.round(rect.width * 11 / 35 * dpr) / dpr}px`
+      if (this.canvas.style.height !== height) { this.canvas.style.height = height; rect = this.canvas.getBoundingClientRect() }
+    }
     if (this.width === rect.width && this.height === rect.height && this.dpr === dpr) return
     this.width = Math.max(0, rect.width)
     this.height = Math.max(0, rect.height)
@@ -166,14 +249,33 @@ export class DotField {
     this.canvas.width = Math.round(this.width * dpr)
     this.canvas.height = Math.round(this.height * dpr)
     this.context?.setTransform(this.width ? this.canvas.width / this.width : 1, 0, 0, this.height ? this.canvas.height / this.height : 1, 0, 0)
-    this.layout()
+    // A seal is often built before insertion. Its first measured size resolves the actual inherited tokens.
+    const root = this.canvas.getRootNode?.()
+    if (root && 'host' in root) this.tokenObserver?.observe((root as ShadowRoot).querySelector('.wrap') ?? (root as ShadowRoot).host, {
+      attributes: true, attributeFilter: ['class', 'style'],
+    })
+    this.refresh()
     this.visibilityChanged()
   }
 
   /** Resolve family tokens again after a theme change, including the pairing chip's shadow tokens. */
   refresh() {
     if (this.dead) return
+    if (this.options.pixelAligned && this.canvas.style) {
+      const rect = this.canvas.getBoundingClientRect()
+      const x = rect.left - this.aligned.x, y = rect.top - this.aligned.y
+      this.aligned = { x: Math.round(x * this.dpr) / this.dpr - x, y: Math.round(y * this.dpr) / this.dpr - y }
+      this.canvas.style.translate = `${this.aligned.x}px ${this.aligned.y}px`
+    }
     this.tokens = resolveDotTokens(this.canvas, this.options.scale ?? (this.options.points ? 'seal' : 'base'))
+    if (this.options.preservePoints && this.tokens.scale === 'seal') {
+      const style = getComputedStyle(this.canvas)
+      const accent = style.getPropertyValue('--bb-accent-text').trim()
+      const plate = parseColor(style.getPropertyValue('--seal-plate')) ?? parseColor(style.getPropertyValue('--bb-sheet'))
+      const ink = parseColor(accent)
+      // Small raster cores need headroom beyond the nominal token contrast. Light surfaces use strong ink only.
+      if (plate && ink && contrast(ink, plate) >= 10) this.tokens.colors.active = accent
+    }
     this.accent = this.options.accent || this.tokens.colors[this.options.role ?? 'active']
     this.surface = this.options.surface || this.tokens.surface
     this.layout()
@@ -295,7 +397,8 @@ export class DotField {
       const dot = this.dots[i % this.dots.length]
       const source = this.source[i % this.source.length]
       let x = dot?.x ?? this.width / 2, y = dot?.y ?? this.height / 2, radius = this.radius, square = false
-      let alpha = this.points ? 0.76 : 0.25 + (dot?.phase ?? 0.5) * 0.13
+      const seal = this.options.preservePoints && this.tokens.scale === 'seal'
+      let alpha = this.points ? (seal ? 1 : 0.76) : 0.25 + (dot?.phase ?? 0.5) * 0.13
       if (handshake !== null) {
         const p = handshake
         const sx = source ? source.x * this.width : x, sy = source ? source.y * this.height : y
@@ -343,6 +446,8 @@ export class DotField {
         alpha += Math.max(0, 1 - Math.hypot(x - this.at.x, y - this.at.y) / DOT_MATERIAL.touchRadius) ** 2 * 0.24
       }
       if (!this.reduced) alpha += ((x / this.width - 0.5) * this.light.x + (y / this.height - 0.5) * this.light.y) * 0.2
+      // Keep the comparison silhouette legible through the light sweep and tilt; surplus QR modules still fade.
+      if (seal && i < this.dots.length && (handshake === null || handshake >= 0.72)) alpha = 1
       if (alpha <= 0) continue
       const role = ROLES.indexOf(dot?.role ?? this.options.role ?? 'active')
       const band = role * BANDS + Math.round(clamp(alpha) * (BANDS - 1))
@@ -375,6 +480,7 @@ export class DotField {
     this.opacity?.cancel()
     this.resizeObserver?.disconnect()
     this.intersectionObserver?.disconnect()
+    this.tokenObserver?.disconnect()
     this.motion?.removeEventListener('change', this.motionChanged)
     this.canvas.ownerDocument.removeEventListener('visibilitychange', this.visibilityChanged)
     this.canvas.ownerDocument.defaultView?.removeEventListener('resize', this.resize)

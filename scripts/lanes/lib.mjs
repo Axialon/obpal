@@ -2,6 +2,7 @@
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, lstatSync, readdirSync, unlinkSync, rmdirSync, realpathSync, openSync, closeSync } from 'node:fs'
 import { dirname, resolve, relative, isAbsolute, toNamespacedPath } from 'node:path'
 import { createServer } from 'node:net'
+import { preserveLaneEvidence } from '../lib/evidence-archive.mjs'
 
 export const STAND_INS = Array.from({ length: 12 }, (_, i) => 5177 + i)
 export const WORKERS = Array.from({ length: 10 }, (_, i) => 5190 + i)
@@ -143,15 +144,17 @@ export function stopTrees(processes, lane, others) {
 
 export function guardCleanup(base, target) {
   const rel = relative(resolve(base), resolve(target))
-  if (!rel || rel.startsWith('..') || isAbsolute(rel) || !/^codex-[a-z][a-z0-9-]*$/.test(rel)) throw new Error('Cleanup target must be a direct codex lane inside .claude/worktrees')
+  if (!rel || rel.startsWith('..') || isAbsolute(rel) || !/^(?:codex|agent|astra)-[a-z][a-z0-9-]*$/.test(rel)) throw new Error('Cleanup target must be a direct agent, astra or codex lane inside .claude/worktrees')
   if (existsSync(base) && normalized(realpathSync(base)) !== normalized(resolve(base))) throw new Error('Worktree container must not traverse a reparse point')
   if (existsSync(target) && lstatSync(target).isSymbolicLink()) throw new Error('Lane root must not be a reparse point')
   return resolve(target)
 }
 
 /** Never recurse into symlinks/junctions; namespace paths handle long Windows filenames. */
-export function removeLaneTree(base, target) {
+export function removeLaneTree(base, target, options = {}) {
   const checked = guardCleanup(base, target)
+  // Every caller gets this safeguard. --force never implies permission to discard evidence.
+  if (existsSync(checked)) (options.preserve || preserveLaneEvidence)(checked, options)
   const remove = path => {
     const long = toNamespacedPath(path)
     const info = lstatSync(long)

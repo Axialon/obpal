@@ -1,9 +1,9 @@
 # Open references: useful facts, explicit file licences
 
-Research checked on 2026-09-30 using the primary project pages and file-level licence headers below. These are
+Original F0 research checked on 2026-09-30 using the primary project pages and file-level licence headers below. These are
 reference candidates, not vendored or version-pinned dependencies. **No external asset, code file, robot
-parameter file or new dependency was imported by F0.** Consequently this return does not add an open-source.json
-credit for something it does not ship. Future reuse must pin a commit/content hash and retain all required
+parameter file or new dependency was imported by F0.** That historical F0 return added no new dependency credit. F0-R adds the engine credits below for the already-pinned
+comparison packages, but no external robot assets or parameter files. Future reuse must pin a commit/content hash and retain all required
 notices in the same reviewed packet as the imported files. A moving URL is sufficient for a research lead,
 not for a reproducible import manifest.
 
@@ -17,7 +17,7 @@ No external reference authorises changing ob.Pal hardware drivers or driving a p
 
 | ID / family | Primary source and exact licence boundary | What it provides | Planned use, and what is not imported |
 | --- | --- | --- | --- |
-| R1 / foundation | [Rapier TypeScript source](https://github.com/dimforge/rapier/tree/master/typescript), [Rapier repository licence](https://github.com/dimforge/rapier/blob/master/LICENSE): Apache-2.0. [Official determinism guide](https://rapier.rs/docs/user_guides/javascript/determinism/). | Rigid bodies, joints, contacts and JS/WASM integration; exact capabilities depend on the pinned build. | Preferred F0-R engine candidate. Measure against the custom reference solver, pin one accepted package/build and lazy-load it. Not installed or benchmarked in this return. |
+| R1 / foundation | [Rapier TypeScript source](https://github.com/dimforge/rapier/tree/master/typescript), [Rapier repository licence](https://github.com/dimforge/rapier/blob/master/LICENSE): Apache-2.0. [Official determinism guide](https://rapier.rs/docs/user_guides/javascript/determinism/). | Rigid bodies, joints, contacts and JS/WASM integration; exact capabilities depend on the pinned build. | F0-R provisional selection is the already-pinned compat 0.21.0 package; real adapter and automated three-way fixture comparison are supplied. Astra did not execute its WASM. Promote only the measured selected engine; see PHYSICS-BACKENDS. |
 | R2 / humanoids | [Menagerie Unitree G1](https://github.com/google-deepmind/mujoco_menagerie/tree/main/unitree_g1), [that model's LICENSE](https://github.com/google-deepmind/mujoco_menagerie/blob/main/unitree_g1/LICENSE): BSD-3-Clause. | MJCF articulated layout, joint/actuator configuration, body inertials and collision/visual separation for a real robot family. | F1 parameter-structure and joint-space reference, with version/units checks. Do not silently copy G1 masses into differently proportioned ob.Pal bodies or copy branded shells. |
 | R3 / humanoids | [Berkeley Humanoid Lite](https://github.com/HybridRobotics/Berkeley-Humanoid-Lite), README licence section: code MIT; other assets CC-BY-SA-4.0. | Functioning open humanoid architecture, assembly/transmission information, controls and simulation descriptions. | Read layout/transmission facts for F1/H2, cite them. **No CAD, meshes or other SA assets copied.** MIT software permission does not relicense the design assets. |
 | R4 / humanoids | [ToddlerBot](https://github.com/hshi74/toddlerbot), [README licence declaration](https://raw.githubusercontent.com/hshi74/toddlerbot/main/README.md): code/docs MIT; design (Onshape/STL etc.) CC-BY-NC-SA-4.0. | Working locomotion/manipulation platform, motor/control conventions and mechanical layout. | F1 reference for target/actuator separation and documented functional layout. **No design files/meshes imported.** A downstream model's MIT label is not accepted as proof that upstream restricted geometry is cleared. |
@@ -59,3 +59,36 @@ manufacturer data here. Chrono/PX4 are formulation references, not substitutes f
 must identify and validate their chosen machine/airframe before claiming fidelity. Water/continuum coefficients
 remain labelled defaults until calibrated. The report-only gate likewise cannot certify an uninstrumented sim.
 These limits do not block an honest game/simulation; they block overstating what it represents.
+
+
+## F0-R NVIDIA additions (checked 2026-10-01)
+
+These entries distinguish upstream software from asset and dependency licences. No Isaac, Newton, ROS or robot
+model file is included in this packet. `src/support/open-source.json` credits the already-pinned physics packages
+used by the adapters/bench, not hypothetical asset imports. The following are research sources, not pinned
+reproducible asset downloads; any later import must carry its own exact bytes, hash and notices.
+
+| ID | Primary source / exact licence | Use and boundary |
+| --- | --- | --- |
+| R15 / Isaac Sim | [Isaac Sim LICENSE](https://github.com/isaac-sim/IsaacSim/blob/main/LICENSE): Apache-2.0 for the open-source project. [Robot asset catalogue](https://docs.isaacsim.omniverse.nvidia.com/6.0.0/assets/usd_assets_robots.html) lists separate asset licences. | Reference articulation/ROS 2 workflows for N2. Project licensing does not relicense bundled dependencies, linked CAD or asset collections. Not run here. |
+| R16 / Isaac Lab | [Release 3.0.0 licence](https://isaac-sim.github.io/IsaacLab/release/3.0.0/source/refs/license.html): most framework packages BSD-3-Clause; `isaaclab_mimic` and related scripts Apache-2.0, with per-file SPDX headers. | Reference training/control/scene separation, not imported policies or assets. Isaac Sim and dependency/asset notices remain separate. Not run here. |
+| R17 / PhysX + binding | [PhysX LICENSE.md](https://github.com/NVIDIA-Omniverse/PhysX/blob/main/LICENSE.md): BSD-3-Clause. [physx-js-webidl](https://github.com/fabmax/physx-js-webidl) and its [2.8.0 package declaration](https://github.com/fabmax/physx-js-webidl/blob/main/dist/package.json): MIT binding. | Real lazy browser comparator using native reduced-coordinate articulations. Binding 2.8.0 package prose names PhysX 5.11.0, not the brief's older 5.3.x; print actual runtime `PHYSICS_VERSION`. Existing dependency remains development-only unless the measured selection promotes it. Browser execution is pending. |
+| R18 / Newton | [Newton repository README/licensing](https://github.com/newton-physics/newton/blob/main/README.md): software Apache-2.0; documentation CC-BY-4.0. A Linux Foundation project initiated by Disney Research, Google DeepMind and NVIDIA. [1.3.0 requirements](https://newton-physics.github.io/newton/1.3.0/guide/installation.html). | N1 off-browser reference trajectories. Python/Warp implementation is not a browser or phone runtime for ob.Pal. CPU execution exists, but the proposed N1 GPU reference workload uses a suitable NVIDIA GPU; do not misstate GPU support as the only possible Newton execution. Not installed or run here. |
+| R19 / asset catalogue | [Isaac Sim 6.0 robot catalogue](https://docs.isaacsim.omniverse.nvidia.com/6.0.0/assets/usd_assets_robots.html), per-asset licence cells; selected entries immediately below. | Read joint frames, mass/inertia and gear/limit metadata only with exact variant/units/provenance. Do not attribute a dataset parameter to measured hardware without its source saying so. No meshes or parameters copied in F0-R. |
+
+### Exact asset references, not a blanket asset permission
+
+Paths are relative to the catalogue's robot root. Each licence below belongs to that named catalogue entry,
+not every asset from its manufacturer. A later import must recheck the actual file's notices and dependencies.
+
+| Cited asset path | Catalogue licence | Possible later use; current status |
+| --- | --- | --- |
+| `Turtlebot/Turtlebot3/turtlebot3_burger.usd` | Apache-2.0 | N2 simulated base/joint layout; reference only. |
+| `iRobot/Create3/create_3.usd` | BSD-3-Clause | Mobile-robot wheel frames/drive comparison; reference only. |
+| `NVIDIA/Robomaker/aws_robomaker_jetbot.usd` | MIT | Compact differential-drive reference; reference only. |
+| `FrankaRobotics/FrankaPanda/franka.usd` | Apache-2.0 | N1/N2 arm settling and named-joint/frame reference; reference only. |
+
+No USD, texture, mesh or robot numeric table is shipped by F0-R, so these assets are deliberately not credited as
+used files in the application. Restricted, unlicensed or uncleared dependencies remain reference-only even when
+a catalogue neighbour has a permissive licence. The current physics fixtures use original, explicitly labelled
+simulation defaults. See the N1/N2 briefs for future provenance manifests and gate evidence.

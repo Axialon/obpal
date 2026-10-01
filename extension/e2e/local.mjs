@@ -64,7 +64,8 @@ export async function startLocal({ dist = resolve(here, '../../dist/client'), po
   const target = new URL(upstream)
   const secure = target.protocol === 'https:'
   const targetPort = Number(target.port) || (secure ? 443 : 80)
-  const [cert, key] = await ensureCert()
+  let cert, key
+  try { [cert, key] = await ensureCert() } catch (error) { await worker?.close(); throw error }
   let offline = false
   let sockets = new Set()
 
@@ -97,7 +98,10 @@ export async function startLocal({ dist = resolve(here, '../../dist/client'), po
         res.writeHead(r.statusCode ?? 502, r.headers)
         r.pipe(res)
       })
-      up.on('error', () => { res.writeHead(502); res.end() })
+      up.on('error', () => {
+        if (res.headersSent || res.writableEnded || res.destroyed) { res.destroy(); return }
+        res.writeHead(502); res.end()
+      })
       req.pipe(up)
       return
     }

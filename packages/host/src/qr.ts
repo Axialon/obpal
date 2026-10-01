@@ -46,6 +46,18 @@ const PLATE_MIN = 0.85
 /** Dot diameter, in modules: round dots with a hair of space between them. */
 const DOT = 0.92
 
+/** Module centres in the visible QR footprint, including its three-module quiet zone. */
+export function qrDotPoints(text: string): { x: number; y: number }[] {
+  const qr = encode(text, { ecc: 'Q', border: 0 })
+  const points: { x: number; y: number }[] = []
+  const size = qr.size + 6
+  const radius = Math.round(qr.size * 0.24) / 2
+  for (let y = 0; y < qr.size; y++) for (let x = 0; x < qr.size; x++) {
+    if (qr.data[y][x] && Math.hypot(x + 0.5 - qr.size / 2, y + 0.5 - qr.size / 2) >= radius + 0.2) points.push({ x: (x + 3.5) / size, y: (y + 3.5) / size })
+  }
+  return points
+}
+
 /** The colours a code is drawn in, made safe to scan. */
 export function qrColors(style: Pick<QrStyle, 'accent' | 'ink' | 'plate'> = {}) {
   const accent = parseColor(style.accent) ?? LIME

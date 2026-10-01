@@ -1,6 +1,7 @@
 /** Presence proof on this checkout's local service. Evidence is always written to a temporary directory. */
+import { tempScope } from './lib/temp.mjs'
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -55,7 +56,9 @@ export function fakeXR() {
 }
 
 export async function runVR(local, check) {
-  const out = await mkdtemp(join(tmpdir(), 'obpal-vr-'))
+  const temps = tempScope()
+  try {
+  const out = await temps.make(join(tmpdir(), 'obpal-vr-'))
   const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true, args: ['--disable-features=WebRtcHideLocalIpsWithMdns', '--ignore-certificate-errors'] })
   const errors = []
   const makePage = async (options = {}) => {
@@ -64,6 +67,7 @@ export async function runVR(local, check) {
   }
   const ready = async page => {
     await page.waitForFunction(() => window.__presence && window.__presence.experience.rides().length, { timeout: 20000 })
+    if (await page.evaluate(() => window.__presence.shared?.guest)) return
     const controls = page.locator('[data-panel="controls"]')
     if (await controls.count() && !(await controls.isVisible())) {
       const toggle = page.locator('[data-panel-toggle="controls"]'); await toggle.focus(); await toggle.click()
@@ -106,7 +110,7 @@ export async function runVR(local, check) {
     const url = new URL(invite); url.searchParams.set('test', 'vr')
     await guest.goto(url.href); await ready(guest)
     await check('VR: two authenticated participants share a drone-cone collision', async () => {
-      await guest.waitForFunction(() => window.__presence.state().status === 'Shared scene', { timeout: 20000 })
+      await guest.waitForFunction(() => window.__presence.state().status === 'Live', { timeout: 20000 })
       const visitor = await guest.evaluate(() => window.__presence.shared.id)
       assert.equal(await host.evaluate(id => window.__sim.claims.held(id), visitor), undefined, 'watching does not take a device claim')
       await guest.getByRole('button', { name: 'First person', exact: true }).click()
@@ -122,7 +126,7 @@ export async function runVR(local, check) {
       assert.equal(b.mode, 'first-person')
       await host.screenshot({ path: join(out, 'shared-host.png') }); await guest.screenshot({ path: join(out, 'shared-guest.png') })
     })
-    await check('VR: a remote grab and throw is authoritative on both screens', async () => {
+    await check('VR: a watcher has no grab or drive controls, including XR input', async () => {
       await host.evaluate(() => {
         const d = window.__device.logic.drones[0]; Object.assign(d, { vx: 0, vy: 0, vz: 0, phase: 'landed' })
         const b = window.__presence.shared.world.bodies[1]
@@ -130,17 +134,17 @@ export async function runVR(local, check) {
       })
       await guest.waitForTimeout(150)
       await guest.getByRole('button', { name: 'Options', exact: true }).click()
-      await guest.getByRole('button', { name: 'Grab', exact: true }).click()
-      await host.waitForFunction(() => window.__presence.shared.world.bodies.some(b => b.owner && b.owner !== 'host'))
-      await guest.waitForFunction(() => window.__presence.shared.world.bodies.some(b => b.owner))
-      await guest.mouse.move(560, 450); await guest.mouse.down(); await guest.mouse.move(620, 420, { steps: 12 }); await guest.mouse.up()
-      await guest.getByRole('button', { name: 'Release', exact: true }).click()
-      await host.waitForFunction(() => window.__presence.shared.world.bodies.every(b => !b.owner))
-      await guest.waitForFunction(() => window.__presence.shared.world.bodies.every(b => !b.owner))
-      await guest.getByRole('button', { name: 'Grab', exact: true }).click()
+      assert.equal(await guest.getByRole('button', { name: 'Grab', exact: true }).count(), 0)
+      assert.equal(await guest.getByRole('switch', { name: 'Drive with XR sticks' }).count(), 0)
+      await guest.evaluate(() => {
+        const shared = window.__presence.shared, input = shared.lastInput
+        shared.link.sendCtl({ t: 'sim', v: 1, kind: 'input', seq: shared.seq + 1, data: { ...input, grab: true, pad: { axes: [1,1,1,1], triggers: [1,1], buttons: 1 } } })
+      })
+      await guest.waitForTimeout(200)
+      assert.equal(await host.evaluate(() => window.__presence.shared.world.bodies.some(b => b.owner && b.owner !== 'host')), false)
       await guest.locator('.presence-controls').getByRole('button', { name: 'Overview', exact: true }).click()
       await guest.getByRole('button', { name: 'First person', exact: true }).click()
-      await guest.getByRole('button', { name: 'Grab', exact: true }).waitFor()
+      assert.equal(await guest.getByRole('button', { name: 'Grab', exact: true }).count(), 0)
     })
     await check('VR: a second scene visitor has its own coloured presence', async () => {
       const other = await makePage(); await other.goto(url.href); await ready(other)
@@ -155,7 +159,7 @@ export async function runVR(local, check) {
       await screen.waitForFunction(() => window.__obpal?.pairingUrl)
       const invite = new URL(await screen.evaluate(() => window.__presence.shared.shareUrl())); invite.searchParams.set('test', 'vr')
       const peer = await makePage(); await peer.goto(invite.href); await ready(peer)
-      await peer.waitForFunction(() => window.__presence.state().status === 'Shared scene')
+      await peer.waitForFunction(() => window.__presence.state().status === 'Live')
       await peer.getByRole('button', { name: 'First person', exact: true }).click()
       await screen.evaluate(() => window.__arm.removeArm('a1'))
       await peer.waitForFunction(() => window.__presence.experience.rides().map(r => r.id).join() === 'a2')
@@ -213,6 +217,8 @@ export async function runVR(local, check) {
     await writeFile(join(out, 'index.html'), `<!doctype html><meta charset="utf-8"><title>Shared sims · presence evidence</title><style>body{font:16px system-ui;background:#141923;color:#eee;margin:32px}section{margin:36px 0}img{width:48%;vertical-align:top}a{color:#c7baff}</style><h1>Shared sims · first person and VR</h1><p>Software browser evidence; hardware comfort and headset frame rate are not measured.</p>${captures.map(([name]) => `<section><h2>${name}</h2><img src="${name}-before.png" alt="${name} overview"><img src="${name}-after.png" alt="${name} first person"></section>`).join('')}<section><h2>Two participants</h2><img src="shared-host.png"><img src="shared-guest.png"><img src="two-participants.png"><img src="phone-first-person.png"></section><a href="xr-cadence.json">Emulated XR cadence</a>`)
     await check('VR: no browser errors', () => assert.deepEqual(errors, []))
   } finally { await browser.close(); console.log(`  VR evidence: ${out}`) }
+
+  } finally { await temps.cleanup() }
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {

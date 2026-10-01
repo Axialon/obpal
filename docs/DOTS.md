@@ -18,7 +18,7 @@ Use `src/family/family.css` for the surface, accent, ink and timing roles. Apps 
 | `--ob-dot-surface` | `--bb-sheet` | Carbon or site glass beneath dots |
 | `--ob-dot-focus` | `--bb-accent-text` | Ordinary focus ring around the control, outside the field |
 
-Light surface variants use the darker accent-text for flat dots. Reduce the bead light's exposure and use a dark neutral outline if its silhouette lacks contrast. A meaningful dot glyph needs at least 3:1 contrast against its immediate surface; explanatory text follows the site's text contrast rules. Color, light and movement never replace a status label. Denial and faults keep the existing labeled status treatment rather than turning the whole constellation red.
+Light surface variants use the darker accent-text for flat dots. Reduce the bead light's exposure and use a dark neutral outline if its silhouette lacks contrast. Connection seal raster cores need at least 4.5:1 against their opaque family sheet backing, and decorative effect cores at least 3:1. Preserved seal cells use full ink opacity. Accent-text is used only when its token ratio against that backing reaches 10:1, leaving headroom for small raster coverage; otherwise use family ink. Never use a raw accent on Light. Measure the rendered pixels, including the glass behind them; explanatory text follows the site's text contrast rules. Color, light and movement never replace a status label. Denial and faults keep the existing labeled status treatment rather than turning the whole constellation red.
 
 ## Geometry and scale
 
@@ -30,13 +30,13 @@ All sizes below are **CSS pixel diameters and center-to-center pitches**, measur
 | `dot.base` | 3 px | 12 px | Panel field and device outline |
 | `dot.display` | 4.2 px | 16 px | Large outline or prominent glyph |
 | `dot.beacon` | 6 px | At least 20 px clear space | One progress marker |
-| `dot.seal` | `min(4.2 px, 0.64 × cell pitch)` | `glyph side / 11` | Trust lane's occupied 11×11 cells |
+| `dot.seal` | `min(4.2 px, 0.90 × cell pitch)` | `glyph side / 11` | Preserved trust seal cells; ordinary decorative samples retain 0.64 × pitch |
 
-At a 28 px glyph, pitch is 2.55 px and diameter is 1.63 px. Preserve every occupied cell, order and hole. Never resample a seal to meet a decorative density cap; make the surrounding field smaller instead. Present a readable name or comparison alternative beside tiny glyphs. Enlarge the glyph when the comparison is the main task.
+At a 28 px glyph, pitch is 2.55 px and diameter is 2.29 px. Preserve every occupied cell, order and hole. Never resample a seal to meet a decorative density cap; make the surrounding field smaller instead. Present a readable name or comparison alternative beside tiny glyphs. Enlarge the glyph when the comparison is the main task.
 
 Square grids use equal horizontal and vertical pitch and a fixed origin. Hex grids offset alternate rows by half a pitch; row spacing is `0.866 × pitch`. Radial grids use concentric rings separated by one pitch, with `round(2πr / pitch)` samples on each ring and a stable angular origin. Constellations sample meaningful paths by arc length, with minimum separation `0.85 × pitch`; no random glitter or changing sample counts during interaction. Round corners follow the same path spacing as straight edges. Deduplicate endpoints.
 
-Keep diameter below 0.4 × pitch for ordinary fields. The seal's denser 0.64 ratio is intentional. Do not mix grid families inside one glyph. A phone, browser and PC can have separate, stable local grids, joined by one continuous thin thread. Meaningful outlines stay in the focal plane and have generous empty space around them.
+Keep diameter below 0.4 × pitch for ordinary fields. The preserved seal's denser 0.90 ratio is intentional. Do not mix grid families inside one glyph. A phone, browser and PC can have separate, stable local grids, joined by one continuous thin thread. Meaningful outlines stay in the focal plane and have generous empty space around them.
 
 ## Flat circles: raster rules
 
@@ -122,3 +122,13 @@ Technical reference: custom material uniforms and shader responsibilities follow
 Stage A resolves sizes, roles and timing in `packages/host/src/dot-tokens.ts`. `src/ui/kit/dot-field.ts` re-exports that contract; `src/ui/kit/dot-space.ts` projects the same normalized point shape as instanced satin spheres. The hero uses one context and on-demand pointer redraws, with a flat fallback on missing or lost WebGL. The first build uses depth-dependent contrast falloff rather than photographic depth of field, and no bloom. Device outlines stay below the phone density limit.
 
 Seal callers opt into preserved samples and never into decorative displacement. The existing caller-owned performance clock and 1200 ms sequence remain unchanged. `DotTimeline` carries an epoch `startedAt` and duration; `dotProgress` can align later consumers. The seal moment records that epoch alongside its existing local start. Stage B must carry the authoritative shared start through the existing handshake, estimate clock offset and use QR geometry for camera projection; no camera flight or new authentication is shipped here.
+
+## Reusable dot loader and connection surface
+
+`DotLoader({ size, label })` and `DOT_LOADER_STYLE` are exported by the portable host package and `src/ui/kit/dot-field.ts`. Sizes start at 16 CSS px and can grow to a hero footprint. Mount `loader.el` in a reserved box, adopt the style once, call `start()` idempotently, `finish()` when the result is ready, and `destroy()` on removal. `aria-busy` follows loading; the accessible label describes the work. The three circles use family ink, with transform and opacity updates only. They never measure layout in a frame. All instances use `dotClock`, one rAF request per document, with an absolute phase that state updates do not restart. Hidden documents, offscreen loaders and reduced motion stop subscribing; reduced motion leaves three crisp stationary circles.
+
+`SealSurface` owns the QR's existing footprint. Its loader hands three source dots into the QR in 240 ms. The scannable SVG then stays still. Authenticated `reveal(id, delayMs)` keeps the caller's original 1200 ms clock, including late delivery: QR modules lift, gather into a ribbon, assemble into the seal and ripple. The flight canvas hands off to the same-size resting glyphs. Extra peers start from an add-dot burst; departure and add/cancel reverse the path. Only one flight or resting plane moves at a time. Full comparison is available from each peer button; names and controls remain accessible. Reduced motion settles immediately, with no travel or hover animation.
+
+Mount `addControl` in the card's icon footer so it never covers a seal at the eight-peer limit. `setPlaceholder(symbol)` stops busy work when no code is available; `loading()` reuses the existing loader when generation resumes.
+
+The phone's `landSeal(row, delayMs, source)` drives the existing compact status canvas and leaves it mounted. Tilt uses already permitted input. The Link popup's activity observer is local, carries no input payload and does not join the controlled page's input port. Live activity causes one finite, one-pixel breath; it never starts a continuous idle loop.

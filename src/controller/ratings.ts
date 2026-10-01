@@ -29,7 +29,7 @@ export interface Rating {
 }
 
 /** What the ratings read from a layout. */
-export type RatedLayout = Pick<Layout, 'modes' | 'controllers' | 'utilities' | 'point' | 'tray' | 'profile'>
+export type RatedLayout = Pick<Layout, 'modes' | 'controllers' | 'utilities' | 'point' | 'tray' | 'profile' | 'universal'>
 
 /**
  * The face a controller is drawn on: the phone's panels, named as the old mode tabs were (`rotate` is the trackpad's,
@@ -114,6 +114,7 @@ export function rateControllers(layout: RatedLayout, device: { motion: boolean }
   const has = (u: UtilityId) => !utilities || utilities.includes(u)
   const keyboard = Array.isArray(layout.tray) && layout.tray.some((c) => c?.type === 'keyboard')
   const takes = (id: ControllerId): boolean => {
+    if (layout.universal) return true
     // Music faces only where a screen names them: nothing reaches them through the modes of older screens.
     if (id === Controller.drums || id === Controller.keys) return named.includes(id)
     if (id === Controller.keyboard) return keyboard || named.includes(id)

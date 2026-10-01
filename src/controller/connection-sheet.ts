@@ -7,7 +7,7 @@ import { readScan } from './scan-code'
 import { sheetExits } from './sheet'
 import { tick } from './haptics'
 import { ICONS } from '../ui/icons'
-import { html, setMarkup } from '../ui/markup'
+import { setMarkup } from '../ui/markup'
 
 function h<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', text = '') {
   const node = document.createElement(tag)
@@ -21,7 +21,18 @@ const button = (text: string, run: () => void, cls = 'btn') => {
   b.onclick = run
   return b
 }
-const kinds = { pc: 'PC', sim: 'Sim', viewer: 'Viewer', site: 'Site' }
+function symbol(icon: string, name: string) {
+  const node = h('span', 'connection-symbol')
+  node.setAttribute('role', 'img'); node.setAttribute('aria-label', name); node.title = name
+  setMarkup(node, ICONS[icon])
+  return node
+}
+function iconButton(icon: string, name: string, run: () => void, cls: string) {
+  const node = button('', run, cls)
+  node.setAttribute('aria-label', name); node.title = name
+  setMarkup(node, ICONS[icon])
+  return node
+}
 const ago = (at: number) => {
   const minutes = Math.max(0, Math.floor((Date.now() - at) / 60000))
   return minutes < 1 ? 'Just now' : minutes < 60 ? `${minutes}m ago` : minutes < 1440 ? `${Math.floor(minutes / 60)}h ago` : new Date(at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
@@ -43,7 +54,7 @@ export class ConnectionSheet {
   private background: { el: HTMLElement; hidden: string | null; inert: boolean } | null = null
   private joining: Connection | null = null
 
-  constructor(private hub: Connections) {
+  constructor(private hub: Connections, private mountSeal?: (slot: HTMLElement, connection: Connection) => void) {
     hub.changed = () => {
       if (this.joining?.welcome && !this.joining.failure && this.joining.link.ready && hub.active === this.joining) { this.close(); return }
       if (this.dialog && this.view === 'list') this.list()
@@ -61,8 +72,7 @@ export class ConnectionSheet {
       card.setAttribute('aria-label', 'Connections')
       const head = h('div', 'sheet-head connection-head')
       head.append(h('div', 'grip'), h('h2', '', 'Connections'))
-      const close = button('×', () => this.close(), 'icon-btn glass')
-      close.setAttribute('aria-label', 'Close connections')
+      const close = iconButton('close', 'Close connections', () => this.close(), 'icon-btn glass')
       head.append(close)
       this.body = h('div', 'connection-body')
       this.say = h('p', 'connection-say')
@@ -131,7 +141,7 @@ export class ConnectionSheet {
     const all = new Map(this.hub.rows)
     for (const c of this.hub.live.values()) if (!all.has(c.row.id)) all.set(c.row.id, c.row)
     const rows = [...all.values()].sort((a, b) => (Number(b.id === this.hub.current) - Number(a.id === this.hub.current)) || Number(!!this.hub.live.get(b.id)?.link.ready) - Number(!!this.hub.live.get(a.id)?.link.ready) || b.at - a.at)
-    const signature = JSON.stringify([this.hub.loading, this.hub.saving, this.hub.current, this.hub.maxLive, rows.map((r) => [r.id, r.name, r.at, this.hub.live.get(r.id)?.link.status, this.hub.live.get(r.id)?.failure, this.hub.live.get(r.id)?.stats?.path, this.hub.live.get(r.id)?.stillConnecting])])
+    const signature = JSON.stringify([this.hub.loading, this.hub.saving, this.hub.current, this.hub.maxLive, rows.map((r) => [r.id, r.name, r.kind, r.at, this.hub.live.get(r.id)?.link.status, this.hub.live.get(r.id)?.failure, this.hub.live.get(r.id)?.stats?.path, this.hub.live.get(r.id)?.stats?.rttMs, this.hub.live.get(r.id)?.welcome?.layout, this.hub.live.get(r.id)?.stillConnecting])])
     if (signature === this.signature) return
     this.signature = signature
     const focus = document.activeElement as HTMLElement | null
@@ -146,6 +156,10 @@ export class ConnectionSheet {
     if (this.hub.saving) list.append(h('p', 'connection-saving', 'Saving…'))
     const tools = h('div', 'connection-actions')
     tools.append(button('Scan another code', () => this.scan(), 'btn primary'), button('Enter a code', () => this.code()))
+    tools.children[0].setAttribute('aria-label', 'Scan another code')
+    tools.children[1].setAttribute('aria-label', 'Enter a code')
+    setMarkup(tools.children[0], ICONS.scan); tools.children[0].append(h('span', '', 'Scan'))
+    setMarkup(tools.children[1], ICONS.keyboard); tools.children[1].append(h('span', '', 'Enter code'))
     const limit = h('label', 'connection-limit', 'Keep connected')
     const select = h('select')
     select.setAttribute('aria-label', 'Maximum live connections')
@@ -181,24 +195,43 @@ export class ConnectionSheet {
       void this.hub.use(row.id).then(c => this.follow(c), (e: Error) => this.tell(e.message))
     }, 'connection-use')
     use.setAttribute('aria-label', `${live && active ? 'Active' : needsCode ? 'Pair again with' : connecting ? 'Connecting to' : 'Switch to'} ${row.name}`)
-    const mark = h('span', 'connection-mark', active ? '●' : live ? 'Ⅱ' : '○')
-    mark.setAttribute('aria-hidden', 'true')
+    const state = live ? active ? 'Connected' : 'Available · paused' : connecting ? c.link.status === 'reconnecting' ? 'Reconnecting' : c.stillConnecting ? 'Still connecting' : 'Connecting' : 'Offline'
+    const mark = symbol(live ? active ? 'check' : 'pause' : connecting ? 'more' : 'link', state)
+    mark.classList.add('connection-mark')
+    mark.dataset.pending = String(!!connecting)
     const label = h('span', 'connection-label')
-    label.append(h('b', '', row.name), h('small', '', `${kinds[row.kind]} · ${active && live ? 'Connected' : live ? 'Available · paused' : connecting ? c.stillConnecting ? 'Still connecting' : 'Connecting…' : 'Offline'}`))
-    if (needsCode) label.append(h('small', '', 'Enter current code'))
+    label.append(h('b', '', row.name))
+    const signals = h('span', 'connection-signals')
+    signals.append(symbol('view', row.kind === 'pc' ? 'PC device' : 'Screen device'))
+    const controllers = c?.welcome?.layout.controllers ?? []
+    const keys = controllers.some(name => /keyboard|keys/.test(name))
+    const target = row.kind === 'pc' ? ['mouse', 'PC'] : keys ? ['keyboard', 'Keys'] : row.kind === 'viewer' ? ['cube', '3D'] : ['remote', 'Controller']
+    signals.append(symbol(target[0], `Target: ${target[1]}`))
+    const path = live ? c.stats?.path : undefined
+    signals.append(symbol(path === 'direct' ? 'link' : path === 'relay' ? 'arrange' : 'more', path === 'direct' ? 'Direct link' : path === 'relay' ? 'Relayed link' : live ? 'Link route unknown' : 'No live link'))
+    signals.append(symbol(live ? 'lock' : 'unlock', live ? 'Encrypted connection' : 'Not connected'))
+    const rtt = live ? c.stats?.rttMs : null
+    const bars = h('span', 'connection-quality')
+    bars.setAttribute('role', 'img'); bars.setAttribute('aria-label', rtt == null ? 'Round-trip quality unknown' : `Round trip ${rtt} milliseconds`)
+    bars.title = bars.getAttribute('aria-label')!
+    const quality = rtt == null ? 0 : rtt <= 80 ? 3 : rtt <= 180 ? 2 : 1
+    for (let i = 0; i < 3; i++) { const dot = h('i'); dot.dataset.lit = String(i < quality); bars.append(dot) }
+    signals.append(bars)
+    label.append(signals)
     const detail = h('span', 'connection-detail')
-    const badge = h('small', 'connection-badge', 'Not connected')
-    if (live) setMarkup(badge, html`${ICONS.lock}<span>${c?.stats?.path === 'relay' ? 'Relayed' : c?.stats?.path === 'direct' ? 'Direct' : 'Encrypted'}</span>`)
-    detail.append(h('small', '', ago(row.at)), badge)
-    use.append(mark, label, detail)
+    detail.append(h('small', '', needsCode ? 'Enter current code' : state), h('small', 'connection-age', ago(row.at)))
+    label.append(detail)
+    const seal = h('span', 'connection-seal-slot')
+    seal.dataset.connectionSeal = row.id
+    seal.hidden = !this.mountSeal || !live
+    if (live && this.mountSeal) this.mountSeal(seal, c)
+    use.append(mark, label, seal)
     const manage = h('div', 'connection-manage')
-    const rename = button('Rename', () => this.rename(row), 'connection-option')
-    rename.setAttribute('aria-label', `Rename ${row.name}`)
-    const forget = button('Forget', () => {
+    const rename = iconButton('settings', `Rename ${row.name}`, () => this.rename(row), 'connection-option')
+    const forget = iconButton('close', `Forget ${row.name}`, () => {
       forget.disabled = true
       void this.hub.forget(row.id).then(() => { this.signature = ''; this.list(); this.tell('Forgotten. Scan again to reconnect.') })
     }, 'connection-option')
-    forget.setAttribute('aria-label', `Forget ${row.name}`)
     manage.append(rename, forget)
     el.append(use)
     if (c && !live) {

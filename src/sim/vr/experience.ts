@@ -54,6 +54,8 @@ export class Experience extends EventTarget {
   private overlay: HTMLDivElement
   private mask: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>
   private exitTarget: THREE.Mesh
+  private guestBadge: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> | null = null
+  private guestBadgeText = ''
   private lastUI = -Infinity
   private observedFrames = 0
   private observedTime = 0
@@ -80,9 +82,15 @@ export class Experience extends EventTarget {
     const ctx = c.getContext('2d')!; ctx.fillStyle = '#141923'; ctx.fillRect(0, 0, 256, 64); ctx.fillStyle = '#ffffff'; ctx.font = '24px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('Overview', 128, 41)
     this.exitTarget = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.05), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), depthTest: false }))
     this.exitTarget.position.set(0, -0.2, -0.5); this.exitTarget.renderOrder = 10001; this.camera.add(this.exitTarget)
+    if (shared?.guest) {
+      // A headset without DOM overlays still needs to say whether its shared scene is live.
+      const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 80
+      this.guestBadge = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.047), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, depthTest: false }))
+      this.guestBadge.position.set(0, -0.13, -0.5); this.guestBadge.renderOrder = 10002; this.camera.add(this.guestBadge)
+    }
     this.controls = document.createElement('div'); this.controls.className = 'presence-controls'; this.controls.setAttribute('aria-label', 'Scene viewpoint')
     // A panel may keep a place for the viewpoint row (the device panel's View section).
-    this.controlsHome = document.querySelector<HTMLElement>('[data-presence-home]') ?? document.querySelector<HTMLElement>('.sim-panel') ?? document.body
+    this.controlsHome = shared?.guest ? document.body : document.querySelector<HTMLElement>('[data-presence-home]') ?? document.querySelector<HTMLElement>('.sim-panel') ?? document.body
     this.controls.classList.toggle('presence-floating', this.controlsHome === document.body)
     const button = (label: string, action: () => void) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.onclick = action; if (!['First person', 'Enter VR', 'Share scene'].includes(label)) b.className = 'presence-extra'; this.controls.append(b); return b }
     this.picker = document.createElement('select'); this.picker.setAttribute('aria-label', 'Ride a device'); this.controls.append(this.picker)
@@ -104,9 +112,9 @@ export class Experience extends EventTarget {
     }
     toggle('Horizon lock', this.settings.horizon, v => { this.settings.horizon = v; this.save() })
     toggle('Comfort shade', this.settings.vignette, v => { this.settings.vignette = v; this.save() })
-    toggle('Drive with XR sticks', false, v => { this.drive = v })
+    if (!shared?.guest) toggle('Drive with XR sticks', false, v => { this.drive = v })
     if (shared && !shared.guest) button('Share scene', () => { const url = shared.shareUrl(); if (url) { void navigator.clipboard?.writeText(url).then(() => { this.info.textContent = 'Scene link copied' }).catch(() => { this.showLink(url) }); this.showLink(url) } })
-    if (shared) this.grabButton = button('Grab / release', () => { this.grab = !this.grab; this.syncGrab() })
+    if (shared && !shared.guest) this.grabButton = button('Grab / release', () => { this.grab = !this.grab; this.syncGrab() })
     const stop = document.getElementById('estop')
     if (stop) button('Stop arms', () => shared?.guest ? shared.stopArms() : stop.click())
     this.info = document.createElement('small'); this.info.setAttribute('role', 'status'); this.controls.append(this.info)
@@ -173,7 +181,7 @@ export class Experience extends EventTarget {
     document.body.classList.toggle('presence-active', mode !== 'overview')
     if (mode === 'overview') this.controlsHome.prepend(this.controls)
     else document.body.append(this.controls)
-    if (document.body.classList.contains('has-sim-panels')) {
+    if (!this.shared?.guest && document.body.classList.contains('has-sim-panels')) {
       if (mode === 'first-person') simPanels().add(this.controls, { id: 'view', title: 'View controls', purpose: 'Switch viewpoint, recenter, return to overview and adjust comfort', icon: 'view', anchor: 'view' }).setState('open')
       else simPanels().remove('view')
     }
@@ -240,13 +248,26 @@ export class Experience extends EventTarget {
     })
   }
   update(dt: number, now: number) {
+    if (this.guestBadge && this.shared) {
+      this.guestBadge.visible = this.mode === 'xr'
+      if (this.guestBadgeText !== this.shared.status) {
+        this.guestBadgeText = this.shared.status
+        const texture = this.guestBadge.material.map as THREE.CanvasTexture
+        const canvas = texture.image as HTMLCanvasElement, ctx = canvas.getContext('2d')!
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+        ctx.fillStyle = 'rgba(20,25,35,0.88)'; ctx.beginPath(); ctx.roundRect(0, 0, 512, 80, 40); ctx.fill()
+        ctx.fillStyle = '#ffffff'; ctx.font = '24px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+        ctx.fillText(`Watching · ${this.shared.status}`, 256, 40)
+        texture.needsUpdate = true
+      }
+    }
     const rides = this.rides()
     if (!rides.some(r => r.id === this.ride)) this.ride = rides[0]?.id ?? ''
     if (now - this.lastUI > 500) {
       this.lastUI = now
       if ([...this.picker.options].map(o => o.value).join() !== rides.map(r => r.id).join()) this.picker.replaceChildren(...rides.map(r => new Option(r.name, r.id)))
       this.picker.value = this.ride
-      this.info.textContent = this.immersive ? this.mode === 'xr' ? 'X view · Y recenter · B exit · hold trigger to drive arms' : 'Drag to look · V view · R recenter · Q / E turn · Escape returns' : this.shared?.status ?? ''
+      this.info.textContent = this.immersive ? this.mode === 'xr' ? this.shared?.guest ? 'X view · Y recenter · B exit' : 'X view · Y recenter · B exit · hold trigger to drive arms' : 'Drag to look · V view · R recenter · Q / E turn · Escape returns' : this.shared?.guest ? '' : this.shared?.status ?? ''
     }
     const r = rides.find(r => r.id === this.ride)
     if (r?.views && this.look.viewpoint >= r.views.length) this.look.viewpoint = 0

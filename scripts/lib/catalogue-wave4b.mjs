@@ -20,8 +20,15 @@ export async function exerciseWave4b(id, { s, p, state, phone, heldBy, check, at
     await until('run started', async () => (await state()).running)
     for (let n = 0; n < 4 && (await state()).running; n++) await p.drag('#pad', 90, 0, 600)
     await until('marble and timer moved', async () => { const u = await state(); return u.x > -1 && u.time > 0 })
+    const track = (await state()).track
     await p.tapTray('Home')
-    await until('track survives Home', async () => { const u = await state(); return !u.running && u.x === -1.16 && u.track[12] !== null })
+    // Home replays the physical feeder, then rests in the cup rather than at an exact scripted coordinate.
+    await until('Home feeder replays', async () => { const u = await state(); return !u.running && u.time === 0 && u.start.phase === 'feeding' && u.start.elapsed < .48 })
+    await until('Home feeder settles', async () => (await state()).start.phase === 'settled')
+    const home = await state()
+    if (home.running || home.finished || home.time !== 0 || home.cursorX !== 2 || home.cursorZ !== 2 || home.tiltX !== 0 || home.tiltZ !== 0) throw new Error('Home did not reset the run')
+    if (JSON.stringify(home.track) !== JSON.stringify(track)) throw new Error('Home changed the built track')
+    if ([home, ...home.marbles].some(m => Math.hypot(m.x + 1.16, m.z) >= .16 || m.vx !== 0 || m.vz !== 0)) throw new Error('Home marbles did not rest in the cup')
   })
   if (id === 'planetary') await check('planetary: a phone samples a reachable rock once and operates the mast', async () => {
     const before = (await state()).samples

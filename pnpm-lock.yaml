@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@dimforge/rapier3d-compat':
+        specifier: 0.21.0
+        version: 0.21.0
       '@mediapipe/tasks-vision':
         specifier: 1.0.1
         version: 1.0.1
@@ -36,9 +39,6 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^5.20260924.1
         version: 5.20260924.1
-      '@dimforge/rapier3d-compat':
-        specifier: 0.21.0
-        version: 0.21.0
       '@types/three':
         specifier: ^0.186.0
         version: 0.186.0

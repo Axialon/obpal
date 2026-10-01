@@ -33,6 +33,8 @@ import { lightArena, quietHorizon, soleShadow } from './lighting'
 import { DriverPanel } from './driver-panel'
 import { upperJoints } from './driver-profile'
 import { startScene } from '../kit/recovery'
+import { LocalControls } from '../local-controls'
+import { mapFaceInput } from '../face-input'
 
 startScene(() => {
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
@@ -406,6 +408,14 @@ void startSimScene({
   if (localActive) s.take(actors[selected].id, 'host')
 })
 
+const localControls = new LocalControls({
+  id: 'humanoid', canvas: stage.renderer.domElement, units: () => actors.map(a => ({ id: a.id, name: a.name })), tray: layout.tray,
+  phone: () => document.getElementById('chip-invite')?.click(),
+  controllerWindow: () => { if (sim?.remote.pairingUrl) window.open(sim.remote.pairingUrl, '_blank', 'noopener') },
+  orbit: enabled => { stage.controls.enabled = enabled },
+  hardware: () => drivers.session.state === 'live',
+})
+
 const flashes = Array.from({ length: 4 }, () => {
   const mesh = new THREE.Mesh(
     new THREE.RingGeometry(0.065, 0.09, 24),
@@ -446,9 +456,10 @@ stage.onFrame = (t, dt) => {
     now = t * 1000,
     inputs = seats?.read(now),
     local = localBody.read(now)
+  const localFrames = localControls.frames(n => { const who = sim?.claims.holder(actors[n].id); return !!who && who !== 'host' }, dt)
   for (let i = 0; i < actors.length; i++) {
     const a = actors[i],
-      owner = sim?.claims.holder(a.id) ?? (localActive && selected === i ? 'host' : '')
+      owner = sim?.claims.holder(a.id) ?? (localFrames.has(i) || localActive && selected === i ? 'host' : '')
     a.rig.detail(stage.camera.position)
     a.rig.face(t, !!a.last?.tracked && !a.control.stopped, faceMotion.matches)
     if (owner !== a.owner) {
@@ -464,9 +475,10 @@ stage.onFrame = (t, dt) => {
         if (!stopped) a.control.resume()
       }
     }
-    const input = owner && owner !== 'host' ? inputs?.get(owner) : undefined
+    const raw = owner && owner !== 'host' ? inputs?.get(owner) : localFrames.get(i)
+    const input = raw ? mapFaceInput('humanoid', ['face.gamepad', 'face.trackpad'], raw, dt) : undefined
     const intent = classical(input)
-    if (owner === 'host' && selected === i) {
+    if (owner === 'host' && selected === i && !localFrames.has(i)) {
       intent.x = Number(keys.has('d')) - Number(keys.has('a'))
       intent.z = Number(keys.has('s')) - Number(keys.has('w'))
       intent.yaw = Number(keys.has('e')) - Number(keys.has('q'))

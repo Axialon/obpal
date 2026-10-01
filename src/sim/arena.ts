@@ -11,7 +11,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { batch, bolt, cylinder, environment, floorMaterial, maker, plastic, softKey } from './kit'
 import { blobShadow } from './devices/view'
-import { Mode, type Frame, type Layout, type PadState } from '@obpal/host'
+import { Mode, type Layout, type PadState } from '@obpal/host'
 import { applyTheme, initialTheme } from '../ui/themes'
 import { mountMarks } from '../ui/icons'
 import { mountTopBar } from '../landing/topbar'
@@ -26,6 +26,10 @@ import { mountSimPanels, numberSections } from './ui/panels'
 import { Readout } from '../ui/kit/readout'
 import { mountQuick, quickAction, quickViews } from '../ui/quick'
 import { modelFailed, startScene } from './kit/recovery'
+import { LocalControls } from './local-controls'
+import { mapFaceInput } from './face-input'
+import { Seats } from './devices/seats'
+import { restInput } from './devices/types'
 
 startScene(() => {
 applyTheme(initialTheme())
@@ -204,7 +208,7 @@ if (!shared.guest) quickAction({ id: 'reset', group: 'page', label: 'Reset', hin
 /** A slot that just got a player enters at its spawn point; an empty one leaves the ring. */
 function spawnHeld() {
   for (const s of slots) {
-    const who = sim?.claims.holder(s.id)
+    const who = sim?.claims.holder(s.id) ?? (localPlayers.has(slots.indexOf(s)) ? `local:${slots.indexOf(s)}` : undefined)
     if (who && !s.group.visible) { respawn(s); s.flash = 1 }
     if (!who && s.group.visible) s.group.visible = false
   }
@@ -227,35 +231,42 @@ function dash(s: Slot, who: string) {
   sound.bus.emit({ kind: 'action', action: 'launch', source: s.id, at: [s.pos.x, 0.1, s.pos.y], strength: 0.6, who })
 }
 
-/** The direction a player steers, from whatever its device sends. */
-function steer(f: Frame, pad: PadState | null): THREE.Vector2 {
-  if (pad) return new THREE.Vector2(pad.axes[0], pad.axes[1])
-  const d = new THREE.Vector2(f.tilt[0], f.tilt[1])
-  if (f.pad1[0] || f.pad1[1]) d.add(new THREE.Vector2(f.pad1[0], f.pad1[1]).multiplyScalar(0.08))
-  return d
-}
-
 const padA = new Map<string, number>()
+const localPlayers = new Set<number>()
+let seats: Seats | null = null
+const localControls = new LocalControls({
+  id: 'arena', canvas: renderer.domElement, units: () => slots, tray: layout.tray,
+  phone: () => document.getElementById('chip-invite')?.click(),
+  controllerWindow: () => { if (sim?.remote.pairingUrl) window.open(sim.remote.pairingUrl, '_blank', 'noopener') },
+})
 let last = 0
 function loop(now: number) {
   const dt = last ? Math.min(0.033, (now - last) / 1000) : 0
   last = now
   if (shared.guest) { view.draw(scene, camera, dt); return }
   const t = now / 1000
+  if (sim && !seats) seats = new Seats(sim.remote, layout, sim.control)
+  const phoneInputs = seats?.read(now)
+  const localFrames = localControls.frames(n => !!sim?.claims.holder(slots[n].id), dt)
+  if ([...localFrames.keys()].join(',') !== [...localPlayers].join(',')) {
+    localPlayers.clear(); for (const n of localFrames.keys()) localPlayers.add(n)
+    spawnHeld(); renderScore()
+  }
   const active = slots.filter((s) => s.group.visible)
   for (const s of active) {
-    const who = sim?.claims.holder(s.id)
-    if (!who || !sim) continue
-    if (s.falling) continue
-    const f = sim.remote.consumeOf(who, now)
+    const holder = sim?.claims.holder(s.id)
+    const who = holder ?? `local:${slots.indexOf(s)}`
+    const input = holder ? phoneInputs?.get(holder) : localFrames.get(slots.indexOf(s))
     const xrPad = xrPads.get(who)
-    const pad = xrPad && now - xrPad.at < 300 ? xrPad.pad : sim.remote.padOf(who)
+    if ((!input && !xrPad) || !sim) continue
+    if (s.falling) continue
+    const mapped = mapFaceInput('arena', [], input ?? restInput(), dt)
+    const pad = xrPad && now - xrPad.at < 300 ? xrPad.pad : mapped.pad
     // A on a gamepad dashes, once per press.
     const a = pad ? pad.buttons & 1 : 0
     if (a && !padA.get(who)) dash(s, who)
     padA.set(who, a)
-    const calibrated = sim.control.aim(who)
-    const d = steer(calibrated && !pad ? { ...f, tilt: calibrated.tilt } : f, pad)
+    const d = new THREE.Vector2(pad?.axes[0] ?? 0, pad?.axes[1] ?? 0)
     const head = xrPad ? shared.people.get(who)?.head.q : undefined
     const frame = head ? new ControlFrame().set(new THREE.Quaternion(...head)) : view.presence!.controlFrame
     d.set(...frame.planar(d.x, d.y))
@@ -316,7 +327,7 @@ function loop(now: number) {
     }
     if (!s.falling) s.group.position.set(s.pos.x, 0, s.pos.y)
     // The puck wears its player's colour, flashes on a hit, and its insignia turns.
-    const who = sim?.claims.holder(s.id)
+    const who = sim?.claims.holder(s.id) ?? (localPlayers.has(slots.indexOf(s)) ? `local:${slots.indexOf(s)}` : undefined)
     const mat = s.ring.material as THREE.MeshStandardMaterial
     mat.emissive.set(who ? sim!.colorOf(who) : '#5b6472')
     s.flash = Math.max(0, s.flash - dt / 0.6)
@@ -340,7 +351,7 @@ function renderScore() {
   const held = sim?.claims.snapshot() ?? {}
   $('score').replaceChildren(...slots.map((s) => {
     const li = document.createElement('li')
-    const who = held[s.id]
+    const who = held[s.id] ?? (localPlayers.has(slots.indexOf(s)) ? `local:${slots.indexOf(s)}` : undefined)
     li.classList.toggle('held', !!who)
     li.innerHTML = '<span class="fx"></span><span><b></b><small></small></span><span class="pts"></span>'
     const fx = li.querySelector<HTMLElement>('.fx')!

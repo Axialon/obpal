@@ -9,7 +9,8 @@
  * screens. --only=<name,name> runs some: catalogue, ui (the sidebar, drawer, glass select and sheet at five sizes:
  * ./lib/catalogue-ui.mjs), rover, drone, maze, ptz, lamp, claw.
  */
-import { mkdtemp, rm } from 'node:fs/promises'
+import { tempScope, keepTemp } from './lib/temp.mjs'
+import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join as joinPath } from 'node:path'
 import { chromium, devices } from 'playwright'
@@ -18,6 +19,9 @@ import { startLocal } from '../extension/e2e/local.mjs'
 import { startWorker } from './local-worker.mjs'
 import { deviceExercises, exerciseDevice } from './lib/catalogue-devices.mjs'
 import { chooseFace, faceOf, faceOptions, runCatalogueUi } from './lib/catalogue-ui.mjs'
+
+const temps = tempScope()
+try {
 
 const HEADED = process.argv.includes('--headed')
 const ONLY = (process.argv.find((a) => a.startsWith('--only='))?.slice(7) ?? '').split(',').filter(Boolean)
@@ -77,7 +81,7 @@ async function screenAt(path, { width = 1280, height = 800 } = {}) {
 }
 
 async function phone(invite, { landscape = false } = {}) {
-  const dir = await mkdtemp(joinPath(tmpdir(), 'obpal-cat-'))
+  const dir = await temps.make(joinPath(tmpdir(), 'obpal-cat-'))
   profiles.push(dir)
   const ctx = await chromium.launchPersistentContext(dir, { ...devices[landscape ? 'Pixel 7 landscape' : 'Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS })
   closers.push(ctx)
@@ -657,8 +661,10 @@ try {
   await Promise.allSettled(closers.map((c) => c.close()))
   await local?.close()
   await worker?.close()
-  await Promise.allSettled(profiles.map((d) => rm(d, { recursive: true, force: true })))
+  await Promise.allSettled(profiles.map((d) => (keepTemp() ? Promise.resolve() : rm(d, { recursive: true, force: true }))))
 }
 const failed = results.filter((r) => !r.ok)
 console.log(failed.length || exitCode ? `FAILED ${failed.length}/${results.length}` : `passed ${results.length}/${results.length}`)
-process.exit(failed.length || exitCode ? 1 : 0)
+process.exitCode = (failed.length || exitCode ? 1 : 0)
+
+} finally { await temps.cleanup() }

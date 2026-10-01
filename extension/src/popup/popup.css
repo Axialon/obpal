@@ -247,3 +247,10 @@ html.in-tab .pop { width: auto; max-width: 720px; margin: 0 auto; padding: 16px;
 .pop .link-journey { margin: 0; }
 /* A QR stays still while it can be scanned. */
 .qr.sweep::after, .qr:hover::after, .conn[data-s='connected'] .status i::after { animation: none; }
+.pop.linked .grid{grid-template-columns:inherit}
+#qr{padding:0;background:var(--bb-sheet);overflow:hidden;border-radius:16px}
+.pair-icons{display:flex;justify-content:center;align-items:center;gap:12px;color:var(--ink);margin-top:10px}
+.pair-icons .ic{width:20px;height:20px}
+.scan-check summary{display:grid;place-items:center;min-height:44px;cursor:pointer}
+.scan-check summary .ic{width:20px;height:20px}
+.scan-hint{display:none}

@@ -17,7 +17,7 @@ export async function measureSmoothnessMotion(page, { pendulum = false, marbleru
     const physics = pendulum || marblerun
     if (physics && (!logic?.physicsDiagnostics || !logic?.renderState)) throw new Error('Fixed-step foundation probe is missing')
     const next = () => new Promise(requestAnimationFrame)
-    if (physics) logic.units.forEach((_, n) => logic.home(n))
+    if (physics) logic.units.forEach((_, n) => logic.home(n, true))
     for (let n = 0; n < 90; n++) await next()
     const marbleRoots = []
     if (marblerun) scene.traverse(o => { if (o.isMesh && (o.name === 'marble' || o.name.startsWith('companion-marble-'))) marbleRoots.push(o) })
@@ -59,7 +59,7 @@ export async function measureSmoothnessMotion(page, { pendulum = false, marbleru
           if (phase === 'motion') logic.units.forEach(u => { u.omega = 1.4 })
           else logic.units.forEach((_, n) => logic.home(n))
         }
-        if (marblerun) logic.units.forEach((_, n) => logic.home(n))
+        if (marblerun) logic.units.forEach((_, n) => logic.home(n, true))
         const resting = marblerun ? logic.renderState() : null
         const begin = performance.now(); let previous = begin, pushes = 0
         // Include the RAF which reaches the duration; probe work between frames is not captured motion.

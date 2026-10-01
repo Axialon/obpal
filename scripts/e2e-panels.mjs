@@ -1,6 +1,7 @@
 /** Window behaviour in real Chromium; evidence is opt-in and always outside the checkout. */
+import { tempScope } from './lib/temp.mjs'
 import { chromium } from 'playwright'
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -40,7 +41,9 @@ function inside(rects, w, h) {
 }
 
 export async function runPanels(local, check) {
-  const out = process.env.OBPAL_PANEL_EVIDENCE || await mkdtemp(join(tmpdir(), 'obpal-panels-'))
+  const temps = tempScope()
+  try {
+  const out = process.env.OBPAL_PANEL_EVIDENCE || await temps.make(join(tmpdir(), 'obpal-panels-'))
   const rel = relative(resolve('.'), resolve(out))
   if (!isAbsolute(rel) && !rel.startsWith('..')) throw new Error('Panel evidence must go to a temporary folder')
   await mkdir(out, { recursive: true })
@@ -196,6 +199,8 @@ export async function runPanels(local, check) {
     console.log(`  panel evidence: ${out}`)
     await writeFile(join(out, 'index.html'), `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Sim window evidence</title><style>body{margin:32px auto;max-width:1400px;padding:0 24px;background:#151719;color:#f2f3f5;font:15px/1.5 system-ui}section{margin:30px 0}img{width:48%;vertical-align:top}video{max-width:100%;max-height:600px}a{color:#c6ff34}</style><h1>Adjustable sim windows</h1><p>Actual Chromium screenshots and pointer captures. Six sims at four screen sizes. Default layout and arranged layout are side by side.</p>${captures.map(p => `<section><h2>${p}</h2><a href="${p}-default.png"><img alt="${p} default" src="${p}-default.png" loading="lazy"></a> <a href="${p}-arranged.png"><img alt="${p} arranged" src="${p}-arranged.png" loading="lazy"></a>${p.endsWith('1280x800') ? `<details><summary>Arrangement capture</summary><video controls preload="none" src="${p}.webm"></video></details>` : ''}</section>`).join('')}<section><h2>Camera enlargement and light theme</h2><img alt="Enlarged camera" src="camera-enlarged.png"><img alt="Light theme" src="camera-light.png"></section></html>`)
   } finally { await browser.close() }
+
+  } finally { await temps.cleanup() }
 }
 
 if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {

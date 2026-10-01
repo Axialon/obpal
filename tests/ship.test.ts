@@ -4,7 +4,7 @@ import { guardShip, runShip } from '../scripts/lib/ship.mjs'
 
 const version = ['12345678', '1234', '1234', '1234', '123456789012'].join('-')
 const publicSha = 'a'.repeat(40)
-const outputs = [`Current Version ID: ${version}`, 'all passed (20 checks, 90 s)', 'Published', `${publicSha}\trefs/heads/main\n`]
+const outputs = [`Current Version ID: ${version}`, 'all passed (20 checks, 90 s)', 'Published', `${publicSha}\trefs/heads/main\n`, 'Verified backup']
 
 describe('ship guard and ordered failures', () => {
   it('requires a clean main checkout on master', () => {
@@ -18,14 +18,14 @@ describe('ship guard and ordered failures', () => {
   it('reports version, live summary and the published main commit', () => {
     const calls: string[] = []
     expect(runShip((command, args) => { calls.push([command, ...args].join(' ')); return outputs[calls.length - 1] })).toEqual({ version, check: outputs[1], published: publicSha })
-    expect(calls).toEqual(['pnpm run deploy', 'pnpm run check:live', 'node scripts/open-source.mjs --publish', 'git ls-remote https://github.com/Axialon/obpal.git refs/heads/main'])
+    expect(calls).toEqual(['pnpm run deploy', 'pnpm run check:live', 'node scripts/open-source.mjs --publish', 'git ls-remote https://github.com/Axialon/obpal.git refs/heads/main', 'node scripts/backup.mjs --label ship'])
   })
   it('parses deployment and check evidence when tools emit terminal colors', () => {
     let calls = 0
     expect(runShip(() => `\u001b[32m${outputs[calls++]}\u001b[0m`).version).toBe(version)
   })
-  it.each(['deploy', 'check:live', 'open-source publish', 'published commit lookup'])('stops at the first %s failure', step => {
-    const index = ['deploy', 'check:live', 'open-source publish', 'published commit lookup'].indexOf(step)
+  it.each(['deploy', 'check:live', 'open-source publish', 'published commit lookup', 'backup'])('stops at the first %s failure', step => {
+    const index = ['deploy', 'check:live', 'open-source publish', 'published commit lookup', 'backup'].indexOf(step)
     let calls = 0
     expect(() => runShip(() => { const at = calls++; if (at === index) throw new Error('synthetic'); return outputs[at] })).toThrow(`${step} failed`)
     expect(calls).toBe(index + 1)

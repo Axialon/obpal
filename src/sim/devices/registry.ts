@@ -64,7 +64,7 @@ export const DEVICES: DeviceEntry[] = [
   entry({ spec: PENDULUM_SPEC, logic: () => new PendulumLogic(), view: () => import('./pendulum.view') }),
   entry({ spec: TELESCOPE_SPEC, logic: () => new TelescopeLogic(), view: () => import('./telescope.view') }),
   entry({ spec: PLANETARY_SPEC, logic: () => new PlanetaryLogic(), view: () => import('./planetary.view') }),
-  entry({ spec: MARBLERUN_SPEC, logic: () => new MarblerunLogic(), view: () => import('./marblerun.view') }),
+  entry({ spec: MARBLERUN_SPEC, logic: () => new MarblerunLogic(typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches), view: () => import('./marblerun.view') }),
   entry({ spec: FOOTBALL_SPEC, logic: () => new FootballLogic(), view: () => import('./football.view') }),
   entry({ spec: ROVER_SPEC, logic: () => new RoverLogic(), view: () => import('./rover.view') }),
   entry({ spec: DRONE_SPEC, logic: () => new DroneLogic(), view: () => import('./drone.view') }),

@@ -10,7 +10,7 @@ import {
   type ScenePerson, type TierId, type TrayControl,
 } from '@obpal/core'
 import { formatCode, lookupCode, normalizeCode, splitCode } from '@obpal/core'
-import { Motion, motionSupported, requestMotionPermission, screenAngle } from './motion'
+import { Motion, motionPermissionRequired, motionSupported, requestMotionPermission, screenAngle } from './motion'
 import { Trackpad } from './trackpad'
 import { feedbackEnabled, setFeedbackEnabled, hapticsKind, tick } from './haptics'
 import { GyroSmoother, playerSpaceRates, TiltStick } from './gyro'
@@ -520,6 +520,7 @@ async function boot(code?: Join) {
   let ratings: Rating[] = []
   let ratedFrom = ''
   let gyroOn = false
+  let marbleMotionChosen = false
   // Keeping the phone cool (see keepAwake below): the screen's wake lock, whether the sensors run, and resting.
   let wake: { release(): Promise<void> } | null = null
   let motionOn = false
@@ -588,7 +589,7 @@ async function boot(code?: Join) {
   /** Every controller rated for this screen and this phone, best first; worked out again only when either changes. */
   function rated(): Rating[] {
     const motion = tier !== Tier.touch
-    const from = JSON.stringify([layout.modes, layout.controllers, layout.utilities, layout.point, layout.profile, layout.tray.some((c) => c.type === 'keyboard'), motion, screenName()])
+    const from = JSON.stringify([layout.universal, layout.modes, layout.controllers, layout.utilities, layout.point, layout.profile, layout.tray.some((c) => c.type === 'keyboard'), motion, screenName()])
     if (from !== ratedFrom) { ratedFrom = from; ratings = byFit(rateControllers(layout, { motion }, screenName()), layout) }
     return ratings
   }
@@ -639,7 +640,7 @@ async function boot(code?: Join) {
     controllers: () => switcher.open(),
   })
   /** The controller bar and the catalogue (./switcher.ts). */
-  const switcher = new Switcher({ pick, hand: openHands, body: openBody, feel: (strong) => tick(strong), toast: (text) => toast(text) })
+  const switcher = new Switcher({ pick, hand: openHands, body: openBody, tilt: () => { settings.style = 'game'; store.set('obpal.style', 'game'); pick(Controller.trackpad) }, feel: (strong) => tick(strong), toast: (text) => toast(text) })
   /** The node strip along the trackpad's edge: which part of what you hold the pad drives (./strip.ts). */
   const strip = new NodeStrip({ send: (id, v) => { if (link.ready) link.sendCtl({ t: 'value', id, v }) }, feel: (strong) => tick(strong), changed: () => render() })
 
@@ -692,9 +693,11 @@ async function boot(code?: Join) {
   let handSeq = 0
   let handGen = 0
   let bodyCamera: CameraView | null = null
+  let bodyHold = false
   let bodyTracker: BodyTracker | null = null
   let bodySeq = 0, bodyGen = 0
   function stopBody() {
+    bodyHold = false
     bodyTracker?.stop(); bodyTracker = null
     const camera = bodyCamera; bodyCamera = null
     camera?.close()
@@ -705,9 +708,10 @@ async function boot(code?: Join) {
     keyboard.close(true)
     const camera = new CameraView({ mode: 'body', measurements: cameraTest,
       typed: stopBody,
+      hold: layout.universal ? active => { bodyHold = active; lastSend = 0; pump(16.7) } : undefined,
       reset: () => { bodyTracker?.stop(); bodyTracker = null },
       fingers: layout.utilities?.includes('camera.hand') ? enabled => bodyTracker?.setFingers(enabled) : undefined,
-      close: () => { bodyTracker?.stop(); bodyTracker = null; bodyCamera = null; syncMotion(); render(); lastSend = 0; pump(16.7) },
+      close: () => { bodyTracker?.stop(); bodyTracker = null; bodyCamera = null; bodyHold = false; syncMotion(); render(); lastSend = 0; pump(16.7) },
       ready: (video, overlay) => {
         if (bodyCamera !== camera) return
         bodyTracker?.stop()
@@ -744,7 +748,7 @@ async function boot(code?: Join) {
     const camera = new CameraView({ mode: 'hand', measurements: cameraTest,
       typed: () => stopHands(),
       close: () => { handTracker?.stop(); handTracker = null; handCamera = null; handHold = false; syncMotion(); render(); lastSend = 0; pump(16.7) },
-      hold: stop ? active => { handHold = active; lastSend = 0; pump(16.7) } : undefined,
+      hold: stop || layout.universal ? active => { handHold = active; lastSend = 0; pump(16.7) } : undefined,
       stop: stop ? () => { handHold = false; lastSend = 0; pump(16.7); link.sendCtl({ t: 'btn', id: stop.id, ev: 'tap' }) } : undefined,
       ready: (video, overlay) => {
         if (handCamera !== camera) return
@@ -855,7 +859,7 @@ async function boot(code?: Join) {
     toast(`Controlling ${next.row.name}`)
   }
 
-  const permission = motionSupported() ? await requestMotionPermission() : 'denied'
+  const permission = motionSupported() ? isApple && motionPermissionRequired() ? 'prompt' : await requestMotionPermission() : 'denied'
   permissionReady = true
   motionPrompt = permission === 'prompt'
   startControls()
@@ -968,14 +972,21 @@ async function boot(code?: Join) {
     const next: TierId = motion.hasGyro && motion.q ? Tier.gyro : motion.q ? Tier.compass : Tier.touch
     if (next === tier) return
     tier = next
+    defaultMarbleMotion()
     render()
-    if (tier !== Tier.touch) hint('gyro', () => document.getElementById('gyro'), 'Tap to steer with your phone’s motion', { place: 'top', delay: 600 })
+    if (tier !== Tier.touch && !gyroOn) hint('gyro', () => document.getElementById('gyro'), 'Tap to steer with your phone’s motion', { place: 'top', delay: 600 })
+  }
+
+  function defaultMarbleMotion() {
+    if (control.sim !== 'marblerun' || marbleMotionChosen || !motion.q) return
+    marbleMotionChosen = true
+    setGyro(true)
   }
 
   function onStatus(s: LinkStatus) {
     // Left on purpose: the link closing says nothing more (the Disconnected screen stays).
     if (hungUp) return
-    if (s !== 'connected') linkBadge.down()
+    if (s !== 'connected') linkBadge.down(s)
     if (s === 'connected') {
       banner(null)
       if (started) showSurface()
@@ -1058,6 +1069,7 @@ async function boot(code?: Join) {
       if (typeof m.values['control.sim'] === 'string' && CONTROL_SPACES[m.values['control.sim']]) {
         if (control.sim !== m.values['control.sim']) control.recenter()
         control.sim = m.values['control.sim']
+        defaultMarbleMotion()
         gamepad.setControlReach(CONTROL_SPACES[control.sim].reach)
       }
       if (m.values['control.scope'] === 'object' || m.values['control.scope'] === 'scene') {
@@ -1384,7 +1396,7 @@ async function boot(code?: Join) {
       if (sentController === was) toast(`${CONTROLLERS[was].name} isn’t on ${screenName()} now`)
       queueMicrotask(setMode)
     }
-    switcher.render(sorted, controllerNow(), screenName(), keyboard.open, !!layout.utilities?.includes('camera.hand'), !!handCamera, !!layout.utilities?.includes('camera.body'), !!bodyCamera)
+    switcher.render(sorted, controllerNow(), screenName(), keyboard.open, !!layout.utilities?.includes('camera.hand'), !!handCamera, !!layout.utilities?.includes('camera.body'), !!bodyCamera, !!layout.universal)
     const isMusic = tab === 'drums' || tab === 'keys'
     if (isMusic !== musicActive) { musicActive = isMusic; musicWire.use(isMusic) }
     surface.classList.toggle('music-on', isMusic)
@@ -1970,8 +1982,8 @@ async function boot(code?: Join) {
       const neutral = emptyState()
       neutral.seq = st.seq = (st.seq + 1) & 0xffff
       neutral.t = Math.round((now - t0) * 1000) >>> 0
-      neutral.flags = handHold ? Flag.touching : 0
-      neutral.touches = handHold ? 1 : 0
+      neutral.flags = (handCamera ? handHold : bodyHold) ? Flag.touching : 0
+      neutral.touches = (handCamera ? handHold : bodyHold) ? 1 : 0
       if (link.sendState(encodeState(neutral))) lastSend = now
       return
     }

@@ -269,18 +269,22 @@ async function compareSeal(popup, phone) {
     return Array.isArray(value) && value.length === 3 && value.every(i => Number.isInteger(i) && i >= 0 && i < 64) && Number.isFinite(link.sealAt) ? value.join('-') : null
   }, 10000)
   const pulse = await until('the popup seal pulse starts', () => popup.evaluate(() => {
-    const moments = document.querySelectorAll('.seal-moment')
+    const moments = document.querySelectorAll('#qr .seal-flight')
     const moment = moments[0]
     if (!moment?.dataset.started) return null
     const box = moment.getBoundingClientRect()
     const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
-    return { count: moments.length, pointer: getComputedStyle(moment).pointerEvents, blocks: !!hit?.closest('.seal-moment'), hidden: moment.getAttribute('aria-hidden') }
+    return { count: moments.length, pointer: getComputedStyle(moment).pointerEvents, blocks: !!hit?.closest('.seal-flight'), hidden: moment.getAttribute('aria-hidden') }
   }), 5000, 50)
   if (pulse.count !== 1 || pulse.pointer !== 'none' || pulse.blocks || pulse.hidden !== 'true') throw new Error(`popup pulse catches input or repeats: ${JSON.stringify(pulse)}`)
   const open = popup.getByRole('button', { name: 'Seal', exact: true })
   await open.waitFor({ state: 'visible', timeout: 5000 })
-  await open.click()
   const panel = popup.locator('#link-seal')
+  await popup.locator('#qr .connection-seal').waitFor({ state: 'visible', timeout: 5000 })
+  const statusSeal = phone.locator('.link-badge .seal-compact')
+  await statusSeal.waitFor({ state: 'visible', timeout: 5000 })
+  if (await statusSeal.getAttribute('data-seal') !== seal) throw new Error('phone status shows a different seal')
+  await open.click()
   const connection = phone.getByRole('dialog', { name: 'Connection', exact: true })
   try {
     await panel.waitFor({ state: 'visible', timeout: 3000 })
@@ -307,7 +311,8 @@ async function compareSeal(popup, phone) {
       await connection.getByRole('button', { name: 'Close', exact: true }).click()
       await connection.waitFor({ state: 'detached', timeout: 3000 })
     }
-    if (await panel.isVisible()) { await open.click(); await panel.waitFor({ state: 'hidden', timeout: 3000 }) }
+    if (await panel.getAttribute('data-expanded') !== null) await open.click()
+    if (!(await popup.locator('#qr .connection-seal').isVisible())) throw new Error('closing comparison removed the persistent seal')
   }
 }
 const enable = (popup, tabId) => popup.evaluate((t) => chrome.runtime.sendMessage({ to: 'bg', type: 'enable', tabId: t, on: true }), tabId)
@@ -370,6 +375,27 @@ try {
   })
 
   // ---- the invite moves on once a phone pairs (spec/SECURITY.md §8, L2) ----
+  await check('late popup storage delivery shows the settled seal automatically without replaying travel', async () => {
+    const original = await linkOf(popup)
+    try {
+      const lateAt = await popup.evaluate(async () => {
+        const { link } = await chrome.storage.session.get('link')
+        const sealAt = Date.now() - 1600
+        await chrome.storage.session.set({ link: { ...link, sealAt } })
+        return sealAt
+      })
+      await until('late static settlement', () => popup.evaluate(at => {
+        const moment = document.querySelector('#qr .seal-flight[data-settled][data-progress="1.000"]')
+        const timeline = JSON.parse(moment?.getAttribute('data-timeline') ?? 'null')
+        return timeline && Math.abs(timeline.startedAt - at) < 100 && !moment.getAnimations().length
+      }, lateAt), 3000)
+      if (!(await popup.locator('#qr .connection-seal').isVisible())) throw new Error('late delivery hid the persistent seal')
+      return 'the authenticated seal settles immediately; its 1200 ms travel is not replayed'
+    } finally {
+      await popup.evaluate(link => chrome.storage.session.set({ link }), original)
+    }
+  })
+
   await check('the invite moves on once the phone pairs: the popup has a new link', async () => {
     const next = await until('a new pairing link', async () => { const u = (await linkOf(popup))?.url; return u && u !== pairing ? u : null }, 8000)
     return `#${new URL(pairing).hash.slice(1, 10)}… → #${new URL(next).hash.slice(1, 10)}…`

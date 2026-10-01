@@ -23,7 +23,8 @@ function cameraFrames() {
     await image.decode()
     const ctx = canvas.getContext('2d')
     ctx.fillStyle = '#1b2025'; ctx.fillRect(0, 0, 720, 720)
-    ctx.drawImage(image, 100, 100, 520, 520)
+    // Keep the whole code inside the visible cover crop in either phone orientation.
+    ctx.drawImage(image, 230, 230, 260, 260)
     // A canvas changes only once here; explicitly deliver that frame even inside captureStream's rate limit.
     window.__cameras.at(-1).getVideoTracks()[0].requestFrame()
   }

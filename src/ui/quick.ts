@@ -28,7 +28,7 @@ let tray: QuickTray | null = null
 onQuickChange((what) => { if (what === 'actions') tray?.render(); else tray?.sync() })
 
 /** The tray on this page, once, with what the tray does itself. */
-export function mountQuick() {
+export function mountQuick(opts: { scroll?: boolean; defer?: (fn: () => void) => number } = {}) {
   if (tray) return tray
   mountPairCameraActions()
   if (document.fullscreenEnabled) quickDefault({
@@ -58,7 +58,7 @@ export function mountQuick() {
     const next = [['Viewer', '/view/', 'cube'], ['Sims', '/sim/', 'gamepad'], ['Link', '/link/', 'link']]
     next.forEach(([label, href, icon], i) => quickDefault({ id: `next${i + 1}` as QuickId, group: 'page', label, icon, hint: `Open ${label}`, run: () => { location.href = href } }))
   }
-  tray = new QuickTray()
+  tray = new QuickTray(opts)
   return tray
 }
 
@@ -74,7 +74,7 @@ class QuickTray {
   private sliding = 0
   private swipe: { id: number; x: number; y: number; done: boolean } | null = null
 
-  constructor() {
+  constructor(private readonly opts: { scroll?: boolean; defer?: (fn: () => void) => number } = {}) {
     document.documentElement.classList.add('quick-on')
     this.el.className = 'quick-tray'
     this.el.setAttribute('aria-label', 'Quick actions')
@@ -136,10 +136,10 @@ class QuickTray {
     // A swipe that ended over a button isn't also a press on it.
     this.el.addEventListener('click', (e) => { if (this.swipe?.done) { e.stopPropagation(); e.preventDefault() } }, true)
 
-    const place = () => { if (!this.frame) this.frame = requestAnimationFrame(() => { this.frame = 0; this.place() }) }
-    for (const type of ['resize', 'scroll', 'obpal:panels']) addEventListener(type, place, { passive: true })
+    const place = () => { if (!this.frame) this.frame = (this.opts.defer ?? requestAnimationFrame)(() => { this.frame = 0; this.place() }) }
+    for (const type of opts.scroll === false ? ['resize', 'obpal:panels'] : ['resize', 'scroll', 'obpal:panels']) addEventListener(type, place, { passive: true })
     window.visualViewport?.addEventListener('resize', place)
-    window.visualViewport?.addEventListener('scroll', place)
+    if (opts.scroll !== false) window.visualViewport?.addEventListener('scroll', place)
     new ResizeObserver(place).observe(this.panel)
     document.addEventListener('fullscreenchange', () => this.sync())
     // The pairing chip opens and folds its card on that edge: the tray moves to stay clear.
@@ -235,7 +235,7 @@ class QuickTray {
     // Switches' states once the action's own handlers have had their turn (a menu it opens, a card it unfolds); a
     // tooltip being read on one that stays (a switch, the camera's next view) comes back with what it says now, unless
     // the surface picker is open beside it.
-    requestAnimationFrame(() => {
+    ;(this.opts.defer ?? requestAnimationFrame)(() => {
       this.sync()
       if (reading && a.stay && this.open && (!this.picker || this.picker.menu.hidden)) this.showTip(id)
     })

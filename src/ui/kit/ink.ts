@@ -9,7 +9,7 @@ const controls = 'button, [role="button"], a.kit-action, a.kit-cta, a.dcard-go, 
 const skip = 'svg, kbd, sup, .kit-sr, .bb-header'
 const fitted = new WeakMap<HTMLElement | ShadowRoot, () => void>()
 
-export function fitControlInk(root: HTMLElement | ShadowRoot = document.body) {
+export function fitControlInk(root: HTMLElement | ShadowRoot = document.body, opts: { defer?: (fn: () => void) => number; cancel?: (id: number) => void } = {}) {
   const existing = fitted.get(root)
   if (existing) return existing
   if (root instanceof ShadowRoot) {
@@ -22,10 +22,12 @@ export function fitControlInk(root: HTMLElement | ShadowRoot = document.body) {
   const pending = new Set<HTMLElement>()
   const observed = new WeakSet<HTMLElement>()
   let frame = 0, active = true
+  const defer = opts.defer ?? requestAnimationFrame
+  const cancel = opts.cancel ?? cancelAnimationFrame
   // Content-visibility can defer an offscreen card's SVG geometry until it approaches the viewport.
   const visibility = new IntersectionObserver(entries => {
     for (const entry of entries) if (entry.isIntersecting) pending.add(entry.target as HTMLElement)
-    if (pending.size && !frame) frame = requestAnimationFrame(flush)
+    if (pending.size && !frame) frame = defer(flush)
   }, { rootMargin: '100px' })
   const labels = (button: HTMLElement) => {
     for (const svg of button.querySelectorAll<SVGSVGElement>('svg')) {
@@ -67,9 +69,21 @@ export function fitControlInk(root: HTMLElement | ShadowRoot = document.body) {
       const style = getComputedStyle(label)
       if (style.fontSize === '0px') continue
       let text = node.textContent ?? ''
+      const font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+      // The seal can shorten the screen-name slot. Fit the visible prefix, including the ellipsis's own edges.
+      if (label.classList.contains('host-t') && style.textOverflow === 'ellipsis' && label.scrollWidth > label.clientWidth) {
+        context.font = font; context.letterSpacing = style.letterSpacing === 'normal' ? '0px' : style.letterSpacing
+        const limit = label.getBoundingClientRect().right - context.measureText('…').width
+        const range = document.createRange()
+        let end = 0
+        for (; end < node.length; end++) {
+          range.setStart(node, end); range.setEnd(node, end + 1)
+          if (range.getBoundingClientRect().right > limit) break
+        }
+        text = text.slice(0, end) + '…'
+      }
       if (style.textTransform === 'uppercase') text = text.toUpperCase()
       if (style.textTransform === 'lowercase') text = text.toLowerCase()
-      const font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
       const key = `${font}|${style.letterSpacing}|${text}`
       let metrics = cache.get(key)
       if (!metrics) {
@@ -152,7 +166,7 @@ export function fitControlInk(root: HTMLElement | ShadowRoot = document.body) {
         }
       }
     }
-    if (pending.size && !frame) frame = requestAnimationFrame(flush)
+    if (pending.size && !frame) frame = defer(flush)
   })
   const watch = () => observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true, attributeOldValue: true, attributeFilter: ['hidden', 'class', 'aria-expanded'] })
   function flush() {
@@ -165,12 +179,12 @@ export function fitControlInk(root: HTMLElement | ShadowRoot = document.body) {
     else for (const el of root.children) if (el instanceof HTMLElement) scan(el)
   }
   void document.fonts.ready.then(() => { if (active) { scanRoot(); flush() } })
-  const refresh = () => { cache.clear(); baselines.clear(); scanRoot(); if (!frame) frame = requestAnimationFrame(flush) }
-  const resize = new ResizeObserver(() => { scanRoot(); if (!frame) frame = requestAnimationFrame(flush) })
+  const refresh = () => { cache.clear(); baselines.clear(); scanRoot(); if (!frame) frame = defer(flush) }
+  const resize = new ResizeObserver(() => { scanRoot(); if (!frame) frame = defer(flush) })
   resize.observe(root instanceof ShadowRoot ? root.host : root)
   document.fonts.addEventListener('loadingdone', refresh)
   addEventListener('resize', refresh)
-  const release = () => { active = false; fitted.delete(root); observer.disconnect(); resize.disconnect(); visibility.disconnect(); cancelAnimationFrame(frame); document.fonts.removeEventListener('loadingdone', refresh); removeEventListener('resize', refresh) }
+  const release = () => { active = false; fitted.delete(root); observer.disconnect(); resize.disconnect(); visibility.disconnect(); cancel(frame); document.fonts.removeEventListener('loadingdone', refresh); removeEventListener('resize', refresh) }
   fitted.set(root, release)
   return release
 }

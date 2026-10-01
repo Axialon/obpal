@@ -1,5 +1,6 @@
 /** Script physical phone turns through CDP, then check the actual projected model and camera axes. Writes only to temp. */
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { tempScope } from './lib/temp.mjs'
+import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, devices } from 'playwright'
@@ -8,7 +9,10 @@ import { startLocal } from '../extension/e2e/local.mjs'
 import { holds, reading, orient, delta, projection, trackingPose, cameraPoseFixture, D } from './lib/orientation.mjs'
 import { trayCamera } from './lib/sim-ui.mjs'
 
-const out = await mkdtemp(join(tmpdir(), 'obpal-orientation-'))
+const temps = tempScope()
+try {
+
+const out = await temps.make(join(tmpdir(), 'obpal-orientation-'))
 const local = await startLocal()
 const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM, headless: !process.argv.includes('--headed'), args: ['--ignore-certificate-errors', '--disable-features=WebRtcHideLocalIpsWithMdns', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
 const rows = [], results = [], errors = []
@@ -252,3 +256,5 @@ try {
 console.log(`Evidence: ${out}`)
 console.log(`passed ${results.filter(Boolean).length}/${results.length}`)
 process.exitCode = results.every(Boolean) ? 0 : 1
+
+} finally { await temps.cleanup() }

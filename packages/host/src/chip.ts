@@ -1,7 +1,7 @@
 /**
  * The pairing chip: how a page offers itself to phones without covering anything. A small glass chip sits in a
  * corner (the ob.Pal mark, "Scan to control", a status dot); it opens into a card with the QR code and the short
- * code, and closes by itself once a phone is in. It takes on the page's look: its accent, font, light or dark
+ * code. Its QR dots become the connection seal and stay in the card once a phone is in. It takes on the page's look: its accent, font, light or dark
  * surface, and corner radius. It lives in its own shadow root, so page CSS can't break it, and it is a plain
  * button and a labelled group for keyboards and screen readers.
  *
@@ -9,10 +9,12 @@
  * by a constructed stylesheet, so it works under a strict Content Security Policy and on pages that enforce Trusted
  * Types.
  */
-import { destroySeal, refreshSeal, sealElement, sealMoment, SEAL_STYLE } from './seal'
+import { destroySeal, refreshSeal, sealElement, SEAL_STYLE } from './seal'
+import { SealSurface, SEAL_SURFACE_STYLE } from './seal-surface'
+import { DOT_LOADER_STYLE } from './dot-field'
 import { communityMarker } from './origin'
 import { formatCode, spokenCode } from '@obpal/core'
-import { luminance, parseColor, toHex, type Rgb } from './color'
+import { contrast, luminance, parseColor, toHex, type Rgb } from './color'
 import { markElement } from './mark'
 import type { DeviceLinkInfo, HostStatus, Remote } from './remote'
 import { svgElement, type SvgNode } from './svg'
@@ -80,12 +82,12 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, 
 let sheet: CSSStyleSheet | null = null
 function adoptStyle(root: ShadowRoot) {
   if ('adoptedStyleSheets' in root && typeof CSSStyleSheet === 'function' && 'replaceSync' in CSSStyleSheet.prototype) {
-    if (!sheet) { sheet = new CSSStyleSheet(); sheet.replaceSync(STYLE + SEAL_STYLE) }
+    if (!sheet) { sheet = new CSSStyleSheet(); sheet.replaceSync(STYLE + SEAL_STYLE + SEAL_SURFACE_STYLE + DOT_LOADER_STYLE) }
     root.adoptedStyleSheets = [sheet]
     return
   }
   const s = document.createElement('style')
-  s.textContent = STYLE + SEAL_STYLE
+  s.textContent = STYLE + SEAL_STYLE + SEAL_SURFACE_STYLE + DOT_LOADER_STYLE
   root.appendChild(s)
 }
 
@@ -128,12 +130,13 @@ export class PairingChip {
     conn: HTMLElement; connMs: HTMLElement; facts: HTMLButtonElement; details: HTMLElement
   }
   private isOpen = false
-  private stopMoment = () => {}
+  private surface: SealSurface
   private seals = h('div', { class: 'seals' })
   private compare = h('button', { class: 'seal-view', type: 'button', hidden: '' }, 'Compare connection seal')
   private back = h('button', { class: 'seal-back', type: 'button' }, 'Back to pairing')
   private sealKey = ''
-  private sealSource = ''
+  private compactSeal = h('span', { class: 'chip-seal' })
+  private compactKey = ''
   /** Opened by a click or a key: stays open. Opened by hovering: closes when the pointer leaves. */
   private pinned = false
   private hoverTimer = 0
@@ -181,15 +184,27 @@ export class PairingChip {
     // device's details a tap away. Only what the connections' own statistics say.
     const conn = h('span', { class: 'conn', ...hidden }, icon(...LOCK), $.connMs)
     const facts = h('button', { class: 'facts', type: 'button', 'aria-expanded': 'false', 'aria-controls': `${id}-link`, hidden: '' })
-    const pill = h('button', { class: 'pill', type: 'button', 'aria-expanded': 'false', 'aria-controls': id }, $.mark, $.label, $.badge, conn, h('span', { class: 'dot', ...hidden }))
+    const pill = h('button', { class: 'pill', type: 'button', 'aria-expanded': 'false', 'aria-controls': id }, $.mark, $.label, $.badge, conn, this.compactSeal, h('span', { class: 'dot', ...hidden }))
     const codeBox = h('div', { class: 'code-box', 'data-wait': '' }, h('span', { class: 'k' }, 'Or type'), $.code, h('span', { class: 'k at' }, 'at ', $.site))
     const side = h('div', { class: 'side' }, codeBox, h('p', { class: 'status' }, h('span', { class: 'sdot', ...hidden }), $.status), facts, $.details, ...($.here ? [$.here] : []))
     const domain = new URL(this.remote.pairingUrl || `https://${this.remote.codeSite}`).hostname
-    const cues = h('div', { class: 'scan-cues' }, h('b', {}, domain), h('p', {}, "Opens in your phone's browser · no app · no account"), h('p', {}, `Check your camera shows ${domain}`))
-    side.append(cues, this.compare)
+    const details = h('details', { class: 'scan-cues' }, h('summary', { 'aria-label': 'Pairing details' }, 'ⓘ'), h('b', {}, domain), h('p', {}, "Opens in your phone's browser · no app · no account"), h('p', {}, `Check your camera shows ${domain}`))
+    details.append(codeBox, facts, $.details, ...($.here ? [$.here] : []))
+    const cues = h('div', { class: 'pair-icons' })
+    const camera: SvgNode[] = [['rect', { x: 4, y: 6, width: 16, height: 13, rx: 3 }], ['circle', { cx: 12, cy: 12, r: 3 }], ['path', { d: 'm8 6 1-2h6l1 2' }]]
+    const phone: SvgNode[] = [['rect', { x: 7, y: 3, width: 10, height: 18, rx: 2 }], ['path', { d: 'm4 4 16 16' }]]
+    const account: SvgNode[] = [['circle', { cx: 12, cy: 8, r: 3 }], ['path', { d: 'M5 20v-2a7 7 0 0 1 14 0M4 4l16 16' }]]
+    for (const [label, glyph] of [['Scan with your phone’s camera', camera], ['No app needed', phone], ['No account needed', account], ['Encrypted, peer to peer', LOCK]] as [string, SvgNode[]][]) {
+      cues.append(h('span', { role: 'img', 'aria-label': label, title: label }, icon(...glyph)))
+    }
+    side.append(cues, details, this.compare)
     const card = h('div', { class: 'card', id, role: 'group', 'aria-label': 'Pair a phone' }, $.qr, side, this.seals)
     this.compare.onclick = () => { card.setAttribute('data-seal-view', ''); this.back.focus() }
-    this.back.onclick = () => { card.removeAttribute('data-seal-view'); this.compare.focus() }
+    this.back.onclick = () => { card.removeAttribute('data-seal-view'); this.$.qr.querySelector<HTMLButtonElement>('.seal-peer')?.focus() }
+    this.surface = new SealSurface({ add: () => { void this.remote.resetInvite(); card.removeAttribute('data-seal-view') }, compare: () => this.compare.click() })
+    $.qr.removeAttribute('role')
+    $.qr.replaceChildren(this.surface.el)
+    side.append(this.surface.addControl)
     const wrap = h('div', { class: 'wrap', 'data-corner': opts.corner ?? 'bottom-right', 'data-variant': opts.variant ?? 'chip', 'data-s': 'starting' }, pill, card, $.live)
     this.root.appendChild(wrap)
     const marker = communityMarker(location.origin)
@@ -210,7 +225,7 @@ export class PairingChip {
   expand() { if (this.blocked) this.unfold = true; else this.setOpen(true, true) }
   collapse() { this.unfold = false; this.setOpen(false) }
   /** As a click on the chip. */
-  toggle() { this.unfold = false; this.setOpen(!this.isOpen, true) }
+  toggle() { this.unfold = false; if (this.remote.seals.length) { this.expand(); this.surface.add() } else this.setOpen(!this.isOpen, true) }
 
   /**
    * Read the page's look again: its accent (--obpal-accent, else --accent, --primary, --color-primary or --brand),
@@ -232,6 +247,11 @@ export class PairingChip {
     w.style.setProperty('--a', toHex(this.accent))
     w.style.setProperty('--a-rgb', this.accent.join(' '))
     w.style.setProperty('--a-ink', luminance(this.accent) > 0.35 ? '#0b0d10' : '#ffffff')
+    const ink = scheme === 'light' ? '#14171c' : '#f3f5f8'
+    const background: Rgb = scheme === 'light' ? [255, 255, 255] : base ?? [18, 20, 26]
+    const familyInk = toRgb(prop(['--bb-ink']))
+    w.style.setProperty('--seal-ink', familyInk && contrast(familyInk, background) >= 7 ? toHex(familyInk) : ink)
+    w.style.setProperty('--seal-plate', prop(['--bb-sheet']) || (scheme === 'light' ? '#ffffff' : '#12141a'))
     w.style.setProperty('--r', `${radius}px`)
     w.style.setProperty('--pill-r', radius >= 14 ? '999px' : `${radius}px`)
     if (base && luminance(base) < 0.2) w.style.setProperty('--base', base.join(' '))
@@ -240,11 +260,13 @@ export class PairingChip {
     this.$.mark.replaceChildren(markElement(toHex(this.accent)))
     this.drawQr()
     this.seals.querySelectorAll<HTMLElement>('.connection-seal').forEach(refreshSeal)
+    this.compactSeal.querySelectorAll<HTMLElement>('.connection-seal').forEach(refreshSeal)
   }
 
   destroy() {
-    this.stopMoment()
+    this.surface.destroy()
     this.seals.querySelectorAll<HTMLElement>('.connection-seal').forEach(destroySeal)
+    this.compactSeal.querySelectorAll<HTMLElement>('.connection-seal').forEach(destroySeal)
     for (const [ev, fn] of this.listeners) this.remote.off(ev as 'status', fn as () => void)
     this.listeners = []
     this.observer?.disconnect()
@@ -277,8 +299,9 @@ export class PairingChip {
       this.pressed = null
       this.unfold = false
       // A click on a card the pointer only peeked at keeps it open; otherwise it opens or closes.
-      if (was === 'peek' && this.isOpen) { this.pinned = true; return }
-      this.setOpen(was !== 'pinned', true)
+      if (was === 'peek' && this.isOpen) this.pinned = true
+      else this.setOpen(was !== 'pinned', true)
+      if (this.isOpen && this.remote.seals.length) this.$.card.setAttribute('data-seal-view', '')
     })
     // With a mouse, resting on the chip peeks at the card (not while the page has a panel there); leaving closes a peek.
     pill.addEventListener('pointerenter', (e) => {
@@ -307,21 +330,25 @@ export class PairingChip {
       this.remote.on(ev, fn)
       this.listeners.push([ev, fn])
     }
-    const reveal = (s: { seal: import('@obpal/core').ConnectionSeal; delayMs: number }) => {
-      this.stopMoment()
-      this.stopMoment = sealMoment(this.root, s.seal, s.delayMs, this.sealSource || this.drawn.url)
+    const reveal = (s: { id: string; seal: import('@obpal/core').ConnectionSeal; delayMs: number }) => {
+      this.surface.sync(this.remote.seals)
+      this.surface.reveal(s.id, s.delayMs)
+      this.expand()
     }
     this.remote.on('seal', reveal)
     this.listeners.push(['seal', reveal as (...a: never[]) => void])
     on('status', () => { this.render(); this.syncCode() })
-    // A phone is in: the card has done its job (and doesn't come back when a page panel closes).
-    on('connect', () => { this.unfold = false; this.setOpen(false) })
-    on('join', () => { this.sealSource = this.drawn.url; this.unfold = false; this.setOpen(false); this.render() })
+    on('connect', () => this.expand())
+    on('join', () => { this.expand(); this.render() })
     on('leave', () => this.render())
     on('attention', () => this.render())
     on('disconnect', () => { this.render(); this.syncCode() })
     on('code', () => this.renderCode())
     on('invite', () => this.drawQr())
+    let inputAt = -Infinity
+    const activity = (who: { id: string }) => { const now = performance.now(); if (this.remote.inputActive(who.id) && now - inputAt > 700) { inputAt = now; this.surface.activity() } }
+    this.remote.on('input', activity)
+    this.listeners.push(['input', activity as (...a: never[]) => void])
   }
 
   private setOpen(open: boolean, pinned = false) {
@@ -374,13 +401,25 @@ export class PairingChip {
     // Only ever an https (or local http) link: the Remote checks its service, and so does this.
     if (this.$.here && /^https:\/\/|^http:\/\/(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(r.pairingUrl)) this.$.here.href = r.pairingUrl
     const key = r.seals.map(s => `${s.id}:${s.name}:${s.seal.join('-')}`).join('|')
-    if (key !== this.sealKey) {
+    const sealChanged = key !== this.sealKey
+    if (sealChanged) {
       this.sealKey = key
       this.seals.querySelectorAll<HTMLElement>('.connection-seal').forEach(destroySeal)
       this.seals.replaceChildren(this.back, ...r.seals.map((s) => h('div', {}, h('b', {}, s.name), sealElement(s.seal), h('p', {}, 'Check both screens show the same seal'))))
     }
     this.seals.hidden = !r.seals.length
     this.compare.hidden = !r.seals.length
+    // Keep the most recently paired phone's seal in the chip; the full view compares every connection.
+    const compact = r.seals.at(-1)
+    const compactKey = compact?.seal.join('-') ?? ''
+    if (compactKey !== this.compactKey) {
+      this.compactKey = compactKey
+      this.compactSeal.querySelectorAll<HTMLElement>('.connection-seal').forEach(destroySeal)
+      this.compactSeal.replaceChildren(...(compact ? [sealElement(compact.seal, true)] : []))
+    }
+    this.compactSeal.hidden = !compact
+    this.surface.sync(r.seals)
+    this.queueRoom()
     if (!r.seals.length) this.$.card.removeAttribute('data-seal-view')
     this.drawQr()
   }
@@ -391,7 +430,7 @@ export class PairingChip {
     const n = r.participants.length
     const who = n && r.participants.every((p) => p.paused) ? 'Phone paused' : n > 1 ? `${n} connected` : `Connected${r.deviceName ? ` to ${r.deviceName}` : ''}`
     const how = this.links.length ? `: ${this.factSentence()}` : ''
-    this.$.pill.setAttribute('aria-label', n ? `${who}${how}. Pair another phone` : this.opts.label ?? 'Scan to control')
+    this.$.pill.setAttribute('aria-label', n ? `${who}${how}. Compare connection seal or pair another phone` : this.opts.label ?? 'Scan to control')
   }
 
   /** The facts as words to hear: "encrypted end to end, verified by the QR code, direct, 12 ms round trip". */
@@ -470,7 +509,7 @@ export class PairingChip {
       box.hidden = false
       box.removeAttribute('data-wait')
       // A fresh code (the last one was used, or ran out) draws the eye once.
-      if (changed && this.isOpen) { box.classList.remove('fresh'); void box.offsetWidth; box.classList.add('fresh') }
+      if (changed && this.isOpen) box.animate?.([{ opacity: 0.7 }, { opacity: 1 }], { duration: 160 })
       return
     }
     // No code yet: hold its place a moment, then give the card to the QR code alone.
@@ -490,11 +529,11 @@ export class PairingChip {
     if (!url || (url === this.drawn.url && accent === this.drawn.accent)) return
     this.drawn = { url, accent }
     this.qr ??= import('./qr')
-    void this.qr.then(({ brandedQrElement, plainQrElement }) => {
+    void this.qr.then(({ brandedQrElement, plainQrElement, qrDotPoints }) => {
       if (this.drawn.url !== url || this.drawn.accent !== accent) return
       let svg: SVGSVGElement
       try { svg = brandedQrElement(url, { accent }) } catch { svg = plainQrElement(url) }
-      this.$.qr.replaceChildren(svg)
+      this.surface.setQr(svg, qrDotPoints(url))
     })
   }
 
@@ -549,13 +588,21 @@ export class PairingChip {
       room.ro?.observe(el)
     }
     // The card keeps its place while closed (it's only hidden), so this is where it opens.
-    const card = this.$.card.getBoundingClientRect()
+    const element = this.$.card
+    element.style.removeProperty('position'); element.style.removeProperty('left'); element.style.removeProperty('top')
+    const card = element.getBoundingClientRect()
     // Shown is laid out and not hidden (a panel fading in counts from its first frame).
-    const blocked = els.some((el) => {
-      if (el.contains(this.el) || !el.getClientRects().length || getComputedStyle(el).visibility === 'hidden') return false
-      const r = el.getBoundingClientRect()
-      return Math.min(r.right, card.right) - Math.max(r.left, card.left) > 1 && Math.min(r.bottom, card.bottom) - Math.max(r.top, card.top) > 1
-    })
+    const panels = els.filter(el => !el.contains(this.el) && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden').map(el => el.getBoundingClientRect())
+    const meets = (left: number, top: number) => panels.some(r => Math.min(r.right, left + card.width) - Math.max(r.left, left) > 1 && Math.min(r.bottom, top + card.height) - Math.max(r.top, top) > 1)
+    let blocked = meets(card.left, card.top)
+    // A connected seal stays visible without covering approval, stop or camera controls. Move the same card to
+    // a clear corner; if the screen has no room, the compact chip remains available until a panel closes.
+    if (blocked && this.remote.participants.length) {
+      const margin = 16
+      const candidates = [[innerWidth - card.width - margin, margin], [margin, margin], [margin, innerHeight - card.height - 72], [(innerWidth - card.width) / 2, margin]]
+      const clear = candidates.find(([left, top]) => left >= margin && top >= margin && top + card.height <= innerHeight - margin && !meets(left, top))
+      if (clear) { element.style.position = 'fixed'; element.style.left = `${clear[0]}px`; element.style.top = `${clear[1]}px`; blocked = false }
+    }
     if (blocked === this.blocked) return
     this.blocked = blocked
     if (blocked) {
@@ -609,9 +656,24 @@ function pageScheme(el: Element): 'light' | 'dark' {
 }
 
 const STYLE = `
+.chip-seal{display:inline-flex;align-items:center}.chip-seal[hidden]{display:none}
 .scan-cues,.seals{font-size:11px;line-height:1.5}.scan-cues p,.seals p{margin:3px 0}.scan-cues{color:var(--ink);max-width:220px}.seals{display:none;max-height:50vh;overflow:auto}.seals>div{padding:8px 0}.seals b{font-size:12px}
 .card[data-seal-view]>.qr,.card[data-seal-view]>.side{display:none}.card[data-seal-view]>.seals:not([hidden]){display:block}
 .seal-view,.seal-back{min-height:44px;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:rgb(var(--hl) / .05);color:var(--ink);font:inherit;cursor:pointer}.seal-view[hidden]{display:none}.seal-view:focus-visible,.seal-back:focus-visible{outline:2px solid var(--a);outline-offset:2px}
+.pair-icons{display:flex;gap:4px;color:var(--ink);align-items:center}.pair-icons .i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6}.scan-cues summary{cursor:pointer;min-width:44px;min-height:44px;display:flex;align-items:center;font-size:20px}
+.wrap[data-live] .pill>.conn,.wrap[data-live] .pill>.dot{display:none}.wrap[data-live] .side>.status{display:none}
+.wrap[data-live] .label{display:none}
+.wrap[data-live] .side>.code-box,.wrap[data-live] .side>.here{display:none}
+.card:not([data-seal-view]){flex-direction:column;align-items:center;gap:8px;width:220px}
+.side{align-items:center;gap:4px;width:100%;min-height:48px}
+.side>.status,.side>.seal-view{display:none}
+.pair-icons{position:absolute;bottom:30px;left:18px}
+.side>.seal-action{position:absolute;right:64px;bottom:18px}
+.scan-cues{align-self:flex-end}.scan-cues[open]{align-self:stretch;background:var(--glass);z-index:3}
+.scan-cues[open]~*{position:relative}
+.scan-cues summary{justify-content:flex-end}
+.facts .fact{font-size:0;padding:4px 6px;height:28px}.facts .fact .i{width:16px;height:16px}
+.seal-view{font-size:0}.seal-view::after{content:'≋';font-size:20px}
 .community-build{pointer-events:auto;color:var(--ink);font-size:11px;line-height:1.5;padding:6px 10px;border:1px solid var(--line);border-radius:10px;background:var(--glass)}
 
 :host { display: contents; }

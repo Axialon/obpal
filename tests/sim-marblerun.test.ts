@@ -4,7 +4,7 @@ import { MarblerunLogic, inChannel } from '../src/sim/devices/marblerun'
 import { restInput } from '../src/sim/devices/types'
 
 it('builds a missing channel, rotates bends and confines the cursor', () => {
-  const l = new MarblerunLogic(), i = restInput()
+  const l = new MarblerunLogic(true), i = restInput()
   expect(inChannel(l.units[0].track, 0, 0)).toBe(false)
   i.presses = ['place']; l.step([i], 0.05)
   expect(inChannel(l.units[0].track, 0, 0)).toBe(true)
@@ -15,7 +15,7 @@ it('builds a missing channel, rotates bends and confines the cursor', () => {
   expect(l.units[1].track[12]).toBeNull()
 })
 it('requires a connected track, then finishes a tilt run and retains its best time', () => {
-  const l = new MarblerunLogic(), i = restInput('face.trackpad', Mode.tilt)
+  const l = new MarblerunLogic(true), i = restInput('face.trackpad', Mode.tilt)
   i.presses = ['run']; l.step([i], 0.05); i.presses = []; i.tilt = [1, 0]
   for (let n = 0; n < 120; n++) l.step([i], 0.05)
   expect(l.units[0].x).toBeLessThan(-0.28); expect(l.units[0].best).toBe(0)
@@ -26,7 +26,7 @@ it('requires a connected track, then finishes a tilt run and retains its best ti
   const best = l.units[0].best; l.home(0); expect(l.units[0].best).toBe(best)
 })
 it('coasts a disconnected marble with its race clock and keeps motion inside the channel', () => {
-  const l = new MarblerunLogic(), i = restInput()
+  const l = new MarblerunLogic(true), i = restInput()
   l.units[0].running = true; i.drag = [30, 80]; l.step([i], 0.05)
   i.quiet = true; const { x, z, time } = l.units[0]; l.step([i], 9)
   expect(l.units[0].time).toBeGreaterThan(time)
@@ -36,7 +36,7 @@ it('coasts a disconnected marble with its race clock and keeps motion inside the
 })
 
 it('limits a short track to ten pieces, permits removal and protects its start and finish', () => {
-  const l = new MarblerunLogic(), i = restInput(); i.presses = ['place']
+  const l = new MarblerunLogic(true), i = restInput(); i.presses = ['place']
   for (let n = 0; n < 25; n++) { l.units[0].cursorX = n % 5; l.units[0].cursorZ = Math.floor(n / 5); l.step([i], 0.05) }
   expect(l.units[0].track.filter(Boolean)).toHaveLength(10)
   l.units[0].cursorX = 0; l.units[0].cursorZ = 0; i.presses = ['remove']; l.step([i], 0.05)

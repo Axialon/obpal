@@ -57,6 +57,11 @@ describe('the device registry', () => {
   it('makes each device’s logic, which rests when nobody holds it', () => {
     for (const d of DEVICES) {
       const logic = d.logic()
+      // The marble feeder has a bounded, audible entrance before its idle contact island sleeps.
+      if (d.spec.id === 'marblerun') {
+        for (let i = 0; i < 600; i++) logic.step([], 1 / 240)
+        logic.drain()
+      }
       for (let i = 0; i < 60; i++) logic.step(Array.from({ length: d.spec.units }, () => null), 1 / 60)
       for (let n = 0; n < d.spec.units; n++) expect(logic.readout(n)).toBeTruthy()
       expect(logic.drain()).toEqual([])

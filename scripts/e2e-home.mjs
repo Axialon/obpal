@@ -38,7 +38,8 @@
  * in the same wall-clock second.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch.
  */
-import { mkdtemp, rm } from 'node:fs/promises'
+import { tempScope, keepTemp } from './lib/temp.mjs'
+import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, devices } from 'playwright'
@@ -48,6 +49,10 @@ import { startLocal } from '../extension/e2e/local.mjs'
 import { trayReading } from './lib/orientation.mjs'
 import { guardSiteButtons } from './lib/surface-buttons.mjs'
 import { runWarmup } from './e2e-warmup.mjs'
+import { runHomeField } from './e2e-home-field.mjs'
+
+const temps = tempScope()
+try {
 
 const HEADED = process.argv.includes('--headed')
 // The environment form also works through e2e:all, preserving its Desktop guard for an isolated check.
@@ -143,7 +148,7 @@ function tilter(page) {
  * 14 px of `at` along it: the marble's rim, if it's there; the night sky, if it isn't.
  */
 async function rimAt(page, wall, at, a) {
-  const [top, vw, vh] = await page.evaluate(() => [document.querySelector('.hero').getBoundingClientRect().top, innerWidth, innerHeight])
+  const [top, vw, vh] = await page.evaluate(() => [0, innerWidth, innerHeight])
   const clip = wall === 'left' ? { x: a.left, y: top + at - 14, width: 2, height: 28 }
     : wall === 'right' ? { x: a.right - 2, y: top + at - 14, width: 2, height: 28 }
     : wall === 'top' ? { x: at - 14, y: top + a.top, width: 28, height: 2 }
@@ -185,6 +190,8 @@ try {
   if (!ONLY) await guardSiteButtons(browser, local.origin, [['home', '/']], check)
 
   if (!ONLY || ONLY === 'warm-up') await runWarmup(local, check, { home: true })
+
+  await runHomeField(browser, local, check)
 
   await check('no sideways scroll on phone widths', async () => {
     const seen = []
@@ -1125,7 +1132,7 @@ try {
     return `on "${pads[i]}" at ${on.x.toFixed(0)},${on.y.toFixed(0)}, ${up.h.toFixed(2)} em up (lit ${lit.glow}, pressed ${lit.press || 'none'}), then off to ${off.x.toFixed(0)},${off.y.toFixed(0)}; no click, no navigation`
   })
 
-  const dir = await mkdtemp(join(tmpdir(), 'obpal-home-'))
+  const dir = await temps.make(join(tmpdir(), 'obpal-home-'))
   profile = dir
   const phoneCtx = await chromium.launchPersistentContext(dir, { ...devices['Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS })
   browsers.push(phoneCtx)
@@ -1233,9 +1240,11 @@ try {
   if (e !== ONLY_DONE) throw e
 } finally {
   for (const b of browsers.reverse()) await b.close().catch(() => {})
-  if (profile) await rm(profile, { recursive: true, force: true }).catch(() => {})
+  if (profile) await (keepTemp() ? Promise.resolve() : rm(profile, { recursive: true, force: true })).catch(() => {})
   await local.close()
 }
 const failed = results.filter((r) => !r.ok).length
 console.log(failed ? `\n${failed} of ${results.length} failed` : `\nall ${results.length} passed`)
-process.exit(failed ? 1 : 0)
+process.exitCode = (failed ? 1 : 0)
+
+} finally { await temps.cleanup() }

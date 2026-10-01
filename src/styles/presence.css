@@ -19,7 +19,21 @@
 .presence-active .presence-controls label { display: inline-flex; }
 .presence-active .sim-panel, .presence-active .ptz-inset { visibility: hidden; }
 .presence-shade { pointer-events: none; position: fixed; inset: 0; z-index: 65; opacity: 0; background: radial-gradient(ellipse at center, transparent 30%, #000 90%); }
+/* Watching status belongs to the scene, independently of its viewpoint controls or panels. */
+.guest-status { position: fixed; z-index: 90; top: max(14px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; justify-content: center; gap: 8px; width: max-content; max-width: calc(100vw - 28px); box-sizing: border-box; min-height: 36px; padding: 8px 12px; border: 1px solid var(--frost-edge); border-radius: 18px; background: var(--frost); backdrop-filter: var(--frost-blur); -webkit-backdrop-filter: var(--frost-blur); box-shadow: var(--frost-shadow); color: var(--ink); font: 500 12px/1.4 var(--font, system-ui); }
+.guest-status .ic { width: 18px; height: 18px; flex: none; }
+.guest-state { color: var(--secondary, var(--ink)); }
+.guest-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: currentColor; opacity: .5; }
+.guest-status[data-state='live'] .guest-dot { background: var(--accent); opacity: 1; }
+.guest-status[data-state='connecting'] .guest-dot, .guest-status[data-state='waiting-for-host'] .guest-dot { animation: guest-pulse 1.2s ease-in-out infinite; }
+@keyframes guest-pulse { 50% { opacity: 1; transform: scale(1.25); } }
+@media (prefers-reduced-motion: reduce) { .guest-dot { animation: none !important; } }
+.presence-guest .sim-windows, .presence-guest .panel-dock, .presence-guest .sim-panel, .presence-guest #home-all, .presence-guest #reset { display: none !important; }
+.presence-guest #open, .presence-guest .tile-add, .presence-guest .sc-x, .presence-guest .sc-tools, .presence-guest #t-spin, .presence-guest #t-reset { display: none !important; }
 @media (max-width: 600px) { .presence-active .presence-controls, .presence-floating { top: 76px; right: 8px; max-width: calc(100vw - 16px); font-size: 11px; } .presence-controls { --kit-select-h: 36px; } .presence-controls button { min-height: 36px; } }
 @media (max-width: 600px) {
   .presence-active .presence-controls { max-height: calc(100dvh - 90px); overflow-y: auto; }
+  .guest-status { top: max(76px, calc(env(safe-area-inset-top) + 62px)); }
+  .presence-guest .presence-controls { top: 126px; }
+  .presence-guest.presence-active .presence-controls { max-height: calc(100dvh - 140px); }
 }

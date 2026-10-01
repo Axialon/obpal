@@ -16,8 +16,10 @@ function buffer(channels: number, length: number, sampleRate: number) {
 }
 const context = { sampleRate: 48000, createBuffer: buffer } as BaseAudioContext
 function run() {
-  const logic = new MarblerunLogic(), u = logic.units[0], input = restInput()
+  const logic = new MarblerunLogic(true), u = logic.units[0], input = restInput()
   u.track[12] = { kind: 0, turn: 0 }; u.running = true
+  // Keep these contact fixtures independent of the new calm cup arrangement.
+  u.marbles[0].x = -.99; u.marbles[1].x = -.82
   return { logic, u, input }
 }
 

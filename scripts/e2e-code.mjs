@@ -13,7 +13,8 @@
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch. OBPAL_SHOTS=<dir> saves
  * screenshots of the chip on several looks and on a phone.
  */
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tempScope, keepTemp } from './lib/temp.mjs'
+import { rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join as joinPath } from 'node:path'
 import { chromium, devices } from 'playwright'
@@ -22,6 +23,9 @@ import sharp from 'sharp'
 import jsQR from 'jsqr'
 import zx from '@zxing/library'
 import { startWorker } from './local-worker.mjs'
+
+const temps = tempScope()
+try {
 
 const PORT = Number(process.env.OBPAL_E2E_WORKER_PORT) || 5179
 const HEADED = process.argv.includes('--headed')
@@ -56,7 +60,7 @@ function watchCompletion() {
   window.__iceEnd = { sent: 0, received: 0 }
   window.__sealStarts = []
   setInterval(() => {
-    const box = document.querySelector('.seal-moment') ?? document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.seal-moment')
+    const box = document.querySelector('.link-badge .connection-seal') ?? document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.seal-flight')
     if (!box?.dataset.started) return
     const at = performance.timeOrigin + Number(box.dataset.started)
     if (window.__sealStarts.at(-1) !== at) window.__sealStarts.push(at)
@@ -123,7 +127,7 @@ try {
     if (s.code.replace(/\s/g, '') !== code) throw new Error(`the chip shows "${s.code}", the remote has ${code}`)
     const url = await screen.evaluate(() => window.__obpal.pairingUrl)
     const qr = screen.locator('.obpal-chip .qr')
-    await until('the QR code drawn', async () => (await qr.innerHTML()).includes('<svg'))
+    await until('the QR code drawn', () => qr.locator('.seal-qr>svg').isVisible())
     const read = await readQr(await qr.screenshot())
     if (read.js !== url || read.zx !== url) throw new Error(`read ${JSON.stringify(read)}`)
     await shot(screen, 'chip-viewer-carbon-open')
@@ -203,8 +207,8 @@ try {
     if (reset !== 'lt-reset') throw new Error(`a click on Reset reaches ${reset}`)
     await screen.locator('#lt-reset').click()
     if (await screen.locator('#lt-presets [data-preset="studio"]').getAttribute('aria-pressed') !== 'true') throw new Error('Reset did not restore Studio lighting')
-    const through = await screen.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.id || document.elementFromPoint(x, y)?.className, { x: g.card.x + 20, y: (g.card.y + g.card.b) / 2 })
-    if (through !== 'scene') throw new Error(`where the card would open, a click reaches ${through}`)
+    const through = await screen.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('#lighting') ? 'lighting control' : document.elementFromPoint(x, y)?.id || document.elementFromPoint(x, y)?.className, { x: g.card.x + 20, y: (g.card.y + g.card.b) / 2 })
+    if (through !== 'scene' && through !== 'lighting control') throw new Error(`the folded card blocks ${through}`)
     // A mouse resting on the chip doesn't open the card over the panel.
     const pill = screen.locator('.obpal-chip .pill')
     await pill.hover()
@@ -226,7 +230,7 @@ try {
 
   // ---- a phone types the code ----
   const phoneAt = async (url) => {
-    const dir = await mkdtemp(joinPath(tmpdir(), 'obpal-code-'))
+    const dir = await temps.make(joinPath(tmpdir(), 'obpal-code-'))
     profiles.push(dir)
     const ctx = await chromium.launchPersistentContext(dir, { ...devices['Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS })
     closers.push(ctx)
@@ -239,7 +243,7 @@ try {
   let joinedWith = ''
   let typedSeal = ''
 
-  await check('a phone types the code, spaces and all, on the start page and joins; the chip closes and shows a new code at once', async () => {
+  await check('a phone types the code, spaces and all, on the start page and joins; the QR becomes a persistent seal and add offers a new code', async () => {
     const code = await until('a short code', liveCode, 20000)
     await phone.locator('#code-in').waitFor()
     await shot(phone, 'phone-start')
@@ -252,40 +256,68 @@ try {
     await phone.locator('#code-in').pressSequentially(typed.slice(-1))
     await shot(phone, 'phone-start-typed')
     await phone.locator('.modes').waitFor({ timeout: 25000 })
-    const firstNotice = phone.locator('.seal-moment .seal-first')
+    const firstNotice = phone.locator('.trust-first')
     await firstNotice.waitFor({ state: 'visible', timeout: 5000 })
     if (!(await firstNotice.textContent()).includes(new URL(ORIGIN).hostname) || !(await firstNotice.textContent()).includes('Connected to the screen showing this seal')) throw new Error('the phone handshake lost its domain notice')
     if (SHOTS) {
       const times = []
       for (const [i, progress] of [0, 0.23, 0.46, 0.73, 0.95].entries()) {
-        await until('the seal handshake frame', () => phone.evaluate(p => Number(document.querySelector('.seal-moment')?.dataset.progress ?? -1) >= p, progress), 5000, 15)
+        await until('the seal handshake frame', () => phone.evaluate(p => Number(document.querySelector('.link-badge .connection-seal')?.dataset.progress ?? -1) >= p, progress), 5000, 15)
         await Promise.all([shot(screen, `handshake-screen-${i}`), shot(phone, `handshake-phone-${i}`)])
-        times.push(await phone.evaluate(() => document.querySelector('.seal-moment')?.dataset.progress))
+        times.push(await phone.evaluate(() => document.querySelector('.link-badge .connection-seal')?.dataset.progress))
       }
       await writeFile(joinPath(SHOTS, 'handshake-frames.json'), JSON.stringify(times))
     }
     const people = await until('the phone on the screen', () => screen.evaluate(() => window.__obpal.participants.length), 10000)
-    const s = await until('the chip closed', async () => { const v = await chipState(); return !v.open && v.status === 'connected' ? v : null }, 5000)
+    const s = await until('the connected card stays open', async () => { const v = await chipState(); return v.open && v.status === 'connected' ? v : null }, 5000)
     await sleep(400)
     await shot(screen, 'chip-viewer-connected')
-    // Closed with a phone in, it holds no code; the people chip's + opens it again, with a code nobody has used.
+    // Add reverses the resting seal into a fresh QR without disconnecting the phone.
     await screen.locator('#chip-invite').click()
     const opened = await chipState()
     if (!opened.open) throw new Error(`+ did not open the chip (${JSON.stringify(opened)})`)
     const next = await until('a fresh code', async () => { const c = await liveCode(); return c && c !== code ? c : null }, 5000)
     if (!(await chipState()).open) throw new Error('+ did not open the chip')
-    return `typed "${typed}", field read "${shown}"; ${people} on the screen, the chip closed (${s.status}); + opens it with ${next}`
+    await screen.getByRole('button', { name: 'Cancel adding a phone', exact: true }).click()
+    await until('seal returns after cancel', () => screen.locator('.seal-stage .connection-seal').first().isVisible())
+    return `typed "${typed}", field read "${shown}"; ${people} on the screen, the card stayed open (${s.status}); + opens it with ${next}`
   })
 
   const phoneSeal = page => page.evaluate(() => document.querySelector('.connection-seal')?.dataset.seal ?? '')
   const screenSeal = () => screen.evaluate(() => document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.connection-seal')?.dataset.seal ?? '')
+  await check('both peers show their seal without a tap and keep it in the QR footprint and phone status after the handshake', async () => {
+    await until('automatic matching status seals', async () => {
+      const p = await phone.locator('.link-badge .seal-compact').getAttribute('data-seal').catch(() => '')
+      const h = await screen.locator('.obpal-chip .pill .seal-compact').getAttribute('data-seal').catch(() => '')
+      return p && p === h
+    })
+    await sleep(3400)
+    if (!(await phone.locator('.link-badge .seal-compact').isVisible()) || !(await screen.locator('.obpal-chip .seal-stage .connection-seal').isVisible())) throw new Error('status seal disappeared with the moment')
+    return 'phone and chip retain all three glyphs'
+  })
+  await check('clicking a hovered connected chip opens its full seal comparison', async () => {
+    const pill = screen.locator('.obpal-chip .pill')
+    if ((await chipState()).open) await pill.evaluate(el => el.click())
+    await until('the chip closed', async () => !(await chipState()).open)
+    await screen.mouse.move(0, 0)
+    await pill.hover()
+    await until('the hover preview', async () => (await chipState()).open)
+    await pill.click()
+    if (!(await screen.locator('.obpal-chip .seals .connection-seal').first().isVisible())) throw new Error('a click left the connected chip showing its QR')
+    await screen.getByRole('button', { name: 'Back to pairing', exact: true }).click()
+    await pill.click()
+    await screen.mouse.move(0, 0)
+    await until('the chip closed', async () => !(await chipState()).open)
+    if (!(await screen.locator('.obpal-chip .pill .seal-compact').isVisible())) throw new Error('closing comparison hid the status seal')
+    return 'hover preview becomes comparison on click; closed chip keeps its compact seal'
+  })
   await check('typed-code peers show the same seal and schedule their pulse together without blocking input', async () => {
     await until('the first connected frame', () => phone.locator('.trust-first').count())
     await shot(phone, 'phone-first-frame')
     await phone.locator('.trust-compare').click()
     typedSeal = await until('the phone seal', () => phoneSeal(phone))
-    if (!(await chipState()).open) await screen.locator('#chip-invite').click()
-    await screen.getByRole('button', { name: 'Compare connection seal', exact: true }).click()
+    if (!(await chipState()).open) await screen.locator('.obpal-chip .pill').click()
+    if (!(await screen.locator('.seals .connection-seal').first().isVisible())) await screen.locator('.seal-peer').first().click()
     const host = await until('the screen seal', screenSeal)
     if (host !== typedSeal) throw new Error(`the seals differ: ${typedSeal} / ${host}`)
     await shot(screen, 'screen-seal-sheet')
@@ -310,6 +342,7 @@ try {
     await phone.getByRole('button', { name: 'Close', exact: true }).click()
     await phone.locator('.trust-dismiss').click()
     await phone.locator('.ctl-tab[data-tab="gamepad"]').click()
+    await phone.locator('.gp .link-badge .seal-compact').waitFor({ state: 'visible', timeout: 3000 })
     await phone.locator('.gp [data-act="settings"]').click()
     await phone.locator('#connection-details').click()
     await phone.getByRole('dialog', { name: 'Connection', exact: true }).waitFor()
@@ -340,6 +373,19 @@ try {
       }
       request.onerror = () => resolve(false)
     })))
+    await phone.addInitScript(() => {
+      window.__lateSealCallbacks = 0
+      const raf = window.requestAnimationFrame.bind(window)
+      window.requestAnimationFrame = callback => raf(now => {
+        const moment = document.querySelector('.link-badge .connection-seal')
+        if (!window.__lateSealCallbacks && moment?.dataset.started && now >= Number(moment.dataset.started)) {
+          window.__lateSealCallbacks++
+          const end = performance.now() + 180
+          while (performance.now() < end) { /* Simulate a busy event loop at the scheduled deadline. */ }
+        }
+        callback(performance.now())
+      })
+    })
     await phone.reload()
     await phone.locator('.modes').waitFor({ timeout: 25000 })
     await until('still one on the screen', () => screen.evaluate(() => window.__obpal.participants.length === 1), 10000)
@@ -347,7 +393,24 @@ try {
       const seal = await screenSeal()
       return seal && seal !== typedSeal
     }, 10000)
-    return 'rejoined'
+    await until('automatic reconnect seal on both status controls', async () => {
+      const p = await phone.locator('.link-badge .seal-compact').getAttribute('data-seal').catch(() => '')
+      const h = await screen.locator('.obpal-chip .pill .seal-compact').getAttribute('data-seal').catch(() => '')
+      return p && p === h && p !== typedSeal
+    })
+    const starts = await until('both reconnect moments', async () => {
+      const values = await Promise.all([screen.evaluate(() => window.__sealStarts.at(-1)), phone.evaluate(() => window.__sealStarts[0])])
+      return values.every(Boolean) ? values : null
+    })
+    if (Math.abs(starts[0] - starts[1]) > 100) throw new Error(`reconnect pulse start difference ${Math.abs(starts[0] - starts[1])}ms`)
+    const phase = await until('the delayed callback joins the current phase', () => phone.evaluate(() => {
+      const moment = document.querySelector('.link-badge .connection-seal')
+      const progress = Number(moment?.dataset.progress)
+      if (!(progress >= .1)) return null
+      return { delayed: window.__lateSealCallbacks, error: Math.abs(progress - Math.min(1, (performance.now() - Number(moment.dataset.started)) / 1200)) }
+    }))
+    if (phase.delayed !== 1 || phase.error > .08) throw new Error(`late callback lost the scheduled phase: ${JSON.stringify(phase)}`)
+    return 'matching persistent seals; a callback delayed 180 ms joins the synchronized phase'
   })
 
   await check('a screen with a phone connected never reloads itself for a gone chunk (src/ui/recover.ts), and one with no phone does', async () => {
@@ -420,11 +483,11 @@ try {
     const seal = await until('QR phone seal', () => phoneSeal(qrPhone))
     const hosts = await screen.evaluate(() => window.__obpal.seals.map(s => s.seal.join('-')))
     if (!hosts.includes(seal)) throw new Error('the QR phone differs from its screen')
-    await until('reduced-motion settlement', () => qrPhone.locator('.seal-moment[data-settled]').count())
-    const progress = await qrPhone.evaluate(() => document.querySelector('.seal-moment')?.dataset.progress)
+    await until('reduced-motion settlement', () => qrPhone.locator('.link-badge .connection-seal[data-settled]').count())
+    const progress = await qrPhone.evaluate(() => document.querySelector('.link-badge .connection-seal')?.dataset.progress)
     if (progress !== undefined) throw new Error('the reduced-motion handshake is running a moving timeline')
     await shot(qrPhone, 'phone-qr-reduced')
-    return 'three named glyphs, a single fade, comparison reachable'
+    return 'three named glyphs, a calm static settle, comparison reachable'
   })
 
   await check('no page errors on the screen', async () => {
@@ -450,9 +513,11 @@ try {
   exitCode = 1
 } finally {
   for (const c of closers.reverse()) await c.close().catch(() => {})
-  for (const d of profiles) await rm(d, { recursive: true, force: true }).catch(() => {})
+  for (const d of profiles) await (keepTemp() ? Promise.resolve() : rm(d, { recursive: true, force: true })).catch(() => {})
   await worker?.close()
 }
 const failed = results.filter((r) => !r.ok).length
 console.log(`${results.length - failed}/${results.length} passed`)
-process.exit(failed || exitCode ? 1 : 0)
+process.exitCode = (failed || exitCode ? 1 : 0)
+
+} finally { await temps.cleanup() }

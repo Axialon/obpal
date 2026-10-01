@@ -9,12 +9,18 @@
  *   - The screen can remove a phone, which then shows that it left and doesn't rejoin.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch.
  */
-import { mkdtemp, rm } from 'node:fs/promises'
+import { tempScope, keepTemp } from './lib/temp.mjs'
+import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, devices } from 'playwright'
 import { cspCheck } from './csp-watch.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
+import assert from 'node:assert/strict'
+import { measureButtonInk, inkError } from './lib/button-ink.mjs'
+
+const temps = tempScope()
+try {
 
 const HEADED = process.argv.includes('--headed')
 /** Where to save screenshots of the scene, the people panel and a phone (optional). */
@@ -46,6 +52,22 @@ async function check(name, fn) {
   }
 }
 
+async function guestViews(guest) {
+  for (const width of [1280, 390]) {
+    await guest.setViewportSize({ width, height: 800 })
+    for (const mode of ['overview', 'first-person', 'xr']) {
+      await guest.evaluate(mode => window.__presence.experience.setMode(mode), mode)
+      await guest.evaluate(() => document.fonts.ready)
+      await guest.waitForTimeout(80)
+      const chip = guest.locator('.guest-status'); assert(await chip.isVisible())
+      const rect = await chip.boundingBox(), viewport = guest.viewportSize()
+      assert(rect.x >= 0 && rect.x + rect.width <= viewport.width && rect.y >= 0 && rect.y + rect.height <= viewport.height)
+      const ink = (await guest.evaluate(measureButtonInk)).find(r => r.classes.includes('guest-status'))
+      assert(ink && inkError(ink) <= .5, `chip ink offset ${JSON.stringify(ink?.groupOffset)}`)
+    }
+  }
+}
+
 const local = await startLocal()
 const profiles = []
 const browsers = []
@@ -74,7 +96,7 @@ try {
 
   const phones = []
   async function joinPhone({ xr = false } = {}) {
-    const dir = await mkdtemp(join(tmpdir(), 'obpal-shared-'))
+    const dir = await temps.make(join(tmpdir(), 'obpal-shared-'))
     profiles.push(dir)
     const ctx = await chromium.launchPersistentContext(dir, { ...devices['Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS })
     browsers.push(ctx)
@@ -118,6 +140,100 @@ try {
     return phone.page.evaluate(() => document.getElementById('toast')?.textContent ?? '')
   }
 
+  await check('watchers stay visible, never lead or ask for approval, and show host left', async () => {
+    const ctx = await screenBrowser.newContext({ ignoreHTTPSErrors: true })
+    let releaseIce
+    const iceGate = new Promise(resolve => { releaseIce = resolve })
+    try {
+      const host = await ctx.newPage()
+      await host.goto(`${local.origin}/sim/arm/?test=vr`)
+      await host.waitForFunction(() => window.__presence && window.__obpal?.pairingUrl)
+      const url = new URL(await host.evaluate(() => window.__presence.shared.shareUrl())); url.searchParams.set('test', 'vr')
+      const guest = await ctx.newPage()
+      await guest.route('**/api/ice*', async route => { await iceGate; await route.continue() })
+      await guest.goto(url.href)
+      await guest.waitForFunction(() => window.__presence?.shared.status === 'Connecting')
+      await guestViews(guest)
+      releaseIce()
+      await guest.waitForFunction(() => window.__presence?.shared.status === 'Live')
+      assert.equal(await host.evaluate(() => window.__obpal.participants.some(p => p.lead)), false)
+      const phone = await ctx.newPage(); await phone.goto(await host.evaluate(() => window.__obpal.pairingUrl))
+      await phone.locator('.modes').waitFor({ timeout: 25000 })
+      await host.waitForFunction(() => window.__obpal.participants.length === 2)
+      assert.equal(await host.evaluate(() => window.__obpal.participants.find(p => p.lead)?.caps.platform !== 'scene'), true)
+      await host.locator('#chip-who').click()
+      assert.equal(await host.locator('#people-list li').filter({ hasText: 'Scene visitor' }).getByRole('button', { name: 'Let in' }).count(), 0)
+      assert.equal(await host.locator('#log').getByText(/Let Scene visitor in/).count(), 0)
+      assert.equal(await host.locator('#note').textContent().then(text => text.includes('Scene visitor wants')), false)
+      await guestViews(guest)
+      assert.equal(await guest.getByRole('button', { name: 'Grab', exact: true }).count(), 0)
+      assert.equal(await guest.getByRole('switch', { name: 'Drive with XR sticks' }).count(), 0)
+      await host.evaluate(() => window.__obpal.disconnect(window.__obpal.participants.find(p => p.caps.platform !== 'scene').id))
+      await host.waitForFunction(() => window.__obpal.participants.length === 1)
+      assert.equal(await host.evaluate(() => window.__obpal.participants.some(p => p.lead)), false)
+      await host.evaluate(() => window.__obpal.disconnect(window.__obpal.participants[0].id))
+      await guest.waitForFunction(() => window.__presence.shared.status === 'Removed')
+      await guestViews(guest)
+      await guest.reload()
+      await guest.waitForFunction(() => window.__presence?.shared.status === 'Live')
+      await host.close()
+      await guest.waitForFunction(() => window.__presence.shared.status === 'Host left')
+      await guestViews(guest)
+      await guest.reload()
+      await guest.waitForFunction(() => window.__presence?.shared.status === 'Waiting for host')
+      await guestViews(guest)
+    } finally { releaseIce(); await ctx.close() }
+  })
+
+  await check('a Viewer guest follows the host model and cannot choose or open another', async () => {
+    const ctx = await screenBrowser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 800 } })
+    try {
+      const guest = await ctx.newPage()
+      const url = new URL(`${local.origin}/view/?join=1&test=vr`); url.hash = new URL(invite).hash
+      await guest.goto(url.href)
+      await guest.waitForFunction(() => window.__presence?.shared.status === 'Live' && document.querySelector('#cap-name')?.textContent === "Box'em core")
+      assert(await guest.locator('.tile').first().isDisabled())
+      const before = await guest.locator('#cap-name').textContent()
+      await guest.keyboard.press('ArrowRight')
+      await guest.evaluate(() => document.querySelector('.tile:not([aria-current="true"])')?.click())
+      await sleep(300)
+      assert.equal(await guest.locator('#cap-name').textContent(), before)
+      assert.equal(await guest.locator('#open').isVisible(), false)
+      const next = screen.locator('.tile:not([aria-current="true"])').first()
+      await next.click()
+      await until('host model on guest', async () => (await guest.locator('#cap-name').textContent()) === (await screen.locator('#cap-name').textContent()) && (await guest.locator('#cap-name').textContent()) !== before)
+      await screen.locator('.tile[data-id="boxem"]').click()
+      await until('Box’em restored', async () => (await screen.locator('#cap-name').textContent()) === before)
+    } finally { await ctx.close() }
+  })
+
+  await check('the ninth room join shows full to guests and phones within 3 seconds', async () => {
+    const ctx = await screenBrowser.newContext({ ignoreHTTPSErrors: true })
+    try {
+      const room = await screen.evaluate(() => window.__obpal.roomId)
+      await screen.evaluate(async room => {
+        window.__capSockets = await Promise.all(Array.from({ length: 8 }, () => new Promise((resolve, reject) => {
+          const socket = new WebSocket(`${location.origin.replace('http', 'ws')}/r/${room}?role=device`)
+          socket.onopen = () => resolve(socket); socket.onerror = reject
+        })))
+      }, room)
+      const guest = await ctx.newPage(), phone = await ctx.newPage()
+      const url = new URL(`${local.origin}/view/?join=1&test=vr`); url.hash = new URL(invite).hash
+      const start = Date.now()
+      await guest.goto(url.href)
+      await guest.locator('.guest-status', { hasText: 'Room full' }).waitFor({ timeout: Math.max(1, 3000 - (Date.now() - start)) })
+      const guestMs = Date.now() - start
+      await guestViews(guest)
+      const phoneStart = Date.now(); await phone.goto(invite)
+      await phone.getByText('This scene is full', { exact: true }).waitFor({ timeout: Math.max(1, 3000 - (Date.now() - phoneStart)) })
+      return `guest ${guestMs} ms; phone ${Date.now() - phoneStart} ms`
+    } finally {
+      await screen.evaluate(() => window.__capSockets?.forEach(s => s.close()))
+      await ctx.close()
+      await sleep(300)
+    }
+  })
+
   let a, b
   await check('two phones join the same scene through one invite, each in its own colour', async () => {
     a = await joinPhone({ xr: true })
@@ -127,6 +243,17 @@ try {
     if (!s.people[0].lead || s.people[1].lead) throw new Error('the first to join should lead')
     const accents = await Promise.all(phones.map((p) => p.page.evaluate(() => document.documentElement.getAttribute('data-bb-accent'))))
     if (!accents[0] || accents[0] === accents[1]) throw new Error(`phones wear ${JSON.stringify(accents)}`)
+    await until('the newest phone and screen show the same compact seal', async () => {
+      const newest = await b.page.locator('.link-badge .seal-compact').getAttribute('data-seal').catch(() => '')
+      const host = await screen.locator('.obpal-chip .pill .seal-compact').getAttribute('data-seal').catch(() => '')
+      return newest && newest === host
+    })
+    await until('both connection seals persist in the QR footprint', async () => {
+      const seals = await screen.locator('.obpal-chip .seal-stage .connection-seal').all()
+      if (seals.length !== 2 || !(await Promise.all(seals.map(seal => seal.isVisible()))).every(Boolean)) return false
+      const values = await Promise.all(seals.map(seal => seal.getAttribute('data-seal')))
+      return (await Promise.all(phones.map(p => p.page.locator('.link-badge .connection-seal').getAttribute('data-seal')))).every(value => values.includes(value))
+    })
     await until('scene lists on both phones', async () => (await Promise.all(phones.map((p) => p.page.locator('.scene-btn').count()))).every((n) => n > 0), 15000)
     return `${s.people.map((p) => p.color).join(' · ')}; phones wear ${accents.join(' · ')}`
   })
@@ -225,9 +352,11 @@ try {
 } finally {
   await Promise.allSettled(browsers.map((b) => b.close()))
   await local.close()
-  await Promise.allSettled(profiles.map((d) => rm(d, { recursive: true, force: true })))
+  await Promise.allSettled(profiles.map((d) => (keepTemp() ? Promise.resolve() : rm(d, { recursive: true, force: true }))))
 }
 
 const failed = results.filter((r) => !r.ok)
 console.log(failed.length || exitCode ? `FAILED ${failed.length}/${results.length}` : `passed ${results.length}/${results.length}`)
-process.exit(failed.length || exitCode ? 1 : 0)
+process.exitCode = (failed.length || exitCode ? 1 : 0)
+
+} finally { await temps.cleanup() }

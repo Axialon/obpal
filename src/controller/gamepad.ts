@@ -186,7 +186,7 @@ function layerHtml(): Content {
   const round = (cls: string, b: number, label: string, ic: Content) => html`<button class="${cls}" data-b="${b}" aria-label="${label}">${ic}</button>`
   const face = (k: string, b: number) => html`<button class="gp-f" data-k="${k}" data-b="${b}" aria-label="${k.toUpperCase()}">${k.toUpperCase()}</button>`
   const arm = (dir: string, b: number) => html`<i data-dir="${dir}" data-bit="${b}">${ICONS.chevron}</i>`
-  const stick = (i: 0 | 1) => html`<div class="gp-stick" data-stick="${i}" role="group" aria-label="${i ? 'Right' : 'Left'} stick, tap to click"><i class="gp-base"><i class="gp-knob"></i></i></div>`
+  const stick = (i: 0 | 1, controls: Content) => html`<div class="gp-stick" data-stick="${i}" role="group" aria-label="${i ? 'Right' : 'Left'} stick, tap to click"><i class="gp-base"><i class="gp-knob"></i></i>${controls}</div>`
   return html`
     <div class="gp" hidden role="application" aria-label="Gamepad">
       <div class="gp-sh l">${trig(0)}${bump(B.LB, 'Left')}</div>
@@ -198,8 +198,7 @@ function layerHtml(): Content {
       <div class="gp-sh r">${bump(B.RB, 'Right')}${trig(1)}</div>
       <div class="gp-cue" role="img" aria-label="Turn your phone sideways for the full controller">${ICONS.phone}</div>
       <div class="gp-side l">
-        ${stick(0)}
-        <div class="gp-dpad" role="group" aria-label="D-pad">${arm('up', B.Up)}${arm('right', B.Right)}${arm('down', B.Down)}${arm('left', B.Left)}</div>
+        ${stick(0, html`<div class="gp-dpad" role="group" aria-label="D-pad">${arm('up', B.Up)}${arm('right', B.Right)}${arm('down', B.Down)}${arm('left', B.Left)}</div>`)}
       </div>
       <div class="gp-mid">
         <div class="gp-center">${round('gp-sm', B.View, 'View', ICONS.view)}<div class="gp-wheel" aria-hidden="true"><i>${ICONS.wheel}</i></div>${round('gp-sm', B.Menu, 'Menu', ICONS.menu)}</div>
@@ -213,8 +212,7 @@ function layerHtml(): Content {
         </div>
       </div>
       <div class="gp-side r">
-        ${stick(1)}
-        <div class="gp-face">${face('y', B.Y)}${face('x', B.X)}${face('b', B.B)}${face('a', B.A)}</div>
+        ${stick(1, html`<div class="gp-face">${face('y', B.Y)}${face('x', B.X)}${face('b', B.B)}${face('a', B.A)}</div>`)}
       </div>
     </div>`
 }
@@ -270,6 +268,8 @@ class Stick {
   }
 
   private down = (e: PointerEvent) => {
+    // Buttons inset in the floating zone keep their own touches, as on the trackpad.
+    if ((e.target as Element).closest('button, .gp-dpad')) return
     if (this.id !== null) return
     capture(this.zone, e)
     this.id = e.pointerId

@@ -1,6 +1,7 @@
 /** Humanoid practice, BODY and personal range calibration in Chromium. Evidence is always temporary. */
+import { tempScope } from './lib/temp.mjs'
 import { chromium, devices } from 'playwright'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -96,7 +97,9 @@ export function installFixture() {
 }
 
 export async function runHumanoid(local, check) {
-  const directory = await mkdtemp(join(tmpdir(), 'obpal-humanoid-'))
+  const temps = tempScope()
+  try {
+  const directory = await temps.make(join(tmpdir(), 'obpal-humanoid-'))
   const report = {
     environment: 'PC Chromium; phone viewports are emulated, not physical phones',
     results: [],
@@ -726,6 +729,8 @@ export async function runHumanoid(local, check) {
     await writeFile(join(directory, 'results.json'), JSON.stringify(report, null, 2))
     console.log(`Humanoid evidence: ${directory}`)
   }
+
+  } finally { await temps.cleanup() }
 }
 if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
   for (const k of ['OBPAL_E2E_PORT', 'OBPAL_E2E_WORKER_PORT']) if (!process.env[k]) throw new Error(`Set ${k}`)

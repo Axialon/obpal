@@ -1,6 +1,7 @@
 /** Rendered control directions, solid clearance and view lifecycle. All evidence goes to a temporary folder. */
+import { tempScope } from './lib/temp.mjs'
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -9,7 +10,9 @@ import { fakeXR } from './e2e-vr.mjs'
 
 const cases = ['rover', 'drone', 'arm-arm5', 'arm-so101', 'ptz', 'airhockey', 'studio', 'dog']
 export async function runControlViews(local, check) {
-  const out = await mkdtemp(join(tmpdir(), 'obpal-control-views-')), measurements = []
+  const temps = tempScope()
+  try {
+  const out = await temps.make(join(tmpdir(), 'obpal-control-views-')), measurements = []
   const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true, args: ['--ignore-certificate-errors'] })
   try {
     for (const id of cases) for (const mode of ['overview', 'first-person', 'xr']) {
@@ -261,6 +264,8 @@ export async function runControlViews(local, check) {
     await writeFile(join(out, 'measurements.json'), JSON.stringify(measurements, null, 2))
     await browser.close(); console.log(`  View evidence: ${out}`)
   }
+
+  } finally { await temps.cleanup() }
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {

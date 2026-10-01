@@ -4,7 +4,8 @@
  * Requires explicit OBPAL_E2E_PORT and OBPAL_E2E_WORKER_PORT; never uses production or loads Link.
  * Synthetic hand results still cross real camera timing, filtering, HAND encoding and WebRTC.
  */
-import { mkdtemp, open, readFile, writeFile } from 'node:fs/promises'
+import { tempScope } from './lib/temp.mjs'
+import { open, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { connect } from 'node:net'
@@ -17,6 +18,9 @@ import { setSurface } from './lib/frost.mjs'
 import { startWorker } from './local-worker.mjs'
 import { cameraDesign } from './e2e-camera-design.mjs'
 import { cameraBody } from './e2e-body.mjs'
+
+const temps = tempScope()
+try {
 
 const headed = process.argv.includes('--headed')
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
@@ -203,7 +207,7 @@ try {
   need(standIn !== localWorker, 'The two test ports must differ')
   need(!process.env.OBPAL_E2E_UPSTREAM && !process.env.OBPAL_E2E_ORIGIN, 'This suite requires its own local worker')
   await Promise.all([free(standIn), free(localWorker)])
-  directory = await mkdtemp(join(tmpdir(), 'obpal-camera-'))
+  directory = await temps.make(join(tmpdir(), 'obpal-camera-'))
   console.log('ob.Pal camera e2e')
   console.log('This suite loads neither Link nor Desktop')
   worker = await startWorker({ port: localWorker }); origin = worker.origin
@@ -491,3 +495,5 @@ try {
 const failed = results.filter(result => !result.ok).length
 console.log(failed ? `FAILED ${failed}/${results.length}` : `passed ${results.length}/${results.length}`)
 process.exitCode = failed ? 1 : 0
+
+} finally { await temps.cleanup() }

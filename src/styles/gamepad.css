@@ -23,6 +23,7 @@ html.gp-mode .hint { display: none !important; }
   --gp-y: 255 206 76;
   --gp-rumble: 0;
   position: fixed; inset: 0; z-index: 10;
+  overflow-y: auto; scrollbar-width: none;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(248px, 29%) minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
@@ -119,8 +120,9 @@ html.gp-mode .hint { display: none !important; }
 @container gpmid (max-width: 340px) {
   .gp-chip > span { display: none; }
   .gp .gp-chip { width: var(--tap); padding: 0; justify-content: center; }
-  /* The chips, the profile and the centre button on one row, so the middle fits a phone held sideways. */
-  .gp-motion { flex-direction: row; gap: 6px; }
+  /* Motion choices share a row; the connection seal keeps its own row below them. */
+  .gp-motion { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: 100%; }
+  .gp-motion > .link-badge { flex-basis: 100%; }
 }
 
 /* ---- sheets: a chip's options (route, sensitivity, deadzone jump, invert) and the profile picker ---- */
@@ -240,12 +242,12 @@ html.gp-mode .hint { display: none !important; }
 @media (orientation: portrait) {
   .gp {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-rows: auto auto minmax(0, 1fr) auto minmax(240px, 48%);
+    grid-template-rows: auto auto minmax(0, 1fr) auto minmax(240px, 1fr);
     grid-template-areas: 'ls rs' 'top top' 'cue cue' 'mid mid' 'lp rp';
     row-gap: var(--sp-4);
   }
   .gp-cue { display: grid; }
-  .gp-mid { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 10px 18px; }
+  .gp-mid { height: max-content; align-self: start; flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 10px 18px; }
   .gp-motion { flex-basis: 100%; }
   .gp-center { margin-top: 0; gap: 14px; }
   .gp-stick { --rx: 44%; --ry: 30%; }

@@ -17,6 +17,7 @@ export class SignalClient {
   onmessage: (m: SignalIn) => void = () => {}
   /** open: the socket is usable. reachable (only with open=false): whether this attempt reached the service at all. */
   onstatus: (open: boolean, reachable: boolean) => void = () => {}
+  onfull: () => void = () => {}
   /** Ever connected successfully. */
   everOpened = false
   private ws: WebSocket | null = null
@@ -52,11 +53,13 @@ export class SignalClient {
       if (e.data === 'pong') return
       try { this.onmessage(JSON.parse(e.data)) } catch { /* ignore malformed */ }
     }
-    ws.onclose = () => {
+    ws.onclose = (e) => {
       if (this.timer) clearTimeout(this.timer)
       if (this.ping) clearInterval(this.ping)
       if (this.ws !== ws) return
       this.ws = null
+      if (this.closed) return
+      if (e.code === 4008) { this.closed = true; this.onfull(); return }
       this.onstatus(false, opened)
       this.retry()
     }

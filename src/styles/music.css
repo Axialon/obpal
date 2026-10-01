@@ -1,7 +1,7 @@
 /* The music faces (./controller/drums.ts, keys.ts): drum pads and tone keys in the controller's column, with the same
    spacing, touch sizes and glass as every face. A small-caps kicker names what's playing, a chip the instrument held. */
 .surface.music-on > .dock, .surface.music-on > #pad { display: none; }
-.music-face { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+.music-face { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-3); overflow-y: auto; scrollbar-width: none; }
 .music-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); min-height: 30px; padding: 0 2px; }
 .music-heading b { font: 750 11px/1 var(--font); letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); }
 .music-part { min-width: 0; max-width: 64%; display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 999px;
@@ -19,8 +19,8 @@
 .music-options output { min-width: 28px; min-height: var(--tap-lg); display: grid; place-items: center; align-self: end; padding: 0; font: 700 16px/1 var(--font-data); color: var(--ink); }
 .music-toggle[aria-pressed=true], .sustain.playing { background: var(--glass-light); color: var(--accent-ink); border-color: rgb(255 255 255 / 0.3); }
 .music-face button:active { transform: scale(0.97); }
-.drum-pads { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, minmax(58px, 1fr)); gap: 10px; }
-.drum-pads.hand-drums { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); }
+.drum-pads { flex: 1 0 194px; min-height: 194px; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, minmax(58px, 1fr)); gap: 10px; }
+.drum-pads.hand-drums { flex-basis: 126px; min-height: 126px; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); }
 .music-pad { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 58px; border-radius: 22px;
   border: 1px solid var(--glass-edge); background: radial-gradient(120% 90% at 50% 40%, rgb(var(--hl-rgb) / 0.09), rgb(var(--hl-rgb) / 0.02)); color: var(--ink);
   touch-action: none; user-select: none; transition: background 90ms, transform 90ms, border-color 90ms; }
@@ -39,7 +39,7 @@
 .strike-map circle.aimed { fill: var(--accent); opacity: 1; stroke: var(--accent); stroke-width: 2; }
 .strike-map text { fill: var(--muted); font-size: 7px; text-anchor: middle; }
 .music-face button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.tone-keys { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(2, 1fr); gap: 8px; }
+.tone-keys { flex: 1 0 168px; min-height: 168px; display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(2, 1fr); gap: 8px; }
 .tone-key { display: flex; flex-direction: column; justify-content: space-between; align-items: center; padding: 15px 6px; border-radius: 12px 12px 24px 24px;
   background: linear-gradient(#eef2e8, #b4bbab); color: #182012; border: 1px solid #f3f7ee; box-shadow: inset 0 -6px 12px rgb(0 0 0 / 0.12), 0 10px 22px -12px rgb(0 0 0 / 0.7);
   touch-action: none; user-select: none; transition: background 90ms, transform 90ms; }
@@ -60,7 +60,7 @@
 :root.land .surface.left.music-on .music-face { grid-column: 2; }
 :root.land .music-pad { flex-direction: row; border-radius: 16px; }
 :root.land .music-pad i { width: 20px; height: 20px; }
-:root.land .tone-keys { grid-template-columns: repeat(8, 1fr); grid-template-rows: 1fr; }
+:root.land .tone-keys { flex-basis: 80px; min-height: 80px; grid-template-columns: repeat(8, 1fr); grid-template-rows: 1fr; }
 :root.land .music-options { --kit-select-h: var(--tap); }
 :root.land .music-toggle, :root.land .music-options > button:not(.kit-select), :root.land .keys-expression > button { min-height: var(--tap); }
 @media (prefers-reduced-motion: reduce) { .music-pad, .tone-key { transition: none; } .music-pad.playing, .tone-key.playing { transform: none; } }

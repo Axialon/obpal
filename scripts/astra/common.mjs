@@ -5,6 +5,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { readDenyWords, riskyPath, scanText } from '../lib/scan.mjs'
 import { LIMITS, readZip, safePath, writeZip } from './zip.mjs'
+import { ensureLayout, prepareRequest, tidyOutbox, uploadMarker } from './layout.mjs'
 
 export const REPOSITORY = 'Axialon/obpal'
 export const SUITES = ['code', 'embed', 'home', 'phone', 'sims', 'shared', 'extension', 'catalogue', 'pages']
@@ -106,11 +107,19 @@ export function loadArchive(path) {
   for (const p of actual) if (sha256(members[p]) !== manifest.files[p]) throw new Error(`Hash mismatch: ${p}`)
   return { bytes, members, manifest }
 }
-export function saveExchange(outbox, stage, kind, bytes, prompt) {
+export function saveExchange(outbox, stage, kind, bytes, prompt, { upload = true } = {}) {
+  ensureLayout(outbox)
+  if (kind === 'Request') prepareRequest(outbox, stage)
   mkdirSync(outbox, { recursive: true })
-  const stem = `obpal-${stage}-${kind}-${utc()}`, path = join(outbox, `${stem}.zip`)
+  const stem = `obpal-${stage}-${kind}-${utc()}`
+  let path = join(outbox, `${stem}.zip`)
   writeFileSync(path, bytes, { flag: 'wx' })
   writeFileSync(join(outbox, `${stem}.prompt.txt`), prompt, { flag: 'wx' })
+  if (upload) {
+    const moved = tidyOutbox(outbox, { currentStage: stage })
+    if (!existsSync(path)) path = moved.find(destination => destination.endsWith(`${stem}.zip`)) || path
+    uploadMarker(dirname(path), stage, `Upload the current loose ZIP files and paste the prompt below.\n\n${prompt}`)
+  }
   return path
 }
 export function args(argv, allowed, flags = []) {

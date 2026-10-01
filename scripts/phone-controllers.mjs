@@ -14,6 +14,7 @@
  */
 import { devices } from 'playwright'
 import { join as joinPath } from 'node:path'
+import { readControlOverlaps } from './lib/control-hitboxes.mjs'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 async function until(what, fn, timeout = 15000) {
@@ -34,6 +35,10 @@ const SIZES = [
   { name: '430×932', width: 430, height: 932, angle: 0 },
   { name: '844×390', width: 844, height: 390, angle: 90 },
 ]
+const HIT_SIZES = Array.from({ length: 8 }, (_, i) => 360 + i * 10).flatMap(width => [
+  { name: `${width}×664`, width, height: 664, angle: 0 },
+  { name: `664×${width}`, width: 664, height: width, angle: 90 },
+])
 
 /**
  * In the page: every control on screen (visible, not scrolled out of its scroller) that comes nearer an edge than
@@ -122,6 +127,8 @@ export async function phoneControllers({ browser, origin, check, shots }) {
     const cdp = await ctx.newCDPSession(phone)
     await cdp.send('DeviceOrientation.setDeviceOrientationOverride', { alpha: 10, beta: 70, gamma: 0 })
     await phone.goto(invite)
+    await phone.waitForFunction(() => document.body.classList.contains('live') || !!document.querySelector('#gate #start'), null, { timeout: 25000 })
+    if (await phone.locator('#gate #start').count()) await phone.locator('#gate #start').click()
     await phone.waitForFunction(() => document.body.classList.contains('live'), null, { timeout: 25000 })
     const clear = () => phone.evaluate(() => document.querySelectorAll('.hint, .bt-notice').forEach((h) => h.remove()))
     const size = async (z) => {
@@ -140,7 +147,7 @@ export async function phoneControllers({ browser, origin, check, shots }) {
     }
     const shut = async () => { await phone.keyboard.press('Escape'); await until('the catalogue closed', () => phone.evaluate(() => !document.querySelector('.ctl-wrap'))) }
     /** Every card: its fit, whether it's the best, dimmed, and in use. */
-    const cards = () => phone.evaluate(() => [...document.querySelectorAll('.ctl-card')].map((c) => ({
+    const cards = () => phone.evaluate(() => [...document.querySelectorAll('.ctl-card[data-c]')].map((c) => ({
       id: c.dataset.c, fit: Number(c.dataset.fit), best: !!c.querySelector('.ctl-best'), out: c.getAttribute('aria-disabled') === 'true', on: c.getAttribute('aria-checked') === 'true',
     })))
     const slots = () => phone.evaluate(() => [...document.querySelectorAll('.modes [data-tab]')].map((b) => ({
@@ -218,6 +225,32 @@ export async function phoneControllers({ browser, origin, check, shots }) {
       return said.join(' → ')
     })
 
+    await check('gamepad inset face buttons and D-pad keep their touches; the floating stick still takes its background', async () => {
+      await v.catalogue()
+      await v.phone.locator('.ctl-card[data-c="face.gamepad"]').click()
+      const states = await v.phone.evaluate(() => {
+        const press = (el, id, fy = .5) => {
+          const r = el.getBoundingClientRect()
+          el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: id, clientX: r.left + r.width / 2, clientY: r.top + r.height * fy }))
+        }
+        const release = (el, id) => el.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: id }))
+        const button = document.querySelector('.gp-f[data-k="a"]'), right = button.closest('.gp-stick')
+        press(button, 41)
+        const face = button.classList.contains('on') && !right.classList.contains('on')
+        release(button, 41)
+        const dpad = document.querySelector('.gp-dpad'), left = dpad.closest('.gp-stick')
+        press(dpad, 42, .15)
+        const direction = !!dpad.querySelector('.on') && !left.classList.contains('on')
+        release(dpad, 42)
+        press(left, 43)
+        const stick = left.classList.contains('on')
+        release(left, 43)
+        return { face, direction, stick, released: !document.querySelector('.gp-stick.on, .gp-f.on, .gp-dpad .on') }
+      })
+      if (Object.values(states).some(value => !value)) throw new Error(JSON.stringify(states))
+      return 'each owns its press and cancellation'
+    })
+
     /**
      * Look at every face `faces` names ([controller, how to show it, what to call it]) at the three sizes (or `sizes`),
      * and the catalogue at each: what comes nearer the edge than EDGE, or is smaller than TAP to touch.
@@ -225,12 +258,16 @@ export async function phoneControllers({ browser, origin, check, shots }) {
     const layouts = async (p, faces, extra = [], sizes = SIZES) => {
       const bad = []
       let looked = 0
+      let hitLayouts = 0
       const look = async (z, label) => {
         await p.clear()
         const a = await p.phone.evaluate(audit, { edge: EDGE, tap: TAP })
         looked++
         for (const n of a.near) bad.push(`${z.name} ${label}: ${n} from the edge`)
         for (const n of a.small) bad.push(`${z.name} ${label}: ${n} to touch`)
+        if (!['catalogue', 'settings', 'keyboard dock'].includes(label)) {
+          for (const n of await readControlOverlaps(p.phone)) bad.push(`${z.name} ${label}: ${n}`)
+        }
       }
       for (const z of sizes) {
         await p.size(z)
@@ -252,9 +289,23 @@ export async function phoneControllers({ browser, origin, check, shots }) {
         await p.shut()
         for (const [label, open, close] of extra) { await open(); await look(z, label); await close() }
       }
+      // The short viewport that exposed the seam, across the phone width range on every face.
+      for (const z of HIT_SIZES) {
+        await p.size(z)
+        for (const [id, label, then] of faces) {
+          if (!id || then) continue // overlays and motion variations were covered above
+          await p.catalogue()
+          await p.phone.locator(`.ctl-card[data-c="${id}"]`).click()
+          await until('the catalogue closed', () => p.phone.evaluate(() => !document.querySelector('.ctl-wrap')))
+          await sleep(400)
+          await p.clear()
+          hitLayouts++
+          for (const n of await readControlOverlaps(p.phone)) bad.push(`${z.name} ${label}: ${n}`)
+        }
+      }
       await p.size(SIZES[0])
       if (bad.length) throw new Error(bad.slice(0, 12).join('; '))
-      return `${looked} layouts, every control ${EDGE}+ px from the edge and ${TAP}+ px to touch`
+      return `${looked} layouts, every control ${EDGE}+ px from the edge and ${TAP}+ px to touch; ${hitLayouts} short portrait/landscape layouts with separate hit areas`
     }
 
     await check('the Viewer at three phone sizes, on every face, in the catalogue and in settings: nothing nearer the edge than 16 px, no touch target under 44 px', async () => {
@@ -284,22 +335,19 @@ export async function phoneControllers({ browser, origin, check, shots }) {
     // One screen at a time from here: the Viewer and its phone step aside for the sims'.
     await v.close()
     const rover = await join('/sim/device/?d=rover')
-    await check('a sim’s ratings (the rover): best first from what it names, the steering wheel best with the spark, what it can’t take dimmed', async () => {
+    await check('a sim’s ratings (the rover): recommended first, every other face selectable with guidance', async () => {
       // The rover suggests the wheel first: it opens as the gamepad on Driving.
       await until('the wheel opens', async () => (await rover.heard())?.controller === 'face.wheel')
       const s = await rover.slots()
-      if (JSON.stringify(s.map((x) => x.id)) !== JSON.stringify(['face.wheel', 'face.trackpad', 'face.wii'])) throw new Error(`slots ${JSON.stringify(s)}`)
+      if (JSON.stringify(s.filter(x => x.id).map((x) => x.id)) !== JSON.stringify(['face.wheel', 'face.trackpad', 'face.wii', 'face.hand', 'face.drums', 'face.keys'])) throw new Error(`slots ${JSON.stringify(s)}`)
       if (!s[0].best || s.slice(1).some((x) => x.best)) throw new Error('the best dot isn’t on the wheel alone')
       await rover.catalogue()
       const c = await rover.cards()
       const got = c.map((x) => `${x.id.slice(5)}:${x.fit}${x.best ? '*' : ''}${x.out ? '-' : ''}`).join(' ')
-      const want = 'wheel:3* gamepad:2 trackpad:2 wii:2 mouse:1 hand:0- keyboard:0- drums:0- keys:0-'
+      const want = 'wheel:3* gamepad:2 trackpad:2 wii:2 mouse:1 hand:1 keyboard:1 drums:1 keys:1'
       if (got !== want) throw new Error(`cards ${got}`)
-      const box = await rover.phone.locator('.ctl-card[data-c="face.hand"]').boundingBox()
-      await rover.cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2, id: 1 }] })
-      const why = await until('the reason', () => rover.phone.evaluate(() => document.querySelector('.ctl-tip.in')?.textContent ?? ''), 3000)
-      await rover.cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
-      if (!/doesn’t take 3D motion/.test(why)) throw new Error(`the tip said "${why}"`)
+      if (c.some(x => x.out)) throw new Error('a sim face is still gated')
+      if (await rover.phone.locator('.ctl-card[data-extra]').count() !== 3) throw new Error('tilt, hand or body missing')
       if (shots) await rover.phone.screenshot({ path: joinPath(shots, 'phone-catalogue-rover.png') })
       await rover.shut()
       return got

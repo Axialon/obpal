@@ -189,6 +189,17 @@ async function screen(remember = false) {
 }
 
 describe('connection seals through the verified link', () => {
+  it('add-a-phone rotates the invite while retaining the authenticated reconnect room', async () => {
+    const host = await screen()
+    const device = await phone(host.remote, host.socket)
+    await until('phone seal pulse', () => device.seals.length)
+    const invite = host.remote.pairingUrl, seal = host.remote.seals[0].seal
+    await host.remote.resetInvite()
+    expect(host.remote.pairingUrl).not.toBe(invite)
+    expect(host.socket.readyState).toBe(1)
+    expect(host.remote.seals[0].seal).toEqual(seal)
+    expect(device.host.channels.ctl.messages().filter(message => message.t === 'seal-start')).toHaveLength(1)
+  })
   it.each(['qr', 'code', 'saved'] as const)('derives the same local seal on both ends after a %s join', async mode => {
     const host = await screen()
     const device = await phone(host.remote, host.socket, { code: mode === 'code', saved: mode === 'saved' })

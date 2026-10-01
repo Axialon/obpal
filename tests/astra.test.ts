@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, unlinkSync, symlinkSync, realpathSync, join, tmpdir, env, bytes, centralOffset } from './astra-node.mjs'
+import { afterEach, describe, expect, it } from 'vitest'
+import { cleanupFixtures, moveFixtureFile, mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, unlinkSync, symlinkSync, realpathSync, join, tmpdir, env, bytes, centralOffset } from './astra-node.mjs'
 import { archive, git, json, loadArchive, sha256 } from '../scripts/astra/common.mjs'
 import { buildPack } from '../scripts/astra/pack.mjs'
 import { applyStage, intake, namedSuites, STAGE_LIMITS, verifyStage } from '../scripts/astra/intake.mjs'
@@ -9,6 +9,7 @@ import { LIMITS, readZip, safePath, writeZip } from '../scripts/astra/zip.mjs'
 
 const TASK = '# Sample\n\nAdd one test.\n\n## Acceptance\nA passing test.\n\n## Out of scope\nEverything else.\n'
 const MIRROR = 'a'.repeat(40)
+afterEach(cleanupFixtures)
 function commit(root: string, subject: string) {
   git(root, ['add', '-A'])
   // Fixture identities are synthetic and never change the checkout's Git configuration.
@@ -41,12 +42,12 @@ function fixture(stage = 'fixture', globs = ['*.txt'], options: Partial<Paramete
   return { root, outbox, base, pack, request, returned, members, metadata, save }
 }
 
-async function receive(f: ReturnType<typeof fixture>, pinned = false) {
+async function receive(f: ReturnType<typeof fixture>, pinned = false, automatic = false) {
   const keys = ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL']
   const old = keys.map((key) => env[key])
   env.GIT_AUTHOR_NAME = env.GIT_COMMITTER_NAME = 'Fixture'
   env.GIT_AUTHOR_EMAIL = env.GIT_COMMITTER_EMAIL = 'fixture@example.test'
-  try { return await intake({ ...f, pinned, run: () => { throw new Error('Intake must never execute returned code') } }) }
+  try { return await intake({ ...f, request: automatic ? undefined : f.request, pinned, run: () => { throw new Error('Intake must never execute returned code') } }) }
   finally { keys.forEach((key, i) => { if (old[i] === undefined) delete env[key]; else env[key] = old[i] }) }
 }
 
@@ -144,6 +145,24 @@ describe('Astra request packs', { timeout: 30_000 }, () => {
 })
 
 describe('Astra return intake', { timeout: 30_000 }, () => {
+  it('finds the retained request under sent and moves the accepted stage ZIP to processed', async () => {
+    const f = fixture('sent-lookup')
+    moveFixtureFile(f.request, join(f.outbox, 'sent', 'sent-lookup', 'nested', f.request.split(/[\\/]/).at(-1)!))
+    const report = await receive(f, false, true)
+    expect(report.result).toBe('review-required')
+    expect(existsSync(f.returned)).toBe(false)
+    expect(report.receivedPath).toContain('processed')
+    expect(existsSync(report.receivedPath!)).toBe(true)
+  })
+  it('moves a refused input to refused and retains its Return and prompt under sent', async () => {
+    const f = fixture('refused-layout'); writeFileSync(join(f.root, 'value.txt'), 'drift\n')
+    const report = await receive(f)
+    expect(report.result).toBe('failed')
+    expect(report.receivedPath).toContain('refused')
+    expect(report.path).toContain('sent')
+    expect(existsSync(f.returned)).toBe(false)
+    expect(existsSync(report.path.replace(/\.zip$/, '.prompt.txt'))).toBe(true)
+  })
   it('accepts a lean request through intake and carries its message budget into the reconcile ZIP', async () => {
     const f = fixture('lean-intake', ['*.txt'], { lean: true, mirror: MIRROR, messages: 14, spent: 0 })
     expect(readZip(f.pack.bytes)['source/value.txt']).toBeUndefined()

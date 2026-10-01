@@ -19,14 +19,14 @@
 import {
   AdditiveBlending, BufferAttribute, BufferGeometry, CanvasTexture, CircleGeometry, Color, DirectionalLight, DoubleSide, ExtrudeGeometry, Group,
   HemisphereLight, LinearFilter, LinearMipmapLinearFilter, Matrix3, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial,
-  PMREMGenerator, Points, Quaternion, Scene, ShaderMaterial, Shape, SphereGeometry, Sprite, SpriteMaterial, SRGBColorSpace, Vector2,
+  Path, PMREMGenerator, Points, Quaternion, Scene, ShaderMaterial, Shape, SphereGeometry, Sprite, SpriteMaterial, SRGBColorSpace, Vector2,
   Vector3, Vector4, WebGLRenderer, WebGLRenderTarget, type Material, type Texture,
 } from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
-import { surfaceAt, type Footprint, type Orb } from './bounce'
+import { inside, surfaceAt, type Footprint, type Orb } from './bounce'
 import { glassScale, type GpuSample, type Step } from './governor'
 import { BEVEL, LETTER_H } from './letters'
-import { createWorld, DEPTH, foreseeable, HIT_MIN, keyOf, ORB_R, PAD_H, WALL_MIN, type HitKind, type PadRect, type WorldMarble } from './world'
+import { createWorld, DEPTH, foreseeable, HIT_MIN, keyOf, ORB_R, PAD_H, PAD_ID, WALL_MIN, type HitKind, type PadRect, type WorldMarble } from './world'
 
 export { ORB_R }
 export type { HitKind, PadRect }
@@ -170,6 +170,9 @@ export interface Field {
    * them (the canvas is over the page there) and the dots stay under them. Call when they move.
    */
   pads(rects: PadRect[]): void
+  scroll(y: number, impulse?: boolean): void
+  avoid(rect: PadRect | null): void
+  readonly active: number
   /**
    * What of the canvas the marbles may use, top to bottom (canvas px; its sides are the canvas's): what's on screen
    * when the page is at its top, below the bar over it. Each marble's outline, as drawn, stays within it.
@@ -264,7 +267,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
   renderer.outputColorSpace = SRGBColorSpace
   const scene = new Scene()
   // The marbles' world (./world.ts): its camera is the one drawn with.
-  const world = createWorld()
+  const world = createWorld(true)
   const camera = world.camera
   scene.add(new HemisphereLight(LAVENDER, new Color('#1c1244'), 1.35))
   const keyDir = new Vector3(-3, 8, 5).normalize()
@@ -450,6 +453,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
     depthWrite: false,
     premultipliedAlpha: true,
     uniforms: {
+      uAvoid: { value: avoid }, uDirection: { value: camera.getWorldDirection(new Vector3()) },
       uTint: { value: tint }, uLife: { value: 0 }, uKey: { value: keyDir },
       uScene: { value: behind.texture }, uRefract: { value: 1 }, uView: { value: buf }, uSteps: { value: 12 },
       uCenter: { value: new Vector2() }, uRad: { value: 1 }, uC: { value: new Vector3() }, uR: { value: ORB_R }, uSpin: { value: new Matrix3() },
@@ -463,6 +467,8 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
         gl_Position = projectionMatrix * viewMatrix * w;
       }`,
     fragmentShader: `
+      uniform vec4 uAvoid;
+      uniform vec3 uDirection;
       uniform vec3 uTint;
       uniform float uLife;
       uniform vec3 uKey;
@@ -499,8 +505,10 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
       void main() {
         // The sphere along this pixel's view ray: how near the ray passes its centre, and one pixel in the same units.
         // (Worked out where the squashed marble is round again: the same, unsquashed.)
-        vec3 rd0 = normalize(vWorld - cameraPosition);
-        vec3 O = unsquash(cameraPosition - uC);
+        if (gl_FragCoord.x > uAvoid.x && gl_FragCoord.x < uAvoid.z && gl_FragCoord.y > uAvoid.y && gl_FragCoord.y < uAvoid.w) discard;
+        vec3 rd0 = uDirection;
+        vec3 origin = vWorld - rd0 * 100.0;
+        vec3 O = unsquash(origin - uC);
         vec3 D = unsquash(rd0);
         float dd = dot(D, D);
         float along = -dot(O, D) / dd;
@@ -508,7 +516,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
         float px = max(length(vec2(dFdx(q), dFdy(q))), 1e-6);
         float cover = clamp((uR - q) / px + 0.5, 0.0, 1.0);
         float qi = min(q, uR);
-        vec3 hit = cameraPosition + rd0 * (along - sqrt(uR * uR - qi * qi) / sqrt(dd));
+        vec3 hit = origin + rd0 * (along - sqrt(uR * uR - qi * qi) / sqrt(dd));
         vec3 n = normalize(unsquash(unsquash(hit - uC)));
         vec3 v = -rd0;
         float ndv = clamp(dot(n, v), 0.0, 1.0);
@@ -639,18 +647,34 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
   }
 
   // ---- the raised things, as blocks that hide what's behind them ----
+  let scrollY = 0
+  const avoid = new Vector4()
   function buildPadBlocks() {
     for (const m of padGroup.children) (m as Mesh).geometry.dispose()
     padGroup.clear()
     for (const fp of world.pads) {
-      const ring = fp.rings[0]
-      const shape = new Shape()
-      shape.moveTo(ring[0], -ring[1])
-      for (let k = 2; k < ring.length; k += 2) shape.lineTo(ring[k], -ring[k + 1])
-      // Its footprint, from the floor up to its top (the shape's y is the floor's -z, as the letters' glyphs are).
-      const geo = new ExtrudeGeometry(shape, { depth: PAD_H, bevelEnabled: false, curveSegments: 1 })
+      const shapes: Shape[] = []
+      const outlines = fp.rings.map(ring => {
+        const path = new Shape()
+        path.moveTo(ring[0], -ring[1])
+        for (let k = 2; k < ring.length; k += 2) path.lineTo(ring[k], -ring[k + 1])
+        return path
+      })
+      fp.rings.forEach((ring, index) => {
+        const containers = fp.rings.map((outer, i) => ({ outer, i }))
+          .filter(({ outer, i }) => i !== index && inside({ ...fp, rings: [outer] }, ring[0], ring[1]))
+        if (containers.length % 2 === 0) shapes.push(outlines[index])
+        else {
+          // The smallest containing outline owns this hole; disconnected glyph parts remain separate shapes.
+          const parent = containers.sort((a, b) => a.outer.length - b.outer.length)[0]
+          outlines[parent.i].holes.push(outlines[index] as Path)
+        }
+      })
+      const geo = new ExtrudeGeometry(shapes, { depth: fp.height, bevelEnabled: false, curveSegments: 1 })
       geo.rotateX(-Math.PI / 2)
-      padGroup.add(new Mesh(geo, hides))
+      const mesh = new Mesh(geo, hides)
+      mesh.userData.pad = fp.id - PAD_ID
+      padGroup.add(mesh)
     }
   }
 
@@ -678,7 +702,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
     const kx = buf.x / W, ky = buf.y / H
     dotUniforms.uPads.value.forEach((v, i) => {
       const b = padRects[i]
-      if (b && b.w > 0) v.set(b.x * kx, buf.y - (b.y + b.h) * ky, (b.x + b.w) * kx, buf.y - b.y * ky)
+      if (b && b.w > 0) v.set(b.x * kx, buf.y - (b.y + b.h - scrollY) * ky, (b.x + b.w) * kx, buf.y - (b.y - scrollY) * ky)
       else v.set(0, 0, 0, 0)
       dotUniforms.uPadR.value[i] = b ? Math.min(b.r, b.w / 2, b.h / 2) * kx : 0
     })
@@ -737,6 +761,22 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
       padsForDots()
       buildPadBlocks()
     },
+    get active() { return world.active },
+    avoid(rect) {
+      const kx = buf.x / W, ky = buf.y / H
+      if (rect) avoid.set((rect.x - 24) * kx, (H - rect.y - rect.h - 24) * ky, (rect.x + rect.w + 24) * kx, (H - rect.y + 24) * ky)
+      else avoid.set(0, 0, 0, 0)
+    },
+    scroll(y, impulse = true) {
+      scrollY = y
+      world.scroll(y, impulse)
+      padsForDots()
+      for (const child of padGroup.children) {
+        const b = padRects[(child.userData.pad as number)]
+        child.visible = !!b && b.y + b.h >= y - 100 && b.y <= y + H + 100
+      }
+      dots.visible = quality.glass > 0 && y < H
+    },
     play: (top, bottom) => world.play(top, bottom),
     padHeight: PAD_H,
     clock: () => world.clock,
@@ -754,17 +794,10 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
       // Points all over the sphere as drawn (a little bigger the higher it is), onto the canvas: their extremes.
       const [bx, by, bz] = o.m.shown
       const rho = ORB_R * (1 + DEPTH * Math.max(0, by - ORB_R))
-      const out = { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity }
-      for (let i = 0; i < 48; i++) {
-        const lat = -Math.PI / 2 + (Math.PI * (i + 0.5)) / 48
-        for (let j = 0; j < 96; j++) {
-          const lon = (2 * Math.PI * j) / 96
-          const p = world.project(bx + rho * Math.cos(lat) * Math.cos(lon), by + rho * Math.sin(lat), bz + rho * Math.cos(lat) * Math.sin(lon))
-          out.left = Math.min(out.left, p.x); out.right = Math.max(out.right, p.x)
-          out.top = Math.min(out.top, p.y); out.bottom = Math.max(out.bottom, p.y)
-        }
-      }
-      return out
+      const centre = world.project(bx, by, bz)
+      const edge = world.project(bx + rho, by, bz)
+      const radius = Math.abs(edge.x - centre.x)
+      return { left: centre.x - radius, right: centre.x + radius, top: centre.y - radius, bottom: centre.y + radius }
     },
     toss: (o, vy) => world.toss(o.m, vy),
     orb: (id, color) => orbMap.get(id) ?? makeOrb(id, color),
@@ -797,6 +830,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
       qualityLevel = lv
       if (q.pr === quality.pr && q.glass === quality.glass) return
       quality = q
+      dots.visible = q.glass > 0 && scrollY < H
       size()
       fitDots()
     },
@@ -919,11 +953,11 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
         l.dipV += (-l.dip * 220 - l.dipV * 18) * dt
         l.dip += l.dipV * dt
         l.lit += (l.kept - l.lit) * (1 - Math.exp(-dt * 2.2))
-        l.mesh.position.y = Math.max(-LETTER_H * 0.45, l.dip * 0.05)
+        l.mesh.position.y = 0
         // A knock rocks it about its foot, a few swings in a fifth of a second.
         spring(l.rx, dt, 7, 0.32)
         spring(l.rz, dt, 7, 0.32)
-        l.mesh.rotation.set(Math.max(-0.08, Math.min(0.08, l.rx.x)), 0, Math.max(-0.08, Math.min(0.08, l.rz.x)))
+        l.mesh.rotation.set(0, 0, 0)
         l.cap.emissiveIntensity = l.lit * 0.7
         l.cap.color.copy(INK).lerp(LIME, l.lit * 0.3)
         if (Math.abs(l.dip) > 1e-4 || Math.abs(l.dipV) > 1e-3 || Math.abs(l.lit - l.kept) > 0.004 || !settled(l.rx) || !settled(l.rz)) busy = true
@@ -945,7 +979,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
       let i = 0
       const refract = quality.glass > 0
       // A hard knock's jolt: the whole view, drawn a pixel or two over (the page itself stays put).
-      const jolted = !settled(shake.x) || !settled(shake.y)
+      const jolted = false
       if (jolted) {
         camera.setViewOffset(W, H, world.view.x - shake.x.x, world.view.y - shake.y.x, W, H)
         camera.updateProjectionMatrix()

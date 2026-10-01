@@ -7,7 +7,7 @@
  * frame is (so its motion is smooth at any frame rate, a step behind at most). Three.js math only: the physics
  * harness (tests/harness) runs exactly this.
  */
-import { PerspectiveCamera, Plane, Raycaster, Vector2, Vector3 } from 'three'
+import { OrthographicCamera, PerspectiveCamera, Plane, Raycaster, Vector2, Vector3 } from 'three'
 import { counterOf, FLOOR, H, inside, nearest, newOrb, roundedRect, surfaceAt, tick, toss, withinWalls, type Body, type Env, type Footprint, type Knock, type Orb, type StepOptions, type Wall } from './bounce'
 import { layoutLetters, TOP, tourStops, type LaidLetter } from './letters'
 
@@ -89,7 +89,7 @@ export const foreseeable = (h: WorldHit) => !h.soft && h.speed > SURE * hearing(
 export const keyOf = (h: WorldHit) => `${h.orb}|${h.kind}|${h.letter ?? h.pad ?? h.wall ?? h.other ?? ''}`
 
 /** A button in the hero, as the marbles' world sees it: its box on the canvas (CSS px) and its corners' radius. */
-export interface PadRect { x: number; y: number; w: number; h: number; r: number }
+export interface PadRect { x: number; y: number; w: number; h: number; r: number; height?: number; rings?: number[][]; step?: boolean }
 
 export interface WorldMarble {
   id: string
@@ -105,7 +105,7 @@ export interface WorldMarble {
 }
 
 export interface World {
-  readonly camera: PerspectiveCamera
+  readonly camera: PerspectiveCamera | OrthographicCamera
   /** The canvas's size (CSS px). */
   readonly size: [number, number]
   /** The letters as laid out (their shapes, for drawing), their footprints, and the raised things'. */
@@ -124,6 +124,9 @@ export interface World {
   layout(lines: string[], W: number, H: number, box: { x: number; y: number; w: number; h: number }): boolean
   /** The raised things, where they are now (canvas px; an empty box: not there). Returns whether they moved. */
   setPads(rects: PadRect[]): boolean
+  /** Move the cached page through a viewport field, carrying marbles and giving a bounded scroll impulse. */
+  scroll(y: number, impulse?: boolean): void
+  readonly active: number
   /** What of the canvas the marbles may use, top to bottom (canvas px). */
   play(top: number, bottom: number): void
   /** The floor point under a canvas point, kept inside the walls for a marble resting there. */
@@ -165,8 +168,9 @@ export interface World {
   foresee(horizon: number): WorldHit[]
 }
 
-export function createWorld(): World {
-  const camera = new PerspectiveCamera(FOV, 1, 0.1, 200)
+export function createWorld(viewport = true): World {
+  // Parallel projection keeps page footprints and marble sizes constant all the way down the document.
+  const camera = viewport ? new OrthographicCamera(-1, 1, 1, -1, -20000, 20000) : new PerspectiveCamera(FOV, 1, 0.1, 200)
   const ray = new Raycaster()
   const planes = new Map<number, Plane>()
   const plane = (h: number) => { let p = planes.get(h); if (!p) planes.set(h, (p = new Plane(new Vector3(0, 1, 0), -h))); return p }
@@ -181,6 +185,7 @@ export function createWorld(): World {
   let playTop = 0, playBottom = Infinity
   let lastLines = ''
   const view = { x: 0, y: 0, dist: 10 }
+  let scroll = 0, baseViewY = 0
   let clock = 0, acc = 0
   const map = new Map<string, WorldMarble>()
   /** Each marble's last knock on each thing, by name (keyOf): when (s on the world's clock). */
@@ -189,6 +194,10 @@ export function createWorld(): World {
 
   function rawFloorAt(sx: number, sy: number, h = 0) {
     ray.setFromCamera(new Vector2((sx / W) * 2 - 1, -(sy / Hc) * 2 + 1), camera)
+    if (camera instanceof OrthographicCamera) {
+      const t = (h - ray.ray.origin.y) / ray.ray.direction.y
+      return { x: ray.ray.origin.x + ray.ray.direction.x * t, z: ray.ray.origin.z + ray.ray.direction.z * t }
+    }
     const hit = new Vector3()
     return ray.ray.intersectPlane(plane(h), hit) ? { x: hit.x, z: hit.z } : { x: 0, z: 0 }
   }
@@ -202,17 +211,22 @@ export function createWorld(): World {
     const el = (ELEVATION * Math.PI) / 180
     const lb = footprints.reduce((b, f) => [Math.min(b[0], f.box[0]), Math.min(b[1], f.box[1]), Math.max(b[2], f.box[2]), Math.max(b[3], f.box[3])], [Infinity, Infinity, -Infinity, -Infinity])
     const cx = (lb[0] + lb[2]) / 2, cz = (lb[1] + lb[3]) / 2
-    camera.aspect = W / Hc
+    if (camera instanceof PerspectiveCamera) camera.aspect = W / Hc
     camera.clearViewOffset()
     // Distance so the block's width fills the box's width (at the block's centre), then the view is shifted so the
     // block's centre lands on the box's centre.
     const tanV = Math.tan(((FOV / 2) * Math.PI) / 180)
     const visW = ((lb[2] - lb[0]) * W) / Math.max(40, box.w)
-    const dist = visW / (2 * tanV * camera.aspect)
+    const dist = visW / (2 * tanV * (W / Hc))
+    if (camera instanceof OrthographicCamera) {
+      camera.left = -visW / 2; camera.right = visW / 2
+      camera.top = visW * Hc / W / 2; camera.bottom = -camera.top
+    }
     camera.position.set(cx, Math.sin(el) * dist, cz + Math.cos(el) * dist)
     camera.lookAt(cx, 0, cz)
     view.x = W / 2 - (box.x + box.w / 2)
-    view.y = Hc / 2 - (box.y + box.h / 2)
+    baseViewY = Hc / 2 - (box.y + box.h / 2)
+    view.y = baseViewY + scroll
     view.dist = dist
     camera.setViewOffset(W, Hc, view.x, view.y, W, Hc)
     camera.updateProjectionMatrix()
@@ -231,9 +245,19 @@ export function createWorld(): World {
     const mid = lookThrough(W / 2, (top + bottom) / 2)
     const eye = camera.position
     const edge = (a: [number, number], b: [number, number]): Wall => {
-      const n = new Vector3().crossVectors(lookThrough(a[0], a[1]), lookThrough(b[0], b[1])).normalize()
-      if (n.dot(mid) < 0) n.negate()
-      return { n: [n.x, n.y, n.z], d: -n.dot(eye) }
+      let n: Vector3
+      let origin = eye
+      if (camera instanceof OrthographicCamera) {
+        ray.setFromCamera(new Vector2(a[0] / W * 2 - 1, 1 - a[1] / Hc * 2), camera)
+        origin = ray.ray.origin.clone()
+        ray.setFromCamera(new Vector2(b[0] / W * 2 - 1, 1 - b[1] / Hc * 2), camera)
+        n = new Vector3().crossVectors(ray.ray.origin.clone().sub(origin), ray.ray.direction).normalize()
+      } else n = new Vector3().crossVectors(lookThrough(a[0], a[1]), lookThrough(b[0], b[1])).normalize()
+      if (camera instanceof OrthographicCamera) {
+        const centre = rawFloorAt(W / 2, (top + bottom) / 2)
+        if (n.dot(new Vector3(centre.x, 0, centre.z).sub(origin)) < 0) n.negate()
+      } else if (n.dot(mid) < 0) n.negate()
+      return { n: [n.x, n.y, n.z], d: -n.dot(origin) }
     }
     walls = [edge([0, top], [0, bottom]), edge([W, top], [W, bottom]), edge([0, top], [W, top]), edge([0, bottom], [W, bottom])]
     env.walls = walls
@@ -243,19 +267,43 @@ export function createWorld(): World {
   function buildPads() {
     pads = padRects.flatMap((b, i): Footprint[] => {
       if (b.w <= 0 || b.h <= 0) return []
-      const pts = roundedRect(b.x, b.y, b.w, b.h, b.r, 4)
-      const ring = new Float64Array(pts.length)
+      const height = b.height ?? PAD_H
+      const outlines = b.rings ?? [roundedRect(b.x, b.y, b.w, b.h, b.r, 4)]
       let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity
-      for (let k = 0; k < pts.length; k += 2) {
-        const p = rawFloorAt(pts[k], pts[k + 1], PAD_H)
-        ring[k] = p.x
-        ring[k + 1] = p.z
-        x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z)
-      }
-      const c = rawFloorAt(b.x + b.w / 2, b.y + b.h / 2, PAD_H)
-      return [{ id: PAD_ID + i, height: PAD_H, box: [x0, z0, x1, z1], rings: [ring], spot: [c.x, c.z], step: true }]
+      const rings = outlines.map((pts) => {
+        const ring = new Float64Array(pts.length)
+        for (let k = 0; k < pts.length; k += 2) {
+          const p = rawFloorAt(pts[k], pts[k + 1] - scroll, height)
+          ring[k] = p.x; ring[k + 1] = p.z
+          x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z)
+        }
+        return ring
+      })
+      const c = rawFloorAt(b.x + b.w / 2, b.y + b.h / 2 - scroll, height)
+      return [{ id: PAD_ID + i, height, box: [x0, z0, x1, z1], rings, spot: [c.x, c.z], step: b.step ?? true }]
     })
-    solid = [...footprints, ...pads]
+    cull()
+  }
+
+  function cull() {
+    if (!viewport) { solid = [...footprints, ...pads]; return }
+    const margin = 100
+    solid = [...footprints.filter((fp) => {
+      const p = project(fp.spot[0], fp.height, fp.spot[1])
+      return p.y > -margin && p.y < Hc + margin
+    }), ...pads.filter((fp) => {
+      const b = padRects[fp.id - PAD_ID]
+      return b.y + b.h >= scroll - margin && b.y <= scroll + Hc + margin
+    })]
+  }
+
+  function contain() {
+    for (const m of map.values()) {
+      const o = m.orb
+      const p = withinWalls(walls, o.x, o.y, o.z, o.r * (1 + DEPTH * Math.max(0, o.y - o.r)))
+      o.x = p.x; o.z = p.z
+      m.was = m.now = m.shown = [o.x, o.y, o.z]
+    }
   }
 
   const project = (x: number, y: number, z: number) => {
@@ -275,6 +323,25 @@ export function createWorld(): World {
     get clock() { return clock },
     get alpha() { return acc / H },
     view,
+    get active() { return solid.length },
+    scroll(y, impulse = true) {
+      if (!viewport || y === scroll) return
+      const old = scroll
+      const positions = [...map.values()].map((m) => ({ m, p: project(m.orb.x, m.orb.y, m.orb.z) }))
+      scroll = y
+      view.y = baseViewY + scroll
+      camera.setViewOffset(W, Hc, view.x, view.y, W, Hc)
+      camera.updateProjectionMatrix(); camera.updateMatrixWorld()
+      buildWalls(); cull()
+      for (const { m, p } of positions) {
+        const o = m.orb, at = rawFloorAt(p.x, p.y, o.y)
+        o.x = at.x; o.z = at.z
+        o.route = []; o.flying = false; o.aim = null; o.target = null
+        if (impulse) { o.vz += Math.max(-1.2, Math.min(1.2, (scroll - old) * -0.002)); o.resting = false }
+        delete o.mem
+      }
+      contain()
+    },
     layout(lines, w, h, box) {
       W = Math.max(1, w); Hc = Math.max(1, h)
       const k = lines.join('\n')
@@ -286,13 +353,14 @@ export function createWorld(): World {
       }
       fit(box)
       // Marbles stay where they were, on whatever is under them now (inside a letter now, they ease out onto it).
+      contain()
       world.wake()
       return changed
     },
     setPads(rects) {
       const same = rects.length === padRects.length && rects.every((r, i) => {
         const q = padRects[i]
-        return Math.abs(r.x - q.x) + Math.abs(r.y - q.y) + Math.abs(r.w - q.w) + Math.abs(r.h - q.h) + Math.abs(r.r - q.r) < 0.5
+        return Math.abs(r.x - q.x) + Math.abs(r.y - q.y) + Math.abs(r.w - q.w) + Math.abs(r.h - q.h) + Math.abs(r.r - q.r) < 0.5 && r.height === q.height && r.rings === q.rings
       })
       if (same) return false
       padRects = rects.map((r) => ({ ...r }))
@@ -306,6 +374,7 @@ export function createWorld(): World {
       playTop = top
       playBottom = bottom
       buildWalls()
+      contain()
       world.wake()
     },
     floorAt(sx, sy) {
@@ -421,6 +490,11 @@ export function createWorld(): World {
       let moving = false
       for (const m of all) {
         m.shown = lerp3(m.was, m.now, k)
+        if (viewport) {
+          const [x, y, z] = m.shown
+          const p = withinWalls(walls, x, y, z, m.orb.r * (1 + DEPTH * Math.max(0, y - m.orb.r)))
+          m.shown = [p.x, y, p.z]
+        }
         moving = moving || !m.orb.resting || m.was[0] !== m.now[0] || m.was[1] !== m.now[1] || m.was[2] !== m.now[2]
       }
       return { hits, moving }

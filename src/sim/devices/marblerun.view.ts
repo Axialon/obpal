@@ -12,7 +12,7 @@ import { mats, wear, type DeviceView } from './view'
 function boards(scene: THREE.Scene, logic: MarblerunLogic, count = 2) {
   const channelPose = new THREE.Matrix4()
   const glass = new THREE.MeshPhysicalMaterial({ color: '#a9d9dc', metalness: 0, roughness: 0.13, transmission: 0.75, thickness: 0.04, ior: 1.5, clearcoat: 1 })
-  const sphereGlass = glass.clone(); sphereGlass.color.set('#87c6dc'); sphereGlass.thickness = 0.11
+  const sphereGlass = glass.clone(); sphereGlass.color.set('#b1e5f0'); sphereGlass.thickness = 0.11; sphereGlass.transmission = .35
   const models = logic.units.slice(0, count).map((u, n) => {
     const base = new THREE.Group(); base.name = `track-pedestal-${n + 1}`; base.position.x = n * 3.8; scene.add(base)
     base.add(tiledDeck(3.3, 3.3, 0, 1.1))
@@ -58,9 +58,10 @@ function boards(scene: THREE.Scene, logic: MarblerunLogic, count = 2) {
     const cup = new THREE.Mesh(new THREE.LatheGeometry(profile, 64), cupGlass)
     cup.name = 'glass-start-cup'; cup.position.x = CUP.x; board.add(cup)
     const marbles = [u, ...u.marbles].map((m, j) => {
-      const mesh = new THREE.Mesh(new THREE.SphereGeometry(m.radius, 24, 16), sphereGlass)
+      const material = sphereGlass.clone(); material.color.set(['#dea448', '#37b98c', '#9363d4'][j])
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(m.radius, 24, 16), material)
       mesh.name = j ? `companion-marble-${j}` : 'marble'; mesh.castShadow = true
-      const ribbon = new THREE.Mesh(new THREE.TorusGeometry(m.radius * .72, m.radius * .045, 6, 32, Math.PI * 1.6), plastic(['#e6b766', '#82cfb0', '#a8b2e8'][j]))
+      const ribbon = new THREE.Mesh(new THREE.TorusGeometry(m.radius * .97, m.radius * .065, 8, 32, Math.PI * 1.8), plastic(['#f4c36d', '#63e6ae', '#ba9bff'][j]))
       ribbon.name = 'marble-colour-ribbon'; ribbon.rotation.y = .7; mesh.add(ribbon)
       board.add(contactPart(mesh, mesh.name, { surface: `board-${n}` })); return mesh
     })
@@ -98,6 +99,6 @@ export function createView(stage: Stage, logic: MarblerunLogic): DeviceView {
   return { framing: playFrame([0, 0.9, 0], 1.85, [0.2, 1.2, 1.1]), overview: playFrame([1.9, 0.8, 0], 3.5), inspect: () => playFrame([0, 0.9, 0], 0.7), follow: n => new THREE.Vector3(n * 3.8, 0.9, 0), update: colors => { if (m.step(colors)) stage.view?.invalidate() } }
 }
 export function preview() {
-  const l = new MarblerunLogic(); l.units[0].track[12] = { kind: 0, turn: 0 }
+  const l = new MarblerunLogic(true); l.units[0].track[12] = { kind: 0, turn: 0 }
   return showcase(scene => { const m = boards(scene, l, 1); let previous = 0, pushAt = 0; return { step(t) { if (t >= pushAt) { l.push(0, .55); pushAt = t + 3 } l.step([], Math.max(0, t - previous)); previous = t; m.step() } } }, [0, 0.9, 0], 1.45)
 }

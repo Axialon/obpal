@@ -1,6 +1,7 @@
 /** Real phone touch events over authenticated WebRTC, plus an eight-seat jam and portable evidence. */
+import { tempScope } from './lib/temp.mjs'
 import { chromium, devices } from 'playwright'
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -14,7 +15,9 @@ const latencyStats = ms => ({ medianMs: quantile(ms, 0.5), p90Ms: quantile(ms, 0
 async function until(fn, ms = 20000) { const end = Date.now() + ms; while (!await fn()) { if (Date.now() > end) throw new Error('Music state timed out'); await sleep(100) } }
 
 export async function runMusic(local, check) {
-  const dir = process.env.OBPAL_EVIDENCE ? resolve('artifacts/codex-music') : await mkdtemp(join(tmpdir(), 'obpal-music-'))
+  const temps = tempScope()
+  try {
+  const dir = process.env.OBPAL_EVIDENCE ? resolve('artifacts/codex-music') : await temps.make(join(tmpdir(), 'obpal-music-'))
   await mkdir(dir, { recursive: true })
   console.log(`  Music measurements and captures: ${dir}`)
   const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true, args: ['--disable-features=WebRtcHideLocalIpsWithMdns', '--ignore-certificate-errors', '--disable-background-timer-throttling', '--disable-renderer-backgrounding'] })
@@ -241,6 +244,8 @@ export async function runMusic(local, check) {
     await writeFile(join(dir, 'measurements.json'), JSON.stringify(report, null, 2) + '\n')
     await writeFile(join(dir, 'index.html'), viewer(report))
   }
+
+  } finally { await temps.cleanup() }
 }
 
 function viewer(report) {
