@@ -92,3 +92,26 @@ No USD, texture, mesh or robot numeric table is shipped by F0-R, so these assets
 used files in the application. Restricted, unlicensed or uncleared dependencies remain reference-only even when
 a catalogue neighbour has a permissive licence. The current physics fixtures use original, explicitly labelled
 simulation defaults. See the N1/N2 briefs for future provenance manifests and gate evidence.
+
+## F1a use and provenance (2026-10-01)
+
+This candidate imports **no** external robot mesh, CAD, texture, controller code or
+numeric parameter table. R2 informs separation of inertial bodies, visual skins,
+local joints and actuator records. R3/R4 remain the previously documented
+layout/transmission references, not parameter sources or permission to copy their
+restricted design assets. R5 stance/recovery architecture is reserved for F1b; no
+walking/recovery controller is claimed here. All new numeric robot parameters are
+original, uncalibrated simulation defaults in `humanoid/physics/model.ts`, with units
+and scaling in [HUMANOID-PHYSICS.md](HUMANOID-PHYSICS.md). Existing ob.Pal profiles
+supply the original geometry and independent joint limits. No new asset credit is
+needed for hypothetical imports, and the existing Rapier package credit is retained.
+
+R1's official [World API](https://rapier.rs/javascript3d/classes/World.html),
+[contact manifold API](https://rapier.rs/javascript3d/classes/TempContactManifold.html)
+and [integration parameters API](https://rapier.rs/javascript3d/classes/IntegrationParameters.html)
+were consulted for the contact callback's flipped orientation, borrowed contact
+points/impulses and native tolerances. The F1a wrapper copies values synchronously;
+it does not copy implementation code from these pages. Documentation is a moving
+reference; execution uses the already-pinned compat 0.21.0 package and reports its
+actual runtime version. The F1 request records Rapier selected by the coordinator;
+that historical engine comparison is not a measurement of this new humanoid.

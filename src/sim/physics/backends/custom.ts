@@ -69,6 +69,7 @@ function contacts(a: Particle, b: Particle): Contact[] {
   return []
 }
 export async function createCustomBackend(scene: Scene, _limits: Readonly<Limits>): Promise<Backend> {
+  if (scene.contact) throw new RangeError('Custom backend does not support requested contact solver settings')
   const boxes = scene.bodies.filter(b => b.shape.kind === 'box')
   if (boxes.some(a => boxes.some(b => b.id !== a.id && (!a.fixed || !b.fixed)))) throw new Error('Unsupported custom box/box contacts')
   let disposed = false

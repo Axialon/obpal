@@ -33,6 +33,8 @@ async function load(): Promise<SDK> {
 }
 interface Entry { spec: Body; actor: Actor; rigid: Rigid | null; dynamic: Dynamic | null; art: Articulation | null }
 export const createPhysXBackend: BackendFactory = async (input, limits): Promise<Backend> => {
+  if (input.joints.some(j => j.motor.integration !== undefined)) throw new RangeError('PhysX native drives do not support inertia-damped torque integration')
+  if (input.contact) throw new RangeError('PhysX backend does not support requested contact solver settings')
   const { P, physics, scale: tolerance, mark } = await load()
   const cleanup: (() => void)[] = [], entries = new Map<string, Entry>()
   let nativeScene: Scene | undefined, disposed = false

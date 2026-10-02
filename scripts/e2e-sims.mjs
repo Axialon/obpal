@@ -32,6 +32,7 @@ import { runTemporal } from './e2e-temporal.mjs'
 import { runWarmup } from './e2e-warmup.mjs'
 import { runGraphicsRecovery, runGraphicsRecoveryLayouts } from './e2e-graphics-recovery.mjs'
 import { runPhysicsBench } from './e2e-physics-bench.mjs'
+import { runHumanoidPhysics } from './e2e-humanoid-physics.mjs'
 import { runSmoothness } from './e2e-smoothness.mjs'
 import { runMarbleMobile } from './e2e-marble-mobile.mjs'
 import { runMarbleControls } from './e2e-marble-controls.mjs'
@@ -196,6 +197,7 @@ try {
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'vr') await runVR(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'music') await runMusic(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'graphics-recovery') await runGraphicsRecovery(local, check)
+  else if (process.env.OBPAL_E2E_SIMS_ONLY === 'humanoid-physics' || process.argv.includes('--only=humanoid-physics')) await runHumanoidPhysics(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'physics-bench' || process.argv.includes('--only=physics-bench')) await runPhysicsBench(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'smoothness') await runSmoothness(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'temporal') await runTemporal(local, check)
@@ -207,6 +209,7 @@ try {
   else {
   console.log('ob.Pal sims e2e')
   await runPhysicsBench(local, check)
+  await runHumanoidPhysics(local, check)
   // ---- robot arm ----
   // The screen's camera: a picture the test paints, with a phone glowing in it (window.__fakeCam).
   const arm = await screenAt('/sim/arm/', () => {

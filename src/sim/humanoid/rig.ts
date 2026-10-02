@@ -15,10 +15,13 @@ import { softPhone } from './soft-materials'
 import type { RigHold } from '../kit/reveal'
 import type { Grip } from './fingers'
 import { fingerAngles } from './tendons'
+import { localRigFrames } from './physics/binding'
+import type { WorldFrame } from './physics/model'
 
 export class Rig {
   readonly root = new THREE.Group()
   readonly pivots = new Map<string, THREE.Group>()
+  private physicalFrames: Record<string, WorldFrame> | null = null
   private fk = forward(this.profile, neutral(this.profile))
   private skins: THREE.Group[][] = []
   private level = 0
@@ -169,7 +172,24 @@ export class Rig {
     )
     this.root.userData.lod = next
   }
+  /** Physics owns every world transform. This consumes interpolation only; no engine reference or write-back exists. */
+  poseWorld(frames: Readonly<Record<string, WorldFrame>>) {
+    const local = localRigFrames(this.profile, frames)
+    for (const j of this.profile.joints) {
+      const f = local.joints[j.id], pivot = this.pivots.get(j.id)!
+      pivot.position.set(f.position.x, f.position.y, f.position.z)
+      pivot.quaternion.set(f.rotation.x, f.rotation.y, f.rotation.z, f.rotation.w)
+    }
+    this.root.position.set(local.root.position.x, local.root.position.y, local.root.position.z)
+    this.root.quaternion.set(local.root.rotation.x, local.root.rotation.y, local.root.rotation.z, local.root.rotation.w)
+    this.physicalFrames = local.world
+  }
   pose(q: Angles, position = new THREE.Vector3(), yaw = 0, offset = new THREE.Vector3()) {
+    if (this.physicalFrames) {
+      for (const j of this.profile.joints) this.pivots.get(j.id)!.position.set(...j.offset)
+      this.physicalFrames = null
+      this.root.rotation.set(0, 0, 0)
+    }
     for (const j of this.profile.joints) this.pivots.get(j.id)!.quaternion.setFromAxisAngle(v(j.axis), q[j.id] || 0)
     this.root.position
       .copy(offset)
@@ -179,6 +199,11 @@ export class Rig {
     this.fk = forward(this.profile, q)
   }
   point(id: string) {
+    if (this.physicalFrames) {
+      const f = this.physicalFrames[id]
+      if (!f) throw new RangeError('Unknown physical rig frame')
+      return new THREE.Vector3(f.position.x, f.position.y, f.position.z)
+    }
     return this.fk
       .get(id)!
       .p.clone()

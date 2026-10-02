@@ -20,6 +20,8 @@ export class Simulation {
   private lastGood: BodyState[] = []
   private commands: { id: string; force: Vec3; torque: Vec3 }[] = []
   private targets = new Map<string, Quat>()
+  private beforeTick: ((tick: number) => void) | undefined
+  private advancing = false
   private forces: ForceDiagnostics = { wheelLoads: {}, displacedVolumes: {}, motorTorques: {} }
 
   constructor(scene: SceneInput, factory: BackendFactory, limits: Partial<Limits> = {}) {
@@ -41,7 +43,7 @@ export class Simulation {
       const adapter: PhysicsAdapter<BodyState[]> = {
         name: backend.id, bodyCount: this.definition.bodies.length,
         get sleepingCount() { return 0 },
-        step: dt => this.tick(dt), capture: () => this.snapshot(),
+        step: (dt, tick) => this.tick(dt, tick), capture: () => this.snapshot(),
         interpolate: (a, b, t) => b.map((s, n) => {
           const p = a[n] ?? s, dot = p.rotation.x * s.rotation.x + p.rotation.y * s.rotation.y + p.rotation.z * s.rotation.z + p.rotation.w * s.rotation.w
           const sign = dot < 0 ? -1 : 1
@@ -63,11 +65,35 @@ export class Simulation {
   }
   async reset(): Promise<void> {
     if (this.status === 'disposed') throw new Error('Physics session is disposed')
+    if (this.advancing) throw new Error('Cannot reset during a physics tick')
     ++this.epoch; this.pending = null; this.releaseBackend(); this.commands = []; this.targets.clear()
     this.forces = { wheelLoads: {}, displacedVolumes: {}, motorTorques: {} }; this.status = 'idle'
     await this.init()
   }
-  advance(seconds: number): void { this.ready(); this.clock!.advance(seconds) }
+  /** Input is sampled synchronously exactly once before each fixed integration step; tick is zero-based. */
+  advance(seconds: number, beforeTick?: (tick: number) => void): void {
+    this.ready()
+    if (this.advancing) throw new Error('Recursive physics advancement is not supported')
+    this.advancing = true; this.beforeTick = beforeTick
+    try { this.clock!.advance(seconds) } finally { this.advancing = false; this.beforeTick = undefined }
+  }
+  contacts() {
+    this.ready()
+    if (!this.backend!.contacts) throw new Error('This backend does not support contact sampling')
+    try {
+      const samples = this.backend!.contacts!()
+      if (samples.length > 256) throw new RangeError('Contact sample budget exceeded')
+      return samples.map(c => {
+        this.body(c.a); this.body(c.b)
+        if (c.a === c.b || !Number.isFinite(c.distance) || !Number.isFinite(c.impulse) || c.impulse < 0)
+          throw new RangeError('Invalid backend contact')
+        const normalOnB = vector(c.normalOnB, 1.0001, 'contact normal')
+        if (norm(normalOnB) < .9999) throw new RangeError('Invalid contact normal length')
+        return { a: c.a, b: c.b, distance: c.distance, impulse: c.impulse, normalOnB,
+          pointA: vector(c.pointA, this.limits.maxPosition, 'contact point'), pointB: vector(c.pointB, this.limits.maxPosition, 'contact point') }
+      })
+    } catch (error) { this.fail(error); throw error }
+  }
   snapshot(): BodyState[] { return this.lastGood.map(copyState) }
   render(): BodyState[] { this.ready(); return this.clock!.render() }
   diagnostics() {
@@ -84,14 +110,30 @@ export class Simulation {
   }
   applyTorque(id: string, torque: Vec3): void { this.ready(); this.body(id); this.enqueue(id, ZERO, vector(torque, this.limits.maxTorque, 'torque')) }
   setMotorTarget(id: string, target: Quat): Quat {
-    this.ready(); const j = this.definition.joints.find(j => j.id === id)
-    if (!j) throw new RangeError('Unknown motor identifier')
-    const clamped = clampCone(quaternion(target), j.cone); this.targets.set(id, clamped)
-    this.wake(j.child); return { ...clamped }
+    return this.setMotorTargets({ [id]: target })[id]
+  }
+  /** Atomic validation; updating controls must not snap the render interpolation clock. */
+  setMotorTargets(targets: Readonly<Record<string, Quat>>): Record<string, Quat> {
+    this.ready()
+    if (!targets || Object.keys(targets).length > this.definition.joints.length) throw new RangeError('Invalid motor target batch')
+    const entries = Object.entries(targets).map(([id, target]) => {
+      const joint = this.definition.joints.find(j => j.id === id)
+      if (!joint) throw new RangeError('Unknown motor identifier')
+      return { joint, target: clampCone(quaternion(target), joint.cone) }
+    })
+    try {
+      // Wake the connected articulation, including low-mass distal links, without changing state snapshots.
+      const island = new Set(entries.flatMap(e => [e.joint.child, e.joint.parent]))
+      for (let n = 0; n < this.definition.joints.length; n++) for (const j of this.definition.joints)
+        if (island.has(j.parent) || island.has(j.child)) { island.add(j.parent); island.add(j.child) }
+      for (const id of island) this.backend!.sleep(id, false)
+      for (const e of entries) this.targets.set(e.joint.id, e.target)
+      return Object.fromEntries(entries.map(e => [e.joint.id, { ...e.target }]))
+    } catch (error) { this.fail(error); throw error }
   }
   sleep(id: string): void { this.setSleep(id, true) }
   wake(id: string): void { this.setSleep(id, false) }
-  dispose(): void { if (this.status === 'disposed') return; ++this.epoch; this.status = 'disposed'; this.pending = null; this.commands = []; this.releaseBackend() }
+  dispose(): void { if (this.advancing) throw new Error('Cannot dispose during a physics tick'); if (this.status === 'disposed') return; ++this.epoch; this.status = 'disposed'; this.pending = null; this.commands = []; this.releaseBackend() }
   private ready() { if (this.status !== 'ready' || !this.backend) throw new Error(`Physics session is ${this.status}`) }
   private body(id: string): BodyState {
     const b = this.lastGood.find(b => b.id === id)
@@ -112,8 +154,9 @@ export class Simulation {
       this.lastGood = this.readChecked(); this.clock!.snap()
     } catch (error) { this.fail(error); throw error }
   }
-  private tick(dt: number) {
+  private tick(dt: number, tick: number) {
     try {
+      this.beforeTick?.(tick)
       const out = new Map<string, Wrench>(), backend = this.backend!
       for (const c of this.commands) { backend.sleep(c.id, false); accumulate(out, c.id, c.force, c.torque) }
       this.commands = []

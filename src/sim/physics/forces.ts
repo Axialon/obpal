@@ -1,5 +1,7 @@
 /** Identical finite suspension, buoyancy and bounded torque controls for the comparison fixtures. */
 import { add, sub, scale, dot, cross, norm, unit, capped, rotate, conjugate, multiply, localPoint, rotationVector, clampCone, clamp, ZERO, type Vec3, type Quat } from './math'
+import { dampedServo } from './servo'
+import { STEP } from './schema'
 import type { Backend, Body, BodyState, Scene, Limits } from './schema'
 export interface Wrench { force: Vec3; torque: Vec3 }
 export interface ForceDiagnostics { wheelLoads: Record<string, number>; displacedVolumes: Record<string, number>; motorTorques: Record<string, number> }
@@ -43,19 +45,24 @@ export function actuatorForces(scene: Scene, backend: Backend, targets: Readonly
     const parent = backend.read(j.parent), child = backend.read(j.child)
     const frame = multiply(parent.rotation, j.frameParent), relative = multiply(conjugate(frame), multiply(child.rotation, j.frameChild))
     const target = targets.get(j.id) ?? j.motor.target, velocity = sub(child.angularVelocity, parent.angularVelocity)
+    const stop = rotationVector(multiply(clampCone(relative, j.cone), conjugate(relative)))
     let torque: Vec3 = { ...ZERO }
     if (backend.capabilities.motor === 'native-drive') backend.motor!(j.id, target)
     else {
       const error = rotate(frame, rotationVector(multiply(target, conjugate(relative))))
-      torque = capped(sub(capped(scale(error, j.motor.stiffness), j.motor.maxTorque), scale(velocity, j.motor.damping)), j.motor.maxTorque)
+      torque = j.motor.integration === 'inertia-damped'
+        ? dampedServo(scene.bodies.find(b => b.id === j.parent)!, parent, scene.bodies.find(b => b.id === j.child)!, child,
+          error, velocity, j.motor.stiffness, j.motor.damping, j.motor.maxTorque, STEP, rotate(frame, stop))
+        : capped(sub(capped(scale(error, j.motor.stiffness), j.motor.maxTorque), scale(velocity, j.motor.damping)), j.motor.maxTorque)
     }
     report.motorTorques[j.id] = norm(torque)
     // A finite, compliant elliptical stop; overshoot is measured, never silently projected in the WASM backends.
-    const stop = rotationVector(multiply(clampCone(relative, j.cone), conjugate(relative)))
-    if (norm(stop) > 1e-8) {
+    if (j.motor.integration !== 'inertia-damped' && norm(stop) > 1e-8) {
       const correction = rotate(frame, stop), n = unit(correction)
-      torque = add(torque, capped(add(scale(correction, 1200), scale(n, Math.max(0, -dot(velocity, n)) * 30)), limits.maxTorque))
+      const stopTorque = capped(add(scale(correction, 1200), scale(n, Math.max(0, -dot(velocity, n)) * 30)), limits.maxTorque)
+      torque = add(torque, stopTorque)
     }
+    if (j.motor.integration === 'inertia-damped') report.motorTorques[j.id] = norm(torque)
     accumulate(out, child.id, ZERO, torque); accumulate(out, parent.id, ZERO, scale(torque, -1))
   }
   for (const w of scene.wheels) {

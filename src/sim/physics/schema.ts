@@ -11,7 +11,7 @@ export interface Body extends BodyInput {
   rotation: Quat; fixed: boolean; mass: number; velocity: Vec3; angularVelocity: Vec3
   friction: number; restitution: number; linearDamping: number; angularDamping: number
 }
-export interface Motor { target: Quat; stiffness: number; damping: number; maxTorque: number }
+export interface Motor { integration?: 'inertia-damped'; target: Quat; stiffness: number; damping: number; maxTorque: number }
 export interface JointInput { id: string; parent: string; child: string; anchorParent: Vec3; anchorChild: Vec3; frameParent?: Quat; frameChild?: Quat; cone: Cone; motor: Motor }
 export interface Joint extends JointInput { frameParent: Quat; frameChild: Quat }
 export interface Wheel {
@@ -22,8 +22,11 @@ export interface Buoy {
   id: string; body: string; height: number; density: number; drag: number
   samples: { point: Vec3; radius: number; volume: number }[]
 }
-export interface SceneInput { bodies: BodyInput[]; gravity?: Vec3; joints?: JointInput[]; wheels?: Wheel[]; buoys?: Buoy[] }
-export interface Scene { bodies: Body[]; gravity: Vec3; joints: Joint[]; wheels: Wheel[]; buoys: Buoy[] }
+export interface ContactSettings { solverIterations: number; allowedLinearError: number; predictionDistance: number }
+/** Owned narrow-phase sample. normalOnB points from A to B; points are world-space, impulse is N s. */
+export interface ContactSample { a: string; b: string; pointA: Vec3; pointB: Vec3; normalOnB: Vec3; distance: number; impulse: number }
+export interface SceneInput { contact?: ContactSettings; bodies: BodyInput[]; gravity?: Vec3; joints?: JointInput[]; wheels?: Wheel[]; buoys?: Buoy[] }
+export interface Scene { contact?: ContactSettings; bodies: Body[]; gravity: Vec3; joints: Joint[]; wheels: Wheel[]; buoys: Buoy[] }
 export interface Limits { maxBodies: number; maxJoints: number; maxForces: number; maxForce: number; maxTorque: number; maxSteps: number; maxFrame: number; maxSpeed: number; maxAngularSpeed: number; maxPosition: number }
 export const STEP = 1 / 240
 export const DEFAULT_LIMITS: Readonly<Limits> = Object.freeze({ maxBodies: 64, maxJoints: 63, maxForces: 128,
@@ -42,6 +45,7 @@ export interface Backend {
   step(dt: number): void
   sleep(id: string, sleeping: boolean): void
   motor?(id: string, target: Quat): void
+  contacts?(): ContactSample[]
   memoryBytes(): number | null
   dispose(): void
 }
@@ -96,13 +100,16 @@ export function validateScene(input: SceneInput, budget: Partial<Limits> = {}): 
     identifier(j.id, used)
     if (!byId.has(j.parent) || !byId.has(j.child) || j.parent === j.child || byId.get(j.child)!.fixed || parents.has(j.child)) throw new RangeError('Invalid articulation tree')
     parents.set(j.child, j.parent)
+    if (j.motor.integration !== undefined && j.motor.integration !== 'inertia-damped') throw new RangeError('Invalid motor integration')
     const c = j.cone
     numberIn(c.swingY, .001, Math.PI - .01, 'swing Y'); numberIn(c.swingZ, .001, Math.PI - .01, 'swing Z')
+    if (c.swingYMin !== undefined) numberIn(c.swingYMin, -Math.PI + .01, -.001, 'negative swing Y')
+    if (c.swingZMin !== undefined) numberIn(c.swingZMin, -Math.PI + .01, -.001, 'negative swing Z')
     numberIn(c.twistMin, -Math.PI + .01, 0, 'twist minimum'); numberIn(c.twistMax, 0, Math.PI - .01, 'twist maximum')
     if (c.twistMax - c.twistMin < .001) throw new RangeError('Twist interval must have positive width')
     return { id: j.id, parent: j.parent, child: j.child, anchorParent: vector(j.anchorParent, 100, 'parent anchor'), anchorChild: vector(j.anchorChild, 100, 'child anchor'),
       frameParent: quaternion(j.frameParent ?? IDENTITY), frameChild: quaternion(j.frameChild ?? IDENTITY), cone: { ...c },
-      motor: { target: clampCone(quaternion(j.motor.target), c), stiffness: numberIn(j.motor.stiffness, 0, 2000, 'motor stiffness'),
+      motor: { ...(j.motor.integration ? { integration: j.motor.integration } : {}), target: clampCone(quaternion(j.motor.target), c), stiffness: numberIn(j.motor.stiffness, 0, 2000, 'motor stiffness'),
         damping: numberIn(j.motor.damping, 0, 200, 'motor damping'), maxTorque: numberIn(j.motor.maxTorque, 0, limits.maxTorque, 'motor torque') } }
   })
   for (const id of parents.keys()) {
@@ -131,5 +138,13 @@ export function validateScene(input: SceneInput, budget: Partial<Limits> = {}): 
   if (actuatorForces > limits.maxForces) throw new RangeError('Actuator force budget exceeded')
   const gravity = vector(input.gravity ?? { x: 0, y: -9.81, z: 0 }, 100, 'gravity')
   if (buoys.length && (gravity.x !== 0 || gravity.z !== 0 || gravity.y >= 0)) throw new RangeError('Buoyancy requires vertical downward gravity')
-  return { bodies, gravity, joints, wheels, buoys }
+  let contact: ContactSettings | undefined
+  if (input.contact !== undefined) {
+    const c = input.contact
+    if (!c || !Number.isInteger(c.solverIterations)) throw new RangeError('Invalid contact solver iterations')
+    contact = { solverIterations: numberIn(c.solverIterations, 1, 32, 'contact solver iterations'),
+      allowedLinearError: numberIn(c.allowedLinearError, .00001, .005, 'contact error'),
+      predictionDistance: numberIn(c.predictionDistance, .00001, .01, 'contact prediction') }
+  }
+  return { bodies, gravity, joints, wheels, buoys, ...(contact ? { contact } : {}) }
 }

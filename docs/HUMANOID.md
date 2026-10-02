@@ -586,3 +586,102 @@ and simultaneous camera inference remain unverified.
 3. **Decided:** standing auto-calibration and mirror on by default, plus an optional guided personal range calibration. Eight short steps cover shoulders (raise, forward, out), elbows, wrists, spine twist/bend, hips, knees, ankles and head. Each shows one animated figure and a measured arc, with completion, skip and redo. Measured ranges map monotonically onto robot limits. Only derived ranges and segment lengths persist in localStorage per device; landmarks never persist. Classical play requires no calibration.
 4. **Decided:** ROS 2 first, with fake G1/H1 adapters in phase 4. Real legs remain locked pending separate commissioning. Sim legs follow BODY with visual foot-contact balance and classical locomotion; no sim feature inherits the hardware leg lock.
 5. **Decided:** npm 0.3.0 ships HAND and BODY together. Publishing belongs to the coordinator; this branch does not publish or change the release version.
+
+## F1a physics pilot candidate (2026-10-01; not the default humanoid)
+
+The F1 request releases work on the measured, selected Rapier backend. It does **not**
+make the new pilot accepted. `physics/` now contains an isolated one-actor implementation
+and unskipped native/browser acceptance. `main.ts`, existing practice/seats, preview
+form gates, BODY routing, real/fake drivers, watchdogs, arming and packet schemas are
+unchanged. F1b balance/gait/two-actor recovery and F1c BODY/source/render release are
+not implemented by this candidate. Existing humanoids still use the legacy path.
+
+### Motor targets and observation/action pairs
+
+`HumanoidPilot.create(buildHumanoid(profileId, actorId))` constructs the versioned
+16-body, 15-joint model through `src/sim/physics` and the selected Rapier factory. A
+static floor is the seventeenth body; the pelvis and every robot link are dynamic.
+`definition()`, `snapshot()`, `renderFrames()`, `observation()` and `journal()` return
+owned values. The optional injected backend is for explicit testing only; production
+creation has no automatic custom-solver or empty-contact fallback.
+
+The schema-1 **simulation-only** `ActuationFrame` has exactly these fields:
+
+```ts
+{
+  schema_version: 1,
+  profileId: 'keel-v1',
+  actorId: 'seat1',
+  generation: 1,
+  tick: 0,
+  source: 'classical', // classical | body | policy | replay | hold
+  targets: { /* every model.scene.joints[].id: { x, y, z, w } */ }
+}
+```
+
+Targets are parent-joint-frame relative rotations, quaternion order x/y/z/w.
+They are not Euler yaw, root poses, forces, actuator ratings or wire packets. A frame
+must supply every joint exactly once; identity, generation, order, finiteness, plain
+own fields and quaternion validity are checked before any target changes. Unknown
+fields (including root position or gain overrides), partial frames, stale/future
+frames and accessors are rejected. Nonzero named root actuation is also rejected by
+`targetsFromAngles`. Joint targets are projected into the signed cone, canonicalised
+across q/-q and limited to 4 rad/s at the 240 Hz fixed step. This is an original
+simulation-default slew bound, not a physical actuator specification. Accepted
+**motor plus compliant-stop torque** is capped at each F1a joint's declared N m limit.
+
+```ts
+const model = buildHumanoid('keel-v1', 'seat1')
+const pilot = await HumanoidPilot.create(model)
+const targets = targetsFromAngles(model, { 'left.arm.roll': Math.PI / 3 })
+try {
+  pilot.advance(1 / 60, observation => ({
+    schema_version: 1, profileId: model.profileId, actorId: model.actorId,
+    generation: observation.generation, tick: observation.stateTick,
+    source: 'classical', targets,
+  }))
+  rig.poseWorld(pilot.renderFrames()) // interpolation is a read, never a physics write
+  const pairs = pilot.journal()
+  // Persisting/exporting pairs or attaching a BODY/policy source is not implemented here.
+} finally { pilot.dispose() }
+```
+
+The synchronous callback is sampled once immediately before each attempted fixed
+step, not once per render frame. Each journal pair contains the **pre-step** observation
+at tick n and the bounded **accepted** action used to produce n+1. A failed integration
+or input callback contributes no completed pair. A frame containing several fixed
+steps retains only its completed pairs on a later failure. The observation contains
+version/profile/actor/generation/tick/time, this actor's world body poses and SI
+velocities, relative joint rotations/velocities, anchor error, mass-weighted COM,
+sole errors and native contact support. Other actors' bodies are excluded.
+
+`quiet()` increments the input generation, replaces the requested hold with measured
+joint rotations, and slews towards that hold; gravity and contacts continue. It is
+**software hold**, not an emergency stop, sleep, arming change or safety guarantee.
+Previously issued frames cannot cross that boundary. `reset()` recreates the initial
+native scene, resets tick/journal and increments generation. `dispose()` is idempotent.
+No input queue, learning, recording UI, source selector or network transport is added.
+A future source owner must call quiet/reset explicitly on its own loss/change policy.
+The gate does not detect phone loss or authenticate the `source` label by itself.
+
+The journal defaults to 240 ticks (one simulated second), may be configured from
+1 to 7,200 ticks (30 seconds) and evicts oldest complete pairs. This bounds record
+count, not measured VM bytes. Training/storage belongs in a later reviewed stage.
+Replay must retain the exact model version and engine/runtime and feed saved accepted
+actions on their recorded tick/generation; wall-clock delivery is not deterministic
+replay. The native test compares 30/60/120 Hz render partitions, including velocities,
+at a stated 1e-6 SI error tolerance, without a cross-platform bit-identity claim.
+
+### Model and evidence contract
+
+[HUMANOID-PHYSICS.md](HUMANOID-PHYSICS.md) gives exact mass/inertia, frame, cone,
+controller and measurement defaults, their limitations, source references and the
+F1b/F1c continuation gates. No new mesh, third-party robot parameter or package was
+imported. Eight forms are tested without opening the six preview-gated forms.
+
+`tests/humanoid-physics-native.test.ts` executes all profiles in Node with the actual
+selected backend. `OBPAL_E2E_SIMS_ONLY=humanoid-physics` selects the new guarded browser
+proof. Both print JSON before assertions; failures remain failures. The offline
+selfcheck tests contracts, orchestration, projection and frame binding, **not native
+stance, collision quality, browser smoothness or phone BODY**. Do not promote the
+pilot or call F1 complete from an offline green result or a pose image.

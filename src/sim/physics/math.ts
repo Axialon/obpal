@@ -1,7 +1,11 @@
 /** Small owned-value maths shared by the candidates. Quaternion order is x, y, z, w; metres/radians/seconds. */
 export interface Vec3 { x: number; y: number; z: number }
 export interface Quat extends Vec3 { w: number }
-export interface Cone { swingY: number; swingZ: number; twistMin: number; twistMax: number }
+export interface Cone {
+  swingY: number; swingZ: number; twistMin: number; twistMax: number
+  /** Optional negative swing radii. Absent means symmetric; both sides include the neutral orientation. */
+  swingYMin?: number; swingZMin?: number
+}
 export const ZERO: Readonly<Vec3> = Object.freeze({ x: 0, y: 0, z: 0 })
 export const IDENTITY: Readonly<Quat> = Object.freeze({ x: 0, y: 0, z: 0, w: 1 })
 export const add = (a: Vec3, b: Vec3): Vec3 => ({ x: a.x + b.x, y: a.y + b.y, z: a.z + b.z })
@@ -52,7 +56,10 @@ export function swingTwist(input: Quat) {
   return { twist: rotationVector(twist).x, swingY: swing.y, swingZ: swing.z }
 }
 export function clampCone(q: Quat, c: Cone): Quat {
-  const s = swingTwist(q), r = Math.hypot(s.swingY / c.swingY, s.swingZ / c.swingZ)
+  const s = swingTwist(q)
+  const ry = s.swingY < 0 ? -(c.swingYMin ?? -c.swingY) : c.swingY
+  const rz = s.swingZ < 0 ? -(c.swingZMin ?? -c.swingZ) : c.swingZ
+  const r = Math.hypot(s.swingY / ry, s.swingZ / rz)
   const factor = r > 1 ? 1 / r : 1
   return quaternion(multiply(fromRotationVector({ x: 0, y: s.swingY * factor, z: s.swingZ * factor }),
     fromRotationVector({ x: clamp(s.twist, c.twistMin, c.twistMax), y: 0, z: 0 })))
