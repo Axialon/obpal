@@ -11,7 +11,6 @@ import { archiveEvidence, verifyEvidence, verifyLaneArchive } from '../scripts/l
 import { digestLane } from '../scripts/lanes/digest.mjs'
 import { execFileSync } from 'node:child_process'
 import { cleanupLane, withLedger, writeLedger, readLedger, waitLane, stopFinalLane, laneState } from '../scripts/lanes/lib.mjs'
-import { renderStoreKit } from '../extension/scripts/store-kit.mjs'
 import { treeSize } from '../scripts/lib/maintenance.mjs'
 
 const fixture = async action => {
@@ -74,16 +73,6 @@ export const cases = [
       inventory: () => ++reads < 3 ? [own] : [app],
       status: rows => ({ state: 'final', alive: rows.includes(own) }), kill: () => assert.fail('stale PID must not authorize a kill'), log() {},
     })
-  } },
-  { name: 'store kit renders portable image and package paths without writing release files', run() {
-    const { html } = renderStoreKit(repo)
-    assert.doesNotMatch(html, /\bfile:\/|\b[A-Za-z]:[\\/]|\\\\/i)
-    assert(!html.includes(repo)); assert(!html.includes(repo.replaceAll('\\', '/')))
-    const images = [...html.matchAll(/<img[^>]+src="([^"]+)"/g)].map(match => match[1])
-    assert.equal(images.length, 8)
-    for (const image of images) { assert.match(image, /^\.\.\/store\/[^/]+\.png$/); assert(existsSync(resolve(repo, 'extension/release', image))) }
-    assert.match(html, /data-copy="obpal-link-[^"]+-store\.zip"/)
-    for (const match of html.matchAll(/(?:src|data-copy)="([^"]+)"/g)) assert(!match[1].startsWith('/'))
   } },
 
   { name: 'permits other ledger commands during archive and removal, and refuses a changed round', run: () => fixture(async root => {

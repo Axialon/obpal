@@ -6,12 +6,13 @@
  *  - manifest.json and PNG action icons rendered from public/logo-mark.svg, and the bundled fonts' licences,
  * then checks that the manifest is MV3 and every file it (or a page) references exists.
  */
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build, defineConfig, type Plugin } from 'vite'
 import { markupBuild } from '../scripts/markup-build.mjs'
 import { ICON_SIZES, renderIcons } from './scripts/icons.mjs'
+import { directoryHashes, inputHash } from './scripts/store-source.mjs'
 
 const root = fileURLToPath(new URL('.', import.meta.url))
 const outDir = resolve(root, 'dist')
@@ -117,6 +118,7 @@ function verifyDist(dir: string) {
 
 function extension(): Plugin {
   let wrote = false
+  const sourceSha256 = inputHash(resolve(root, '..'))
   return {
     name: 'obpal-link-extension',
     apply: 'build',
@@ -144,6 +146,9 @@ function extension(): Plugin {
         })
       }
       verifyDist(outDir)
+      if (sourceSha256 !== inputHash(resolve(root, '..'))) throw new Error('Extension source changed during build; rebuild')
+      mkdirSync(resolve(root, 'release'), { recursive: true })
+      writeFileSync(resolve(root, 'release/build-source.json'), JSON.stringify({ sourceSha256, files: directoryHashes(outDir) }, null, 2) + '\n')
     },
   }
 }

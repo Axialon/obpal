@@ -16,6 +16,8 @@
 import { resolveChromium, shortPath } from './lib/browser.mjs'
 import { LINK_REPO, PAGES, VIEWPORTS, latestRelease, linkInstallChecks, linkVersionLabel, pageHeaderChecks, releaseChecks, securityTxtCheck, shownCode, turnChecks } from './lib/live.mjs'
 import { formatDuration, formatTable } from './lib/report.mjs'
+import { pendingWarning } from '../extension/scripts/store-manager.mjs'
+import { fileURLToPath } from 'node:url'
 
 const PARTS = ['pages', 'api', 'turn', 'headers', 'release']
 const argv = process.argv.slice(2).filter((a) => a !== '--')
@@ -63,6 +65,12 @@ if (only.includes('release')) {
   const label = linkVersionLabel(html)
   const api = await fetch(`https://api.github.com/repos/${LINK_REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'obpal-check-live' } })
   const release = api.ok ? latestRelease(await api.json().catch(() => null)) : null
+  if (release) {
+    try {
+      const warning = pendingWarning(fileURLToPath(new URL('..', import.meta.url)), release.tag)
+      if (warning) console.log(warning)
+    } catch { console.log('Store release comparison unavailable') }
+  }
   for (const r of releaseChecks({ label, release, http: api.status })) add('release', r)
 }
 

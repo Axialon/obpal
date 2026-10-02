@@ -1,17 +1,7 @@
 {
-  "item": "jnnpcnoilofjaffabnhecfokjjknlemg",
-  "state": "1.6.2 published; 1.8.0 prepared for coordinator review",
-  "updated": "2026-10-02",
-  "done": [
-    "The existing item retains Link's fixed ID",
-    "Link 1.6.2 is published on the Chrome Web Store",
-    "Link 1.7.0 was released on GitHub and was never submitted to the store",
-    "Link 1.8.0 includes everything since the published 1.6.2, with refreshed brand art and change-marked copy"
-  ],
-  "next": [
-    "Review the 1.8.0 pack and before-and-after image sheets",
-    "Upload extension/release/obpal-link-1.8.0-store.zip to the existing item (no key)",
-    "Use pnpm run store:kit to update only CHANGED fields and images, then save the draft",
-    "The owner submits the update for review in the Developer Dashboard; the coordinator then records the outcome here"
-  ]
+  "schema": 1,
+  "published": "1.6.2",
+  "pending": null,
+  "prepared": "1.8.0",
+  "updated": "2026-10-02"
 }

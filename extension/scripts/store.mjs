@@ -27,6 +27,7 @@ import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { files, unzip, zip } from './zip.mjs'
+import { inputHash, validateBuild, sha256 } from './store-source.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const repo = resolve(root, '..')
@@ -151,6 +152,8 @@ if (keyPath) {
 // ---- the build ------------------------------------------------------------------------------------------------
 
 if (!existsSync(join(dist, 'manifest.json'))) fail(`no build in ${dist}: run pnpm run store:extension, which builds first`)
+let receipt
+try { receipt = validateBuild(repo) } catch (error) { fail(error.message) }
 const built = JSON.parse(await readFile(join(dist, 'manifest.json'), 'utf8'))
 const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
 if (built.version !== pkg.version) fail(`the build is ${built.version} but extension/package.json says ${pkg.version}: build first`)
@@ -185,9 +188,11 @@ const paths = (await files(dist)).filter((p) => relative(dist, p).replace(/\\/g,
 const bytes = await zip(paths, dist, { 'manifest.json': manifestJson })
 const storeZip = join(out, `obpal-link-${manifest.version}-store.zip`)
 const entries = verify(bytes, false)
+if (receipt.sourceSha256 !== inputHash(repo)) fail('source changed during packing: run pnpm run store:extension')
 await mkdir(out, { recursive: true })
 await writeFile(storeZip, bytes)
 verify(await readFile(storeZip), false)
+await writeFile(join(out, 'store-package.json'), JSON.stringify({ version: manifest.version, sourceSha256: receipt.sourceSha256, zipSha256: sha256(bytes) }, null, 2) + '\n')
 console.log(`ob.Pal Link ${manifest.version} for the Chrome Web Store`)
 console.log(`  ${relative(repo, storeZip)} (${KB(bytes.length)}): ${entries.length} files, the manifest without its key`)
 list(entries)

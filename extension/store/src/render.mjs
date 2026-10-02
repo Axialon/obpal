@@ -38,6 +38,7 @@ import { renderSVG } from 'uqr'
 import { acquireGpuLease } from '../../../scripts/lib/gpu-lease.mjs'
 import { POSTERS, SHOTS } from './scenes.mjs'
 import { downsample } from '../../scripts/downsample.mjs'
+import { inputHash, artPath } from '../../scripts/store-source.mjs'
 import { rawRun, distill as distillEvidence } from '../../../scripts/lib/distill.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -467,6 +468,7 @@ const captureEvidence = join(repo, 'artifacts/link-1.8/round-5/after/captures')
 const captures = kept ?? rawRun(captureEvidence)
 let browser, releaseGpu
 const started = Date.now()
+const artSourceSha256 = inputHash(repo, artPath)
 try {
   if (['1', 'swiftshader'].includes(process.env.OBPAL_E2E_GPU)) {
     releaseGpu = await acquireGpuLease({ waiting: () => console.log('Store art waiting for GPU lease') })
@@ -488,6 +490,9 @@ try {
   if (!kept) await capture(captures)
   if (doArt) await art(browser, captures)
   if (doShots) await screenshots(browser, captures)
+  const { snapshot, writeJson } = await import('../../scripts/store-manager.mjs')
+  if (artSourceSha256 !== inputHash(repo, artPath)) throw new Error('Store art inputs changed during rendering; render again')
+  if (out === store && doArt && doShots && !only) writeJson(join(out, 'art.json'), { sourceSha256: artSourceSha256, images: snapshot(repo).images })
 } finally {
   try {
     await browser?.close()

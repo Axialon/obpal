@@ -10,6 +10,7 @@ const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8', win
 try {
   guardShip({ root, gitDir: git(['rev-parse', '--path-format=absolute', '--git-dir']), commonDir: git(['rev-parse', '--path-format=absolute', '--git-common-dir']), branch: git(['branch', '--show-current']), status: git(['status', '--porcelain']) })
   const sha = git(['rev-parse', 'HEAD'])
+  // check:live prints the store lag warning in this command's output too.
   const result = runShip((command, args) => {
     console.log(`ship: ${command} ${args.join(' ')}`)
     const windowsPnpm = process.platform === 'win32' && command === 'pnpm'

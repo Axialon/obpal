@@ -29,13 +29,14 @@ import { nextBuild } from './lib/deploy-sim.mjs'
 import { guardSiteButtons, SITE_BUTTON_ROUTES } from './lib/surface-buttons.mjs'
 import { runGraphicsRecoveryLayouts } from './e2e-graphics-recovery.mjs'
 import { e2eBrowserOptions } from './lib/browser.mjs'
+import { runStoreKit } from './e2e-store-kit.mjs'
 
 const PORT = Number(process.env.OBPAL_E2E_WORKER_PORT) || 5179
 const HEADED = process.argv.includes('--headed')
 const SHOTS = process.env.OBPAL_SHOTS || ''
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
 const ONLY = process.env.OBPAL_E2E_PAGES_ONLY || ''
-if (ONLY && !['try', 'viewer'].includes(ONLY)) throw new Error(`unknown pages selector: ${ONLY}`)
+if (ONLY && !['try', 'viewer', 'store'].includes(ONLY)) throw new Error(`unknown pages selector: ${ONLY}`)
 const PAGES = ['/', '/p/', '/view/', '/sim/', '/sim/arm/', '/sim/arena/', '/sim/humanoid/', '/sim/device/', '/embed/', '/link/', '/link/desktop/', '/link/try/', '/catalogue/', '/buttons/', '/sponsor/', '/donate/', '/privacy/', '/trust/']
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const results = []
@@ -161,11 +162,12 @@ try {
   worker = await startWorker({ port: PORT })
   console.log(`ob.Pal pages e2e (${worker.origin})`)
   browser = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED }))
+  if (!ONLY || ONLY === 'store') await runStoreKit(browser, check, SHOTS)
   if (ONLY === 'try') {
     await check('Try keeps readable controller feedback without constellation motion', () => runTry(browser, worker.origin))
   } else if (ONLY === 'viewer') {
     await runViewerScene(browser, worker.origin, check)
-  } else {
+  } else if (!ONLY) {
   await runLinkHero(browser, worker.origin, check)
   await guardSiteButtons(browser, worker.origin, SITE_BUTTON_ROUTES.filter(([name]) => name !== 'home'), check)
   await check('IndexNow key is served at its matching public URL', async () => {
