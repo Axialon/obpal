@@ -7,10 +7,12 @@
  * the answers) and asks the worker to change things; the helper is the one that persists its own.
  */
 import '../../../src/family'
+import { dotLoading } from '../../../src/ui/kit/loading'
 import '../../../src/styles/base.css'
 import '../ui/link.css'
 import './options.css'
-import { ICONS, LOGO_WORD } from '../../../src/ui/icons'
+import { ICONS } from '../../../src/ui/icons'
+import { LINK_LOGO } from '../../../src/ui/brand'
 import { askFor, parseAnswers, parsePhone, type Answers, type Phone } from '../shared/access'
 import { DEFAULT_MODE, isTargetMode, type TargetMode } from '../shared/constants'
 import { DESKTOP_URL, MAC_ACCESSIBILITY, EMPTY_PC, parsePcState, PC_PAGE_PORT_NAME, type PcProgramEntry, type PcState } from '../shared/native'
@@ -37,8 +39,7 @@ let notify = false
 
 app.innerHTML = `
   <header class="top rise">
-    <span class="logo" aria-label="ob.Pal"><span class="mark-slot" data-mark></span>${LOGO_WORD}</span>
-    <span class="tag">Link</span>
+    <span class="logo" aria-label="ob.Pal Link">${LINK_LOGO}</span>
     <span class="ver" id="ver"></span>
   </header>
   <section class="hero rise" style="--i:1" aria-labelledby="title">
@@ -251,13 +252,17 @@ function render() {
 
   const note = $('note')
   const notice = noticeFor()
+  dotLoading(note, false)
   note.hidden = !notice
   note.replaceChildren()
   if (notice) {
+    const waiting = pc.link === 'off' || pc.link === 'connecting'
     note.insertAdjacentHTML('afterbegin', LINK_ICONS.info)
     const t = document.createElement('span')
     t.textContent = notice.text
+    t.classList.toggle('dot-wait-label', waiting)
     note.append(t)
+    dotLoading(note, waiting, notice.text)
     if (notice.action) {
       const b = document.createElement('button')
       b.type = 'button'

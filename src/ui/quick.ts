@@ -72,7 +72,7 @@ class QuickTray {
   private picker: { menu: HTMLElement; api: { open(): void; close(): void; place(): void } } | null = null
   private frame = 0
   private sliding = 0
-  private swipe: { id: number; x: number; y: number; done: boolean } | null = null
+  private swipe: { id: number; x: number; y: number; axis: 'x' | 'y' | null; done: boolean } | null = null
 
   constructor(private readonly opts: { scroll?: boolean; defer?: (fn: () => void) => number } = {}) {
     document.documentElement.classList.add('quick-on')
@@ -119,12 +119,13 @@ class QuickTray {
     this.el.addEventListener('focusout', (e) => { if (this.open && e.relatedTarget && !this.owns(e.relatedTarget as Node)) this.close(false) })
     // A swipe back toward the edge closes it; on the tab, a swipe away from the edge opens it. Once a press moves
     // sideways it's a swipe: the tray keeps the pointer (so the edge doesn't cut it short) and it presses nothing.
-    this.el.addEventListener('pointerdown', (e) => { this.swipe = { id: e.pointerId, x: e.clientX, y: e.clientY, done: false } })
+    this.el.addEventListener('pointerdown', (e) => { this.swipe = { id: e.pointerId, x: e.clientX, y: e.clientY, axis: null, done: false } })
     this.el.addEventListener('pointermove', (e) => {
       const s = this.swipe
       if (!s || s.id !== e.pointerId || s.done) return
       const dx = e.clientX - s.x, dy = e.clientY - s.y
-      if (Math.abs(dy) > Math.abs(dx)) return
+      if (!s.axis && Math.max(Math.abs(dx), Math.abs(dy)) >= 8) s.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y'
+      if (s.axis !== 'x') return
       if (Math.abs(dx) > 6 && !this.el.hasPointerCapture(e.pointerId)) this.el.setPointerCapture(e.pointerId)
       if (Math.abs(dx) < 24) return
       if (dx > 0 && this.open) { s.done = true; this.close(false) }
@@ -388,6 +389,7 @@ class QuickTray {
     // What's fixed on that edge: the pairing chip's pill, and its card while it's open (folded, the card keeps its box
     // but isn't there); the viewer's viewpoint row; a sim's badge and windows; the home page's sound button.
     const chip = document.querySelector('.obpal-chip')?.shadowRoot
+    const pill = chip?.querySelector('.pill')?.getBoundingClientRect()
     const things = [chip?.querySelector('.pill'), chip?.querySelector('.wrap')?.hasAttribute('data-open') ? chip.querySelector('.card') : null,
       ...document.querySelectorAll('.presence-floating, .sim-badge, [data-sound], .sim-window:not([hidden])')]
       .filter((el): el is Element => !!el && !(el as HTMLElement).hidden).map((el) => el.getBoundingClientRect()).filter((r) => r.width && r.height)
@@ -404,9 +406,13 @@ class QuickTray {
       for (let cols = 1; cols <= count; cols++) {
         blocked = blockedBy(reach(cols))
         const room = Math.max(0, ...freeSpans(top, bottom, blocked).map(([a, b]) => b - a))
-        // Nowhere clear at all: over whatever is there for the moment it's open (the pairing card folds for it), in
-        // as many rows as the edge holds.
-        if (room < button + pad) { rows = fit(bottom - top); blocked = []; break }
+        // The pairing card folds and windows may be covered, but the persistent pill
+        // stays above the tray. Keep its space clear when choosing the fallback rows.
+        if (room < button + pad) {
+          blocked = pill?.width ? [[pill.top - 8, pill.bottom + 8]] : []
+          rows = fit(Math.max(0, ...freeSpans(top, bottom, blocked).map(([a, b]) => b - a)))
+          break
+        }
         rows = fit(room)
         if (Math.ceil(count / rows) <= cols) break
       }

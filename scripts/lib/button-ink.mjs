@@ -32,7 +32,7 @@ export function measureButtonInk({ surfaces = false } = {}) {
   }
   function ink(node) {
     const el = node.parentElement
-    if (!el || el.closest('svg, .kit-sr, sup, kbd' + (surfaces ? ', .ctl-mark, .hw-badges' : '')) || !rendered(el) || !node.textContent.trim()) return []
+    if (!el || el.closest('svg, .kit-sr, .dot-wait-label, sup, kbd' + (surfaces ? ', .ctl-mark, .hw-badges' : '')) || !rendered(el) || !node.textContent.trim()) return []
     const s = getComputedStyle(el), font = `${s.fontStyle} ${s.fontWeight} ${s.fontSize} ${s.fontFamily}`
     let clipLeft = -Infinity, clipRight = Infinity, ellipsis = false
     if (surfaces) for (let p = el; p && p !== document.body; p = p.parentElement) {
@@ -108,9 +108,9 @@ export function measureButtonInk({ surfaces = false } = {}) {
       target.push({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.abs(b.x - a.x), height: Math.abs(b.y - a.y) })
     }
     // A badge/disc or keycap is part of the visible group, while its glyph's own centre is still reported separately.
-    const decorations = [...el.querySelectorAll('kbd, .panel-badge, .dev-face-ic, .kit-side-ic, .kit-seg-ic, .kit-select-ic, .kit-select-badge, .sel-thumb, .mark, .dot, .ns-count b, .kit-chip > button, .sims-filters-n' + (surfaces ? ', .look > i, .bb-theme > i, .swatch, .gyro-ic, .gyro-sw, .row-ic, .sw, img, .tile-art, .pick-art, .ctl-gauge, .person, .fact, .music-pad > i' : ''))].filter(rendered).filter(e => {
+    const decorations = [...el.querySelectorAll('kbd, .panel-badge, .dev-face-ic, .kit-side-ic, .kit-seg-ic, .kit-select-ic, .kit-select-badge, .sel-thumb, .mark, .dot, .dot-loader, .ns-count b, .kit-chip > button, .sims-filters-n' + (surfaces ? ', .look > i, .bb-theme > i, .swatch, .gyro-ic, .gyro-sw, .row-ic, .sw, img, .tile-art, .pick-art, .ctl-gauge, .person, .fact, .music-pad > i' : ''))].filter(rendered).filter(e => {
       const s = getComputedStyle(e)
-      return e.matches('img, .swatch, .tile-art, .pick-art, .ctl-gauge') || s.backgroundColor !== 'rgba(0, 0, 0, 0)' || s.backgroundImage !== 'none' || s.boxShadow !== 'none'
+      return e.matches('img, .swatch, .tile-art, .pick-art, .ctl-gauge, .dot-loader') || s.backgroundColor !== 'rgba(0, 0, 0, 0)' || s.backgroundImage !== 'none' || s.boxShadow !== 'none'
     }).map(e => box(e.getBoundingClientRect()))
     for (const svg of el.querySelectorAll('svg')) if (rendered(svg) && getComputedStyle(svg).backgroundColor !== 'rgba(0, 0, 0, 0)') decorations.push(box(svg.getBoundingClientRect()))
     // The seal is a raster graphic in the control's visible group, just like its image or device mark.

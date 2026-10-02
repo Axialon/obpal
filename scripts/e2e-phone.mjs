@@ -27,6 +27,7 @@ import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join as joinPath } from 'node:path'
 import { chromium, devices } from 'playwright'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 import { checkFrost, setSurface } from './lib/frost.mjs'
 import { cspCheck } from './csp-watch.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
@@ -34,6 +35,7 @@ import { phoneConnections } from './phone-connections.mjs'
 import { phoneControllers } from './phone-controllers.mjs'
 import { phoneCamera } from './phone-camera.mjs'
 import { phoneConnectUx } from './phone-connect-ux.mjs'
+import { phoneCardRails } from './phone-card-rails.mjs'
 import { runPhonePacks } from './lib/packs-ui.mjs'
 import { phoneRecovery } from './phone-recovery.mjs'
 import { phonePointing } from './phone-pointing.mjs'
@@ -77,10 +79,19 @@ let dir = ''
 let exitCode = 0
 try {
   console.log('ob.Pal phone lock and hardware buttons e2e')
-  const sb = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
+  const sb = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED, args: RTC_ARGS }))
   closers.push(sb)
+  if (process.env.OBPAL_E2E_PHONE_ONLY === 'connections') {
+    await phoneConnections({ browser: sb, origin: local.origin, check, shots: SHOTS })
+    await check('connection sheets and controller controls retain centred ink', async () => {
+      const rows = []
+      await visitPhoneButtons(sb, local.origin, (_page, size, state, measured) => rows.push(...measured.map(r => ({ size, state, ...r }))))
+      return assertButtonInk(rows)
+    })
+  } else {
   await phonePointing({ browser: sb, origin: local.origin, check, shots: SHOTS, baseline: process.env.OBPAL_POINTING_BASELINE === '1' })
   if (process.env.OBPAL_POINTING_ONLY !== '1') {
+  await phoneCardRails({ browser: sb, origin: local.origin, check })
   await phoneConnectUx({ browser: sb, origin: local.origin, check })
   await check('all controller faces, dock, camera and connection sheets: button ink within 0.5px at three sizes, Carbon and Light', async () => {
     const rows = []
@@ -121,7 +132,7 @@ try {
   await screen.evaluate(() => { window.__btns = []; window.__obpal.on('button', (e) => window.__btns.push(`${e.id}:${e.ev}`)) })
 
   dir = await temps.make(joinPath(tmpdir(), 'obpal-phone-'))
-  const ctx = await chromium.launchPersistentContext(dir, { ...devices['Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS })
+  const ctx = await chromium.launchPersistentContext(dir, e2eBrowserOptions({ ...devices['Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS }))
   closers.push(ctx)
   // No native orientation lock in this run (as on an iPhone): the controller must lock by counter-rotating itself.
   await ctx.addInitScript(() => {
@@ -342,6 +353,7 @@ try {
   await runUniversalFaces(sb, local.origin, check, process.env.OBPAL_E2E_EVIDENCE_ROOT)
   await runPhonePacks({ browser: sb, origin: local.origin, check })
   await check('no Content Security Policy violations on any page', cspCheck)
+  }
   }
 } catch (e) {
   console.error(e)

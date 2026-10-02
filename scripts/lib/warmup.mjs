@@ -95,9 +95,15 @@ export async function prepareWarmup(context, { images = false } = {}) {
         }
       } })
     }
+    const contexts = new WeakSet()
     const get = HTMLCanvasElement.prototype.getContext
     HTMLCanvasElement.prototype.getContext = function (kind, options) {
       const result = get.call(this, kind, options)
+      if (result && kind.startsWith('webgl') && !contexts.has(result)) {
+        contexts.add(result)
+        const info = result.getExtension('WEBGL_debug_renderer_info')
+        event('webgl-context', { canvas: this.id || this.className, renderer: info ? String(result.getParameter(info.UNMASKED_RENDERER_WEBGL)) : 'masked' })
+      }
       if (this.matches('.hero-stage, #stage, .dcard-stage canvas')) queueMicrotask(() => attach(this))
       return result
     }

@@ -60,6 +60,11 @@ function cardOf(card: SimCard): { el: HTMLElement; slot: PreviewSlot | null } {
   body.className = 'dcard-body'
   setMarkup(body, html`<h2>${card.name}</h2><p>${card.blurb}</p><ul class="dcard-faces" aria-label="Controllers that suit it"></ul><div class="dcard-foot"><a class="dcard-go" href="${card.href!}" aria-label="Try the ${card.name.toLowerCase()}"><span>Try it</span>${ICONS['arrow-right']}</a></div>`)
   const faces = body.querySelector('ul')!
+  if (card.id !== 'viewer') {
+    const local = document.createElement('a'); local.className = 'dcard-local kit-action'; local.textContent = 'Play here'
+    const href = new URL(card.href!, location.origin); href.searchParams.set('local', matchMedia('(pointer: coarse)').matches ? 'phone' : 'here')
+    local.href = href.pathname + href.search; body.querySelector('.dcard-foot')!.append(local)
+  }
   card.controllers.forEach((c, i) => faces.appendChild(badge(c, card, i === 0)))
   el.append(stage, body)
   if (!card.preview) return { el, slot: null }

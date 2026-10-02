@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { startLocal } from '../extension/e2e/local.mjs'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const assert = (ok, message) => { if (!ok) throw new Error(message) }
@@ -21,7 +22,7 @@ export async function runControl(local, check) {
   try {
   const dir = await temps.make(join(tmpdir(), 'obpal-control-'))
   console.log(`  Control space measurements and captures: ${dir}`)
-  const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true, args: ['--disable-features=WebRtcHideLocalIpsWithMdns', '--ignore-certificate-errors', '--disable-background-timer-throttling', '--disable-renderer-backgrounding'] })
+  const browser = await chromium.launch(e2eBrowserOptions({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true, args: ['--disable-features=WebRtcHideLocalIpsWithMdns', '--ignore-certificate-errors', '--disable-background-timer-throttling', '--disable-renderer-backgrounding'] }))
   const errors = [], open = new Set(), report = {}
   async function pair(id) {
     const host = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true })

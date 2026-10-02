@@ -6,6 +6,7 @@ import { gzipSync } from 'node:zlib'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
 const PREFIX = '/__physics-bench/'
 const IDS = ['custom', 'rapier', 'physx']
@@ -33,7 +34,7 @@ export async function runPhysicsBench(local, check) {
     }))
     const entry = outputs.find(item => item.type === 'chunk' && item.isEntry)
     if (!entry) throw new Error('Vite bench entry is missing')
-    browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: !process.argv.includes('--headed') })
+    browser = await chromium.launch(e2eBrowserOptions({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: !process.argv.includes('--headed') }))
     report.browser = browser.version()
     for (const profile of PROFILES) for (const id of IDS) {
       const environment = `browser:${profile.id}`, context = await browser.newContext({ viewport: { width: 1280, height: 800 }, serviceWorkers: 'block' })

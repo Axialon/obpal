@@ -9,6 +9,7 @@ import '../styles/base.css'
 import '../styles/sim.css'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { batch, bolt, cylinder, environment, floorMaterial, maker, plastic, softKey } from './kit'
 import { blobShadow } from './devices/view'
 import { Mode, type Layout, type PadState } from '@obpal/host'
@@ -80,6 +81,9 @@ addEventListener('bb-theme', surface)
 const camera = new THREE.PerspectiveCamera(40, 1, 0.05, 60)
 camera.position.set(0, 4.3, 3.4)
 camera.lookAt(0, 0, 0.15)
+const controls = new OrbitControls(camera, renderer.domElement)
+controls.target.set(0, 0, .15); controls.enableDamping = true
+controls.minDistance = 1.5; controls.maxDistance = 30; controls.maxPolarAngle = Math.PI / 2 - .01
 
 // The ring: a glass disc with a glowing edge over the void.
 const disc = new THREE.Mesh(new THREE.CylinderGeometry(RING, RING, 0.08, 96), floorMaterial('#252e34'))
@@ -177,7 +181,7 @@ const shared = new SharedPresence({
   colliders: () => slots.filter(s => s.group.visible).map(s => ({ p: [s.pos.x, 0.15, s.pos.y], r: PUCK })),
 })
 scene.add(shared.group)
-view.presence = new Experience(renderer, scene, camera, rides, shared)
+view.presence = new Experience(renderer, scene, camera, rides, shared, controls)
 if (!shared.guest) shared.world.add('ball', [0, 0.16, 0], 0.16)
 if (!shared.guest) void startSimScene({
   appName: 'ob.Pal faction arena',
@@ -234,20 +238,22 @@ function dash(s: Slot, who: string) {
 const padA = new Map<string, number>()
 const localPlayers = new Set<number>()
 let seats: Seats | null = null
-const localControls = new LocalControls({
+const localControls = shared.guest ? null : new LocalControls({
   id: 'arena', canvas: renderer.domElement, units: () => slots, tray: layout.tray,
   phone: () => document.getElementById('chip-invite')?.click(),
   controllerWindow: () => { if (sim?.remote.pairingUrl) window.open(sim.remote.pairingUrl, '_blank', 'noopener') },
+  orbit: enabled => { controls.enabled = enabled && !view.presence?.immersive },
 })
 let last = 0
 function loop(now: number) {
   const dt = last ? Math.min(0.033, (now - last) / 1000) : 0
   last = now
+  controls.update()
   if (shared.guest) { view.draw(scene, camera, dt); return }
   const t = now / 1000
   if (sim && !seats) seats = new Seats(sim.remote, layout, sim.control)
   const phoneInputs = seats?.read(now)
-  const localFrames = localControls.frames(n => !!sim?.claims.holder(slots[n].id), dt)
+  const localFrames = localControls?.frames(n => !!sim?.claims.holder(slots[n].id), dt) ?? new Map()
   if ([...localFrames.keys()].join(',') !== [...localPlayers].join(',')) {
     localPlayers.clear(); for (const n of localFrames.keys()) localPlayers.add(n)
     spawnHeld(); renderScore()

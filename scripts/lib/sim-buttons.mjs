@@ -11,12 +11,26 @@ export async function buttonRoutes() {
 }
 
 export async function visitButtonStates(page, origin, path, sample) {
-  const errors = []
+  const errors = [], network = [], consoleErrors = []
+  const pathname = url => { try { return new URL(url).pathname } catch { return '' } }
   page.on('pageerror', e => errors.push(e.message))
+  page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text().slice(0, 500)) })
+  page.on('requestfailed', request => network.push({ path: pathname(request.url()), failure: request.failure()?.errorText }))
+  page.on('response', response => { if (response.status() >= 400) network.push({ path: pathname(response.url()), status: response.status() }) })
   await page.goto(origin + path)
-  await page.waitForFunction(() => document.querySelector('.sim-windows, .hub, .catalogue, #controller-slot')).catch(e => { throw new Error(errors.join('; ') || e.message) })
+  const wait = async (phase, ready) => page.waitForFunction(ready).catch(async error => {
+    const state = await page.evaluate(() => ({
+      path: location.pathname, classes: document.body.className,
+      windows: document.querySelectorAll('.sim-windows, .hub, .catalogue, #controller-slot').length,
+      host: !!window.__obpal, pairing: !!window.__obpal?.pairingUrl,
+      recovery: document.querySelector('.sim-recovery')?.dataset.kind ?? '',
+      message: document.querySelector('.sim-recovery [role=alert], .msg h1')?.textContent ?? '',
+    })).catch(() => null)
+    throw new Error(`${phase}: ${error.message}; ${JSON.stringify({ state, errors, consoleErrors, network })}`)
+  })
+  await wait('scene controls ready', () => document.querySelector('.sim-windows, .hub, .catalogue, #controller-slot'))
   if (path !== '/sim/') {
-    await page.waitForFunction(() => !!window.__obpal?.pairingUrl)
+    await wait('pairing code ready', () => !!window.__obpal?.pairingUrl)
     if (await page.locator('body.dev').count()) await page.locator('#dev-view button').first().waitFor({ state: 'attached' })
   }
   await page.evaluate(() => document.fonts.ready)

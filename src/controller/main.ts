@@ -1,4 +1,8 @@
 import { showPackArrival } from './packs'
+import { ParticipantStrip } from '../ui/participants'
+import { PhonePlay } from '../sim/local-play'
+import { decodePad, validSimMessage } from '@obpal/core'
+import type { RoomState } from '../sim/participation'
 import { controllerWorkerURL, type Content, insertMarkup, html, setMarkup } from '../ui/markup'
 import { family } from '../family'
 import '../styles/base.css'
@@ -30,6 +34,7 @@ import { LinkBadge } from './linkbadge'
 import { sheetExits } from './sheet'
 import { Connections, type Connection, type Join } from './connections'
 import { ConnectionSheet } from './connection-sheet'
+import { dotLoading } from '../ui/kit/loading'
 import { pendingPhase, STILL_CONNECTING } from './pairing-recovery'
 import { CameraView } from '../ui/camera'
 import { HandTracker } from './hand-tracker'
@@ -53,6 +58,7 @@ import { applyTheme, initialTheme, swatch, THEMES, themeById } from '../ui/theme
 import { barSlots, byFit, choiceFor, CONTROLLER_ICON, controllerOn, FACE_OF, fallback, rateControllers, type Face, type Rating } from './ratings'
 import { Switcher } from './switcher'
 import { NodeStrip } from './strip'
+import { resolveShortLink } from './short-link'
 
 const app = document.getElementById('app')!
 const isApple = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
@@ -116,14 +122,14 @@ async function deviceName(): Promise<string> {
   return /Android/.test(ua) ? 'Android phone' : 'Browser'
 }
 
-function screenMessage(opts: { title: string; body: Content; spinner?: boolean; art?: string; action?: { label: string; run: () => void } }) {
+function screenMessage(opts: { title: string; body: Content; busy?: boolean; art?: string; action?: { label: string; run: () => void } }) {
   document.documentElement.classList.remove('gp-mode') // full-screen messages keep the background and hints alive
   setMarkup(app, html`
     <main class="msg">
       <div class="logo">${logo()}</div>
       <div class="msg-card glass">
-        ${opts.spinner ? html`<div class="spinner" aria-hidden="true"></div>` : opts.art ? html`<div class="msg-art">${opts.art}</div>` : ''}
-        <h1>${opts.title}</h1>
+        ${opts.busy ? html`<div class="dot-loading-slot" data-dot-loading="true" data-dot-size="48" data-dot-label="${opts.title}"></div>` : opts.art ? html`<div class="msg-art">${opts.art}</div>` : ''}
+        <h1 class="${opts.busy ? 'dot-wait-label' : ''}">${opts.title}</h1>
         <p>${opts.body}</p>
         ${opts.action ? html`<button class="btn primary" id="act">${opts.action.label}</button>` : ''}
       </div>
@@ -151,8 +157,13 @@ addEventListener('hashchange', () => {
 })
 
 /** How the phone came: a code from the URL (scanned), or a short code typed on the start page (PROTOCOL §2b). */
-const pairing = takePairing()
-void boot(pairing ?? undefined)
+if (location.hash.startsWith('#s.')) {
+  screenMessage({ title: 'Opening shared scene', body: 'Connecting to the room.', art: ICONS.view, busy: true })
+  void resolveShortLink(location.hash, location.origin).then(url => location.replace(url), error => screenMessage({ title: error.message, art: ICONS.view, body: 'Ask for a new link, or try again when connected.' }))
+} else {
+  const pairing = takePairing()
+  void boot(pairing ?? undefined)
+}
 
 /**
  * The start page, when the phone came with no code: scan the one on the screen, or type the short code beside it.
@@ -216,12 +227,16 @@ function startPage() {
     busy = true
     const generation = ++entryGeneration
     input.readOnly = true
-    go.textContent = 'Connecting…'
+    go.textContent = ''
+    dotLoading(go, true, 'Connecting to the screen')
+    say.classList.add('dot-wait-label')
     tell('Finding your screen…')
     ready()
     const r = await lookupCode(location.origin, parts.handle)
     busy = false
     input.readOnly = false
+    dotLoading(go, false)
+    say.classList.remove('dot-wait-label')
     go.textContent = 'Connect'
     if (!form.isConnected) return
     if (generation !== entryGeneration) {
@@ -549,6 +564,7 @@ async function boot(code?: Join) {
   let chipTimer: ReturnType<typeof setTimeout> | undefined
   let heldShown = ''
   let scene: { you: string; people: ScenePerson[]; nodes: SceneNode[]; held: Record<string, string> } | null = null
+  let sceneUrl = ''
   /** The face last shown, so a switch animates the new one in. */
   let faceShown = ''
   /** Tilt or 1:1, in the dock (the glass kit's segmented control), once the surface is up. */
@@ -623,6 +639,22 @@ async function boot(code?: Join) {
   const name = deviceName()
   const link = new Connections({ service: location.origin, cert: own, caps, name, beforeSwitch: releaseControls, switched: switchSurface,
     status: onStatus, message: onHost, stats: (s) => linkBadge.update(s), seal: (s) => linkBadge.reveal(s), notice: (text) => toast(text), attempt: showAttempt })
+  let participation: ParticipantStrip | null = null, grantedPlay: PhonePlay | null = null, seatGrant = '', roomSeq = -1, roomSend = 0, watching = false
+  const sendRoom = (kind: 'handover' | 'audience' | 'seat', data: import('@obpal/core').SimValue) => link.sendCtl({ t: 'sim', v: 1, kind, seq: ++roomSend, data })
+  function roomState(room: RoomState & { grant?: string }) {
+    participation ??= new ParticipantStrip({ handover: (op, to) => sendRoom('handover', { op, ...(to ? { to } : {}) }), audience: data => sendRoom('audience', data) }, false, true)
+    participation.root.hidden = false; participation.update(room)
+    const grant = room.grant ?? '', observer = room.people.find(p => p.id === room.you)?.role === 'watch'
+    if (grant !== seatGrant || observer) { grantedPlay?.close(false); grantedPlay = null; releaseControls() }
+    seatGrant = grant; watching = observer || !!grant
+    if (!watching && surface?.classList.contains('gp-on')) { const middle = surface.querySelector('.gp-mid'); if (middle && participation.root.parentElement !== middle) middle.append(participation.root) }
+    else if (surface && participation.root.parentElement !== surface) surface.querySelector('.bar')?.after(participation.root)
+    if (surface) for (const el of surface.children) if (el instanceof HTMLElement && el !== participation.root && !el.classList.contains('bar')) el.inert = watching
+    if (grant && !grantedPlay) grantedPlay = new PhonePlay({ id: room.you,
+      pad: b => { const p = decodePad(b); if (p) sendRoom('seat', { x: p.axes[0], y: p.axes[1], rx: p.axes[2], ry: p.axes[3] }) }, state: () => {},
+      control: m => { if (m.t === 'btn' && m.ev === 'tap') sendRoom('seat', { x: 0, y: 0, action: m.id }) }, close: () => sendRoom('handover', { op: 'demote' }),
+    }, layout, control.sim ?? '', true)
+  }
   const musicWire = new MusicWire(m => { if (link.ready) link.sendCtl(m) })
   const drums = new Drums(musicWire, motion, control)
   const keys = new Keys(musicWire, motion, control, recenterHere)
@@ -785,7 +817,7 @@ async function boot(code?: Join) {
   link.setLimit(Number(store.get('obpal.connections.limit') ?? 3))
   addEventListener('pagehide', () => { stopHands(); stopBody(); connections.close(); link.destroy() })
   if (code) {
-    screenMessage({ title: 'Connecting', body: code.v === 2 ? 'Reaching your screen over Wi-Fi…' : 'Finding your screen…', spinner: true })
+    screenMessage({ title: 'Connecting', body: code.v === 2 ? 'Keep the screen open on the same Wi-Fi.' : 'Keep the page with the code open.', busy: true })
     void connectTo(code).catch((e: Error) => screenMessage({ title: 'Scan again', body: e.message, art: ICONS.phone }))
   } else {
     startPage()
@@ -984,6 +1016,7 @@ async function boot(code?: Join) {
   }
 
   function onStatus(s: LinkStatus) {
+    if (s !== 'connected') { participation && (participation.root.hidden = true); grantedPlay?.close(false); grantedPlay = null; seatGrant = ''; watching = false; roomSeq = -1 }
     // Left on purpose: the link closing says nothing more (the Disconnected screen stays).
     if (hungUp) return
     if (s !== 'connected') linkBadge.down(s)
@@ -1041,16 +1074,18 @@ async function boot(code?: Join) {
     }
     if (s === 'unreachable') {
       surface = null
-      return screenMessage({ title: 'ob.Pal is out of reach', body: 'Still trying. If the screen shows a direct code, scan that one instead.', spinner: true })
+      return screenMessage({ title: 'ob.Pal is out of reach', body: 'Still trying. If the screen shows a direct code, scan that one instead.', busy: true })
     }
     const text = s === 'waiting-host' ? 'Waiting for the screen' : 'Reconnecting…'
     if (surface) banner(text)
-    else screenMessage({ title: s === 'waiting-host' ? 'Waiting for the screen' : 'Connecting', body: s === 'waiting-host' ? 'Keep the page with the code open.' : 'Securing the connection…', spinner: true })
+    else screenMessage({ title: s === 'waiting-host' ? 'Waiting for the screen' : 'Connecting', body: 'Keep the page with the code open.', busy: true })
   }
 
   function onHost(m: HostMsg) {
+    if (m.t === 'sim' && m.kind === 'room' && validSimMessage(m) && m.seq > roomSeq) { const room = m.data as unknown as RoomState; if (Array.isArray(room?.people) && room.audience && Array.isArray(room.units) && Array.isArray(room.requests)) { roomSeq = m.seq; roomState(room) }; return }
     if (m.t === 'rumble') return gamepad.rumble(m.strong, m.weak, m.ms)
     if (m.t === 'welcome') {
+      sceneUrl = ''
       hostName = m.name
       layout = m.layout
       // The first controller the screen suggests opens (CATALOGUE §9.2), once: a reconnect keeps what the person chose.
@@ -1065,6 +1100,7 @@ async function boot(code?: Join) {
       gamepad.setHost({ name: hostName, profile: layout.profile, utilities: layout.utilities, modePacks: layout.modePacks, rig: layout.rig })
       keyboard.offered(layout.tray.some((c) => c.type === 'keyboard'))
     } else if (m.t === 'state') {
+      if (typeof m.values['play.scene'] === 'string') { try { const url = new URL(m.values['play.scene']); if (url.origin === location.origin && url.searchParams.get('join') === 'play') sceneUrl = url.href } catch { /* Invalid scene links are ignored. */ } }
       if ('music.sync' in m.values) musicWire.reply(m.values['music.sync'])
       if (typeof m.values['control.sim'] === 'string' && CONTROL_SPACES[m.values['control.sim']]) {
         if (control.sim !== m.values['control.sim']) control.recenter()
@@ -1095,7 +1131,7 @@ async function boot(code?: Join) {
       if (typeof m.values.accent === 'string' && !seatColor) { family.setAccent(m.values.accent); syncThemeRows() }
     }
     else if (m.t === 'scene' && typeof m.you === 'string' && Array.isArray(m.people) && m.held && typeof m.held === 'object') {
-      scene = { you: m.you, people: m.people.slice(0, 16), nodes: Array.isArray(m.nodes) ? m.nodes.slice(0, 64) : scene?.nodes ?? [], held: m.held }
+      scene = { you: m.you, people: m.people.slice(0, 33), nodes: Array.isArray(m.nodes) ? m.nodes.slice(0, 64) : scene?.nodes ?? [], held: m.held }
     }
     else if (m.t === 'feedback') {
       if (m.toast) toast(m.toast)
@@ -1249,6 +1285,7 @@ async function boot(code?: Join) {
       <div class="toast glass" id="toast" role="status" aria-live="polite"></div>
       <div class="rest" id="rest" aria-hidden="true"><span>Resting to keep your phone cool · touch to wake</span></div>`)
     surface = document.getElementById('surface')!
+    if (participation) { surface.querySelector('.bar')?.after(participation.root); for (const el of surface.children) if (el instanceof HTMLElement && el !== participation.root && !el.classList.contains('bar')) el.inert = watching }
     switcher.mount(surface)
     strip.mount(surface)
     linkBadge.mount(document.getElementById('link-badge')!)
@@ -1592,7 +1629,7 @@ async function boot(code?: Join) {
   function thumb(o: { image?: string; glyph?: string; color?: string; label: string }) {
     const img = safeImage(o.image)
     return img
-      ? html`<img src="${img}" alt="" loading="lazy" decoding="async">`
+      ? html`<img src="${img}" alt="" loading="lazy" decoding="async" data-dot-thumbnail="Opening ${o.label} preview">`
       : html`<span style="color:${/^#[0-9a-f]{3,8}$/i.test(o.color ?? '') ? o.color : 'var(--accent)'}">${o.glyph ?? o.label.slice(0, 1)}</span>`
   }
 
@@ -1661,6 +1698,10 @@ async function boot(code?: Join) {
       }
     }
     // In a shared scene, what you hold (or the scene list, to claim something) comes first.
+    if (sceneUrl) {
+      const open = document.createElement('button'); open.type = 'button'; open.className = 'tray-btn glass'
+      iconAction(open, 'view', 'Open scene'); open.onclick = () => { link.close(); location.assign(sceneUrl) }; tray.append(open)
+    }
     if (scene && scene.nodes.length) {
       const c = sceneControl()
       const mine = Object.entries(scene.held).find(([, who]) => who === scene!.you)?.[0]
@@ -1716,6 +1757,20 @@ async function boot(code?: Join) {
       tray.appendChild(b)
     }
     tray.hidden = !control.sim && layout.tray.length === 0 && !(scene && scene.nodes.length)
+    const middle = surface?.querySelector('.gp-mid')
+    if (middle) {
+      let actions = middle.querySelector<HTMLElement>('.gp-share-actions')
+      if (!actions) { actions = document.createElement('div'); actions.className = 'gp-share-actions'; actions.setAttribute('role', 'toolbar'); actions.setAttribute('aria-label', 'Shared scene'); middle.append(actions); fitControlInk(actions) }
+      actions.replaceChildren(); actions.hidden = !sceneUrl
+      if (sceneUrl) {
+        for (const [id, glyph, label] of [['open', 'view', 'Open scene'], ['undo', 'undo', 'Undo drop'], ['clear', 'reset', 'Clear drops'], ['toggle', 'plus', 'Drop-ins']]) {
+          const button = document.createElement('button'); button.type = 'button'; iconAction(button, glyph, label)
+          button.onclick = () => { if (id === 'open') { link.close(); location.assign(sceneUrl) } else if (id === 'toggle') link.sendCtl({ t: 'value', id: 'drops.toggle', v: !values['drops.toggle'] }); else link.sendCtl({ t: 'btn', id: `drops.${id}`, ev: 'tap' }) }
+          if (id === 'toggle') button.setAttribute('aria-pressed', String(!!values['drops.toggle']))
+          actions.append(button)
+        }
+      }
+    }
     tray.onscroll = trayEdge
     requestAnimationFrame(trayEdge)
   }
@@ -1807,6 +1862,7 @@ async function boot(code?: Join) {
     const line = text ?? (hostNotice || null)
     b.hidden = !line
     b.textContent = line ?? ''
+    dotLoading(b, !!line && /[Ww]aiting|[Cc]onnecting|[Rr]econnecting/.test(line) && !document.querySelector('.link-badge[data-state=connecting], .link-badge[data-state=reconnecting]'), line || 'Connected')
   }
 
   let toastTimer: ReturnType<typeof setTimeout> | undefined

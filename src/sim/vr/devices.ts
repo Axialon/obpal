@@ -11,13 +11,25 @@ import { Experience } from './experience'
 import type { V3 } from './world'
 import { collideDevices } from './collisions'
 import { ViewInputs } from './inputs'
+import { deviceDrops } from './device-drops'
 
 /** Keep integration outside device models: rig anchors and the existing physics remain the source of truth. */
 export function devicePresence(logic: DeviceLogic, stage: Stage, getView: () => DeviceView | null, getSim: () => SimScene | null) {
   const driving = new Map<number, { who: string; pad: PadState; last: number; previous: number }>()
   const phones = new Map<string, { grab: boolean; offset: V3 }>()
+  let audienceInput: { unit: string; input: DeviceInput } | null = null
   const rides = () => deviceRides(logic, stage.scene, getView()?.anchor)
   const shared = new SharedPresence({
+    sim: logic.spec.id,
+    audienceUnits: () => rides().map(r => ({ id: r.id, name: r.name, busy: !!getSim()?.claims.holder(r.id) && getSim()?.claims.holder(r.id) !== 'audience' })),
+    reserveAudience(unit) {
+      const sim = getSim(); if (!sim) return false
+      if (unit && sim.claims.holder(unit) && sim.claims.holder(unit) !== 'audience') return false
+      sim.release('audience'); audienceInput = null
+      return !unit || sim.take(unit, 'audience')
+    },
+    audienceInput: (unit, input) => { audienceInput = { unit, input } },
+    ...deviceDrops(logic, () => shared),
     capture: () => captureDevice(logic), apply: s => applyDevice(logic, s), rides,
     drive(who, ride, pad) {
       const sim = getSim(), n = rides().findIndex(r => r.id === ride)
@@ -67,6 +79,7 @@ export function devicePresence(logic: DeviceLogic, stage: Stage, getView: () => 
     },
     inputs(perUnit: (DeviceInput | null)[], inputs: Map<string, DeviceInput>) {
       const sim = getSim()
+      if (audienceInput && shared.audience.mode !== 'off') { const n = rides().findIndex(r => r.id === audienceInput!.unit); if (n >= 0 && sim?.claims.holder(audienceInput.unit) === 'audience') perUnit[n] = audienceInput.input }
       for (const [n, d] of driving) {
         if (performance.now() - d.last > 300 || sim?.claims.holder(rides()[n].id) !== d.who) { driving.delete(n); continue }
         const input = restInput(); input.pad = d.pad; input.padPressed = d.pad.buttons & ~d.previous; d.previous = d.pad.buttons

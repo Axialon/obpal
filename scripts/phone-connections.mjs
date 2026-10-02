@@ -452,14 +452,20 @@ async function pendingRecovery({ browser, origin, check, shots }) {
     const screens = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true })
     const phoneCtx = await browser.newContext({ ...devices['Pixel 7'], viewport: { width: 390, height: 844 }, ignoreHTTPSErrors: true, serviceWorkers: 'block' })
     await phoneCtx.addInitScript(() => {
-      window.__holdWelcomes = false; window.__welcomes = []; window.__controllers = 0; window.__peers = []
+      window.__holdWelcomes = false; window.__welcomes = []; window.__controllers = 0; window.__peers = []; window.__channelOwners = new WeakMap(); window.__welcomedPeer = null
       const Peer = RTCPeerConnection
-      window.RTCPeerConnection = class extends Peer { constructor(...args) { super(...args); window.__peers.push(this) } }
+      window.RTCPeerConnection = class extends Peer {
+        constructor(...args) { super(...args); window.__peers.push(this) }
+        createDataChannel(...args) { const channel = super.createDataChannel(...args); window.__channelOwners.set(channel, this); return channel }
+      }
       const descriptor = Object.getOwnPropertyDescriptor(RTCDataChannel.prototype, 'onmessage')
       Object.defineProperty(RTCDataChannel.prototype, 'onmessage', { ...descriptor, set(fn) {
         const channel = this
         descriptor.set.call(channel, event => {
-          if (window.__holdWelcomes && JSON.parse(event.data).t === 'welcome') { window.__welcomes.push(() => fn.call(channel, event)); return }
+          if (JSON.parse(event.data).t === 'welcome') {
+            if (window.__holdWelcomes) { window.__welcomes.push(() => fn.call(channel, event)); return }
+            window.__welcomedPeer = window.__channelOwners.get(channel)
+          }
           fn.call(channel, event)
         })
       } })
@@ -486,6 +492,7 @@ async function pendingRecovery({ browser, origin, check, shots }) {
       // First remember B normally, then return to A and delay only B's authenticated welcome on reconnect.
       await p.evaluate(url => { location.hash = new URL(url).hash }, inviteB)
       await until('B active', async () => await p.locator('.host-name').textContent() === 'ob.Pal Viewer')
+      await p.evaluate(() => { window.__pendingPeer = window.__welcomedPeer })
       await open()
       await p.getByRole('button', { name: 'Switch to Active screen', exact: true }).click()
       await p.getByRole('button', { name: 'Connections', exact: true }).waitFor()
@@ -495,7 +502,11 @@ async function pendingRecovery({ browser, origin, check, shots }) {
       }))
       await b.evaluate(() => { window.__pendingInputs = 0; window.__obpal.on('input', () => window.__pendingInputs++) })
       // Lose only B's channel, then delay its verified reconnect welcome while A stays active.
-      await p.evaluate(() => { window.__holdWelcomes = true; window.__peers[1].close() })
+      console.log('  delayed-welcome peers before close: ' + JSON.stringify(await p.evaluate(() => window.__peers.map((pc, index) => ({ index, connection: pc.connectionState, signaling: pc.signalingState })))))
+      await p.evaluate(() => {
+        if (window.__pendingPeer?.connectionState !== 'connected') throw new Error('The second screen has no connected welcomed peer')
+        window.__holdWelcomes = true; window.__pendingPeer.close()
+      })
       await until('welcome delayed', () => p.evaluate(() => window.__welcomes.length > 0))
       if (await b.evaluate(() => window.__pendingInputs)) throw new Error('input reached a pending target')
       await open()

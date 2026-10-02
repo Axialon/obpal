@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { emptyPad, emptyState, encodePad, encodeState, Flag, Mode, PadButton } from '@obpal/core'
 import { Remote } from '../packages/host/src/remote'
 import { Stream } from '../packages/host/src/stream'
 
+beforeEach(() => { vi.useFakeTimers({ toFake: ['performance'] }); vi.advanceTimersByTime(100) })
 afterEach(() => vi.useRealTimers())
 
 describe('a silent gamepad', () => {

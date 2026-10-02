@@ -11,7 +11,7 @@
  */
 import { destroySeal, refreshSeal, sealElement, SEAL_STYLE } from './seal'
 import { SealSurface, SEAL_SURFACE_STYLE } from './seal-surface'
-import { DOT_LOADER_STYLE } from './dot-field'
+import { DotLoader, DOT_LOADER_STYLE } from './dot-field'
 import { communityMarker } from './origin'
 import { formatCode, spokenCode } from '@obpal/core'
 import { contrast, luminance, parseColor, toHex, type Rgb } from './color'
@@ -119,6 +119,7 @@ const STATUS: Record<HostStatus, string> = {
 }
 
 export class PairingChip {
+  private readonly pillLoader = new DotLoader({ size: 24, label: 'Waiting for a phone' })
   /** The chip's element: its own shadow root holds everything. */
   readonly el: HTMLElement
   private root: ShadowRoot
@@ -131,7 +132,7 @@ export class PairingChip {
   }
   private isOpen = false
   private surface: SealSurface
-  private seals = h('div', { class: 'seals' })
+  private seals = h('div', { class: 'seals', part: 'rail' })
   private compare = h('button', { class: 'seal-view', type: 'button', hidden: '' }, 'Compare connection seal')
   private back = h('button', { class: 'seal-back', type: 'button' }, 'Back to pairing')
   private sealKey = ''
@@ -184,7 +185,7 @@ export class PairingChip {
     // device's details a tap away. Only what the connections' own statistics say.
     const conn = h('span', { class: 'conn', ...hidden }, icon(...LOCK), $.connMs)
     const facts = h('button', { class: 'facts', type: 'button', 'aria-expanded': 'false', 'aria-controls': `${id}-link`, hidden: '' })
-    const pill = h('button', { class: 'pill', type: 'button', 'aria-expanded': 'false', 'aria-controls': id }, $.mark, $.label, $.badge, conn, this.compactSeal, h('span', { class: 'dot', ...hidden }))
+    const pill = h('button', { class: 'pill', type: 'button', 'aria-expanded': 'false', 'aria-controls': id }, $.mark, $.label, $.badge, conn, this.compactSeal, this.pillLoader.el)
     const codeBox = h('div', { class: 'code-box', 'data-wait': '' }, h('span', { class: 'k' }, 'Or type'), $.code, h('span', { class: 'k at' }, 'at ', $.site))
     const side = h('div', { class: 'side' }, codeBox, h('p', { class: 'status' }, h('span', { class: 'sdot', ...hidden }), $.status), facts, $.details, ...($.here ? [$.here] : []))
     const domain = new URL(this.remote.pairingUrl || `https://${this.remote.codeSite}`).hostname
@@ -201,7 +202,7 @@ export class PairingChip {
     const card = h('div', { class: 'card', id, role: 'group', 'aria-label': 'Pair a phone' }, $.qr, side, this.seals)
     this.compare.onclick = () => { card.setAttribute('data-seal-view', ''); this.back.focus() }
     this.back.onclick = () => { card.removeAttribute('data-seal-view'); this.$.qr.querySelector<HTMLButtonElement>('.seal-peer')?.focus() }
-    this.surface = new SealSurface({ add: () => { void this.remote.resetInvite(); card.removeAttribute('data-seal-view') }, compare: () => this.compare.click() })
+    this.surface = new SealSurface({ add: () => { void this.remote.inviteAnotherPhone(); card.removeAttribute('data-seal-view') }, compare: () => this.compare.click() })
     $.qr.removeAttribute('role')
     $.qr.replaceChildren(this.surface.el)
     side.append(this.surface.addControl)
@@ -210,13 +211,20 @@ export class PairingChip {
     const marker = communityMarker(location.origin)
     if (marker) wrap.append(marker)
     this.$ = { ...$, wrap, pill, card, codeBox, conn, facts }
+    // The requested initial state precedes layout; later opens retain their transition.
+    const initiallyOpen = !!(opts.open || opts.variant === 'panel')
+    if (initiallyOpen) {
+      this.isOpen = this.pinned = true
+      wrap.setAttribute('data-open', '')
+      pill.setAttribute('aria-expanded', 'true')
+    }
     this.wire()
     ;(opts.parent ?? document.body).appendChild(this.el)
     this.refresh()
     this.watchLooks()
     this.render()
-    if (opts.open || opts.variant === 'panel') this.setOpen(true, true)
-    else this.syncCode()
+    this.syncCode()
+    if (initiallyOpen) this.opts.onToggle?.(true)
     this.watchRoom()
   }
 
@@ -265,6 +273,7 @@ export class PairingChip {
 
   destroy() {
     this.surface.destroy()
+    this.pillLoader.destroy()
     this.seals.querySelectorAll<HTMLElement>('.connection-seal').forEach(destroySeal)
     this.compactSeal.querySelectorAll<HTMLElement>('.connection-seal').forEach(destroySeal)
     for (const [ev, fn] of this.listeners) this.remote.off(ev as 'status', fn as () => void)
@@ -275,6 +284,8 @@ export class PairingChip {
     this.room?.ro?.disconnect()
     this.room = null
     removeEventListener('resize', this.queueRoom)
+    document.removeEventListener('transitionend', this.roomMotion, true)
+    document.removeEventListener('transitioncancel', this.roomMotion, true)
     clearTimeout(this.hoverTimer)
     clearTimeout(this.leaveTimer)
     clearTimeout(this.codeTimer)
@@ -388,6 +399,10 @@ export class PairingChip {
     const s = r.status
     const w = this.$.wrap
     w.dataset.s = s
+    const busy = !this.isOpen && ['starting', 'ready', 'connecting', 'offline'].includes(s)
+    this.pillLoader.el.hidden = !busy
+    this.pillLoader.el.setAttribute('aria-label', STATUS[s])
+    if (busy) this.pillLoader.start(); else this.pillLoader.finish()
     w.toggleAttribute('data-live', n > 0)
     this.$.badge.textContent = n > 1 ? String(n) : ''
     const paused = r.participants.filter((p) => p.paused).length
@@ -528,11 +543,16 @@ export class PairingChip {
     const accent = toHex(this.accent)
     if (!url || (url === this.drawn.url && accent === this.drawn.accent)) return
     this.drawn = { url, accent }
+    this.$.qr.toggleAttribute('data-dense', url.length > 100)
     this.qr ??= import('./qr')
     void this.qr.then(({ brandedQrElement, plainQrElement, qrDotPoints }) => {
       if (this.drawn.url !== url || this.drawn.accent !== accent) return
       let svg: SVGSVGElement
       try { svg = brandedQrElement(url, { accent }) } catch { svg = plainQrElement(url) }
+      // Dense capability links need three CSS pixels per module for the round
+      // finders to survive rasterisation. The seal keeps this same footprint.
+      const size = Math.max(168, Math.min(192, svg.viewBox.baseVal.width * 3))
+      this.$.qr.style.setProperty('--obpal-qr-min', `${size}px`)
       this.surface.setQr(svg, qrDotPoints(url))
     })
   }
@@ -566,7 +586,14 @@ export class PairingChip {
     ro?.observe(this.$.card)
     this.room = { mo, ro, seen: new WeakSet() }
     addEventListener('resize', this.queueRoom)
+    document.addEventListener('transitionend', this.roomMotion, true)
+    document.addEventListener('transitioncancel', this.roomMotion, true)
     this.checkRoom()
+  }
+
+  /** A transition can finish after its panel's state attribute already says shown. */
+  private roomMotion = (e: Event) => {
+    if (e.target instanceof Element && this.room?.seen.has(e.target)) this.queueRoom()
   }
 
   private queueRoom = () => {
@@ -582,10 +609,13 @@ export class PairingChip {
     let els: Element[]
     try { els = [...document.querySelectorAll(this.opts.avoid!)] } catch { return }
     for (const el of els) {
-      if (room.seen.has(el)) continue
-      room.seen.add(el)
-      room.mo.observe(el, { attributes: true })
-      room.ro?.observe(el)
+      // A fixed panel may move with its container's style without changing size.
+      for (let node: Element | null = el; node && node !== document.body; node = node.parentElement) {
+        if (room.seen.has(node)) continue
+        room.seen.add(node)
+        room.mo.observe(node, { attributes: true })
+        room.ro?.observe(node)
+      }
     }
     // The card keeps its place while closed (it's only hidden), so this is where it opens.
     const element = this.$.card
@@ -719,11 +749,10 @@ const STYLE = `
 .badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
   background: rgb(var(--hl) / .12); font-variant-numeric: tabular-nums; }
 .dot, .sdot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--muted); }
-.wrap[data-s=ready] :is(.dot, .sdot) { background: var(--a); box-shadow: 0 0 0 3px rgb(var(--a-rgb) / .2); animation: obpal-pulse 1.8s ease-in-out infinite; }
+.wrap[data-s=ready] :is(.dot, .sdot) { background: var(--a); box-shadow: 0 0 0 3px rgb(var(--a-rgb) / .2); }
 .wrap[data-s=connecting] :is(.dot, .sdot) { background: #fcd34d; }
 .wrap[data-s=connected] :is(.dot, .sdot) { background: #6ee7b7; }
 .wrap[data-s=offline] :is(.dot, .sdot) { background: #fb7185; }
-@keyframes obpal-pulse { 50% { opacity: .4; } }
 
 .card { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; padding: 16px 18px 16px 16px; border-radius: var(--r, 18px); max-width: 460px;
   transform-origin: var(--origin, bottom right); opacity: 0; visibility: hidden; transform: translateY(8px) scale(.96);
@@ -742,9 +771,10 @@ const STYLE = `
   box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; transition: none; }
 .wrap[data-variant=panel] .qr { width: 100%; height: auto; aspect-ratio: 1; border-radius: 16px; }
 .wrap[data-variant=panel] .side { gap: 8px; }
-.qr { width: var(--obpal-qr, 168px); height: var(--obpal-qr, 168px); flex: none; border-radius: 10px; background: #fff;
+.qr { width: max(var(--obpal-qr, 168px), var(--obpal-qr-min, 0px)); height: max(var(--obpal-qr, 168px), var(--obpal-qr-min, 0px)); flex: none; border-radius: 10px; background: #fff;
   box-shadow: 0 0 0 1.5px rgb(var(--a-rgb) / .55), 0 10px 30px rgb(var(--a-rgb) / .2); }
 .qr svg { display: block; width: 100%; height: 100%; }
+.qr[data-dense] { width: var(--obpal-qr, 192px); height: var(--obpal-qr, 192px); }
 .side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .code-box { display: flex; flex-direction: column; gap: 2px; }
 .code-box[hidden] { display: none; }

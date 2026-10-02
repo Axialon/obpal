@@ -9,6 +9,9 @@ import type { V3 } from './world'
 import '../../styles/presence.css'
 import { simPanels } from '../ui/panels'
 import { iconAction, statefulIconAction } from '../../ui/kit/action'
+import { placementHit } from './placement'
+import { SceneDotLoader } from '../../ui/kit/scene-loading'
+import { dotLoading } from '../../ui/kit/loading'
 
 export type ViewMode = 'overview' | 'first-person' | 'xr'
 const UP = new THREE.Vector3(0, 1, 0)
@@ -23,6 +26,8 @@ export class Experience extends EventTarget {
   settings = { ...DEFAULT_COMFORT }
   ride = ''
   drive = false
+  followPlayer = true
+  private frozenPose: { p: THREE.Vector3; q: THREE.Quaternion } | null = null
   readonly controlFrame = new ControlFrame()
   readonly look = new RideLook()
   private steady = new SteadyPose()
@@ -39,6 +44,8 @@ export class Experience extends EventTarget {
   private lastYaw = 0
   private savedShadows = false
   private xrPending = false
+  private xrButton: HTMLButtonElement
+  private syncLoading = () => {}
   private emulated = false
   private controllerHands: THREE.Group[] = []
   private controllerSources: (XRInputSource | null)[] = [null, null]
@@ -59,10 +66,35 @@ export class Experience extends EventTarget {
   private lastUI = -Infinity
   private observedFrames = 0
   private observedTime = 0
-  constructor(readonly renderer: THREE.WebGLRenderer, readonly scene: THREE.Scene, readonly overview: THREE.PerspectiveCamera, readonly rides: () => Ride[], readonly shared?: SharedPresence, private orbit?: { enabled: boolean }) {
+  constructor(readonly renderer: THREE.WebGLRenderer, readonly scene: THREE.Scene, readonly overview: THREE.PerspectiveCamera, readonly rides: () => Ride[], readonly shared?: SharedPresence, private orbit?: { enabled: boolean; touches?: unknown }) {
     super()
     this.rig.name = 'presence-rig'
     this.rig.add(this.camera); scene.add(this.rig)
+    const loadingHost = document.querySelector<HTMLElement>('#sim-load, #loading')
+    if (loadingHost || shared?.guest) {
+      const loader = new SceneDotLoader(renderer.domElement, scene, () => this.activeCamera)
+      let mode = this.mode
+      const sync = () => {
+        const gate = renderer.domElement.classList.contains('sim-warming')
+        loader.suspended = gate
+        const busy = loadingHost?.dataset.dotLoading === 'true'
+        const xrWaiting = this.mode === 'xr' && !!shared?.guest && ['Connecting', 'Waiting for host'].includes(shared.status)
+        const badge = document.querySelector<HTMLElement>('.guest-status')
+        if (badge) { if (xrWaiting) badge.dataset.dotScene = ''; else delete badge.dataset.dotScene }
+        // Compile the beads with the hidden warm-up scene. The flat adapter remains visible until the gate opens.
+        if (gate) loader.loading = true
+        else if (busy || xrWaiting) { if (loadingHost && busy) loadingHost.dataset.dotScene = ''; loader.loading = true }
+        else loader.finish()
+        if (mode !== this.mode) { mode = this.mode; loader.reframe() }
+        if (loadingHost && (!busy || gate)) delete loadingHost.dataset.dotScene
+      }
+      const observer = new MutationObserver(sync)
+      if (loadingHost) observer.observe(loadingHost, { attributes: true, attributeFilter: ['data-dot-loading'] })
+      observer.observe(renderer.domElement, { attributes: true, attributeFilter: ['class'] })
+      sync()
+      this.syncLoading = sync
+      addEventListener('pagehide', event => { if (!event.persisted) { observer.disconnect(); loader.destroy() } })
+    }
     renderer.xr.enabled = true
     renderer.xr.setReferenceSpaceType('local')
     renderer.xr.setFramebufferScaleFactor(0.85)
@@ -97,7 +129,9 @@ export class Experience extends EventTarget {
     this.picker.onchange = () => { this.ride = this.picker.value; this.look.viewpoint = 0; this.recenter() }
     button('First person', () => { this.setMode('first-person'); void this.startSensors() }).classList.add('presence-enter')
     const enter = button('Enter VR', () => { void this.enterXR() }); enter.disabled = true; enter.title = 'Checking VR support'
-    void navigator.xr?.isSessionSupported('immersive-vr').then(ok => { enter.disabled = !ok; enter.title = ok ? 'Look around inside this scene' : 'This browser does not offer immersive VR' }).catch(() => { enter.title = 'VR is unavailable here' })
+    this.xrButton = enter
+    if (navigator.xr) { enter.textContent = ''; enter.setAttribute('aria-label', 'Enter VR'); dotLoading(enter, true, 'Checking VR support') }
+    void navigator.xr?.isSessionSupported('immersive-vr').then(ok => { enter.disabled = !ok; enter.title = ok ? 'Look around inside this scene' : 'This browser does not offer immersive VR' }).catch(() => { enter.title = 'VR is unavailable here' }).finally(() => { dotLoading(enter, false); enter.textContent = 'Enter VR' })
     if (!navigator.xr) enter.title = 'Use a WebXR headset browser to enter VR'
     this.leaveButton = button('Overview', () => { void this.leave() }); this.leaveButton.hidden = true
     this.viewButton = button('View', () => this.switchView()); this.viewButton.title = 'Switch viewpoint (V)'
@@ -113,10 +147,35 @@ export class Experience extends EventTarget {
     toggle('Horizon lock', this.settings.horizon, v => { this.settings.horizon = v; this.save() })
     toggle('Comfort shade', this.settings.vignette, v => { this.settings.vignette = v; this.save() })
     if (!shared?.guest) toggle('Drive with XR sticks', false, v => { this.drive = v })
-    if (shared && !shared.guest) button('Share scene', () => { const url = shared.shareUrl(); if (url) { void navigator.clipboard?.writeText(url).then(() => { this.info.textContent = 'Scene link copied' }).catch(() => { this.showLink(url) }); this.showLink(url) } })
+    const follow = button('Follow the player', () => { this.followPlayer = !this.followPlayer; this.frozenPose = null; follow.setAttribute('aria-pressed', String(this.followPlayer)) })
+    follow.setAttribute('aria-pressed', 'true')
+    if (shared) {
+      shared.pickDrop = (x, y) => {
+        const rect = renderer.domElement.getBoundingClientRect(), ray = new THREE.Raycaster()
+        ray.setFromCamera(new THREE.Vector2((x - rect.left) / rect.width * 2 - 1, 1 - (y - rect.top) / rect.height * 2), this.activeCamera)
+        const point = ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -.35), new THREE.Vector3())
+        return point?.toArray() as V3 | null
+      }
+      shared.placementClear = (at, radius) => {
+        scene.updateMatrixWorld(true)
+        const sphere = new THREE.Sphere(new THREE.Vector3(...at), radius + .025)
+        let clear = true
+        scene.traverse(o => {
+          if (!clear || !(o instanceof THREE.Mesh) || !o.visible || o.parent === shared.group || o.name === 'sky') return
+          if (o.material instanceof THREE.ShaderMaterial) return
+          for (let parent = o.parent; parent; parent = parent.parent) if (!parent.visible) return
+          const hits = (matrix: THREE.Matrix4) => placementHit(o.geometry, matrix, sphere)
+          if (o instanceof THREE.InstancedMesh) {
+            const instance = new THREE.Matrix4(), matrix = new THREE.Matrix4()
+            for (let i = 0; clear && i < o.count; i++) { o.getMatrixAt(i, instance); matrix.multiplyMatrices(o.matrixWorld, instance); if (hits(matrix)) clear = false }
+          } else if (hits(o.matrixWorld)) clear = false
+        })
+        return clear
+      }
+    }
     if (shared && !shared.guest) this.grabButton = button('Grab / release', () => { this.grab = !this.grab; this.syncGrab() })
     const stop = document.getElementById('estop')
-    if (stop) button('Stop arms', () => shared?.guest ? shared.stopArms() : stop.click())
+    if (stop && (!shared || shared.canControl)) button('Stop arms', () => shared?.guest ? shared.stopArms() : stop.click())
     this.info = document.createElement('small'); this.info.setAttribute('role', 'status'); this.controls.append(this.info)
     for (const child of this.controls.children) if (!['SELECT'].includes(child.tagName) && !['Overview', 'View', 'Recenter', 'Options', 'Stop arms', 'First person'].includes(child.textContent ?? '')) child.classList.add('presence-secondary')
     // The changing View label names the current viewpoint, so it keeps its words.
@@ -128,6 +187,15 @@ export class Experience extends EventTarget {
     this.controlsHome.prepend(this.controls)
     this.syncGrab()
     this.bindLook()
+    const touchControls = orbit?.touches && typeof orbit.touches === 'object' && 'ONE' in orbit.touches ? orbit.touches as { ONE?: THREE.TOUCH | null; TWO?: THREE.TOUCH | null } : null
+    const one = touchControls?.ONE, two = touchControls?.TWO
+    addEventListener('obpal:phonecamera', e => {
+      if (!orbit || !touchControls) return
+      const mode = (e as CustomEvent<boolean | string>).detail
+      orbit.enabled = this.mode === 'overview'
+      touchControls.ONE = mode === true || mode === 'leave' ? one : null
+      touchControls.TWO = mode === true || mode === 'leave' ? two : THREE.TOUCH.DOLLY_ROTATE
+    })
     for (let n = 0; n < 2; n++) {
       const ray = renderer.xr.getController(n)
       const grip = renderer.xr.getControllerGrip(n)
@@ -161,8 +229,7 @@ export class Experience extends EventTarget {
   get immersive() { return this.mode !== 'overview' }
   private syncGrab() { if (this.grabButton) statefulIconAction(this.grabButton, 'grab', this.grab) }
   private save() { try { localStorage.setItem('obpal.comfort', JSON.stringify(this.settings)) } catch { /* private storage */ } }
-  private showLink(url: string) { let a = this.controls.querySelector<HTMLAnchorElement>('a'); if (!a) { a = document.createElement('a'); this.controls.append(a) }; a.href = url; a.textContent = 'Open shared scene'; a.target = '_blank'; a.rel = 'noopener' }
-  recenter() { this.look.recenter(); this.resetOrientation(); this.xrZero = null; this.lastPosition = null; this.steady.reset() }
+  recenter() { this.look.recenter(); this.resetOrientation(); this.xrZero = null; this.lastPosition = null; this.frozenPose = null; this.steady.reset() }
   private resetOrientation() {
     this.orientation.reset(); this.gyro.identity()
     if (this.reading) {
@@ -199,6 +266,7 @@ export class Experience extends EventTarget {
   async enterXR() {
     if (this.xrPending || this.renderer.xr.isPresenting) return
     this.xrPending = true
+    this.xrButton.textContent = ''; dotLoading(this.xrButton, true, 'Starting VR')
     let session: XRSession | null = null
     try {
       session = await navigator.xr!.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'hand-tracking', 'dom-overlay'], domOverlay: { root: this.controls } })
@@ -208,7 +276,7 @@ export class Experience extends EventTarget {
       const rates = session.supportedFrameRates
       if (rates?.length && session.updateTargetFrameRate) { const hz = rates.includes(90) ? 90 : rates.includes(72) ? 72 : rates[0]; await session.updateTargetFrameRate(hz).catch(() => {}) }
     } catch { await session?.end().catch(() => {}); this.setMode('overview'); this.info.textContent = 'VR could not start. First person is available.' }
-    finally { this.xrPending = false }
+    finally { this.xrPending = false; dotLoading(this.xrButton, false); this.xrButton.textContent = 'Enter VR' }
   }
   async leave() {
     this.emulated = false
@@ -224,10 +292,12 @@ export class Experience extends EventTarget {
   }
   private bindLook() {
     const canvas = this.renderer.domElement
+    const touches = new Set<number>()
     let x = 0, y = 0
-    canvas.addEventListener('pointerdown', e => { if (this.mode !== 'first-person') return; this.look.held = true; x = e.clientX; y = e.clientY; canvas.setPointerCapture(e.pointerId) })
-    canvas.addEventListener('pointerup', () => { this.look.held = false })
-    canvas.addEventListener('pointercancel', () => { this.look.held = false })
+    canvas.addEventListener('pointerdown', e => { touches.add(e.pointerId); if (this.mode !== 'first-person' || document.body.classList.contains('phone-playing') && !document.body.classList.contains('phone-camera-mode') && touches.size < 2) return; this.look.held = true; x = e.clientX; y = e.clientY; canvas.setPointerCapture(e.pointerId) })
+    const release = (e: PointerEvent) => { touches.delete(e.pointerId); this.look.held = false }
+    canvas.addEventListener('pointerup', release)
+    canvas.addEventListener('pointercancel', release)
     canvas.addEventListener('pointermove', e => {
       if (this.mode !== 'first-person' || (!this.look.held && document.pointerLockElement !== canvas)) return
       this.look.yaw -= (document.pointerLockElement === canvas ? e.movementX : e.clientX - x) * 0.004
@@ -257,7 +327,7 @@ export class Experience extends EventTarget {
         ctx.clearRect(0, 0, canvas.width, canvas.height)
         ctx.fillStyle = 'rgba(20,25,35,0.88)'; ctx.beginPath(); ctx.roundRect(0, 0, 512, 80, 40); ctx.fill()
         ctx.fillStyle = '#ffffff'; ctx.font = '24px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-        ctx.fillText(`Watching · ${this.shared.status}`, 256, 40)
+        ctx.fillText(['Connecting', 'Waiting for host'].includes(this.shared.status) ? 'Watching' : `Watching · ${this.shared.status}`, 256, 40)
         texture.needsUpdate = true
       }
     }
@@ -279,7 +349,9 @@ export class Experience extends EventTarget {
     if (this.viewButton.textContent !== viewLabel) this.viewButton.textContent = viewLabel
     this.viewButton.disabled = (r?.views?.length ?? 1) < 2
     if (r) {
-      const target = viewpoint?.pose() ?? r.pose()
+      const live = viewpoint?.pose() ?? r.pose()
+      if (!this.followPlayer) this.frozenPose ??= { p: live.p.clone(), q: live.q.clone() }
+      const target = this.frozenPose ? { p: this.frozenPose.p.clone(), q: this.frozenPose.q.clone() } : live
       if (this.settings.horizon) target.q.copy(upright(target.q, !!viewpoint?.level))
       const p = this.steady.step(target, dt, viewpoint?.follows ? 40 : 18, viewpoint?.follows ? 14 : 10)
       if (this.settings.horizon) p.q.copy(upright(p.q, !!viewpoint?.level))
@@ -314,6 +386,7 @@ export class Experience extends EventTarget {
       this.renderer.xr.updateCamera(this.camera)
       this.observedFrames++; this.observedTime += dt
     }
+    if (now === this.lastUI) this.syncLoading()
     this.controlFrame.set(this.activeCamera.getWorldQuaternion(new THREE.Quaternion()))
     if (this.shared && r) {
       const pad = emptyPad()

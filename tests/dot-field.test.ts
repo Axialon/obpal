@@ -51,6 +51,7 @@ function surface(width = 100, height = 60, reduced = false) {
   })
   return {
     canvas, context, shapes, backgrounds, tokens, raf, animation, media,
+    bounds(w: number, h: number) { width = w; height = h },
     resize(w: number, h: number) { width = w; height = h; resize() },
     intersect(on: boolean) { intersect(on) },
     hidden(value: boolean) { Object.defineProperty(document, 'hidden', { value, writable: true }); document.dispatchEvent(new Event('visibilitychange')) },
@@ -62,6 +63,19 @@ function surface(width = 100, height = 60, reduced = false) {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('the shared round dot field', () => {
+  it('paints the source phase before a newly visible flight receives its resize callback', () => {
+    const s = surface(0, 0)
+    const field = new DotField(s.canvas, { points: Array.from({ length: 60 }, (_, i) => ({ x: i / 60, y: .8 })), preservePoints: true, idle: false })
+    field.setSource([{ x: .4, y: .5 }, { x: .5, y: .5 }, { x: .6, y: .5 }])
+    s.bounds(100, 60)
+    field.handshake(0, true)
+    expect([s.canvas.width, s.canvas.height]).toEqual([200, 120])
+    expect(s.shapes.map(p => [p.x, p.y])).toEqual([[40, 30], [50, 30], [60, 30]])
+    s.resize(100, 60)
+    expect(s.shapes.map(p => [p.x, p.y])).toEqual([[40, 30], [50, 30], [60, 30]])
+    expect(s.raf.size).toBe(0)
+    field.destroy()
+  })
   it('resolves tokens when a detached field first gets its live size', () => {
     const s = surface(0, 0)
     const field = new DotField(s.canvas, { points: [{ x: 0.5, y: 0.5 }], scale: 'seal', preservePoints: true })

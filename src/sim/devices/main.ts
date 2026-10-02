@@ -91,7 +91,7 @@ const local = presence.shared.guest ? null : new LocalControls({
   id: spec.id, canvas: stage.renderer.domElement, units: () => units, tray: spec.tray,
   phone: () => document.getElementById('chip-invite')?.click(),
   controllerWindow: () => { if (sim?.remote.pairingUrl) window.open(sim.remote.pairingUrl, '_blank', 'noopener') },
-  orbit: enabled => { if (!(spec.id === 'marblerun' && matchMedia('(pointer: coarse)').matches)) stage.controls.enabled = enabled },
+  orbit: enabled => { if (!(spec.id === 'marblerun' && matchMedia('(pointer: coarse)').matches)) stage.controls.enabled = enabled && !presence.experience.immersive },
 })
 const marblePhone = spec.id === 'marblerun' && !presence.shared.guest && matchMedia('(pointer: coarse)').matches ? new MarblePhone() : null
 let marbleMotionButton: HTMLButtonElement | null = null
@@ -113,7 +113,7 @@ if (marblePhone) {
   stage.controls.enabled = false
   let finger: { id: number; x: number; y: number; travel: number; at: number } | null = null
   const canvas = stage.renderer.domElement
-  canvas.addEventListener('pointerdown', e => { finger = { id: e.pointerId, x: e.clientX, y: e.clientY, travel: 0, at: performance.now() }; canvas.setPointerCapture(e.pointerId) })
+  canvas.addEventListener('pointerdown', e => { if (document.body.classList.contains('phone-playing')) return; finger = { id: e.pointerId, x: e.clientX, y: e.clientY, travel: 0, at: performance.now() }; canvas.setPointerCapture(e.pointerId) })
   canvas.addEventListener('pointermove', e => { if (!finger || finger.id !== e.pointerId) return; const x = e.clientX - finger.x, y = e.clientY - finger.y; finger.travel += Math.hypot(x, y); marblePhone.move(x, y); finger.x = e.clientX; finger.y = e.clientY })
   canvas.addEventListener('pointerup', e => {
     if (finger?.id !== e.pointerId) return
@@ -122,6 +122,7 @@ if (marblePhone) {
   })
   canvas.addEventListener('pointercancel', () => { finger = null })
   addEventListener('pagehide', () => marblePhone.stop(), { once: true })
+  addEventListener('obpal:localplay', () => { finger = null; stage.controls.enabled = true; stage.controls.touches.ONE = -1 as THREE.TOUCH; stage.controls.touches.TWO = THREE.TOUCH.DOLLY_ROTATE })
 }
 function directMarbleInput(perUnit: (DeviceInput | null)[]) {
   if (!marblePhone) return
@@ -384,7 +385,7 @@ if (!presence.shared.guest) void startSimScene({
   focused: () => { renderUnits(); stage.view.invalidate() },
   // A phone that joins drives a free unit straight away.
   joined: (p: Participant) => {
-    if (p.caps?.platform === 'scene') return
+    if (p.capability === 'watch') return
     if (upright.matches && !nudged) { nudged = true; setTimeout(() => { if (upright.matches) sim?.note('Turn this screen sideways for a bigger view') }, 1200) }
     if (!sim || sim.claims.held(p.id)) return
     const free = units.find((u) => !sim!.claims.holder(u.id))
@@ -494,7 +495,7 @@ if (!presence.shared.guest) void startSimScene({
       return f && who && inputs.get(who)?.face === 'face.trackpad' ? { parts: f.parts, locks: f.locks, color: s.colorOf(who) || null } : { parts: [], locks: new Set<string>(), color: null }
     })
     if (halos.update(ringed, t, dt)) stage.view.invalidate()
-    if (following && view?.follow) {
+    if (following && presence.experience.followPlayer && view?.follow) {
       const active = perUnit.findIndex((i) => i && !i.quiet && (i.touching || i.held.size || i.presses.length || i.pose?.touching || spec.id === 'marblerun' && (i.space?.active || !!i.hold || Math.hypot(...i.tilt) > .01) || i.pad && [...i.pad.axes, ...i.pad.triggers].some((v) => Math.abs(v) > 0.04)))
       if (active >= 0) followedUnit = active
       stage.follow(view.follow(followedUnit))

@@ -242,7 +242,8 @@ html.gp-mode .hint { display: none !important; }
 @media (orientation: portrait) {
   .gp {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-rows: auto auto minmax(0, 1fr) auto minmax(240px, 1fr);
+    /* Keep the zone centres clear of the inset D-pad and face buttons. */
+    grid-template-rows: auto auto minmax(0, 1fr) auto minmax(240px, 48%);
     grid-template-areas: 'ls rs' 'top top' 'cue cue' 'mid mid' 'lp rp';
     row-gap: var(--sp-4);
   }

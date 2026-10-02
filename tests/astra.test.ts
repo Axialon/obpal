@@ -286,6 +286,8 @@ describe('Astra return intake', { timeout: 30_000 }, () => {
       const lane = join(f.root, '.claude', 'worktrees', 'astra-round-trip')
       expect(readFileSync(join(lane, 'value.txt'), 'utf8').replace(/\r\n/g, '\n')).toBe('after\n')
       expect(git(lane, ['status', '--porcelain']).toString()).toBe('')
+      expect(report.path).toMatch(/held[\\/]round-trip/)
+      expect(existsSync(report.path.replace(/\.zip$/, '.prompt.txt'))).toBe(true)
       const result = loadArchive(report.path)
       expect(result.members['acceptance/check.json'].toString()).toContain('7')
       expect(result.members['RESULT.md'].toString()).toContain('failed (exit 7)')

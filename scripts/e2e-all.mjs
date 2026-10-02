@@ -23,14 +23,16 @@
  * Exit codes: 0 all passed, 1 a suite failed, timed out or couldn't start, 2 bad arguments, 3 the guard tripped.
  */
 import { spawn, spawnSync } from 'node:child_process'
-import { closeSync, mkdirSync, openSync, readFileSync, statSync } from 'node:fs'
+import { closeSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createServer, connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { resolveChromium, shortPath } from './lib/browser.mjs'
+import { detectE2eGpu, resolveChromium, shortPath } from './lib/browser.mjs'
+import { acquireGpuLease } from './lib/gpu-lease.mjs'
 import { DEFAULT_PORT, DEFAULT_WORKER_PORT, failures, knownSuites, listeningPids, newSessionLines, parseArgs, parseResult, suitePorts, suiteTimeout } from './lib/e2e.mjs'
 import { formatDuration, formatTable } from './lib/report.mjs'
+import { distill } from './lib/distill.mjs'
 import { tempScope } from './lib/temp.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
@@ -73,6 +75,7 @@ async function waitFree(ports) {
   const end = Date.now() + opts.waitMin * 60_000
   let told = 0
   for (;;) {
+    cancelled.signal.throwIfAborted()
     const held = []
     for (const p of ports) if (await busy(p)) held.push(p)
     if (!held.length) return true
@@ -127,6 +130,7 @@ mkdirSync(out, { recursive: true })
 const env = {
   ...process.env,
   OBPAL_E2E_EVIDENCE_ROOT: process.env.OBPAL_E2E_EVIDENCE_ROOT || out,
+  ...(process.argv.includes('--keep-raw') ? { OBPAL_KEEP_RAW: '1', OBPAL_KEEP_TEMP: '1' } : {}),
   ...(process.argv.includes('--keep-logs') ? { OBPAL_KEEP_TEMP: '1' } : {}),
   OBPAL_E2E_PORT: String(Number(process.env.OBPAL_E2E_PORT) || DEFAULT_PORT),
   OBPAL_E2E_WORKER_PORT: String(Number(process.env.OBPAL_E2E_WORKER_PORT) || DEFAULT_WORKER_PORT),
@@ -138,22 +142,63 @@ const startSize = logAtStart?.length ?? 0
 
 console.log(`e2e:all: ${opts.suites.join(' ')}`)
 console.log(`  browser: ${browser.from} ${shortPath(browser.path)}`)
+if (env.OBPAL_E2E_GPU === '1') console.log('  GPU: queued hardware WebGL probe; SwiftShader fallback when unavailable')
 console.log(`  service: ${env.OBPAL_E2E_UPSTREAM ? `${env.OBPAL_E2E_UPSTREAM} (OBPAL_E2E_UPSTREAM)` : 'a fresh local worker per suite'}`)
 console.log(`  ports: stand-in ${env.OBPAL_E2E_PORT}, worker ${env.OBPAL_E2E_WORKER_PORT}; logs: ${out}`)
 console.log(`  ob.Pal Desktop log: ${logAtStart ? 'watched' : desktopLog ? 'none here (not installed)' : 'none (not Windows)'}`)
 
 let current = null
-process.on('SIGINT', async () => {
-  if (current) await killTree(current)
-  console.error('\ne2e:all: interrupted')
-  process.exit(130)
-})
+let releaseGpu = null
+let gpuLeasePromise = null
+let gpuProbePromise = null
+let interruptedCleanup = null
+let cancelCode = 0
+let gpuDevice = null
+const startedAt = new Date().toISOString()
+const source = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true }).stdout.trim()
+const cancelled = new AbortController()
+async function interrupt(code, message) {
+  if (cancelCode) return
+  cancelCode = code
+  cancelled.abort(new Error(message))
+  const child = current
+  interruptedCleanup = (async () => {
+    if (child) await killTree(child)
+    await gpuProbePromise?.catch(() => null)
+  })()
+  await interruptedCleanup
+  console.error(`\ne2e:all: ${message}`)
+}
+process.on('SIGINT', () => { void interrupt(130, 'interrupted') })
+process.on('SIGTERM', () => { void interrupt(143, 'terminated') })
 
+if (env.OBPAL_E2E_GPU === '1') {
+  try {
+    gpuLeasePromise = acquireGpuLease({ signal: cancelled.signal, waiting: () => console.log('  GPU lease busy; waiting up to 180 min') })
+    releaseGpu = await gpuLeasePromise
+    gpuProbePromise = detectE2eGpu(browser.path).catch(error => ({ hardware: false, renderer: '', reason: error.message }))
+    const device = await gpuProbePromise
+    cancelled.signal.throwIfAborted()
+    gpuDevice = device
+    env.OBPAL_E2E_GPU = device.hardware ? '1' : 'swiftshader'
+    console.log(`  renderer: ${device.renderer || 'unavailable'}${device.hardware ? '' : `; SwiftShader fallback (${device.reason})`}`)
+  } catch (error) {
+    await interruptedCleanup
+    await releaseGpu?.()
+    console.error(`e2e:all: ${error.message}`)
+    process.exit(cancelCode || 2)
+  }
+}
+
+let exitCode = 1
+try {
 const rows = []
+const timings = []
 const details = []
 let guard = null
 let stopped = ''
 for (const suite of opts.suites) {
+  cancelled.signal.throwIfAborted()
   if (stopped) { rows.push([suite, 'not run', '', '', stopped]); continue }
   const { port, worker } = suitePorts(suite, env)
   const ports = [port, worker].filter((p) => p !== null)
@@ -164,24 +209,28 @@ for (const suite of opts.suites) {
   }
   const temps = tempScope({ keep: env.OBPAL_KEEP_TEMP === '1' })
   const suiteTemp = await temps.make(join(tmpdir(), 'obpal-e2e-suite-'))
-  const suiteEnv = { ...env, TEMP: suiteTemp, TMP: suiteTemp, TMPDIR: suiteTemp }
+  const suiteEnv = { ...env, OBPAL_E2E_EVIDENCE_ROOT: join(env.OBPAL_E2E_EVIDENCE_ROOT, suite), TEMP: suiteTemp, TMP: suiteTemp, TMPDIR: suiteTemp }
   try {
+  mkdirSync(suiteEnv.OBPAL_E2E_EVIDENCE_ROOT, { recursive: true })
   const logPath = join(out, `${suite}.log`)
   const fd = openSync(logPath, 'w')
   const sizeBefore = logSize()
   const t0 = Date.now()
   process.stdout.write(`> e2e:${suite} … `)
-  let timedOut = false
+  let timedOut = false, timeoutCleanup
   const timeoutMin = suiteTimeout(suite, opts, env)
   const code = await new Promise((r) => {
+    cancelled.signal.throwIfAborted()
     current = spawn('pnpm', ['run', `e2e:${suite}`], { cwd: root, env: suiteEnv, shell: win, stdio: ['ignore', fd, fd], windowsHide: true, detached: !win })
-    const timer = setTimeout(() => { timedOut = true; killTree(current) }, timeoutMin * 60_000)
+    const timer = setTimeout(() => { timedOut = true; timeoutCleanup = killTree(current) }, timeoutMin * 60_000)
     current.on('error', () => { clearTimeout(timer); r(-1) })
     current.on('exit', (c) => { clearTimeout(timer); r(c ?? -1) })
   })
+  await timeoutCleanup
   current = null
   closeSync(fd)
   const ms = Date.now() - t0
+  timings.push({ suite, ms })
   const log = readFileSync(logPath, 'utf8')
   const res = parseResult(log)
   const tests = res ? `${res.passed}/${res.total}` : '?'
@@ -210,6 +259,14 @@ for (const suite of opts.suites) {
   } finally {
     if (current) { await killTree(current); current = null }
     if (worker !== null) await stopLeftoverWorker(worker)
+    mkdirSync(suiteEnv.OBPAL_E2E_EVIDENCE_ROOT, { recursive: true })
+    try { await distill(suiteEnv.OBPAL_E2E_EVIDENCE_ROOT, { keepRaw: process.argv.includes('--keep-raw') }) } catch (error) {
+      console.error(`Evidence distillation failed: ${error.message}; raw TEMP retained`)
+      temps.retain()
+      stopped = 'evidence distillation failed'
+      rows.push([suite + ' evidence', 'FAIL', '', '', error.message])
+      continue
+    }
     await temps.cleanup()
   }
 }
@@ -224,13 +281,25 @@ if (logAtEnd) {
   console.log(`\nob.Pal Desktop log: ${count(logAtStart ?? Buffer.alloc(0))} test-browser lines before, ${count(logAtEnd)} after; ${fresh.length ? `${fresh.length} NEW` : 'no new sessions'}`)
 }
 else console.log('\nob.Pal Desktop guard: no new sessions (no helper log present)')
+writeFileSync(join(out, 'results.json'), JSON.stringify({ rows, guard: guard || 'no new sessions', startedAt,
+  source,
+  gpu: gpuDevice, rendererMode: env.OBPAL_E2E_GPU || 'original', simsOnly: env.OBPAL_E2E_SIMS_ONLY || null,
+  timings, elapsedMs: Date.now() - Date.parse(startedAt),
+  browser: browser.from }, null, 2) + '\n')
 if (guard) {
   const bar = '!'.repeat(78)
   console.error(`\n${bar}\n  A TEST BROWSER REACHED THE INSTALLED ob.Pal Desktop during e2e:${guard.suite}. The run stopped there.`)
   console.error(`  Its log (read only) gained:\n    ${guard.reached.slice(0, 5).map((l) => l.slice(0, 150)).join('\n    ')}`)
   console.error(`  Find how the suite's browser got the real host before running anything else.\n${bar}`)
-  process.exit(3)
+  exitCode = 3
+} else {
+  await distill(out, { keepRaw: process.argv.includes('--keep-raw') })
+  const bad = rows.filter((r) => r[1] !== 'pass').length
+  console.log(`\n${bad ? `${bad} of ${rows.length} suites did not pass` : `all ${rows.length} suites passed`}; logs in ${out}`)
+  exitCode = bad ? 1 : 0
 }
-const bad = rows.filter((r) => r[1] !== 'pass').length
-console.log(`\n${bad ? `${bad} of ${rows.length} suites did not pass` : `all ${rows.length} suites passed`}; logs in ${out}`)
-process.exit(bad ? 1 : 0)
+} catch (error) {
+  if (!cancelCode) throw error
+  exitCode = cancelCode
+} finally { await interruptedCleanup; await releaseGpu?.() }
+process.exit(cancelCode || exitCode)

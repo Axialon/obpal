@@ -2,6 +2,7 @@
 import { chromium } from 'playwright'
 import { failGraphics, GRAPHICS_SCENES } from './lib/graphics-failure.mjs'
 import { checkFrost, setSurface } from './lib/frost.mjs'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 const assert = (condition, message) => { if (!condition) throw new Error(message) }
@@ -20,8 +21,9 @@ async function open(browser, origin, scene, kind, width = 390, search = '') {
     }
   })
   const page = await context.newPage()
-  const seen = { errors: [], loads: 0 }
+  const seen = { errors: [], requests: [], loads: 0 }
   page.on('pageerror', error => seen.errors.push(error.message))
+  page.on('requestfailed', request => seen.requests.push({ path: new URL(request.url()).pathname.slice(0, 160), error: request.failure()?.errorText }))
   page.on('request', request => { if (request.isNavigationRequest() && request.frame() === page.mainFrame()) seen.loads++ })
   await page.goto(`${origin}/sim/${scene}/${search}`, { waitUntil: 'domcontentloaded' })
   return { context, page, seen }
@@ -32,7 +34,13 @@ async function ready(page) {
 }
 
 async function stableError(page, seen) {
-  await page.locator('#sim-recovery [role="alert"]').waitFor({ timeout: 15000 })
+  try { await page.locator('#sim-recovery [role="alert"]').waitFor({ timeout: 15000 }) }
+  catch (error) {
+    const state = await page.evaluate(() => ({ ready: document.readyState, failed: document.body.classList.contains('sim-failed'),
+      recovery: document.querySelector('#sim-recovery')?.textContent, loading: document.querySelector('#sim-load')?.className,
+      text: document.body.innerText.slice(0, 500) }))
+    throw new Error(`${error.message}; ${JSON.stringify({ ...state, errors: seen.errors, loads: seen.loads })}`)
+  }
   assert(await page.locator('#sim-recovery [role="alert"]').textContent() === copy, 'wrong graphics diagnosis')
   assert(await page.locator('#sim-recovery button').count() === 0, 'a graphics failure offers a futile retry')
   assert(!await page.locator('#sim-load').isVisible(), 'the loading status stayed busy')
@@ -44,7 +52,7 @@ async function stableError(page, seen) {
 
 /** The sims suite covers all affected entries, slow models, failed models/imports and bounded session-safe retry. */
 export async function runGraphicsRecovery(local, check) {
-  const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true, args: ['--ignore-certificate-errors'] })
+  const browser = await chromium.launch(e2eBrowserOptions({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true, args: ['--ignore-certificate-errors'] }))
   try {
     for (const scene of GRAPHICS_SCENES) for (const width of [390, 1280]) await check(`graphics recovery: ${scene} at ${width}px`, async () => {
       const { context, page, seen } = await open(browser, local.origin, scene, 'context', width)
@@ -95,6 +103,12 @@ export async function runGraphicsRecovery(local, check) {
           assert(!(await page.locator('#sim-recovery').textContent()).includes('WebGL'), 'asset failure was labelled unsupported graphics')
         }
         assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'horizontal overflow')
+      } catch (error) {
+        const state = await page.evaluate(() => ({ ready: document.readyState, classes: document.body.className,
+          stageReady: document.querySelector('#stage')?.dataset.simReady, loaderHidden: document.querySelector('#sim-load')?.hidden,
+          recovery: document.querySelector('#sim-recovery')?.textContent?.slice(0, 500) })).catch(() => null)
+        console.error(`Graphics asset ${kind} at ${width}px: ${JSON.stringify({ state, errors: seen.errors.slice(-8), requests: seen.requests.slice(-8) })}`)
+        throw error
       } finally { await context.close() }
     })
 

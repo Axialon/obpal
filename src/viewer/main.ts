@@ -3,6 +3,7 @@ import { family } from '../family'
 import '../styles/base.css'
 import '../styles/viewer.css'
 import * as THREE from 'three'
+import { dotLoading, dotThumbnail } from '../ui/kit/loading'
 import CameraControls from 'camera-controls'
 import { mountBodyCapture } from '../ui/body-capture'
 import { mountSound } from '../sim/audio/session'
@@ -45,7 +46,7 @@ mountBodyCapture()
 const D2R = Math.PI / 180
 const GROUND_Y = -1.62
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
-const guestScene = new URLSearchParams(location.search).get('join') === '1'
+const guestScene = new URLSearchParams(location.search).has('watch') || ['1', 'play'].includes(new URLSearchParams(location.search).get('join') ?? '')
 const store = {
   get: (k: string) => { try { return localStorage.getItem(k) } catch { return null } },
   set: (k: string, v: string) => { try { localStorage.setItem(k, v) } catch { /* private mode */ } },
@@ -389,6 +390,8 @@ function renderTiles(animate = false) {
     add.onclick = (e) => { e.stopPropagation(); dismissHint('catalog'); dismissHint('add'); void selectItem(item, true) }
     b.appendChild(add)
     tiles.appendChild(b)
+    const image = b.querySelector('img')
+    if (image) dotThumbnail(image, `Opening ${item.name} thumbnail`, () => { image.remove(); setMarkup(b.querySelector('.tile-art')!, ICONS.cube) })
   }
   // Local folder: connect / reconnect card or folder bar, file paths under the tile names, what the scan skipped.
   if (cat.id === LOCAL_CATEGORY) localFolder.renderPanel(tiles)
@@ -469,7 +472,7 @@ function calm<T extends THREE.Object3D>(root: T): T {
 async function selectItem(item: CatalogItem, add = false, fromHost = false) {
   if (guestScene && !fromHost) return
   const token = add ? loadToken : ++loadToken
-  const loading = setTimeout(() => { if (token === loadToken) { $('loading').hidden = false; $('loading-text').textContent = item.name } }, 160)
+  const loading = setTimeout(() => { if (token === loadToken) { $('loading').hidden = false; $('loading-text').textContent = item.name; dotLoading($('loading'), true, `Opening ${item.name}`, 48) } }, 160)
   try {
     let obj: THREE.Object3D
     let clips: THREE.AnimationClip[] = []
@@ -499,7 +502,7 @@ async function selectItem(item: CatalogItem, add = false, fromHost = false) {
     note(`Couldn't load ${item.name}`)
   } finally {
     clearTimeout(loading)
-    if (token === loadToken) $('loading').hidden = true
+    if (token === loadToken) { dotLoading($('loading'), false); $('loading').hidden = true }
   }
 }
 
@@ -648,6 +651,7 @@ async function loadFile(file: File, add = false) {
   const token = add ? loadToken : ++loadToken
   const ext = file.name.split('.').pop()?.toLowerCase()
   const url = URL.createObjectURL(file)
+  const loading = setTimeout(() => { if (token === loadToken) { $('loading').hidden = false; dotLoading($('loading'), true, `Opening ${file.name}`, 48) } }, 160)
   try {
     let obj: THREE.Object3D
     let clips: THREE.AnimationClip[] = []
@@ -675,6 +679,8 @@ async function loadFile(file: File, add = false) {
     console.error(e)
     note(`Couldn't open ${file.name}`)
   } finally {
+    clearTimeout(loading)
+    if (token === loadToken) { dotLoading($('loading'), false); $('loading').hidden = true }
     URL.revokeObjectURL(url)
   }
 }
@@ -1044,10 +1050,15 @@ function drawCursor(s: Seat, px: number, py: number, vx: number, vy: number, off
 }
 
 async function startRemote() {
-  remote = await Remote.create({ appName: 'ob.Pal Viewer', layout, seats: 8 })
+  remote = await Remote.create({ appName: 'ob.Pal Viewer', layout, seats: 8, session: location.pathname })
   holdForPhone(remote)
   controlSpace = new ControlSession(remote, 'viewer')
   sharedPresence.connect(remote)
+  const share = document.querySelector<HTMLButtonElement>('.share-open')
+  if (share) {
+    share.classList.add('tool')
+    document.getElementById('tools')!.insertBefore(share, document.getElementById('open'))
+  }
   remote.setHostPerson({ name: 'Screen', color: family.accentColor() })
   Object.assign(window, { __obpal: remote, __viewer: { holder, camera, controls, view, seats, parts } })
   // Open while nobody is here; it closes by itself as a phone comes in, and the + in the people chip opens it again.
@@ -1077,6 +1088,13 @@ async function startRemote() {
     note(`${p.name} left`)
     publishScene()
   })
+  remote.on('role', p => {
+    removeSeat(p.id)
+    const seat = addSeat(p), part = p.simSeat ? nodeParts.get(p.simSeat) : null
+    if (part) parts.select(part, seat.hand)
+    publishScene(); renderScene(false)
+  })
+  remote.on('sim', (m, who) => { if (m.kind === 'seat' && who.simSeat && (m.data as { action?: string }).action === 'reset') { const seat = seats.get(who.id); if (seat) seatButton(seat, 'reset', 'tap') } })
   remote.on('mode', (m, who) => {
     const s = seats.get(who.id)
     if (!s) return
@@ -1112,7 +1130,7 @@ async function startRemote() {
   $('chip-who').onclick = () => togglePeople()
   $('invite-new').onclick = async () => {
     await remote?.resetInvite()
-    note('New invite link: the old code no longer works')
+    note('New pairing code: the old code no longer works')
   }
 }
 
@@ -1538,7 +1556,7 @@ const REST_AFTER_MS = 3000
 const REST_FRAME_MS = 100
 
 function loop(now: number) {
-  if (!experience.immersive && !sharedPresence.guest && !sharedPresence.people.size && now - lastActive > REST_AFTER_MS && lastFrame && now - lastFrame < REST_FRAME_MS) return
+  if ($('loading').hidden && !experience.immersive && !sharedPresence.guest && !sharedPresence.people.size && now - lastActive > REST_AFTER_MS && lastFrame && now - lastFrame < REST_FRAME_MS) return
   const dt = lastFrame ? Math.min((now - lastFrame) / 1000, 0.1) : 0
   lastFrame = now
   const visibleCamera = experience.activeCamera
@@ -1567,7 +1585,7 @@ function loop(now: number) {
     }
     for (const seat of seats.values()) {
       const id = seat.who.id
-      const pad = remote.padOf(id)
+      const pad = remote.simPadOf(id, now) ?? remote.padOf(id)
       if (pad) {
         if (pad.buttons || pad.axes.some((a) => Math.abs(a) > 0.05) || pad.triggers.some((t) => t > 0.05)) markActive()
         const pt = remote.pointerOf(id)

@@ -43,3 +43,6 @@ html.site ::selection { background: rgb(var(--bb-accent-rgb) / 0.35); color: var
 /* Site actions and the surface tiles use the shared glyph edges, with equal room on each side. */
 html.site .bb-theme { padding-block: 8.5px; align-content: center; }
 html.site .top-nav a { display: inline-flex; align-items: center; justify-content: center; }
+
+.pack-art { position: relative; }
+.pack-art>.dot-loader { position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%); }

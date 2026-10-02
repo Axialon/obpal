@@ -7,13 +7,14 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium, devices } from 'playwright'
 import { fakeXR } from './e2e-vr.mjs'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 
 const cases = ['rover', 'drone', 'arm-arm5', 'arm-so101', 'ptz', 'airhockey', 'studio', 'dog']
 export async function runControlViews(local, check) {
   const temps = tempScope()
   try {
   const out = await temps.make(join(tmpdir(), 'obpal-control-views-')), measurements = []
-  const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true, args: ['--ignore-certificate-errors'] })
+  const browser = await chromium.launch(e2eBrowserOptions({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true, args: ['--ignore-certificate-errors'] }))
   try {
     for (const id of cases) for (const mode of ['overview', 'first-person', 'xr']) {
       await check(`Views: ${id} ${mode} moves screen right, clears solids and keeps the horizon`, async () => {

@@ -14,13 +14,15 @@ import { LINK_TRY_URL } from '../shared/desktop-guide'
  * A phone that wants the PC and hasn't been answered for yet gets the prompt at the top (../ui/ask.ts); one this PC
  * said no to shows in the PC card, with the way to allow it after all.
  */
+import { dotLoading } from '../../../src/ui/kit/loading'
 import { family } from '../../../src/family'
 import '../../../src/styles/base.css'
 import '../ui/link.css'
 import './popup.css'
 import { destroySeal, sealElement, SealSurface, SEAL_STYLE, SEAL_SURFACE_STYLE, DOT_LOADER_STYLE } from '@obpal/host'
 import { brandedQrElement, qrDotPoints } from '../../../packages/host/src/qr'
-import { ICONS, LOGO_WORD } from '../../../src/ui/icons'
+import { ICONS } from '../../../src/ui/icons'
+import { LINK_LOGO } from '../../../src/ui/brand'
 import { accessOf, askFor, parseAnswers, parsePhone, type Answers, type Phone } from '../shared/access'
 import { DEFAULT_MODE, isTargetMode, TARGET_MODES, type TargetMode } from '../shared/constants'
 import { parseFacts, parseLink, workerStale, type BgRequest, type LinkFacts, type LinkState, type LinkStatus } from '../shared/messages'
@@ -118,8 +120,7 @@ const parseFrames = (x: unknown): State['frames'] => {
 const app = document.getElementById('app') as HTMLElement
 app.innerHTML = `
   <header class="bar rise">
-    <span class="logo" aria-label="ob.Pal"><span class="mark-slot" data-mark></span>${LOGO_WORD}</span>
-    <span class="tag">Link</span>
+    <span class="logo" aria-label="ob.Pal Link">${LINK_LOGO}</span>
     <span class="conn" id="conn">
       <span class="status" id="status" role="status"><i aria-hidden="true"></i><span id="status-t"></span><b id="device-name" hidden></b></span>
       <span class="facts" id="facts" hidden>${ICONS.lock}<span id="facts-t"></span></span>
@@ -292,6 +293,8 @@ function render() {
   $('status').dataset.s = status
   $('conn').dataset.s = status
   $('status-t').textContent = STATUS[status]
+  $('status-t').classList.toggle('dot-wait-label', ['starting', 'ready', 'connecting'].includes(status))
+  dotLoading($('status'), status === 'starting' || ['ready', 'connecting'].includes(status) && !!link?.url, STATUS[status])
   $('device-name').hidden = !connected
   $('device-name').textContent = link?.device || 'Phone'
   $('unpair').hidden = !connected
@@ -347,6 +350,7 @@ function render() {
   const can = scriptable(cur?.url)
   tabBtn.setAttribute('aria-checked', String(cur?.id !== undefined && state.tab === cur.id))
   tabBtn.setAttribute('aria-busy', String(state.busy))
+  dotLoading(tabBtn, state.busy, 'Applying tab permission')
   tabBtn.disabled = state.busy || !can
   $('tab-host').textContent = can ? hostOf(cur?.url) : 'Not available on this page'
 
@@ -521,6 +525,9 @@ function renderPc() {
   ic.innerHTML = icon
   ic.dataset.tone = tone
   $('pc-title').textContent = title
+  const waiting = view.kind === 'connecting' || accessOf(state.answers, connectedPhone()?.key ?? '') === 'ask'
+  $('pc-title').classList.toggle('dot-wait-label', waiting)
+  dotLoading($('pc-title').parentElement!, waiting, title)
   $('pc-sub').textContent = sub
   $('pc-kinds').hidden = !kinds
   renderHelper()

@@ -55,7 +55,7 @@
       </div>
     </aside>
 
-    <div class="caption glass" id="caption" aria-live="polite"><span class="cap-single" id="cap-single"><span class="cap-dot" id="cap-dot"></span><span class="cap-cat" id="cap-cat"></span><span class="cap-name" id="cap-name">Loading</span></span><div class="scene-strip" id="scene-strip" role="list" aria-label="Objects in the scene" hidden></div></div>
+    <div class="caption glass" id="caption" aria-live="polite"><span class="cap-single" id="cap-single"><span class="cap-dot" id="cap-dot"></span><span class="cap-cat" id="cap-cat"></span><span class="cap-name" id="cap-name" aria-label="Preparing viewer"></span></span><div class="scene-strip" id="scene-strip" role="list" aria-label="Objects in the scene" hidden></div></div>
 
     <div class="more glass" id="more" role="menu" aria-label="More tools" hidden></div>
     <div class="bb-menu bb-glass switcher" id="switcher" aria-label="Blackboxes apps" hidden></div>
@@ -68,7 +68,7 @@
       <canvas class="glow-view" id="glow-view" width="160" height="120" hidden aria-label="What the camera sees"></canvas>
     </div>
     <div class="pointer" id="pointer" hidden></div>
-    <div class="loading glass" id="loading" hidden><span class="ring" aria-hidden="true"></span><span id="loading-text"></span></div>
+    <div class="loading glass dot-loading-slot" id="loading" role="status" aria-label="Opening model" data-dot-loading="false" data-dot-size="48" hidden><span class="dot-wait-label" id="loading-text"></span></div>
     <div class="drop" id="drop" hidden><div><span data-icon="upload"></span>Drop to open</div></div>
     <div class="note glass" id="note" role="status" aria-live="polite"></div>
     <input type="file" id="file" accept=".glb,.gltf,.stl,.obj" multiple hidden />

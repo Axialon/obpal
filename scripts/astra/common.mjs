@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { existsSync, lstatSync, readFileSync, realpathSync, statSync, mkdirSync, writeFileSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { readDenyWords, riskyPath, scanText } from '../lib/scan.mjs'
+import { plainDirectory } from '../lib/maintenance.mjs'
 import { LIMITS, readZip, safePath, writeZip } from './zip.mjs'
-import { ensureLayout, prepareRequest, tidyOutbox, uploadMarker } from './layout.mjs'
+import { copyHeldReturn, ensureLayout, heldReturn, prepareRequest, tidyOutbox, uploadMarker } from './layout.mjs'
 
 export const REPOSITORY = 'Axialon/obpal'
 export const SUITES = ['code', 'embed', 'home', 'phone', 'sims', 'shared', 'extension', 'catalogue', 'pages']
@@ -107,18 +108,24 @@ export function loadArchive(path) {
   for (const p of actual) if (sha256(members[p]) !== manifest.files[p]) throw new Error(`Hash mismatch: ${p}`)
   return { bytes, members, manifest }
 }
-export function saveExchange(outbox, stage, kind, bytes, prompt, { upload = true } = {}) {
+export function saveExchange(outbox, stage, kind, bytes, prompt, { upload = true, held = false, attach } = {}) {
+  stageId(stage)
+  if ((held && kind !== 'Return') || (attach && kind !== 'Request')) throw new Error('Only Returns can be held and Requests can attach')
+  const returned = attach ? heldReturn(outbox, resolve(attach)) : null
   ensureLayout(outbox)
   if (kind === 'Request') prepareRequest(outbox, stage)
-  mkdirSync(outbox, { recursive: true })
+  const folder = held ? join(outbox, 'held', stage) : outbox
+  plainDirectory(folder)
+  mkdirSync(folder, { recursive: true })
   const stem = `obpal-${stage}-${kind}-${utc()}`
-  let path = join(outbox, `${stem}.zip`)
+  let path = join(folder, `${stem}.zip`)
   writeFileSync(path, bytes, { flag: 'wx' })
-  writeFileSync(join(outbox, `${stem}.prompt.txt`), prompt, { flag: 'wx' })
-  if (upload) {
+  writeFileSync(join(folder, `${stem}.prompt.txt`), prompt, { flag: 'wx' })
+  if (upload && !held) {
+    const attachment = returned ? copyHeldReturn(outbox, returned) : null
+    uploadMarker(outbox, stage, `Upload ${basename(path)}${attachment ? ` and ${attachment}` : ''} and paste the prompt below.\n\n${attachment ? `Read the attached Return for stage ${returned.stage} first: RESULT.md, SOURCE.json, INTEGRATION.md, actual.patch, acceptance/ and REDACTIONS.json. Fold those findings into this next stage deliverable in one turn. Preserve failed, blocked and unexecuted checks; never invent green results or claim merge or deployment. Follow the new Request's scope, pinned source and return contract.\n\n` : ''}${prompt}`)
     const moved = tidyOutbox(outbox, { currentStage: stage })
     if (!existsSync(path)) path = moved.find(destination => destination.endsWith(`${stem}.zip`)) || path
-    uploadMarker(dirname(path), stage, `Upload the current loose ZIP files and paste the prompt below.\n\n${prompt}`)
   }
   return path
 }

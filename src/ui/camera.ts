@@ -6,6 +6,7 @@ import { dismissHint, hint } from './hints'
 import { ICONS } from './icons'
 import { setMarkup } from './markup'
 import { coverPoint } from './camera-space'
+import { dotLoading } from './kit/loading'
 import { constrainedDownload, handAssetsCached } from '../controller/hand-assets'
 import { bodyAssetsCached } from '../controller/body-assets'
 import type { Vec3 } from '@obpal/core'
@@ -58,6 +59,7 @@ export class CameraView {
   private held = false
   private pointer: number | null = null
   private preparation = 0
+  private readonly loaderObserver: MutationObserver
   private readonly onHidden = () => { if (document.hidden) this.close() }
   private readonly onExit = () => this.close()
   private readonly onBlur = () => { if (this.options.mode === 'body') this.close(); else this.hold(false) }
@@ -84,6 +86,9 @@ export class CameraView {
     mark.alt = ''
     const word = element('span', '', 'ob.Pal')
     logo.append(mark)
+    const syncLoader = () => dotLoading(logo, this.opened && ['opening', 'loading'].includes(this.dialog.dataset.state ?? ''), this.dialog.dataset.state === 'loading' ? 'Preparing tracking model' : 'Starting camera', 37)
+    this.loaderObserver = new MutationObserver(syncLoader)
+    this.loaderObserver.observe(this.dialog, { attributes: true, attributeFilter: ['data-state', 'open'] })
     brand.append(logo, word)
     this.exit = this.control('Close camera', 'close', () => this.close())
     this.exit.dataset.cameraClose = ''
@@ -241,8 +246,10 @@ export class CameraView {
     if (this.opened) return
     current?.close()
     current = this
+    this.loaderObserver.observe(this.dialog, { attributes: true, attributeFilter: ['data-state', 'open'] })
     this.returnFocus = document.activeElement as HTMLElement | null
     this.opened = true
+    this.dialog.dataset.state = 'opening'
     this.locked = false
     this.overlay.width = this.overlay.height = 0
     document.body.append(this.dialog)
@@ -259,6 +266,8 @@ export class CameraView {
   close(reason: 'close' | 'type' | 'found' = 'close') {
     if (!this.opened) return
     this.opened = false
+    this.loaderObserver.disconnect()
+    dotLoading(this.dialog.querySelector<HTMLElement>('.camera-logo')!, false)
     this.preparation++
     if (current === this) current = null
     clearTimeout(this.lockTimer)
@@ -294,8 +303,8 @@ export class CameraView {
       const toggle = this.dialog.querySelector<HTMLInputElement>('[data-camera-fingers]')
       if (toggle) toggle.disabled = progress !== null
     }
-    this.dialog.dataset.state = progress === null ? 'tracking' : 'loading'
-    this.dialog.style.setProperty('--camera-progress', String(progress ?? 1))
+    const state = progress === null ? 'tracking' : 'loading'
+    if (this.dialog.dataset.state !== state) this.dialog.dataset.state = state
     this.say(progress === null ? (this.options.mode === 'body' ? 'Keep your shoulders and hips in view' : 'Show your hand') : '')
     if (progress === null && this.options.mode === 'hand') hint('camera.hand', () => this.opened ? this.island : null,
       this.options.hold ? 'Hold to move · pinch for the gripper' : 'Fist to turn · pinch to grab',

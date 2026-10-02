@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { encodeBody, encodeHand } from '@obpal/core'
 import { BodyInput } from '../packages/host/src/body'
 import { Stream } from '../packages/host/src/stream'
 import { bodyState } from './body-fixture'
+beforeEach(() => { vi.useFakeTimers({ toFake: ['performance'] }); vi.advanceTimersByTime(100) })
 afterEach(() => vi.useRealTimers())
 describe('body input lifetime', () => {
   it('expires at 250 ms, retaining sequence order across expiry and generation changes', () => {

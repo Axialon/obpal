@@ -33,6 +33,8 @@ const PAGES = [
 const STORE_ART = [
   'extension/store/src/marquee.html', 'extension/store/src/tile.html', 'extension/store/src/shot.html',
   'extension/store/src/render.mjs',
+  'extension/store/src/scenes.mjs',
+  'extension/store/src/poster.mjs', 'extension/store/src/shot.mjs',
 ]
 
 /** What visitors read: the pages, the summaries written for AI readers, Link's README and store listing, and the strings the scripts add. */
@@ -224,6 +226,22 @@ const RULES: Rule[] = [
 ]
 
 describe('overclaims', () => {
+  it('store captions qualify each route and keep the typing dock on PC only', async () => {
+    const { SHOTS, POSTERS } = await import('../extension/store/src/scenes.mjs')
+    expect(SHOTS.map((s: { scene: string }) => s.scene)).toEqual(['controller', 'viewer', 'keys', 'pc', 'pairing'])
+    const [controller, viewer, keys, pc, pairing] = SHOTS
+    expect(controller.sub).toMatch(/standard Gamepad API/)
+    expect(viewer.sub).toMatch(/compatible viewers/)
+    expect(keys.sub).toMatch(/some pages require trusted input/)
+    expect(keys.face).toBe('face.gamepad')
+    expect(pc.sub).toMatch(/ob.Pal Desktop.*Windows only/)
+    expect(pairing.sub).toMatch(/Pairing alone leaves input off/)
+    expect(SHOTS.filter((s: { items: { src: string }[] }) => s.items.some(i => i.src === 'phone-keyboard')).map((s: { scene: string }) => s.scene)).toEqual(['pc'])
+    // The real phone offers the keyboard tray only in PC; Keys maps a controller instead.
+    expect(readText('extension/src/offscreen.ts')).toContain('tray: pcTarget ? [picker, KEYBOARD] : [picker]')
+    expect(Object.values(POSTERS).map((p: { phone: string }) => p.phone)).toEqual(['phone-wii', 'phone-rotate'])
+    expect(SHOTS.filter((s: { face?: string }) => s.face === 'face.gamepad')).toHaveLength(2)
+  })
   for (const rule of RULES) {
     // The npm import is allowed once the packages are published, and then the words that say they aren't are not; the rest stand.
     const applies = !rule.when || (rule.when === 'published') === NPM_PUBLISHED

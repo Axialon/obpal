@@ -1,7 +1,7 @@
 /* Public sims (CATALOGUE §7): a full-bleed stage, a glass panel of nodes and safety, and the shared-scene chrome. */
 body.sim { margin: 0; overflow: hidden; background: rgb(var(--base-rgb, 7 9 13)); color: var(--ink); font-family: var(--font); }
 body.sim #stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; transition: opacity 0.32s var(--ease); }
-body.sim #stage.sim-warming { opacity: 0; }
+body.sim #stage.sim-warming { opacity: 0; transition: none; }
 /* A failed start retains the page identity and navigation, without empty scene windows or actions. */
 body.sim.sim-failed :is(#stage, .sim-windows, .sim-panel, .panel-dock, #chip, #people, .obpal-chip, .quick-tray) { display: none !important; }
 .sim-recovery { position: fixed; z-index: 4; left: 50%; top: 88px; transform: translateX(-50%); width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 104px); overflow: auto; box-sizing: border-box; padding: 24px; border-radius: 26px; font-size: 14px; line-height: 1.5; }
@@ -25,14 +25,13 @@ body.sim button.kit-icon-action { flex: none; width: 36px; min-width: 36px; padd
 body.sim button.kit-icon-action[hidden] { display: none; }
 body.sim .sim-actions:has(> .kit-icon-action) { display: flex; flex-wrap: wrap; }
 @media (pointer: coarse) { body.sim button.kit-icon-action { width: 44px; min-width: 44px; min-height: 44px; } }
-/* The device area while its mesh comes (src/sim/kit/loading.ts): a glass pill and one turning ring, where the device will
+/* The device area while its mesh comes (src/sim/kit/loading.ts): a glass pill and three dots, where the device will
    stand. It fades in after a beat, so a mesh that is there at once never shows it, and out as the device eases in. */
 .sim-load { position: fixed; left: var(--load-x, 50%); top: 50%; z-index: 2; display: inline-flex; align-items: center; gap: 10px; padding: 10px 16px; border-radius: 999px; color: var(--secondary, var(--muted)); font-size: 13px; font-weight: 650; letter-spacing: -0.005em; transform: translate(-50%, -50%); pointer-events: none; opacity: 0; transition: opacity 0.2s var(--ease); }
+.sim-load.glass { background: var(--frost); border-color: var(--frost-edge); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); }
 .sim-load.on { opacity: 1; transition: opacity 0.3s var(--ease) 0.25s; }
 /* Before the page has placed it: the middle of what the panel leaves free, with the panel where it starts. */
 @media (min-width: 861px) { .sim-load { left: var(--load-x, calc(50% + 175px)); } }
-.sim-load i { width: 16px; height: 16px; flex: none; border-radius: 50%; border: 2px solid rgb(var(--hl-rgb) / 0.18); border-top-color: var(--accent); animation: sim-load-spin 0.8s linear infinite; }
-@keyframes sim-load-spin { to { transform: rotate(360deg); } }
 
 .sim-top { position: fixed; top: 0; left: 0; right: 0; height: 72px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; padding: 0 20px; pointer-events: none; z-index: 5; }
 .sim-top > * { pointer-events: auto; }

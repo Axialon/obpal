@@ -393,12 +393,15 @@ async function exchange({ root, returned, request, stage: requestedStage, mode, 
   members['SOURCE.json'] = json({ base_sha: base, head, changed_paths: head ? verified.touched : [], hashes,
     pending_status: redact(pending, deny, redactions, 'SOURCE.json'), deviations })
   members['REDACTIONS.json'] = json(redactions)
-  const prompt = `You are Astra reconciling ob.Pal stage ${stage}. Read MANIFEST.json, RESULT.md, SOURCE.json, INTEGRATION.md, actual.patch, acceptance/ and REDACTIONS.json in the attached result ZIP. Preserve every real failed, blocked or unexecuted check. Do not claim merged or deployed. Deliver one precise, coherent reconcile with findings and the next bounded stage; changes need a fresh pinned request ZIP. Never replay a stale stage or invent green results.
+  const nextPrompt = mode === 'intake'
+    ? 'Deliver one precise, coherent reconcile with findings and the next bounded stage; changes need a fresh pinned request ZIP.'
+    : 'Fold these findings into the next bounded stage requested by the accompanying fresh Request ZIP, in one turn. This result waits in held storage until that request attaches it.'
+  const prompt = `You are Astra reconciling ob.Pal stage ${stage}. Read MANIFEST.json, RESULT.md, SOURCE.json, INTEGRATION.md, actual.patch, acceptance/ and REDACTIONS.json in the attached result ZIP. Preserve every real failed, blocked or unexecuted check. Do not claim merged or deployed. ${nextPrompt} Never replay a stale stage or invent green results.
 Working within the message budget
 ${messageBudgetLine(message_budget)} This is the request's budget checkpoint; the owner's ledger records subsequent usage. Each round trip costs Astra one message. Plan internally, resolve questions from the pack/GitHub, list assumptions and report actual self-checks. If needed, include a coherent partial with a precise continuation plan in this message.\n`
   members['ASTRA_START.txt'] = prompt
   let path = saveExchange(outbox ?? defaultOutbox(), stage, 'Return', archive(members, { kind: 'result', stage, result, message_budget,
-    ...(mode === 'intake' && returned && existsSync(returned) ? { received_sha256: sha256(readFileSync(returned)) } : {}) }), prompt, { upload: mode !== 'intake' })
+    ...(mode === 'intake' && returned && existsSync(returned) ? { received_sha256: sha256(readFileSync(returned)) } : {}) }), prompt, { upload: false, held: mode !== 'intake' })
   let moved = {}
   if (mode === 'intake' && returned && existsSync(returned)) {
     moved = finishIntake(outbox ?? defaultOutbox(), returned, stage, false, path)

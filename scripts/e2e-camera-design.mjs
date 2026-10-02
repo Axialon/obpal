@@ -98,6 +98,7 @@ export async function cameraDesign(o) {
     const previous = await phone.locator('.ctl-tab[aria-selected="true"]').getAttribute('data-tab')
     await lime(phone); await openHand(phone)
     await until('reopened tracker', () => phone.evaluate(() => ['GPU', 'CPU'].includes(window.__cameraHand.stats()?.delegate)), 45000)
+    need(await phone.locator('.camera-logo .dot-loader').count() <= 1, 'Reopening retained a disposed loading indicator')
     need(await phone.locator('.camera-video').getAttribute('data-mirrored') === 'true', 'Hand did not default to mirrored front capture')
     await inject(phone, handResult())
     await phone.locator('.camera-chip[data-gesture="hand"][data-active="true"]').waitFor()

@@ -1,0 +1,44 @@
+/* One rail for card contents, shared by phone sheets and the site's popovers. */
+:root :is(.rail, .sheet:not(.picker), .picker-list, .kit-sheet .kit-sheet-body, .kit-side .kit-side-body,
+.kit-listbox, .panel-body:not(:has(> .panel-feed)), .panel-dock-items,
+.tiles, .switcher, .themes, .people, .lighting, .quick-themes, .quick-tip,
+.presence-active .presence-controls, .wii, .music-face, :where(.surface.one-hand) .mouse,
+.ns-list, .bt-log ol, :where(#community-packs) pre, .bld-out pre, .embed-code pre, .build-card pre, .embed-panel),
+.obpal-chip::part(rail) {
+  min-width: 0; min-height: 0;
+  overflow-x: hidden; overflow-y: auto;
+  touch-action: pan-y; overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+}
+:root :is(.rail[data-rail='x'], .ctl-bar .ctl-tabs, .surface .tray, .bt-notice .bt-n-picks, .scene-strip) {
+  min-width: 0; overflow-x: auto; overflow-y: hidden;
+  touch-action: pan-x; overscroll-behavior: contain;
+  scroll-snap-type: x mandatory;
+}
+.ctl-tabs > *, .tray > *, .bt-n-picks > *, .scene-strip > * { scroll-snap-align: start; }
+:root.land .surface .tray {
+  overflow-x: hidden; overflow-y: auto; touch-action: pan-y; scroll-snap-type: y mandatory;
+}
+.picker-list, .ctl-sheet, .tiles, .kit-listbox, .ns-list, .themes, .quick-themes { scroll-snap-type: y mandatory; }
+.ctl-sheet { scroll-padding-top: 64px; }
+.picker-list .pick, .ctl-card, .tiles .tile, .kit-option, .ns-item,
+.themes :is(.bb-theme, .bb-accent), .quick-themes :is(.bb-theme, .bb-accent) { scroll-snap-align: start; }
+.picker-list h3 { scroll-snap-align: start; scroll-margin-top: 14px; }
+/* The node strip selects and edge-scrolls by script; the pad keeps its own two-axis input. */
+:root .surface .ns-list { touch-action: none; }
+
+/* Grid/flex children must be allowed to shrink before long tokens can wrap. */
+:is(.sheet, .picker-list, .kit-sheet-body, .kit-side-body, .panel-body, .tiles) > * { min-width: 0; }
+:root .pick-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+:root .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+:is(.sheet, .kit-sheet-body, .kit-side-body, .panel-body) :is(p, code, h2, h3) { overflow-wrap: anywhere; }
+:root :is(.bld-out pre, #community-packs pre, .embed-code pre, .build-card pre) { white-space: pre-wrap; overflow-wrap: anywhere; }
+.kit-sheet-title { min-width: 0; overflow-wrap: anywhere; }
+
+/* A short handle pull returns on the same transform rail, with a gentle spring. */
+:root .sheet { transition-timing-function: cubic-bezier(.22, 1.12, .36, 1); }
+:root .kit-side[data-open='true'], :root .kit-sheet[data-open='true'] { transition-timing-function: cubic-bezier(.22, 1.12, .36, 1); }
+:root :is(.sheet-wrap, .obpal-camera) { overflow: hidden; overscroll-behavior: contain; }
+@media (prefers-reduced-motion: reduce) {
+  .rail, .sheet, .kit-side, .kit-sheet { scroll-behavior: auto; transition: none !important; animation: none !important; }
+}

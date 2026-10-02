@@ -56,12 +56,6 @@
 .camera-brand { display: inline-flex; align-items: center; gap: 9px; font: 700 23px/1 var(--font-display); letter-spacing: -.035em; }
 .camera-logo { position: relative; width: 37px; height: 37px; display: grid; place-items: center; }
 .camera-logo img { width: 29px; height: 29px; }
-.camera-logo::after { content: ''; position: absolute; inset: 0; border-radius: 50%; border: 2px solid transparent; }
-.obpal-camera:is([data-state='opening'], [data-state='loading']) .camera-logo::after {
-  border-color: rgb(var(--bb-accent-rgb) / .18); border-top-color: var(--bb-accent); animation: camera-loading 1.2s linear infinite;
-}
-.camera-logo::before { content: ''; position: absolute; inset: -3px; border-radius: 50%; background: conic-gradient(var(--bb-accent) calc(var(--camera-progress, 0) * 1turn), transparent 0); mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 0); }
-@keyframes camera-loading { to { transform: rotate(1turn); } }
 .camera-control, .camera-type { color: var(--bb-ink); -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .camera-control { position: relative; display: grid; place-items: center; flex: none; width: 44px; height: 44px; padding: 0; border-radius: 50%; font: 700 14px/1 var(--bb-font-data); }
 .camera-control[aria-pressed='true'] { background: var(--bb-accent); color: var(--bb-accent-ink); }
@@ -72,8 +66,6 @@
 .camera-guide > i:nth-child(2) { top: 0; left: calc(100% - 32px); border-left: 0; border-bottom: 0; border-radius: 0 14px 0 0; transform-origin: bottom left; }
 .camera-guide > i:nth-child(3) { top: calc(100% - 32px); left: calc(100% - 32px); border-top: 0; border-left: 0; border-radius: 0 0 14px; transform-origin: top left; }
 .camera-guide > i:nth-child(4) { top: calc(100% - 32px); left: 0; border-top: 0; border-right: 0; border-radius: 0 0 0 14px; transform-origin: top right; }
-.obpal-camera[data-state='scanning'] .camera-guide { animation: camera-breathe 2.4s ease-in-out infinite alternate; }
-@keyframes camera-breathe { to { transform: translate(-50%, -50%) scale(.975); } }
 .obpal-camera[data-state='rejected'] .camera-guide { color: var(--bad); }
 .camera-lock { display: none; position: absolute; inset: 0; place-items: center; }
 .camera-lock .ic { width: 56px; height: 56px; padding: 13px; background: var(--bb-accent); color: var(--bb-accent-ink); border-radius: 50%; animation: camera-found 160ms var(--bb-ease-out) 100ms both; }
@@ -131,3 +123,7 @@ body:has(.sheet-wrap) .obpal-camera .hint { visibility: visible; }
 @media (prefers-reduced-motion: reduce) {
   .obpal-camera, .obpal-camera *, .obpal-camera *::before, .obpal-camera *::after { animation: none !important; transition: none !important; }
 }
+
+.camera-logo>.dot-loader { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+.camera-logo:has(>.dot-loader:not([hidden])) { border-radius: 50%; background: var(--frost); border: 1px solid var(--frost-edge); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); }
+.obpal-camera:is([data-state="opening"], [data-state="loading"]) .camera-logo img { visibility: hidden; }

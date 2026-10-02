@@ -59,6 +59,13 @@ export class Seats {
     })
     remote.on('recenter', (who) => { const s = this.seat(who.id); s.recentred = true; s.pointer.recenter() })
     remote.on('leave', (p) => this.seats.delete(p.id))
+    remote.on('role', p => this.seats.delete(p.id))
+    remote.on('sim', (m, who) => {
+      if (m.kind !== 'seat' || !who.simSeat) return
+      const s = this.seat(who.id), d = m.data as { action?: string }
+      s.lastInput = performance.now()
+      if (d.action) s.presses.push(d.action)
+    })
   }
 
   private seat(id: string): Seat {
@@ -77,7 +84,13 @@ export class Seats {
   read(now: number, spotOf?: (x: number, y: number, who: string) => [number, number] | null): Map<string, DeviceInput> {
     const out = new Map<string, DeviceInput>()
     for (const p of this.remote.participants) {
+      if (p.role === 'watch') { this.seats.delete(p.id); continue }
       const s = this.seat(p.id)
+      if (p.simSeat) {
+        const pad = this.remote.simPadOf(p.id, now)
+        out.set(p.id, { ...restInput('face.gamepad', Mode.gamepad), pad, quiet: !pad, presses: s.presses })
+        s.presses = []; continue
+      }
       const f = this.remote.consumeOf(p.id, now)
       // The pad counts while the gamepad is what the phone sends now: a pad left behind stays live for a moment after
       // the phone moves to another controller, and its STATE packets are newer then.

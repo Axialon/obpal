@@ -17,7 +17,10 @@ import { chromium, devices } from 'playwright'
 import { cspCheck } from './csp-watch.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
 import assert from 'node:assert/strict'
-import { measureButtonInk, inkError } from './lib/button-ink.mjs'
+import { readButtonInk, inkError } from './lib/button-ink.mjs'
+import { shareP1 } from './lib/share-p1.mjs'
+import { shareP2 } from './lib/share-p2.mjs'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 
 const temps = tempScope()
 try {
@@ -53,17 +56,16 @@ async function check(name, fn) {
 }
 
 async function guestViews(guest) {
+  await guest.bringToFront()
   for (const width of [1280, 390]) {
     await guest.setViewportSize({ width, height: 800 })
     for (const mode of ['overview', 'first-person', 'xr']) {
       await guest.evaluate(mode => window.__presence.experience.setMode(mode), mode)
-      await guest.evaluate(() => document.fonts.ready)
-      await guest.waitForTimeout(80)
       const chip = guest.locator('.guest-status'); assert(await chip.isVisible())
       const rect = await chip.boundingBox(), viewport = guest.viewportSize()
       assert(rect.x >= 0 && rect.x + rect.width <= viewport.width && rect.y >= 0 && rect.y + rect.height <= viewport.height)
-      const ink = (await guest.evaluate(measureButtonInk)).find(r => r.classes.includes('guest-status'))
-      assert(ink && inkError(ink) <= .5, `chip ink offset ${JSON.stringify(ink?.groupOffset)}`)
+      const ink = (await readButtonInk(guest)).find(r => r.classes.includes('guest-status'))
+      assert(ink && inkError(ink) <= .5, `${width}px ${mode} status ${await chip.textContent()}: ${JSON.stringify(ink)}`)
     }
   }
 }
@@ -74,7 +76,7 @@ const browsers = []
 let exitCode = 0
 try {
   console.log('ob.Pal shared scene e2e')
-  const screenBrowser = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
+  const screenBrowser = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED, args: RTC_ARGS }))
   browsers.push(screenBrowser)
   const screenCtx = await screenBrowser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true })
   // A model with semantic nodes (Box'em core: time, cost, quality, scope).
@@ -98,7 +100,7 @@ try {
   async function joinPhone({ xr = false } = {}) {
     const dir = await temps.make(join(tmpdir(), 'obpal-shared-'))
     profiles.push(dir)
-    const ctx = await chromium.launchPersistentContext(dir, { ...devices['Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS })
+    const ctx = await chromium.launchPersistentContext(dir, e2eBrowserOptions({ ...devices['Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS }))
     browsers.push(ctx)
     // WebXR as an Android phone with ARCore has it, reporting whatever pose the test sets (window.__fakePose).
     if (xr) await ctx.addInitScript(() => {
@@ -189,7 +191,7 @@ try {
     const ctx = await screenBrowser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 800 } })
     try {
       const guest = await ctx.newPage()
-      const url = new URL(`${local.origin}/view/?join=1&test=vr`); url.hash = new URL(invite).hash
+      const url = new URL(`${local.origin}/view/?join=1&test=vr`); url.hash = await screen.evaluate(() => window.__obpal.watchFragment)
       await guest.goto(url.href)
       await guest.waitForFunction(() => window.__presence?.shared.status === 'Live' && document.querySelector('#cap-name')?.textContent === "Box'em core")
       assert(await guest.locator('.tile').first().isDisabled())
@@ -207,18 +209,19 @@ try {
     } finally { await ctx.close() }
   })
 
-  await check('the ninth room join shows full to guests and phones within 3 seconds', async () => {
+  await check('24 watchers and 8 players have separate pools; excess joins show Room full within 3 seconds', async () => {
     const ctx = await screenBrowser.newContext({ ignoreHTTPSErrors: true })
     try {
       const room = await screen.evaluate(() => window.__obpal.roomId)
       await screen.evaluate(async room => {
-        window.__capSockets = await Promise.all(Array.from({ length: 8 }, () => new Promise((resolve, reject) => {
-          const socket = new WebSocket(`${location.origin.replace('http', 'ws')}/r/${room}?role=device`)
-          socket.onopen = () => resolve(socket); socket.onerror = reject
+        const keys = new URLSearchParams(window.__obpal.admissionQuery)
+        window.__capSockets = await Promise.all([...Array(24).fill(keys.get('watch')), ...Array(8).fill(keys.get('play'))].map(key => new Promise((resolve, reject) => {
+          const socket = new WebSocket(`${location.origin.replace('http', 'ws')}/r/${room}?role=device&key=${key}`)
+          socket.onmessage = e => { if (JSON.parse(e.data).t === 'welcome') resolve(socket) }; socket.onerror = reject; socket.onclose = () => reject(new Error('pool admission rejected'))
         })))
       }, room)
       const guest = await ctx.newPage(), phone = await ctx.newPage()
-      const url = new URL(`${local.origin}/view/?join=1&test=vr`); url.hash = new URL(invite).hash
+      const url = new URL(`${local.origin}/view/?join=1&test=vr`); url.hash = await screen.evaluate(() => window.__obpal.watchFragment)
       const start = Date.now()
       await guest.goto(url.href)
       await guest.locator('.guest-status', { hasText: 'Room full' }).waitFor({ timeout: Math.max(1, 3000 - (Date.now() - start)) })
@@ -345,6 +348,8 @@ try {
     if ((await scene()).people.length) throw new Error('the removed phone rejoined')
     return 'no rejoin'
   })
+  await shareP1({ browser: screenBrowser, origin: local.origin, check, shots: SHOTS })
+  await shareP2({ browser: screenBrowser, origin: local.origin, check })
   await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {
   console.error(e)

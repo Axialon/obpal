@@ -14,6 +14,7 @@ export function tempScope({ keep = false, fallback = true } = {}) {
   }
   if (fallback) process.once('exit', onExit)
   return {
+    retain() { keep = true },
     async make(prefix) { const path = await mkdtemp(prefix); paths.add(path); return path },
     makeSync(prefix) { const path = mkdtempSync(prefix); paths.add(path); return path },
     async cleanup() {

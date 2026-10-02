@@ -1,10 +1,11 @@
 /**
- * A viewport marble field for the whole home page. Layout observers cache document-space obstacles; scroll only
- * updates the view and a bounded impulse. The shared ticker advances fixed-step physics and interpolates drawing.
+ * A viewport marble field for the whole home page. Layout observers cache static document-space obstacles; active
+ * transforms are read together before drawing, and scrolling sweeps their motion through the marbles. The shared
+ * ticker advances fixed-step physics and interpolates drawing.
  * Pointer events never capture, cancel navigation or prevent text selection. Reduced motion skips the opening;
  * marbles rest until explicitly played with. The saved field switch stops drawing and restores the text headline.
  */
-import { addActor, wake } from './ticker'
+import { addActor, addRead, wake } from './ticker'
 import { onTilt, onToss, recentre, startTilt, tiltOn } from './tilt'
 import { hopTo } from './bounce'
 import { createGlass, type GlassStats, type SoundState } from './glass'
@@ -13,6 +14,7 @@ import type { Frame, Participant, Remote } from '@obpal/host'
 import type { ScreenPointer } from '../viewer/pointer'
 import type { Field, FieldOrb, Gfx, Hit, PadRect } from './field'
 import { family } from '../family'
+import { html, setMarkup } from '../ui/markup'
 
 const LIME = '#c6ff34'
 /** A hand that stops moving keeps steering its marble this long; then the marble rolls to a stop. */
@@ -46,7 +48,7 @@ const BUZZ_GAP = 70
  * The page's raised things in the hero that marbles roll onto (its buttons, the hint, the sound control, the three
  * steps' icons). Their footprints stay fixed between layout observations.
  */
-const PADS = '.cta .btn, [data-hint], [data-sound], .quick .qi'
+const PADS = '.cta .btn, [data-hint], .quick .qi'
 
 /** The step ?quality= holds the field at, if any. */
 function pinnedStep(steps: readonly Step[]): number | null {
@@ -56,6 +58,11 @@ function pinnedStep(steps: readonly Step[]): number | null {
 }
 
 export interface Hero {
+  /** Cached geometry and physical state for the deterministic whole-page contact proof. */
+  contacts(): { rects: { id: number; owner: string; rect: PadRect }[]; marbles: { id: string; speed: number; resting: boolean }[] }
+  seed(id: string, x: number, y: number): void
+  showSeeds(): void
+  clearSeeds(): void
   /** Phones join through this remote (a computer's pairing card), each with its own marble. */
   attach(remote: Remote, pointer: typeof ScreenPointer, read?: (who: string, now: number) => Frame): void
   /** Start following the phone's tilt and tosses (on a phone; iOS asks first, from a tap). */
@@ -63,7 +70,7 @@ export interface Hero {
   readonly tilting: boolean
   readonly enabled: boolean
   toggleField(): void
-  activity(): { draws: number; layouts: number; active: number; enabled: boolean }
+  activity(): { draws: number; layouts: number; active: number; enabled: boolean; moving: number; reads: number; motionMs: number; stepMs: number }
   /** A card being directly played takes the motion budget until it settles. */
   sceneActive(active: boolean): boolean
   /** The marbles' sound (./glass.ts): on, blocked (waiting for a click or a tap), off, or none. */
@@ -117,17 +124,26 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   let viewportTop = 0, pendingScroll = scrollY, appliedScroll = 0
   let sceneUnderPointer = false
   let sceneBusy = false
+  let sceneDrawAt = -1e9
   let lastInteraction = performance.now()
   let scrollAt = -1e9
   stage.parentElement?.removeChild(stage)
   document.body.appendChild(stage)
   const fieldToggle = document.createElement('button')
   fieldToggle.type = 'button'
-  fieldToggle.className = 'field-toggle btn'
+  fieldToggle.className = 'hero-sound field-toggle'
   fieldToggle.dataset.fieldToggle = ''
-  document.body.appendChild(fieldToggle)
+  const dock = document.createElement('div')
+  dock.className = 'field-controls'
+  const volume = hero.querySelector<HTMLElement>('[data-sound]')
+  document.body.appendChild(dock)
+  dock.appendChild(fieldToggle)
+  if (volume) dock.appendChild(volume)
+  setMarkup(fieldToggle, html`<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M7.5 9a5 5 0 0 1 7-2M6.5 14c3.5-3 6 4 11-1"/><path class="when-off" d="m4 4 16 16"/></svg>`)
   const preference = () => {
-    fieldToggle.textContent = enabled ? 'Marbles on' : 'Marbles off'
+    fieldToggle.dataset.state = enabled ? 'on' : 'off'
+    fieldToggle.setAttribute('aria-label', enabled ? 'Marbles on' : 'Marbles off')
+    fieldToggle.title = enabled ? 'Marbles on — turn off' : 'Marbles off — turn on'
     fieldToggle.setAttribute('aria-pressed', String(enabled))
     stage.hidden = !enabled
     document.documentElement.classList.toggle('field3d', enabled && !!field)
@@ -202,6 +218,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     drawSides(field)
     field.scroll(pendingScroll, false)
     appliedScroll = pendingScroll
+    if (repelledCard) repelDemo(repelledCard)
     dirty = true
     wake()
   }
@@ -257,10 +274,9 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   let press: { x: number; y: number; t: number } | null = null
   const follow = (e: PointerEvent) => {
     sceneUnderPointer = !!(e.target as Element | null)?.closest?.('.scene-art')
-    if (sceneUnderPointer) { local.at = -1e9; field?.avoid(null); wake(); return }
+    if (sceneUnderPointer) { local.at = -1e9; repelDemo(e.target as Element); wake(); return }
     if (e.pointerType !== 'mouse' || !enabled) return
-    const control = controlRects.find(r => e.clientX >= r.x - 24 && e.clientX <= r.x + r.w + 24 && e.clientY >= r.y - appliedScroll - 24 && e.clientY <= r.y + r.h - appliedScroll + 24)
-    field?.avoid(control ? { ...control, y: control.y - appliedScroll } : null)
+    repelDemo(document.activeElement?.closest('.scene') ?? null)
     const p = heroAt(e)
     local.x = p.x; local.y = p.y; local.at = performance.now()
     if (anchor && Math.hypot(p.x - anchor.sx, p.y - anchor.sy) > 10) anchor = null
@@ -354,12 +370,62 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   // ---- the page's buttons: steps the marbles roll up onto and off (./field.ts), which answer them ----
 
   // Hero blocks answer a marble with light, never movement or a synthetic click.
-  const padEls = [...hero.querySelectorAll<HTMLElement>(PADS)]
+  const padEls = [...hero.querySelectorAll<HTMLElement>(PADS), ...(volume ? [volume] : []), fieldToggle]
   const padState = new Map(padEls.map((el) => [el, { glow: 0, flash: 0, shown: '' }]))
   /** Each button's box (hero px), in the order the field counts them; empty while one isn't there to stand on. */
   let padRects: PadRect[] = []
-  let controlRects: PadRect[] = []
   let padOwners: (HTMLElement | null)[] = []
+  const onscreen = new Set<Element>(), moving = new Set<Element>()
+  const settling = new Set<Element>()
+  let motionRects: { index: number; rect: PadRect }[] = []
+  let geometryReads = 0, motionMs = 0, stepMs = 0
+  const motionWatch = new IntersectionObserver(entries => {
+    for (const e of entries) { if (e.isIntersecting) onscreen.add(e.target); else onscreen.delete(e.target) }
+  }, { rootMargin: '50px' })
+  for (const el of document.querySelectorAll('.scene, .build-card, .pair, .hero-hint')) motionWatch.observe(el)
+  const motionStart = (e: Event) => {
+    if (e instanceof TransitionEvent && e.propertyName !== 'transform') return
+    const el = e.target as Element
+    if (el.matches('.scene, .build-card, .pair, .hero-hint')) { settling.delete(el); moving.add(el); wake() }
+  }
+  const motionEnd = (e: Event) => {
+    if (e instanceof TransitionEvent && e.propertyName !== 'transform') return
+    const el = e.target as Element
+    if (moving.has(el)) { settling.add(el); scheduleLayout(); wake() }
+  }
+  for (const type of ['transitionrun', 'animationstart']) document.addEventListener(type, motionStart)
+  for (const type of ['transitionend', 'transitioncancel', 'animationend', 'animationcancel']) document.addEventListener(type, motionEnd)
+  addRead(() => {
+    const at = performance.now()
+    motionRects = []
+    geometryReads = 0
+    if (!field || !enabled || document.hidden) return
+    // Only moving, visible bodies are read. Scroll is analytic; static elements never enter this phase.
+    for (const el of moving) {
+      if (!onscreen.has(el)) continue
+      const index = padOwners.indexOf(el as HTMLElement), base = padRects[index]
+      if (!base) continue
+      const r = el.getBoundingClientRect()
+      geometryReads++
+      motionRects.push({ index, rect: { ...base, x: r.x, y: r.y + (base.fixed ? 0 : scrollY), w: r.width, h: r.height } })
+    }
+    // End and cancellation can restore a transform instantly. Read that final pose once before caching it again.
+    for (const el of settling) moving.delete(el)
+    settling.clear()
+    motionMs = performance.now() - at
+  })
+  let repelledCard: Element | null = null
+  function repelDemo(target: Element | null) {
+    const card = target?.closest('.scene')
+    repelledCard = card ?? null
+    const i = card ? padOwners.indexOf(card as HTMLElement) : -1
+    const rect = i >= 0 ? padRects[i] : null
+    field?.avoid(rect ? { ...rect, y: rect.y - appliedScroll } : null)
+    dirty = true
+  }
+  document.addEventListener('focusin', e => { repelDemo(e.target as Element); dirty = true; wake() })
+  document.addEventListener('focusout', () => { repelDemo(null); wake() })
+  document.addEventListener('pointerdown', e => { if ((e.target as Element)?.closest('.scene-art')) repelDemo(e.target as Element) }, { passive: true })
   let ping: { el: HTMLElement; timer: number } | null = null
   /** Each raised thing's side as last drawn (px, to the half pixel): where its foot is on screen from its top. */
   const padSide = padEls.map(() => '')
@@ -369,17 +435,16 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       if (el.hidden || el.classList.contains('gone') || !el.getClientRects().length) return { x: 0, y: 0, w: 0, h: 0, r: 0 }
       const r = el.getBoundingClientRect()
       const radius = parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0
-      return { x: r.left, y: r.top + scrollY, w: r.width, h: r.height, r: radius }
-    })
-    controlRects = [...document.querySelectorAll<HTMLElement>('main a, main button')].filter(el => !el.hidden && el.getClientRects().length).map(el => {
-      const r = el.getBoundingClientRect()
-      return { x: r.x, y: r.y + scrollY, w: r.width, h: r.height, r: 0 }
+      const fixed = el.closest('.field-controls') !== null
+      return { x: r.left, y: r.top + (fixed ? 0 : scrollY), w: r.width, h: r.height, r: radius, fixed }
     })
     if (!pageGeometry || !includePage) return padRects
-    for (const el of document.querySelectorAll<HTMLElement>('main .scene, main .build-card, main a, main button, main .live-dot, main .sec-head, .site-foot')) {
-      if (hero.contains(el) || !el.getClientRects().length) continue
+    for (const el of document.querySelectorAll<HTMLElement>('main .pair, main .scene, main .build-card, main a, main button, main .live-dot, main .sec-head, .site-foot')) {
+      if ((hero.contains(el) && !el.matches('.pair')) || !el.getClientRects().length) continue
+      // Content inside a solid card shares its collider; nested controls never make trapping seams.
+      if (!el.matches('.pair, .scene, .build-card') && el.closest('.pair, .scene, .build-card')) continue
       const r = el.getBoundingClientRect()
-      const kind = el.matches('.scene, .build-card') ? 'rail' : el.matches('.live-dot') ? 'peg' : el.matches('.sec-head, .site-foot') ? 'ramp' : 'block'
+      const kind = el.matches('.pair, .scene, .build-card') ? 'rail' : el.matches('.live-dot') ? 'peg' : el.matches('.sec-head, .site-foot') ? 'ramp' : 'block'
       padOwners.push(el)
       padRects.push(pageGeometry.obstacleRect({ x: r.x, y: r.y + scrollY, w: r.width, h: kind === 'ramp' ? 4 : r.height, r: parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0 }, kind))
     }
@@ -402,7 +467,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   }
   function padHit(h: Hit) {
     const owner = h.pad === undefined ? null : padOwners[h.pad]
-    if (owner && !hero.contains(owner)) {
+    if (owner && !padState.has(owner)) {
       if (ping) { clearTimeout(ping.timer); ping.el.classList.remove('field-hit') }
       owner.classList.add('field-hit')
       ping = { el: owner, timer: window.setTimeout(() => { owner.classList.remove('field-hit'); ping = null }, 350) }
@@ -440,7 +505,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     padEls.forEach((el, i) => {
       const st = padState.get(el)!
       const cached = padRects[i]
-      const b = cached && { ...cached, y: cached.y - appliedScroll }
+      const b = cached && { ...cached, y: cached.y - (cached.fixed ? 0 : appliedScroll) }
       if (!b) return
       let near: { o: FieldOrb; x: number; y: number; k: number } | null = null
       for (const { o, p, rad, s } of b.w > 0 ? orbs : []) {
@@ -479,7 +544,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   for (const el of padEls) { padWatch.observe(el, { attributes: true, attributeFilter: ['class', 'hidden', 'data-state'] }); padSize.observe(el) }
   const copy = hero.querySelector('.hero-copy')
   if (copy) padSize.observe(copy)
-  for (const el of document.querySelectorAll('main > section, .scene, .build-card')) padSize.observe(el)
+  for (const el of document.querySelectorAll('main > section, .scene, .build-card, .pair, .site-foot')) padSize.observe(el)
   const sectionWatch = new IntersectionObserver(() => { dirty = true; wake() }, { rootMargin: '100px' })
   for (const section of document.querySelectorAll('main > section')) sectionWatch.observe(section)
   document.addEventListener('visibilitychange', () => {
@@ -488,6 +553,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   })
   addEventListener('resize', scheduleLayout, { passive: true })
   visualViewport?.addEventListener('resize', scheduleLayout, { passive: true })
+  document.fonts?.addEventListener('loadingdone', scheduleLayout)
   addEventListener('scroll', () => { pendingScroll = scrollY; sceneUnderPointer = false; lastInteraction = scrollAt = performance.now(); dirty = true; wake() }, { passive: true })
 
   // ---- what a hit sounds like, and the knock felt in the hand ----
@@ -554,7 +620,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   let pinned = pinnedStep(steps)
   function effectiveQuality() {
     const now = performance.now()
-    return pinned ?? Math.max(governor.level, now - scrollAt < 180 ? pick(steps, 'plain') : 0, now - lastInteraction > 15000 ? steps.length - 1 : 0)
+    return pinned ?? Math.max(governor.level, sceneUnderPointer || sceneBusy || document.activeElement?.closest('.scene') ? steps.length - 1 : 0, now - scrollAt < 180 ? pick(steps, 'plain') : 0, now - lastInteraction > 15000 ? steps.length - 1 : 0)
   }
   function setQuality() {
     if (!field) return
@@ -587,19 +653,25 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   addActor((now, dt) => {
     // Disabled or hidden, neither physics nor drawing advances.
     if (!enabled || document.hidden || !visible || !field) { glass.foresee([], 0); looping = false; return false }
+    if (motionRects.length) {
+      const at = performance.now()
+      for (const { index, rect } of motionRects) padRects[index] = rect
+      field.movePads(motionRects, dt)
+      if (repelledCard) repelDemo(repelledCard)
+      motionMs += performance.now() - at
+      dirty = true
+    }
     if (pendingScroll !== appliedScroll) {
       tour = false; anchor = null; local.at = -1e9
       field.scroll(pendingScroll, !still)
       appliedScroll = pendingScroll
+      repelDemo(document.activeElement?.closest('.scene') ?? null)
     }
-    if (sceneUnderPointer || sceneBusy) {
-      if (dirty) { field.render(); draws++; dirty = false }
-      looping = false; return false
-    }
+    // Fresh phone steering must be consumed before deciding whether the field can stay asleep.
+    readPhones(now)
     const lastInput = Math.max(local.at, tiltAt, tossAt, ...[...phones.values()].map(p => p.at))
     if (!dirty && !looping && !pageGeometry!.fieldAwake(enabled, document.hidden, false, lastInput, now)) return false
     const workAt = performance.now()
-    readPhones(now)
     const f = field
     const o = me()
     const mine = now - local.at < HOLD_MS
@@ -611,7 +683,9 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     o.push = tilting ? tiltPush : null
     for (const [id, ph] of phones) if (ph.gone) { f.removeOrb(id); phones.delete(id) }
     frameAt = now
+    const stepAt = performance.now()
     const busy = f.step(dt)
+    stepMs = performance.now() - stepAt
     foresee(f, dt)
     const padsBusy = answerPads(dt)
     if (busy) pace(dt)
@@ -622,10 +696,14 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       if (governor.work(performance.now() - workAt + renderWork) !== level) setQuality()
     }
     const renderAt = performance.now()
-    f.render()
-    renderWork = performance.now() - renderAt
-    draws++; dirty = false
-    looping = busy || padsBusy || mine || tilting || tour
+    const sharing = sceneUnderPointer || sceneBusy || !!document.activeElement?.closest('.scene')
+    // A played demo gets the drawing budget; marble physics still advances, so contacts never freeze in place.
+    if (!sharing || dirty || now - sceneDrawAt >= 1000 / 30) {
+      f.render()
+      renderWork = performance.now() - renderAt
+      draws++; dirty = false; sceneDrawAt = now
+    }
+    looping = busy || padsBusy || mine || tilting || tour || motionRects.length > 0
     return looping
   })
 
@@ -689,9 +767,25 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   }
 
   const heroApi: Hero = {
+    contacts: () => ({ rects: padRects.map((rect, i) => ({ id: PAD_ID + i, owner: padOwners[i]?.className ?? '', rect })),
+      marbles: field?.orbs().map(o => ({ id: o.id, speed: Math.hypot(o.orb.vx, o.orb.vy, o.orb.vz), resting: o.orb.resting })) ?? [] }),
+    seed(id, x, y) {
+      if (!field) return
+      takeOver()
+      const p = field.planeAt(x, y, TOP + R + 0.3)
+      const marble = field.orb(`proof-${id}`, LIME), o = marble.orb
+      Object.assign(o, { x: p.x, z: p.z, y: TOP + R + 0.3, vx: 0, vy: 0, vz: 0, target: null, route: [], flying: false, resting: false })
+      delete o.mem
+      marble.m.was = marble.m.now = marble.m.shown = [o.x, o.y, o.z]
+      marble.life = 1
+      local.at = -1e9
+      wake()
+    },
+    showSeeds() { if (field) { field.step(0); field.render(); draws++ } },
+    clearSeeds() { for (const o of field?.orbs() ?? []) if (o.id.startsWith('proof-')) field?.removeOrb(o.id) },
     onSound: null,
     get enabled() { return enabled },
-    activity: () => ({ draws, layouts, active: field?.active ?? 0, enabled }),
+    activity: () => ({ draws, layouts, active: field?.active ?? 0, enabled, moving: motionRects.length, reads: geometryReads, motionMs, stepMs }),
     sceneActive(active) {
       const changed = active !== sceneBusy
       sceneBusy = active
@@ -711,7 +805,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       read = consume
       Pointer = P
       r.on('join', join)
-      r.on('leave', (p) => { const ph = phones.get(p.id); if (ph) ph.gone = true; pointers.delete(p.id); colors.delete(p.id); wake() })
+      r.on('leave', (p) => { const ph = phones.get(p.id); if (ph) ph.gone = true; pointers.delete(p.id); colors.delete(p.id); dirty = true; wake() })
       r.on('recenter', (p) => pointers.get(p.id)?.recenter())
       r.on('input', () => wake())
       r.on('toss', (e, who) => phoneToss(who, tossSpeed(e.v)))
@@ -748,7 +842,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
         return { id: o.id, x: p.x, y: p.y, life: o.life, h: y - o.orb.r, on, held: !!o.orb.held }
       })
     },
-    pads: () => padEls.map((el) => el.textContent?.trim() ?? ''),
+    pads: () => padEls.map((el) => el.textContent?.trim() || el.getAttribute('aria-label') || ''),
     outline: (id) => {
       const o = field?.outline(id)
       if (!o) return null

@@ -8,6 +8,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, devices } from 'playwright'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 async function until(what, fn, timeout = 15000) {
@@ -96,7 +97,7 @@ function judge(frames, at, a, b, unit) {
 
 export async function simsStrip({ origin, check, executablePath, headed = false, shots = '' }) {
   const args = ['--disable-features=WebRtcHideLocalIpsWithMdns', '--ignore-certificate-errors']
-  const browser = await chromium.launch({ executablePath, headless: !headed, args })
+  const browser = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !headed, args }))
   const dirs = []
   const contexts = []
   const errors = []
@@ -110,7 +111,7 @@ export async function simsStrip({ origin, check, executablePath, headed = false,
     const invite = await until('invite', () => screen.evaluate(() => window.__obpal?.pairingUrl || ''), 20000)
     const dir = await mkdtemp(join(tmpdir(), 'obpal-strip-'))
     dirs.push(dir)
-    const ctx = await chromium.launchPersistentContext(dir, { ...devices['Pixel 7'], executablePath, headless: !headed, args })
+    const ctx = await chromium.launchPersistentContext(dir, e2eBrowserOptions({ ...devices['Pixel 7'], executablePath, headless: !headed, args }))
     contexts.push(ctx)
     await ctx.addInitScript(() => { for (const k of ['gyro', 'models', 'more', 'point', 'lock', 'track', 'level', 'hold-part']) try { sessionStorage.setItem(`obpal.hint.${k}`, '1') } catch { /* private */ } })
     const page = ctx.pages()[0] ?? (await ctx.newPage())

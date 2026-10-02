@@ -3,6 +3,7 @@ import { DurableObject } from 'cloudflare:workers'
 import { Buckets, CodeBook, readLookup, type Claim, type CodeEntry, type Work } from './codes'
 import { iceAnswer, relayOf, stunServers, type IceEnv } from './ice'
 import { allow, type RateLimit } from './limits'
+import { admission, expiredWatch, ownerVerifier, WATCH_IDLE_MS, type Sharing } from './sharing'
 import { handlePayment, PAYMENT_ROUTES, type PaymentsEnv } from './payments'
 
 export interface Env extends PaymentsEnv, IceEnv {
@@ -41,9 +42,15 @@ export default {
       if (!(await allow(env.RL_SOCKET, await clientKey(req, env)))) return new Response('Too many connections, try again in a minute', { status: 429, headers: { 'Retry-After': '60' } })
       return env.ROOMS.get(env.ROOMS.idFromName(room[1])).fetch(req)
     }
-    if (url.pathname === '/api/health') return Response.json({ ok: true, service: 'obpal', proto: 1 }, { headers: CORS })
+    if (url.pathname === '/api/health') return Response.json({ ok: true, service: 'obpal', proto: 2 }, { headers: CORS })
     if (url.pathname === '/api/ice') return iceServers(req, url, env)
     if (url.pathname === '/api/code') return lookupCode(req, env)
+    const share = /^\/api\/share\/([A-Za-z0-9_-]{22})\/(play|watch)$/.exec(url.pathname)
+    if (share && req.method === 'GET') {
+      if (!(await allow(env.RL_SOCKET, await clientKey(req, env)))) return new Response('Slow down', { status: 429, headers: NO_STORE })
+      const sealed = await env.ROOMS.get(env.ROOMS.idFromName(share[1])).shareTarget(share[2] as 'play' | 'watch')
+      return Response.json(sealed ? { sealed } : { error: 'removed' }, { status: sealed ? 200 : 404, headers: NO_STORE })
+    }
     if (PAYMENT_ROUTES.includes(url.pathname)) return (await handlePayment(req, env)) ?? new Response('Not found', { status: 404 })
     if (url.pathname === '/sim/device/' && url.searchParams.has('d')) {
       const id = url.searchParams.get('d') ?? ''
@@ -109,6 +116,7 @@ async function lookupCode(req: Request, env: Env): Promise<Response> {
 }
 
 interface Tag {
+  capability?: 'player' | 'watcher'
   id: string
   role: 'host' | 'device'
   /** The room's name (its id in /r/<room>) and keyed network hashes for the socket: a host's short codes need both. */
@@ -124,7 +132,7 @@ interface Tag {
 const SOCKET_CLAIMS = { cap: 10, every: 6_000 }
 
 /**
- * One room per pairing (room id = hash of the QR secret). A blind signaling mailbox:
+ * A stable room per shared session (legacy pairing rooms hash the QR secret). A signaling mailbox:
  * forwards device -> host and host -> addressed device. Hibernates between messages.
  */
 export class Room extends DurableObject<Env> {
@@ -147,9 +155,32 @@ export class Room extends DurableObject<Env> {
   }
 
   async fetch(req: Request): Promise<Response> {
-    const role: Tag['role'] = new URL(req.url).searchParams.get('role') === 'host' ? 'host' : 'device'
+    const query = new URL(req.url).searchParams
+    const role: Tag['role'] = query.get('role') === 'host' ? 'host' : 'device'
+    const reject = (code: number, reason: string) => {
+      const { 0: client, 1: server } = new WebSocketPair()
+      server.accept(); server.close(code, reason)
+      return new Response(null, { status: 101, webSocket: client })
+    }
+    let sharing = await this.ctx.storage?.get<Sharing>('sharing')
+    if (sharing && sharing.watch && expiredWatch(sharing, Date.now())) { sharing.expiredWatchKey = sharing.watch; sharing.watch = null; await this.ctx.storage.put('sharing', sharing) }
+    if (role === 'host' && sharing && await ownerVerifier(query.get('owner') ?? '') !== sharing.owner) return reject(4009, 'removed')
+    if (role === 'host' && !sharing && query.has('owner')) {
+      const play = query.get('play'), watch = query.get('watch')
+      if (!/^[A-Za-z0-9_-]{22}$/.test(query.get('owner') ?? '') || !/^[A-Za-z0-9_-]{43}$/.test(play ?? '') || !/^[A-Za-z0-9_-]{43}$/.test(watch ?? '')) return reject(4009, 'removed')
+      sharing = { owner: await ownerVerifier(query.get('owner')!), play: query.get('playOpen') === '0' ? null : play, watch: query.get('watchOpen') === '0' ? null : watch, emptyAt: null }
+      await this.ctx.storage.put('sharing', sharing)
+    }
+    let capability: Tag['capability'] = 'player'
+    if (role === 'device' && sharing) {
+      const ticket = query.get('ticket')
+      const tickets = ticket ? await this.ctx.storage.get<Record<string, number>>('tickets') : undefined
+      const validTicket = ticket && sharing.play && tickets?.[ticket]
+      capability = admission(sharing, query.get('key'), Date.now()) ?? (validTicket && validTicket > Date.now() ? 'player' : undefined)
+      if (!capability) return reject(4009, 'removed')
+    }
     if (role === 'host' && this.ctx.getWebSockets('host').length > 0) return new Response('Room already has a host', { status: 409 })
-    if (role === 'device' && this.ctx.getWebSockets('device').length >= 8) {
+    if (role === 'device' && this.ctx.getWebSockets(sharing ? capability : 'device').length >= (capability === 'watcher' ? 24 : 8)) {
       // Browsers hide failed upgrade bodies. Reject over an unregistered socket so clients can read the reason.
       const { 0: client, 1: server } = new WebSocketPair()
       server.accept()
@@ -159,12 +190,13 @@ export class Room extends DurableObject<Env> {
 
     const { 0: client, 1: server } = new WebSocketPair()
     const id = crypto.randomUUID().slice(0, 8)
-    this.ctx.acceptWebSocket(server, [role, `id:${id}`])
+    this.ctx.acceptWebSocket(server, [role, `id:${id}`, ...(role === 'device' ? [capability!] : [])])
     const room = ROOM.exec(new URL(req.url).pathname)?.[1]
-    server.serializeAttachment({ id, role, ...(role === 'host' ? { room, net: await networkKeys(this.env, req.headers.get('CF-Connecting-IP')) } : {}) } satisfies Tag)
+    server.serializeAttachment({ id, role, capability: role === 'device' ? capability : undefined, ...(role === 'host' ? { room, net: await networkKeys(this.env, req.headers.get('CF-Connecting-IP')) } : {}) } satisfies Tag)
+    if (sharing) { sharing.emptyAt = null; await this.ctx.storage.put('sharing', sharing); await this.ctx.storage.deleteAlarm() }
 
     const hostPresent = this.ctx.getWebSockets('host').length > 0
-    server.send(JSON.stringify({ t: 'welcome', id, role, host: hostPresent }))
+    server.send(JSON.stringify({ t: 'welcome', id, role, host: hostPresent, ...(role === 'host' && sharing ? { sharing: { play: !!sharing.play, watch: !!sharing.watch } } : {}) }))
     const others = this.ctx.getWebSockets(role === 'host' ? 'device' : 'host')
     for (const ws of others) safeSend(ws, { t: 'peer', ev: 'join', id, role })
     return new Response(null, { status: 101, webSocket: client })
@@ -172,15 +204,38 @@ export class Room extends DurableObject<Env> {
 
   async webSocketMessage(ws: WebSocket, msg: string | ArrayBuffer) {
     if (typeof msg !== 'string' || msg.length > 16_384) return
-    let m: { t?: string; to?: string; d?: unknown; op?: string; work?: Work }
+    let m: { t?: string; to?: string; d?: unknown; op?: string; work?: Work; play?: string | null; watch?: string | null; revision?: number; links?: { play?: string; watch?: string } }
     try { m = JSON.parse(msg) } catch { return }
+    if (m.t === 'sharing') {
+      const me = ws.deserializeAttachment() as Tag
+      const sharing = await this.ctx.storage.get<Sharing>('sharing')
+      if (me.role !== 'host' || !sharing) return
+      if (!Number.isSafeInteger(m.revision) || m.revision! < (sharing.revision ?? 0)) return
+      sharing.revision = m.revision
+      let resetTickets = false
+      for (const key of ['play', 'watch'] as const) {
+        if (!(key in m) || !(m[key] === null || /^[A-Za-z0-9_-]{43}$/.test(m[key] ?? ''))) continue
+        if (key === 'watch' && m[key] !== null && m[key] === sharing.expiredWatchKey) continue
+        if (sharing[key] !== m[key]) {
+          sharing[key] = m[key]!
+          if (sharing.links) delete sharing.links[key]
+          if (key === 'play') resetTickets = true
+          for (const peer of this.ctx.getWebSockets(key === 'watch' ? 'watcher' : 'player')) peer.close(4009, 'removed')
+        }
+        const sealed = m.links?.[key]
+        if (sharing[key] && typeof sealed === 'string' && /^[A-Za-z0-9_-]{40,2048}$/.test(sealed)) (sharing.links ??= {})[key] = sealed
+      }
+      if (resetTickets) await this.ctx.storage.put({ sharing, tickets: {} }); else await this.ctx.storage.put('sharing', sharing)
+      safeSend(ws, { t: 'sharing', play: !!sharing.play, watch: !!sharing.watch, revision: m.revision })
+      return
+    }
     if (m.t === 'code') return this.onCode(ws, m.op, m.work)
     if (m.t !== 'sig' || m.d === undefined) return
     const me = ws.deserializeAttachment() as Tag
     const targets = me.role === 'device'
       ? this.ctx.getWebSockets('host')
       : typeof m.to === 'string' ? this.ctx.getWebSockets(`id:${m.to}`) : []
-    for (const t of targets) safeSend(t, { t: 'sig', from: me.id, d: m.d })
+    for (const t of targets) safeSend(t, { t: 'sig', from: me.id, d: m.d, ...(me.role === 'device' ? { capability: me.capability } : {}) })
   }
 
   /**
@@ -215,6 +270,11 @@ export class Room extends DurableObject<Env> {
 
   /** A device looked up this room's short code: tell the host, with its replacement. False: no host is here. */
   async codeUsed(handle: string, ticket: string, next: Claim | null): Promise<boolean> {
+    const sharing = await this.ctx.storage.get<Sharing>('sharing')
+    if (sharing && !sharing.play) return false
+    const now = Date.now(), tickets = await this.ctx.storage.get<Record<string, number>>('tickets') ?? {}
+    const live = Object.entries(tickets).filter(([, until]) => until > now).slice(-63)
+    await this.ctx.storage.put('tickets', { ...Object.fromEntries(live), [ticket]: now + 60_000 })
     const hosts = this.ctx.getWebSockets('host')
     for (const ws of hosts) {
       if (next && 'code' in next) ws.serializeAttachment({ ...(ws.deserializeAttachment() as Tag), code: next.code } satisfies Tag)
@@ -225,25 +285,41 @@ export class Room extends DurableObject<Env> {
 
   async webSocketClose(ws: WebSocket, code: number, reason: string) {
     // A close frame (normal, going away, or none given) is a page that left; anything else is a lost connection.
-    this.left(ws, code === 1000 || code === 1001 || code === 1005)
+    await this.left(ws, code === 1000 || code === 1001 || code === 1005)
     try { ws.close(code, reason) } catch { /* already closed */ }
   }
 
   async webSocketError(ws: WebSocket) {
-    this.left(ws, false)
+    await this.left(ws, false)
   }
 
   /**
    * A socket went: tell the other side. `clean`: the page closed it (left, or reloaded); otherwise the connection was
    * lost, and a device's peer connection, which doesn't run through here, may well still be up.
    */
-  private left(ws: WebSocket, clean: boolean) {
+  private async left(ws: WebSocket, clean: boolean) {
     const me = ws.deserializeAttachment() as Tag | null
     if (!me) return
     // A code is live only while its host is: the handle goes with the host's socket.
     if (me.role === 'host' && me.room && me.code) this.ctx.waitUntil(this.env.CODES.get(this.env.CODES.idFromName('codes')).drop(me.room, me.code).catch(() => {}))
     const others = this.ctx.getWebSockets(me.role === 'host' ? 'device' : 'host')
     for (const t of others) if (t !== ws) safeSend(t, { t: 'peer', ev: 'leave', id: me.id, role: me.role, clean })
+    if (this.ctx.getWebSockets().filter(peer => peer !== ws && peer.readyState === 1).length === 0) {
+      const sharing = await this.ctx.storage.get<Sharing>('sharing')
+      if (sharing) { sharing.emptyAt = Date.now(); await this.ctx.storage.put('sharing', sharing); await this.ctx.storage.setAlarm(sharing.emptyAt + WATCH_IDLE_MS) }
+    }
+  }
+
+  /** Ciphertext is public metadata; its corresponding live capability is still required to decrypt and join. */
+  async shareTarget(key: 'play' | 'watch'): Promise<string | null> {
+    const sharing = await this.ctx.storage.get<Sharing>('sharing')
+    if (!sharing?.[key] || key === 'watch' && expiredWatch(sharing, Date.now())) return null
+    return sharing.links?.[key] ?? null
+  }
+
+  async alarm() {
+    const sharing = await this.ctx.storage.get<Sharing>('sharing')
+    if (sharing && sharing.watch && expiredWatch(sharing, Date.now()) && !this.ctx.getWebSockets().length) { sharing.expiredWatchKey = sharing.watch; sharing.watch = null; await this.ctx.storage.put('sharing', sharing) }
   }
 }
 

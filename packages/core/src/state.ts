@@ -1,7 +1,7 @@
 import type { Quat, Vec3 } from './quat'
 
 /** Wire protocol version implemented by this package. */
-export const PROTO = 1
+export const PROTO = 2
 export const STATE_BYTES = 76
 export const STATE_HEADER = 0x11 // high nibble: version 1, low nibble: type 1 (STATE)
 

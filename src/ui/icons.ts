@@ -1,9 +1,13 @@
 /** Stroke icon set shared by the phone controller and the viewer. Names double as the protocol's standard tray icon vocabulary. */
-import { type Content, html, setMarkup } from './markup'
+import { type Content, setMarkup } from './markup'
+import { brandLockup, brandMark, syncBrand } from './brand'
 
 const s = (d: string) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`
 
 export const ICONS: Record<string, string> = {
+  share: s('<circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="5" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8 10.8 7.8-4.6M8 13.2l7.8 4.6"/>'),
+  copy: s('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M15 5V4H4v11h1"/>'),
+  undo: s('<path d="M8 5 3 10l5 5M3 10h10a7 7 0 0 1 7 7v2"/>'),
   play: s('<path d="m8 4 12 8-12 8Z"/>'),
   pause: s('<path d="M8 5v14M16 5v14"/>'),
   record: s('<circle cx="12" cy="12" r="6" fill="currentColor"/>'),
@@ -138,73 +142,18 @@ export const ICONS: Record<string, string> = {
 
 export const icon = (name: string | undefined) => (name && ICONS[name]) || ''
 
-let markSeq = 0
+/** Static vector identity needs no animation clock. Retained for surfaces that previously settled an orbit. */
+export function calmMarks(root: ParentNode, _orbits = 1) { syncBrand(root) }
 
-/**
- * The ob.Pal mark: the Blackboxes family cube (obsidian facets, hairline seams) whose lower faces and front
- * edges catch the accent light, wrapped in ob.Pal's orbit with a satellite, the "." of ob.Pal. Everything lit
- * takes the theme accent; a scan line sweeps the box on hover. Static twin: public/favicon.svg (scripts/brand-icons.mjs).
- */
-/**
- * Let the logo's satellite finish `orbits` orbits (7.5 s each), then hold still. Its motion redraws the mark (and its
- * blurred glow) every frame, which a page that stays open for long, like the phone controller, shouldn't pay for.
- */
-export function calmMarks(root: ParentNode, orbits = 1) {
-  const marks = [...root.querySelectorAll<SVGSVGElement>('svg.mark')]
-  const still = matchMedia('(prefers-reduced-motion: reduce)').matches
-  setTimeout(() => { for (const m of marks) m.pauseAnimations?.() }, still ? 0 : orbits * 7500)
-}
-
-/** Fill each `[data-mark]` slot with the inline logo mark (crisp at any size); a phone lets it settle after two orbits. */
+/** Existing header slots use the shared outlined lockup; isolated mark slots use the canonical SVG. */
 export function mountMarks(root: ParentNode = document) {
-  for (const slot of root.querySelectorAll<HTMLElement>('[data-mark]')) setMarkup(slot, logoMark())
-  if (matchMedia('(pointer: coarse)').matches) calmMarks(root, 2)
+  for (const slot of root.querySelectorAll<HTMLElement>('[data-mark]')) {
+    const owner = slot.closest('.logo')
+    if (owner) setMarkup(owner, logo(location.pathname.startsWith('/link/')))
+    else setMarkup(slot, logoMark())
+  }
 }
 
-export function logoMark(): Content {
-  const id = `obm${++markSeq}`
-  const A = 'var(--accent, #C6FF34)'
-  const ring = 'M95.6 45.63 A47 15 -14 0 1 4.4 68.37'
-  const orbit = 'M95.6 45.63 A47 15 -14 0 1 4.4 68.37 A47 15 -14 0 1 95.6 45.63'
-  const sat = (glow: boolean) => html`<g><animateMotion dur="7.5s" repeatCount="indefinite" calcMode="linear"><mpath href="#${id}-orbit"/></animateMotion>${glow ? html`<circle r="6.5" style="fill:${A}" opacity=".45" filter="url(#${id}-soft)"/>` : ''}<circle r="3.7" style="fill:${A}"/><circle r="1.4" fill="#fff"/></g>`
-  return html`<svg class="mark" viewBox="0 0 100 100" aria-hidden="true" focusable="false" shape-rendering="geometricPrecision">
-  <defs>
-    <linearGradient id="${id}-top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4b4b4b"/><stop offset=".35" stop-color="#262626"/><stop offset=".75" stop-color="#131313"/><stop offset="1" stop-color="#050505"/></linearGradient>
-    <linearGradient id="${id}-left" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1b1b1b"/><stop offset=".45" stop-color="#0a0a0a"/><stop offset="1" stop-color="#000"/></linearGradient>
-    <linearGradient id="${id}-right" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2c2c2c"/><stop offset=".5" stop-color="#121212"/><stop offset="1" stop-color="#040404"/></linearGradient>
-    <linearGradient id="${id}-ring" x1="0" y1="0" x2="1" y2="0"><stop offset="0" style="stop-color:${A};stop-opacity:.6"/><stop offset=".55" style="stop-color:${A}"/><stop offset="1" style="stop-color:var(--accent-soft, #E6FFA3)"/></linearGradient>
-    <linearGradient id="${id}-spill" x1="0" y1="0" x2="0" y2="1"><stop offset=".42" style="stop-color:${A};stop-opacity:0"/><stop offset="1" style="stop-color:${A};stop-opacity:.5"/></linearGradient>
-    <clipPath id="${id}-box"><polygon points="50,19 78,34.4 78,65.2 50,80.6 22,65.2 22,34.4"/></clipPath>
-    <clipPath id="${id}-front"><polygon points="0,69.47 100,44.53 100,100 0,100"/></clipPath>
-    <path id="${id}-orbit" d="${orbit}"/>
-    <filter id="${id}-soft" filterUnits="userSpaceOnUse" x="-20" y="-20" width="140" height="140"><feGaussianBlur stdDeviation="2.4"/></filter>
-  </defs>
-  <ellipse cx="50" cy="57" rx="47" ry="15" transform="rotate(-14 50 57)" fill="none" style="stroke:${A}" stroke-width="1.8" opacity=".3"/>
-  <g opacity=".8">${sat(false)}</g>
-  <polygon points="50,19 78,34.4 78,65.2 50,80.6 22,65.2 22,34.4" fill="#000"/>
-  <polygon points="50,19 78,34.4 50,49.8 22,34.4" fill="url(#${id}-top)"/>
-  <polygon points="22,34.4 50,49.8 50,80.6 22,65.2" fill="url(#${id}-left)"/>
-  <polygon points="50,49.8 78,34.4 78,65.2 50,80.6" fill="url(#${id}-right)"/>
-  <polygon points="22,34.4 50,49.8 50,80.6 22,65.2" fill="url(#${id}-spill)" opacity=".7"/>
-  <polygon points="50,49.8 78,34.4 78,65.2 50,80.6" fill="url(#${id}-spill)"/>
-  <g clip-path="url(#${id}-box)"><g class="mark-scan"><line x1="0" y1="24" x2="100" y2="24" style="stroke:${A}" stroke-width="6" filter="url(#${id}-soft)" opacity=".8"/><line x1="0" y1="24" x2="100" y2="24" stroke="#fff" stroke-width="1.4"/></g></g>
-  <polygon points="50,19 78,34.4 78,65.2 50,80.6 22,65.2 22,34.4" fill="none" stroke="rgba(255,255,255,.38)" stroke-width="1.2" stroke-linejoin="round"/>
-  <path d="M50,49.8 L50,80.6" fill="none" stroke="rgba(255,255,255,.3)" stroke-width="1.2"/>
-  <path d="M22,34.4 L50,49.8 L78,34.4" fill="none" style="stroke:${A}" stroke-width="2.4" stroke-linejoin="round"/>
-  <line x1="50" y1="19" x2="78" y2="34.4" stroke="rgba(255,255,255,.66)" stroke-width="1.1" stroke-linecap="round"/>
-  <line x1="50" y1="19" x2="78" y2="34.4" style="stroke:${A}" stroke-width="1.3" opacity=".55" stroke-linecap="round"/>
-  <path d="${ring}" fill="none" style="stroke:${A}" stroke-width="6" stroke-linecap="round" opacity=".35" filter="url(#${id}-soft)"/>
-  <path d="${ring}" fill="none" stroke="url(#${id}-ring)" stroke-width="2.8" stroke-linecap="round"/>
-  <g clip-path="url(#${id}-front)">${sat(true)}</g>
-</svg>`
-}
-
-/** Pause the logo's SVG animations for people who prefer reduced motion (satellite rests in front). */
-export function settleMotion(root: ParentNode = document) {
-  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) return
-  root.querySelectorAll<SVGSVGElement>('svg.mark').forEach((svg) => { svg.pauseAnimations(); svg.setCurrentTime(1.4) })
-}
-
-/** Lockup: the mark with the ob.Pal wordmark (quiet "ob", accent full stop, bold "Pal"). */
-export const LOGO_WORD = `<span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span>`
-export const logo = () => html`${logoMark()}${LOGO_WORD}`
+export function logoMark(): Content { return brandMark() }
+export function settleMotion(root: ParentNode = document) { syncBrand(root) }
+export const logo = (link = false) => brandLockup(link)

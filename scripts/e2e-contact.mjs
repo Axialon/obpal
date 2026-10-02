@@ -2,18 +2,19 @@
 import { tempScope } from './lib/temp.mjs'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:net'
-import { readFile, readdir, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { chromium, devices } from 'playwright'
 import { startLocal } from '../extension/e2e/local.mjs'
 import { deviceExercises } from './lib/catalogue-devices.mjs'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 
 const temps = tempScope()
 try {
 
 const baseline = process.argv.includes('--baseline')
-const only = process.argv.find(a => a.startsWith('--only='))?.slice(7).split(',')
+const only = (process.argv.find(a => a.startsWith('--only='))?.slice(7) ?? process.env.OBPAL_E2E_CONTACT_ONLY ?? process.env.OBPAL_CONTACT_ONLY)?.split(',')
 const out = await temps.make(join(tmpdir(), 'obpal-contact-'))
 const arms = ['arm5', 'six', 'scara', 'delta', 'desk', 'so101']
 const registry = await readFile('src/sim/devices/registry.ts', 'utf8')
@@ -24,9 +25,9 @@ for (const name of ['OBPAL_E2E_PORT', 'OBPAL_E2E_WORKER_PORT']) {
   assert(process.env[name], `${name} is required`)
   await new Promise((resolve, reject) => { const s = createServer(); s.once('error', reject); s.listen(+process.env[name], '127.0.0.1', () => s.close(resolve)) })
 }
-const local = await startLocal(), report = [], failures = []
-const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM, headless: true,
-  args: ['--ignore-certificate-errors', '--disable-features=WebRtcHideLocalIpsWithMdns'] })
+const local = await startLocal({ dist: process.env.OBPAL_E2E_SITE_DIST }), report = [], failures = []
+const browser = await chromium.launch(e2eBrowserOptions({ executablePath: process.env.OBPAL_E2E_CHROMIUM, headless: true,
+  args: ['--ignore-certificate-errors', '--disable-features=WebRtcHideLocalIpsWithMdns'] }))
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 function summary(frames) {
@@ -56,7 +57,8 @@ async function phoneAt(invite, errors) {
   await cdp.send('DeviceOrientation.setDeviceOrientationOverride', { alpha: 10, beta: 70, gamma: 0 })
   await page.goto(invite)
   await page.waitForFunction(() => document.body.classList.contains('live'), null, { timeout: 30000 })
-  await page.addLocatorHandler(page.locator('.hint.in'), hint => hint.getByRole('button', { name: 'Dismiss hint' }).click())
+  // Hints float and can fade before a stable click. Dismiss through their real DOM action.
+  await page.addLocatorHandler(page.locator('.hint.in'), hint => hint.getByRole('button', { name: 'Dismiss hint' }).evaluate(button => button.click()))
   await page.evaluate(() => document.querySelectorAll('.hint').forEach(h => h.remove()))
   const touch = (type, points = []) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points.map(([x, y], i) => ({ x, y, id: i + 1 })) })
   const move = async id => {
@@ -256,6 +258,12 @@ try {
     }
   }
 } finally { await browser.close(); await local.close() }
+if (process.env.OBPAL_E2E_EVIDENCE_ROOT) {
+  const evidence = process.env.OBPAL_E2E_EVIDENCE_ROOT
+  await mkdir(evidence, { recursive: true })
+  await copyFile(join(out, 'contacts.json'), join(evidence, 'contacts.json'))
+  for (const { id } of failures) await copyFile(join(out, `${id}-failure.png`), join(evidence, `${id}-failure.png`)).catch(() => {})
+}
 console.log(`Contact evidence: ${out}`)
 console.log(`${report.length - failures.length}/${report.length} passed`)
 process.exitCode = failures.length ? 1 : 0

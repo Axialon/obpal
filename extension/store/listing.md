@@ -45,6 +45,7 @@ Pin ob.Pal Link from the Extensions menu after adding it.
 2. Scan the QR code with your phone's camera.
 3. Turn on "This tab" and choose Controller, 3D or Keys. PC control is set up separately, with ob.Pal Desktop.
 New to it? Try in Link opens a dot demo: choose Controller, turn on "This tab" there and move the left stick.
+Pair → Enable → Try keeps these steps in view. The pairing card's icon row brings its actions together. Once a phone connects, the QR code's dots become its connection seal and stay in that space. Link shows the active phone's seal; use Add phone to show a new QR, or cancel to return to its seal.
 The popup shows the connection: a lock, direct or relayed, and the round trip. A phone you've paired once can also connect directly over your Wi-Fi when the internet is down, if your network lets devices reach each other.
 Works in Chrome, Edge, Brave and Vivaldi (Chromium 120 or later). Other Chromium browsers may work, but aren't tested.
 
@@ -52,7 +53,7 @@ Private by design
 • No accounts, analytics, ads or remote code.
 • Phone and computer talk over encrypted WebRTC; the ob.Pal service only introduces them.
 • Each QR code pairs once, so an old photo of it can't connect.
-• Link and your phone show the same connection seal, three symbols, so you can check it's your phone that connected.
+• Link and your phone show the same connection seal, three symbols, so you can compare them. The seal is a comparison aid, not certification or permission to control anything.
 • Pairing keys can't be read out, on the phone or in Link.
 • Input acts only in the tab you switch on, or on the PC where you allow it. Link reads page geometry and focus to deliver input; it does not collect page content or browsing history. On ob.Pal's own Desktop install page, Link tells the page only whether the helper is connected and its version.
 Privacy policy: https://obpal.blackboxes.net/privacy/
@@ -70,7 +71,7 @@ Free and open source (MIT): https://github.com/Axialon/obpal
 
 | Field | File |
 |---|---|
-| Store icon (128×128) | `icon-128.png`: the package's own icon, 96 px of art in 16 px of clear padding |
+| Store icon (128×128) | `icon-128.png`: from `public/logo-mark.svg`, 96 px of art in 16 px of clear padding |
 | Screenshots (1280×800, up to 5, in this order) | `screenshot-1.png` … `screenshot-5.png` |
 | Small promo tile (440×280) | `tile-440x280.png` |
 | Marquee promo tile (1400×560, optional) | `marquee-1400x560.png` |

@@ -1,3 +1,4 @@
+import './controls.css'
 import { setMarkup, html, insertMarkup } from '../ui/markup'
 import { applyTheme, initialTheme } from '../ui/themes'
 import { calmMarks, mountMarks } from '../ui/icons'
@@ -59,6 +60,7 @@ hero.onSound = (s) => {
   soundBtn.hidden = s === 'none'
   soundBtn.dataset.state = s
   soundBtn.setAttribute('aria-pressed', String(s === 'on'))
+  soundBtn.setAttribute('aria-label', s === 'on' ? 'Sound on' : s === 'off' ? 'Sound off' : ask)
   soundLabel.textContent = s === 'on' ? 'Sound on' : s === 'off' ? 'Sound off' : ask
   soundBtn.title = s === 'on' ? 'Sound on' : s === 'off' ? 'Sound off' : 'Your browser starts sound after a click or a tap'
 }
@@ -89,7 +91,7 @@ quickAction(desk ? {
 })
 mountQuick({ scroll: false, defer: fn => window.setTimeout(fn, 0) })
 // For the end-to-end test (scripts/e2e-home.mjs), as the viewer exposes its own.
-Object.assign(window, { __home: { tips: () => hero.tips(), dot: () => hero.dot(), pads: () => hero.pads(), outline: (id: string) => hero.outline(id), gfx: () => hero.gfx(), audio: () => hero.audio(), drop: (x: number, y: number) => hero.drop(x, y), counters: () => hero.counters(), gaps: () => hero.gaps(), steps: () => hero.steps(), activity: () => hero.activity(), sim: () => hero.sim() } })
+Object.assign(window, { __home: { contacts: () => hero.contacts(), seed: (id: string, x: number, y: number) => hero.seed(id, x, y), showSeeds: () => hero.showSeeds(), clearSeeds: () => hero.clearSeeds(), tips: () => hero.tips(), dot: () => hero.dot(), pads: () => hero.pads(), outline: (id: string) => hero.outline(id), gfx: () => hero.gfx(), audio: () => hero.audio(), drop: (x: number, y: number) => hero.drop(x, y), counters: () => hero.counters(), gaps: () => hero.gaps(), steps: () => hero.steps(), activity: () => hero.activity(), sim: () => hero.sim() } })
 if (debug.size) void import('./debug').then(({ mountDebug }) => mountDebug(debug, { audio: () => hero.audio(), gfx: () => hero.gfx() }))
 
 if (desk) {
@@ -592,7 +594,7 @@ function turnPhones(now: number) {
 
 addActor((now, dt) => {
   turnPhones(now)
-  let busy = false
+  let busy = false, occupied = false
   for (const l of lives) {
     if (!l.visible || now > l.until) continue
     if (l.kept && now >= l.kept.until && !l.drag) l.kept = null
@@ -606,7 +608,8 @@ addActor((now, dt) => {
     l.t += dt
     l.scene.step(dt, pointing ? (modes ? l.kept!.p : l.pointer) : tilted ? l.tilt : null, l.t)
     busy = true
+    occupied ||= pointing || tilted || turning
   }
-  const sceneChanged = hero.sceneActive(busy)
+  const sceneChanged = hero.sceneActive(occupied)
   return busy || sceneChanged
 })

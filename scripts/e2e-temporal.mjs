@@ -1,4 +1,5 @@
 /** Surface stability across the sim family. Measurements and optional captures always go to a fresh temporary folder. */
+import { distill, rawRun } from './lib/distill.mjs'
 import { tempScope } from './lib/temp.mjs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -7,6 +8,7 @@ import { chromium } from 'playwright'
 import sharp from 'sharp'
 import { measureTemporal, prepareTemporal, temporalFailure } from './lib/temporal.mjs'
 import { pressInWindow } from './lib/sim-ui.mjs'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 
 export const TEMPORAL_SIMS = [
   ...['arm5', 'so101', 'six', 'scara', 'delta', 'desk'].map(kind => [`arm-${kind}`, `/sim/arm/?kind=${kind}`]),
@@ -20,8 +22,9 @@ export const TEMPORAL_SIMS = [
 export async function runTemporal(local, check, { ids = null, captures = [] } = {}) {
   const temps = tempScope()
   try {
-  const out = await temps.make(join(tmpdir(), 'obpal-temporal-'))
-  const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true })
+  const out = process.env.OBPAL_E2E_EVIDENCE_ROOT ? join(process.env.OBPAL_E2E_EVIDENCE_ROOT, 'temporal') : await temps.make(join(tmpdir(), 'obpal-temporal-'))
+  await mkdir(out, { recursive: true })
+  const browser = await chromium.launch(e2eBrowserOptions({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true }))
   const results = []
   try {
     for (const [id, path] of TEMPORAL_SIMS.filter(([id]) => !ids || ids.includes(id))) {
@@ -51,8 +54,15 @@ export async function runTemporal(local, check, { ids = null, captures = [] } = 
           if (id === 'submarine') result.heldAnimation = 'Underwater caustics clock at phase zero; shader and lighting remain enabled.'
           if (result.heatmap) {
             const dir = join(out, id); await mkdir(dir)
+            const raw = rawRun(dir), proof = []
             await sharp(Buffer.from(result.heatmap.split(',')[1], 'base64')).flip().png().toFile(join(dir, 'heat.png'))
-            for (const shot of result.shots) await writeFile(join(dir, `${shot.phase}-${String(shot.n).padStart(2, '0')}.png`), Buffer.from(shot.image.split(',')[1], 'base64'))
+            for (const shot of result.shots) {
+              const path = `${shot.phase}-${String(shot.n).padStart(2, '0')}.png`, frame = result.frames.find(f => f.phase === shot.phase && f.n === shot.n)
+              await writeFile(join(raw, path), Buffer.from(shot.image.split(',')[1], 'base64'))
+              proof.push({ path, diff: frame?.p95, threshold: shot.phase === 'orbit' ? 3 : 2, failed: Boolean(frame && temporalFailure({ ...result, frames: result.frames.map(f => f === frame ? f : { ...f, p95: 0, spikes: 0 }) })) })
+            }
+            await writeFile(join(dir, 'evidence-frames.json'), JSON.stringify({ expectedCount: proof.length, frames: proof }, null, 2))
+            await distill(dir, { keepRaw: process.argv.includes('--keep-raw') || process.env.OBPAL_KEEP_RAW === '1' })
           }
           delete result.heatmap; delete result.shots
           const failure = temporalFailure(result)
@@ -67,6 +77,7 @@ export async function runTemporal(local, check, { ids = null, captures = [] } = 
     if (!ids || ids.includes('home')) await homeSurfaces(browser, local, check, out)
   } finally { await browser.close() }
   await writeFile(join(out, 'measurements.json'), JSON.stringify(results, null, 2))
+  await distill(out)
   console.log(`  Surface measurements: ${out}`)
   return { out, results }
 

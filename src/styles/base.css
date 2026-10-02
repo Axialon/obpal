@@ -1,3 +1,5 @@
+@import './rail.css';
+
 /* ob.Pal theme variables: aliases of the Blackboxes family tokens (surface via data-bb-theme, accent via data-bb-product). */
 :root {
   /* Aliases of the Blackboxes family tokens (src/family/family.css): data-bb-theme picks the surface,
@@ -60,6 +62,8 @@ a { color: var(--accent-text); }
 /* logo lockup: obsidian box + orbit mark, then the ob.Pal wordmark */
 .logo { display: inline-flex; align-items: center; gap: 11px; color: var(--ink); text-decoration: none; }
 .logo .mark { width: 40px; height: 40px; flex: none; overflow: visible; filter: drop-shadow(0 6px 14px rgb(0 0 0 / 0.5)); }
+.logo .brand-lockup { display: block; height: 40px; width: 114.903px; flex: none; }
+.logo .brand-lockup[data-brand-link='true'] { width: 172.5216px; }
 .logo .word { font-family: var(--font-display); font-size: 21px; font-weight: 700; letter-spacing: -0.03em; line-height: 1; white-space: nowrap; }
 .logo .word b { font-weight: 800; }
 .logo .word .ob { font-weight: 500; opacity: 0.82; }

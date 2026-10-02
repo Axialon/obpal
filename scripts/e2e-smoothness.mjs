@@ -1,27 +1,32 @@
 /** Report the whole family; the migrated pendulum and marble run are enforced gates. Use the existing guarded sims runner. */
 import { tempScope } from './lib/temp.mjs'
-import { writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 import { prepareWarmup, measureWarmup, warmupFailure } from './lib/warmup.mjs'
 import { prepareSmoothness, measureSmoothnessMotion } from './lib/smoothness-motion.mjs'
 import { smoothnessVerdict } from './lib/smoothness-report.mjs'
 import { SMOOTHNESS_SIMS } from './lib/smoothness-catalogue.mjs'
 import { runMarbleControls } from './e2e-marble-controls.mjs'
 import { runMarbleMobile } from './e2e-marble-mobile.mjs'
+import { rawRun } from './lib/distill.mjs'
 
 export async function runSmoothness(local, check, { ids = null } = {}) {
   const temps = tempScope({ keep: true })
   try {
   ids ??= process.env.OBPAL_SMOOTHNESS_IDS?.split(',').filter(Boolean) ?? null
   if (ids?.some(id => !SMOOTHNESS_SIMS.some(([known]) => known === id))) throw new Error('Unknown smoothness sim id')
-  const out = await temps.make(join(process.env.OBPAL_E2E_EVIDENCE_ROOT || tmpdir(), 'obpal-smoothness-')), results = []
+  const evidenceRoot = process.env.OBPAL_E2E_EVIDENCE_ROOT || tmpdir()
+  await mkdir(evidenceRoot, { recursive: true })
+  const out = await temps.make(join(evidenceRoot, 'obpal-smoothness-'))
+  const raw = rawRun(out), results = []
   const phone = process.env.OBPAL_SMOOTHNESS_SIZE === 'phone'
   const size = phone ? { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true }
     : { viewport: { width: 960, height: 640 }, deviceScaleFactor: 1 }
-  const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true,
-    args: ['--ignore-certificate-errors', '--autoplay-policy=no-user-gesture-required'] })
+  const browser = await chromium.launch(e2eBrowserOptions({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true,
+    args: ['--ignore-certificate-errors', '--autoplay-policy=no-user-gesture-required'] }))
   try {
     for (const [id, path] of SMOOTHNESS_SIMS.filter(([id]) => !ids || ids.includes(id))) {
       const row = { id, path, size, enforced: id === 'pendulum' || id === 'marblerun', error: null }
@@ -57,10 +62,14 @@ export async function runSmoothness(local, check, { ids = null } = {}) {
       else console.log(`  report-only: ${id}: ${row.verdict.status}`)
     }
     if (results.some(row => row.id === 'marblerun')) {
-      await runMarbleControls(browser, local, check, out)
-      await runMarbleMobile(browser, local, check, out)
+      await runMarbleControls(browser, local, check, raw)
+      await runMarbleMobile(browser, local, check, raw)
     }
-  } finally { await browser.close(); console.log(`  Smoothness measurements: ${out}`) }
+  } finally {
+    await browser.close()
+    for (const file of await readdir(raw)) if (file.endsWith('.json')) await copyFile(join(raw, file), join(out, file))
+    console.log(`  Smoothness measurements: ${out}`)
+  }
   return { out, results }
 
   } finally { await temps.cleanup() }

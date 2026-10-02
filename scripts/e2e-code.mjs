@@ -23,6 +23,7 @@ import sharp from 'sharp'
 import jsQR from 'jsqr'
 import zx from '@zxing/library'
 import { startWorker } from './local-worker.mjs'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 
 const temps = tempScope()
 try {
@@ -43,7 +44,9 @@ async function until(what, fn, timeout = 10000, every = 100) {
   }
 }
 const results = []
+const only = process.env.OBPAL_E2E_CODE_ONLY && new RegExp(process.env.OBPAL_E2E_CODE_ONLY)
 async function check(name, fn) {
+  if (only && !only.test(name)) return
   try {
     const detail = await fn()
     results.push({ ok: true })
@@ -98,7 +101,7 @@ try {
   const ORIGIN = worker.origin
   console.log(`ob.Pal pairing chip and short code e2e (${ORIGIN})`)
 
-  const browser = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
+  const browser = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED, args: RTC_ARGS }))
   closers.push(browser)
   const screenCtx = await browser.newContext({ viewport: { width: 1280, height: 800 } })
   await screenCtx.addInitScript(watchCompletion)
@@ -128,7 +131,24 @@ try {
     const url = await screen.evaluate(() => window.__obpal.pairingUrl)
     const qr = screen.locator('.obpal-chip .qr')
     await until('the QR code drawn', () => qr.locator('.seal-qr>svg').isVisible())
-    const read = await readQr(await qr.screenshot())
+    await until('the QR card fully shown', () => screen.locator('.obpal-chip .card').evaluate(card => {
+      const style = getComputedStyle(card)
+      return style.opacity === '1' && style.transform === 'none'
+    }))
+    const pixels = await qr.screenshot()
+    if (SHOTS) {
+      await writeFile(joinPath(SHOTS, 'qr.png'), pixels)
+      await writeFile(joinPath(SHOTS, 'qr.svg'), await qr.locator('.seal-qr>svg').evaluate(svg => svg.outerHTML))
+      await writeFile(joinPath(SHOTS, 'qr-layout.json'), JSON.stringify(await qr.evaluate((el, url) => {
+        const rows = []
+        for (let node = el; node instanceof Element; node = node.parentElement) {
+          const style = getComputedStyle(node), b = node.getBoundingClientRect()
+          rows.push({ class: node.className, opacity: style.opacity, transform: style.transform, filter: style.filter, mix: style.mixBlendMode, width: b.width, height: b.height })
+        }
+        return { url, rows }
+      }, url)))
+    }
+    const read = await readQr(pixels)
     if (read.js !== url || read.zx !== url) throw new Error(`read ${JSON.stringify(read)}`)
     await shot(screen, 'chip-viewer-carbon-open')
     return `code ${s.code}, QR read by jsQR and ZXing`
@@ -176,15 +196,19 @@ try {
     return `${s.accent}, ${font.split(',')[0]}`
   })
 
-  await check('reduced motion: the card opens without moving, the status dot is still', async () => {
+  await check('reduced motion: the card opens without moving, the waiting dots stay still', async () => {
     await screen.emulateMedia({ reducedMotion: 'reduce' })
-    const m = await screen.evaluate(() => {
+    await screen.locator('.obpal-chip .pill').click()
+    const m = await screen.evaluate(async () => {
       const r = document.querySelector('.obpal-chip').shadowRoot
-      return { card: getComputedStyle(r.querySelector('.card')).transitionDuration, dot: getComputedStyle(r.querySelector('.dot')).animationName }
+      const loader = r.querySelector('.pill .dot-loader'), before = loader.innerHTML
+      await new Promise(done => setTimeout(done, 250))
+      return { card: getComputedStyle(r.querySelector('.card')).transitionDuration, circles: loader.children.length, hidden: loader.hidden, still: loader.innerHTML === before }
     })
+    await screen.locator('.obpal-chip .pill').click()
     await screen.emulateMedia({ reducedMotion: null })
-    if (!/^0s(, 0s)*$/.test(m.card) || m.dot !== 'none') throw new Error(JSON.stringify(m))
-    return `transition ${m.card}, dot ${m.dot}`
+    if (!/^0s(, 0s)*$/.test(m.card) || m.circles !== 3 || m.hidden || !m.still) throw new Error(JSON.stringify(m))
+    return `transition ${m.card}, three visible static dots`
   })
 
   await check('the lighting panel and the chip never overlap: the card folds while it is open and comes back after, the panel ends above the chip, and a click on the chip opens the card in its place', async () => {
@@ -232,7 +256,7 @@ try {
   const phoneAt = async (url) => {
     const dir = await temps.make(joinPath(tmpdir(), 'obpal-code-'))
     profiles.push(dir)
-    const ctx = await chromium.launchPersistentContext(dir, { ...devices['Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS })
+    const ctx = await chromium.launchPersistentContext(dir, e2eBrowserOptions({ ...devices['Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS }))
     closers.push(ctx)
     await ctx.addInitScript(watchCompletion)
     const page = ctx.pages()[0] ?? (await ctx.newPage())
@@ -451,7 +475,6 @@ try {
     const code = await until('a live code', liveCode, 5000)
     const wrong = code.slice(0, -1) + String((Number(code.at(-1)) + 1) % 10)
     await second.locator('#code-in').fill(wrong)
-    await second.locator('#code-in').press('Enter')
     await second.locator('text=That code didn’t match').waitFor({ timeout: 25000 })
     const next = await until('a new code on the screen', async () => { const c = await liveCode(); return c && c !== code ? c : null }, 5000)
     const people = await screen.evaluate(() => window.__obpal.participants.length)

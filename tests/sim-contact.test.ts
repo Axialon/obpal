@@ -3,6 +3,10 @@ import * as THREE from 'three'
 import { contactInstances, contactPart, contactProbe, contactSurface, lowestPoint } from '../src/sim/contact'
 import { batch } from '../src/sim/kit'
 import { tiledDeck } from '../src/sim/kit/precision'
+import { MarblerunLogic } from '../src/sim/devices/marblerun'
+import { createView as marbleView } from '../src/sim/devices/marblerun.view'
+import { CUP } from '../src/sim/physics/marblerun'
+import type { Stage } from '../src/sim/devices/stage'
 
 it('reports signed millimetres from rendered geometry through nested rotation and scale', () => {
   const scene = new THREE.Scene(), parent = new THREE.Group()
@@ -101,4 +105,22 @@ it('measures a foot bridging a shallow recess independently of the acceptance to
   const reading = contactProbe(scene).sample()[0]
   expect(reading.lowestGapMm).toBeCloseTo(1, 4)
   expect(reading.gapMm).toBeCloseTo(0, 4)
+})
+
+it.each([0, .07, .115, .16, .18, .2, .24, .4].map((offset, i) => ({ offset, turn: i * .7 })))('seats rolling marble hulls at cup offset $offset under tilt', ({ offset, turn }) => {
+  const scene = new THREE.Scene(), logic = new MarblerunLogic(true)
+  const view = marbleView({ scene } as Stage, logic), probe = contactProbe(scene)
+  for (const u of logic.units) {
+    u.tiltX = .6; u.tiltZ = -.4
+    for (const m of [u, ...u.marbles]) { m.x = CUP.x + offset; m.z = 0; m.rollX = turn; m.rollZ = turn / 2 }
+  }
+  view.update([], 0, 0)
+  const marbles = probe.sample().filter(r => r.part.includes('marble'))
+  expect(marbles).toHaveLength(6)
+  for (const r of marbles) {
+    expect(r.gapMm, `${r.part} at ${offset}, ${turn}`).not.toBeNull()
+    expect(Math.abs(r.gapMm!), `${r.part} at ${offset}, ${turn}: ${r.gapMm} mm`).toBeLessThanOrEqual(2)
+    expect(r.castsShadow && r.receivesShadow).toBe(true)
+  }
+  probe.dispose()
 })

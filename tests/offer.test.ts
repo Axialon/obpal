@@ -52,16 +52,17 @@ class FakeWS {
 
 /** A promise and the function that settles it. */
 function later<T>() { let settle!: (v: T) => void; const p = new Promise<T>((r) => { settle = r }); return { p, settle } }
-const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
+const wait = (ms: number) => vi.advanceTimersByTimeAsync(ms)
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
   FakePC.all = []
   FakeWS.all = []
   vi.stubGlobal('WebSocket', FakeWS)
   vi.stubGlobal('RTCPeerConnection', FakePC)
   vi.stubGlobal('document', { addEventListener() {}, removeEventListener() {}, visibilityState: 'visible' })
 })
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
 /**
  * One phone start: `order` says when the welcome, the ICE servers and the certificate come (ms after start, in

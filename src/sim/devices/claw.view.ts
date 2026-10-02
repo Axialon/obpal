@@ -178,6 +178,7 @@ function placeClaw(m: ClawModel, c: Claw, prizes: readonly Prize[], color: strin
   fitFingers(m.fingers, m.root, prizes, c.close)
   wear(m.sign, color, 0.5, 1.8 + (color ? 0.4 * Math.sin(t * 3) : 0))
   prizes.forEach((p, k) => {
+    if (!m.prizes[k]) return
     const { mesh, index } = m.prizes[k]
     const state = `${p.x}:${p.y}:${p.z}:${p.won}`
     if (m.prizes[k].last === state) return

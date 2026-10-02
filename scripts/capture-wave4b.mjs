@@ -1,4 +1,5 @@
 /** Reproducible catalogue and device evidence, using only the assigned local ports and Playwright browser. */
+import { distill } from './lib/distill.mjs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { chromium } from 'playwright'
@@ -106,3 +107,5 @@ try {
   await browser?.close()
   await local.close()
 }
+
+await distill(out, { keepRaw: process.argv.includes("--keep-raw") || process.env.OBPAL_KEEP_RAW === "1" })

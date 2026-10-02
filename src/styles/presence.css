@@ -11,6 +11,7 @@
 .presence-controls button, .presence-controls a { min-height: 32px; padding: 5px 9px; color: inherit; background: transparent; border: 1px solid var(--line, #626573); border-radius: 7px; font: inherit; cursor: pointer; }
 .presence-controls button:disabled { opacity: .45; cursor: default; }
 .presence-controls button:focus-visible { outline: 2px solid var(--accent, #c6ff34); outline-offset: 2px; }
+.presence-controls .share-open { position: static; flex: none; }
 .presence-controls label { display: inline-flex; align-items: center; gap: 4px; }
 .presence-controls small { flex-basis: 100%; opacity: .8; }
 .presence-active .presence-enter { display: none; }
@@ -25,9 +26,8 @@
 .guest-state { color: var(--secondary, var(--ink)); }
 .guest-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: currentColor; opacity: .5; }
 .guest-status[data-state='live'] .guest-dot { background: var(--accent); opacity: 1; }
-.guest-status[data-state='connecting'] .guest-dot, .guest-status[data-state='waiting-for-host'] .guest-dot { animation: guest-pulse 1.2s ease-in-out infinite; }
-@keyframes guest-pulse { 50% { opacity: 1; transform: scale(1.25); } }
-@media (prefers-reduced-motion: reduce) { .guest-dot { animation: none !important; } }
+.guest-status[aria-busy='true'] .guest-dot { display: none; }
+.guest-status[data-dot-scene] > .dot-loader { visibility: hidden; }
 .presence-guest .sim-windows, .presence-guest .panel-dock, .presence-guest .sim-panel, .presence-guest #home-all, .presence-guest #reset { display: none !important; }
 .presence-guest #open, .presence-guest .tile-add, .presence-guest .sc-x, .presence-guest .sc-tools, .presence-guest #t-spin, .presence-guest #t-reset { display: none !important; }
 @media (max-width: 600px) { .presence-active .presence-controls, .presence-floating { top: 76px; right: 8px; max-width: calc(100vw - 16px); font-size: 11px; } .presence-controls { --kit-select-h: 36px; } .presence-controls button { min-height: 36px; } }

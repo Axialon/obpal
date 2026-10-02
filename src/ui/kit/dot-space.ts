@@ -1,10 +1,18 @@
 import * as THREE from 'three'
-import { DOT_MATERIAL, dotProgress, resolveDotTokens, type DotRole, type DotTimeline, type DotTokens } from './dot-field'
+import { DOT_MATERIAL, dotClock, dotProgress, resolveDotTokens, type DotRole, type DotTimeline, type DotTokens } from './dot-field'
 import type { DotPoint } from './dot-field'
 
 /** Normalized flat samples acquire depth, in fractions of the visible height, without changing identity. */
 export interface SpaceDot extends DotPoint { z?: number; role?: DotRole; diameter?: number }
 export interface DotSpaceOptions { points: readonly SpaceDot[]; routes?: readonly (readonly SpaceDot[])[]; tokens?: DotTokens; decorative?: boolean; fallback?: () => void }
+
+/** Scene loaders reuse the bead adapter's geometry and satin material, without another context. */
+export function dotBeads(count: number) {
+  const mesh = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 12, 8), new THREE.MeshStandardMaterial({ roughness: DOT_MATERIAL.roughness, metalness: 0.08, transparent: true, depthWrite: false }), count)
+  mesh.frustumCulled = false
+  mesh.name = 'dot-bead-loader'
+  return mesh
+}
 
 /** One bounded, on-demand 3D context. Instanced satin beads share the portable renderer's points and tokens. */
 export class DotSpace {
@@ -30,6 +38,7 @@ export class DotSpace {
   private width = 1
   private height = 1
   private frame = 0
+  private stopFrame = () => {}
   private visible = true
   private dead = false
   private previous = 0
@@ -141,7 +150,10 @@ export class DotSpace {
   syncTimeline(timeline: DotTimeline) { this.timeline = timeline; this.request() }
 
   private request() {
-    if (!this.dead && this.visible && !document.hidden && !this.frame) this.frame = requestAnimationFrame(this.draw)
+    if (!this.dead && this.visible && !document.hidden && !this.frame) {
+      this.frame = 1
+      this.stopFrame = dotClock(now => { this.draw(now); return false })
+    }
   }
 
   private draw = (now: number) => {
@@ -169,7 +181,7 @@ export class DotSpace {
 
   private motionChanged = () => { this.target = this.current = { x: 0, y: 0 }; this.request() }
   private visibility = () => {
-    if (!this.visible || document.hidden) { cancelAnimationFrame(this.frame); this.frame = 0; this.previous = 0 }
+    if (!this.visible || document.hidden) { this.stopFrame(); this.frame = 0; this.previous = 0 }
     else this.request()
   }
   private lost = (event: Event) => { event.preventDefault(); this.destroy(); this.options.fallback?.() }
@@ -177,7 +189,7 @@ export class DotSpace {
   destroy() {
     if (this.dead) return
     this.dead = true
-    cancelAnimationFrame(this.frame)
+    this.stopFrame()
     this.resizeObserver.disconnect(); this.observer.disconnect(); this.themeObserver.disconnect()
     this.motion.removeEventListener('change', this.motionChanged)
     document.removeEventListener('visibilitychange', this.visibility)

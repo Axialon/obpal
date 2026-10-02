@@ -1,26 +1,31 @@
-// Render the ob.Pal mark (public/favicon.svg) to the PNG action icons Chrome needs.
+// Render the shared ob.Pal brand mark to the PNG action icons Chrome needs.
 // Used by the Vite build (extension/vite.config.ts), or on its own: node extension/scripts/icons.mjs [outDir]
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import sharp from 'sharp'
 import { downsample } from './downsample.mjs'
-import { markSVG } from './mark.mjs'
 
 export const ICON_SIZES = [16, 32, 48, 128]
-/** 16 and 32 px use the favicon's bolder mark; 48 px and up the bold mark fitted to their pixels (./mark.mjs). */
-export const MARK_SVG = fileURLToPath(new URL('../../public/favicon.svg', import.meta.url))
+/** One source for geometry, gradients and colours at every size. */
+export const MARK_SVG = fileURLToPath(new URL('../../public/logo-mark.svg', import.meta.url))
+
+/** Only stroke weights change below 48 px; no new rim, tile, geometry or colours. */
+export function toolbarMark(svg, size) {
+  const weights = size === 16 ? { '1.3': 2.2, '2.4': 3.6, '3': 4, '3.8': 5 } : size === 32 ? { '1.3': 1.8, '2.4': 3, '3': 3.5, '3.8': 4.4 } : {}
+  return svg.replace(/stroke-width="([\d.]+)"/g, (match, width) => weights[width] ? `stroke-width="${weights[width]}"` : match)
+}
 
 /**
  * Draw the art at 8x and average it down as light (./downsample.mjs), which keeps the mark's lines crisp and at their
  * weight: the owner picked it over 1x and 2x (2026-09-27). (No sharpening: on the clear background it rings into a
  * pale fringe that shows on dark pages.)
- * @param {string} [svgPath] the small sizes' mark
+ * @param {string} [svgPath] the brand mark
  * @param {number[]} [sizes]
  * @returns {Promise<{ size: number, png: Buffer }[]>}
  */
 export async function renderIcons(svgPath = MARK_SVG, sizes = ICON_SIZES) {
-  const small = await readFile(svgPath, 'utf8')
+  const brand = await readFile(svgPath, 'utf8')
   return Promise.all(
     sizes.map(async (size) => {
       // The 128 px icon is the store and extensions-page icon: 96 px of art inside 16 px of clear padding (Chrome
@@ -28,7 +33,7 @@ export async function renderIcons(svgPath = MARK_SVG, sizes = ICON_SIZES) {
       const pad = size >= 128 ? size / 8 : 0
       const art = size - pad * 2
       const clear = { r: 0, g: 0, b: 0, alpha: 0 }
-      const sized = size >= 48 ? markSVG(art, { width: art * 8, bold: true }) : small.replace(/<svg\b/, `<svg width="${art * 8}" height="${art * 8}"`)
+      const sized = toolbarMark(brand, size).replace(/<svg\b/, `<svg width="${art * 8}" height="${art * 8}"`)
       const png = await (await downsample(await sharp(Buffer.from(sized)).png().toBuffer(), 8))
         .extend({ top: pad, bottom: pad, left: pad, right: pad, background: clear })
         .png({ compressionLevel: 9 })

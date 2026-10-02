@@ -3,6 +3,7 @@
  * and after (scripts/capture-sims.mjs), and phase 3's quick-actions tray (scripts/capture-quick.mjs). Each capture
  * script writes its pictures, then this page from whatever pictures are there.
  */
+import { distill } from './distill.mjs'
 import { readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -52,5 +53,6 @@ ${videos ? `<h2>Recording</h2><div class="pair">${videos}</div>` : ''}
 ${trayShots ? `<h2>Its actions in use</h2><div class="pair">${trayShots}</div>` : ''}
 ${trayPages}</section>` : ''}
 </html>\n`)
+  await distill(out, { keepRaw: process.argv.includes("--keep-raw") || process.env.OBPAL_KEEP_RAW === "1" })
   return shots.length
 }

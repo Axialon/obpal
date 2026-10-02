@@ -7,6 +7,7 @@
 import { chromium } from 'playwright'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 
 const assert = (ok, message) => { if (!ok) throw new Error(message) }
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -152,7 +153,7 @@ const stopWhenBehind = (page, deg) => page.evaluate(d => new Promise((resolve, r
 }), deg)
 
 export async function runArmLive(local, check) {
-  const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM, args: ['--ignore-certificate-errors'] })
+  const browser = await chromium.launch(e2eBrowserOptions({ executablePath: process.env.OBPAL_E2E_CHROMIUM, args: ['--ignore-certificate-errors'] }))
   try {
     await check('robot arm, live: going live is refused while a joint is unreported', () => withArm(browser, local, { pos: [0, 18, null, 62, 0, 1] }, async page => {
       const r = await tryLive(page)

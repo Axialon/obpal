@@ -365,6 +365,13 @@ function settle(a: Arm) {
   releaseCameraHand(a)
   if (!a.homing) for (let i = 0; i < GRIP; i++) a.joints[i].target = null
 }
+/** A scoped release holds only that simulated seat, including its Home and Grip targets. */
+function holdSimSeat(node: string) {
+  const found = findNode(node)
+  if (!found || found.arm.hw) return
+  if (!found.joint) { found.arm.homing = false; settle(found.arm) }
+  for (const joint of found.joint ? [found.joint] : found.arm.joints) { joint.target = null; joint.vel = 0; jointInputs.delete(joint) }
+}
 function gripClosed(a: Arm) {
   const g = a.joints[GRIP]
   // Closed on a block, it's shut, however wide the block keeps it.
@@ -579,12 +586,6 @@ let sim: SimScene | null = null
 const genericEvents = new Map<string, { presses: string[]; values: { id: string; v: number | boolean | string }[]; text: string }>()
 const localArms = new Set<string>()
 const eventsOf = (id: string) => { let e = genericEvents.get(id); if (!e) { e = { presses: [], values: [], text: '' }; genericEvents.set(id, e) }; return e }
-const localControls = new LocalControls({
-  id: `arm:${KIND.id}`, canvas: renderer.domElement, units: () => arms.map(a => ({ id: a.id, name: a.name })), tray: layout.tray,
-  phone: () => document.getElementById('chip-invite')?.click(),
-  controllerWindow: () => { if (sim?.remote.pairingUrl) window.open(sim.remote.pairingUrl, '_blank', 'noopener') },
-  hardware: () => arms.some(a => !!a.hw?.live), orbit: enabled => { controls.enabled = enabled },
-})
 /** When each participant's input last arrived: the watchdog stops what it drives 200 ms after its input goes quiet. */
 const lastInput = new Map<string, number>()
 const lastButtons = new Map<string, number>()
@@ -623,7 +624,35 @@ for (let i = 0; i < 2; i++) addArm()
 
 const xrDrives = new Map<string, { pad: PadState; at: number }>()
 const rides = () => arms.map(a => armRide(a.id, a.name, a.model.root, a.model.grasp, KIND.drive.reach[1], KIND.drive.height[1]))
+const droppedBlocks = new Map<string, Block>()
 const shared = new SharedPresence({
+  sim: 'arm', hardwareLive: () => arms.some(a => !!a.hw?.live),
+  seatSafe: seat => !arms.find(a => a.id === seat || a.joints.some(j => j.node === seat))?.hw,
+  seatInput(who, seat, input) {
+    const found = findNode(seat)
+    if (!sim || !found || found.arm.hw || stopped || sim.claims.holder(seat) !== who) return
+    if (!input.pad) { xrDrives.delete(who); lastInput.delete(who); return }
+    if (!found.joint) xrDrives.set(who, { pad: { ...input.pad, triggers: [0, 0] }, at: performance.now() })
+    lastInput.set(who, performance.now())
+  },
+  placeDrop(object, at) {
+    if (arms.some(a => !!a.hw?.live)) return null
+    const r = object.radius, mesh = object.kind === 'ball' ? new THREE.Mesh(new THREE.SphereGeometry(r, 20, 14), plastic('#79b9be')) : box(r * 2, r * 2, r * 2, plastic('#79b9be'), .004)
+    mesh.position.set(...at); mesh.castShadow = mesh.receiveShadow = true
+    const block: Block = { mesh, half: [r, r, r], mass: .12, by: null, vy: 0, grip: 0 }
+    blocks.push(block); scene.add(contactPart(mesh, `drop-${crypto.randomUUID()}`, { obstacle: 'stock', mode: () => block.by || block.vy ? 'clear' : 'touch' }))
+    const body = shared.world.add('block', at, r, { read: () => mesh.getWorldPosition(new THREE.Vector3()).toArray(), write: (p, v) => { if (!block.by) { mesh.position.set(...p); block.vy = v[1] } }, busy: () => !!block.by || arms.some(a => !!a.hw?.live) })
+    body.kind = object.kind; body.rendered = true; body.guestOnly = true
+    droppedBlocks.set(body.id, block)
+    return body
+  },
+  removeDrop(id) {
+    const block = droppedBlocks.get(id)
+    if (!block) return
+    if (block.by) drop(block)
+    const index = blocks.indexOf(block); if (index >= 0) blocks.splice(index, 1)
+    block.mesh.removeFromParent(); block.mesh.geometry.dispose(); (block.mesh.material as THREE.Material).dispose(); droppedBlocks.delete(id)
+  },
   rides,
   capture: () => ({ arms: arms.map(a => ({ id: a.id, angles: a.joints.map(j => j.angle) })), blocks: blocks.map(b => ({ p: b.mesh.getWorldPosition(new THREE.Vector3()).toArray(), q: b.mesh.getWorldQuaternion(new THREE.Quaternion()).toArray() })) }),
   apply(state: SimValue) {
@@ -648,6 +677,12 @@ const shared = new SharedPresence({
 })
 scene.add(shared.group)
 view.presence = new Experience(renderer, scene, camera, rides, shared, controls)
+const localControls = shared.guest ? null : new LocalControls({
+  id: `arm:${KIND.id}`, canvas: renderer.domElement, units: () => arms.map(a => ({ id: a.id, name: a.name })), tray: layout.tray,
+  phone: () => document.getElementById('chip-invite')?.click(),
+  controllerWindow: () => { if (sim?.remote.pairingUrl) window.open(sim.remote.pairingUrl, '_blank', 'noopener') },
+  hardware: () => arms.some(a => !!a.hw?.live), orbit: enabled => { controls.enabled = enabled && !view.presence?.immersive },
+})
 const controlFrame = (who: string) => {
   const input = xrDrives.get(who)
   const head = input && performance.now() - input.at < 200 ? shared.people.get(who)?.head.q : undefined
@@ -717,6 +752,21 @@ if (!shared.guest) void startSimScene({
     if (a) { a.track = null; a.drive = null; releaseCameraHand(a) }
   })
   s.remote.on('leave', (p) => { xrDrives.delete(p.id); dropAim(p.id); renderPanel() })
+  s.remote.on('sim', (m, who) => {
+    if (m.kind !== 'seat' || !who.simSeat) return
+    const found = findNode(who.simSeat), action = (m.data as { action?: string }).action
+    if (!found || found.arm.hw || s.claims.holder(who.simSeat) !== who.id) return
+    // Scoped guests can hold their simulated arm, but never reach the global hardware stop/resume channel.
+    if (action === 'estop') { holdSimSeat(who.simSeat); xrDrives.delete(who.id); return }
+    if (stopped) return
+    if (action === 'home') { if (found.joint) found.joint.target = found.joint.spec.home; else homeArm(found.arm, who.id) }
+    if (action === 'grip' && (!found.joint || found.joint.spec.key === 'gripper')) toggleGrip(found.arm)
+  })
+  s.remote.on('role', p => {
+    xrDrives.delete(p.id); lastInput.delete(p.id); lastButtons.delete(p.id); genericEvents.delete(p.id); dropAim(p.id)
+    if (p.role === 'watch' && arms.some(a => a.hw?.live)) estop('host', 'Control handed over')
+    if (p.releasedSeat) holdSimSeat(p.releasedSeat)
+  })
   refreshNodes()
 })
 
@@ -1314,7 +1364,7 @@ function stepArm(a: Arm, now: number, dt: number) {
       if (now - (lastInput.get(who) ?? 0) > 200) { j.state = 'watchdog'; if (!a.homing) j.target = null } else {
         const f = frames.get(who) ?? s.remote.consumeOf(who, now)
         if (!f.touching) a.jog.delete(j.node)
-        const c = commanded(a, j, who, f, s.remote.padOf(who), dt)
+        const c = commanded(a, j, who, f, !hw && s.remote.participants.find(p => p.id === who)?.simSeat === j.node ? s.remote.simPadOf(who, now) : s.remote.padOf(who), dt)
         if (c === null) { j.state = 'deadman'; if (!a.homing && j.spec.key !== 'gripper') j.target = null } else v = c
       }
     }
@@ -1396,10 +1446,10 @@ function loop(now: number) {
   last = now
   if (!shared.guest) {
     readInputs(now, dt)
-    const localFrames = localControls.frames(n => {
+    const localFrames = localControls?.frames(n => {
       const a = arms[n]
       return !a || !!sim?.claims.holder(a.id) && sim.claims.holder(a.id) !== 'host' || a.joints.some(j => { const who = sim?.claims.holder(j.node); return !!who && who !== 'host' })
-    }, dt)
+    }, dt) ?? new Map()
     for (const id of [...localArms]) if (![...localFrames.keys()].some(n => arms[n]?.id === id)) {
       const a = arms.find(a => a.id === id); if (a) settle(a)
       localArms.delete(id); xrDrives.delete(`local:${id}`); lastInput.delete(`local:${id}`)

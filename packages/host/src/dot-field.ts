@@ -2,6 +2,7 @@ import { DOT_MATERIAL, DOT_TIMING, dotEase, resolveDotTokens, type DotRole, type
 import { contrast, parseColor } from './color'
 
 const clocks = new WeakMap<Document, { listeners: Set<(now: number) => boolean>; raf: number; schedule: () => void }>()
+const loadingClocks = new WeakMap<Document, { listeners: Set<(now: number) => boolean>; stop: () => void }>()
 /** Finite subscribers share one frame request. Returning false releases the subscription. */
 export function dotClock(tick: (now: number) => boolean, doc: Document = document): () => void {
   let clock = clocks.get(doc)
@@ -28,7 +29,28 @@ export function dotClock(tick: (now: number) => boolean, doc: Document = documen
   }
 }
 
-export const DOT_LOADER_STYLE = `.dot-loader{display:flex;align-items:center;justify-content:center;gap:12%;width:var(--dot-loader-size,48px);height:var(--dot-loader-size,48px);color:var(--seal-ink,var(--bb-accent-text,var(--ink,currentColor)))}.dot-loader>i{display:block;flex:none;width:16%;aspect-ratio:1;border-radius:50%;background:currentColor}`
+export const DOT_LOADER_STYLE = `.dot-loader{display:inline-flex;flex:none;vertical-align:middle;align-items:center;justify-content:center;gap:12%;width:var(--dot-loader-size,48px);height:var(--dot-loader-size,48px);color:var(--seal-ink,var(--bb-ink,var(--ink,currentColor)))}.dot-loader[hidden]{display:none}.dot-loader>i{display:block;flex:none;width:16%;aspect-ratio:1;border-radius:50%;background:currentColor}`
+
+/** Pending surfaces share one moving owner, including portable cards and scene beads. Others keep their static frame. */
+export function dotLoaderClock(tick: (now: number) => boolean, doc: Document = document, handoff = false): () => void {
+  let clock = loadingClocks.get(doc)
+  if (!clock) { clock = { listeners: new Set(), stop: () => {} }; loadingClocks.set(doc, clock) }
+  const current = clock
+  if (handoff) current.listeners = new Set([tick, ...current.listeners])
+  else current.listeners.add(tick)
+  if (current.listeners.size === 1) current.stop = dotClock(now => {
+    const owner = current.listeners.values().next().value
+    if (owner && !owner(now)) current.listeners.delete(owner)
+    return current.listeners.size > 0
+  }, doc)
+  return () => { current.listeners.delete(tick); if (!current.listeners.size) current.stop() }
+}
+
+/** The flat and scene adapters use the same absolute phase, without restarting on state updates. */
+export function dotLoaderFrame(now: number, index: number) {
+  const wave = (1 + Math.sin(now / 180 - index * 0.8)) / 2
+  return { lift: wave * 0.22, scale: 0.85 + wave * 0.15, opacity: 0.7 + wave * 0.3 }
+}
 
 /** A stable three-dot loader. State updates never restart its phase or change its measured box. */
 export class DotLoader {
@@ -53,17 +75,17 @@ export class DotLoader {
     this.start()
   }
   start() { if (!this.running) { this.running = true; this.el.setAttribute('aria-busy', 'true'); this.sync() } }
-  finish() { this.running = false; this.el.setAttribute('aria-busy', 'false'); this.sync() }
+  finish() { if (this.running) { this.running = false; this.el.setAttribute('aria-busy', 'false'); this.sync() } }
   private sync = () => {
     this.stop()
     this.dots.forEach(dot => { dot.style.transform = 'none'; dot.style.opacity = '1' })
     if (!this.running || this.motion.matches || document.hidden || !this.visible) return
-    this.stop = dotClock(now => {
+    this.stop = dotLoaderClock(now => {
       if (!this.running) return false
       if (this.el.isConnected) this.dots.forEach((dot, i) => {
-        const wave = (1 + Math.sin(now / 180 - i * 0.8)) / 2
-        dot.style.transform = `translate3d(0,${-wave * 22}%,0) scale(${0.85 + wave * 0.15})`
-        dot.style.opacity = String(0.7 + wave * 0.3)
+        const frame = dotLoaderFrame(now, i)
+        dot.style.transform = `translate3d(0,${-frame.lift * 100}%,0) scale(${frame.scale})`
+        dot.style.opacity = String(frame.opacity)
       })
       return true
     })
@@ -328,12 +350,14 @@ export class DotField {
   }
 
   /** Draw a deterministic QR lift, ribbon, glyph and ripple frame; it never starts its own RAF loop. */
-  handshake(progress: number) {
+  handshake(progress: number, measure = false) {
     if (this.dead || !Number.isFinite(progress)) return
     this.stopFrame()
     this.playing = null
     this.opacity?.cancel(); this.opacity = null
     this.progress = this.reduced ? 1 : clamp(progress)
+    // A newly visible flight measures once before presentation; later frames need no layout read.
+    if (measure) this.resize()
     this.draw(performance.now())
   }
 

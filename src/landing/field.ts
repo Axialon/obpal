@@ -23,6 +23,7 @@ import {
   Vector3, Vector4, WebGLRenderer, WebGLRenderTarget, type Material, type Texture,
 } from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { inside, surfaceAt, type Footprint, type Orb } from './bounce'
 import { glassScale, type GpuSample, type Step } from './governor'
 import { BEVEL, LETTER_H } from './letters'
@@ -170,6 +171,7 @@ export interface Field {
    * them (the canvas is over the page there) and the dots stay under them. Call when they move.
    */
   pads(rects: PadRect[]): void
+  movePads(updates: { index: number; rect: PadRect }[], seconds: number): void
   scroll(y: number, impulse?: boolean): void
   avoid(rect: PadRect | null): void
   readonly active: number
@@ -267,7 +269,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
   renderer.outputColorSpace = SRGBColorSpace
   const scene = new Scene()
   // The marbles' world (./world.ts): its camera is the one drawn with.
-  const world = createWorld(true)
+  const world = createWorld(true, !opts.still)
   const camera = world.camera
   scene.add(new HemisphereLight(LAVENDER, new Color('#1c1244'), 1.35))
   const keyDir = new Vector3(-3, 8, 5).normalize()
@@ -505,7 +507,6 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
       void main() {
         // The sphere along this pixel's view ray: how near the ray passes its centre, and one pixel in the same units.
         // (Worked out where the squashed marble is round again: the same, unsquashed.)
-        if (gl_FragCoord.x > uAvoid.x && gl_FragCoord.x < uAvoid.z && gl_FragCoord.y > uAvoid.y && gl_FragCoord.y < uAvoid.w) discard;
         vec3 rd0 = uDirection;
         vec3 origin = vWorld - rd0 * 100.0;
         vec3 O = unsquash(origin - uC);
@@ -652,7 +653,11 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
   function buildPadBlocks() {
     for (const m of padGroup.children) (m as Mesh).geometry.dispose()
     padGroup.clear()
+    // Static depth masks share one draw per viewport band; scrolling only changes which batches are visible.
+    const bands = new Map<number, { geometry: BufferGeometry[]; top: number; bottom: number }>()
     for (const fp of world.pads) {
+      // Exclusion cards never contain a marble. Fixed controls own their DOM depth, so neither needs a stale mask.
+      if (padRects[fp.id - PAD_ID].exclude || padRects[fp.id - PAD_ID].fixed) continue
       const shapes: Shape[] = []
       const outlines = fp.rings.map(ring => {
         const path = new Shape()
@@ -672,8 +677,16 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
       })
       const geo = new ExtrudeGeometry(shapes, { depth: fp.height, bevelEnabled: false, curveSegments: 1 })
       geo.rotateX(-Math.PI / 2)
-      const mesh = new Mesh(geo, hides)
-      mesh.userData.pad = fp.id - PAD_ID
+      const rect = padRects[fp.id - PAD_ID], key = Math.floor(rect.y / H)
+      let band = bands.get(key)
+      if (!band) { band = { geometry: [], top: rect.y, bottom: rect.y + rect.h }; bands.set(key, band) }
+      band.geometry.push(geo)
+      band.top = Math.min(band.top, rect.y); band.bottom = Math.max(band.bottom, rect.y + rect.h)
+    }
+    for (const band of bands.values()) {
+      const mesh = new Mesh(mergeGeometries(band.geometry)!, hides)
+      for (const geo of band.geometry) geo.dispose()
+      mesh.userData.top = band.top; mesh.userData.bottom = band.bottom
       padGroup.add(mesh)
     }
   }
@@ -702,7 +715,8 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
     const kx = buf.x / W, ky = buf.y / H
     dotUniforms.uPads.value.forEach((v, i) => {
       const b = padRects[i]
-      if (b && b.w > 0) v.set(b.x * kx, buf.y - (b.y + b.h - scrollY) * ky, (b.x + b.w) * kx, buf.y - (b.y - scrollY) * ky)
+      const offset = b?.fixed ? 0 : scrollY
+      if (b && b.w > 0) v.set(b.x * kx, buf.y - (b.y + b.h - offset) * ky, (b.x + b.w) * kx, buf.y - (b.y - offset) * ky)
       else v.set(0, 0, 0, 0)
       dotUniforms.uPadR.value[i] = b ? Math.min(b.r, b.w / 2, b.h / 2) * kx : 0
     })
@@ -761,8 +775,13 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
       padsForDots()
       buildPadBlocks()
     },
+    movePads(updates, seconds) {
+      for (const { index, rect } of updates) padRects[index] = rect
+      world.movePads(updates, seconds)
+    },
     get active() { return world.active },
     avoid(rect) {
+      world.repel(rect)
       const kx = buf.x / W, ky = buf.y / H
       if (rect) avoid.set((rect.x - 24) * kx, (H - rect.y - rect.h - 24) * ky, (rect.x + rect.w + 24) * kx, (H - rect.y + 24) * ky)
       else avoid.set(0, 0, 0, 0)
@@ -772,8 +791,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
       world.scroll(y, impulse)
       padsForDots()
       for (const child of padGroup.children) {
-        const b = padRects[(child.userData.pad as number)]
-        child.visible = !!b && b.y + b.h >= y - 100 && b.y <= y + H + 100
+        child.visible = child.userData.bottom >= y - 100 && child.userData.top <= y + H + 100
       }
       dots.visible = quality.glass > 0 && y < H
     },

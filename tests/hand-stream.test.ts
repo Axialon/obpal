@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { encodeHand, HandFlag, HandGesture, type HandState, type Vec3 } from '@obpal/core'
 import { Stream } from '../packages/host/src/stream'
 
+beforeEach(() => { vi.useFakeTimers({ toFake: ['performance'] }); vi.advanceTimersByTime(100) })
 afterEach(() => vi.useRealTimers())
 
 const hand: HandState = {

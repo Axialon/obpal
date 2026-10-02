@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { encodePose, encodeState, emptyState, Flag, PoseFlag, type PoseState } from '@obpal/core'
 import { Stream } from '../packages/host/src/stream'
 
+beforeEach(() => { vi.useFakeTimers({ toFake: ['performance'] }); vi.advanceTimersByTime(100) })
 afterEach(() => vi.useRealTimers())
 
 const pose: PoseState = { flags: PoseFlag.tracked | PoseFlag.touching, seq: 10, t: 0, p: [0, 0, 0], q: [0, 0, 0, 1], gen: 1, source: 'camera' }

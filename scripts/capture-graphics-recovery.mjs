@@ -1,4 +1,5 @@
 /** Requested screenshots live in ignored artifacts; the tests themselves use temporary output. */
+import { distill } from './lib/distill.mjs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
@@ -44,3 +45,5 @@ try {
     } finally { await context.close() }
   }
 } finally { await browser.close(); await local.close() }
+
+await distill(out, { keepRaw: process.argv.includes("--keep-raw") || process.env.OBPAL_KEEP_RAW === "1" })

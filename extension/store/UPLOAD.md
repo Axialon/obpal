@@ -2,7 +2,15 @@
 
 The steps in the Developer Dashboard, in order. What to paste is in [listing.md](listing.md); the images are in this folder.
 
-## Before you start
+## Updating the published item to 1.8.0
+
+1. The store's live version is 1.6.2. GitHub's 1.7.0 was never submitted to the store; 1.8.0 includes both sets of changes.
+2. Run `pnpm run store:art`, `pnpm run pack:extension`, `pnpm run store:extension` and `pnpm run store:kit`. Use the existing item, not New item; do not pass `--with-key`.
+3. Open `extension/release/store-kit.html`. Its one-screen checklist and CHANGED markers compare every field and image with the 1.6.2 submission at `a4f0ff0`. Changed text has a before → after view. Leave unchanged fields as they are.
+4. Upload `extension/release/obpal-link-1.8.0-store.zip` under **Package → Upload new package**. Update the marked text and all eight images: the store icon, five screenshots, small tile and marquee. The logo now matches the ob.Pal logo used everywhere else.
+5. Save drafts on the edited tabs. The coordinator submits for review, then records the outcome in `status.json`.
+
+## First upload (historical reference)
 
 - **The first-upload zip:** `%USERPROFILE%\.obpal-keys\store\obpal-link-<version>-store-first-upload.zip`. It carries the extension's private key as `key.pem`, so the store keeps Link's ID, the one ob.Pal Desktop talks to. It's made outside the repository, next to the key, by:
 

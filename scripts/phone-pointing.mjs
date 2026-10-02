@@ -16,6 +16,12 @@ export async function phonePointing({ browser, origin, check, shots, baseline = 
           window.dispatchEvent(new DeviceMotionEvent('devicemotion', { rotationRate: { alpha: 0, beta: 0, gamma: 0 }, accelerationIncludingGravity: { x: 0, y: 6, z: 7 }, interval: 16 }))
         }, 16)
         for (const k of ['gyro', 'models', 'point', 'level', 'track', 'lock', 'hold-part', 'parts-phone', 'more']) sessionStorage.setItem(`obpal.hint.${k}`, '1')
+        window.__pointPeers = []
+        const createChannel = RTCPeerConnection.prototype.createDataChannel
+        RTCPeerConnection.prototype.createDataChannel = function (...args) {
+          if (!window.__pointPeers.includes(this)) window.__pointPeers.push(this)
+          return createChannel.apply(this, args)
+        }
         window.__wire = []
         window.__travel = null
         window.__pointer = []
@@ -36,8 +42,13 @@ export async function phonePointing({ browser, origin, check, shots, baseline = 
       await screen.waitForFunction(() => !!window.__obpal?.pairingUrl)
       await screen.evaluate(() => { window.__received = []; window.__obpal.on('button', e => window.__received.push({ t: 'btn', id: e.id, ev: e.ev })) })
       await phone.goto(await screen.evaluate(() => window.__obpal.pairingUrl))
-      if (device === 'iPhone 13') await phone.locator('#gate #start').click()
-      await phone.waitForFunction(() => document.body.classList.contains('live'))
+      try {
+        if (device === 'iPhone 13') await phone.locator('#gate #start').click()
+        await phone.waitForFunction(() => document.body.classList.contains('live'))
+      } catch (error) {
+        console.log('  phone initial state: ' + JSON.stringify(await phone.evaluate(() => ({ path: location.pathname, classes: document.body.className, text: document.body.innerText.slice(0, 1000), peers: window.__pointPeers.map(p => ({ connection: p.connectionState, ice: p.iceConnectionState, signal: p.signalingState })) }))))
+        throw error
+      }
       await phone.waitForTimeout(1000)
       const cdp = await ctx.newCDPSession(phone)
       const settingsDone = async () => { await phone.locator('#done').click(); await phone.locator('.sheet-wrap').waitFor({ state: 'detached' }) }
@@ -249,7 +260,12 @@ export async function phonePointing({ browser, origin, check, shots, baseline = 
         await check(`${device}: one-hand preferences and handedness survive reload`, async () => {
           await phone.reload()
           if (device === 'iPhone 13') await phone.locator('#gate #start').click()
-          await phone.waitForFunction(() => document.body.classList.contains('live')); await phone.waitForTimeout(1000)
+          try { await phone.waitForFunction(() => document.body.classList.contains('live')) }
+          catch (error) {
+            console.log('  phone reload state: ' + JSON.stringify(await phone.evaluate(() => ({ path: location.pathname, classes: document.body.className, text: document.body.innerText.slice(0, 1000), peers: window.__pointPeers.map(p => ({ connection: p.connectionState, ice: p.iceConnectionState, signal: p.signalingState })) }))))
+            throw error
+          }
+          await phone.waitForTimeout(1000)
           for (const face of ['mouse', 'wii', 'trackpad']) {
             await choose(face)
             if (!await phone.locator('.surface.one-hand.left').count()) throw new Error(`${face} preference lost`)

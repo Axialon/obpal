@@ -1,5 +1,5 @@
 /**
- * The loading state of a sim's device area: one glass pill with a turning ring (#sim-load, in the page's HTML and
+ * The loading state of a sim's device area: one glass pill with the shared dots (#sim-load, in the page's HTML and
  * styled in sim.css), shown from the first paint until every rig the page waits for is ready to appear. It is
  * `hidden` in the HTML and shown by the page's early script (./early.ts) on pages that have a mesh, so a sim without
  * one never shows it. It comes in after a short delay, so a mesh that is there at once never shows it at all.
@@ -7,6 +7,8 @@
  */
 
 /** Rigs held back from view, and whether the page has yet to make its first hold. */
+import { dotLoading } from '../../ui/kit/loading'
+
 let holding = 0
 let expecting = false
 let leaving: ReturnType<typeof setTimeout> | undefined
@@ -19,6 +21,7 @@ const element = () => typeof document === 'undefined' || typeof document.getElem
 function update() {
   const el = element()
   if (!el) return
+  dotLoading(el, !stopped && (expecting || holding > 0), 'Preparing the scene', 48)
   if (stopped) { el.hidden = true; el.classList.remove('on'); return }
   if (expecting || holding > 0) {
     clearTimeout(leaving)

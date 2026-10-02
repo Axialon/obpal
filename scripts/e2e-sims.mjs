@@ -21,6 +21,7 @@ import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join as joinPath } from 'node:path'
 import { chromium, devices } from 'playwright'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 import { cspCheck } from './csp-watch.mjs'
 import { runMusic } from './e2e-music.mjs'
 import { runControl } from './e2e-control.mjs'
@@ -82,7 +83,7 @@ const profiles = []
 let exitCode = 0
 
 async function screenAt(path, init) {
-  const b = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
+  const b = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED, args: RTC_ARGS }))
   closers.push(b)
   const context = await b.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true })
   if (init) await context.addInitScript(init)
@@ -96,7 +97,7 @@ async function screenAt(path, init) {
 async function phone(invite, { xr = true, way = 'motion' } = {}) {
   const dir = await temps.make(joinPath(tmpdir(), 'obpal-sim-'))
   profiles.push(dir)
-  const ctx = await chromium.launchPersistentContext(dir, { ...devices['Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS })
+  const ctx = await chromium.launchPersistentContext(dir, e2eBrowserOptions({ ...devices['Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS }))
   closers.push(ctx)
   const page = ctx.pages()[0] ?? (await ctx.newPage())
   // Test gestures start after onboarding; a delayed hint must not intercept a scene claim.
@@ -174,22 +175,26 @@ async function phone(invite, { xr = true, way = 'motion' } = {}) {
 try {
   if (['local-control', 'local-control-before'].includes(process.env.OBPAL_E2E_SIMS_ONLY)) await runLocalControl(local, check, { baseline: process.env.OBPAL_E2E_SIMS_ONLY === 'local-control-before' })
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'local-faces') {
-    const browser = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
+    const browser = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED, args: RTC_ARGS }))
     try { await runUniversalFaces(browser, local.origin, check, `${process.env.OBPAL_E2E_EVIDENCE_ROOT || 'artifacts/local-control'}/after`) } finally { await browser.close() }
   }
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'audio') await runAudio(local, check)
+  else if (process.env.OBPAL_E2E_SIMS_ONLY === 'load') await runLoad(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'graphics-layouts') {
-    const browser = await chromium.launch({ executablePath, headless: true, args: RTC_ARGS })
+    const browser = await chromium.launch(e2eBrowserOptions({ executablePath, headless: true, args: RTC_ARGS }))
     try { await runGraphicsRecoveryLayouts(browser, local.origin, check) } finally { await browser.close() }
   }
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'marble-mobile') {
-    const browser = await chromium.launch({ executablePath, headless: true, args: RTC_ARGS })
+    const browser = await chromium.launch(e2eBrowserOptions({ executablePath, headless: true, args: RTC_ARGS }))
     const evidence = tempScope({ keep: true })
     const out = await evidence.make(joinPath(process.env.OBPAL_E2E_EVIDENCE_ROOT || tmpdir(), 'obpal-marble-mobile-'))
     try { await runMarbleControls(browser, local, check, out); await runMarbleMobile(browser, local, check, out) }
     finally { await browser.close(); console.log(`  Marble mobile measurements: ${out}`) }
   }
+  else if (process.env.OBPAL_E2E_SIMS_ONLY === 'p1-repairs') { await runVR(local, check); await runMusic(local, check); await runAudio(local, check); await runSimButtons(local, check) }
+  else if (process.env.OBPAL_E2E_SIMS_ONLY === 'p1-gestures') { await runAudio(local, check); await runSimButtons(local, check) }
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'vr') await runVR(local, check)
+  else if (process.env.OBPAL_E2E_SIMS_ONLY === 'music') await runMusic(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'graphics-recovery') await runGraphicsRecovery(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'physics-bench' || process.argv.includes('--only=physics-bench')) await runPhysicsBench(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'smoothness') await runSmoothness(local, check)
@@ -450,7 +455,7 @@ try {
   })
   if (arm.errors.length) console.log(`  page errors: ${arm.errors.join(' | ')}`)
   await check('robot arm kinds: each opens with its own joints, and its arm 1 picks up a block and lifts it', async () => {
-    const b = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
+    const b = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED, args: RTC_ARGS }))
     closers.push(b)
     const context = await b.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true })
     const done = []
@@ -515,7 +520,7 @@ try {
 
   // ---- the pairing chip beside the panel, on phones ----
   await check('on phones windows start docked, pairing fits below the bar and yields to overlapping windows', async () => {
-    const b = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
+    const b = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED, args: RTC_ARGS }))
     closers.push(b)
     const out = []
     for (const [w, h] of [[412, 915], [390, 844], [360, 640]]) {

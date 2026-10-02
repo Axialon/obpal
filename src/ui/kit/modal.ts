@@ -5,6 +5,7 @@
  * dismisses it; a short drag springs back. The slide itself is CSS (styles/kit.css), keyed on data-open.
  */
 import '../../styles/kit.css'
+import { railAxis, railPull } from '../rail'
 
 export type Edge = 'left' | 'bottom'
 
@@ -49,7 +50,7 @@ export class ModalLayer {
   private scrim: HTMLDivElement | null = null
   private made: HTMLElement[] = []
   private opener: HTMLElement | null = null
-  private drag: { id: number; start: number; at: number; t: number; v: number } | null = null
+  private drag: { id: number; x: number; y: number; start: number; at: number; t: number; v: number; axis: 'x' | 'y' | null } | null = null
   private opened = false
   private readonly keys = (e: KeyboardEvent) => this.key(e)
 
@@ -60,6 +61,7 @@ export class ModalLayer {
       h.addEventListener('pointermove', (e) => this.dragMove(e))
       h.addEventListener('pointerup', (e) => this.dragEnd(e))
       h.addEventListener('pointercancel', (e) => this.dragEnd(e, true))
+      h.addEventListener('lostpointercapture', (e) => this.dragEnd(e, true))
     }
   }
 
@@ -102,6 +104,8 @@ export class ModalLayer {
     this.opened = false
     const el = this.el
     el.dataset.open = 'false'
+    this.drag = null
+    el.classList.remove('kit-dragging')
     el.style.transform = ''
     el.removeAttribute('role')
     el.removeAttribute('aria-modal')
@@ -142,20 +146,23 @@ export class ModalLayer {
 
   private dragStart(e: PointerEvent) {
     if (!this.isOpen || e.pointerType === 'mouse' || (e.target as Element).closest('button, a, input, [role="slider"]')) return
-    this.drag = { id: e.pointerId, start: this.along(e), at: this.along(e), t: e.timeStamp, v: 0 }
+    this.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, start: this.along(e), at: this.along(e), t: e.timeStamp, v: 0, axis: null }
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-    this.el.classList.add('kit-dragging')
   }
 
   private dragMove(e: PointerEvent) {
     const d = this.drag
     if (!d || e.pointerId !== d.id) return
+    d.axis ??= railAxis(e.clientX - d.x, e.clientY - d.y)
+    if (d.axis !== (this.opts.edge === 'bottom' ? 'y' : 'x')) return
+    this.el.classList.add('kit-dragging')
     const now = this.along(e)
     const dt = Math.max(1, e.timeStamp - d.t)
     d.v = (now - d.at) / dt
     d.at = now
     d.t = e.timeStamp
-    const moved = Math.max(0, now - d.start)
+    const size = this.opts.edge === 'bottom' ? this.el.offsetHeight : this.el.offsetWidth
+    const moved = railPull(now - d.start, size)
     this.el.style.transform = this.opts.edge === 'bottom' ? `translateY(${moved}px)` : `translateX(${-moved}px)`
   }
 
@@ -165,7 +172,7 @@ export class ModalLayer {
     this.drag = null
     this.el.classList.remove('kit-dragging')
     const size = this.opts.edge === 'bottom' ? this.el.offsetHeight : this.el.offsetWidth
-    if (!cancelled && dismisses(d.at - d.start, size, d.v)) this.close()
+    if (!cancelled && d.axis === (this.opts.edge === 'bottom' ? 'y' : 'x') && dismisses(d.at - d.start, size, d.v)) this.close()
     else this.el.style.transform = ''
   }
 }

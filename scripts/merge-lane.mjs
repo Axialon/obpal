@@ -19,6 +19,7 @@
  * Exit codes: 0 merged and green (or nothing to merge), 1 typecheck or vitest failed after the merge (the merge
  * stays; look before you go on), 2 refused, 3 conflicts (the merge is left in progress for you to resolve).
  */
+import { changedSuites } from './lib/suites.mjs'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -71,6 +72,8 @@ if (!commits.length) {
   console.log(`merge-lane: ${branch} has nothing ${target} lacks; nothing to merge.`)
   process.exit(0)
 }
+const requiredSuites = changedSuites(root, target, branch)
+console.log(`Required e2e suites: ${requiredSuites.join(' ') || 'none'}`)
 const stat = summarizeNumstat(git(['diff', '--numstat', '-M', `${target}...${branch}`]))
 const behind = Number(git(['rev-list', '--count', `${branch}..${target}`]).trim())
 const lockChanged = gitStatus(['diff', '--quiet', `${target}...${branch}`, '--', 'pnpm-lock.yaml']).status === 1

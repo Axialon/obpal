@@ -7,6 +7,7 @@ import { resolve, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { startLocal } from '../extension/e2e/local.mjs'
 import { chooseFace } from './lib/catalogue-ui.mjs'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const assert = (ok, message) => { if (!ok) throw new Error(message) }
@@ -20,7 +21,7 @@ export async function runMusic(local, check) {
   const dir = process.env.OBPAL_EVIDENCE ? resolve('artifacts/codex-music') : await temps.make(join(tmpdir(), 'obpal-music-'))
   await mkdir(dir, { recursive: true })
   console.log(`  Music measurements and captures: ${dir}`)
-  const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true, args: ['--disable-features=WebRtcHideLocalIpsWithMdns', '--ignore-certificate-errors', '--disable-background-timer-throttling', '--disable-renderer-backgrounding'] })
+  const browser = await chromium.launch(e2eBrowserOptions({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true, args: ['--disable-features=WebRtcHideLocalIpsWithMdns', '--ignore-certificate-errors', '--disable-background-timer-throttling', '--disable-renderer-backgrounding'] }))
   const errors = [], phones = [], metrics = []
   let contextId = '', report = {}
   const watch = page => page.on('pageerror', e => errors.push(e.message))

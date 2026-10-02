@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url'
 import { createServer } from 'node:net'
 import { chromium, devices } from 'playwright'
 import { startLocal } from '../extension/e2e/local.mjs'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 
 const args = ['--disable-features=WebRtcHideLocalIpsWithMdns', '--ignore-certificate-errors', '--autoplay-policy=user-gesture-required']
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -32,10 +33,12 @@ async function saveRecording(page, path) {
 }
 
 export async function runAudio(local, check) {
+  const runCheck = check
+  check = (name, run) => process.env.OBPAL_E2E_AUDIO_ONLY && !new RegExp(process.env.OBPAL_E2E_AUDIO_ONLY).test(name) ? undefined : runCheck(name, run)
   const temps = tempScope()
   try {
   const out = await temps.make(join(tmpdir(), 'obpal-audio3d-'))
-  const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, args })
+  const browser = await chromium.launch(e2eBrowserOptions({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, args }))
   const measurements = []
   const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 800 } })
   await context.addInitScript(() => { try { localStorage.removeItem('obpal.sim.muted'); localStorage.removeItem('obpal.sim.reduced') } catch {} })
@@ -93,17 +96,30 @@ export async function runAudio(local, check) {
     const touches = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 1 }] })
     const drive = async (selector, dx, dy, ms) => {
       await page.evaluate(() => document.querySelectorAll('.hint').forEach(e => e.remove()))
-      const point = await page.locator(selector).first().evaluate(target => {
-        const b = target.getBoundingClientRect()
-        // Inset face buttons and D-pad own the stick's centre. Drive its uncovered floating-stick background.
-        for (const fy of [.5, .2, .8]) for (const fx of [.5, .2, .8]) {
-          const x = b.x + b.width * fx, y = b.y + b.height * fy, hit = document.elementFromPoint(x, y)
-          if (target.classList.contains('gp-stick') ? hit === target : hit && target.contains(hit)) return { x, y }
+      const b = await page.locator(selector).first().boundingBox()
+      assert.ok(b, `visible ${selector}`)
+      const point = await page.locator(selector).first().evaluate(el => {
+        const r = el.getBoundingClientRect()
+        if (!el.matches('.gp-stick')) return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+        // Chromium expands touch targets around buttons. Keep a stick gesture well away from its inset controls.
+        let best = null, clearance = -1
+        const controls = [...el.querySelectorAll('button, .gp-dpad')].map(c => c.getBoundingClientRect())
+        for (const dx of [.15, .3, .5, .7, .85]) for (const dy of [.15, .3, .5, .7, .85]) {
+          const x = r.x + r.width * dx, y = r.y + r.height * dy, hit = document.elementFromPoint(x, y)
+          if (hit !== el) continue
+          const distance = Math.min(...controls.map(c => Math.hypot(Math.max(c.left - x, 0, x - c.right), Math.max(c.top - y, 0, y - c.bottom))))
+          if (distance > clearance) { best = { x, y }; clearance = distance }
         }
-        return null
+        return best
       })
-      assert.ok(point, `uncovered touch target ${selector}`)
+      assert.ok(point, `free touch region ${selector}`)
       const { x, y } = point
+      const hit = await page.evaluate(({ selector, x, y }) => {
+        const target = document.querySelector(selector), actual = document.elementFromPoint(x, y)
+        return { owns: target.classList.contains('gp-stick') ? actual === target : !!actual && target.contains(actual), target: actual?.closest('button, .gp-stick, .gp-dpad, .pad')?.getAttribute('aria-label'), x, y, viewport: [innerWidth, innerHeight] }
+      }, { selector, x, y })
+      measurements.push({ interaction: selector, hit })
+      assert.ok(hit.owns, `${selector} touch hit ${hit.target}`)
       await touches('touchStart', x, y)
       for (let i = 0; i < ms / 40; i++) { await touches('touchMove', x + dx + i % 2, y + dy); await sleep(40) }
       await touches('touchEnd')
@@ -202,8 +218,10 @@ export async function runAudio(local, check) {
       if (id === 'drone') {
         await page.getByRole('button', { name: 'Overview', exact: true }).click()
         await p.drive('.gp-f[data-k="a"]', 0, 0, 160)
-        await sleep(1200)
+        await page.waitForFunction(() => window.__device.logic.drones[0].phase === 'flying')
+        const before = await page.evaluate(() => window.__device.logic.drones[0].z)
         await p.drive('.gp-stick[data-stick="1"]', 45, -40, 2200)
+        assert.ok(await page.evaluate(z => Math.abs(window.__device.logic.drones[0].z - z) > .1, before), 'the right-stick touch flew the drone')
       } else if (id === 'dog') {
         await p.drive('.gp-stick[data-stick="0"]', 10, -50, 3200)
         assert.ok(await page.evaluate(() => window.__simAudio.haptics > 0), 'gait and servo feedback reached the owned dog')

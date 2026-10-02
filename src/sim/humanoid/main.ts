@@ -33,6 +33,10 @@ import { lightArena, quietHorizon, soleShadow } from './lighting'
 import { DriverPanel } from './driver-panel'
 import { upperJoints } from './driver-profile'
 import { startScene } from '../kit/recovery'
+import { SharedPresence } from '../vr/presence'
+import { Experience } from '../vr/experience'
+import { anchorPose } from '../vr/rigs'
+import type { SimValue } from '@obpal/core'
 import { LocalControls } from '../local-controls'
 import { mapFaceInput } from '../face-input'
 
@@ -268,6 +272,7 @@ document
   .querySelectorAll<HTMLButtonElement>('[data-seat]')
   .forEach((b) => (b.onclick = () => choose(Number(b.dataset.seat))))
 function takeLocal(source = localSource) {
+  if (shared.guest) return false
   const actor = actors[selected],
     holder = sim?.claims.holder(actor.id)
   if (holder && holder !== 'host') {
@@ -357,6 +362,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-drive]').forEach((b) => {
   b.onpointerup = b.onpointercancel = b.onlostpointercapture = () => keys.delete(b.dataset.drive!)
 })
 addEventListener('keydown', (e) => {
+  if (shared.guest) return
   if (walkthrough.dialog.open || (e.target as HTMLElement)?.closest('input,select,textarea')) return
   if (e.code === 'Space') {
     e.preventDefault()
@@ -392,27 +398,46 @@ const layout: Layout = {
   utilities: ['pad', 'motion.tilt', 'touch.trackpad', 'camera.body', 'camera.hand'],
   tray: PRESETS.map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1), type: 'button' as const })),
 }
-void startSimScene({
+const shared = new SharedPresence({
+  sim: 'humanoid', hardwareLive: () => drivers.session.state === 'live',
+  rides: () => actors.map(a => ({ id: a.id, name: a.name, style: 'body' as const, pose: () => { const p = anchorPose(a.rig.root); p.p.y += 1.3; return p } })),
+  capture: () => ({ actors: actors.map(a => ({ p: a.control.position.toArray(), yaw: a.control.yaw, q: a.control.q })) }),
+  apply(state: SimValue) {
+    const s = state as unknown as { actors: { p: [number, number, number]; yaw: number; q: typeof actors[number]['control']['q'] }[] }
+    if (!Array.isArray(s?.actors)) return
+    s.actors.forEach((pose, n) => { const a = actors[n]; if (!a) return; a.control.position.set(...pose.p); a.control.yaw = pose.yaw; Object.assign(a.control.q, pose.q); a.rig.pose(pose.q, a.control.position, pose.yaw) })
+  },
+})
+stage.scene.add(shared.group)
+const experience = new Experience(stage.renderer, stage.scene, stage.camera, shared.adapter.rides, shared, stage.controls)
+stage.view.presence = experience
+if (shared.guest) {
+  drivers.panel.setState('closed'); drivers.panel.toggle.hidden = true; drivers.el.inert = true
+  document.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button:not(.presence-controls button, .drop-tray button), .sim-panel input').forEach(b => { b.disabled = true })
+}
+if (!shared.guest) void startSimScene({
   appName: 'ob.Pal humanoids',
   layout,
   nodes: actors.map((a) => ({ id: a.id, name: a.name, kind: 'slot', group: 'Robots' })),
   approval: false,
   howTo: () => 'Sticks or tilt to move · Body camera to follow you',
   joined: (p) => {
+    if (p.capability === 'watch') return
     const free = actors.find((a) => !sim?.claims.holder(a.id))
     if (free) sim?.take(free.id, p.id)
   },
 }).then((s) => {
   sim = s
+  shared.connect(s.remote)
   seats = new Seats(s.remote, layout)
   if (localActive) s.take(actors[selected].id, 'host')
 })
 
-const localControls = new LocalControls({
+const localControls = shared.guest ? null : new LocalControls({
   id: 'humanoid', canvas: stage.renderer.domElement, units: () => actors.map(a => ({ id: a.id, name: a.name })), tray: layout.tray,
   phone: () => document.getElementById('chip-invite')?.click(),
   controllerWindow: () => { if (sim?.remote.pairingUrl) window.open(sim.remote.pairingUrl, '_blank', 'noopener') },
-  orbit: enabled => { stage.controls.enabled = enabled },
+  orbit: enabled => { stage.controls.enabled = enabled && !experience.immersive },
   hardware: () => drivers.session.state === 'live',
 })
 
@@ -440,6 +465,8 @@ const injected = new Map<number, BodyInput>()
 let inspecting = false
 const faceMotion = matchMedia('(prefers-reduced-motion: reduce)')
 stage.onFrame = (t, dt) => {
+  if (shared.guest) { actors.forEach(a => a.rig.detail(stage.camera.position)); return }
+  if (shared.guest) { stage.view.invalidate(); return }
   for (const actor of actors)
     for (const shadow of actor.shadows) {
       const foot = actor.rig.point(shadow.joint)
@@ -456,7 +483,7 @@ stage.onFrame = (t, dt) => {
     now = t * 1000,
     inputs = seats?.read(now),
     local = localBody.read(now)
-  const localFrames = localControls.frames(n => { const who = sim?.claims.holder(actors[n].id); return !!who && who !== 'host' }, dt)
+  const localFrames = localControls?.frames(n => { const who = sim?.claims.holder(actors[n].id); return !!who && who !== 'host' }, dt) ?? new Map()
   for (let i = 0; i < actors.length; i++) {
     const a = actors[i],
       owner = sim?.claims.holder(a.id) ?? (localFrames.has(i) || localActive && selected === i ? 'host' : '')

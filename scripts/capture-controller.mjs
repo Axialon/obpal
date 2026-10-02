@@ -20,6 +20,7 @@
  * OBPAL_E2E_CHROMIUM) and writes nothing outside artifacts/. Controllers are picked the way a person picks them: from the
  * catalogue sheet when the build has one, else with the old mode tabs.
  */
+import { distill } from './lib/distill.mjs'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -481,3 +482,5 @@ ${extras.join('')}
   console.log(`wrote ${join(root, 'index.html')}`)
 }
 
+
+await distill(out, { keepRaw: process.argv.includes("--keep-raw") || process.env.OBPAL_KEEP_RAW === "1" })

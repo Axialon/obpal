@@ -1,21 +1,29 @@
 /** Small authoritative props. Existing engines can supply a binding instead of a second simulation. */
 export type V3 = [number, number, number]
-export interface Body { id: string; kind: 'cone' | 'ball' | 'block' | 'pallet'; p: V3; v: V3; r: number; owner: string | null; bound?: boolean }
+export interface Body { id: string; kind: 'cone' | 'ball' | 'block' | 'pallet'; p: V3; v: V3; r: number; owner: string | null; bound?: boolean; rendered?: boolean; guestOnly?: boolean }
 export interface Collider { p: V3; r: number; move?(x: number, z: number): void }
 export interface Binding { read(): V3; write(p: V3, v: V3): void; busy?(): boolean }
 export const distance = (a: V3, b: V3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
 export const validVector = (p: unknown, bound = 100) => Array.isArray(p) && p.length === 3 && p.every(x => typeof x === 'number' && Number.isFinite(x) && Math.abs(x) <= bound)
 
 export class PropWorld {
+  private nextId = 0
   readonly bodies: Body[] = []
   private bindings = new Map<string, Binding>()
   private hands = new Map<string, { p: V3; at: number; velocity: V3 }>()
   private thrown = new Set<string>()
   add(kind: Body['kind'], p: V3, r: number, binding?: Binding) {
-    const b: Body = { id: `prop${this.bodies.length + 1}`, kind, p: [...p], v: [0, 0, 0], r, owner: null }
+    const b: Body = { id: `prop${++this.nextId}`, kind, p: [...p], v: [0, 0, 0], r, owner: null }
     this.bodies.push(b)
     if (binding) { this.bindings.set(b.id, binding); b.bound = true }
     return b
+  }
+  remove(id: string) {
+    const n = this.bodies.findIndex(b => b.id === id)
+    if (n < 0) return
+    const body = this.bodies[n]
+    if (body.owner) this.release(body.owner, false)
+    this.bodies.splice(n, 1); this.bindings.delete(id); this.thrown.delete(id)
   }
   grab(who: string, id: string, hand: V3, now: number) {
     const b = this.bodies.find(x => x.id === id)

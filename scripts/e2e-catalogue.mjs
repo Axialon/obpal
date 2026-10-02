@@ -19,6 +19,7 @@ import { startLocal } from '../extension/e2e/local.mjs'
 import { startWorker } from './local-worker.mjs'
 import { deviceExercises, exerciseDevice } from './lib/catalogue-devices.mjs'
 import { chooseFace, faceOf, faceOptions, runCatalogueUi } from './lib/catalogue-ui.mjs'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 
 const temps = tempScope()
 try {
@@ -67,7 +68,7 @@ function watch(page) {
 }
 
 async function screenAt(path, { width = 1280, height = 800 } = {}) {
-  const b = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
+  const b = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED, args: RTC_ARGS }))
   closers.push(b)
   const context = await b.newContext({ viewport: { width, height }, ignoreHTTPSErrors: true })
   const page = await context.newPage()
@@ -83,7 +84,7 @@ async function screenAt(path, { width = 1280, height = 800 } = {}) {
 async function phone(invite, { landscape = false } = {}) {
   const dir = await temps.make(joinPath(tmpdir(), 'obpal-cat-'))
   profiles.push(dir)
-  const ctx = await chromium.launchPersistentContext(dir, { ...devices[landscape ? 'Pixel 7 landscape' : 'Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS })
+  const ctx = await chromium.launchPersistentContext(dir, e2eBrowserOptions({ ...devices[landscape ? 'Pixel 7 landscape' : 'Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS }))
   closers.push(ctx)
   const page = ctx.pages()[0] ?? (await ctx.newPage())
   const errors = watch(page)
@@ -171,7 +172,7 @@ try {
 
   // ---- the catalogue page ----
   if (wanted('catalogue')) {
-    const b = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
+    const b = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED, args: RTC_ARGS }))
     closers.push(b)
     const page = await (await b.newContext({ viewport: { width: 1280, height: 900 }, ignoreHTTPSErrors: true })).newPage()
     const pageErrors = watch(page)
@@ -352,7 +353,7 @@ try {
 
   // ---- the catalogue's glass UI at five sizes: the sidebar and its rail, the drawer, the glass select, the sheet ----
   if (wanted('ui')) {
-    const b = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
+    const b = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED, args: RTC_ARGS }))
     closers.push(b)
     await runCatalogueUi({ browser: b, origin: ORIGIN, check, until })
     await b.close()

@@ -5,6 +5,7 @@ import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { installFixture } from './e2e-humanoid.mjs'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const assert = (ok, why) => {
@@ -76,11 +77,11 @@ export async function runHumanoidLive(local, check) {
     timelines: [],
     setupRetries: [],
   }
-  const browser = await chromium.launch({
+  const browser = await chromium.launch(e2eBrowserOptions({
     executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined,
     headless: !process.argv.includes('--headed'),
     args: ['--ignore-certificate-errors', '--disable-background-timer-throttling', '--disable-renderer-backgrounding'],
-  })
+  }))
   const errors = [],
     contexts = []
   const run = (name, work) =>

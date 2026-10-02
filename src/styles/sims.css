@@ -197,3 +197,6 @@
   .sims-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) { .dcard, .dcard-stage canvas, .dcard-go, .dcard-go .ic { transition: none; } }
+
+.dcard-stage>.dot-loader { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 8px; border-radius: 16px; background: var(--bb-sheet); }
+.dcard-stage[aria-busy='true'] .dcard-ph { visibility: hidden; }

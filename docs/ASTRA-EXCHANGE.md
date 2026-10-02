@@ -17,10 +17,9 @@ flowchart LR
   L --> C[Coordinator reads review.md and complete diff]
   C --> M[Coordinator adds approval marker]
   M --> G[astra:verify: install if lock changed, then local gates]
-  G --> R[Result ZIP and reconcile prompt]
-  F --> R
-  R --> A
-  R --> B
+  G --> R[Held Result ZIP and prompt]
+  F --> B
+  R --> P
 ```
 
 ## 1. Write the brief
@@ -120,8 +119,8 @@ Detailed product and exchange rules stay in START_HERE.
 
 ## 3. Upload and paste
 
-Attach the request ZIP in your Astra conversation in ChatGPT. Paste the entire sibling `.prompt.txt` once. START_HERE,
-TASK, MANIFEST and RETURN_CONTRACT provide context, bounds, exact source hashes and the required return format.
+Attach the ZIPs named in `UPLOAD-THIS-<stage>.prompt.txt` in your Astra conversation in ChatGPT. Paste that entire prompt
+once. START_HERE, TASK, MANIFEST and RETURN_CONTRACT provide context, bounds, exact source hashes and the required return format.
 Ask Astra to return the ZIP as a downloadable file, then save it to `Downloads/obpal-astra/inbox`.
 Lean packs use the public GitHub snapshot for source; keep the original request ZIP for intake.
 
@@ -239,10 +238,10 @@ payload and 4 MiB combined expanded binary literals. Split larger stages; these 
 within the result archive limits. Captured result logs have an 8 MiB combined budget. Exceeding it fails evidence
 capture, preserves the actual gate exit codes and marks omitted logs explicitly.
 
-## 6. Read the result and reconcile
+## 6. Hold the result for the next stage
 
-Verify writes `obpal-<stage>-Return-<UTC>.zip` and its `.prompt.txt`. Intake also writes a refusal ZIP if preflight or apply
-fails; successful intake writes the local review report and defers the Return ZIP to verify. RESULT records each
+Verify writes `obpal-<stage>-Return-<UTC>.zip` and its `.prompt.txt` under `outbox/held/<stage>/`. It leaves the current
+loose upload unchanged and writes no `UPLOAD-THIS` prompt. Intake also writes a refusal ZIP if preflight or apply fails; successful intake writes the local review report and defers the Return ZIP to verify. RESULT records each
 gate and its actual exit code. SOURCE records base, head, path hashes and deviations; INTEGRATION names the commits and
 states that no merge occurred. `actual.patch` is the applied delta; `acceptance/` holds real logs and exit-code JSON.
 Private log lines are replaced and listed in REDACTIONS. If private content also appears in a patch, the result explicitly
@@ -251,8 +250,19 @@ On private scan refusal, the entire patch is withheld, including opaque binary p
 result archive. Detailed redaction records are bounded to 1,000 lines, with a count for additional removed lines.
 Failed checks retain their nonzero exit codes. The process exits nonzero for failed or blocked integration.
 
-Upload this result ZIP to Astra and paste its sibling prompt to reconcile findings. A failed check stays failed until
-there is new executed evidence. A follow-up implementation needs a new request and stage id. The coordinator reviews
+Build the next bounded request with the held Return attached:
+
+```powershell
+pnpm run astra:pack -- --stage next-stage --task artifacts/astra/NEXT.md --paths "tests/code.test.ts" --attach <outbox/held/sample-code/obpal-sample-code-Return-UTC.zip>
+```
+
+`--attach` accepts a validated Return ZIP from this outbox's `held/<stage>/` folder. It copies the ZIP and its prompt
+into the loose upload set beside the new Request, retaining the held originals. `UPLOAD-THIS-<next-stage>.prompt.txt`
+names both ZIPs and asks Astra to fold verification findings into the next stage deliverable in one turn. Upload both
+ZIPs and paste that prompt once; no separate bare reconcile turn is needed. Tidy retains both until the next pack
+supersedes them. A failed check stays failed until there is new executed evidence. Follow-up work needs a fresh pinned
+request and stage id. `outbox/README.md` describes loose uploads, held results and retained exchanges;
+`inbox/README.md` describes pending, processed and refused stage ZIPs. The coordinator reviews
 and, if accepted, merges the lane with `scripts/merge-lane.mjs`, then owns deployment.
 
 ## Verification and dry run

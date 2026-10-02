@@ -1,5 +1,6 @@
 /** Explicit, simulated-driver controls. All leases come from a locally held physical control. */
 import { html, setMarkup } from '../../ui/markup'
+import { dotLoading } from '../../ui/kit/loading'
 import { iconAction } from '../../ui/kit/action'
 import { GlassSelect } from '../../ui/kit/select'
 import { DetentSlider } from '../../ui/kit/slider'
@@ -287,6 +288,9 @@ export class DriverPanel {
           stopped: 'Stopped',
           fault: 'Held · fault',
         }[live.state]
+        const waiting = live.state === 'connecting' || live.state === 'arming'
+        get('state').classList.toggle('dot-wait-label', waiting)
+        dotLoading(get('state').parentElement!, waiting, live.state === 'arming' ? 'Waiting for guardian acknowledgement' : 'Connecting to driver')
         lastState = live.state
       }
       if (lastReason !== live.reason) {

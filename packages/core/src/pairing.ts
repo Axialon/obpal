@@ -31,6 +31,9 @@ export function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
 
 /** What the QR code carries, in the URL fragment (never sent to any server). */
 export interface Pairing {
+  /** Protocol 2 capability links keep one room while either key rotates. */
+  room?: string
+  capability?: 'play' | 'watch'
   /** 128-bit pairing secret. */
   secret: Uint8Array
   /** SHA-256 fingerprint of the host's DTLS certificate (32 bytes). */
@@ -45,17 +48,23 @@ export interface SavedInvite {
 }
 
 export async function saveInvite(p: Pairing): Promise<SavedInvite> {
-  return { room: await roomIdFor(p.secret), key: await importPairKey(p.secret), fp: p.fp }
+  return { room: p.room ?? await roomIdFor(p.secret), key: await importPairKey(p.secret), fp: p.fp }
 }
 
 export const newSecret = () => crypto.getRandomValues(new Uint8Array(16))
 export const randomBytes = (n: number) => crypto.getRandomValues(new Uint8Array(n))
 
 export function encodePairing(p: Pairing): string {
+  if (p.room) return `3.${p.capability === 'watch' ? 'w' : 'p'}.${p.room}.${b64url(p.secret)}.${b64url(p.fp)}`
   return `1.${b64url(p.secret)}.${b64url(p.fp)}`
 }
 
 export function parsePairing(fragment: string): Pairing | null {
+  const capability = /^#?3\.([pw])\.([A-Za-z0-9_-]{22})\.([A-Za-z0-9_-]{22})\.([A-Za-z0-9_-]{43})$/.exec(fragment)
+  if (capability) {
+    const secret = fromB64url(capability[3]), fp = fromB64url(capability[4])
+    return b64url(secret) === capability[3] && b64url(fp) === capability[4] ? { secret, fp, room: capability[2], capability: capability[1] === 'w' ? 'watch' : 'play' } : null
+  }
   if (!/^#?1\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}$/.test(fragment)) return null
   const [v, s, f] = fragment.replace(/^#/, '').split('.')
   if (v !== '1' || !s || !f) return null
@@ -66,6 +75,31 @@ export function parsePairing(fragment: string): Pairing | null {
   } catch {
     return null
   }
+}
+
+/** A signaling admission verifier, separate from the DTLS binding MAC. It reveals neither key. */
+export async function admissionFor(secret: BindKey): Promise<string> {
+  return b64url(await hkdf(secret, enc.encode('obpal admission v2'), 'room admission', 32))
+}
+
+export interface ShareTarget { fp: string; path: string }
+/** Short links encrypt only scene metadata; the capability secret stays in the browser's URL fragment. */
+export async function sealShareTarget(secret: BindKey, target: ShareTarget): Promise<string> {
+  const key = await shareTargetKey(secret), iv = randomBytes(12)
+  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv as BufferSource }, key, enc.encode(JSON.stringify(target)))
+  return b64url(concat(iv, new Uint8Array(encrypted)))
+}
+export async function openShareTarget(secret: BindKey, sealed: string): Promise<ShareTarget> {
+  if (!/^[A-Za-z0-9_-]{40,2048}$/.test(sealed)) throw new Error('Invalid shared link')
+  const bytes = fromB64url(sealed), key = await shareTargetKey(secret)
+  const clear = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes.slice(0, 12) }, key, bytes.slice(12))
+  const target = JSON.parse(new TextDecoder().decode(clear)) as ShareTarget
+  if (!/^[A-Za-z0-9_-]{43}$/.test(target.fp) || !/^\/(?:sim|view)\//.test(target.path) || target.path.length > 512 || target.path.includes('#')) throw new Error('Invalid shared scene')
+  return target
+}
+async function shareTargetKey(secret: BindKey) {
+  const base = await hkdfKey(secret, 'deriveKey')
+  return crypto.subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: enc.encode('obpal short link v2'), info: enc.encode('scene metadata') }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
 }
 
 /** Public room id: a hash of the secret, so the room service never learns the secret. */

@@ -39,10 +39,12 @@
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch.
  */
 import { tempScope, keepTemp } from './lib/temp.mjs'
-import { rm } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium, devices } from 'playwright'
+import { e2eBrowserOptions } from './lib/browser.mjs'
+import { settledWindow } from './lib/settled-window.mjs'
 import { cspCheck } from './csp-watch.mjs'
 import sharp from 'sharp'
 import { startLocal } from '../extension/e2e/local.mjs'
@@ -50,6 +52,11 @@ import { trayReading } from './lib/orientation.mjs'
 import { guardSiteButtons } from './lib/surface-buttons.mjs'
 import { runWarmup } from './e2e-warmup.mjs'
 import { runHomeField } from './e2e-home-field.mjs'
+import { runHomeContacts } from './e2e-home-contacts.mjs'
+import { runHomeMotion } from './e2e-home-motion.mjs'
+import { runHomeQr } from './e2e-home-qr.mjs'
+import { rawRun } from './lib/distill.mjs'
+import { startupProbe, startupPath, startupText, watchStartup } from './lib/home-startup.mjs'
 
 const temps = tempScope()
 try {
@@ -57,9 +64,11 @@ try {
 const HEADED = process.argv.includes('--headed')
 // The environment form also works through e2e:all, preserving its Desktop guard for an isolated check.
 const ONLY = process.argv.find((arg) => arg.startsWith('--only='))?.slice(7) || process.env.OBPAL_E2E_HOME_ONLY || ''
+// The field group retains the full run's control and graphics warm-up before measuring pacing.
+const FIELD_PROFILE = ONLY === 'viewport field'
 const ONLY_DONE = Symbol('only test finished')
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
-// Software WebGL for the hero's 3D field in headless runs.
+// Software WebGL by default; e2eBrowserOptions can opt into the measured Windows GPU path.
 const RTC_ARGS = ['--disable-features=WebRtcHideLocalIpsWithMdns', '--ignore-certificate-errors', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const median = (values) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]
@@ -119,8 +128,7 @@ async function settle(page, drive, least = 1.5, wall = 45000) {
     await drive()
     const { t, q } = await page.evaluate(() => ({ t: window.__home.tips().find((m) => m.id === 'me'), q: window.__home.sim() }))
     seen.push({ x: t.x, y: t.y, at: q.t })
-    const recent = seen.filter((p) => p.at >= q.t - 0.45)
-    if (q.t - t0 >= least && q.t - recent[0].at >= 0.4 && recent.every((p) => Math.hypot(p.x - t.x, p.y - t.y) < 0.3)) return t
+    if (q.t - t0 >= least && settledWindow(seen)) return t
     await sleep(110)
   }
   return me(page)
@@ -167,7 +175,9 @@ async function rimAt(page, wall, at, a) {
   return best
 }
 async function check(name, fn) {
-  if (ONLY && !name.includes(ONLY)) return
+  if (ONLY === 'remote') {
+    if (!/with nobody steering|a computer shows a code|a phone that opens the code|the phone's marble follows|the phone flicked upward|the phone held as a tray|a phone that leaves|no page errors on the computer|no Content Security Policy/.test(name)) return
+  } else if (ONLY && !FIELD_PROFILE && !name.includes(ONLY)) return
   try {
     const detail = await fn()
     results.push({ name, ok: true })
@@ -176,22 +186,26 @@ async function check(name, fn) {
     results.push({ name, ok: false })
     console.log(`  ✗ ${name}: ${e?.message ?? e}`)
   }
-  if (ONLY) throw ONLY_DONE
+  if (ONLY && ONLY !== 'remote' && !FIELD_PROFILE) throw ONLY_DONE
 }
 
 // OBPAL_E2E_PORT runs the stand-in elsewhere than its usual 5176, beside another run.
-const local = await startLocal({ port: Number(process.env.OBPAL_E2E_PORT) || undefined })
+const local = await startLocal({ port: Number(process.env.OBPAL_E2E_PORT) || undefined, dist: process.env.OBPAL_E2E_SITE_DIST })
 const browsers = []
 let profile = ''
 try {
   console.log('ob.Pal home e2e')
-  const browser = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
+  const browser = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED, args: RTC_ARGS }))
   browsers.push(browser)
-  if (!ONLY) await guardSiteButtons(browser, local.origin, [['home', '/']], check)
+  if (!ONLY || FIELD_PROFILE) await guardSiteButtons(browser, local.origin, [['home', '/']], check)
 
-  if (!ONLY || ONLY === 'warm-up') await runWarmup(local, check, { home: true })
+  if (!ONLY || ONLY === 'warm-up' || FIELD_PROFILE) await runWarmup(local, check, { home: true })
 
+  await runHomeContacts(browser, local, check)
+  await runHomeMotion(browser, local, check)
+  await runHomeQr(browser, local, check)
   await runHomeField(browser, local, check)
+  if (FIELD_PROFILE) throw ONLY_DONE
 
   await check('no sideways scroll on phone widths', async () => {
     const seen = []
@@ -748,12 +762,19 @@ try {
         // (below the headline, clear of the raised things and their sides), and down the column clear from there to
         // the bottom nearest the middle.
         const ways = await page.evaluate(() => {
-          const blocks = [...document.querySelectorAll('.hero .cta .btn, .hero [data-hint], .hero [data-sound], .hero .quick .qi, #hero-h')]
+          const blocks = [...document.querySelectorAll('.hero .cta .btn, .hero [data-hint], .field-controls .hero-sound, .hero .quick .qi, #hero-h')]
             .map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0).map((r) => ({ l: r.left, t: r.top, r: r.right, b: r.bottom + 16 }))
           const m = 16
           const free = (l, t, r, b) => blocks.every((q) => q.r < l || q.l > r || q.b < t || q.t > b)
           let row = NaN, col = NaN, down = NaN
           for (let y = innerHeight - 30; y >= 90 && Number.isNaN(row); y -= 1) if (free(0, y - m, innerWidth, y + m)) row = y
+          // A short landscape viewport may have no full-width lane. Test each wall from nearby clear floor.
+          const side = (left) => {
+            if (!Number.isNaN(row)) return [innerWidth / 2, row]
+            const x = left ? m * 1.5 : innerWidth - m * 1.5
+            for (let y = innerHeight - 30; y >= 90; y--) if (free(left ? 0 : x - m, y - m, left ? x + m : innerWidth, y + m)) return [x, y]
+            return [NaN, NaN]
+          }
           // The column down to the bottom: nearest the middle, starting as high up as it's clear.
           for (let k = 0; k < innerWidth / 2 && Number.isNaN(col); k += 2) {
             for (const x of [innerWidth / 2 + k, innerWidth / 2 - k]) {
@@ -762,7 +783,7 @@ try {
             }
           }
           // Start the downward press on the same open row: higher taps can land among the step labels and their raised icons.
-          return [['left', innerWidth / 2, row, 0, -16], ['right', innerWidth / 2, row, 0, 16], ['bottom', col, Math.max(down, row), 16, 0]]
+          return [['left', ...side(true), 0, -16], ['right', ...side(false), 0, 16], ['bottom', col, Math.min(innerHeight - 30, Number.isNaN(row) ? down + 32 : Math.max(down, row)), 16, 0]]
         })
         if (ways.some((w) => Number.isNaN(w[1]) || Number.isNaN(w[2]))) throw new Error(`${name}: no clear way to an edge: ${JSON.stringify(ways)}`)
         for (const [wall, x, y, down, right] of ways) {
@@ -782,9 +803,25 @@ try {
         await settle(page, () => tilt.tip(-14, 0))
         await measure('top')
       } else {
-        // Pointed at each edge: at the sides, at the bottom of what's on screen, and just under the bar at the top.
-        const a = (await page.evaluate(() => window.__home.outline('me'))).area
-        for (const [wall, x, y] of [['left', 2, a.bottom * 0.62], ['right', a.right - 2, a.bottom * 0.62], ['bottom', a.right * 0.72, a.bottom - 2], ['top', a.right * 0.72, a.top + 3]]) {
+        // Stage near each boundary: steering through the solid QR card would test that card, not the viewport wall.
+        const ways = await page.evaluate(() => {
+          const outline = window.__home.outline('me'), a = outline.area
+          const m = Math.ceil((outline.right - outline.left) / 2) + 8
+          const blocks = [...document.querySelectorAll('.hero .cta .btn, .hero [data-hint], .hero .pair, .field-controls .hero-sound, .hero .quick .qi, #hero-h')]
+            .map(el => el.getBoundingClientRect()).filter(r => r.width > 0)
+          const free = (l, t, r, b) => blocks.every(q => q.right < l || q.left > r || q.bottom + 16 < t || q.top > b)
+          const side = left => {
+            const x = left ? 2 * m : a.right - 2 * m
+            for (let y = a.bottom - m; y >= a.top + m; y--) if (free(left ? 0 : x - m, y - m, left ? x + m : a.right, y + m)) return [x, y]
+            return [NaN, NaN]
+          }
+          return [['left', ...side(true), 2, null], ['right', ...side(false), a.right - 2, null], ['bottom', 2 * m, a.bottom - 2 * m, 2 * m, a.bottom - 2], ['top', 2 * m, a.top + 2 * m, 2 * m, a.top + 3]]
+        })
+        for (const [wall, sx, sy, x, targetY] of ways) {
+          if (!Number.isFinite(sx) || !Number.isFinite(sy)) throw new Error(`${name}: no clear staging lane for ${wall}`)
+          await page.evaluate(([x, y]) => window.__home.drop(x, y), [sx, sy])
+          await simWait(page, 1.2)
+          const y = targetY ?? sy
           await settle(page, () => page.mouse.move(x + Math.random(), y))
           await measure(wall)
         }
@@ -905,9 +942,9 @@ try {
     await sleep(600)
     await page.locator('[data-hint]').tap()
     await page.evaluate(() => scrollTo(0, 0))
-    // The raised things: the buttons, the hint, the sound control and the three steps' icons.
+    // The raised things: the buttons, the hint, both dock controls and the three steps' icons.
     const pads = await page.evaluate(() => window.__home.pads())
-    if (pads.length !== 9 || pads.filter((t) => t === '').length !== 3 || !pads.includes('Scan a code') || !pads.includes('Share viewer link') || !pads.some((t) => /sound/i.test(t))) throw new Error(`raised things: ${JSON.stringify(pads)}`)
+    if (pads.length !== 10 || pads.filter((t) => t === '').length !== 3 || !pads.includes('Scan a code') || !pads.includes('Share viewer link') || !pads.includes('Marbles on') || !pads.some((t) => /sound/i.test(t))) throw new Error(`raised things: ${JSON.stringify(pads)}`)
     // A hand holding the phone: 60 readings a second, each a little off (±1°), and now and then a stray one (6° off).
     await page.evaluate(() => {
       let seed = 7
@@ -977,17 +1014,17 @@ try {
         if (s.drawn.dy < (name === '390x844' ? 3.5 : 7)) throw new Error(`${name}: "${s.text}" is drawn only ${s.drawn.dy} px tall`)
       }
       // The icons and the sound control: a glass top, and a side lighter than the floor's shadow below it.
-      const look = await page.evaluate(() => [...document.querySelectorAll('.hero .quick .qi, .hero [data-sound]')].map((el) => {
+      const look = await page.evaluate(() => [...document.querySelectorAll('.hero .quick .qi, .field-controls [data-sound], .field-controls [data-field-toggle]')].map((el) => {
         const r = el.getBoundingClientRect(), cs = getComputedStyle(el)
         const alpha = (cs.backgroundColor.match(/[\d.]+/g) ?? []).map(Number)[3] ?? 1
-        return { sound: el.matches('[data-sound]'), x: r.left, y: r.top, w: r.width, h: r.height, alpha, dy: parseFloat(el.style.getPropertyValue('--pad-dy')) || 0, dx: parseFloat(el.style.getPropertyValue('--pad-dx')) || 0, shadow: cs.boxShadow }
+        return { sound: el.matches('[data-sound]'), fixed: !!el.closest('.field-controls'), x: r.left, y: r.top, w: r.width, h: r.height, alpha, dy: parseFloat(el.style.getPropertyValue('--pad-dy')) || 0, dx: parseFloat(el.style.getPropertyValue('--pad-dx')) || 0, shadow: cs.boxShadow }
       }))
       const shot = await page.screenshot()
       const dpr = size.deviceScaleFactor ?? 1
       const { data, info } = await sharp(shot).raw().toBuffer({ resolveWithObject: true })
       const lum = (x0, y0, x1, y1) => {
         let sum = 0, n = 0
-        for (let y = Math.round(y0 * dpr); y < Math.round(y1 * dpr); y++) for (let x = Math.round(x0 * dpr); x < Math.round(x1 * dpr); x++) {
+        for (let y = Math.max(0, Math.round(y0 * dpr)); y < Math.min(info.height, Math.round(y1 * dpr)); y++) for (let x = Math.max(0, Math.round(x0 * dpr)); x < Math.min(info.width, Math.round(x1 * dpr)); x++) {
           const k = (y * info.width + x) * info.channels
           sum += 0.2126 * data[k] + 0.7152 * data[k + 1] + 0.0722 * data[k + 2]; n++
         }
@@ -1000,7 +1037,9 @@ try {
         // Its side: the band under its middle, as tall as it's drawn (leaning with it); the floor's shadow just under that.
         const mx = q.x + q.w * 0.3 + q.dx * 0.5, bw = q.w * 0.4
         const side = lum(mx, q.y + q.h + 1, mx + bw, q.y + q.h + q.dy - 1)
-        const floor = lum(mx + q.dx * 0.5, q.y + q.h + q.dy + 3, mx + q.dx * 0.5 + bw, q.y + q.h + q.dy + 7)
+        // The fixed stack's floor reference must clear its other button and stay inside the screenshot.
+        const floorX = q.fixed ? q.x - bw - 20 : mx + q.dx * 0.5
+        const floor = lum(floorX, q.y + q.h + q.dy + 3, floorX + bw, q.y + q.h + q.dy + 7)
         if (!(side > floor + 6)) throw new Error(`${name}: ${q.sound ? 'the sound control' : 'an icon'} shows no side (side ${side.toFixed(1)}, floor ${floor.toFixed(1)})`)
         sides.push(`${q.sound ? 'sound' : 'icon'} ${side.toFixed(0)}/${floor.toFixed(0)}`)
       }
@@ -1011,7 +1050,9 @@ try {
   })
 
   const screenCtx = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true })
+  await screenCtx.addInitScript(startupProbe)
   const screen = await screenCtx.newPage()
+  const hostStartup = watchStartup(screen)
   const screenErrors = []
   screen.on('pageerror', (e) => screenErrors.push(e.message))
   await screen.goto(`${local.origin}/`)
@@ -1038,6 +1079,7 @@ try {
   })
 
   let invite = ''
+  let inviteAt = 0
   await check('a computer shows a code once someone is there', async () => {
     const before = await screen.evaluate(() => !!document.querySelector('.obpal-chip'))
     if (before) throw new Error('a code was made before anyone moved')
@@ -1048,6 +1090,7 @@ try {
       const root = document.querySelector('[data-pair-slot] .obpal-chip')?.shadowRoot
       return root?.querySelector('.qr svg') ? root.querySelector('.here')?.href || '' : ''
     }), 20000)
+    inviteAt = Date.now()
     return new URL(invite).pathname
   })
 
@@ -1134,15 +1177,65 @@ try {
 
   const dir = await temps.make(join(tmpdir(), 'obpal-home-'))
   profile = dir
-  const phoneCtx = await chromium.launchPersistentContext(dir, { ...devices['Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS })
+  const phoneCtx = await chromium.launchPersistentContext(dir, e2eBrowserOptions({ ...devices['Pixel 7'], executablePath, headless: !HEADED, args: RTC_ARGS }))
   browsers.push(phoneCtx)
   const phone = phoneCtx.pages()[0] ?? (await phoneCtx.newPage())
+  await phoneCtx.addInitScript(startupProbe)
+  const phoneStartup = watchStartup(phone)
+  const throttle = Number(process.env.OBPAL_E2E_HOME_CPU_RATE || 1)
+  if (![1, 4].includes(throttle)) throw new Error('OBPAL_E2E_HOME_CPU_RATE must be 1 or 4')
+  if (throttle !== 1) await (await phoneCtx.newCDPSession(phone)).send('Emulation.setCPUThrottlingRate', { rate: throttle })
 
   await check('a phone that opens the code joins, and the hero goes live', async () => {
-    await phone.goto(invite)
-    await phone.locator('.modes').waitFor({ timeout: 25000 })
-    await until('the phone on the page', () => screen.evaluate(() => (window.__obpal?.participants.length ?? 0) === 1), 20000)
-    await until('the hero live', () => screen.evaluate(() => document.querySelector('.hero').hasAttribute('data-live')), 5000)
+    const started = Date.now(), inviteAgeMs = started - inviteAt
+    const evidence = process.env.OBPAL_E2E_EVIDENCE_ROOT
+    const capture = async (ok, error) => {
+      if (!evidence) return
+      await mkdir(evidence, { recursive: true })
+      const read = async (page) => {
+        try {
+          return await page.evaluate(() => ({ pathname: location.pathname, readyState: document.readyState,
+            visibleText: document.body.innerText, probes: window.__homeStartup,
+            marks: performance.getEntriesByType('mark').filter(m => m.name.startsWith('obpal:')).map(m => ({ name: m.name, startMs: m.startTime })) }))
+        } catch (error) { return { error: startupText(error.message) } }
+      }
+      const host = await screen.evaluate((captured) => ({
+        inviteMatches: document.querySelector('[data-pair-slot] .obpal-chip')?.shadowRoot?.querySelector('.here')?.href === captured,
+        participants: (window.__obpal?.participants ?? []).map(p => ({ lead: p.lead, since: p.since, paused: p.paused, controller: p.controller })),
+        participantCount: window.__obpal?.participants.length ?? null,
+        status: window.__obpal?.status,
+        live: document.querySelector('.hero')?.hasAttribute('data-live'), probes: window.__homeStartup,
+      }), invite).catch(error => ({ error: startupText(error.message) }))
+      const state = await read(phone)
+      if (state.visibleText) state.visibleText = startupText(state.visibleText)
+      state.pathname = startupPath(phone.url())
+      state.modesVisible = await phone.locator('.modes').isVisible().catch(() => null)
+      await writeFile(join(evidence, 'home-startup.json'), JSON.stringify({ ok, elapsedMs: Date.now() - started,
+        inviteAgeMs, cpuRate: throttle, error: error ? startupText(error.message) : undefined,
+        phone: { ...state, ...phoneStartup }, host: { ...host, ...hostStartup } }, null, 2) + '\n')
+      if (!ok) {
+        const raw = rawRun(evidence)
+        try {
+          // The finite QR-to-seal arrival can still contain invite modules; retain the startup text around it.
+          await phone.screenshot({ path: join(raw, 'startup.png'), mask: [phone.locator('input, a, .connection-seal, .qr')], timeout: 5000 })
+          await writeFile(join(evidence, 'evidence-frames.json'), JSON.stringify({ expectedCount: 1,
+            frames: [{ path: 'startup.png', timeMs: Date.now() - started, failed: true }] }) + '\n')
+        } catch (error) {
+          await writeFile(join(evidence, 'startup-screenshot-error.txt'), startupText(error.message) + '\n')
+        }
+      }
+    }
+    try {
+      await phone.goto(invite)
+      await phone.locator('.modes').waitFor({ timeout: 25000 })
+      await until('the phone on the page', () => screen.evaluate(() => (window.__obpal?.participants.length ?? 0) === 1), 20000)
+      await until('the hero live', () => screen.evaluate(() => document.querySelector('.hero').hasAttribute('data-live')), 5000)
+    } catch (error) {
+      // Save the first miss before the dependent checks can obscure the phone's startup state.
+      await capture(false, error)
+      throw new Error(startupText(error.message))
+    }
+    await capture(true)
     const hint = await screen.locator('[data-hint-text]').textContent()
     if (!/tilt your phone/i.test(hint ?? '')) throw new Error(`hint says "${hint}"`)
     // The sound button is there to switch the marbles' sound (it starts with a click on the page).
@@ -1153,6 +1246,9 @@ try {
   await check("the phone's marble follows it", async () => {
     const tip = () => screen.evaluate(() => window.__home.tips().find((t) => t.id !== 'me'))
     await until('a marble for the phone', tip, 5000)
+    // A paired phone must wake a field that has finished its opening and returned to idle sleep.
+    await until('the field at rest', () => screen.evaluate(() => !window.__home.sim().busy), 20000)
+    await sleep(3000)
     const before = await tip()
     // No motion sensors here, so the phone steers with its trackpad, as a real phone without a gyro does.
     const cdp = await phoneCtx.newCDPSession(phone)

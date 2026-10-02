@@ -9,6 +9,7 @@ import { cspCheck } from './csp-watch.mjs'
 import { modelProof } from './humanoid-model-proof.mjs'
 import { tendonProof } from './humanoid-tendon-proof.mjs'
 import { softProof } from './humanoid-soft-proof.mjs'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const assert = (ok, message) => {
@@ -105,7 +106,7 @@ export async function runHumanoid(local, check) {
     results: [],
     measurements: [],
   }
-  const browser = await chromium.launch({
+  const browser = await chromium.launch(e2eBrowserOptions({
     executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined,
     headless: !process.argv.includes('--headed'),
     args: [
@@ -116,7 +117,7 @@ export async function runHumanoid(local, check) {
       '--use-fake-device-for-media-stream',
       '--use-fake-ui-for-media-stream',
     ],
-  })
+  }))
   const contexts = [],
     pageErrors = []
   const run = async (name, fn) =>

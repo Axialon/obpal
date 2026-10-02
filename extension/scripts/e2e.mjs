@@ -63,6 +63,7 @@ import { chromium, devices } from 'playwright'
 import { nativePort } from '../e2e/native-port.mjs'
 import { startLocal, UPSTREAM } from '../e2e/local.mjs'
 import { visitLinkButtons, assertButtonInk } from '../../scripts/lib/surface-buttons.mjs'
+import { e2eBrowserOptions } from '../../scripts/lib/browser.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const HEADED = process.argv.includes('--headed')
@@ -111,7 +112,7 @@ async function check(name, fn) {
 // ---- the extension under test ---------------------------------------------------------------------------------
 
 const ext = await mkdtemp(join(tmpdir(), 'obpal-link-ext-'))
-await cp(join(root, 'dist'), ext, { recursive: true })
+await cp(process.env.OBPAL_E2E_EXTENSION_DIST || join(root, 'dist'), ext, { recursive: true })
 const manifestPath = join(ext, 'manifest.json')
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
 manifest.host_permissions = [...manifest.host_permissions, 'https://127.0.0.1/*']
@@ -220,7 +221,7 @@ function startHarness() {
 const page0 = await readFile(join(root, 'e2e', 'harness.html'))
 // /framed: the game page inside a full-size iframe from another origin (localhost vs 127.0.0.1), the way itch.io
 // and most game portals host games. Without "All sites" the extension can't reach into it.
-const local = await startLocal()
+const local = await startLocal({ dist: process.env.OBPAL_E2E_SITE_DIST })
 const base = `${local.origin}/__game`
 const gameOrigin = local.origin.replace('127.0.0.1', 'localhost')
 const framed = `<!doctype html><title>Framed game</title><style>html,body{margin:0;height:100%}iframe{border:0;width:100%;height:100%;display:block}</style><iframe src="${gameOrigin}/__game/" allow="gamepad"></iframe>`
@@ -235,20 +236,20 @@ const phoneProfile = await mkdtemp(join(tmpdir(), 'obpal-link-phone-'))
  * own host rules (the offline one) keeps just those.
  */
 const launchDesk = async (extra = []) => {
-  const ctx = await chromium.launchPersistentContext(profile, {
+  const ctx = await chromium.launchPersistentContext(profile, e2eBrowserOptions({
     executablePath,
     headless: !HEADED,
     args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`, ...RTC_ARGS, ...(extra.some((a) => a.startsWith('--host-resolver-rules')) ? [] : local.serviceArgs), ...extra],
     viewport: { width: 1280, height: 800 },
     deviceScaleFactor: 2,
-  })
+  }))
   await ctx.route('**/__game/**', (route) => route.fulfill({ contentType: 'text/html', body: new URL(route.request().url()).pathname.endsWith('/framed') ? framed : page0 }))
   return ctx
 }
 /** The phone: a persistent context too, so its service worker cache and its remembered screens survive. */
-const phoneCtx = await chromium.launchPersistentContext(phoneProfile, {
+const phoneCtx = await chromium.launchPersistentContext(phoneProfile, e2eBrowserOptions({
   ...devices['Pixel 7 landscape'], executablePath, headless: !HEADED, args: [...RTC_ARGS, '--ignore-certificate-errors'],
-})
+}))
 let desk = await launchDesk()
 
 async function openPopup(ctx) {
@@ -352,7 +353,79 @@ try {
   let page = desk.pages()[0] ?? (await desk.newPage())
   await page.goto(`${base}/`)
   const pairing = await until('pairing link', async () => (await linkOf(popup))?.url || '', 20000)
+  await check('popup and options show dot progress during reported startup and stop on completion', async () => {
+    const previous = await popup.evaluate(() => chrome.storage.session.get(['link', 'pc']))
+    const options = await desk.newPage()
+    const before = !!process.env.OBPAL_E2E_EXTENSION_DIST
+    try {
+      // This reported-state fixture owns PC status. The page's initial helper demand would overwrite it;
+      // permission and native-demand behavior use normal ports in the PC checks below.
+      await options.addInitScript(() => {
+        const connect = chrome.runtime.connect.bind(chrome.runtime)
+        chrome.runtime.connect = (...args) => args[0]?.name === 'obpal-link/pc-page'
+          ? connect({ name: 'obpal-link/e2e-reported-state' }) : connect(...args)
+      })
+      await options.goto(`chrome-extension://${id}/options.html`)
+      await options.waitForFunction(() => document.documentElement.classList.contains('settled'))
+      for (const width of [1280, 390]) {
+        await popup.setViewportSize({ width, height: 844 })
+        await options.setViewportSize({ width, height: 844 })
+        await popup.evaluate(previous => chrome.storage.session.set({ link: { ...previous.link, status: 'connecting' }, pc: { ...previous.pc, link: 'connecting' } }), previous)
+        await popup.waitForFunction(() => document.querySelector('#status')?.dataset.s === 'connecting')
+        if (!before) {
+          await popup.locator('#status .dot-loader').waitFor({ state: 'visible' })
+          await options.locator('#note .dot-loader').waitFor({ state: 'visible' })
+          const result = await popup.locator('#status .dot-loader').evaluate(el => ({ circles: el.children.length, label: el.getAttribute('aria-label'), rect: el.getBoundingClientRect().width }))
+          if (result.circles !== 3 || !result.label || result.rect < 16) throw new Error(JSON.stringify(result))
+        }
+        await shot(popup, `dot-loaders-popup-${width}`)
+        await shot(options, `dot-loaders-options-${width}`)
+      }
+      await popup.evaluate(previous => chrome.storage.session.set({ pc: { ...previous.pc, link: 'ready' } }), previous)
+      if (!before) await options.locator('#note .dot-loader').waitFor({ state: 'hidden' })
+      return before ? 'baseline status fixture; guarded copy' : 'reported state fixture; three labelled circles; both widths; guarded copy'
+    } finally {
+      await popup.evaluate(previous => chrome.storage.session.set(previous), previous)
+      await popup.setViewportSize({ width: 1280, height: 800 })
+      await options.close()
+    }
+  })
   let tabId = await popup.evaluate(async (b) => (await chrome.tabs.query({ url: `${b}/*` }))[0]?.id, base)
+  await check('This tab acknowledgement shows progress until the guarded reply completes', async () => {
+    // An extension tab stands in for the toolbar popup; report the real controlled tab once at startup.
+    await popup.addInitScript(base => {
+      if (sessionStorage.getItem('dot-tab-fixture')) return
+      const query = chrome.tabs.query.bind(chrome.tabs)
+      chrome.tabs.query = options => {
+        if (!options.active || !options.currentWindow) return query(options)
+        chrome.tabs.query = query
+        sessionStorage.setItem('dot-tab-fixture', 'done')
+        return query({ url: `${base}/*` })
+      }
+    }, base)
+    await popup.reload()
+    await popup.locator('#tab').waitFor({ state: 'visible' })
+    await until('This tab available', () => popup.locator('#tab').isEnabled())
+    await popup.evaluate(() => {
+      const send = chrome.runtime.sendMessage.bind(chrome.runtime)
+      chrome.runtime.sendMessage = (...args) => args[0]?.type === 'enable' ? new Promise(resolve => {
+        window.__releaseTab = () => { chrome.runtime.sendMessage = send; return send(...args).then(resolve) }
+      }) : send(...args)
+    })
+    try {
+      await popup.locator('#tab').click()
+      for (const width of [1280, 390]) {
+        await popup.setViewportSize({ width, height: 844 })
+        if (!process.env.OBPAL_E2E_EXTENSION_DIST) await popup.locator('#tab .dot-loader').waitFor({ state: 'visible' })
+        await shot(popup, `dot-loaders-tab-answer-${width}`)
+      }
+    } finally {
+      await popup.evaluate(() => window.__releaseTab?.())
+      await popup.setViewportSize({ width: 1280, height: 800 })
+    }
+    if (!process.env.OBPAL_E2E_EXTENSION_DIST) await popup.locator('#tab .dot-loader').waitFor({ state: 'hidden' })
+    return 'real guarded enable request; both widths; reply releases the busy state'
+  })
   await enable(popup, tabId)
   // The controlled tab is the one in front (as when a person clicks the toolbar icon on it): pages in background
   // tabs get no animation frames, and the Gamepad API connection events run on them.
@@ -402,7 +475,7 @@ try {
   })
 
   await check('the old QR link pairs nobody new: a second phone is told it was used, and the first stays connected', async () => {
-    stranger = await chromium.launch({ executablePath, headless: !HEADED, args: [...RTC_ARGS, '--ignore-certificate-errors'] })
+    stranger = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED, args: [...RTC_ARGS, '--ignore-certificate-errors'] }))
     const other = await (await stranger.newContext({ ...devices['Pixel 7 landscape'] })).newPage()
     await other.goto(onPhone(pairing))
     const said = await other.locator('.msg-card h1').filter({ hasText: 'This code was used' }).textContent({ timeout: 15000 })
@@ -708,12 +781,44 @@ try {
         await opts.locator('#ask:not([hidden])').waitFor({ timeout: 5000 })
         await sleep(700)
         await opts.screenshot({ path: join(SHOTS, 'ask-options-dark.png') })
+        const viewport = phone.viewportSize()
+        for (const width of [1280, 390]) {
+          await phone.setViewportSize({ width, height: 844 }); await opts.setViewportSize({ width, height: 844 })
+          await phone.bringToFront(); await sleep(200); await shot(phone, `dot-loaders-phone-approval-${width}`)
+          await opts.bringToFront(); await sleep(200); await shot(opts, `dot-loaders-options-approval-${width}`)
+        }
+        await phone.setViewportSize(viewport)
+        // Hold only this test page's answer message; the background and native stub remain disarmed.
+        await opts.evaluate(() => {
+          const send = chrome.runtime.sendMessage.bind(chrome.runtime)
+          chrome.runtime.sendMessage = (...args) => args[0]?.type === 'answer' ? new Promise(() => {}) : send(...args)
+        })
+        await opts.locator('#ask button[data-allow="false"]').click()
+        for (const width of [1280, 390]) {
+          await opts.setViewportSize({ width, height: 844 }); await sleep(200)
+          await shot(opts, `dot-loaders-options-answer-${width}`)
+          if (!process.env.OBPAL_E2E_EXTENSION_DIST && !await opts.locator('#ask .dot-loader:not([hidden])').isVisible()) throw new Error('answer acknowledgement has no dots')
+        }
         await opts.close()
         await page.bringToFront()
       }
       // Deny: kept, the prompt and the notification go, the helper stays disarmed, and the phone, which picked PC
       // itself, is back on the target it had.
-      await popup.locator('#ask button[data-allow="false"]').click()
+      if (SHOTS) {
+        await popup.evaluate(() => {
+          const send = chrome.runtime.sendMessage.bind(chrome.runtime)
+          chrome.runtime.sendMessage = (...args) => args[0]?.type === 'answer' ? new Promise(resolve => { window.__releaseAnswer = () => { chrome.runtime.sendMessage = send; return send(...args).then(resolve) } }) : send(...args)
+        })
+        await popup.locator('#ask button[data-allow="false"]').click()
+        const viewport = popup.viewportSize()
+        for (const width of [1280, 390]) {
+          await popup.setViewportSize({ width, height: 844 }); await sleep(200)
+          await shot(popup, `dot-loaders-popup-answer-${width}`)
+          if (!process.env.OBPAL_E2E_EXTENSION_DIST && !await popup.locator('#ask .dot-loader:not([hidden])').isVisible()) throw new Error('answer acknowledgement has no dots')
+        }
+        await popup.setViewportSize(viewport)
+        await popup.evaluate(() => window.__releaseAnswer())
+      } else await popup.locator('#ask button[data-allow="false"]').click()
       await until('the answer kept', async () => (await localOf(popup, 'answers'))?.[me.key]?.allow === false)
       await until('the prompt goes', () => popup.evaluate(() => document.getElementById('ask').hidden))
       await until('the notification goes', async () => !(await notified()).includes('obpal-ask'))

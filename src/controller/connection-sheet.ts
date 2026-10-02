@@ -1,6 +1,7 @@
 /** The phone's private list and scanner, built with DOM text under the controller's Trusted Types policy. */
 import { formatCode, lookupCode, splitCode, type StoredConnection } from '@obpal/core'
 import { Connections, type Connection, type Join } from './connections'
+import { dotLoading } from '../ui/kit/loading'
 import { pendingPhase, STILL_CONNECTING } from './pairing-recovery'
 import { CameraView } from '../ui/camera'
 import { readScan } from './scan-code'
@@ -127,7 +128,9 @@ export class ConnectionSheet {
     this.code()
   }
 
-  private tell(s: string) { if (this.say) this.say.textContent = s }
+  private tell(s: string) {
+    if (this.say) { this.say.textContent = s; this.say.classList.toggle('dot-wait-label', s === 'Saving…' || s === 'Finding your screen…') }
+  }
 
   private stopCamera() {
     const camera = this.scanner
@@ -151,9 +154,10 @@ export class ConnectionSheet {
     list.setAttribute('role', 'list')
     list.setAttribute('aria-label', 'Saved screens')
     list.setAttribute('aria-busy', String(this.hub.loading || this.hub.saving))
+    dotLoading(list, this.hub.loading || this.hub.saving, this.hub.saving ? 'Saving screens' : 'Opening screens', 32)
     for (const row of rows) list.append(this.entry(row))
-    if (!rows.length) list.append(h('p', 'connection-empty', this.hub.loading ? 'Loading screens…' : 'Your screens will appear here.'))
-    if (this.hub.saving) list.append(h('p', 'connection-saving', 'Saving…'))
+    if (!rows.length) list.append(h('p', 'connection-empty', this.hub.loading ? '' : 'Your screens will appear here.'))
+    if (this.hub.saving) list.append(h('p', 'connection-saving dot-wait-label', 'Saving…'))
     const tools = h('div', 'connection-actions')
     tools.append(button('Scan another code', () => this.scan(), 'btn primary'), button('Enter a code', () => this.code()))
     tools.children[0].setAttribute('aria-label', 'Scan another code')
@@ -190,7 +194,7 @@ export class ConnectionSheet {
     el.setAttribute('role', 'listitem')
     const use = button('', () => {
       if (needsCode) { this.hub.cancel(row.id); this.code(); return }
-      if (connecting) { this.tell(c.stillConnecting ? STILL_CONNECTING : 'Connecting… You can cancel this attempt.'); return }
+      if (connecting) { this.tell(c.stillConnecting ? STILL_CONNECTING : 'You can cancel this attempt.'); return }
       tick()
       void this.hub.use(row.id).then(c => this.follow(c), (e: Error) => this.tell(e.message))
     }, 'connection-use')
@@ -199,6 +203,7 @@ export class ConnectionSheet {
     const mark = symbol(live ? active ? 'check' : 'pause' : connecting ? 'more' : 'link', state)
     mark.classList.add('connection-mark')
     mark.dataset.pending = String(!!connecting)
+    if (connecting) { mark.replaceChildren(); dotLoading(mark, true, state) }
     const label = h('span', 'connection-label')
     label.append(h('b', '', row.name))
     const signals = h('span', 'connection-signals')
@@ -219,7 +224,7 @@ export class ConnectionSheet {
     signals.append(bars)
     label.append(signals)
     const detail = h('span', 'connection-detail')
-    detail.append(h('small', '', needsCode ? 'Enter current code' : state), h('small', 'connection-age', ago(row.at)))
+    detail.append(h('small', connecting ? 'dot-wait-label' : '', needsCode ? 'Enter current code' : state), h('small', 'connection-age', ago(row.at)))
     label.append(detail)
     const seal = h('span', 'connection-seal-slot')
     seal.dataset.connectionSeal = row.id
@@ -236,7 +241,7 @@ export class ConnectionSheet {
     el.append(use)
     if (c && !live) {
       const recovery = h('div', 'connection-recovery')
-      const progress = c.stillConnecting ? STILL_CONNECTING : 'Connecting… Keep the screen’s ob.Pal page open.'
+      const progress = c.stillConnecting ? STILL_CONNECTING : 'Keep the screen’s ob.Pal page open.'
       const state = h('p', 'connection-say', connecting ? c.link.status === 'unreachable' ? `ob.Pal is out of reach. ${progress}` : progress : this.refusal(c.failure ?? c.link.status))
       state.setAttribute('role', 'status')
       const actions = h('div', 'connection-actions')
@@ -293,6 +298,7 @@ export class ConnectionSheet {
       if (!input.value.trim() || save.disabled) return
       save.disabled = true
       form.setAttribute('aria-busy', 'true')
+      dotLoading(form, true, 'Saving the screen name')
       this.tell('Saving…')
       void this.hub.rename(row.id, input.value).then(() => {
         if (!form.isConnected) return
@@ -376,11 +382,14 @@ export class ConnectionSheet {
     const parts = parsed?.kind === 'short' ? splitCode(parsed.digits) : null
     if (!parts) { this.tell('Enter all ten digits, starting with 1–9.'); return }
     this.busy = true
+    const form = this.body?.querySelector('form')
+    if (form) dotLoading(form, true, 'Finding your screen')
     this.tell('Finding your screen…')
     const generation = this.generation
     const result = await lookupCode(location.origin, parts.handle)
     if (generation !== this.generation || !this.dialog) return
     this.busy = false
+    if (form) dotLoading(form, false)
     if ('room' in result) await this.join({ v: 'code', code: { ...parts, room: result.room, ticket: result.ticket } })
     else {
       if (result.error === 'slow-down') this.until = Date.now() + (result.retry ?? 60) * 1000

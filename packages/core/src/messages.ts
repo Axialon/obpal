@@ -95,7 +95,7 @@ export interface Caps {
 export interface PairGrant { id: string; key: string }
 
 /** Someone in a shared scene (CATALOGUE §5): a device, or the screen itself (id "host"). */
-export interface ScenePerson { id: string; name: string; color: string; lead?: boolean }
+export interface ScenePerson { id: string; name: string; color: string; lead?: boolean; role?: 'play' | 'watch'; seat?: string; simOnly?: boolean }
 
 /**
  * Something in a shared scene one participant at a time can control. `parent`: the node this one is part of (a joint
@@ -192,10 +192,11 @@ export type HostMsg =
 
 /** Signaling envelope exchanged with the room service (JSON over WebSocket). */
 export type SignalIn =
-  | { t: 'welcome'; id: string; role: 'host' | 'device'; host: boolean }
+  | { t: 'sharing'; play: boolean; watch: boolean; revision: number }
+  | { t: 'welcome'; id: string; role: 'host' | 'device'; host: boolean; sharing?: { play: boolean; watch: boolean } }
   /** leave: `clean` when the page closed its socket (it left); otherwise the socket was lost, which a peer connection may outlive. */
   | { t: 'peer'; ev: 'join' | 'leave'; id: string; role?: 'host' | 'device'; clean?: boolean }
-  | { t: 'sig'; from: string; d: SignalPayload }
+  | { t: 'sig'; from: string; d: SignalPayload; capability?: 'player' | 'watcher' }
   | { t: 'error'; code: string }
   /**
    * Short codes, to the host (PROTOCOL §2b). A new handle for this room (`code`, until `exp`); or `ev: 'used'`: a

@@ -17,6 +17,23 @@ export function cupSurface(x: number, z: number) {
   }
   return { height, gx: r ? slope * dx / r : 0, gz: r ? slope * z / r : 0 }
 }
+
+const lowerHull = Array.from({ length: 65 }, (_, i) => {
+  const angle = (i - 32) * Math.PI / 64
+  return { offset: Math.sin(angle), height: Math.cos(angle) }
+})
+/** Seat the whole sphere against the cup, including its 1 mm glass skin and curved lip. */
+export function marbleHeight(x: number, z: number, radius: number) {
+  const distance = Math.hypot(x - CUP.x, z)
+  if (distance >= CUP.outer + radius) return radius
+  let height = radius
+  for (const point of lowerHull) {
+    const r = Math.abs(distance + point.offset * radius)
+    const floor = cupSurface(CUP.x + r, 0).height + (r <= CUP.outer ? .001 : 0)
+    height = Math.max(height, floor + point.height * radius)
+  }
+  return height
+}
 interface Board extends Marble { marbles: Marble[]; tiltX: number; tiltZ: number; start: MarbleStart }
 export interface MarblePose { x: number; z: number; radius: number; rollX: number; rollZ: number }
 export interface BoardPose { tiltX: number; tiltZ: number; marbles: MarblePose[] }

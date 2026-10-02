@@ -5,7 +5,7 @@ import { axis, clamp, slopeOf, stick } from './input'
 import type { DeviceInput, DeviceSpec } from './types'
 import { planar } from '../vr/intent'
 import { FixedWorld } from '../physics/world'
-import { MarblerunAdapter, cupSurface } from '../physics/marblerun'
+import { MarblerunAdapter, marbleHeight } from '../physics/marblerun'
 import { startState } from './marblerun.start'
 
 export const MARBLERUN_SPEC: DeviceSpec = {
@@ -38,7 +38,7 @@ export const marblePitch = (m: Marble) => clamp((RUN.radius / m.radius) ** 0.65 
 const marbleMass = 2500 * 4 / 3 * Math.PI * RUN.radius ** 3
 export function marblePosition(n: number, m: Marble, tiltX: number, tiltZ: number): [number, number, number] {
   const rz = -tiltX * 0.08, rx = tiltZ * 0.08
-  const height = m.radius + cupSurface(m.x, m.z).height
+  const height = marbleHeight(m.x, m.z, m.radius)
   const x = m.x * Math.cos(rz) - height * Math.sin(rz), y = m.x * Math.sin(rz) + height * Math.cos(rz)
   return [n * 3.8 + x, 0.9 + y * Math.cos(rx) - m.z * Math.sin(rx), y * Math.sin(rx) + m.z * Math.cos(rx)]
 }
@@ -77,7 +77,7 @@ export class MarblerunLogic extends Machine {
         this.events.push({ unit: n, kind: 'score', text: `Finished in ${u.time.toFixed(2)} s` })
       }
     }))
-  private readonly world = new FixedWorld(this.adapter, { maxBodies: 6 })
+  private readonly world = new FixedWorld(this.adapter, { maxBodies: 14 })
   private simulated = this.adapter.capture()
   renderState() {
     const live = this.adapter.capture()

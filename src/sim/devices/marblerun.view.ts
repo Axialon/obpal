@@ -4,7 +4,7 @@ import { darkTitanium, gunmetal, carbon } from '../kit/surfaces'
 import { pov, tiledDeck } from '../kit/precision'
 import { batch, metal, plastic } from '../kit'
 import { MarblerunLogic, RUN, trackEnds } from './marblerun'
-import { CUP, cupSurface } from '../physics/marblerun'
+import { CUP, cupSurface, marbleHeight } from '../physics/marblerun'
 import { block, disc, playFrame, rod, showcase } from './parts'
 import type { Stage } from './stage'
 import { mats, wear, type DeviceView } from './view'
@@ -55,15 +55,16 @@ function boards(scene: THREE.Scene, logic: MarblerunLogic, count = 2) {
       return new THREE.Vector2(r, cupSurface(CUP.x + r, 0).height + .001)
     })
     const cupGlass = glass.clone(); cupGlass.side = THREE.DoubleSide
-    const cup = new THREE.Mesh(new THREE.LatheGeometry(profile, 64), cupGlass)
-    cup.name = 'glass-start-cup'; cup.position.x = CUP.x; board.add(cup)
+    const cup = new THREE.Mesh(new THREE.LatheGeometry(profile.reverse(), 64), cupGlass)
+    cup.name = 'glass-start-cup'; cup.position.x = CUP.x; cup.castShadow = cup.receiveShadow = true
+    board.add(contactSurface(cup, `board-${n}`))
     const marbles = [u, ...u.marbles].map((m, j) => {
       const material = sphereGlass.clone(); material.color.set(['#dea448', '#37b98c', '#9363d4'][j])
       const mesh = new THREE.Mesh(new THREE.SphereGeometry(m.radius, 24, 16), material)
       mesh.name = j ? `companion-marble-${j}` : 'marble'; mesh.castShadow = true
-      const ribbon = new THREE.Mesh(new THREE.TorusGeometry(m.radius * .97, m.radius * .065, 8, 32, Math.PI * 1.8), plastic(['#f4c36d', '#63e6ae', '#ba9bff'][j]))
+      const ribbon = new THREE.Mesh(new THREE.TorusGeometry(m.radius * .94, m.radius * .06, 8, 32, Math.PI * 1.8), plastic(['#f4c36d', '#63e6ae', '#ba9bff'][j]))
       ribbon.name = 'marble-colour-ribbon'; ribbon.rotation.y = .7; mesh.add(ribbon)
-      board.add(contactPart(mesh, mesh.name, { surface: `board-${n}` })); return mesh
+      board.add(contactPart(mesh, mesh.name, { surface: `board-${n}`, slope: true })); return mesh
     })
     for (const [x, color] of [[-1.16, '#d9a65e'], [1.16, '#91c76c']] as const) { const goal = new THREE.Mesh(new THREE.RingGeometry(0.1, 0.13, 32), plastic(color)); goal.rotation.x = -Math.PI / 2; goal.position.set(x, 0.045, 0); board.add(goal) }
     return { board, pieces, channels, cursor, marbles, light, u }
@@ -87,7 +88,8 @@ function boards(scene: THREE.Scene, logic: MarblerunLogic, count = 2) {
       }
       m.cursor.visible = !u.running; m.cursor.position.set((Math.round(u.cursorX) - 2) * RUN.cell, 0.14, (Math.round(u.cursorZ) - 2) * RUN.cell)
       pose.marbles.forEach((body, j) => {
-        m.marbles[j].position.set(body.x, body.radius + cupSurface(body.x, body.z).height, body.z)
+        if (!m.marbles[j]) return
+        m.marbles[j].position.set(body.x, marbleHeight(body.x, body.z, body.radius), body.z)
         m.marbles[j].rotation.set(body.rollX, 0, body.rollZ)
       })
     })

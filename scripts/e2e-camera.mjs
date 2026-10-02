@@ -18,6 +18,7 @@ import { setSurface } from './lib/frost.mjs'
 import { startWorker } from './local-worker.mjs'
 import { cameraDesign } from './e2e-camera-design.mjs'
 import { cameraBody } from './e2e-body.mjs'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 
 const temps = tempScope()
 try {
@@ -52,9 +53,9 @@ async function free(port) {
   })
 }
 
-/** A grayscale QR frame with a quiet zone. Chromium loops the one-frame Y4M file at its declared cadence. */
+/** A portrait QR frame keeps its quiet zone inside the phone's cover crop. Chromium loops the Y4M at its declared cadence. */
 async function videoFixture(file, text) {
-  const qr = encode(text, { ecc: 'M', border: 4 }), width = 640, height = 480
+  const qr = encode(text, { ecc: 'M', border: 4 }), width = 640, height = 960
   const unit = Math.floor(420 / qr.size), left = Math.floor((width - qr.size * unit) / 2), top = Math.floor((height - qr.size * unit) / 2)
   need(unit >= 3, 'The QR fixture is too dense for the capture size')
   const y = Buffer.alloc(width * height, 235)
@@ -164,6 +165,7 @@ const results = [], errors = [], modelRequests = [], browsers = []
 const report = { environment: headed ? 'PC headed Chromium' : 'PC headless Chromium', warning: 'PC fixture measurements are not phone camera or mobile inference evidence.', results, measurements: {} }
 let directory, worker, phone, screen, origin
 async function check(name, run) {
+  if (process.env.OBPAL_E2E_CAMERA_ONLY && !new RegExp(process.env.OBPAL_E2E_CAMERA_ONLY).test(name)) return
   try {
     const detail = await run()
     results.push({ name, ok: true, detail: detail ?? '' })
@@ -180,7 +182,7 @@ function watch(context, name) {
   })
 }
 async function cameraBrowser(file, fakePermission = true) {
-  const browser = await chromium.launch({ executablePath, headless: !headed, args: [...args, '--use-fake-device-for-media-stream=fps=60', ...(fakePermission ? ['--use-fake-ui-for-media-stream'] : []), `--use-file-for-fake-video-capture=${file}`] })
+  const browser = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !headed, args: [...args, '--use-fake-device-for-media-stream=fps=60', ...(fakePermission ? ['--use-fake-ui-for-media-stream'] : []), `--use-file-for-fake-video-capture=${file}`] }))
   browsers.push(browser)
   return browser
 }
@@ -211,7 +213,7 @@ try {
   console.log('ob.Pal camera e2e')
   console.log('This suite loads neither Link nor Desktop')
   worker = await startWorker({ port: localWorker }); origin = worker.origin
-  const browser = await chromium.launch({ executablePath, headless: !headed, args })
+  const browser = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !headed, args }))
   browsers.push(browser)
   const screenContext = await browser.newContext({ viewport: { width: 1280, height: 800 } })
   watch(screenContext, 'Viewer')
@@ -286,6 +288,7 @@ try {
   })
 
   await check('denied camera permission offers a working typed-code fallback', async () => {
+    const before = await screen.evaluate(() => window.__obpal.participants.length)
     const camera = await cameraBrowser(rejectedFile, false), context = await camera.newContext(mobile)
     watch(context, 'denied camera'); await context.addInitScript(probeCamera)
     const page = await context.newPage(), cdp = await context.newCDPSession(page)
@@ -311,7 +314,7 @@ try {
       const code = await until('fresh host code', () => screen.evaluate(() => window.__obpal.code || ''))
       await page.getByRole('textbox', { name: 'Code from your screen' }).fill(code)
       await page.locator('.modes').waitFor({ timeout: 20000 })
-      await until('typed phone joined the Viewer', () => screen.evaluate(() => window.__obpal.participants.length >= 2))
+      await until('typed phone joined the Viewer', () => screen.evaluate(before => window.__obpal.participants.length > before, before))
       report.measurements.denied = { method: permission }
       return `${permission}; typed code paired successfully`
     } finally { await context.close() }
@@ -483,8 +486,13 @@ try {
   await check('Content Security Policy', cspCheck)
 } catch (error) {
   results.push({ name: 'camera suite setup', ok: false, error: error?.message ?? String(error) })
+  if (screen && directory) {
+    report.setup = await screen.evaluate(() => ({ ready: document.readyState, viewer: !!window.__viewer, remote: !!window.__obpal, text: document.body.innerText.slice(-2000) })).catch(() => null)
+    await screen.screenshot({ path: join(directory, 'setup-failure.png') }).catch(() => {})
+  }
   console.error(error?.stack ?? error)
 } finally {
+  report.pageErrors = errors
   for (const browser of browsers.reverse()) await browser.close().catch(() => {})
   await worker?.close()
   if (directory) {

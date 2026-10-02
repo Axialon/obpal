@@ -19,6 +19,7 @@ import { chromium, devices } from 'playwright'
 import { cspCheck } from './csp-watch.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
 import { startWorker } from './local-worker.mjs'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 
 const HEADED = process.argv.includes('--headed')
 const SHOTS = process.env.OBPAL_SHOTS || ''
@@ -56,7 +57,7 @@ async function check(name, fn) {
 
 const worker = await startWorker({ port: Number(process.env.OBPAL_E2E_WORKER_PORT) || 5189 })
 const local = await startLocal({ port: PORT, upstream: worker.origin })
-const browser = await chromium.launch({ executablePath, headless: !HEADED, args: RTC_ARGS })
+const browser = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED, args: RTC_ARGS }))
 let exitCode = 0
 try {
   console.log(`ob.Pal embed e2e (${local.origin})`)

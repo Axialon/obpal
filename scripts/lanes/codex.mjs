@@ -5,9 +5,10 @@ import { tmpdir } from 'node:os'
 import { join, resolve, dirname, delimiter, relative } from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
-import { allocatePorts, STAND_INS, WORKERS, portFree, withLedger, parseEvents, laneState, matchesLane, stopTrees, guardCleanup, removeLaneTree, sleep, codexArgs } from './lib.mjs'
+import { cleanupLane, allocatePorts, STAND_INS, WORKERS, portFree, withLedger, parseEvents, laneState, matchesLane, stopTrees, guardCleanup, removeLaneTree, codexArgs, waitLane, stopFinalLane } from './lib.mjs'
 import { formatTable, formatDuration } from '../lib/report.mjs'
 import { freeGb, settings } from '../lib/maintenance.mjs'
+import { preserveLaneEvidence, verifyLaneArchive } from '../lib/evidence-archive.mjs'
 import { digestLane } from './digest.mjs'
 
 const root = resolve(fileURLToPath(new URL('../..', import.meta.url)))
@@ -21,7 +22,7 @@ const help = `pnpm run lane -- <command>
 start <name> --prompt <file> [--model gpt-6.1-sol] [--effort high|xhigh] [--ports auto|a/b] [--base master] [--blender] [--search] [--extra-dir <dir>]
 resume <name> --prompt <file> [--model <model>] [--effort <effort>]
 status [name] [--json] | digest <name> | wait <name> [--timeout <minutes>] | stop <name> [--dry-run]
-cleanup <name> [--force] [--discard-artifacts] | ports | brief`
+cleanup <name> [--force] [--discard-artifacts] [--full-artifacts] | ports | brief`
 
 function options(argv) {
   const positional = [], opts = { extraDirs: [] }
@@ -30,7 +31,7 @@ function options(argv) {
     if (arg === '--') continue
     if (!arg.startsWith('--')) { positional.push(arg); continue }
     const key = arg.slice(2)
-    if (['json', 'dry-run', 'force', 'blender', 'search', 'help', 'discard-artifacts'].includes(key)) { opts[key] = true; continue }
+    if (['json', 'dry-run', 'force', 'blender', 'search', 'help', 'discard-artifacts', 'full-artifacts'].includes(key)) { opts[key] = true; continue }
     if (!['prompt', 'model', 'effort', 'ports', 'base', 'extra-dir', 'timeout'].includes(key)) throw new Error(`Unknown option ${arg}`)
     const value = argv[++i]
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${arg}`)
@@ -103,6 +104,17 @@ function snapshot(lane, all, inventory) {
   return { name: lane.name, state: lane.cleanedAt ? 'stopped' : laneState({ final: Boolean(final.trim()), failed, stopped: round.stoppedAt, alive, lastEventAt, startedAt: Date.parse(round.startedAt), now, stallMinutes: Number(process.env.OBPAL_LANE_STALL_MINUTES || 20) }), model: lane.model, age: formatDuration(now - Date.parse(round.startedAt)), lastEventAge: lastEventAt ? formatDuration(now - lastEventAt) : '-', eventCount: events.count, message: events.message.replace(/\s+/g, ' ').slice(-120), alive, ports: lane.cleanedAt ? '-' : `${lane.ports.standIn}/${lane.ports.worker}`, final, failed }
 }
 
+async function stopLingeringFinal(lane, ledger) {
+  await stopFinalLane(lane, ledger.lanes, {
+    inventory: processes,
+    status: inventory => snapshot(lane, ledger.lanes, inventory),
+    kill({ root: target, tree }) {
+      if (win) execFileSync('taskkill.exe', ['/PID', String(target.pid), '/T', '/F'], { stdio: 'pipe', windowsHide: true })
+      else for (const p of [...tree].reverse()) process.kill(p.pid, 'SIGTERM')
+    },
+  })
+}
+
 const headers = ['lane', 'state', 'model', 'age', 'last event', 'events', 'last message', 'alive', 'ports']
 const cells = row => [row.name, row.state, row.model, row.age, row.lastEventAge, row.eventCount, row.message, row.alive ? 'yes' : 'no', row.ports]
 async function statuses(name) {
@@ -128,11 +140,11 @@ async function launch(ledger, lane, opts, cfg, resume) {
   const number = lane.rounds.length + 1
   const prefix = join(local, `${lane.name}-r${number}`)
   const round = { number, prompt: `${prefix}-prompt.md`, events: `${prefix}-events.jsonl`, final: `${prefix}-final.md`, err: `${prefix}-err.log`, exit: `${prefix}-exit.json`, startedAt: new Date().toISOString() }
-  const header = `Worktree: ${lane.worktree}\nBranch: ${lane.branch}. Follow AGENTS.md and $obpal-develop.\nPorts: stand-in ${lane.ports.standIn}, worker ${lane.ports.worker}.\nInstall: pnpm install --frozen-lockfile --store-dir "$TEMP/pnpm-store-obpal" (PowerShell: "$env:TEMP/pnpm-store-obpal").\n\n`
+  const header = `Worktree: ${lane.worktree}\nBranch: ${lane.branch}. Follow AGENTS.md and $obpal-develop.\nPorts: stand-in ${lane.ports.standIn}, worker ${lane.ports.worker}.\nInstall: pnpm install --frozen-lockfile --store-dir "$TEMP/pnpm-store-obpal" (PowerShell: "$env:TEMP/pnpm-store-obpal").\nRequired validation: pnpm run suites -- master prints the suites selected from changed paths. Run that set through pnpm run e2e:all with your assigned ports, alongside pnpm run check; record any explicit brief override. Distil evidence by default; raw frames belong in TEMP.\n\n`
   writeFileSync(round.prompt, header + prompt)
   writeFileSync(round.events, '')
   writeFileSync(round.err, '')
-  const env = { OBPAL_E2E_CHROMIUM: cfg.chromiumPath, BLENDER: lane.blender ? cfg.blenderPath : '', OBPAL_E2E_PORT: String(lane.ports.standIn), OBPAL_E2E_WORKER_PORT: String(lane.ports.worker) }
+  const env = { OBPAL_E2E_GPU: process.env.OBPAL_E2E_GPU ?? '1', OBPAL_E2E_CHROMIUM: cfg.chromiumPath, BLENDER: lane.blender ? cfg.blenderPath : '', OBPAL_E2E_PORT: String(lane.ports.standIn), OBPAL_E2E_WORKER_PORT: String(lane.ports.worker) }
   const job = { ...round, executable: binary, args: codexArgs(lane, round, roots, env, resume), worktree: lane.worktree, ledgerFile, name: lane.name }
   const jobFile = `${prefix}-job.json`
   writeFileSync(jobFile, JSON.stringify(job, null, 2) + '\n', { mode: 0o600 })
@@ -171,8 +183,9 @@ async function main() {
         await launch(ledger, { name, worktree, branch: `codex/${name}`, ports, model: opts.model || 'gpt-6.1-sol', effort: opts.effort || 'high', blender: Boolean(opts.blender), search: Boolean(opts.search), extraDirs: opts.extraDirs, rounds: [], createdAt: new Date().toISOString(), threadId: null }, opts, cfg, false)
       } else {
         const lane = find(ledger, name)
+        if (!lane.cleanedAt && !lane.cleaningAt) await stopLingeringFinal(lane, ledger)
         const state = snapshot(lane, ledger.lanes, processes())
-        if (lane.cleanedAt || state.alive) throw new Error('Cannot resume a cleaned or live lane; stop it first')
+        if (lane.cleanedAt || lane.cleaningAt || state.alive) throw new Error('Cannot resume a cleaned or live lane; stop it first')
         if (!lane.threadId) throw new Error('No thread.started event was recorded')
         guardCleanup(base, lane.worktree)
         lane.model = opts.model || lane.model
@@ -194,25 +207,11 @@ async function main() {
   } else if (command === 'wait') {
     const minutes = Number(opts.timeout || 60)
     if (!Number.isFinite(minutes) || minutes <= 0) throw new Error('Timeout must be positive minutes')
-    const deadline = Date.now() + minutes * 60_000
-    for (;;) {
-      // A long cleanup (archiving a lane's evidence) can hold the ledger past the lock timeout; a waiter keeps waiting.
-      let row
-      try { [row] = await statuses(name) }
-      catch (error) {
-        if (!/ledger is locked/.test(error.message) || Date.now() >= deadline) throw error
-        await sleep(5000); continue
-      }
-      if (row.state !== 'running') {
-        console.log(formatTable(headers, [cells(row)]))
-        if (row.failed) console.log(row.failed)
-        if (row.final) console.log('\n' + row.final)
-        if (row.state !== 'final') process.exitCode = 1
-        return
-      }
-      if (Date.now() >= deadline) throw new Error(`Wait timed out after ${minutes} minutes; lane continues running`)
-      await sleep(2000)
-    }
+    const row = await waitLane(async () => (await statuses(name))[0], minutes)
+    console.log(formatTable(headers, [cells(row)]))
+    if (row.failed) console.log(row.failed)
+    if (row.final) console.log('\n' + row.final)
+    if (row.state !== 'final') process.exitCode = 1
   } else if (command === 'ports') {
     await withLedger(ledgerFile, async ledger => {
       console.log(formatTable(['lane', 'stand-in', 'worker'], ledger.lanes.filter(l => !l.cleanedAt).map(l => [l.name, l.ports.standIn, l.ports.worker])))
@@ -223,6 +222,30 @@ async function main() {
         console.log(`${label}: free ${free.join(', ') || 'none'}; allocated/busy ${busy.join(', ') || 'none'}`)
       }
     })
+  } else if (command === 'cleanup') {
+    await cleanupLane(ledgerFile, name, {
+      async prepare(lane, ledger) {
+        await stopLingeringFinal(lane, ledger)
+        const row = snapshot(lane, ledger.lanes, processes())
+        if (row.alive) throw new Error('Stop the lane before cleanup')
+        const target = guardCleanup(base, lane.worktree)
+        if (lane.branch !== `codex/${lane.name}` || target !== join(base, `codex-${lane.name}`)) throw new Error('Ledger branch/path does not match lane identity')
+        if (!opts.force) {
+          try { git(['merge-base', '--is-ancestor', lane.branch, 'master']) } catch { throw new Error('Branch is not merged into master; use --force only to discard it') }
+          if (existsSync(target) && execFileSync('git', ['status', '--porcelain'], { cwd: target, encoding: 'utf8', windowsHide: true }).trim()) throw new Error('Worktree is dirty; commit it or explicitly discard with --force')
+        }
+        const nested = git(['worktree', 'list', '--porcelain']).split('\n').filter(l => l.startsWith('worktree ')).map(l => l.slice(9)).filter(p => p !== target && relative(target, p) && !relative(target, p).startsWith('..') && !relative(target, p).includes(':'))
+        if (nested.length) throw new Error('Clean up registered nested worktrees individually first')
+      },
+      archive: lane => preserveLaneEvidence(lane.worktree, { discardArtifacts: Boolean(opts['discard-artifacts']), fullArtifacts: Boolean(opts['full-artifacts']), maintenance: settings(root), laneName: lane.name }),
+      alive: (lane, ledger) => snapshot(lane, ledger.lanes, processes()).alive,
+      remove(lane, archive) {
+        verifyLaneArchive(lane.worktree, archive)
+        removeLaneTree(base, lane.worktree, { preserve: () => archive })
+      },
+      finish: () => git(['worktree', 'prune', '--expire', 'now']),
+    })
+    console.log(`Cleaned ${name}; ports released; branch retained. Review pnpm run reap -- --dry-run for further cleanup.`)
   } else await withLedger(ledgerFile, async ledger => {
     const lane = find(ledger, name)
     const inventory = processes()
@@ -244,21 +267,6 @@ async function main() {
         if (!trees.length && row.alive) throw new Error('Supervisor is live but no safe Codex match yet; retry shortly')
         lane.rounds.at(-1).stoppedAt = new Date().toISOString()
       }
-    } else {
-      if (row.alive) throw new Error('Stop the lane before cleanup')
-      const target = guardCleanup(base, lane.worktree)
-      if (lane.branch !== `codex/${lane.name}` || target !== join(base, `codex-${lane.name}`)) throw new Error('Ledger branch/path does not match lane identity')
-      if (lane.cleanedAt) { console.log(`${name} already cleaned`); return }
-      if (!opts.force) {
-        try { git(['merge-base', '--is-ancestor', lane.branch, 'master']) } catch { throw new Error('Branch is not merged into master; use --force only to discard it') }
-        if (existsSync(target) && execFileSync('git', ['status', '--porcelain'], { cwd: target, encoding: 'utf8', windowsHide: true }).trim()) throw new Error('Worktree is dirty; commit it or explicitly discard with --force')
-      }
-      const nested = git(['worktree', 'list', '--porcelain']).split('\n').filter(l => l.startsWith('worktree ')).map(l => l.slice(9)).filter(p => p !== target && relative(target, p) && !relative(target, p).startsWith('..') && !relative(target, p).includes(':'))
-      if (nested.length) throw new Error('Clean up registered nested worktrees individually first')
-      removeLaneTree(base, target, { discardArtifacts: Boolean(opts['discard-artifacts']), maintenance: settings(root), laneName: lane.name })
-      git(['worktree', 'prune', '--expire', 'now'])
-      lane.cleanedAt = new Date().toISOString()
-      console.log(`Cleaned ${name}; ports released; branch retained. Review pnpm run reap -- --dry-run for further cleanup.`)
     }
   })
 }

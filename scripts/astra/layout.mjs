@@ -1,12 +1,12 @@
 /** Keep upload files loose and all completed exchanges in folders. Moves never replace existing files. */
-import { existsSync, lstatSync, mkdirSync, readdirSync, renameSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, renameSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import { loadArchive, stageId } from './common.mjs'
 import { plainDirectory } from '../lib/maintenance.mjs'
 
-const OUTBOX_README = '# Astra outbox\n\nLoose files are the current upload: the newest Request ZIP and prompt, its latest verification Return ZIP and prompt, and UPLOAD-THIS-<stage>.prompt.txt.\n\nsent/<stage>/ holds earlier or already uploaded exchanges. archive/dry-run/ holds synthetic exchanges; archive/superseded/ holds older versions and unclassified notes. Nothing is deleted. Run pnpm run astra:tidy -- --dry-run to preview moves.\n'
-const INBOX_README = '# Astra inbox\n\nLoose stage ZIPs await intake. Intake moves accepted ZIPs to processed/<stage>/ and refused ZIPs to refused/<stage>/. Refusal Returns stay beside the retained exchanges in outbox/sent/<stage>/. Nothing is deleted.\n'
+export const OUTBOX_README = '# Astra outbox\n\nLoose files are the current upload: the newest Request ZIP and prompt, an explicitly attached Return ZIP and prompt, and UPLOAD-THIS-<stage>.prompt.txt naming the ZIPs to upload together.\n\nVerification writes its Return ZIP and prompt to held/<stage>/ without an upload prompt. Build the next request with pnpm run astra:pack -- --stage <next> --task <brief.md> --attach <held-return.zip>; upload both named ZIPs and paste UPLOAD-THIS once. Astra folds the prior verification into the next stage in one turn.\n\nsent/<stage>/ holds earlier or already uploaded exchanges. archive/dry-run/ holds synthetic exchanges; archive/superseded/ holds older versions and unclassified notes. Nothing is deleted. Run pnpm run astra:tidy -- --dry-run to preview moves.\n'
+export const INBOX_README = '# Astra inbox\n\nLoose stage ZIPs await intake. Intake moves accepted ZIPs to processed/<stage>/ and refused ZIPs to refused/<stage>/. Refusal Returns stay beside the retained exchanges in outbox/sent/<stage>/. Verification Returns wait in outbox/held/<stage>/ until the next astra:pack --attach <held-return.zip> copies one into the upload set. Upload it with the new Request and paste UPLOAD-THIS once. Nothing is deleted.\n'
 export function ensureLayout(outbox, { dryRun = false } = {}) {
   const inbox = join(dirname(resolve(outbox)), 'inbox')
   plainDirectory(outbox); plainDirectory(inbox)
@@ -49,15 +49,35 @@ export function tidyOutbox(outbox, { currentStage, dryRun = false } = {}) {
   const returned = newest(files.filter(file => file.kind === 'Return' && file.zip))
   currentStage ??= request?.stage || returned?.stage
   const currentRequest = newest(files.filter(file => file.stage === currentStage && file.kind === 'Request' && file.zip))
-  const currentReturn = newest(files.filter(file => file.stage === currentStage && file.kind === 'Return' && file.zip))
+  const marker = files.find(file => file.stage === currentStage && file.kind === 'marker')
+  const upload = marker ? readFileSync(marker.path, 'utf8') : ''
+  const currentReturn = newest(files.filter(file => file.kind === 'Return' && file.zip && (file.stage === currentStage || upload.includes(basename(file.path)))))
   const moves = []
   for (const file of files) {
     const dry = /(?:^|-)(?:dry-run|dryrun)(?:-|$)/.test(file.stage)
-    if (!dry && file.stage === currentStage && (file.stem === currentRequest?.stem || file.stem === currentReturn?.stem || file.kind === 'marker')) continue
+    if (!dry && (file.stem === currentReturn?.stem || file.stage === currentStage && (file.stem === currentRequest?.stem || file.kind === 'marker'))) continue
     const group = dry ? ['archive', 'dry-run'] : file.stage === currentStage || file.stage === 'unclassified' ? ['archive', 'superseded'] : ['sent']
     moves.push(movePreserving(file.path, join(outbox, ...group, file.stage, basename(file.path)), { dryRun }))
   }
   return moves
+}
+/** Validate a held result before changing the current upload; keep the held original intact. */
+export function heldReturn(outbox, path) {
+  if (lstatSync(path).isSymbolicLink()) throw new Error('--attach requires a regular held Return ZIP')
+  plainDirectory(dirname(resolve(path)))
+  const returned = loadArchive(path)
+  if (returned.manifest.kind !== 'result') throw new Error('--attach requires a held Return ZIP')
+  const folder = join(resolve(outbox), 'held', stageId(returned.manifest.stage))
+  plainDirectory(folder)
+  if (dirname(resolve(path)) !== folder) throw new Error('--attach requires a Return in outbox/held/<stage>/')
+  if (exchangeInfo(path).kind !== 'Return') throw new Error('--attach requires a named held Return ZIP')
+  const prompt = path.replace(/\.zip$/, '.prompt.txt')
+  if (!path.endsWith('.zip') || !existsSync(prompt) || lstatSync(prompt).isSymbolicLink()) throw new Error('Held Return prompt is missing or linked')
+  return { path, prompt, stage: returned.manifest.stage }
+}
+export function copyHeldReturn(outbox, returned) {
+  for (const source of [returned.path, returned.prompt]) copyFileSync(source, join(outbox, basename(source)), constants.COPYFILE_EXCL)
+  return basename(returned.path)
 }
 export function prepareRequest(outbox, stage) {
   stageId(stage); ensureLayout(outbox)

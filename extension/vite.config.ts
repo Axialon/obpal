@@ -3,7 +3,7 @@
  *  - popup.html, options.html, offscreen.html and the module service worker (background.js) from one multi-entry build,
  *  - the classic scripts as self-contained IIFEs, one build each: the content scripts (bridge.js, page.js) and the
  *    options page's first-paint script (first-paint.js, which puts the last look on before the page is drawn),
- *  - manifest.json and PNG action icons rendered from public/favicon.svg, and the bundled fonts' licences,
+ *  - manifest.json and PNG action icons rendered from public/logo-mark.svg, and the bundled fonts' licences,
  * then checks that the manifest is MV3 and every file it (or a page) references exists.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs'

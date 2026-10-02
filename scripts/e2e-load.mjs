@@ -15,6 +15,7 @@
  */
 import { readFile } from 'node:fs/promises'
 import { chromium } from 'playwright'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 async function until(what, fn, timeout = 10000, every = 50) {
@@ -34,7 +35,15 @@ const arms = [...table.match(/ARM_MODELS[^=]*= \[([^\]]*)\]/)[1].matchAll(/'([a-
 export const LOAD_SIMS = [...arms, ...devices]
 
 export async function runLoad(local, check, { executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined } = {}) {
-  const browser = await chromium.launch({ executablePath, headless: true })
+  const runCheck = check
+  check = (name, run) => process.env.OBPAL_E2E_LOAD_ONLY && !new RegExp(process.env.OBPAL_E2E_LOAD_ONLY).test(name) ? undefined : runCheck(name, run)
+  const launch = () => chromium.launch(e2eBrowserOptions({ executablePath, headless: true }))
+  let browser
+  const freshBrowser = async () => {
+    if (browser && process.env.OBPAL_E2E_GPU !== '1') return
+    await browser?.close()
+    browser = await launch()
+  }
   try {
     /**
      * A page on `path`, with the mesh's request handled by `mode`: { abort } refuses it; { hold: ms } lets it go that
@@ -42,6 +51,8 @@ export async function runLoad(local, check, { executablePath = process.env.OBPAL
      * options for the browser context.
      */
     async function open(path, model, mode = {}) {
+      // GPU cold-load cases bound their browser's network lifetime; software keeps its original reuse.
+      await freshBrowser()
       const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true, ...mode.context })
       // Whether the pill was ever up, whatever moment the test looks.
       await context.addInitScript(() => {
@@ -53,14 +64,22 @@ export async function runLoad(local, check, { executablePath = process.env.OBPAL
       else if (mode.hold || mode.wait) await context.route(`**/models/${model}.glb`, async (route) => {
         if (mode.hold) await until('the sim to hold its rig', () => page.evaluate((ready) => window.__rigs?.().created > 0 && (!ready || !!window.__device?.logic), !!mode.ready).catch(() => false), 30000).catch(() => {})
         await sleep(mode.hold ?? mode.wait)
-        await route.continue()
+        await route.continue().catch(error => { if (!page.isClosed()) throw error })
       })
-      const errors = []
+      const errors = [], requests = []
       page.on('pageerror', (e) => errors.push(e.message))
-      await page.goto(`${local.origin}${path}${path.includes('?') ? '&' : '?'}test=load&quality=native`)
-      // The sim is up once its first rig is held (or, for a sim that fell back at once, shown).
-      await until('a rig held', () => page.evaluate(() => window.__rigs?.().created > 0), 30000)
-      return { context, page, errors }
+      page.on('requestfailed', r => requests.push({ path: new URL(r.url()).pathname.slice(0, 160), error: r.failure()?.errorText }))
+      try {
+        await page.goto(`${local.origin}${path}${path.includes('?') ? '&' : '?'}test=load&quality=native`)
+        // The sim is up once its first rig is held (or, for a sim that fell back at once, shown).
+        await until('a rig held', () => page.evaluate(() => window.__rigs?.().created > 0), 30000)
+        return { context, page, errors }
+      } catch (error) {
+        const state = await page.evaluate(() => ({ ready: document.readyState, rigs: window.__rigs?.(), remote: !!window.__obpal, failed: document.body.classList.contains('sim-failed'), text: document.body.innerText.slice(-800) })).catch(() => null)
+        console.error(`First-load setup ${path}: ${JSON.stringify({ state, errors: errors.slice(-8), requests: requests.slice(-8) })}`)
+        await context.close().catch(() => {})
+        throw error
+      }
     }
     const report = (page, model) => page.evaluate((model) => {
       const mark = (n) => performance.getEntriesByName(`obpal:${model}:${n}`)[0]?.startTime ?? null
@@ -176,6 +195,7 @@ export async function runLoad(local, check, { executablePath = process.env.OBPAL
     })
 
     await check('first load: the mesh is fetched once, by the page\'s preload, ahead of the rig', async () => {
+      await freshBrowser()
       const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true })
       try {
         const page = await context.newPage()
@@ -190,5 +210,5 @@ export async function runLoad(local, check, { executablePath = process.env.OBPAL
         return `one request, from the page's preload, ${Math.round(held - first[0].start)} ms before the rig existed`
       } finally { await context.close() }
     })
-  } finally { await browser.close() }
+  } finally { await browser?.close() }
 }

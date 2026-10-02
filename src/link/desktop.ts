@@ -1,3 +1,4 @@
+import { dotLoading, dotState } from '../ui/kit/loading'
 import { DotField } from '../ui/kit/dot-field'
 import { constellationPoints } from './constellation-points'
 import './journey.css'
@@ -9,6 +10,7 @@ const check = document.querySelector<HTMLButtonElement>('#desktop-check')!
 let expiry = 0
 const expired = () => {
   status.textContent = 'Link has not reported recently. Reopen Link to check Desktop.'
+  dotLoading(status, false)
   delete status.dataset.helper
   check.hidden = true
 }
@@ -27,8 +29,10 @@ window.addEventListener('message', event => {
     error: 'Link could not connect to Desktop. Open Link’s PC settings for the explanation.',
     ready: `Desktop is connected${value.version ? ` · ${value.version}` : ''}. Phone and program permission are still separate.`,
   }
-  status.textContent = descriptions[value.status]
+  status.textContent = value.status === 'connecting' ? '' : descriptions[value.status]
   status.dataset.helper = value.status
+  if (['connecting', 'ready', 'missing', 'error'].includes(value.status)) dotState(status, value.status === 'connecting' ? 'working' : value.status === 'ready' ? 'done' : 'failed', descriptions[value.status])
+  else dotLoading(status, false)
   detail.textContent = 'Check in Link opens its PC settings. Pairing, Allow/Deny and program scope stay there.'
 })
 document.addEventListener('visibilitychange', () => {

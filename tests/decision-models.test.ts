@@ -215,6 +215,20 @@ describe('advisory e2e triage', () => {
     expect(result.failures[2].rerun).toContain("OBPAL_E2E_SIMS_ONLY='smoothness'")
     expect(validSchema(result, triageSchema)).toBe(true)
   })
+  it('accepts five long exact failure lines without a digest length target and grounds categories', async () => {
+    const root = temp()
+    const lines = ['\u2717 camera: expected 3 actual 4', '\u2717 input: wire [], wanted [click]', '\u2717 controls: 11 off-centre: x=1.23', '\u2717 unknown: Timeout waiting', '\u2717 port: EADDRINUSE']
+    writeFileSync(join(root, 'phone.log'), lines.map(line => line + ' ' + 'details '.repeat(80)).join('\n'))
+    const result = await triageDirectory(root, { runner: async request => {
+      expect(request.prompt).toContain('No digest length target')
+      expect(request.prompt).toContain('real-regression')
+      expect(request.prompt).toContain('Ground each category in the quoted line')
+      return echo(request)
+    } })
+    expect(result.mode).toBe('model')
+    expect(result.failures).toHaveLength(5)
+    expect(result.failures.map(f => f.category)).toEqual(['real-regression', 'real-regression', 'real-regression', 'unknown', 'harness-or-environment'])
+  })
   it('never accepts passing, omitted failures, changed exact lines, or promoted flakes', async () => {
     const root = temp()
     writeFileSync(join(root, 'pages.log'), '✗ Try page: Timeout waiting')

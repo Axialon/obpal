@@ -4,6 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { measureButtonInk } from './lib/button-ink.mjs'
 import { assertButtonInk } from './lib/surface-buttons.mjs'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 
 const assert = (ok, message) => { if (!ok) throw new Error(message) }
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -29,7 +30,7 @@ const clearPoint = page => page.evaluate(() => {
 })
 
 export async function runLocalControl(local, check, { baseline = false } = {}) {
-  const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM, headless: true, args: ['--ignore-certificate-errors', '--disable-features=WebRtcHideLocalIpsWithMdns', '--disable-background-timer-throttling', '--disable-renderer-backgrounding'] })
+  const browser = await chromium.launch(e2eBrowserOptions({ executablePath: process.env.OBPAL_E2E_CHROMIUM, headless: true, args: ['--ignore-certificate-errors', '--disable-features=WebRtcHideLocalIpsWithMdns', '--disable-background-timer-throttling', '--disable-renderer-backgrounding'] }))
   const out = join(process.env.OBPAL_E2E_EVIDENCE_ROOT || 'artifacts/local-control', baseline ? 'before' : 'after')
   await mkdir(out, { recursive: true })
   const report = [], errors = []
@@ -141,6 +142,7 @@ export async function runLocalControl(local, check, { baseline = false } = {}) {
 }
 
 export async function runUniversalFaces(browser, origin, check, out) {
+  if (out) await mkdir(out, { recursive: true })
   for (const [id, path, faces] of [
     ['marblerun', '/sim/device/?d=marblerun', ['face.wheel', 'face.mouse', 'face.keys']],
     ['kart', '/sim/device/?d=kart', ['face.trackpad', 'face.mouse', 'face.keys']],

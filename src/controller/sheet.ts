@@ -4,6 +4,7 @@
  * visible screen (its content scrolls, clear of the browser's own bars: controller.css).
  */
 import { toUi } from './uiframe'
+import { railAxis, railPull } from '../ui/rail'
 
 /** Pulled down this far (px), or flung down this fast (px/ms), it closes; less, and it springs back. */
 const CLOSE_PX = 90
@@ -52,34 +53,46 @@ export function sheetExits(wrap: HTMLElement, close: () => void): (handOver?: bo
   addEventListener('popstate', onPop)
 
   // A swipe down: the sheet follows the finger, then goes or springs back.
-  let pull: { y: number; t: number; dy: number; v: number; on: boolean } | null = null
+  let pull: { x: number; y: number; t: number; dy: number; v: number; axis: 'x' | 'y' | null; on: boolean } | null = null
   const slider = (t: EventTarget | null) => !!(t as Element | null)?.closest?.('input[type=range], .bb-range, .pick-grid')
   sheet.addEventListener('touchstart', (e) => {
-    if (e.touches.length !== 1 || slider(e.target)) { pull = null; return }
+    if (e.touches.length !== 1 || slider(e.target)) {
+      if (pull?.on) { sheet.style.transition = ''; sheet.style.transform = '' }
+      pull = null
+      return
+    }
     const top = !!(e.target as Element).closest('.grip, .sheet-head, .picker-head')
     // From the top edge always; from inside only while there's nothing above to scroll back to.
-    if (!top && sheet.scrollTop > 0 && !(e.target as Element).closest('.picker-head')) { pull = null; return }
-    pull = { y: toUi(e.touches[0].clientX, e.touches[0].clientY).y, t: e.timeStamp, dy: 0, v: 0, on: false }
+    let node = e.target as HTMLElement | null
+    while (!top && node && sheet.contains(node)) {
+      if (node.scrollTop > 0) { pull = null; return }
+      if (node === sheet) break
+      node = node.parentElement
+    }
+    const at = toUi(e.touches[0].clientX, e.touches[0].clientY)
+    pull = { ...at, t: e.timeStamp, dy: 0, v: 0, axis: null, on: false }
   }, { passive: true })
   sheet.addEventListener('touchmove', (e) => {
-    if (!pull) return
-    const y = toUi(e.touches[0].clientX, e.touches[0].clientY).y
+    if (!pull || e.touches.length !== 1) return
+    const { x, y } = toUi(e.touches[0].clientX, e.touches[0].clientY)
     const dy = y - pull.y
+    pull.axis ??= railAxis(x - pull.x, dy)
+    if (pull.axis === 'x') return
     const dt = Math.max(1, e.timeStamp - pull.t)
     pull.v = pull.v * 0.5 + ((dy - pull.dy) / dt) * 0.5
     pull.dy = dy
     pull.t = e.timeStamp
-    if (!pull.on && dy > 8) { pull.on = true; sheet.style.transition = 'none' }
+    if (!pull.on && pull.axis === 'y' && dy > 8) { pull.on = true; sheet.style.transition = 'none' }
     if (!pull.on) return
     if (e.cancelable) e.preventDefault()
-    sheet.style.transform = `translateY(${Math.max(0, dy)}px)`
+    sheet.style.transform = `translateY(${railPull(dy, sheet.offsetHeight)}px)`
   }, { passive: false })
-  const release = () => {
+  const release = (e: TouchEvent) => {
     const p = pull
     pull = null
     if (!p?.on) return
     sheet.style.transition = ''
-    if (p.dy > CLOSE_PX || (p.dy > 24 && p.v > FLING)) {
+    if (e.type !== 'touchcancel' && (p.dy > CLOSE_PX || (p.dy > 24 && p.v > FLING))) {
       sheet.style.transform = `translateY(${sheet.offsetHeight}px)`
       shut()
     } else sheet.style.transform = ''

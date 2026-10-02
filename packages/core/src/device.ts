@@ -2,7 +2,7 @@ import type { Caps, DeviceMsg, HostMsg, PairGrant, SignalIn, SignalPayload } fro
 import { CodePake } from './code'
 import { connectionSeal, sealSessionContext, type ConnectionSeal } from './seal'
 import {
-  b64url, bindMac, equalBytes, fromB64url, importPairKey, lanContext, lanIceCredentials, lanOfferSdp, mungeIce, parsePairing, roomIdFor, sdpFingerprint,
+  admissionFor, b64url, bindMac, equalBytes, fromB64url, importPairKey, lanContext, lanIceCredentials, lanOfferSdp, mungeIce, parsePairing, roomIdFor, sdpFingerprint,
   type LanPairing, type Pairing, type SavedInvite,
 } from './pairing'
 import { fetchIce, ICE_REFRESH_BEFORE_MS, linkInfo, roomSocketUrl, SignalClient, type IceSet, type LinkInfo } from './signal'
@@ -178,13 +178,15 @@ export class DeviceLink {
     this.statsTimer = setInterval(() => this.poll(), 2000)
     if ('lan' in this.opts) return this.startLan()
     const { service } = this.opts
-    this.roomId = 'code' in this.opts ? this.opts.code.room : 'saved' in this.opts ? this.opts.saved.room : await roomIdFor(this.opts.pairing.secret)
+    this.roomId = 'code' in this.opts ? this.opts.code.room : 'saved' in this.opts ? this.opts.saved.room : this.opts.pairing.room ?? await roomIdFor(this.opts.pairing.secret)
     if (this.status === 'closed') return
     // The socket and the ICE server lookup race; neither waits for the other.
     this.iceReady = fetchIce(service, this.roomId).then((set) => this.takeIce(set))
-    this.sig = new SignalClient(roomSocketUrl(service, this.roomId, 'device'))
+    const admission = 'pairing' in this.opts ? `&key=${await admissionFor(this.opts.pairing.secret)}` : 'saved' in this.opts ? `&key=${await admissionFor(this.opts.saved.key)}` : 'code' in this.opts ? `&ticket=${encodeURIComponent(this.opts.code.ticket)}` : ''
+    this.sig = new SignalClient(roomSocketUrl(service, this.roomId, 'device') + admission)
     this.sig.onmessage = (m) => this.onSignal(m)
     this.sig.onfull = () => { this.teardown(); this.setStatus('full') }
+    this.sig.onremoved = () => { this.teardown(); this.setStatus('removed') }
     this.sig.onstatus = (open, reachable) => {
       if (open) { mark('obpal:signal'); return }
       if (this.status === 'connected') return
@@ -550,7 +552,7 @@ export class DeviceLink {
     const o = this.opts
     const pc = this.pc
     const p = invite ? parsePairing(invite) : null
-    if (!p || !('code' in o) || !this.hostFp || !equalBytes(p.fp, this.hostFp) || (await roomIdFor(p.secret)) !== this.roomId || this.pc !== pc || this.opts !== o) return
+    if (!p || !('code' in o) || !this.hostFp || !equalBytes(p.fp, this.hostFp) || (p.room ?? await roomIdFor(p.secret)) !== this.roomId || this.pc !== pc || this.opts !== o) return
     this.opts = { service: o.service, pairing: p, remember: o.remember, caps: o.caps, name: o.name, cert: o.cert }
     this.emit('invite', invite!)
   }

@@ -155,14 +155,14 @@ import { readZip } from './zip.mjs'
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const { opts, positional } = args(process.argv.slice(2), ['stage', 'task', 'paths', 'budget', 'outbox', 'checkpoint', 'mirror', 'at', 'messages', 'spent'], ['lean'])
-    if (positional.length || !opts.stage || !opts.task) throw new Error('Usage: astra:pack -- --stage <id> --task <brief.md> [--paths <comma-separated globs>] [--budget <MiB>] [--outbox <dir>] [--checkpoint <json>] [--at <sha>] [--mirror <public-commit-sha>] [--lean] [--messages <n>] [--spent <n>]')
+    const { opts, positional } = args(process.argv.slice(2), ['stage', 'task', 'paths', 'budget', 'outbox', 'checkpoint', 'mirror', 'at', 'messages', 'spent', 'attach'], ['lean'])
+    if (positional.length || !opts.stage || !opts.task) throw new Error('Usage: astra:pack -- --stage <id> --task <brief.md> [--paths <comma-separated globs>] [--budget <MiB>] [--outbox <dir>] [--checkpoint <json>] [--at <sha>] [--mirror <public-commit-sha>] [--lean] [--messages <n>] [--spent <n>] [--attach <held-return.zip>]')
     const result = buildPack({ root: process.cwd(), stage: opts.stage, task: readFileSync(opts.task, 'utf8'),
       globs: opts.paths?.split(','), budget: opts.budget ? Number(opts.budget) : undefined,
       at: opts.at, mirror: opts.mirror, lean: opts.lean === true,
       messages: opts.messages !== undefined ? Number(opts.messages) : undefined, spent: opts.spent !== undefined ? Number(opts.spent) : undefined,
       checkpoint: opts.checkpoint ? JSON.parse(readFileSync(opts.checkpoint, 'utf8')) : undefined })
-    console.log(saveExchange(resolve(opts.outbox ?? defaultOutbox()), opts.stage, 'Request', result.bytes, result.prompt))
+    console.log(saveExchange(resolve(opts.outbox ?? defaultOutbox()), opts.stage, 'Request', result.bytes, result.prompt, { attach: opts.attach }))
     console.log(`${result.files} source files; ${result.bytes.length} ZIP bytes; pinned ${result.master}`)
     console.log(`Trimmed: ${json(result.trimmed)}`)
   } catch (e) { console.error(`astra:pack: ${e.message}`); process.exitCode = 1 }

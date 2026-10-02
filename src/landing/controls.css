@@ -1,0 +1,12 @@
+/* The viewport field draws above the reading surface; content cards exclude marbles physically. */
+.home .hero-stage { z-index: 10; }
+/* Share the volume button's glass and icon styling, in a stack clear of the right-edge phone tab. */
+.field-controls { position: fixed; z-index: 21; right: max(36px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.field-controls .hero-sound { position: relative; inset: auto; width: 44px; min-width: 44px; height: 44px; padding: 0; opacity: 1; }
+.field-controls .hero-sound:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 4px; }
+.field-controls [data-sound-label] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* A narrow desktop window can still offer a QR. Give it the same centred, evenly padded frame. */
+@media (max-width: 600px) {
+  .home .pair { display: block; }
+  .home .pair-note { margin: 14px 0 0; }
+}

@@ -1,8 +1,48 @@
 /** The viewer's replacement lifecycle, through its catalogue and file input. */
+import { readControlOverlaps } from './control-hitboxes.mjs'
+import { mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
+
 export async function runViewerScene(browser, origin, check) {
+  for (const [width, height] of [[360, 740], [390, 844], [430, 932], [740, 360], [844, 390], [932, 430]]) {
+    await check(`viewer controls at ${width}x${height} keep the pinned selection clear of the picker`, async () => {
+      const context = await browser.newContext({ viewport: { width, height }, hasTouch: true, isMobile: true, reducedMotion: 'reduce' })
+      try {
+        const page = await context.newPage()
+        await page.goto(origin + '/view/')
+        await page.waitForFunction(() => window.__viewer?.holder.children.length === 1)
+        if (await page.locator('.catalog').getAttribute('data-state') === 'rail') await page.locator('#rail-toggle').tap()
+        await page.evaluate(() => {
+          const { holder, parts } = window.__viewer
+          parts.select(parts.objectPart(holder.children[0].children[0]))
+        })
+        await page.locator('.node-card.pinned.in').waitFor()
+        for (const state of ['open', 'rail', 'reopened']) {
+          if (state !== 'open') await page.locator('#rail-toggle').tap()
+          await page.waitForTimeout(500)
+          const card = await page.locator('.node-card').boundingBox(), picker = await page.locator('.catalog').boundingBox()
+          if (card.y + card.height > picker.y) throw new Error(`${state}: selection covers picker`)
+          const overlaps = await readControlOverlaps(page)
+          if (process.env.OBPAL_SHOTS) {
+            await mkdir(process.env.OBPAL_SHOTS, { recursive: true })
+            await page.screenshot({ path: join(process.env.OBPAL_SHOTS, `viewer-${width}x${height}-${state}.png`) })
+          }
+          if (overlaps.length) throw new Error(`${state}: ${overlaps.join('; ')}`)
+          const rail = await page.locator('.rail').evaluate(el => {
+            const s = getComputedStyle(el)
+            return [s.overflowX, s.overflowY, s.touchAction, s.overscrollBehavior, s.scrollSnapType]
+          })
+          if (rail.join('|') !== 'hidden|auto|pan-y|contain|y mandatory') throw new Error(`${state}: rail ${rail}`)
+        }
+        await page.locator('.nc-x').tap()
+        await page.waitForFunction(() => !window.__viewer.parts.host.selected)
+        return 'open, folded and reopened picker; sampled hit boxes; native vertical rail; release tap'
+      } finally { await context.close() }
+    })
+  }
   for (const width of [1280, 390]) {
     await check(`viewer at ${width}px switches through every model with only its named staging`, async () => {
-      const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 800 } })
+      const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 800 }, hasTouch: width === 390, isMobile: width === 390 })
       try {
         const page = await context.newPage()
         const errors = []
@@ -110,8 +150,8 @@ export async function runViewerScene(browser, origin, check) {
 async function pick(page, item) {
   const previous = await page.evaluate(() => window.__viewer.holder.children[0]?.uuid)
   await openCategory(page, item.category)
-  // A deliberately pinned old selection can cover the phone rail or tiles. Exercise the picker handler directly.
-  await page.locator(`.tile[data-id="${item.id}"]`).evaluate(tile => tile.click())
+  const tile = page.locator(`.tile[data-id="${item.id}"]`)
+  await tile[page.viewportSize().width === 390 ? 'tap' : 'click']()
   await page.waitForFunction(({ id, previous }) => {
     const roots = window.__viewer.holder.children
     return roots.length === 1 && roots[0].name === `model:${id}` && roots[0].uuid !== previous
@@ -122,10 +162,12 @@ async function pick(page, item) {
 
 async function openCategory(page, category) {
   const button = page.locator(`.cat-btn[data-cat="${category}"]`)
-  if (await button.getAttribute('aria-selected') !== 'true') await button.evaluate(button => button.click())
+  if (await button.getAttribute('aria-selected') !== 'true') await button[page.viewportSize().width === 390 ? 'tap' : 'click']()
 }
 
 async function assertScene(page, id) {
+  // The new root arrives before its bounded loading handoff has finished.
+  await page.waitForFunction(() => window.__viewer.holder.parent.getObjectByName('dot-bead-loader')?.visible === false, null, { timeout: 1000 })
   const state = await page.evaluate(() => {
     const holder = window.__viewer.holder, scene = holder.parent
     return {
@@ -133,14 +175,15 @@ async function assertScene(page, id) {
       stage: scene.children.filter(o => o !== holder).map(o => ({ name: o.name, type: o.type })),
       presence: scene.getObjectByName('shared-presence').children.length,
       contactShadows: scene.children.filter(o => o.name === 'model-contact-shadow').map(o => o.visible),
+      loader: { visible: scene.getObjectByName('dot-bead-loader')?.visible, count: scene.getObjectByName('dot-bead-loader')?.count },
     }
   })
   const expected = [
     ['studio-key', 'DirectionalLight'], ['studio-rim', 'DirectionalLight'], ['studio-fill', 'HemisphereLight'],
     ['studio-grid', 'Mesh'], ['studio-shadow', 'Mesh'], ['selection-host', 'Mesh'],
-    ['shared-presence', 'Group'], ['presence-rig', 'Group'], ['model-contact-shadow', 'Mesh'],
+    ['shared-presence', 'Group'], ['presence-rig', 'Group'], ['dot-bead-loader', 'Mesh'], ['model-contact-shadow', 'Mesh'],
   ].map(([name, type]) => ({ name, type }))
   if (JSON.stringify(state.roots) !== JSON.stringify([{ name: `model:${id}`, children: 1 }]) ||
       JSON.stringify(state.stage) !== JSON.stringify(expected) || state.presence !== 0 ||
-      JSON.stringify(state.contactShadows) !== '[false]') throw new Error(`${id}: unexpected scene ${JSON.stringify(state)}`)
+      JSON.stringify(state.contactShadows) !== '[false]' || state.loader.visible !== false || state.loader.count !== 3) throw new Error(`${id}: unexpected scene ${JSON.stringify(state)}`)
 }

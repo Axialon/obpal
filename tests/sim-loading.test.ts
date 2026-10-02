@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 describe('the loading status and a failed start', () => {
   const classes = new Set<string>()
-  const pill = { hidden: true, offsetWidth: 10, classList: { contains: (name: string) => classes.has(name), add: (name: string) => classes.add(name), remove: (name: string) => classes.delete(name) } }
+  const pill = { dataset: {} as Record<string, string>, getAttribute: () => null, setAttribute: () => {}, hidden: true, offsetWidth: 10, classList: { contains: (name: string) => classes.has(name), add: (name: string) => classes.add(name), remove: (name: string) => classes.delete(name) } }
   beforeEach(() => {
     vi.resetModules(); vi.useFakeTimers(); classes.clear(); pill.hidden = true
     vi.stubGlobal('document', { getElementById: () => pill })

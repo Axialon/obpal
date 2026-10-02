@@ -56,10 +56,12 @@
           <p class="fine">ob.Pal Link · %LINK_VERSION% · free, MIT licensed<br />Tested in Chrome, Edge, Brave and Vivaldi. <a href="https://github.com/Axialon/obpal/blob/main/extension/README.md#limitations">See the limits</a>.</p>
           <p id="store-return" class="return-note" hidden>Back from the store? Open Extensions, pin ob.Pal Link, then open it on the demo.</p>
         </div>
-        <figure class="constellation" aria-label="Illustration: a phone connects to a browser. Windows PC control is optional.">
-          <canvas id="link-space" aria-hidden="true"></canvas><canvas id="link-flat" aria-hidden="true" hidden></canvas>
+        <figure class="constellation" data-link-hero aria-label="Journey preview: a phone connects to a browser. Windows PC control is a separate, optional choice.">
+          <div class="hero-stage"><canvas id="link-space" aria-hidden="true"></canvas><canvas id="link-flat" aria-hidden="true" hidden></canvas></div>
           <div class="device-labels"><span>Phone</span><span>Browser</span><span>PC <small>optional · Windows</small></span></div>
-          <figcaption>A connection is the start. You choose what it controls.</figcaption>
+          <figcaption id="hero-preview-note" role="status">Journey preview. A connection is the start. You choose what it controls.</figcaption>
+          <div class="hero-steps" aria-label="Preview a journey step"><button type="button" class="btn" data-link-step="pair" aria-pressed="false">Pair</button><button type="button" class="btn" data-link-step="enable" aria-pressed="false">Enable</button><button type="button" class="btn" data-link-step="try" aria-pressed="false">Try</button><button type="button" class="btn" id="hero-reset">Reset</button></div>
+          <button type="button" class="btn hero-pc" id="hero-pc" aria-pressed="false">Preview PC route</button>
           <button class="btn tilt-button" id="use-tilt" type="button" aria-pressed="false">Use tilt</button><span class="fine" id="tilt-note" role="status"></span>
         </figure>
       </section>

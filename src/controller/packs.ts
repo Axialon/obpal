@@ -1,6 +1,7 @@
 /** The phone's pack library. Selection keys stay namespaced; the existing mode packet uses a bounded alias. */
 import { isProfileId, PACK_ID, packCredit, packProfileId, PROFILES, type Pack, type ProfileSpec } from '@obpal/core'
 import { communityPacks, loadCommunityPacks } from '../catalogue/packs'
+import { dotLoading } from '../ui/kit/loading'
 
 const ARRIVAL = 'obpal.pack-arrival'
 let requested: string | null = null
@@ -23,9 +24,12 @@ export function clearPackArrival() {
 /** Explain a catalogue handoff while the phone waits for a screen's pairing code. */
 export function showPackArrival() {
   if (!requested) return
+  const pending = document.getElementById('pack-arrival')
+  if (pending) { pending.hidden = false; dotLoading(pending, true, 'Opening the selected pack') }
   void loadCommunityPacks().then(() => {
     const node = document.getElementById('pack-arrival')
     if (!node) return
+    dotLoading(node, false)
     const pack = communityPacks().find((p) => p.id === requested && !p.deprecated)
     node.hidden = false
     node.textContent = pack ? `${pack.name} · ${packCredit(pack)} · ${pack.attribution}. Connect to a screen, then open Profile to use this pack.` : 'This pack is unavailable. Connect to the internet and check the community catalogue.'

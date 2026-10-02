@@ -7,6 +7,7 @@ import { fitControlInk } from '../ui/kit/ink'
 import { enhanceSelect } from '../ui/kit/select'
 import { simPanels } from './ui/panels'
 import { LocalInput, liveInput, standardPad, type LocalSource } from './local-input'
+import { installLocalInputSource } from './local-play'
 import type { DeviceInput } from './devices/types'
 import '../styles/local-control.css'
 
@@ -81,7 +82,15 @@ export class LocalControls {
     lock.hidden = !opts.canvas.requestPointerLock
     this.help.className = 'local-bindings glass'; this.help.hidden = true; this.help.setAttribute('role', 'region'); this.help.setAttribute('aria-label', 'Control bindings'); document.body.append(this.help)
     this.help.addEventListener('keydown', e => { if (e.key === 'Escape') { this.help.hidden = true; this.remap = null; opts.canvas.focus(); e.stopPropagation() } })
-    simPanels().add(this.el, { id: 'local-control', title: 'Play on this device', purpose: 'Choose a controller and its bindings', icon: 'controls', anchor: 'controls', state: 'closed' })
+    const panel = simPanels().add(this.el, { id: 'local-control', title: 'Play on this device', purpose: 'Choose a controller and its bindings', icon: 'controls', anchor: 'controls', state: 'closed' })
+    installLocalInputSource(() => {
+      input.clear()
+      if (!['keyboard', 'gamepad'].includes(input.source)) input.source = 'keyboard'
+      input.armed = true; this.save(); this.paint(); panel.setState('open')
+      // Share closes its modal after the launch event, so focus on the next frame.
+      requestAnimationFrame(() => { if (input.armed) opts.canvas.focus({ preventScroll: true }) })
+      return () => { input.disarm(); this.paint() }
+    })
     opts.canvas.tabIndex = 0
     opts.canvas.setAttribute('aria-description', 'Enable local controls, then focus this scene to play. Tab leaves the scene. Question mark shows bindings; Escape releases controls.')
     const abort = new AbortController(), signal = abort.signal

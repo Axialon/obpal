@@ -16,10 +16,8 @@
 .connection-mark { width: 24px; height: 24px; color: var(--muted); }
 .connection-mark .ic { width: 20px; height: 20px; }
 .connection-row[data-active=true] .connection-mark { color: var(--accent); }
-.connection-mark[data-pending=true] .ic circle { animation: connection-dot 900ms ease-in-out infinite alternate; }
 .connection-mark[data-pending=true] .ic circle:nth-child(2) { animation-delay: 150ms; }
 .connection-mark[data-pending=true] .ic circle:nth-child(3) { animation-delay: 300ms; }
-@keyframes connection-dot { from { opacity: .3; transform: translateY(1px); } to { opacity: 1; transform: translateY(-1px); } }
 .connection-label { min-width: 0; display: grid; gap: var(--sp-1); }
 .connection-label b { display: block; font-size: 14px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .connection-signals { display: flex; align-items: center; gap: var(--sp-2); color: var(--secondary); }
@@ -54,4 +52,3 @@
   .connection-row { padding: var(--sp-1) 0; }
   .connection-body:has(.connection-list) > .connection-actions { flex-direction: column; }
 }
-@media (prefers-reduced-motion: reduce) { .connection-mark[data-pending=true] .ic circle { animation: none; } }

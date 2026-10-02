@@ -228,10 +228,13 @@ export async function phoneControllers({ browser, origin, check, shots }) {
     await check('gamepad inset face buttons and D-pad keep their touches; the floating stick still takes its background', async () => {
       await v.catalogue()
       await v.phone.locator('.ctl-card[data-c="face.gamepad"]').click()
+      await until('the catalogue closed', () => v.phone.evaluate(() => !document.querySelector('.ctl-wrap')))
+      await sleep(400)
       const states = await v.phone.evaluate(() => {
         const press = (el, id, fy = .5) => {
           const r = el.getBoundingClientRect()
-          el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: id, clientX: r.left + r.width / 2, clientY: r.top + r.height * fy }))
+          const x = r.left + r.width / 2, y = r.top + r.height * fy
+          document.elementFromPoint(x, y).dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: id, clientX: x, clientY: y }))
         }
         const release = (el, id) => el.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: id }))
         const button = document.querySelector('.gp-f[data-k="a"]'), right = button.closest('.gp-stick')

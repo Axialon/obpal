@@ -3,6 +3,8 @@ import { checkPack, loadModePack, modePackPose, PACK_ID, PACK_LICENSES, PACK_SEM
 import { HUMANOID } from '../src/sim/humanoid/profile'
 import { readText, packFiles } from './devtools-node.mjs'
 import { SITE_PROFILES } from '../extension/src/shared/sites'
+// Load this graph during collection; the test's deadline covers behavior rather than first-time transformation.
+import '../src/controller/gamepad'
 
 const examples = packFiles().map((f) => JSON.parse(readText(f)) as Pack)
 const profile = examples.find((p): p is Pack<'profile'> => p.kind === 'profile')!

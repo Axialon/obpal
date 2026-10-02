@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import source from '../src/family/family.js?raw'
 import type { FamilyApi } from '../src/family'
+
+beforeEach(() => vi.useFakeTimers())
+afterEach(() => vi.useRealTimers())
 
 /** A stand-in for the browser's range input: the accessors and step methods family.js wraps, and the style it fills. */
 class RangeInput {
@@ -109,7 +112,7 @@ describe('Sliders: the accent fill up to the knob (family.js)', () => {
     const form = rootOf(a)
     listeners.reset({ target: form })
     a.current = '40' // the browser's reset, which bypasses the accessors
-    await new Promise((r) => setTimeout(r, 5))
+    await vi.advanceTimersByTimeAsync(0)
     expect(a.fill).toBe('40.00%')
   })
 

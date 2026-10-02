@@ -293,6 +293,7 @@ export class NodeStrip {
       this.toggleLock(p.item)
     }, LONG_PRESS_MS)
     const at = toUi(e.clientX, e.clientY)
+    if (this.list) this.list.style.scrollSnapType = 'none'
     this.press = { id: e.pointerId, item: id, at: performance.now(), moved: false, locked: false, timer, x: at.x, y: at.y }
     b.classList.add('down')
   }
@@ -342,6 +343,7 @@ export class NodeStrip {
     this.press = null
     clearTimeout(p.timer)
     cancelAnimationFrame(this.edge)
+    if (this.list) this.list.style.scrollSnapType = ''
     this.list?.querySelector('.ns-item.down')?.classList.remove('down')
     // A tap picks what it landed on; a long press has locked it already, a swipe picked as it went.
     if (!p.moved && !p.locked) this.pick(p.item)
@@ -352,6 +354,7 @@ export class NodeStrip {
     this.press = null
     if (p) clearTimeout(p.timer)
     cancelAnimationFrame(this.edge)
+    if (this.list) this.list.style.scrollSnapType = ''
     this.list?.querySelector('.ns-item.down')?.classList.remove('down')
   }
 }

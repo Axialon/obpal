@@ -1,4 +1,5 @@
 /** A hand-back digest is a review aid, never authorization to merge or ship. */
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { readLedger } from './lib.mjs'
 import { classify, cleanLog, DIGEST_LIMIT, digestSchema, readInput, safePath, sanitize } from '../lib/decision-model.mjs'
@@ -51,8 +52,8 @@ export function handbackInput(text, limit = 48_000) {
 
 export function extractDigest({ final, events = '', err = '', stopped = false, incomplete = false }) {
   final = sanitize(final); events = sanitize(events); err = cleanLog(err)
-  const head = /\bHead\s*:\s*[`*]*([a-f0-9]{7,40})\b/i.exec(final)?.[1] || null
-  const master = /\bMerged master\s*:\s*[`*]*([a-f0-9]{7,40})\b/i.exec(final)?.[1] || null
+  const head = /\bHead\s*:?\s*([a-f0-9]{7,40})\b/i.exec(plain(final))?.[1] || null
+  const master = /\bMerged master\s*:?\s*([a-f0-9]{7,40})\b/i.exec(plain(final))?.[1] || null
   const tests = []
   const failures = []
   for (const line of final.split('\n')) {
@@ -82,7 +83,8 @@ export function extractDigest({ final, events = '', err = '', stopped = false, i
   if (!head || !master) reasons.push('Missing head or merged master')
   if (!tests.length) reasons.push('No numeric test table')
   if (!tests.some(test => /typecheck|typescript/i.test(test.check)) || !tests.some(test => /vitest/i.test(test.check))) reasons.push('Missing required typecheck or Vitest')
-  if (tests.some(test => test.passed + test.skipped !== test.total)) reasons.push('Test table contains failures')
+  const failedCount = tests.reduce((n, test) => n + Math.max(0, test.total - test.passed - test.skipped), 0)
+  if (failedCount) reasons.push(`${failedCount} failure${failedCount === 1 ? '' : 's'} (see hand-back)`)
   if (!/no new sessions/i.test(final)) reasons.push('Helper guard unverified')
   if (failures.length) reasons.push('Review failure history and retained reruns')
   if (incomplete) reasons.push('Source truncated or missing; inspect originals')
@@ -130,6 +132,16 @@ export async function digestLane(local, name, options = {}) {
   const handback = handbackInput(final.text)
   const source = { final: handback.text, events: summaryEvents(events.text), err: cleanLog(err.text), stopped: Boolean(round.stoppedAt), incomplete: final.truncated || handback.truncated || !final.bytes || !events.bytes }
   const baseline = extractDigest({ ...source, final: final.text })
+  if (lane.branch && lane.worktree) for (const key of ['head', 'master']) {
+    if (!baseline[key]) continue
+    try {
+      const sha = execFileSync('git', ['rev-parse', '--verify', `${baseline[key]}^{commit}`], { cwd: lane.worktree, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+      execFileSync('git', ['merge-base', '--is-ancestor', sha, lane.branch], { cwd: lane.worktree, windowsHide: true, stdio: 'pipe' })
+      baseline[key] = sha
+    } catch {
+      baseline[key] = null; baseline.verdict = 'needs-fix'; baseline.reasons.push(`Unresolved ${key} on lane branch`)
+    }
+  }
   const result = await classify(baseline, source, digestSchema, options, candidate => {
     // Prose may be compressed; identity, measurements and the conservative verdict may not change.
     return ['status', 'head', 'master', 'tests', 'evidence', 'verdict'].every(key => JSON.stringify(candidate[key]) === JSON.stringify(baseline[key])) && ['failures', 'decisions', 'risks', 'reasons'].every(key => candidate[key].length === baseline[key].length && candidate[key].every(text => text.length > 0 && sanitize(text) === text))

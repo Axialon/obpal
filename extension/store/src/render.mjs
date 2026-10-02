@@ -5,7 +5,7 @@
  *   icon-128.png                             the store icon: the build's own (extension/dist/icons/icon-128.png)
  *   screenshot-1.png … screenshot-5.png      1280 × 800 (shot.html around real renders)
  *
- * The screenshots are made of real renders at 150%: the built extension (extension/dist) in Chromium, its popup laid
+ * The screenshots are made of real renders at device pixel ratio 3: the built extension (extension/dist) in Chromium, its popup laid
  * out as the popup (640 px wide), and the phone controller of the site build (dist/client), paired with the extension
  * through the assigned local signaling worker the way the extension's e2e test pairs them. What the popup shows is written into
  * chrome.storage the way the service worker writes it, and the popup is shown an ordinary web page in front
@@ -15,7 +15,8 @@
  * and with the native host renamed to one that isn't installed, so no ob.Pal Desktop is ever started. Nothing touches
  * the registry; the only browsers are Playwright's Chromium, in throwaway profiles.
  *
- * Every image is written as a 24-bit PNG without alpha (the store's format), drawn at its size (see SCALE).
+ * Screenshots and promo images are 24-bit PNGs without alpha, drawn at their store size (see SCALE). The icon keeps
+ * transparent padding around the canonical brand mark.
  *
  * Usage: pnpm run store:art                               (builds the site and the extension first)
  *        node extension/store/src/render.mjs [art] [shots] [--only <n,n>] [--out <dir>]
@@ -28,14 +29,16 @@ import { existsSync, statSync } from 'node:fs'
 import { copyFile, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { startLocal } from '../../e2e/local.mjs'
-import { resolveChromium } from '../../../scripts/lib/browser.mjs'
+import { resolveChromium, e2eBrowserOptions, detectE2eGpu } from '../../../scripts/lib/browser.mjs'
 import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium, devices } from 'playwright'
 import sharp from 'sharp'
 import { renderSVG } from 'uqr'
+import { acquireGpuLease } from '../../../scripts/lib/gpu-lease.mjs'
+import { POSTERS, SHOTS } from './scenes.mjs'
 import { downsample } from '../../scripts/downsample.mjs'
-import { markSVG } from '../../scripts/mark.mjs'
+import { rawRun, distill as distillEvidence } from '../../../scripts/lib/distill.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const store = resolve(here, '..')
@@ -52,10 +55,10 @@ const ORIGIN = 'https://store.obpal.test'
  */
 const SCALE = Number(process.env.STORE_ART_SCALE ?? 1)
 /**
- * The scale the screenshots show the extension and the phone at: 150%, so their smallest text is about 17 px and most
- * of it 19 px or more. They're rendered at that scale and placed pixel for pixel, never resized.
+ * UI capture density: three device pixels per CSS pixel. Captures are scaled down into the store frames;
+ * vectors are rendered directly at their final size, and no logo raster is enlarged.
  */
-const SHOWN = 1.5
+const SHOWN = 3
 /**
  * Text smoothed in grey, never in colour: ClearType-style subpixel smoothing only works live on one screen's stripes, and
  * baked into an image it leaves coloured, stepped edges that scaling makes worse. Colours in plain sRGB, whatever the
@@ -73,6 +76,7 @@ const PAGE = '#0b0b0c'
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json',
   '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.glb': 'model/gltf-binary',
+  '.mjs': 'text/javascript; charset=utf-8',
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const inside = (path, dir) => { const r = relative(dir, path); return r === '' || (!r.startsWith('..') && !isAbsolute(r)) }
@@ -104,9 +108,6 @@ const doShots = !parts.length || parts.includes('shots')
 function serve(page, captures) {
   return page.route(`${ORIGIN}/**`, (route) => {
     const path = decodeURIComponent(new URL(route.request().url()).pathname)
-    // The mark drawn for the size it's shown at (/mark/<px>.svg), its lines on whole pixels (extension/scripts/mark.mjs).
-    const mark = path.match(/^\/mark\/(\d+)\.svg$/)
-    if (mark) return route.fulfill({ body: markSVG(Number(mark[1]), { bold: true }), contentType: 'image/svg+xml' })
     const [base, rel] = captures && path.startsWith('/captures/') ? [captures, path.slice('/captures/'.length)] : [repo, path.slice(1)]
     const file = resolve(base, rel)
     if (!inside(file, base) || !existsSync(file) || !statSync(file).isFile()) return route.fulfill({ status: 404, body: '' })
@@ -119,12 +120,27 @@ async function render(browser, url, [w, h], file, captures) {
   const page = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: SCALE })
   await serve(page, captures)
   await page.goto(url)
+  await page.waitForFunction(() => document.body.dataset.renderReady === 'true')
+  await page.waitForLoadState('networkidle')
   await page.evaluate(async () => {
     await document.fonts.ready
-    await Promise.all([...document.images].map((i) => i.decode().catch(() => {})))
+    await Promise.all([...document.images].map((i) => i.decode()))
   })
   await sleep(200)
+  // Include the phone shell around captures and the outer glass devices on promos.
+  for (const device of await page.locator('.item, .motif rect[rx="33"], .motif rect[rx="24"]').all()) {
+    const box = await device.boundingBox()
+    const margin = await device.evaluate(el => el.classList.contains('phone') ? 20 : 16)
+    if (!box || box.x < margin || box.y < margin || box.x + box.width > w - margin || box.y + box.height > h - margin) throw new Error(`Device leaves frame margin: ${file}`)
+  }
+  const brand = await page.locator('img.brand').boundingBox()
+  if (!brand) throw new Error('Missing vector lockup')
   const png = await page.screenshot()
+  const pixels = await sharp(png).extract({ left: Math.ceil(brand.x), top: Math.ceil(brand.y), width: Math.floor(brand.width), height: Math.floor(brand.height) }).removeAlpha().raw().toBuffer()
+  let lit = 0
+  for (let p = 0; p < pixels.length; p += 3) if (pixels[p] + pixels[p + 1] + pixels[p + 2] > 180) lit++
+  if (lit < 300) throw new Error(`Missing rendered logo pixels: ${file}`)
+  console.log(`  vector lockup: ${Math.round(brand.width)} px, ${lit} visible pixels`)
   await page.close()
   await (SCALE > 1 ? await downsample(png, SCALE) : sharp(png)).flatten({ background: PAGE }).removeAlpha().png({ compressionLevel: 9 }).toFile(file)
   const m = await sharp(file).metadata()
@@ -134,9 +150,13 @@ async function render(browser, url, [w, h], file, captures) {
 
 // ---- the promo tiles and the icon ------------------------------------------------------------------------------------
 
-async function art(browser) {
-  await render(browser, `${ORIGIN}/extension/store/src/tile.html`, [440, 280], join(out, 'tile-440x280.png'))
-  await render(browser, `${ORIGIN}/extension/store/src/marquee.html`, [1400, 560], join(out, 'marquee-1400x560.png'))
+async function art(browser, captures) {
+  for (const spec of Object.values(POSTERS)) {
+    const { width } = await sharp(join(captures, `${spec.phone}.png`)).metadata()
+    if (width < 355 * .768) throw new Error(`Capture would be enlarged: ${spec.phone}`)
+  }
+  await render(browser, `${ORIGIN}/extension/store/src/tile.html`, [440, 280], join(out, 'tile-440x280.png'), captures)
+  await render(browser, `${ORIGIN}/extension/store/src/marquee.html`, [1400, 560], join(out, 'marquee-1400x560.png'), captures)
   await copyFile(join(dist, 'icons', 'icon-128.png'), join(out, 'icon-128.png'))
   console.log(`  ${relative(repo, join(out, 'icon-128.png'))}  128x128 (the build's icon)`)
 }
@@ -192,11 +212,6 @@ function fakeTab() {
 
 /** The phone in landscape, in CSS pixels. */
 const LAND = { width: 740, height: 360 }
-/**
- * The phone upright, for typing: as tall as makes its top bar to the top of its keyboard (290 px, the stand-in's) fill
- * the screenshot's height at 150%, under its bezel.
- */
-const UPRIGHT = { width: 412, height: 796 }
 /** The phone's name in the popup: what the controller calls an Android phone that doesn't give its model. */
 const DEVICE = 'Android phone'
 /** ob.Pal Desktop as the service worker mirrors it into storage.session "pc" (shared/native.ts PcState). */
@@ -219,11 +234,11 @@ async function capture(captures) {
   if (!existsSync(join(site, 'p', 'index.html'))) throw new Error('no site build: pnpm exec vite build')
   const ext = await safeCopy()
   const profile = await mkdtemp(join(temporary, 'obpal-store-profile-'))
-  const desk = await chromium.launchPersistentContext(profile, {
+  const desk = await chromium.launchPersistentContext(profile, e2eBrowserOptions({
     executablePath, headless: true, viewport: { width: 1280, height: 800 }, deviceScaleFactor: SHOWN,
     args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`, ...RTC_ARGS, ...CLEAN, ...local.serviceArgs],
-  })
-  const phones = await chromium.launch({ executablePath, headless: true, args: [...RTC_ARGS, ...CLEAN, ...local.serviceArgs] })
+  }))
+  const phones = await chromium.launch(e2eBrowserOptions({ executablePath, headless: true, args: [...RTC_ARGS, ...CLEAN, ...local.serviceArgs] }))
   try {
     await desk.addInitScript(fakeTab)
     const worker = desk.serviceWorkers()[0] ?? (await desk.waitForEvent('serviceworker'))
@@ -257,7 +272,7 @@ async function capture(captures) {
      * The popup as Chrome shows it: 640 px wide and as tall as its content. `qr`: the address its code shows instead of
      * the pairing link, drawn as the popup draws its code.
      */
-    async function popup(name, { tab, pc, qr } = {}) {
+    async function popup(name, { tab, pc, qr, compare = false } = {}) {
       const page = await desk.newPage()
       await page.setViewportSize({ width: 640, height: 600 })
       await page.goto(`${base}/popup.html${tab ? `?tab=${encodeURIComponent(tab)}` : ''}`)
@@ -266,13 +281,21 @@ async function capture(captures) {
       await sleep(900)
       if (qr) {
         const svg = renderSVG(qr, { ecc: 'M', border: 1, blackColor: '#0a0a0a', whiteColor: '#ffffff' })
-        await page.evaluate((svg) => { document.getElementById('qr').innerHTML = svg }, svg)
+        await page.evaluate((svg) => { document.querySelector('#qr .seal-qr').innerHTML = svg }, svg)
       }
       await page.evaluate(() => document.documentElement.classList.remove('in-tab'))
       const box = await page.evaluate(() => { const r = document.querySelector('.pop').getBoundingClientRect(); return { w: Math.ceil(r.width), h: Math.ceil(r.height) } })
       await page.setViewportSize({ width: Math.min(800, box.w), height: Math.min(600, box.h) })
       await sleep(300)
-      await page.screenshot({ path: shot(name) })
+      if (compare) {
+        await page.locator('#seal-open').click()
+        await page.locator('#link-seal').screenshot({ path: shot(name) })
+      } else {
+        await page.screenshot({ path: shot(name), fullPage: true })
+        await page.locator('#qr').screenshot({ path: shot(`${name}-qr`) })
+        await page.locator('.pair-icons').screenshot({ path: shot(`${name}-icons`) })
+        await page.locator('.controls').screenshot({ path: shot(`${name}-controls`) })
+      }
       await page.close()
       console.log(`  captured ${name} (${box.w}x${box.h})`)
     }
@@ -320,11 +343,62 @@ async function capture(captures) {
     await phone.locator('.modes').waitFor({ timeout: 30000 }).catch(async error => { await phone.screenshot({ path: join(captures, 'phone-timeout.png') }); await writeFile(join(captures, 'phone-timeout.txt'), await phone.locator('body').innerText()); throw error })
     const live = await until('the phone connected', async () => { const l = await read('session', 'link'); return l?.status === 'connected' ? l : null }, 20000)
     const connected = { ...live, device: DEVICE }
+    await session({ link: connected, tab: 4242 })
+    await popup('popup-connected', { tab: `${SERVICE}/link/try/` })
+    await popup('popup-seal', { tab: `${SERVICE}/link/try/`, compare: true })
+    await phone.locator('.link-badge').click({ force: true })
+    const connection = phone.getByRole('dialog', { name: 'Connection', exact: true })
+    await connection.waitFor({ state: 'visible' })
+    await connection.locator('.connection-seal').screenshot({ path: shot('phone-seal') })
+    await connection.getByRole('button', { name: 'Close', exact: true }).click({ force: true })
+    await connection.waitFor({ state: 'hidden' })
+    if (await phone.locator('.trust-dismiss').isVisible()) await tap('.trust-dismiss')
 
-    // Controller: the gamepad face.
+    // Current pages behind the input-route composition. These are local builds, not pictures of third-party games.
+    const demo = await desk.newPage()
+    await demo.setViewportSize({ width: 1100, height: 700 })
+    await demo.route(`${SERVICE}/**`, route => {
+      const path = decodeURIComponent(new URL(route.request().url()).pathname)
+      let file = resolve(site, `.${path}`)
+      if (existsSync(file) && statSync(file).isDirectory()) file = join(file, 'index.html')
+      if (!inside(file, site) || !existsSync(file)) return route.fulfill({ status: 404, body: '' })
+      return route.fulfill({ path: file, contentType: MIME[extname(file)] ?? 'application/octet-stream' })
+    })
+    await demo.goto(`${SERVICE}/link/try/`)
+    await demo.evaluate(() => document.fonts.ready)
+    const demoTab = await ctl.evaluate(async url => (await chrome.tabs.query({ url }))[0]?.id, `${SERVICE}/link/try/`)
+    if (!Number.isInteger(demoTab)) throw new Error('the demo tab is missing')
+    const enabled = await send({ to: 'bg', type: 'enable', tabId: demoTab, on: true })
+    if (!enabled?.ok) throw new Error(`the demo tab could not be enabled: ${JSON.stringify(enabled)}`)
+    await send({ to: 'bg', type: 'mode', mode: 'gamepad' })
     await tap('.modes [data-tab=gamepad]')
     await phone.locator('.gp-f[data-k=a]').waitFor({ timeout: 8000 })
+    await demo.bringToFront()
+    const stick = await phone.locator('.gp-stick[data-stick="0"]').boundingBox()
+    if (!stick) throw new Error('the phone left stick is missing')
+    await touches('touchStart', [[stick.x + stick.width / 2, stick.y + stick.height / 2]])
+    await touches('touchMove', [[stick.x + stick.width * 0.8, stick.y + stick.height / 2]])
+    await demo.waitForFunction(() => [...navigator.getGamepads()].some(pad => pad && /ob\.Pal/.test(pad.id)), null, { timeout: 10000 })
+    await sleep(1000)
+    await demo.locator('#demo-state').screenshot({ path: shot('page-demo-feedback') })
+    await touches('touchEnd', [])
+    await demo.setViewportSize({ width: 940, height: 430 })
+    await demo.goto(`${SERVICE}/view/`)
+    await demo.waitForFunction(() => window.__viewer?.holder.children.length === 1)
+    if (await demo.locator('.catalog').getAttribute('data-state') !== 'rail') await demo.locator('#rail-toggle').click()
+    await demo.locator('#t-frame').click()
+    await sleep(700)
+    // Isolate the actual viewer canvas; incidental catalogue/tool labels would be micro text in the store frame.
+    await demo.evaluate(() => { for (const el of document.body.children) if (el.id !== 'scene') el.style.setProperty('display', 'none', 'important') })
+    await demo.locator('#scene').screenshot({ path: shot('page-viewer') })
+    await demo.close()
+
+    // Controller: the gamepad face.
+    await phone.locator('.gp-f[data-k=a]').waitFor({ timeout: 8000 })
     await phoneShot('phone-gamepad')
+    // Keys is the same real controller face, mapped to keys rather than a virtual pad.
+    await send({ to: 'bg', type: 'mode', mode: 'keys' })
+    await phoneShot('phone-keys')
 
     // 3D: the trackpad.
     await send({ to: 'bg', type: 'mode', mode: 'viewer' })
@@ -332,6 +406,12 @@ async function capture(captures) {
     await tap('.modes [data-tab=rotate]')
     await phone.locator('#pad').waitFor({ timeout: 8000 })
     await phoneShot('phone-rotate')
+    await popup('popup-viewer', { tab: `${SERVICE}/view/` })
+
+    // Browser pointing: A/B and minus/plus on the shipped Wii-style face.
+    await tap('.modes [data-tab=point]')
+    await phone.locator('.wii-a').waitFor({ timeout: 8000 })
+    await phoneShot('phone-wii')
 
     // PC: the popup controlling the whole PC. The phone is new to this PC: allowed first, as the person at it would in
     // the popup's prompt.
@@ -341,43 +421,15 @@ async function capture(captures) {
     await until('the helper check', async () => (await read('session', 'pc'))?.link === 'missing')
     await session({ link: connected, tab: 4242 })
     await popup('popup-pc', { tab: 'https://play.example.com/', pc: PC })
-
-    // Typing: a text field has the focus on the PC, so the phone offers Type; one tap opens its keyboard dock. The
-    // phone stands upright, UPRIGHT tall.
-    await phone.setViewportSize(UPRIGHT)
-    await tap('.modes [data-tab=rotate]')
-    // What the service worker tells the link when ob.Pal Desktop reports a focused text field. The link takes it only
-    // from a context without a tab, so it goes from the worker.
-    const sw = desk.serviceWorkers()[0] ?? (await desk.waitForEvent('serviceworker'))
-    await sw.evaluate(() => chrome.runtime.sendMessage({ to: 'offscreen', type: 'text-field', field: 'text' }).catch(() => undefined))
-    await phone.locator('#type-prompt').waitFor({ state: 'visible', timeout: 8000 })
-    await tap('#type-prompt')
+    // A picked Wii variant stays picked across target changes; choose the actual air-mouse card.
+    await tap('#ctl-more')
+    await tap('.ctl-card[data-c="face.mouse"]')
+    await phone.locator('#mouse-left').waitFor({ timeout: 8000 })
+    await phoneShot('phone-mouse')
+    await tap('[data-id=keyboard]')
     await phone.locator('#kbd').waitFor({ state: 'visible', timeout: 8000 })
-    // Nothing on this computer types (no ob.Pal Desktop here), so the phone would say so: that notice stays out of the picture.
-    await phone.addStyleTag({ content: '#toast { display: none !important; }' })
-    await phone.keyboard.type('See you at 7, bring the snacks')
-    // The phone's own keyboard, which a screenshot can't show: a plain stand-in, with the dock riding on it as it does.
-    await phone.evaluate(() => {
-      const kb = document.createElement('div')
-      kb.style.cssText = 'position:fixed;left:0;right:0;bottom:0;height:290px;z-index:100;background:#1c1c1f;border-top:1px solid #2c2c30;display:grid;grid-template-rows:repeat(4,1fr);gap:9px;padding:12px 5px 26px'
-      for (const r of ['qwertyuiop', 'asdfghjkl', '⇧zxcvbnm⌫', '?123 , space . ↵']) {
-        const row = document.createElement('div')
-        row.style.cssText = 'display:flex;gap:5px;justify-content:center'
-        for (const k of r.includes(' ') ? r.split(' ') : [...r]) {
-          const key = document.createElement('span')
-          const [flex, max] = k === 'space' ? [5, 190] : k.length > 1 ? [1.6, 58] : [1, 37]
-          key.textContent = k
-          key.style.cssText = `flex:${flex};max-width:${max}px;border-radius:7px;background:#38383d;color:#eee;display:grid;place-items:center;white-space:nowrap;font:500 ${k.length > 1 && k !== 'space' ? 15 : 19}px Inter,system-ui`
-          row.appendChild(key)
-        }
-        kb.appendChild(row)
-      }
-      document.body.appendChild(kb)
-      const dock = document.getElementById('kbd')
-      dock.style.setProperty('--kb', '290px')
-      dock.classList.add('up')
-    })
-    await phoneShot('phone-typing')
+    await phone.locator('#kbd').screenshot({ path: shot('phone-keyboard') })
+
     await phoneCtx.close()
   } finally {
     await desk.close()
@@ -389,55 +441,16 @@ async function capture(captures) {
 
 // ---- the screenshots: a caption and the renders, laid out on shot.html ---------------------------------------------------
 
-// One render per picture, at 150% and as big as the frame allows: a caption above it (or beside a phone standing
-// upright), one light behind it. A render that doesn't fit runs off the frame's edge rather than being made smaller.
-const above = { x: 64, y: 54, w: 1152, align: 'center' }
-const SHOTS = [
-  {
-    title: 'Your phone controls *websites*',
-    sub: 'Scan the code: the controller opens in your phone’s browser. No app to install.',
-    cap: above,
-    light: { x: 120, y: 330, w: 1040, h: 560 },
-    items: [{ src: 'popup-pair', kind: 'popup', x: 160, y: 232 }],
-  },
-  {
-    title: 'A *gamepad* for browser games',
-    sub: 'For browser games that read the Gamepad API. Rumble needs phone and browser vibration support.',
-    cap: above,
-    light: { x: 120, y: 330, w: 1040, h: 560 },
-    items: [{ src: 'phone-gamepad', kind: 'phone', x: 69, y: 200 }],
-  },
-  {
-    title: 'Rotate, pan and zoom in *3D*',
-    sub: 'Drag to rotate, two fingers to pan, pinch to zoom in compatible page viewers.',
-    cap: above,
-    light: { x: 120, y: 330, w: 1040, h: 560 },
-    items: [{ src: 'phone-rotate', kind: 'phone', x: 69, y: 200 }],
-  },
-  {
-    title: 'Your *whole PC*, with ob.Pal Desktop',
-    sub: 'On Windows, control allowed programs or Whole PC. Elevated apps may refuse input.',
-    cap: above,
-    light: { x: 120, y: 330, w: 1040, h: 560 },
-    // Down to the trackpad's gestures; the frame's edge cuts it below them.
-    items: [{ src: 'popup-pc', kind: 'popup', x: 160, y: 252 }],
-  },
-  {
-    title: 'Your PC’s *mouse and keyboard*',
-    sub: 'Point, tap and scroll. In supported text fields, Link can offer typing with your phone’s keyboard.',
-    cap: { x: 64, y: 226, w: 462 },
-    light: { x: 440, y: 160, w: 880, h: 760 },
-    // The phone rising from the frame's edge, which cuts it at the top of its keyboard (UPRIGHT).
-    items: [{ src: 'phone-typing', kind: 'phone', x: 566, y: 24 }],
-  },
-]
+// Current UI captures inside branded frames. Explicit crops isolate the pairing surface and input routes.
 
 async function screenshots(browser, captures) {
   for (const [i, s] of SHOTS.entries()) {
     if (only && !only.has(i + 1)) continue
     const items = await Promise.all(s.items.map(async (it) => {
       const { width: w, height: h } = await sharp(join(captures, `${it.src}.png`)).metadata()
-      return { ...it, w, h, src: `/captures/${it.src}.png` }
+      const sourceWidth = it.cropCss ? it.cropCss[2] * SHOWN : w
+      if (it.width > sourceWidth) throw new Error(`Capture would be enlarged: ${it.src}`)
+      return { ...it, w, h, crop: it.cropCss?.map(n => n * SHOWN), src: `/captures/${it.src}.png` }
     }))
     const spec = { ...s, items }
     await render(browser, `${ORIGIN}/extension/store/src/shot.html#${encodeURIComponent(JSON.stringify(spec))}`, [1280, 800], join(out, `screenshot-${i + 1}.png`), captures)
@@ -450,32 +463,45 @@ await mkdir(out, { recursive: true })
 const desktopLog = join(process.env.APPDATA || '', 'obpal', 'desktop.log')
 const logBefore = existsSync(desktopLog) ? await readFile(desktopLog) : Buffer.alloc(0)
 const kept = process.env.OBPAL_STORE_CAPTURES ? resolve(process.env.OBPAL_STORE_CAPTURES) : null
-if (doShots && !kept) {
-  for (const port of [Number(process.env.OBPAL_E2E_PORT), Number(process.env.OBPAL_E2E_WORKER_PORT)]) {
-    if (!Number.isInteger(port) || port < 1) throw new Error('Assign both e2e ports for store captures')
-    await new Promise((ok, fail) => { const server = createServer(); server.once('error', fail); server.listen(port, '127.0.0.1', () => server.close(ok)) })
-  }
-  local = await startLocal()
-}
-const browser = await chromium.launch({ executablePath, headless: true, args: CLEAN })
-/** Renders kept by an earlier run (OBPAL_STORE_KEEP_CAPTURES), to lay the screenshots out again without capturing. */
-const captures = kept ?? (await mkdtemp(join(temporary, 'obpal-store-captures-')))
+const captureEvidence = join(repo, 'artifacts/link-1.8/round-5/after/captures')
+const captures = kept ?? rawRun(captureEvidence)
+let browser, releaseGpu
+const started = Date.now()
 try {
-  console.log(`ob.Pal Link store art -> ${out}`)
-  if (doArt) await art(browser)
-  if (doShots) {
-    if (!kept) await capture(captures)
-    await screenshots(browser, captures)
+  if (['1', 'swiftshader'].includes(process.env.OBPAL_E2E_GPU)) {
+    releaseGpu = await acquireGpuLease({ waiting: () => console.log('Store art waiting for GPU lease') })
+    if (process.env.OBPAL_E2E_GPU === '1') {
+      const gpu = await detectE2eGpu(executablePath)
+      console.log(`Store art renderer: ${gpu.renderer}; fallback: ${gpu.hardware ? 'none' : 'SwiftShader'}`)
+      if (!gpu.hardware) process.env.OBPAL_E2E_GPU = 'swiftshader'
+    }
   }
+  if ((doShots || doArt) && !kept) {
+    for (const port of [Number(process.env.OBPAL_E2E_PORT), Number(process.env.OBPAL_E2E_WORKER_PORT)]) {
+      if (!Number.isInteger(port) || port < 1) throw new Error('Assign both e2e ports for store captures')
+      await new Promise((ok, fail) => { const server = createServer(); server.once('error', fail); server.listen(port, '127.0.0.1', () => server.close(ok)) })
+    }
+    local = await startLocal()
+  }
+  browser = await chromium.launch(e2eBrowserOptions({ executablePath, headless: true, args: CLEAN }))
+  console.log(`ob.Pal Link store art -> ${out}`)
+  if (!kept) await capture(captures)
+  if (doArt) await art(browser, captures)
+  if (doShots) await screenshots(browser, captures)
 } finally {
-  await browser.close()
-  await local?.close()
-  const logAfter = existsSync(desktopLog) ? await readFile(desktopLog) : Buffer.alloc(0)
-  const fresh = logAfter.subarray(logBefore.length).toString('utf8')
-  if (/browser:.*ms-playwright/i.test(fresh)) throw new Error('Guard failed: installed helper recorded a capture session')
-  console.log('ob.Pal Desktop log: no new sessions')
-  if (!kept) {
-    if (process.env.OBPAL_STORE_KEEP_CAPTURES) console.log(`  renders kept in ${captures}`)
-    else await rm(captures, { recursive: true, force: true }).catch(() => {})
+  try {
+    await browser?.close()
+    await local?.close()
+    const logAfter = existsSync(desktopLog) ? await readFile(desktopLog) : Buffer.alloc(0)
+    const fresh = logAfter.subarray(logBefore.length).toString('utf8')
+    if (/browser:.*ms-playwright/i.test(fresh)) throw new Error('Guard failed: installed helper recorded a capture session')
+    console.log('ob.Pal Desktop log: no new sessions')
+    if (!kept) {
+      if (process.env.OBPAL_STORE_KEEP_CAPTURES) console.log(`  renders kept in ${captures}`)
+      else await distillEvidence(captureEvidence)
+    }
+  } finally {
+    await releaseGpu?.()
+    console.log(`Store art: ${Date.now() - started} ms`)
   }
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { hmacSha256, leadingZeroBits, sha256, solveWork, workDone } from '@obpal/core'
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
@@ -41,12 +41,14 @@ describe('the proof of work', () => {
     expect(workDone('k.16.nonce.taG', x!, 12) && workDone('k.16.nonce.tah', x!, 12)).toBe(false)
   })
 
-  it('takes a phone about a quarter of a second at the base 16 bits (measured here, in tries per second)', async () => {
-    const t0 = performance.now()
-    let n = 0
-    for (; n < 20_000; n++) workDone('lz3k9q.16.AbCdEfGhIjKlMnOp.0123456789abcdefghij', n.toString(36), 16)
-    const perSecond = n / ((performance.now() - t0) / 1000)
-    // 2^16 tries on average; a phone runs JavaScript about 3-5 times slower than this machine.
-    expect(perSecond).toBeGreaterThan(50_000)
+  it('yields every 4096 tries and stops at its fixed search budget', async () => {
+    vi.useFakeTimers()
+    try {
+      const search = solveWork('fixed-no-solution', 256, 8192)
+      expect(vi.getTimerCount()).toBe(1)
+      await vi.runAllTimersAsync()
+      expect(await search).toBeNull()
+      expect(vi.getTimerCount()).toBe(0)
+    } finally { vi.useRealTimers() }
   })
 })

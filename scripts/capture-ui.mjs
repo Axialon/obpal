@@ -10,6 +10,7 @@
  * Needs OBPAL_E2E_PORT and OBPAL_E2E_WORKER_PORT (free), a build (vite build), and Playwright's Chromium or
  * OBPAL_E2E_CHROMIUM. Never writes into the repository outside artifacts/.
  */
+import { distill } from './lib/distill.mjs'
 import { mkdir, readdir, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
@@ -187,3 +188,5 @@ ${pairs}
 </html>\n`)
 if (errors.length) console.log(`page errors:\n  ${errors.join('\n  ')}`)
 console.log(`${files.length} images in ${out}; viewer: ${join(out, 'index.html')}`)
+
+await distill(out, { keepRaw: process.argv.includes("--keep-raw") || process.env.OBPAL_KEEP_RAW === "1" })

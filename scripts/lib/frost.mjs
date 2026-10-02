@@ -4,7 +4,12 @@ export async function setSurface(page, theme) {
   await page.evaluate(async theme => {
     window.BlackboxesFamily.setTheme(theme)
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-    await Promise.all(document.getAnimations().filter(animation => animation instanceof CSSTransition).map(animation => animation.finished.catch(() => {})))
+    // A cancelled transition can be idle by the time its finished promise is read; that new promise never settles.
+    const deadline = performance.now() + 5000
+    while (document.getAnimations().some(animation => animation instanceof CSSTransition && !['finished', 'idle'].includes(animation.playState))) {
+      if (performance.now() >= deadline) throw new Error('Theme transitions did not settle within 5 s')
+      await new Promise(resolve => requestAnimationFrame(resolve))
+    }
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
   }, theme)
 }

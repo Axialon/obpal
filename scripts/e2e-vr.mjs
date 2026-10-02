@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium, devices } from 'playwright'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 
 export function fakeXR() {
   window.__xrHead = { x: 0, y: 1.6, z: 0, yaw: 0 }
@@ -59,7 +60,7 @@ export async function runVR(local, check) {
   const temps = tempScope()
   try {
   const out = await temps.make(join(tmpdir(), 'obpal-vr-'))
-  const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true, args: ['--disable-features=WebRtcHideLocalIpsWithMdns', '--ignore-certificate-errors'] })
+  const browser = await chromium.launch(e2eBrowserOptions({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true, args: ['--disable-features=WebRtcHideLocalIpsWithMdns', '--ignore-certificate-errors'] }))
   const errors = []
   const makePage = async (options = {}) => {
     const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 800 }, ...options })
@@ -168,7 +169,8 @@ export async function runVR(local, check) {
       assert(hostPose.every((v, i) => Math.abs(v - peerPose[i]) < 0.01))
       await screen.evaluate(() => window.__arm.addArm())
       await peer.waitForFunction(() => window.__presence.experience.rides().map(r => r.id).join() === 'a1,a2')
-      await peer.getByRole('button', { name: 'Stop arms', exact: true }).click()
+      assert.equal(await peer.getByRole('button', { name: 'Stop arms', exact: true }).count(), 0, 'watchers cannot control the arms')
+      await screen.locator('#estop').click()
       await screen.waitForFunction(() => !!window.__arm.stopped())
       await peer.context().close(); await screen.context().close()
     })

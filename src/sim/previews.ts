@@ -4,6 +4,7 @@
  * at up to 30 frames a second; under reduced motion each draws one
  * still frame; nothing draws while the tab is hidden. three.js loads once the first card comes into view.
  */
+import { dotLoading } from '../ui/kit/loading'
 import type { Preview } from './devices/view'
 
 export interface PreviewSlot {
@@ -73,7 +74,7 @@ export function mountPreviews(slots: readonly PreviewSlot[]) {
     l.ctx.clearRect(0, 0, c.width, c.height)
     l.ctx.drawImage(renderer.domElement, 0, full.y - c.height, c.width, c.height, 0, 0, c.width, c.height)
     l.frames++
-    if (!l.drawn) { l.drawn = true; c.closest('.dcard-stage')?.classList.add('live') }
+    if (!l.drawn) { l.drawn = true; const host = c.closest<HTMLElement>('.dcard-stage'); host?.classList.add('live'); if (host) dotLoading(host, false) }
   }
 
   const frame = (now: number) => {
@@ -99,13 +100,16 @@ export function mountPreviews(slots: readonly PreviewSlot[]) {
   const load = async (l: Live) => {
     if (l.preview || l.loading) return
     l.loading = true
+    const host = l.slot.canvas.closest<HTMLElement>('.dcard-stage')
+    if (host) dotLoading(host, true, 'Preparing preview', 32)
     await start()
-    if (failed || !three || stopped) return
+    if (failed || !three || stopped) { if (host) dotLoading(host, false); return }
     try {
       l.preview = await l.slot.load()
       l.preview.scene.environment = env
       wake()
     } catch {
+      if (host) dotLoading(host, false)
       // A preview that doesn't load leaves its card's still picture.
     }
   }
@@ -138,6 +142,7 @@ export function mountPreviews(slots: readonly PreviewSlot[]) {
     stats: () => ({ renderers: renderer ? 1 : 0, cards: lives.map(l => ({ id: l.slot.canvas.closest<HTMLElement>('.dcard')?.dataset.id, visible: l.visible && onScreen(l), loaded: !!l.preview, frames: l.frames })) }),
     stop() {
       stopped = true
+      lives.forEach(l => { const host = l.slot.canvas.closest<HTMLElement>('.dcard-stage'); if (host) dotLoading(host, false) })
       io.disconnect()
       resized.disconnect()
       document.removeEventListener('visibilitychange', onVisibility)

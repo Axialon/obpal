@@ -1,11 +1,13 @@
 import { DOT_SIZES, DotField } from '../ui/kit/dot-field'
 import { DotSpace } from '../ui/kit/dot-space'
 import { constellationPoints, constellationRoutes } from './constellation-points'
+import { LinkHero } from './hero'
+import type { HeroState } from './hero-points'
 
 export function mountConstellation() {
   const canvas = document.querySelector<HTMLCanvasElement>('#link-space')!
   const fallback = document.querySelector<HTMLCanvasElement>('#link-flat')!
-  let flat: DotField | undefined, space: DotSpace | undefined
+  let flat: DotField | undefined, space: DotSpace | LinkHero | undefined
   let generation = 0
   const theme = new MutationObserver(() => flat?.refresh())
   const showFlat = () => {
@@ -19,25 +21,31 @@ export function mountConstellation() {
     canvas.hidden = false; fallback.hidden = true; space = undefined
     const rect = canvas.getBoundingClientRect()
     const points = constellationPoints(rect.width, rect.height, DOT_SIZES.display.pitch)
-    try { space = new DotSpace(canvas, { points, routes: constellationRoutes(), decorative: true, fallback: showFlat }) } catch { showFlat() }
+    if (canvas.closest('[data-link-hero]')) space = new LinkHero(canvas, fallback, generation === 1)
+    else try { space = new DotSpace(canvas, { points, routes: constellationRoutes(), decorative: true, fallback: showFlat }) } catch { showFlat() }
     theme.observe(document.documentElement, { attributes: true, attributeFilter: ['data-bb-theme', 'data-bb-accent'] })
   }
   mount()
   const pointer = (event: PointerEvent) => {
-    const rect = canvas.getBoundingClientRect()
-    space?.pointer((event.clientX - rect.left) / rect.width * 2 - 1, (event.clientY - rect.top) / rect.height * 2 - 1)
+    const rect = (canvas.hidden ? fallback : canvas).getBoundingClientRect()
+    if (!rect.width || !rect.height) return
+    const x = (event.clientX - rect.left) / rect.width * 2 - 1, y = (event.clientY - rect.top) / rect.height * 2 - 1
+    if (space instanceof LinkHero) space.pointer(x, y, x < -1 / 3 ? 'phone' : x < 1 / 3 ? 'browser' : 'pc')
+    else space?.pointer(x, y)
   }
   const resize = new ResizeObserver(() => {
     const rect = (flat ? fallback : canvas).getBoundingClientRect()
     if (!rect.width || !rect.height) return
     const points = constellationPoints(rect.width, rect.height, DOT_SIZES.display.pitch)
     if (flat) flat.setPoints(points)
-    else space?.setPoints(points)
+    else if (space instanceof DotSpace) space.setPoints(points)
   })
   resize.observe(canvas)
   resize.observe(fallback)
   canvas.addEventListener('pointermove', pointer, { passive: true })
   canvas.addEventListener('pointerleave', () => space?.pointer(0, 0), { passive: true })
+  fallback.addEventListener('pointermove', pointer, { passive: true })
+  fallback.addEventListener('pointerleave', () => space?.pointer(0, 0), { passive: true })
   let tilt = false
   const orientation = (event: DeviceOrientationEvent) => {
     if (event.gamma === null || event.beta === null) return
@@ -71,5 +79,5 @@ export function mountConstellation() {
   })
   window.addEventListener('pageshow', event => { if (event.persisted) { mount(); resize.observe(canvas); resize.observe(fallback) } })
   // A stable handle follows the current renderer when browser history restores this document.
-  return { pointer: (x: number, y: number) => space?.pointer(x, y) }
+  return { pointer: (x: number, y: number) => space?.pointer(x, y), setState: (state: HeroState, pc: boolean, replay = true) => { if (space instanceof LinkHero) space.setState(state, pc, replay) } }
 }

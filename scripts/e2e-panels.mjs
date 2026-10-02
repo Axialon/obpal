@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { checkFrost, setSurface } from './lib/frost.mjs'
+import { e2eBrowserOptions } from './lib/browser.mjs'
 
 const assert = (ok, message) => { if (!ok) throw new Error(message) }
 const sizes = [[1280, 800], [1920, 1080], [844, 390], [390, 844]]
@@ -48,7 +49,7 @@ export async function runPanels(local, check) {
   if (!isAbsolute(rel) && !rel.startsWith('..')) throw new Error('Panel evidence must go to a temporary folder')
   await mkdir(out, { recursive: true })
   const captures = []
-  const browser = await chromium.launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM, args: ['--ignore-certificate-errors'] })
+  const browser = await chromium.launch(e2eBrowserOptions({ executablePath: process.env.OBPAL_E2E_CHROMIUM, args: ['--ignore-certificate-errors'] }))
   try {
     for (const [name, route] of sims) for (const [width, height] of sizes) {
       await check(`panels: ${name} move, resize, minimise, close, reopen, reload and reset at ${width}x${height}`, async () => {

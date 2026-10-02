@@ -4,6 +4,7 @@ import { html, setMarkup } from '../ui/markup'
 import { loadCommunityPacks } from './packs'
 import { ICONS } from '../ui/icons'
 import { plainQrElement } from '../../packages/host/src/qr'
+import { dotLoading, dotThumbnail } from '../ui/kit/loading'
 
 export function mountCommunity() {
   const list = document.getElementById('community-packs')!
@@ -34,9 +35,12 @@ export function mountCommunity() {
       </div></details>
     </article>`))
     status.textContent = packs.length ? `${matches.length} of ${packs.length} packs` : 'No cached packs. Connect to the internet and reload to get the catalogue.'
+    list.querySelectorAll('img').forEach(image => dotThumbnail(image, image.alt, () => image.remove()))
   }
   search.addEventListener('input', render)
+  dotLoading(status, true, 'Opening community packs', 32)
   void loadCommunityPacks().then((loaded) => {
+    dotLoading(status, false)
     packs = loaded
     setMarkup(credits, packs.map((p) => html`<li><b>${p.name}</b> (${p.id} · ${p.version}) — ${p.attribution}
       <span>${packCredit(p)}</span>

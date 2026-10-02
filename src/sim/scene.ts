@@ -12,6 +12,7 @@ import { holdForPhone } from '../ui/recover'
 import { ControlSession } from './control-space'
 import { quickAction } from '../ui/quick-actions'
 import { mountBodyCapture } from '../ui/body-capture'
+import { mountLocalPlay } from './local-play'
 
 export interface SimScene {
   remote: Remote
@@ -72,7 +73,7 @@ const clock = () => new Date().toLocaleTimeString('en-GB', { hour12: false })
 export async function startSimScene(o: SimOptions): Promise<SimScene> {
   mountBodyCapture()
   o.layout = { ...o.layout, universal: true }
-  const remote = await Remote.create({ appName: o.appName, layout: o.layout, seats: 8 })
+  const remote = await Remote.create({ appName: o.appName, layout: o.layout, seats: 8, session: location.pathname + location.search.replace(/[?&](test|local)=[^&]*/g, '') })
   holdForPhone(remote)
   const query = new URLSearchParams(location.search)
   const control = new ControlSession(remote, query.get('d') ?? (location.pathname.includes('/marblerun/') ? 'marblerun' : location.pathname.includes('/arm/') ? `arm-${query.get('kind') ?? 'arm5'}` : location.pathname.includes('/humanoid/') ? 'humanoid' : 'arena'))
@@ -97,7 +98,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   const autoAllow = $('auto-allow') as HTMLInputElement | null
   let approvalHeld = false
   const waived = () => !!autoAllow?.checked && !approvalHeld
-  const visitor = (id: string) => people.get(id)?.caps?.platform === 'scene'
+  const visitor = (id: string) => people.get(id)?.role === 'watch'
   const allowed = (id: string) => !visitor(id) && (!o.approval || approved.has(id) || waived())
   const holdApproval = (held: boolean) => {
     if (held === approvalHeld) return
@@ -133,8 +134,8 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
       note(`${lead.name}: ${CONTROLLERS[next].name}`)
     },
   })
-  const nameOf = (id: string | undefined) => (!id ? '' : id === 'host' ? 'The screen' : id.startsWith('local:') ? 'Local player' : people.get(id)?.name ?? 'Someone')
-  const colorOf = (id: string | undefined) => (!id ? '' : id === 'host' || id.startsWith('local:') ? family.accentColor() : people.get(id)?.color ?? '')
+  const nameOf = (id: string | undefined) => (!id ? '' : id === 'audience' ? 'Audience' : id === 'host' ? 'The screen' : id.startsWith('local:') ? 'Local player' : people.get(id)?.name ?? 'Someone')
+  const colorOf = (id: string | undefined) => (!id ? '' : id === 'audience' || id === 'host' || id.startsWith('local:') ? family.accentColor() : people.get(id)?.color ?? '')
 
   const log = (text: string, color?: string) => {
     const list = $('log')
@@ -157,6 +158,8 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
 
   const take = (node: string, who: string, force = false): boolean => {
     if (visitor(who)) return false
+    const grant = people.get(who)?.simSeat
+    if (grant && grant !== node) return false
     const r = claims.take(node, who, force)
     const name = nodeName(node)
     if (!r.ok) {
@@ -237,6 +240,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   remote.on('disconnect', () => { $('chip').hidden = true; chip.expand(); $('people').hidden = true })
   remote.on('join', (p) => {
     people.set(p.id, p)
+    if (remote.isLocal(p.id)) approved.add(p.id)
     log(`${p.name} joined`, p.color)
     if (!visitor(p.id) && o.approval && !allowed(p.id)) {
       pending.add(p.id)
@@ -256,6 +260,13 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
     publish()
     o.left?.(p)
   })
+  remote.on('role', p => {
+    claims.release(p.id); focus.reset(p.id); pending.delete(p.id); approved.delete(p.id); people.set(p.id, p)
+    if (p.simSeat) { approved.add(p.id); claims.take(p.simSeat, p.id) }
+    else o.left?.(p)
+    remote.setValues({ part: p.simSeat ? nodeName(p.simSeat) : '' }, p.id)
+    publish()
+  })
   remote.on('claim', ({ node }, who) => {
     if (visitor(who.id)) return
     if (!allowed(who.id)) { remote.feedback({ haptic: 'bump', toast: 'Waiting for the screen to let you in' }, who.id); return }
@@ -271,7 +282,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   $('chip-disc').onclick = () => remote.disconnect()
   $('chip-invite').onclick = () => { chip.toggle(); if (chip.expanded) $('people').hidden = true }
   $('chip-who').onclick = () => { const p = $('people'); p.hidden = !p.hidden; if (!p.hidden) chip.collapse() }
-  $('invite-new').onclick = async () => { await remote.resetInvite(); note('New invite link: the old code no longer works') }
+  $('invite-new').onclick = async () => { await remote.resetInvite(); note('New pairing code: the old code no longer works') }
   document.querySelectorAll<HTMLElement>('[data-icon]').forEach((el) => el.insertAdjacentHTML('afterbegin', ICONS[el.dataset.icon!] ?? ''))
   for (const button of document.querySelectorAll<HTMLButtonElement>('button.kit-action, button.btn')) {
     // Device views may give Home a scene-specific meaning before their shared shell finishes loading.
@@ -299,5 +310,6 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
 
   const result: SimScene = { remote, control, claims, focus, nodes, allowed, waived, holdApproval, nameOf, colorOf, log, note, publish, take, release, setNodes, nodeName }
   publish()
+  mountLocalPlay(remote, o.layout, nodes.find(n => !n.parent)?.id)
   return result
 }

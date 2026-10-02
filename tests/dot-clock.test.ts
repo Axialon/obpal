@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { dotClock } from '../packages/host/src/dot-field'
+import { dotClock, dotLoaderClock } from '../packages/host/src/dot-field'
 
 function clock() {
   const frames = new Map<number, FrameRequestCallback>()
@@ -23,6 +23,16 @@ it('shares one request and the same timestamp, then releases finite subscription
   expect(c.frames.size).toBe(1)
   stop(); stop()
   expect(c.frames.size).toBe(0)
+})
+
+it('gives pending flat and scene loaders one moving owner and transfers it without another clock', () => {
+  const c = clock(), observed: string[] = []
+  const first = dotLoaderClock(now => { observed.push(`flat:${now}`); return true }, c.doc)
+  const second = dotLoaderClock(now => { observed.push(`scene:${now}`); return true }, c.doc)
+  expect(c.frames.size).toBe(1)
+  c.step(900); expect(observed).toEqual(['flat:900'])
+  first(); c.step(1200); expect(observed).toEqual(['flat:900', 'scene:1200'])
+  second(); expect(c.frames.size).toBe(0)
 })
 
 it('stops requests in a hidden document and resumes the current time without replay', () => {

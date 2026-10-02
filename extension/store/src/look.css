@@ -52,16 +52,3 @@ body {
   box-shadow: inset 0 0 0 2px rgb(255 255 255 / 0.14), inset 0 3px 0 rgb(255 255 255 / 0.08), 0 30px 70px -28px rgb(0 0 0 / 0.95);
   backdrop-filter: blur(22px) saturate(150%);
 }
-
-/* The wordmark, as the site and the extension set it (src/styles/base.css), heavier for these sizes: "ob", a lime point,
-   a bolder "Pal". At display size the point's side bearings show, so it sits a little tighter. */
-.word { font-family: var(--display); font-weight: 800; letter-spacing: -0.035em; line-height: 1; white-space: nowrap; }
-.word .ob { font-weight: 650; opacity: 0.86; }
-.word .pt { color: var(--lime); margin: 0 -0.035em; }
-.word b { font-weight: 800; }
-/* A solid lime pill with dark type. */
-.tag {
-  display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 999px; background: var(--lime); color: var(--lime-ink);
-  font-family: var(--ui); font-weight: 800; letter-spacing: 0.14em;
-}

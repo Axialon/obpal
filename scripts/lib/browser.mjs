@@ -42,3 +42,34 @@ export function newestInstalled(wanted) {
 
 /** The last three parts of a browser's path, enough to tell which one without printing a home folder. */
 export const shortPath = (p) => (p ? `…/${p.split(/[\\/]/).slice(-3).join('/')}` : '')
+
+/** Opt into the measured Windows D3D11 path; keep every suite's existing options when unset. */
+export function e2eBrowserOptions(options, env = process.env, platform = process.platform) {
+  if (env.OBPAL_E2E_GPU === 'swiftshader') {
+    const args = (options.args ?? []).filter(arg => !arg.startsWith('--use-angle=') &&
+      !['--enable-unsafe-swiftshader', '--enable-gpu', '--ignore-gpu-blocklist'].includes(arg))
+    return { ...options, args: [...args, '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] }
+  }
+  if (env.OBPAL_E2E_GPU !== '1') return options
+  if (platform !== 'win32') throw new Error('OBPAL_E2E_GPU=1 requires Windows; only D3D11 was measured')
+  const args = (options.args ?? []).filter(arg => !arg.startsWith('--use-angle=') &&
+    !['--enable-unsafe-swiftshader', '--enable-gpu', '--ignore-gpu-blocklist'].includes(arg))
+  return { ...options, args: [...args, '--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist'] }
+}
+
+/** Probe the actual WebGL renderer; a missing or software device uses the explicit software fallback. */
+export async function detectE2eGpu(executablePath, { platform = process.platform, launch } = {}) {
+  if (platform !== 'win32') return { hardware: false, renderer: '', reason: 'D3D11 requires Windows' }
+  const start = launch || (options => import('playwright').then(({ chromium }) => chromium.launch(options)))
+  const browser = await start(e2eBrowserOptions({ executablePath: executablePath || undefined, headless: true, timeout: 30_000 }, { OBPAL_E2E_GPU: '1' }, platform))
+  try {
+    const page = await browser.newPage()
+    const renderer = await page.evaluate(() => {
+      const gl = document.createElement('canvas').getContext('webgl2')
+      const info = gl?.getExtension('WEBGL_debug_renderer_info')
+      return info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : ''
+    })
+    const hardware = !!renderer && !/swiftshader|software|llvmpipe|basic render|warp/i.test(renderer)
+    return { hardware, renderer, reason: hardware ? '' : 'no hardware WebGL renderer detected' }
+  } finally { await browser.close() }
+}

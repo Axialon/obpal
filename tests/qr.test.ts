@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import jsQR from 'jsqr'
 import { BinaryBitmap, HybridBinarizer, QRCodeReader, RGBLuminanceSource } from '@zxing/library'
 import { renderSVG } from 'uqr'
-import { encodePairing, encodeLanPairing } from '@obpal/core'
+import { b64url, encodePairing, encodeLanPairing } from '@obpal/core'
 import { luminance, parseColor } from '../packages/host/src/color'
 import { brandedQr, plainQr, qrColors } from '../packages/host/src/qr'
 import { rasterize } from './raster.mjs'
@@ -39,6 +39,16 @@ async function readers(svg: string, size: number, text: string, opts: { backgrou
 }
 
 describe('the branded QR code scans', () => {
+  it('reads persistent capability links with both decoders at the chip sizes', async () => {
+    const link = `http://127.0.0.1:5179/p/#${encodePairing({ secret: bytes(16, 7), fp: bytes(32, 8), room: b64url(bytes(16, 9)), capability: 'play' })}`
+    for (const size of [...CHIP, 177, 354]) expect(await readers(brandedQr(link), size, link, { background: '#171717' }), `${size}px`).toEqual(ALL)
+  })
+  it('reads shared-room Play invites with both decoders at the dense chip size', async () => {
+    for (let seed = 0; seed < 6; seed++) {
+      const link = `http://127.0.0.1:5179/p/#${encodePairing({ secret: bytes(16, seed), fp: bytes(32, seed + 1), room: 'a'.repeat(22), capability: 'play' })}`
+      for (const size of [192, 384]) expect(await readers(brandedQr(link), size, link, { background: '#171717' })).toEqual(ALL)
+    }
+  })
   it('with both decoders at the chip’s sizes, on every surface', async () => {
     for (const bg of SURFACES) for (const size of CHIP) expect(await readers(brandedQr(LINKS[0]), size, LINKS[0], { background: bg }), `${bg} at ${size}px`).toEqual(ALL)
   })

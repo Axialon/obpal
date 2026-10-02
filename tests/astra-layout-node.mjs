@@ -13,6 +13,35 @@ const fixture = async action => {
 }
 const request = (outbox, stage) => saveExchange(outbox, stage, 'Request', archive({ 'TASK.md': 'Synthetic task' }, { kind: 'request', stage }), 'Synthetic upload prompt')
 export const layoutCases = [
+  { name: 'verification holds results without an upload marker and next pack attaches both ZIPs in one turn', run: () => fixture(({ outbox }) => {
+    const first = request(outbox, 'earlier')
+    const marker = join(outbox, 'UPLOAD-THIS-earlier.prompt.txt'), before = readFileSync(marker, 'utf8')
+    const held = saveExchange(outbox, 'earlier', 'Return', archive({ 'RESULT.md': 'check failed (exit 7)' }, { kind: 'result', stage: 'earlier', result: 'failed' }), 'held result prompt', { held: true })
+    assert.match(held, /held[\\/]earlier/); assert(existsSync(held.replace(/\.zip$/, '.prompt.txt')))
+    assert.equal(readFileSync(marker, 'utf8'), before)
+    assert.deepEqual(readdirSync(outbox).filter(name => name.endsWith('.zip')), [first.split(/[\\/]/).at(-1)])
+    const next = saveExchange(outbox, 'next', 'Request', archive({}, { kind: 'request', stage: 'next' }), 'next bounded task', { attach: held })
+    assert(existsSync(held)); assert(existsSync(next))
+    const copy = join(outbox, held.split(/[\\/]/).at(-1))
+    assert.deepEqual(readFileSync(copy), readFileSync(held)); assert(existsSync(copy.replace(/\.zip$/, '.prompt.txt')))
+    const combined = readFileSync(join(outbox, 'UPLOAD-THIS-next.prompt.txt'), 'utf8')
+    assert(combined.includes(next.split(/[\\/]/).at(-1))); assert(combined.includes(held.split(/[\\/]/).at(-1)))
+    assert.match(combined, /Fold.*one turn/); assert.match(combined, /next bounded task/); assert.match(combined, /failed, blocked and unexecuted/)
+    assert.deepEqual(tidyExchange(outbox), [])
+    request(outbox, 'later'); assert(!existsSync(copy)); assert(existsSync(held))
+  }) },
+  { name: 'held verification alone produces no loose upload, and invalid attachments preserve the current upload', run: () => fixture(({ outbox, root }) => {
+    const held = saveExchange(outbox, 'prior', 'Return', archive({}, { kind: 'result', stage: 'prior' }), 'held prompt', { held: true })
+    assert.equal(readdirSync(outbox).filter(name => /zip$|UPLOAD-THIS/.test(name)).length, 0)
+    const current = request(outbox, 'current')
+    const pack = attach => saveExchange(outbox, 'next', 'Request', archive({}, { kind: 'request', stage: 'next' }), 'next', { attach })
+    assert.throws(() => pack(current), /held Return/)
+    const outside = join(root, 'outside.zip'); writeFileSync(outside, readFileSync(held))
+    assert.throws(() => pack(outside), /outbox\/held/)
+    writeFileSync(held, 'corrupt ZIP'); assert.throws(() => pack(held))
+    assert(existsSync(current)); assert(existsSync(join(outbox, 'UPLOAD-THIS-current.prompt.txt')))
+  }) },
+
   { name: 'a new pack moves earlier loose stages to sent and keeps only the current upload', run: () => fixture(({ outbox }) => {
     const first = request(outbox, 'earlier'), current = request(outbox, 'current')
     assert.equal(existsSync(first), false); assert.equal(existsSync(current), true)

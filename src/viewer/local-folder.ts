@@ -1,3 +1,4 @@
+import { dotLoading } from '../ui/kit/loading'
 /**
  * Local folder catalogue: connect a folder on this device and its 3D files appear under "Local" in the catalogue and in
  * the phone's model picker, to view and control like the built-in models.
@@ -12,7 +13,8 @@
  * - Nothing leaves the device: files are never uploaded, and a reference that is not in the folder fails offline.
  *
  * Viewer hooks (main.ts): init() at boot, renderPanel() after the Local tiles render, release() when an object leaves the scene.
- */import { type Content, html, setMarkup } from '../ui/markup'
+ */
+import { type Content, html, setMarkup } from '../ui/markup'
 
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
@@ -540,13 +542,15 @@ function head(): HTMLElement {
     where.querySelector('span')!.textContent = source.name
     const again = button(busy ? 'lf-btn busy' : 'lf-btn', ICONS.rotate, 'Refresh', session ? 'Pick the folder again' : 'Refresh', () => void refresh())
     bar.append(where, again, button('lf-btn', ICONS.close, 'Disconnect', 'Disconnect', disconnect))
+    if (busy) { again.replaceChildren(); dotLoading(again, true, 'Refreshing folder') }
     return bar
   }
   const card = el('div', 'lf-card')
   if (busy) {
     card.classList.add('busy')
     card.setAttribute('role', 'status')
-    setMarkup(card, html`<span class="lf-art"><i class="lf-ring"></i></span><span class="lf-title"></span><span class="lf-sub"></span>`)
+    setMarkup(card, html`<span class="lf-art"></span><span class="lf-title"></span><span class="lf-sub"></span>`)
+    dotLoading(card.querySelector<HTMLElement>('.lf-art')!, true, 'Reading folder', 48)
     card.querySelector('.lf-title')!.textContent = busy.name
     progress = card.querySelector('.lf-sub')
     if (busy.seen) progress!.textContent = `${count(busy.seen)} scanned`

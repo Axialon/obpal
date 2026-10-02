@@ -20,12 +20,12 @@ export function rerunCommand(file, line) {
     if (selector) setup.push(`$env:OBPAL_E2E_SIMS_ONLY='${selector}'`)
   }
   if (suite === 'pages' && /\btry\b/i.test(line)) setup.push("$env:OBPAL_E2E_PAGES_ONLY='try'")
-  if (!['code', 'embed', 'home', 'phone', 'sims', 'shared', 'extension', 'catalogue', 'pages'].includes(suite)) return 'Identify the suite, then rerun it once through pnpm run e2e:all with the assigned ports and browser.'
+  if (!['code', 'embed', 'home', 'phone', 'sims', 'shared', 'extension', 'catalogue', 'pages', 'camera', 'contact', 'orientation'].includes(suite)) return 'Identify the suite, then rerun it once through pnpm run e2e:all with the assigned ports and browser.'
   return `${setup.join('; ')}; pnpm run e2e:all -- ${suite}`
 }
 
 export function failureCategory(line, context = '') {
-  if (/assert|expected|actual|toEqual|toBe\b|!==|mismatch/i.test(line)) return 'real-regression'
+  if (/assert|expected|actual|toEqual|toBe\b|!==|mismatch|wire\s+.*wanted|\d+\s+off-centre/i.test(line)) return 'real-regression'
   if (/EADDRINUSE|port.*(?:busy|in use)|browser.*(?:not found|missing|closed)|executable.*(?:exist|missing)|worker.*(?:fail|exit|start)|ECONNREFUSED|ENOTFOUND|Cannot find module|spawn.*(?:EACCES|ENOENT)/i.test(line)) return 'harness-or-environment'
   if (/timeout|timed out|waiting for|waitFor/i.test(line) && /under load|concurrent validation|heavy lanes/i.test(line + context) && KNOWN_FLAKY.some(name => line.toLowerCase().includes(name))) return 'load-or-timing-flake'
   return 'unknown'
@@ -39,7 +39,7 @@ export function extractTriage(logs) {
     const errors = lines.filter(line => /^(?:\s*)(?:Error:|AssertionError|TimeoutError|FAIL\b|FAILED\b)|EADDRINUSE|ECONNREFUSED|browserType\.launch.*executable/i.test(line))
     const selected = checks.length ? checks : errors
     for (const line of selected) {
-      const category = failureCategory(line, lines.join('\n'))
+      const category = failureCategory(line)
       failures.push({ file, line, category, cause: line.trim(), rerun: rerunCommand(file, line) })
     }
     if (truncated) failures.push({ file, line: '[log truncated]', category: 'unknown', cause: 'Earlier failing checks may be missing; inspect the original log.', rerun: rerunCommand(file, '') })
@@ -54,9 +54,10 @@ export async function triageDirectory(directory, options = {}) {
   // Read suite logs only: no directory recursion, attachments, helper logs or arbitrary files.
   const logs = files.map(file => ({ file, ...readInput(join(directory, file), directory, 96_000, true) })).map(log => ({ ...log, text: cleanLog(log.text) }))
   const baseline = extractTriage(logs)
-  const result = await classify(baseline, logs.map(({ file, text }) => ({ file, text: text.slice(-8000) })), triageSchema, options, candidate => candidate.failures.length === baseline.failures.length && candidate.failures.every((failure, i) => {
+  const guidance = 'Ground each category in the quoted line. real-regression: explicit assertion or mismatch (expected 3 actual 4, wire [] wanted [click], 11 off-centre with measured offsets). harness-or-environment: failed infrastructure (EADDRINUSE, missing browser executable). load-or-timing-flake: a documented known flaky check AND timeout AND explicit load evidence in that line. unknown: insufficient evidence (Timeout waiting alone). Preserve deterministic categories and explain the quoted evidence. No digest length target applies.'
+  const result = await classify(baseline, { failures: baseline.failures, definitions: guidance }, triageSchema, { timeoutMs: 90_000, ...options, guidance }, candidate => candidate.failures.length === baseline.failures.length && candidate.failures.every((failure, i) => {
     const original = baseline.failures[i]
-    return ['file', 'line', 'category', 'rerun'].every(key => failure[key] === original[key]) && failure.cause.length > 0 && sanitize(failure.cause) === failure.cause && !/\bpass(?:ed|ing)?\b/i.test(failure.cause)
+    return ['file', 'line', 'rerun'].every(key => failure[key] === original[key]) && failure.category === failureCategory(original.line) && failure.cause.length > 0 && sanitize(failure.cause) === failure.cause && !/\bpass(?:ed|ing)?\b/i.test(failure.cause)
   }))
   return { ...result, advisory: 'Recommendations only; rerun once with the same assigned ports/browser. A real rerun must pass. A second failure needs investigation.' }
 }

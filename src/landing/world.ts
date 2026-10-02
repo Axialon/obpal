@@ -89,7 +89,7 @@ export const foreseeable = (h: WorldHit) => !h.soft && h.speed > SURE * hearing(
 export const keyOf = (h: WorldHit) => `${h.orb}|${h.kind}|${h.letter ?? h.pad ?? h.wall ?? h.other ?? ''}`
 
 /** A button in the hero, as the marbles' world sees it: its box on the canvas (CSS px) and its corners' radius. */
-export interface PadRect { x: number; y: number; w: number; h: number; r: number; height?: number; rings?: number[][]; step?: boolean }
+export interface PadRect { x: number; y: number; w: number; h: number; r: number; height?: number; rings?: number[][]; step?: boolean; exclude?: boolean; fixed?: boolean }
 
 export interface WorldMarble {
   id: string
@@ -124,6 +124,7 @@ export interface World {
   layout(lines: string[], W: number, H: number, box: { x: number; y: number; w: number; h: number }): boolean
   /** The raised things, where they are now (canvas px; an empty box: not there). Returns whether they moved. */
   setPads(rects: PadRect[]): boolean
+  movePads(updates: { index: number; rect: PadRect }[], seconds: number): void
   /** Move the cached page through a viewport field, carrying marbles and giving a bounded scroll impulse. */
   scroll(y: number, impulse?: boolean): void
   readonly active: number
@@ -156,6 +157,8 @@ export interface World {
   toss(m: WorldMarble, vy: number): void
   /** Wake every marble (something about the world changed). */
   wake(): void
+  /** A demo in use keeps a soft clearance outside its cached block. */
+  repel(rect: PadRect | null): void
   /** Advance by dt (s): whole steps, each H; returns what was struck, in order, and whether anything still moves. */
   step(dt: number): { hits: WorldHit[]; moving: boolean }
   /** The moment on the world's clock that's drawn now (a step behind the last at most). */
@@ -168,7 +171,7 @@ export interface World {
   foresee(horizon: number): WorldHit[]
 }
 
-export function createWorld(viewport = true): World {
+export function createWorld(viewport = true, flowing = false): World {
   // Parallel projection keeps page footprints and marble sizes constant all the way down the document.
   const camera = viewport ? new OrthographicCamera(-1, 1, 1, -1, -20000, 20000) : new PerspectiveCamera(FOV, 1, 0.1, 200)
   const ray = new Raycaster()
@@ -191,6 +194,48 @@ export function createWorld(viewport = true): World {
   /** Each marble's last knock on each thing, by name (keyOf): when (s on the world's clock). */
   const knocked = new Map<string, number>()
   const env: Env = { walls, grow: DEPTH }
+  const ledges = new Map<string, { id: number; time: number; x: number; z: number }>()
+  let repelled: PadRect | null = null
+  let blocks: PadRect[] = []
+  let scrollTime = 0
+  /** Viewport-space kinematic motion, in CSS pixels and pixels per second. Static outlines stay untouched. */
+  function sweptCards(previous: PadRect[], current: PadRect[], seconds: number) {
+    for (let i = 0; i < current.length; i++) {
+      const b = current[i], a = previous[i]
+      if (!a?.exclude || !b.exclude || b.w <= 0 || b.h <= 0) continue
+      const vx = (b.x - a.x) / seconds, vy = (b.y - a.y) / seconds
+      if (!vx && !vy) continue
+      if (Math.max(a.y + a.h, b.y + b.h) < playTop || Math.min(a.y, b.y) > Hc) continue
+      for (const m of map.values()) {
+        const o = m.orb, p = project(o.x, o.y, o.z)
+        const radius = Math.abs(project(o.x + o.r, o.y, o.z).x - p.x)
+        // Slab intersection of a stationary marble with a moving, radius-expanded block.
+        let enter = 0, leave = 1, nx = 0, ny = 0
+        for (const [point, delta, low, high, axis] of [[p.x, -vx * seconds, a.x - radius, a.x + a.w + radius, 0], [p.y, -vy * seconds, a.y - radius, a.y + a.h + radius, 1]]) {
+          if (Math.abs(delta) < 1e-9) { if (point < low || point > high) leave = -1; continue }
+          let lo = (low - point) / delta, hi = (high - point) / delta
+          if (lo > hi) [lo, hi] = [hi, lo]
+          if (lo >= enter) { enter = lo; nx = axis === 0 ? -Math.sign(delta) : 0; ny = axis === 1 ? -Math.sign(delta) : 0 }
+          leave = Math.min(leave, hi)
+        }
+        if (enter > leave || leave < 0 || enter > 1 || (!nx && !ny)) continue
+        const x = nx < 0 ? b.x - radius - .1 : nx > 0 ? b.x + b.w + radius + .1 : p.x
+        const y = ny < 0 ? b.y - radius - .1 : ny > 0 ? b.y + b.h + radius + .1 : p.y
+        const at = rawFloorAt(x, y, o.y), velocity = rawFloorAt(x + vx, y + vy, o.y)
+        o.x = at.x; o.z = at.z
+        // Contact velocity wakes a sleeping marble; clamp the impulse to the field's gentle scroll budget.
+        const dx = velocity.x - at.x, dz = velocity.z - at.z, speed = Math.hypot(dx, dz)
+        if (speed) { o.vx = dx / speed * Math.min(3, speed); o.vz = dz / speed * Math.min(3, speed) }
+        o.resting = false
+        delete o.mem
+      }
+    }
+  }
+
+  function cacheBlocks() {
+    blocks = padRects.filter(b => b.exclude && b.w > 0 && b.h > 0 && (b.fixed || b.y + b.h >= scroll && b.y <= scroll + Hc))
+      .map(b => ({ ...b, y: b.y - (b.fixed ? 0 : scroll) }))
+  }
 
   function rawFloorAt(sx: number, sy: number, h = 0) {
     ray.setFromCamera(new Vector2((sx / W) * 2 - 1, -(sy / Hc) * 2 + 1), camera)
@@ -264,22 +309,24 @@ export function createWorld(viewport = true): World {
   }
 
   // The raised things as steps: each one's top is its box on screen, found on the plane at its height.
-  function buildPads() {
+  function buildPads(fixedOnly = false, changed?: Set<number>) {
+    const existing = fixedOnly || changed ? new Map(pads.map(p => [p.id, p])) : null
     pads = padRects.flatMap((b, i): Footprint[] => {
       if (b.w <= 0 || b.h <= 0) return []
+      if (existing && (changed ? !changed.has(i) : !b.fixed)) return existing.get(PAD_ID + i) ? [existing.get(PAD_ID + i)!] : []
       const height = b.height ?? PAD_H
       const outlines = b.rings ?? [roundedRect(b.x, b.y, b.w, b.h, b.r, 4)]
       let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity
       const rings = outlines.map((pts) => {
         const ring = new Float64Array(pts.length)
         for (let k = 0; k < pts.length; k += 2) {
-          const p = rawFloorAt(pts[k], pts[k + 1] - scroll, height)
+          const p = rawFloorAt(pts[k], pts[k + 1] - (b.fixed ? 0 : scroll), height)
           ring[k] = p.x; ring[k + 1] = p.z
           x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z)
         }
         return ring
       })
-      const c = rawFloorAt(b.x + b.w / 2, b.y + b.h / 2 - scroll, height)
+      const c = rawFloorAt(b.x + b.w / 2, b.y + b.h / 2 - (b.fixed ? 0 : scroll), height)
       return [{ id: PAD_ID + i, height, box: [x0, z0, x1, z1], rings, spot: [c.x, c.z], step: b.step ?? true }]
     })
     cull()
@@ -293,7 +340,7 @@ export function createWorld(viewport = true): World {
       return p.y > -margin && p.y < Hc + margin
     }), ...pads.filter((fp) => {
       const b = padRects[fp.id - PAD_ID]
-      return b.y + b.h >= scroll - margin && b.y <= scroll + Hc + margin
+      return b.fixed || b.y + b.h >= scroll - margin && b.y <= scroll + Hc + margin
     })]
   }
 
@@ -312,6 +359,103 @@ export function createWorld(viewport = true): World {
   }
   const lerp3 = (a: [number, number, number], b: [number, number, number], k: number): [number, number, number] => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k]
 
+  /** Resolve content blocks in the viewport plane, including airborne marbles and layouts appearing beneath them. */
+  function clearCards(m: WorldMarble, margin = 0, moving = 0, drawing = false) {
+    if (!viewport || (!blocks.length && !repelled)) return
+    const o = m.orb, p = project(o.x, o.y, o.z)
+    const radius = Math.abs(project(o.x + o.r, o.y, o.z).x - p.x)
+    const obstacles = repelled ? [...blocks, repelled] : blocks
+    const overlap = (b: PadRect, x: number, y: number, extra: number) => x > b.x - extra && x < b.x + b.w + extra && y > b.y - extra && y < b.y + b.h + extra
+    const hit = obstacles.find(b => overlap(b, p.x, p.y, radius + margin))
+    if (!hit) return
+    // Search all four exits of the connected cards, rather than alternating between two tight borders.
+    const candidates = obstacles.flatMap(b => [
+      { x: b.x - radius - margin - .1, y: p.y, nx: -1, ny: 0 },
+      { x: b.x + b.w + radius + margin + .1, y: p.y, nx: 1, ny: 0 },
+      { x: p.x, y: b.y - radius - margin - .1, nx: 0, ny: -1 },
+      { x: p.x, y: b.y + b.h + radius + margin + .1, nx: 0, ny: 1 },
+    ]).filter(q => q.x >= radius && q.x <= W - radius && q.y >= playTop + radius && q.y <= Math.min(playBottom, Hc) - radius && !obstacles.some(b => overlap(b, q.x, q.y, radius + margin)))
+    // A phone's narrow gutter can hold a centre even when the drawn rim meets both borders.
+    if (!candidates.length && margin === 0) candidates.push(...obstacles.flatMap(b => [
+      { x: b.x - .1, y: p.y, nx: -1, ny: 0, gutter: true }, { x: b.x + b.w + .1, y: p.y, nx: 1, ny: 0, gutter: true },
+    ]).filter(q => q.x >= radius && q.x <= W - radius && !obstacles.some(b => overlap(b, q.x, q.y, 0))))
+    candidates.sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))
+    const exit = candidates[0]
+    if (!exit) return
+    const at = rawFloorAt(exit.x, exit.y, o.y), normal = rawFloorAt(exit.x + exit.nx, exit.y + exit.ny, o.y)
+    const dx = normal.x - at.x, dz = normal.z - at.z, length = Math.hypot(dx, dz)
+    const nx = dx / length, nz = dz / length, into = o.vx * nx + o.vz * nz
+    o.x = at.x; o.z = at.z
+    if (drawing) return
+    const speed = Math.max(.7, -into * .55, Math.min(3, Math.abs(moving)))
+    if (into < speed) { o.vx += (speed - into) * nx; o.vz += (speed - into) * nz }
+    if ('gutter' in exit) {
+      // When a gutter cannot fit the rim, move along it as well: normal speed alone only pins it against the wall.
+      const ends = [hit.y - radius, hit.y + hit.h + radius].filter(y => y >= playTop + radius && y <= Math.min(playBottom, Hc) - radius)
+      ends.sort((a, b) => Math.abs(a - p.y) - Math.abs(b - p.y))
+      const direction = ends.length ? Math.sign(ends[0] - p.y) : 1
+      const along = rawFloorAt(exit.x, exit.y + direction, o.y), tx = along.x - at.x, tz = along.z - at.z, distance = Math.hypot(tx, tz)
+      const tangent = o.vx * tx / distance + o.vz * tz / distance
+      if (tangent < .9) { o.vx += (.9 - tangent) * tx / distance; o.vz += (.9 - tangent) * tz / distance }
+    }
+    o.resting = false
+    delete o.mem
+  }
+
+  /** Static friction may pause on a ledge, but passive page contacts always roll to a reachable exit. */
+  function flow(m: WorldMarble) {
+    const o = m.orb
+    if (!flowing || o.target || m.push || o.flying || o.route.length) { ledges.delete(m.id); return }
+    const pad = solid.find(p => {
+      if (p.id < PAD_ID) return false
+      if (padRects[p.id - PAD_ID].exclude) return false
+      return o.y - o.r <= p.height + .03 && (inside(p, o.x, o.z) || nearest(p, o.x, o.z).d < o.r + .03)
+    })
+    if (!pad) { ledges.delete(m.id); return }
+    let state = ledges.get(m.id)
+    if (!state || state.id !== pad.id) {
+      const e = nearest(pad, o.x, o.z)
+      state = { id: pad.id, time: 0, x: o.x + e.nx * (e.d + o.r * 2), z: o.z + e.nz * (e.d + o.r * 2) }
+      // For an inside point, nearest's normal points toward the interior.
+      if (inside(pad, o.x, o.z)) { state.x = o.x - e.nx * (e.d + o.r * 2); state.z = o.z - e.nz * (e.d + o.r * 2) }
+      const goal = withinWalls(walls, state.x, o.y, state.z, o.r)
+      state.x = goal.x; state.z = goal.z
+      if (inside(pad, goal.x, goal.z) || nearest(pad, goal.x, goal.z).d < o.r) {
+        const b = pad.box
+        const exits = [[b[0] - o.r * 2, o.z], [b[2] + o.r * 2, o.z], [o.x, b[1] - o.r * 2], [o.x, b[3] + o.r * 2]]
+          .map(([x, z]) => withinWalls(walls, x, o.y, z, o.r))
+          .filter(p => !inside(pad, p.x, p.z) && nearest(pad, p.x, p.z).d >= o.r)
+          .sort((a, b) => Math.hypot(a.x - o.x, a.z - o.z) - Math.hypot(b.x - o.x, b.z - o.z))
+        if (exits[0]) { state.x = exits[0].x; state.z = exits[0].z }
+      }
+      ledges.set(m.id, state)
+    }
+    state.time += H
+    if (state.time < .55) return
+    const dx = state.x - o.x, dz = state.z - o.z, d = Math.hypot(dx, dz)
+    if (d < .01) return
+    // A gentle rolling speed beats static grip without a hop or synthetic button press.
+    o.vx = dx / d * .9; o.vz = dz / d * .9; o.resting = false
+    if (o.mem) { o.mem.still = 0; o.mem.stuck = false }
+  }
+
+  /** A played demo's extra margin is a soft force; only its actual solid boundary expels a centre. */
+  function repelStep(m: WorldMarble) {
+    if (!repelled) return
+    const o = m.orb, p = project(o.x, o.y, o.z), b = repelled
+    const radius = Math.abs(project(o.x + o.r, o.y, o.z).x - p.x)
+    const dx = Math.max(b.x - p.x, 0, p.x - b.x - b.w), dy = Math.max(b.y - p.y, 0, p.y - b.y - b.h)
+    const distance = Math.hypot(dx, dy) - radius
+    if (distance < 0 || distance >= 12) return
+    const nx = p.x < b.x ? -dx : p.x > b.x + b.w ? dx : 0
+    const ny = p.y < b.y ? -dy : p.y > b.y + b.h ? dy : 0
+    const at = rawFloorAt(p.x + nx, p.y + ny, o.y), x = at.x - o.x, z = at.z - o.z, length = Math.hypot(x, z)
+    if (!length) return
+    const push = (1 - distance / 12) * 2 * H
+    o.vx += x / length * push; o.vz += z / length * push; o.resting = false
+    if (o.mem) o.mem.still = 0
+  }
+
   const world: World = {
     camera,
     get size() { return [W, Hc] as [number, number] },
@@ -327,8 +471,10 @@ export function createWorld(viewport = true): World {
     scroll(y, impulse = true) {
       if (!viewport || y === scroll) return
       const old = scroll
+      const previous = padRects.map(b => ({ ...b, y: b.y - (b.fixed ? 0 : old) }))
       const positions = [...map.values()].map((m) => ({ m, p: project(m.orb.x, m.orb.y, m.orb.z) }))
       scroll = y
+      ledges.clear()
       view.y = baseViewY + scroll
       camera.setViewOffset(W, Hc, view.x, view.y, W, Hc)
       camera.updateProjectionMatrix(); camera.updateMatrixWorld()
@@ -340,7 +486,13 @@ export function createWorld(viewport = true): World {
         if (impulse) { o.vz += Math.max(-1.2, Math.min(1.2, (scroll - old) * -0.002)); o.resting = false }
         delete o.mem
       }
+      cacheBlocks()
+      const elapsed = Math.max(H, clock - scrollTime)
+      scrollTime = clock
+      sweptCards(previous, padRects.map(b => ({ ...b, y: b.y - (b.fixed ? 0 : scroll) })), elapsed)
+      if (padRects.some(b => b.fixed)) buildPads(true)
       contain()
+      for (const m of map.values()) { clearCards(m, 0, (scroll - old) * .002); m.was = m.now = m.shown = [m.orb.x, m.orb.y, m.orb.z] }
     },
     layout(lines, w, h, box) {
       W = Math.max(1, w); Hc = Math.max(1, h)
@@ -360,14 +512,28 @@ export function createWorld(viewport = true): World {
     setPads(rects) {
       const same = rects.length === padRects.length && rects.every((r, i) => {
         const q = padRects[i]
-        return Math.abs(r.x - q.x) + Math.abs(r.y - q.y) + Math.abs(r.w - q.w) + Math.abs(r.h - q.h) + Math.abs(r.r - q.r) < 0.5 && r.height === q.height && r.rings === q.rings
+        return Math.abs(r.x - q.x) + Math.abs(r.y - q.y) + Math.abs(r.w - q.w) + Math.abs(r.h - q.h) + Math.abs(r.r - q.r) < 0.5 && r.height === q.height && r.rings === q.rings && r.exclude === q.exclude && r.fixed === q.fixed
       })
       if (same) return false
+      const previous = padRects.map(b => ({ ...b, y: b.y - (b.fixed ? 0 : scroll) }))
       padRects = rects.map((r) => ({ ...r }))
+      ledges.clear()
       buildPads()
+      cacheBlocks()
+      sweptCards(previous, padRects.map(b => ({ ...b, y: b.y - (b.fixed ? 0 : scroll) })), H)
+      for (const m of map.values()) clearCards(m)
       // A marble on a raised thing that moved (or went), or by one, is free to roll, or fall, again.
       for (const m of map.values()) if (m.on >= PAD_ID || pads.some((p) => Math.abs(m.orb.x - (p.box[0] + p.box[2]) / 2) < (p.box[2] - p.box[0]) / 2 + 1 && Math.abs(m.orb.z - (p.box[1] + p.box[3]) / 2) < (p.box[3] - p.box[1]) / 2 + 1)) m.orb.resting = false
       return true
+    },
+    movePads(updates, seconds) {
+      if (!updates.length) return
+      const previous = padRects.map(b => ({ ...b, y: b.y - (b.fixed ? 0 : scroll) }))
+      for (const { index, rect } of updates) padRects[index] = { ...rect }
+      buildPads(false, new Set(updates.map(u => u.index)))
+      cacheBlocks()
+      sweptCards(previous, padRects.map(b => ({ ...b, y: b.y - (b.fixed ? 0 : scroll) })), Math.max(H, seconds))
+      for (const m of map.values()) { clearCards(m); m.was = m.now = m.shown = [m.orb.x, m.orb.y, m.orb.z] }
     },
     play(top, bottom) {
       if (top === playTop && bottom === playBottom) return
@@ -461,9 +627,16 @@ export function createWorld(viewport = true): World {
       return m
     },
     marbles: () => [...map.values()],
-    remove(id) { map.delete(id) },
+    remove(id) { map.delete(id); ledges.delete(id) },
     toss(m, vy) { toss(m.orb, vy, solid) },
     wake() { for (const m of map.values()) m.orb.resting = false },
+    repel(rect) {
+      repelled = rect
+      if (rect) {
+        for (const m of map.values()) { clearCards(m); m.was = m.now = m.shown = [m.orb.x, m.orb.y, m.orb.z] }
+        world.wake()
+      }
+    },
     step(dt) {
       const hits: WorldHit[] = []
       const all = [...map.values()]
@@ -472,13 +645,16 @@ export function createWorld(viewport = true): World {
       // at once, not slid there.
       for (const m of all) {
         const o = m.orb
+        clearCards(m)
         if (o.x !== m.now[0] || o.y !== m.now[1] || o.z !== m.now[2]) { m.now = [o.x, o.y, o.z]; m.was = [...m.now] }
       }
       acc += Math.min(Math.max(0, dt), CATCH_UP)
       while (acc >= H - 1e-9) {
         acc -= H
         for (const m of all) m.was = m.now
+        for (const m of all) { flow(m); repelStep(m) }
         const knocks = tick(bodies, solid, H, env)
+        for (const m of all) clearCards(m)
         for (const m of all) m.now = [m.orb.x, m.orb.y, m.orb.z]
         report(all, knocks, hits, clock, knocked)
         arrivals(all, hits)
@@ -494,8 +670,14 @@ export function createWorld(viewport = true): World {
           const [x, y, z] = m.shown
           const p = withinWalls(walls, x, y, z, m.orb.r * (1 + DEPTH * Math.max(0, y - m.orb.r)))
           m.shown = [p.x, y, p.z]
+          // Interpolation must never draw through the old position inside a newly appeared block.
+          const saved = [m.orb.x, m.orb.y, m.orb.z] as const
+          ;[m.orb.x, m.orb.y, m.orb.z] = m.shown
+          clearCards(m, 0, 0, true)
+          m.shown = [m.orb.x, m.orb.y, m.orb.z]
+          ;[m.orb.x, m.orb.y, m.orb.z] = saved
         }
-        moving = moving || !m.orb.resting || m.was[0] !== m.now[0] || m.was[1] !== m.now[1] || m.was[2] !== m.now[2]
+        moving = moving || !m.orb.resting || (flowing && ledges.has(m.id)) || m.was[0] !== m.now[0] || m.was[1] !== m.now[1] || m.was[2] !== m.now[2]
       }
       return { hits, moving }
     },

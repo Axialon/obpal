@@ -18,6 +18,7 @@ export class SignalClient {
   /** open: the socket is usable. reachable (only with open=false): whether this attempt reached the service at all. */
   onstatus: (open: boolean, reachable: boolean) => void = () => {}
   onfull: () => void = () => {}
+  onremoved: () => void = () => {}
   /** Ever connected successfully. */
   everOpened = false
   private ws: WebSocket | null = null
@@ -27,6 +28,8 @@ export class SignalClient {
   private timer: ReturnType<typeof setTimeout> | null = null
 
   constructor(private url: string, private connectTimeout = REACH_TIMEOUT_MS) {}
+  /** Update admission for the next reconnect without disturbing current channels. */
+  setUrl(url: string) { this.url = url }
 
   connect() {
     if (this.closed) return
@@ -60,6 +63,7 @@ export class SignalClient {
       this.ws = null
       if (this.closed) return
       if (e.code === 4008) { this.closed = true; this.onfull(); return }
+      if (e.code === 4009) { this.closed = true; this.onremoved(); return }
       this.onstatus(false, opened)
       this.retry()
     }

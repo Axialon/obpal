@@ -64,14 +64,16 @@ export function pidAlive(pid) {
 }
 
 /** Serialize allocations and ledger edits across CLI processes. A crashed owner releases its lock. */
-export async function withLedger(file, action) {
+export async function withLedger(file, action, { open = openSync } = {}) {
   mkdirSync(dirname(file), { recursive: true })
   const lock = `${file}.lock`
   const deadline = Date.now() + 10_000
   for (;;) {
-    try { const fd = openSync(lock, 'wx'); writeFileSync(fd, String(process.pid)); closeSync(fd); break }
+    try { const fd = open(lock, 'wx'); writeFileSync(fd, String(process.pid)); closeSync(fd); break }
     catch (error) {
-      if (error.code !== 'EEXIST') throw error
+      // Windows reports a lock file being created or deleted by another process as EPERM, EACCES or EBUSY: retry those too.
+      if (!['EEXIST', 'EPERM', 'EACCES', 'EBUSY'].includes(error.code)) throw error
+      if (error.code !== 'EEXIST') { if (Date.now() >= deadline) throw new Error('Lane ledger is locked; retry after the other command finishes'); await sleep(100); continue }
       let owner
       try { owner = Number(readFileSync(lock, 'utf8')) } catch (error) { if (error.code === 'ENOENT') continue; throw error }
       if (owner && !pidAlive(owner)) { try { unlinkSync(lock) } catch {} }
@@ -85,6 +87,32 @@ export async function withLedger(file, action) {
     writeLedger(file, ledger)
     return result
   } finally { unlinkSync(lock) }
+}
+
+/** Archive without holding the ledger; a short reservation prevents resume/removal races. */
+export async function cleanupLane(file, name, { prepare, archive, remove, finish = () => {}, alive = () => false }) {
+  const ledger = readLedger(file), lane = ledger.lanes.find(lane => lane.name === name)
+  if (!lane) throw new Error('Unknown lane')
+  if (lane.cleanedAt) return
+  if (lane.cleaningAt) throw new Error('Lane cleanup already in progress')
+  await prepare(lane, ledger)
+  const identity = JSON.stringify([lane.branch, lane.worktree, lane.rounds.at(-1)?.number])
+  const preserved = await archive(lane)
+  if (alive(lane, readLedger(file))) throw new Error('Lane changed during archive; refusing removal')
+  await withLedger(file, currentLedger => {
+    const current = currentLedger.lanes.find(lane => lane.name === name)
+    if (!current || current.cleanedAt || current.cleaningAt || JSON.stringify([current.branch, current.worktree, current.rounds.at(-1)?.number]) !== identity) throw new Error('Lane changed during archive; refusing removal')
+    current.cleaningAt = new Date().toISOString()
+    current.evidenceArchive = preserved
+  })
+  try {
+    await remove(lane, preserved)
+    await finish(lane)
+    await withLedger(file, ledger => { const current = ledger.lanes.find(lane => lane.name === name); current.cleanedAt = new Date().toISOString(); delete current.cleaningAt })
+  } catch (error) {
+    await withLedger(file, ledger => { delete ledger.lanes.find(lane => lane.name === name).cleaningAt })
+    throw error
+  }
 }
 
 export function codexArgs(lane, round, roots, env, resume = false) {
@@ -118,6 +146,41 @@ export function laneState({ final, failed, stopped, alive, lastEventAt, startedA
   if (final) return 'final'
   if (!alive || now - (lastEventAt || startedAt) >= stallMinutes * 60_000) return 'stalled'
   return 'running'
+}
+
+/** Wait through quiet live commands and temporary ledger contention, within the caller's deadline. */
+export async function waitLane(status, minutes, { pause = sleep, now = Date.now } = {}) {
+  const deadline = now() + minutes * 60_000
+  for (;;) {
+    let row
+    try { row = await status() }
+    catch (error) {
+      if (!/ledger is locked/.test(error.message) || now() >= deadline) throw error
+      await pause(5000); continue
+    }
+    if (row.state !== 'running' && !(row.state === 'stalled' && row.alive)) return row
+    if (now() >= deadline) throw new Error(`Wait timed out after ${minutes} minutes; lane continues running`)
+    await pause(2000)
+  }
+}
+
+/** Stop only safely matched final-lane trees, then wait for its supervisor to exit. */
+export async function stopFinalLane(lane, others, { inventory, status, kill, log = console.log, pause = sleep, now = Date.now }) {
+  const row = status(inventory())
+  if (row.state !== 'final' || !row.alive) return
+  const trees = stopTrees(inventory(), lane, others)
+  if (!trees.length) throw new Error('Final supervisor is live but no safe Codex match; retry shortly')
+  for (const { root } of trees) {
+    // PIDs and protected descendants are checked again immediately before stopping.
+    const fresh = stopTrees(inventory(), lane, others).find(tree => tree.root.pid === root.pid)
+    if (fresh) await kill(fresh)
+  }
+  const deadline = now() + 5000
+  while (status(inventory()).alive) {
+    if (now() >= deadline) throw new Error('Final lane process is still live; retry shortly')
+    await pause(100)
+  }
+  log(`Stopped lingering final process tree for ${lane.name}`)
 }
 
 const normalized = s => String(s).replaceAll('\\', '/').replace(/\/$/, '').toLowerCase()

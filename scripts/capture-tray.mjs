@@ -1,4 +1,5 @@
 /** Phone evidence from the current build. Run before and after the change; writes only ignored artifacts/tray/. */
+import { distill } from './lib/distill.mjs'
 import { mkdir, readdir, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { chromium } from 'playwright'
@@ -63,3 +64,5 @@ const tiles = await Promise.all(files.map(async (name, i) => {
 }))
 await sharp({ create: { width: columns * cellW, height: Math.ceil(files.length / columns) * cellH, channels: 3, background: '#202027' } })
   .composite(tiles.flat()).png().toFile(`${out}/contact-sheet.png`)
+
+await distill(out, { keepRaw: process.argv.includes("--keep-raw") || process.env.OBPAL_KEEP_RAW === "1" })

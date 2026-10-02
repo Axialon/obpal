@@ -4,7 +4,7 @@
  * The surface and the accent are the Blackboxes family's (src/family), offered as the phone's settings sheet offers
  * them. A pick applies at once and is kept in chrome.storage (the Link's choice, apart from the websites'), with the
  * family's own keys as its cache for the first paint (./lookcache.ts); the other Link page, if it is open, follows it
- * through that cache. Also here: the animated logo, the light that follows the mouse across the cards, the radio
+ * through that cache. Also here: the shared vector logo, the light that follows the mouse across the cards, the radio
  * groups' keys (./radios.ts), and the switch that lets state changes animate only once a page has shown its first
  * real state.
  */
@@ -119,8 +119,7 @@ export function syncLook(root: ParentNode) {
 }
 
 /**
- * The logo mark in each `[data-mark]` slot, its satellite orbiting (still for people who prefer less motion).
- * `orbits`: let it settle after that many, for a page that may stay open for long.
+ * Mount the shared vector identity. `orbits` remains compatible with surfaces that previously settled the logo.
  */
 export function mountLogo(root: ParentNode = document, orbits?: number) {
   mountMarks(root)

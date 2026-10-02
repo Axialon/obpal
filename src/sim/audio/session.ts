@@ -3,6 +3,7 @@
  * card: its header with the button that starts, mutes and unmutes the sound, and a level slider with three stops, Off
  * (muted), Reduced and Full, that the button and the slider keep in step.
  */
+import { dotLoading } from '../../ui/kit/loading'
 import { SimSound, type Rumble } from './engine'
 import { profileOf } from './profiles'
 import { DetentSlider } from '../../ui/kit/slider'
@@ -46,7 +47,13 @@ export function mountSound(id: string, rumble: Rumble, panel = document.querySel
     quickAction({ id: 'sound', group: 'system', label: words, hint: 'The sim’s sound', icon: sound.muted || !sound.running ? 'mute' : 'sound', stay: true, pressed: () => sound.running && !sound.muted, run: () => mute.click() })
   }
   const persist = () => { try { localStorage.setItem('obpal.sim.muted', sound.muted ? '1' : '0'); localStorage.setItem('obpal.sim.reduced', sound.reduced ? '1' : '0') } catch { /* private browsing */ } }
-  const start = async () => { try { await sound.start(); status.textContent = ''; refresh() } catch { status.textContent = 'Tap Start sound to try again.' } }
+  let unlocking = false
+  const start = async () => {
+    if (unlocking) return
+    unlocking = true; dotLoading(status, true, 'Unlocking audio')
+    try { await sound.start(); status.textContent = ''; refresh() } catch { status.textContent = 'Tap Start sound to try again.' }
+    finally { unlocking = false; dotLoading(status, false) }
+  }
   // Any press starts the sound, but for the sound switches' own (this card's, the quick-actions tray's): they decide.
   const gesture = (e: Event) => { if (!sound.running && !sound.muted && !mute.contains(e.target as Node) && !(e.target as Element | null)?.closest?.('[data-quick="sound"]')) void start() }
   document.addEventListener('pointerdown', gesture); document.addEventListener('keydown', gesture)

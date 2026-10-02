@@ -1,12 +1,11 @@
 /** Cached document-space outlines. Scroll changes their view, never their geometry. */
 import { Font } from 'three/examples/jsm/loaders/FontLoader.js'
 import { glyphData } from './letters'
-import { roundedRect } from './bounce'
 import type { PadRect } from './world'
 
 export type ObstacleKind = 'block' | 'rail' | 'peg' | 'ramp'
 
-/** Cards are hollow rails, leaving room to play among their content. Icons are round pegs. */
+/** Content cards are solid exclusion blocks. Icons are round pegs. */
 export function obstacleRect(rect: PadRect, kind: ObstacleKind): PadRect {
   if (rect.w <= 0 || rect.h <= 0) return { ...rect, w: 0, h: 0 }
   if (kind === 'peg') {
@@ -15,11 +14,7 @@ export function obstacleRect(rect: PadRect, kind: ObstacleKind): PadRect {
   }
   if (kind === 'ramp') return { ...rect, h: Math.max(3, rect.h), r: 1, height: 0.055 }
   if (kind === 'rail' && Math.min(rect.w, rect.h) > 32) {
-    const inset = 6
-    return { ...rect, height: 0.12, rings: [
-      roundedRect(rect.x, rect.y, rect.w, rect.h, rect.r, 4),
-      roundedRect(rect.x + inset, rect.y + inset, rect.w - inset * 2, rect.h - inset * 2, Math.max(0, rect.r - inset), 4),
-    ] }
+    return { ...rect, height: 0.3, exclude: true, step: false }
   }
   return { ...rect, height: 0.3 }
 }
