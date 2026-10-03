@@ -10,7 +10,7 @@ export const CONTROL_SPACES: Record<string, ControlSpace> = {
   lamp: space('settings', 30), claw: space('point'), studio: space('music'), boat: space('drive', 30),
   spotlights: space('point'), vacuum: space('drive', 30), tank: space('drive'), excavator: space('settings', 30),
   forklift: space('drive', 30), painter: space('point'), gimbal: space('point'), plane: space('drive', 30),
-  slotcars: space('settings', 25, 20), dog: space('drive', 30), sorting: space('point', 30), kart: space('drive', 30),
+  slotcars: space('settings', 25, 20), dog: space('drive', 30), octopus: space('drive', 30), sorting: space('point', 30), kart: space('drive', 30),
   helicopter: space('drive', 30), submarine: space('drive', 30), smarthome: space('settings', 30),
   airhockey: space('point', 30), pinball: space('tilt', 18, 18), football: space('settings', 25, 20),
   marblerun: space('tilt', 20, 20), planetary: space('drive', 30), telescope: space('point'),

@@ -20,7 +20,7 @@ const fields: Record<string, string> = { drone: 'drones', rover: 'rovers', maze:
 export const DEVICE_RIGS: Record<string, [number, number]> = {
   drone: [0.16, -0.42], rover: [0.58, -0.5], kart: [0.88, -0.32], submarine: [0.18, -1.34], helicopter: [0.68, -1.2],
   boat: [0.68, -0.8], plane: [0.55, -0.95], tank: [1.2, -1.15], forklift: [1.58, -0.55], dog: [0.98, -0.96],
-  vacuum: [0.26, -0.46], planetary: [1.4, -0.6], slotcars: [0.24, -0.26], excavator: [1.85, 0.7],
+  vacuum: [0.26, -0.46], planetary: [1.4, -0.6], octopus: [0.62, -0.32], slotcars: [0.24, -0.26], excavator: [1.85, 0.7],
   ptz: [1.9, -0.15], gimbal: [1.37, -0.48], slider: [1.05, -0.15], jib: [0, -0.15], telescope: [1.7, -0.8],
   lamp: [0.75, 0], spotlights: [3.65, 0], smarthome: [1.5, 0], studio: [1.25, 1], painter: [0, 0.15],
   maze: [0.55, 0.6], claw: [1.4, 0], sorting: [1.2, 0.8], airhockey: [1.1, 2.8], football: [1.2, 1.7],
@@ -58,7 +58,7 @@ export function fallbackPose(logic: DeviceLogic, n: number, at?: Vector3) {
   return { p, q }
 }
 
-const bodies = new Set(['rover', 'boat', 'tank', 'kart', 'submarine', 'planetary', 'vacuum', 'forklift', 'slotcars', 'dog'])
+const bodies = new Set(['rover', 'boat', 'tank', 'kart', 'submarine', 'planetary', 'vacuum', 'forklift', 'slotcars', 'dog', 'octopus'])
 const flyers = new Set(['drone', 'helicopter', 'plane'])
 const operators = new Set(['claw', 'excavator', 'sorting', 'jib', 'painter'])
 const lenses = new Set(['ptz', 'gimbal', 'telescope', 'slider', 'spotlights'])

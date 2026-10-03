@@ -47,7 +47,7 @@ const COPY = [
   'packages/host/src/chip.ts', 'packages/host/src/seal.ts', 'packages/host/src/origin.ts', 'packages/host/src/remote.ts', 'src/controller/linkbadge.ts',
   'src/ui/trust-origin.ts', 'src/ui/shares.ts', 'src/trust/main.ts', 'TRADEMARKS.md', 'spec/SECURITY.md',
   'src/controller/connection-sheet.ts', 'src/controller/connections.ts', 'src/controller/pairing-recovery.ts',
-  'src/sim/kit/recovery.ts',
+  'src/sim/kit/recovery.ts', 'src/sim/devices/octopus.ts',
 ]
 
 /** The words of `COPY` that aren't code: what the code in it imports from our own packages is no claim about npm. */

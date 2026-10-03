@@ -26,6 +26,8 @@ export const TUNING: Record<string, Tuning> = {
   helicopter: tune('helicopter', 'flight', 28, 9, 1),
   plane: tune('propeller', 'flight', 105, 4, 0.9),
   dog: tune('servo', 'mechanism', 155, 6, 0.85, 'feet'),
+  // Tendon actuators: a quiet servo bed that follows travel; soft arms make no footfall samples.
+  octopus: tune('servo', 'mechanism', 110, 5, 0.55, 'none'),
   rover: tune('drive', 'vehicle', 125, 6, 1),
   vacuum: tune('vacuum', 'household', 390, 3, 0.78, 'vacuum'),
   tank: tune('engine', 'vehicle', 42, 5, 1),
@@ -83,6 +85,8 @@ export const REFERENCE_LUFS: Record<string, number> = {
   plane: -20.87,
   slotcars: -23.12,
   dog: -24.33,
+  // Not yet measured: set to its category's target, so it is mixed without a trim until the reference programme is run.
+  octopus: -26,
   sorting: -21.04,
   kart: -20.30,
   helicopter: -23.22,

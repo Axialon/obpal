@@ -1,5 +1,6 @@
 /** Phone gestures for the second device collection; state is read only from the screen. */
 export const deviceExercises = [
+  { id: 'octopus', face: 'face.gamepad', drag: ['.gp-stick[data-stick="0"]', 0, -55], field: 'z', key: 'Space', button: 'actions', home: [['x', 0], ['z', 0.9], ['v', 0]] },
   { id: 'jib', face: 'face.gamepad', drag: ['.gp-stick[data-stick="0"]', 45, -25], field: 'swing', key: 'Space', button: 'actions', home: [['swing', 0], ['boom', 0.15], ['pan', 0]] },
   { id: 'slider', face: 'face.trackpad', drag: ['#pad', 55, 0], field: 'x', key: 'Space', button: 'actions', home: [['x', 0], ['pan', 0], ['tilt', 0]] },
   { id: 'trebuchet', face: 'face.trackpad', drag: ['#pad', 45, -25], field: 'weight', key: 'Space', button: 'actions', home: [['weight', 25], ['angle', 45], ['z', -1.8]] },

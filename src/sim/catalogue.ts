@@ -105,7 +105,7 @@ const categories: Record<string, CategoryId> = {
   dog: 'robotics', sorting: 'industrial', kart: 'vehicles', helicopter: 'flying', submarine: 'vehicles',
   smarthome: 'home', pinball: 'games', airhockey: 'games', studio: 'music', arena: 'games', viewer: 'space-science',
 }
-const fresh = new Set(['football', 'marblerun', 'planetary', 'telescope', 'pendulum', 'trebuchet', 'slider', 'jib', 'dog', 'sorting', 'kart', 'helicopter', 'submarine', 'smarthome', 'pinball', 'airhockey', 'studio'])
+const fresh = new Set(['octopus', 'football', 'marblerun', 'planetary', 'telescope', 'pendulum', 'trebuchet', 'slider', 'jib', 'dog', 'sorting', 'kart', 'helicopter', 'submarine', 'smarthome', 'pinball', 'airhockey', 'studio'])
 const featured = new Set(['dog', 'kart', 'pinball', 'drone', 'arm-so101', 'lamp', 'studio'])
 
 /** Where a category sits in the catalogue: its place in CATEGORIES, Robotics first (owner, 2026-09-28). */

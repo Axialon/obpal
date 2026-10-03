@@ -47,6 +47,7 @@ import { PENDULUM_SPEC, PendulumLogic } from './pendulum'
 import { TREBUCHET_SPEC, TrebuchetLogic } from './trebuchet'
 import { SLIDER_SPEC, SliderLogic } from './slider'
 import { JIB_SPEC, JibLogic } from './jib'
+import { OCTOPUS_SPEC, OctopusLogic } from './octopus'
 
 export interface DeviceEntry<L extends DeviceLogic = DeviceLogic> {
   spec: DeviceSpec
@@ -58,6 +59,7 @@ export interface DeviceEntry<L extends DeviceLogic = DeviceLogic> {
 const entry = <L extends DeviceLogic>(e: DeviceEntry<L>) => e as unknown as DeviceEntry
 
 export const DEVICES: DeviceEntry[] = [
+  entry({ spec: OCTOPUS_SPEC, logic: () => new OctopusLogic(), view: () => import('./octopus.view') }),
   entry({ spec: JIB_SPEC, logic: () => new JibLogic(), view: () => import('./jib.view') }),
   entry({ spec: SLIDER_SPEC, logic: () => new SliderLogic(), view: () => import('./slider.view') }),
   entry({ spec: TREBUCHET_SPEC, logic: () => new TrebuchetLogic(), view: () => import('./trebuchet.view') }),

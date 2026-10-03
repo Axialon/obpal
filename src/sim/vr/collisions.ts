@@ -1,7 +1,7 @@
 import type { DeviceLogic } from '../devices/types'
 import { deviceState } from './rigs'
 
-const moving = new Set(['rover', 'drone', 'boat', 'tank', 'forklift', 'dog', 'kart', 'helicopter', 'submarine', 'plane', 'vacuum', 'planetary'])
+const moving = new Set(['rover', 'drone', 'boat', 'tank', 'forklift', 'dog', 'kart', 'helicopter', 'submarine', 'plane', 'vacuum', 'planetary', 'octopus'])
 /** Fill gaps between units after their native physics; already separated native contacts need no correction. */
 export function collideDevices(logic: DeviceLogic) {
   if (!moving.has(logic.spec.id)) return

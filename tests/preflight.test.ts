@@ -23,7 +23,8 @@ describe('demo preflight: the command line', () => {
   it('refuses what it does not know, naming what it does', () => {
     expect(() => parseArgs(['--nope'], {})).toThrow('unknown option --nope')
     expect(() => parseArgs(['--only', 'web,tv'], {})).toThrow(/unknown part tv \(parts: web home viewer sims\)/)
-    expect(() => parseArgs(['--sims', 'octopus'], {})).toThrow(/unknown sim octopus \(sims: humanoid .*or a path such as sim\/kart\//)
+    expect(() => parseArgs(['--sims', 'jetpack'], {})).toThrow(/unknown sim jetpack \(sims: humanoid .*octopus, or a path such as sim\/kart\//)
+    expect(parseArgs(['--sims', 'octopus'], {}).sims).toEqual(['octopus'])
     expect(() => parseArgs(['--origin', 'https://example.org/path'], {})).toThrow('not an origin')
     expect(() => parseArgs(['--budget', '0'], {})).toThrow('--budget needs a positive number')
     expect(() => parseArgs(['--out'], {})).toThrow('--out needs a value')

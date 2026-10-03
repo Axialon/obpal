@@ -74,7 +74,8 @@ if (!$('dev-units-sec').hidden) {
   document.querySelector<HTMLElement>('.dev-panel .safety')!.hidden = true
 }
 
-const stage = createStage($<HTMLCanvasElement>('stage'), themeById(family.getTheme()), { ready: () => view !== null })
+// The octopus re-poses its swept arms every frame, so it caps the pixel ratio at 1.5 to keep within its frame budget.
+const stage = createStage($<HTMLCanvasElement>('stage'), themeById(family.getTheme()), { ready: () => view !== null, ...(spec.id === 'octopus' ? { maxDpr: 1.5 } : {}) })
 const logic = entry.logic()
 const units = Array.from({ length: spec.units }, (_, n) => ({ id: `${spec.id}${n + 1}`, name: spec.unitNames?.[n] ?? `${spec.unit} ${n + 1}` }))
 const unitOf = (node: string | undefined) => units.findIndex((u) => u.id === node)

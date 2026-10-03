@@ -39,9 +39,10 @@ import six from './six'
 import scara from './scara'
 import delta from './delta'
 import desk from './desk'
+import octopus from './octopus'
 import type { SoundProfile } from '../profile'
 
-export const PROFILES: readonly SoundProfile[] = [rover, drone, maze, ptz, lamp, claw, boat, spotlights, vacuum, tank, excavator, forklift, painter, gimbal, plane, slotcars, dog, sorting, kart, helicopter, submarine, smarthome, airhockey, pinball, football, marblerun, planetary, telescope, pendulum, trebuchet, slider, jib, studio, arena, viewer, arm5, so101, six, scara, delta, desk]
+export const PROFILES: readonly SoundProfile[] = [rover, drone, maze, ptz, lamp, claw, boat, spotlights, vacuum, tank, excavator, forklift, painter, gimbal, plane, slotcars, dog, sorting, kart, helicopter, submarine, smarthome, airhockey, pinball, football, marblerun, planetary, telescope, pendulum, trebuchet, slider, jib, studio, arena, viewer, arm5, so101, six, scara, delta, desk, octopus]
 export const profileOf = (id: string) => {
   const p = PROFILES.find(p => p.id === id)
   if (!p) throw new Error(`Missing sound profile: ${id}`)

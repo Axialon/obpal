@@ -2,7 +2,7 @@
 export const FULL_SIMS_GROUPS = [
   'physics-bench', 'humanoid-physics', 'core', 'smoothness', 'temporal', 'warm-up',
   'graphics-recovery', 'load', 'control', 'music', 'vr', 'control-views', 'audio',
-  'panels', 'arm-live', 'humanoid', 'humanoid-live', 'buttons', 'local-control',
+  'panels', 'arm-live', 'humanoid', 'humanoid-live', 'buttons', 'local-control', 'octopus',
 ]
 
 export const EXCLUSIVE_SIMS_GROUPS = [
@@ -12,7 +12,7 @@ export const EXCLUSIVE_SIMS_GROUPS = [
 
 const SHARED_SIMS_GROUPS = [
   'temporal', 'graphics-recovery', 'graphics-layouts', 'buttons', 'panels',
-  'audio', 'vr', 'p1-gestures', 'local-control', 'local-control-before', 'local-faces',
+  'audio', 'vr', 'p1-gestures', 'local-control', 'local-control-before', 'local-faces', 'octopus',
 ]
 
 // Home selectors are substrings of check names, rather than named groups.

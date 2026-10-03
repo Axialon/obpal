@@ -1,8 +1,9 @@
 # Octopus bot: continuum motion and original design
 
 Plan approved as `d80f27a`, with the owner/coordinator decisions recorded below.
-Phase 6.1 supplies the tested continuum foundation against master `a02812f`;
-it does not register a playable page, ship meshes or expose a hardware panel.
+Phase 6.1 supplies the tested continuum foundation against master `a02812f`.
+Stage A (2026-10-03, below) registers the playable `/sim/octopus/` with a
+procedural Cove model; it ships no meshes and exposes no hardware panel.
 Dimensions, limits, material properties and timings are simulation defaults,
 not measured hardware specifications. Each implementation phase needs
 coordinator review and a merge. Physical-device performance remains unverified.
@@ -310,3 +311,54 @@ sorting button centring. The final `a02812f` run passes those earlier failures;
 no assertion was weakened. Phase 6.1 is complete as a dormant, tested continuum
 foundation. Phases 6.2–6.4 and the inherited humanoid-live failures remain work
 for their respective lanes.
+
+## Stage A: the playable studio (2026-10-03)
+
+**Route.** The coordinator chose the device registry over a separate page:
+`/sim/octopus/` is a row in `src/sim/devices/registry.ts`, so the catalogue
+card, tray, seats, every phone face (through the shared face mapping), sound,
+VR ride and control space come from the existing device framework. It has one
+seat. Water, climbing, a second seat, hand/body capture mappings, the Blender
+skinned arms and phase 6.4 are deferred.
+
+**Motion.** The body turns only about its vertical axis and moves kinematically
+at up to 0.3 m/s. Each arm plants its contact site (55% along the arm) on the
+floor and holds it while the body moves; `src/sim/continuum/solve.ts` places it
+with a damped least-squares solve over the four sections' bend and strain,
+within the profile's limits, with a one-sided floor and a weak shape bias. An
+arm re-plants when the travel has displaced it or carried it toward the edge
+of its reach band, never beside a stepping neighbour and never leaving fewer
+than four planted, so the stepping follows contact and direction, not a clock.
+The body slows as a planted arm nears the band's edge and waits there for it to
+re-plant: arms pull the body rather than slide. Curled arms follow the routed
+tendon elasticity, and an unsupported body falls under gravity onto whatever
+part of it touches the floor. Ticks are fixed at 120 Hz.
+
+**Controls.** Stick, drag or tilt crawls and turns; A or a tap grabs or lets
+go; B curls; X pulses; Y or the tray's worded Stop holds everything until a
+fresh command. Grab wraps the front pair round the ball by solving two points
+of each arm onto its surface; out of reach, the pair reaches ahead instead.
+Pulse runs the jet cycle's mantle squeeze, scaled to Cove's cavity (design
+values); with no water it moves the body only by the planted arms' elongation.
+Nobody holding it for four seconds starts a showcase that seeks the ball,
+wraps it, carries it into the ring, curls and pulses, without scoring or
+events.
+
+**Model.** Procedural three.js, original: a satin obsidian egg mantle (0.38 m
+along its axis, 0.30 m across) leaning back on a soft collar, with panel seams,
+one lime seam, a smoked-glass belt over a lime core, and eight graphite arms
+swept as tapered superellipse tubes with two dorsal sheaths along the logic's
+exact section frames. 128 cups are one instanced mesh; a membrane joins the
+proximal arms. A slow travelling wave runs root to tip in the shape bias,
+tapering toward the tip and absent from a planted arm's floor section; the arm
+skin darkens toward the root with a paler oral side and a soft rim term, on a
+Carbon floor. No meshes or textures are downloaded, only the ball casts a shadow
+map, and the page caps its pixel ratio at 1.5.
+
+**Measured (desktop, `tests/octopus.test.ts`).** Across the working band the
+solver places a planted site within 1 cm; over a scripted crawl and turn the
+planted sites hold within 1.5 cm (p95 under 5 mm), with at least four arms
+planted throughout. 30, 60 and 120 Hz replays agree within 1e-6. These
+are logic measurements on a shared desktop, not device frame rates; frames,
+strips and timings from the browser are retained under
+`artifacts/octopus/`. Physical-phone performance remains unverified.

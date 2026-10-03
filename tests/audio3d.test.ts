@@ -20,7 +20,7 @@ describe('sim audio', () => {
   it('covers every shipped device, arm, arena and Viewer exactly once', () => {
     const ids = [...DEVICES.map(d => d.spec.id), ...ARM_KINDS.map(a => a.id), 'arena', 'viewer'].sort()
     expect(PROFILES.map(p => p.id).sort()).toEqual(ids)
-    expect(ids).toHaveLength(41)
+    expect(ids).toHaveLength(42)
     expect(() => profileOf('missing')).toThrow()
   })
   it('reads finite world positions and motion for every device, at rest and while stepping', () => {

@@ -41,7 +41,7 @@ export function smoothnessCases(test: (name: string, run: () => void) => unknown
     const source = readFileSync(new URL('../src/sim/devices/registry.ts', import.meta.url), 'utf8')
     const modules = [...source.matchAll(/view:\s*\(\)\s*=>\s*import\('\.\/([\w-]+)\.view'\)/g)].map(m => m[1])
     const ids = SMOOTHNESS_SIMS.map(([id]) => id)
-    assert.equal(modules.length, 33); assert.equal(new Set(ids).size, ids.length)
+    assert.equal(modules.length, 34); assert.equal(new Set(ids).size, ids.length)
     for (const id of modules) assert.ok(ids.includes(id), `missing ${id}`)
     for (const kind of ['arm5', 'so101', 'six', 'scara', 'delta', 'desk']) assert.ok(ids.includes(`arm-${kind}`))
     for (const id of ['arena', 'humanoid', 'humanoid-soft']) assert.ok(ids.includes(id))

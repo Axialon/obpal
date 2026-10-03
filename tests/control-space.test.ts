@@ -28,7 +28,7 @@ const turn = (degrees: number, q: Quat) => qMul(qAxisAngle(0, 0, 1, -degrees * D
 describe('a position and comfortable reach for every sim', () => {
   it('covers the complete playable catalogue exactly once', () => {
     expect(Object.keys(CONTROL_SPACES).sort()).toEqual(SIMS.map(s => s.id).sort())
-    expect(SIMS).toHaveLength(42)
+    expect(SIMS).toHaveLength(43)
   })
   it.each(Object.entries(CONTROL_SPACES))('%s reaches both horizontal limits from an arbitrary centre', (id, profile) => {
     const motion = new Motion(), control = new CalibratedControl(motion)

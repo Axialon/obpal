@@ -39,7 +39,7 @@ export function devicePresence(logic: DeviceLogic, stage: Stage, getView: () => 
       driving.set(n, { who, pad, last: performance.now(), previous: driving.get(n)?.previous ?? 0 })
     },
     colliders: () => {
-      const moving = ['drone', 'rover', 'kart', 'submarine', 'helicopter', 'boat', 'plane', 'tank', 'forklift', 'dog', 'vacuum', 'planetary']
+      const moving = ['drone', 'rover', 'kart', 'submarine', 'helicopter', 'boat', 'plane', 'tank', 'forklift', 'dog', 'vacuum', 'planetary', 'octopus']
       if (!moving.includes(logic.spec.id)) return []
       return rides().map((_, n) => {
         const u = deviceState(logic, n)
@@ -51,7 +51,8 @@ export function devicePresence(logic: DeviceLogic, stage: Stage, getView: () => 
   const experience = new Experience(stage.renderer, stage.scene, stage.camera, rides, shared, stage.controls)
   const viewInputs = new ViewInputs(logic, experience)
   stage.view.presence = experience
-  if (!shared.guest) {
+  // The octopus brings its own ball, and its arms sweep the spot where the play set would stand.
+  if (!shared.guest && logic.spec.id !== 'octopus') {
     const first = deviceState(logic, 0)
     const x = first.x ?? 0, z = first.z ?? 0
     // A small shared play set near the first ride; these props never alter a sim's scoring objects.

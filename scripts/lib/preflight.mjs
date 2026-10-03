@@ -20,6 +20,7 @@ export const SIMS = {
   pinball: { name: 'Pinball', path: '/sim/pinball/' },
   lamp: { name: 'Lamp', path: '/sim/lamp/' },
   studio: { name: 'Studio', path: '/sim/studio/' },
+  octopus: { name: 'Octopus', path: '/sim/octopus/' },
 }
 /** The three flagship sims a run opens unless --sims says otherwise. The watch link and the phone are tried on the first that starts, so the lightest comes first. */
 export const DEFAULT_SIMS = ['drone', 'humanoid', 'arm']

@@ -19,7 +19,8 @@ export async function loadSims(root, build) {
       resolve: { alias: { '@obpal/core': join(root, 'packages/core/src/index.ts') } },
       build: { outDir: dir, emptyOutDir: false, copyPublicDir: false, ssr: join(root, 'src/sim/catalogue.ts'),
         rollupOptions: { output: { entryFileNames: 'catalogue.mjs' } } },
-      ssr: { noExternal: ['@obpal/core'] },
+      // The octopus's pure logic uses three.js maths; bundle it so the temporary module needs no node_modules.
+      ssr: { noExternal: ['@obpal/core', 'three'] },
     })
     const { SIMS, DEVICE_IDS } = await import(pathToFileURL(outfile).href)
     return { SIMS, DEVICE_IDS }

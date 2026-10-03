@@ -5,7 +5,7 @@
  */
 
 /** Every page of the site, loaded at a desktop and a phone width. */
-export const PAGES = ['/', '/view/', '/p/', '/buttons/', '/embed/', '/catalogue/', '/link/', '/privacy/', '/sim/', '/sim/arm/', '/sim/arena/']
+export const PAGES = ['/', '/view/', '/p/', '/buttons/', '/embed/', '/catalogue/', '/link/', '/privacy/', '/sim/', '/sim/arm/', '/sim/arena/', '/sim/octopus/']
 export const VIEWPORTS = [[1440, 900], [390, 844]]
 
 const row = (check, ok, detail, warn = false) => ({ check, status: ok ? (warn ? 'WARN' : 'pass') : 'FAIL', detail })

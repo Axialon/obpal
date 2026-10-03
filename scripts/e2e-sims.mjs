@@ -15,6 +15,7 @@
  * --only=tracking (or OBPAL_E2E_SIMS_ONLY=tracking) runs the arm's tracking checks and their pairing/claim setup.
  * --only=panels (or OBPAL_E2E_SIMS_ONLY=panels) runs just the window checks, also through e2e:all's guard.
  * --only=buttons (or OBPAL_E2E_SIMS_ONLY=buttons) checks rendered control ink and accessible icon names at three sizes.
+ * OBPAL_E2E_SIMS_ONLY=octopus runs the octopus's load, paired-phone, timing, showcase and reduced-motion checks.
  */
 import { tempScope, keepTemp } from './lib/temp.mjs'
 import { rm } from 'node:fs/promises'
@@ -45,6 +46,7 @@ import { runSimButtons } from './e2e-sim-buttons.mjs'
 import { runArmLive } from './e2e-arm-live.mjs'
 import { runHumanoid } from './e2e-humanoid.mjs'
 import { runHumanoidLive } from './e2e-humanoid-live.mjs'
+import { runOctopus } from './e2e-octopus.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
 
 const temps = tempScope()
@@ -188,7 +190,7 @@ try {
       temporal: runTemporal, 'warm-up': runWarmup, 'graphics-recovery': runGraphicsRecovery,
       load: runLoad, control: runControl, music: runMusic, vr: runVR, 'control-views': runControlViews,
       audio: runAudio, panels: runPanels, 'arm-live': runArmLive, humanoid: runHumanoid,
-      'humanoid-live': runHumanoidLive, buttons: runSimButtons, 'local-control': runLocalControl,
+      'humanoid-live': runHumanoidLive, buttons: runSimButtons, 'local-control': runLocalControl, octopus: runOctopus,
     }
     for (const group of GROUPS) await runners[group](local, check)
   }
@@ -223,6 +225,7 @@ try {
   else if (ONLY_BUTTONS) await runSimButtons(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'humanoid-live') await runHumanoidLive(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'humanoid') await runHumanoid(local, check)
+  else if (process.env.OBPAL_E2E_SIMS_ONLY === 'octopus') await runOctopus(local, check)
   else if (ONLY_PANELS) await runPanels(local, check)
   else {
   console.log('ob.Pal sims e2e')

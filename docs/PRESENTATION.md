@@ -81,7 +81,7 @@ Open `/sim/`. Show three, in this order. Each sim page issues its own pairing co
 2. **Drone** (`/sim/drone/`). Take off, fly through the rings, land. Phone as Gamepad: left stick climbs and turns, tilt to fly. Say: "Same phone, now a flight controller." Fallback: the Trackpad tab flies it too (tilt to fly, drag up to climb, tap to take off).
 3. **SO-101 arm** (`/sim/arm/?kind=so101`). Scan to join, then take a whole arm or one joint; Point aims at a spot, B holds. Say: "A simulated robot arm." Do not connect a real arm on stage: that path is experimental and untested on hardware, and Stop there is a software hold, not an emergency stop.
 
-Octopus: there is no octopus sim on the site. It exists as a design plan (docs/OCTOPUS.md) and a tested motion foundation only, with no playable page. Do not show it or say it exists.
+Octopus (optional, `/sim/octopus/`, once the build that adds it is deployed; check it with `--sims octopus`). Cove is a simulated soft robot. Left unpaired for a few seconds it shows itself: it finds the ball, wraps two arms round it, carries it into the lime ring, curls and pulses. Paired, the Gamepad face drives it: left stick crawls and turns, A grabs or lets go, B curls, X pulses, Y stops. Say: "Eight soft arms from one thumb: each arm plants and re-plants as it moves." It is a design study in the sim, not a real robot, and its motion is kinematic placement with elastic smoothing, not a physics or rod simulation. Fallback: Home in the panel puts it back at the start.
 
 Fallback for any sim: if a sim stalls, shows a blank stage, or shows "The scene could not be loaded", do not fight it. Its Reload button is limited to once in ten minutes and is off while the scene is paired or shared. Use Back to sims and open the next one (Dog, Kart, Pinball, Lamp and Studio are all featured). The sim you skip loses nothing.
 
@@ -179,7 +179,8 @@ Say what ships:
 Do not say:
 - That it works on any website or any game. It works where a page reads the Gamepad API (or takes mouse and keys), in the browsers named above, and the limits are in the Link README.
 - That a real arm is supported. An arm you connect is experimental and untested on hardware; Stop is a software hold, not an emergency stop.
-- That there is a macOS build (it is coming soon), a TV mode, an octopus sim, or a signature-motion product.
+- That there is a macOS build (it is coming soon), a TV mode, or a signature-motion product.
+- That the octopus is a real robot, a physics or rod simulation, or biologically validated.
 - That a phone's volume keys work as controls. Browsers never give them to a page.
 - A latency number. The milliseconds on the padlock are a round trip on the control channel, not motion to photon, and nothing in this runbook has measured the second.
 - That something is instant, seamless, effortless or magic. Show it and let it speak.
