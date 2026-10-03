@@ -341,6 +341,9 @@ describe('overclaims', () => {
     expect(service).toContain('PAYMENT_ROUTES.includes(url.pathname)')
     expect(readText('worker/payments.ts')).toContain("PAYMENT_ROUTES = ['/api/payments/config', '/api/donations/live', '/api/checkout', '/api/donate', '/api/webhooks/stripe', '/api/webhooks/sponsors']")
     expect(readText('vite.config.ts')).toContain("'script-src': [\"'self'\"]")
+    // No analytics: nothing of ours loads or allows an analytics script. Cloudflare's automatic Web Analytics may still add its
+    // beacon at the edge (a dashboard setting, turned off); the pages' own policy blocks it, and must keep doing so.
+    for (const file of [...PAGES, 'vite.config.ts', 'public/_headers', 'worker/index.ts']) expect(readText(file), file).not.toMatch(/cloudflareinsights|data-cf-beacon/i)
     expect(readText('src/controller/scanner.ts')).toMatch(/getUserMedia\(\{ audio: false, video:/)
     expect(readText('src/controller/main.ts')).toContain('if (scanArrival) openConnections()')
     expect(readText('src/controller/main.ts')).not.toContain('catch(() => openConnections(true))')

@@ -15,7 +15,8 @@ const marker = changed => '<span class="mark ' + (changed ? 'changed' : '') + '"
 const button = (label, value) => '<button type="button" data-copy="' + esc(value) + '">' + label + '</button>'
 
 export async function renderStoreKit(root, options = {}) {
-  const info = await storeStatus(root, undefined, { ...options, validateCurrent: true })
+  // The kit is what gets uploaded: its art, listing and zip are always held to their receipts.
+  const info = await storeStatus(root, undefined, { ...options, validateCurrent: true, strict: true })
   if (info.packageError) throw new Error(info.packageError)
   const { version, tabs, baseline, status, images, packageInfo } = info
   const consistency = (options.checkCopy ?? checkStoreCopy)(root, packageInfo.manifest)

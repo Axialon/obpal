@@ -22,10 +22,14 @@ async function watch(ctx) {
   return ctx
 }
 
+/** Each browser's own newContext, from before it was made to watch. */
+const unwatched = new WeakMap()
+
 const launch = chromium.launch.bind(chromium)
 chromium.launch = async (...args) => {
   const browser = await launch(...args)
   const newContext = browser.newContext.bind(browser)
+  unwatched.set(browser, newContext)
   browser.newContext = async (...o) => watch(await newContext(...o))
   // A page of its own context, as browser.newPage() makes it, but watched.
   browser.newPage = async (...o) => (await browser.newContext(...o)).newPage()
@@ -33,6 +37,13 @@ chromium.launch = async (...args) => {
 }
 const persistent = chromium.launchPersistentContext.bind(chromium)
 chromium.launchPersistentContext = async (...args) => watch(await persistent(...args))
+
+/**
+ * A context the watcher leaves alone, for pages this checkout doesn't serve: the store kit's links open the live site,
+ * which is the deployed build behind Cloudflare's edge, and the edge can add scripts of its own (the Web Analytics
+ * beacon) that the pages' policies rightly block. Only the pages this checkout serves are held to its policies.
+ */
+export const newUnwatchedContext = (browser, ...options) => (unwatched.get(browser) ?? browser.newContext.bind(browser))(...options)
 
 /** For a suite's check(): the violations, if any, as the error; otherwise how many were watched (none). */
 export async function cspCheck() {

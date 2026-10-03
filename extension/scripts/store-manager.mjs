@@ -16,6 +16,22 @@ export const writeJson = (path, value) => writeFileSync(path, JSON.stringify(val
 const storeFile = (root, name) => join(root, 'extension/store', name)
 const versionOf = root => readJson(join(root, 'extension/package.json')).version
 export const lastSubmitted = ledger => ledger.entries.findLast(entry => entry.submittedAt)
+/** Whether the plain x.y.z `version` is newer than `other`; false when either is anything else. */
+export function versionNewer(version, other) {
+  const [a, b] = [version, other].map(v => /^\d+\.\d+\.\d+$/.test(v ?? '') ? v.split('.').map(Number) : null)
+  if (!a || !b) return false
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i]
+  return false
+}
+/**
+ * In development: a version newer than the last submission that isn't marked prepared. Its listing, art and zip may lag
+ * its code, so `store check` leaves their receipts alone until `store -- kit` validates them and marks it prepared. A
+ * version that was submitted, or is prepared, is held to them; so is a rejected one, which is fixed in place.
+ */
+export const inDevelopment = (ledger, status, version) => {
+  const latest = lastSubmitted(ledger)
+  return status.prepared !== version && (!latest || versionNewer(version, latest.version))
+}
 const atCommit = (root, commit, name) => git(root, ['show', `${commit}:extension/store/${name}`], null)
 const listingHashes = tabs => Object.fromEntries(tabs.flatMap(tab => tab.fields.map(field => [fieldKey(tab, field), sha256(field.text)])))
 const sameHashes = (a, b) => b && Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([key, hash]) => b[key] === hash)
@@ -55,8 +71,12 @@ export function validatePackage(root) {
   return { file, path, bytes: bytes.length, sha256: hash, sourceSha256: receipt.sourceSha256, manifest }
 }
 
-/** Checks tracked truth without requiring an ignored release zip to exist on a fresh checkout. */
-export async function checkStore(root, { preparing = false, validateCurrent = true } = {}) {
+/**
+ * Checks tracked truth without requiring an ignored release zip to exist on a fresh checkout. A version in development
+ * (inDevelopment) passes without its art receipt and listing, and the result says `development`; `strict` holds it to
+ * them anyway, as the kit and recording a submission do.
+ */
+export async function checkStore(root, { preparing = false, validateCurrent = true, strict = false } = {}) {
   const ledger = readJson(storeFile(root, 'submissions.json')), status = readJson(storeFile(root, 'status.json'))
   if (ledger.schema !== 1 || status.schema !== 1 || !Array.isArray(ledger.entries)) throw new Error('Invalid store ledger or status schema')
   let previousDate = ''
@@ -90,7 +110,9 @@ export async function checkStore(root, { preparing = false, validateCurrent = tr
     })
     return { ledger, status, images }
   }
-  const images = await validateImages(root), current = snapshot(root)
+  const images = await validateImages(root)
+  if (!strict && inDevelopment(ledger, status, versionOf(root))) return { ledger, status, images, development: true }
+  const current = snapshot(root)
   const art = readJson(storeFile(root, 'art.json'))
   if (art.sourceSha256 !== inputHash(root, artPath) || !sameHashes(current.images, art.images)) throw new Error('Store art receipt is stale or changed without rebuilt art; run pnpm run store:art')
   const config = readFileSync(join(root, 'extension/vite.config.ts'), 'utf8')
@@ -101,7 +123,7 @@ export async function checkStore(root, { preparing = false, validateCurrent = tr
     const match = new RegExp(`\\n  ${property}: '([^']*)'`).exec(config)
     if (!field || field.text !== match?.[1]) throw new Error(`Listing ${name} contradicts extension manifest`)
   }
-  return { ledger, status, images }
+  return { ledger, status, images, development: false }
 }
 
 export const storeLags = (published, release) => {
@@ -124,13 +146,14 @@ export async function storeStatus(root, release, options) {
   const tabs = compareFields(parseListing(readFileSync(storeFile(root, 'listing.md'), 'utf8')), before)
   let packageInfo, packageError
   try { packageInfo = validatePackage(root) } catch (error) { packageError = error.message }
-  return { version: versionOf(root), ledger, status, baseline, tabs, images: images.map(image => ({ ...image, changed: baseline?.images[image.file] !== image.sha256 })), packageInfo, packageError, release }
+  return { version: versionOf(root), development: inDevelopment(ledger, status, versionOf(root)), ledger, status, baseline, tabs, images: images.map(image => ({ ...image, changed: baseline?.images[image.file] !== image.sha256 })), packageInfo, packageError, release }
 }
 
 export function formatStatus(info) {
   const { status, baseline } = info
-  return [`Link ${info.version}: published ${status.published ?? 'none'}; pending review ${status.pending ?? 'none'}; prepared ${status.prepared ?? 'none'}`,
+  return [`Link ${info.version}${info.development ? ' (in development)' : ''}: published ${status.published ?? 'none'}; pending review ${status.pending ?? 'none'}; prepared ${status.prepared ?? 'none'}`,
     `Baseline: last submission ${baseline?.version ?? 'none'} (${baseline?.commit.slice(0, 7) ?? 'none'})`,
+    ...(info.development ? ['In development: newer than the last submission, so store check leaves its art and zip receipts alone; pnpm run store -- kit validates them and marks it prepared, and they are enforced from then on'] : []),
     ...info.tabs.flatMap(tab => tab.fields.map(field => `${field.changed ? 'CHANGED' : 'unchanged'} field: ${fieldKey(tab, field)}`)),
     ...info.images.map(image => `${image.changed ? 'CHANGED' : 'unchanged'} image: ${image.file}${image.missing ? ' (missing; run pnpm run store:art)' : ''}`),
     `Store zip: ${info.packageError ?? 'matches current extension source'}`,
@@ -140,7 +163,9 @@ export function formatStatus(info) {
 
 const safeReason = reason => typeof reason === 'string' && /^[A-Za-z0-9 .,;:!?()'\-]{1,500}$/.test(reason) && !/@|https?:|[\\/]|\b(email|owner|account|publisher|name)\b/i.test(reason)
 export async function recordSubmission(root, command, version, reason, now = new Date()) {
-  const { ledger, status } = await checkStore(root), date = now.toISOString().slice(0, 10)
+  // A submission is held to its art and listing even when the version was never prepared; an outcome is not, so
+  // recording one needs nothing of a newer version in development.
+  const { ledger, status } = await checkStore(root, { strict: command === 'submitted' }), date = now.toISOString().slice(0, 10)
   if (command === 'submitted') {
     if (version !== versionOf(root)) throw new Error('Submit the current extension version')
     if (status.pending || ledger.entries.some(entry => entry.version === version && entry.state !== 'rejected')) throw new Error('A submission is pending or this version is already recorded')

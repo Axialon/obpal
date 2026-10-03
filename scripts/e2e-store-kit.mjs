@@ -6,12 +6,16 @@ import { isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 import { serveKit } from '../extension/scripts/store-cli.mjs'
-import { validatePackage } from '../extension/scripts/store-manager.mjs'
+import { storeStatus, validatePackage } from '../extension/scripts/store-manager.mjs'
 import { git, sha256 } from '../extension/scripts/store-source.mjs'
 import { rawRun } from './lib/distill.mjs'
+import { newUnwatchedContext } from './csp-watch.mjs'
 
 export async function runStoreKit(browser, check, shots = '') {
   const root = fileURLToPath(new URL('..', import.meta.url))
+  // A version in development has no kit yet: the kit holds its art, listing and zip to their receipts, and `store -- kit` prepares it.
+  const { version, development } = await storeStatus(root)
+  if (development) return check(`store kit: Link ${version} is in development`, async () => 'not prepared, so there is no kit to click through yet (pnpm run store -- kit)')
   // Fresh checkouts have no ignored upload zip. Build through the existing guarded packer.
   try { validatePackage(root) } catch {
     for (const [script, args, cwd] of [
@@ -32,9 +36,10 @@ export async function runStoreKit(browser, check, shots = '') {
   try {
     server = await serveKit(root, port, { renderOnly: true })
     for (const width of [1100, 390]) await check(`store kit ${width}px: every link, image and copy action resolves`, async () => {
-      const context = await browser.newContext({ viewport: { width, height: 850 }, deviceScaleFactor: 1, permissions: ['clipboard-read', 'clipboard-write'], reducedMotion: 'reduce', acceptDownloads: true })
+      // The links open the live site, not this checkout's pages, so the Content Security Policy watcher leaves this context alone.
+      const context = await newUnwatchedContext(browser, { viewport: { width, height: 850 }, deviceScaleFactor: 1, permissions: ['clipboard-read', 'clipboard-write'], reducedMotion: 'reduce', acceptDownloads: true })
       try {
-        const page = await context.newPage(), badResponses = [], errors = [], navigations = []
+        const page = await context.newPage(), badResponses = [], errors = [], navigations = [], beacons = new Set()
         context.on('response', response => { if (response.request().isNavigationRequest()) navigations.push(response) })
         page.on('response', response => { if (response.url().startsWith(origin) && response.status() >= 400) badResponses.push(response.status()) })
         page.on('pageerror', error => errors.push(error.message))
@@ -72,6 +77,7 @@ export async function runStoreKit(browser, check, shots = '') {
             const navigation = navigations.findLast(response => response.url() === popup.url())
             assert(navigation, `No document response for ${href}`)
             assert.equal(navigation.status(), 200, href)
+            if (await popup.locator('script[src*="static.cloudflareinsights.com"]').count().catch(() => 0)) beacons.add(new URL(popup.url()).pathname)
             await popup.close(); destinations++
           }
         }
@@ -86,7 +92,10 @@ export async function runStoreKit(browser, check, shots = '') {
           await page.screenshot({ path: join(captures, path) }); frames.push({ path, failed: false })
         }
         observations.push({ width, downloads, destinations, copiedPaths: paths, copyButtons: count, images: 8, broken: 0 })
-        return `${url}; ${downloads} downloads, ${destinations} live links, ${count} copies (${paths} existing absolute paths), 8 images; no failures`
+        // Our code never loads an analytics beacon (the privacy page says there is none, and the pages' policy blocks any). Cloudflare's
+        // automatic Web Analytics adds one at the edge: say so here, where the live pages are opened, until it is turned off in the dashboard.
+        const injected = beacons.size ? `; NOTE: Cloudflare Web Analytics injects its beacon into live ${[...beacons].join(' ')}: turn off automatic injection in the Cloudflare dashboard` : ''
+        return `${url}; ${downloads} downloads, ${destinations} live links, ${count} copies (${paths} existing absolute paths), 8 images; no failures${injected}`
       } finally { await context.close() }
     })
     if (evidence || shots) {

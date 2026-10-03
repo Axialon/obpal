@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import sharp from 'sharp'
-import { artwork, checkStore, formatStatus, lastSubmitted, pendingWarning, readJson, recordSubmission, snapshot, storeLags, storeStatus, validateImages, validatePackage, writeJson } from '../extension/scripts/store-manager.mjs'
+import { artwork, checkStore, formatStatus, inDevelopment, lastSubmitted, pendingWarning, readJson, recordSubmission, snapshot, storeLags, storeStatus, validateImages, validatePackage, versionNewer, writeJson } from '../extension/scripts/store-manager.mjs'
 import { artPath, directoryHashes, git, inputHash, sha256, validateBuild } from '../extension/scripts/store-source.mjs'
 import { renderStoreKit, writeStoreKit } from '../extension/scripts/store-kit.mjs'
 import { checkStoreCopy } from '../extension/scripts/store-copy.mjs'
@@ -187,6 +187,55 @@ export const cases = [
     await writeStoreKit(root, fixtureOptions)
     assert.equal(readJson(store(root, 'status.json')).prepared, '1.8.0')
     await checkStore(root)
+  }) },
+  { name: 'a version is in development when it is newer than the last submission and not prepared', run() {
+    const entry = state => ({ version: '1.8.0', submittedAt: '2026-10-03', state })
+    assert(versionNewer('1.10.0', '1.9.0')); assert(!versionNewer('1.9.0', '1.9.0')); assert(!versionNewer('1.8.0', '1.9.0'))
+    assert(!versionNewer('1.9', '1.8.0') && !versionNewer('1.9.0', undefined))
+    assert.equal(inDevelopment({ entries: [] }, { prepared: null }, '1.9.0'), true)
+    assert.equal(inDevelopment({ entries: [entry('submitted')] }, { prepared: null }, '1.9.0'), true)
+    assert.equal(inDevelopment({ entries: [entry('published')] }, { prepared: null }, '1.10.0'), true)
+    assert.equal(inDevelopment({ entries: [entry('published')] }, { prepared: '1.9.0' }, '1.9.0'), false, 'prepared')
+    assert.equal(inDevelopment({ entries: [entry('submitted')] }, { prepared: null }, '1.8.0'), false, 'the submitted version')
+    assert.equal(inDevelopment({ entries: [entry('rejected')] }, { prepared: null }, '1.8.0'), false, 'a rejected version is fixed in place')
+    assert.equal(inDevelopment({ entries: [entry('published')] }, { prepared: null }, '1.7.0'), false, 'older than the last submission')
+  } },
+  { name: 'check passes a version in development without its art receipt, and holds it to the receipt once prepared', run: () => fixture(async root => {
+    const prepared = readJson(store(root, 'status.json'))
+    // The version is newer than the ledger's last submission (1.6.2), and art inputs have changed without a rebuild.
+    writeFileSync(store(root, 'src/look.css'), 'body{color:red}')
+    await assert.rejects(checkStore(root), /art receipt is stale/) // the fixture marks 1.8.0 prepared
+    writeJson(store(root, 'status.json'), { ...prepared, prepared: null })
+    assert.equal((await checkStore(root)).development, true)
+    await assert.rejects(checkStore(root, { strict: true }), /art receipt is stale/)
+    const info = await storeStatus(root)
+    assert.equal(info.development, true)
+    assert.match(formatStatus(info), /^Link 1\.8\.0 \(in development\): published 1\.6\.2; pending review none; prepared none/)
+    assert.match(formatStatus(info), /In development: .*art and zip receipts.*enforced/)
+    // The kit validates in full: stale art refuses it, and the version does not become prepared.
+    await assert.rejects(writeStoreKit(root, fixtureOptions), /art receipt is stale/)
+    assert.equal(readJson(store(root, 'status.json')).prepared, null)
+    await assert.rejects(renderStoreKit(root, fixtureOptions), /art receipt is stale/)
+    // Rebuilt art lets the kit prepare it, and from then on the receipt binds again.
+    artReceipt(root); await writeStoreKit(root, fixtureOptions)
+    assert.equal(readJson(store(root, 'status.json')).prepared, '1.8.0')
+    const ready = await storeStatus(root)
+    assert.equal(ready.development, false); assert.doesNotMatch(formatStatus(ready), /development/)
+    assert.equal((await checkStore(root)).development, false)
+    writeFileSync(store(root, 'src/look.css'), 'body{color:blue}')
+    await assert.rejects(checkStore(root), /art receipt is stale/)
+  }) },
+  { name: 'a submitted version stays held to its art; submitting needs current art, recording an outcome does not', run: () => fixture(async root => {
+    await recordSubmission(root, 'submitted', '1.8.0')
+    writeFileSync(store(root, 'src/look.css'), 'body{color:red}')
+    await assert.rejects(checkStore(root), /art receipt is stale/) // 1.8.0 is the last submission: not in development
+    // Link moves on to 1.9.0 while 1.8.0 is in review, with its art not rebuilt.
+    writeJson(join(root, 'extension/package.json'), { version: '1.9.0' })
+    assert.equal((await checkStore(root)).development, true)
+    await assert.rejects(recordSubmission(root, 'submitted', '1.9.0'), /art receipt is stale/)
+    await recordSubmission(root, 'published', '1.8.0')
+    assert.equal(readJson(store(root, 'status.json')).published, '1.8.0')
+    assert.equal((await checkStore(root)).development, true)
   }) },
   { name: 'failed regeneration removes an old kit and serves useful errors instead of stale HTML', run: () => fixture(async root => {
     await writeStoreKit(root, fixtureOptions)

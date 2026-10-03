@@ -31,6 +31,9 @@ export function remoteIdentity(url) {
 }
 export function guardRemote(root, configured) {
   if (!configured || !/^[\w.-]+\/[\w.-]+$/.test(configured)) throw refusal('Configure backupRepository before pushing')
+  // List the remotes first: asking for the URL of an absent one makes git print "error: No such remote" on the console
+  // (the fixture tests refuse a repository without one, and `pnpm run ship` runs them), though the refusal is the answer.
+  if (!git(root, ['remote']).split(/\r?\n/).includes('backup')) throw refusal('The backup remote is missing')
   let urls
   try {
     urls = [...git(root, ['remote', 'get-url', '--all', 'backup']).trim().split(/\r?\n/), ...git(root, ['remote', 'get-url', '--push', '--all', 'backup']).trim().split(/\r?\n/)]

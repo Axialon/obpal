@@ -10,6 +10,8 @@ The owner submits the existing item by hand in the [Developer Dashboard](https:/
 
 The historical 1.6.2 entry uses its source commit and original listing/image hashes. Its original submitted zip and submission date are unavailable: the ledger explicitly records a null zip hash and a commit-date proxy, and records publication as observed on the migration date. Existing 1.8.0 art is adopted as the initial art receipt; subsequent full renders refresh it.
 
+A version newer than the last submission that isn't marked prepared is in development: `pnpm run store -- status` says so, and `pnpm run store -- check` (so `pnpm run check`) leaves its art and zip receipts alone, which lets a branch bump Link's version before the store art is rebuilt. `pnpm run store -- kit` validates the art, listing and zip in full and marks the version prepared; from then on the art receipt is enforced, and the kit refuses stale art or a stale zip. Recording a submission always holds the version to its art and zip, prepared or not. Recording the outcome of an earlier submission needs nothing of the newer version. A submitted or rejected version is never in development.
+
 A missing zip or missing receipt on a fresh checkout is expected: `pnpm run store:extension` builds both. Matching version numbers alone do not prove freshness. Build receipts include tracked and untracked extension inputs and shared dependencies; packing rejects altered build output. Store submission requires a clean tracked tree so recorded content is recoverable from its commit.
 
 `ship` and `check:live` warn when the published store version lags GitHub. Pending review still counts as lagging until published. This warning does not fail a release check.

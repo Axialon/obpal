@@ -1,7 +1,7 @@
 /** Synthetic maintenance fixtures; no real worktrees, remotes or backups are modified. */
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync, openSync, closeSync, ftruncateSync } from 'node:fs'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { join, toNamespacedPath } from 'node:path'
 import { tmpdir } from 'node:os'
 import { allowedHistoricalFile, HISTORICAL_TEST_TLS, guardRemote, guardTracked, retentionSelection, selfTest, verifyManifest } from '../scripts/backup.mjs'
@@ -46,6 +46,15 @@ export const cases = [
     git(root, ['remote', 'set-url', '--push', 'backup', 'git@github.com:fixture/private.git']); guardRemote(root, 'fixture/private')
     git(root, ['remote', 'set-url', '--add', '--push', 'backup', 'https://github.com/fixture/public'])
     assert.throws(() => guardRemote(root, 'fixture/private'), { exitCode: 2 })
+  }) },
+  { name: 'refuses an absent backup remote without git printing an error to the console', run: () => withFixture(root => {
+    init(root)
+    // Git writes straight to the process's own stderr, so a child shows what a `pnpm run ship` log would.
+    const module = new URL('../scripts/backup.mjs', import.meta.url).href
+    const script = `import { guardRemote } from ${JSON.stringify(module)}\ntry { guardRemote(${JSON.stringify(root)}, 'fixture/private') } catch (error) { console.log(error.exitCode, error.message) }`
+    const run = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', windowsHide: true })
+    assert.equal(run.stdout.trim(), '2 The backup remote is missing')
+    assert.equal(run.stderr, '')
   }) },
   { name: 'checks historical secret files even after they are deleted', run: () => withFixture(root => {
     init(root); guardTracked(root)

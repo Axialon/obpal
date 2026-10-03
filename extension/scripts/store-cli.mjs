@@ -56,7 +56,8 @@ export async function main(root, args) {
     const result = await writeStoreKit(root)
     console.log(`Store kit ${result.version}: ${result.out}\n${result.changedFields} changed fields; ${result.changedImages} changed images`)
   } else if (command === 'check') {
-    await checkStore(root); checkStoreCopy(root); console.log('Store listing, art, status, copy and ledger agree')
+    const { development } = await checkStore(root); checkStoreCopy(root)
+    console.log(development ? `Store status, copy and ledger agree; ${readJson(join(root, 'extension/package.json')).version} is in development, so its art and zip are held to their receipts once it is prepared (pnpm run store -- kit)` : 'Store listing, art, status, copy and ledger agree')
   } else if (command === 'serve') {
     const port = Number(version), server = await serveKit(root, port)
     console.log(`Live store kit: http://127.0.0.1:${port}/extension/release/store-kit.html (Ctrl+C to stop)`)
