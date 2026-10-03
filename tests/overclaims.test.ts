@@ -57,7 +57,7 @@ const PROSE = COPY.filter((f) => !f.endsWith('.ts') && !f.startsWith('spec/'))
 const DOCS = [
   'spec/PACKS.md', 'CONTRIBUTING.md', ...['profiles', 'mappings', 'modes', 'scenes'].map((f) => `catalogue/${f}/README.md`),
   'README.md', 'desktop/README.md', 'packages/core/README.md', 'packages/host/README.md', 'packages/core/src/messages.ts',
-  'spec/CATALOGUE.md', 'spec/PROTOCOL.md', 'spec/STYLE-3D.md', 'spec/MESSAGING.md', 'spec/SECURITY.md', 'hardware/arduino/obpal-arm/obpal-arm.ino',
+  'spec/CATALOGUE.md', 'spec/PROTOCOL.md', 'spec/STYLE-3D.md', 'spec/MESSAGING.md', 'spec/SECURITY.md', 'hardware/arduino/obpal-arm/obpal-arm.ino', 'docs/PRESENTATION.md',
 ]
 
 /** The entities HTML writes that these files use. */

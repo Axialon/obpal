@@ -3,11 +3,10 @@
 .share-panel header, .share-actions, .share-tabs, .share-local { display: flex; align-items: center; justify-content: center; gap: 8px; }
 .share-panel header { justify-content: space-between; margin-bottom: 12px; }
 .share-panel button, .drop-tray button, .phone-play button { display: inline-flex; align-items: center; justify-content: center; min-width: 40px; min-height: 40px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
-.share-panel button:focus-visible, .drop-tray button:focus-visible, .phone-play button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .share-panel button:disabled { opacity: .5; cursor: default; }
 .share-panel .ic, .drop-tray .ic, .phone-play .ic { width: 20px; height: 20px; }
 .share-tabs button { flex: 1; }
-.share-tabs button[aria-selected=true] { background: var(--ink); color: rgb(var(--surface-rgb)); }
+.share-tabs button[aria-selected=true] { background: var(--interaction-selected-fill); color: var(--accent-text); box-shadow: var(--interaction-selected-shadow); }
 .share-qr { display: flex; align-items: center; justify-content: center; min-height: 208px; padding: 14px 0; }
 .share-qr svg { width: 200px; max-width: 100%; border-radius: 12px; }
 .share-qr [data-dot-result] svg { width: 24px; height: 24px; }
@@ -35,7 +34,7 @@
 .phone-playing .drop-tray { bottom: 230px; }
 .phone-playing .drop-credit { bottom: 350px; }
 .drop-tray { position: fixed; z-index: 85; bottom: max(18px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; max-width: calc(100vw - 32px); padding: 8px; border: 1px solid var(--frost-edge); border-radius: 14px; background: var(--frost); color: var(--ink); backdrop-filter: var(--frost-blur); }
-.drop-tray button[aria-pressed=true] { outline: 2px solid var(--accent); }
+.drop-tray button[aria-pressed=true] { background: var(--interaction-selected-fill); box-shadow: var(--interaction-selected-shadow); }
 .drop-tray small { flex-basis: 100%; text-align: center; }
 .drop-tray input { width: 100px; color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 5px; font: inherit; }
 .drop-credit { position: fixed; z-index: 84; left: 50%; bottom: 118px; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; max-width: calc(100vw - 32px); padding: 6px 10px; border-radius: 12px; background: var(--frost); color: var(--ink); font: 500 12px/1.4 var(--font, system-ui); }

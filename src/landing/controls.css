@@ -5,10 +5,12 @@
 /* Share the volume button's glass and icon styling, in a stack clear of the right-edge phone tab. */
 .field-controls { position: fixed; z-index: 21; right: max(36px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; align-items: center; gap: 28px; }
 .field-controls .hero-sound { --block: 0 8px 20px -10px rgb(0 0 0 / 0.55); position: relative; inset: auto; width: 44px; min-width: 44px; height: 44px; padding: 0; opacity: 1; transition: color 0.2s var(--ease), border-color 0.2s var(--ease), transform 0.12s var(--ease); }
-.field-controls .hero-sound:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 4px; }
 .field-controls [data-sound-label] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* A narrow desktop window can still offer a QR. Give it the same centred, evenly padded frame. */
 @media (max-width: 600px) {
   .home .pair { display: block; }
   .home .pair-note { margin: 14px 0 0; }
 }
+
+/* The marble peg holds a marble when the page has no clear landing. */
+.field-controls .field-toggle[data-holding] { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #c6ff34) 24%, transparent), 0 0 18px #c6ff3426; }

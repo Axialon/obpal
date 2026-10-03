@@ -9,7 +9,8 @@ Tools for developing ob.Pal with parallel Claude Code agents. A coordinator sess
 | `pnpm run check` | You want typecheck and vitest together, for example after resolving a merge. |
 | `node scripts/merge-lane.mjs <branch> [-m …] [--dry-run]` | You merge a lane (coordinator, main checkout only). It reviews, scans for secrets and private data, merges with `--no-ff` under the repo's identity, then installs, typechecks and runs vitest. It never pushes. |
 | `pnpm run publish:npm [-- --yes]` | You release @obpal/core and @obpal/host (coordinator; main checkout, master, clean tree for `--yes`). The default is a dry run: it builds, tests, packs, inspects the tarballs and prints a plan. `--yes` publishes, prints npm's sign-in link as `APPROVE: <url>` for the owner to approve, then checks the registry and an install. Lanes may run the dry run. |
-| `pnpm run check:live [-- --origin …] [--only …]` | You've deployed. It checks every page at two widths, the pairing code, the /api/code rules, the TURN relay, the security headers and security.txt, and that /link/ shows the release it downloads, read only. |
+| `pnpm run check:live [-- --origin …] [--only …]` | You've deployed. It checks every page at two widths (and that no sim shows its "could not be loaded" card), the pairing code, the /api/code rules, the TURN relay, the security headers and security.txt, and that /link/ shows the release it downloads, read only. |
+| `pnpm run demo:preflight [-- --sims … --only … --without-beacon]` | Someone presents the live site (docs/PRESENTATION.md). In one to two minutes it joins an emulated phone to the home page and the Viewer, starts three sims, opens a watch link, relays through TURN and fetches what /link/ and Desktop's page offer, then prints a PASS/FAIL table with timings and keeps screenshots under artifacts/demo-preflight. Read only; it checks the ob.Pal Desktop log for new sessions like the e2e runner. |
 
 ## Agents, skills and hooks
 | file | use it when |

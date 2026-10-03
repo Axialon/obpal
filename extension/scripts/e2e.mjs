@@ -64,6 +64,7 @@ import { nativePort } from '../e2e/native-port.mjs'
 import { startLocal, UPSTREAM } from '../e2e/local.mjs'
 import { visitLinkButtons, assertButtonInk } from '../../scripts/lib/surface-buttons.mjs'
 import { e2eBrowserOptions } from '../../scripts/lib/browser.mjs'
+import { interactionStates } from '../../scripts/lib/interaction-states.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const HEADED = process.argv.includes('--headed')
@@ -340,11 +341,23 @@ try {
   console.log('ob.Pal Link e2e')
   if (DESKTOP) console.log('  --desktop: this run reaches the installed ob.Pal Desktop and injects real input (into its harness window)')
   let { id, popup } = await openPopup(desk)
+  await check('popup: keyboard ring, pointer focus and six-surface contrast', () => interactionStates(popup, '.chip[aria-checked="true"]'))
   await check('popup and options: button ink within 0.5px at three sizes, Carbon and Light', async () => {
     const rows = [], opts = await desk.newPage()
     try {
       await opts.goto(`chrome-extension://${id}/options.html`)
-      for (const p of [popup, opts]) await visitLinkButtons(p, (_page, size, state, measured) => rows.push(...measured.map(r => ({ size, state, ...r }))))
+      await check('options: keyboard ring, pointer focus and six-surface contrast', () => interactionStates(opts, '.bb-accent[aria-checked="true"]'))
+      for (const p of [popup, opts]) {
+        // The interaction probes leave the pointer over a chip; ink centring measures its resting icon.
+        await p.mouse.move(0, 0)
+        await p.evaluate(async () => {
+          document.activeElement?.blur()
+          getComputedStyle(document.documentElement).color
+          await Promise.all(document.getAnimations().filter(a => Number.isFinite(a.effect?.getComputedTiming().endTime)).map(a => a.finished.catch(() => {})))
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+        })
+        await visitLinkButtons(p, (_page, size, state, measured) => rows.push(...measured.map(r => ({ size, state, ...r }))))
+      }
       return assertButtonInk(rows)
     } finally { await opts.close(); await popup.setViewportSize({ width: 1280, height: 800 }) }
   })

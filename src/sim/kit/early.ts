@@ -8,14 +8,16 @@
 import { expectRig } from './loading'
 import { downloadPrototype, pageModels } from './models'
 import { modelFailed, sceneFailed } from './recovery'
+import { ownModuleFailed } from './script-failure'
 import { holdReload } from '../../ui/recover'
 
 // A shared visitor must keep its authenticated scene link across a failed import.
 holdReload(() => new URLSearchParams(location.search).get('join') === '1')
 addEventListener('obpal:model-failed', modelFailed)
-// A module that never loads cannot reach its page boundary.
+// A module of ours that never loads cannot reach its page boundary. A script from another origin (an analytics beacon the
+// page policy blocks) is not ours.
 addEventListener('error', event => {
-  if (event.target instanceof HTMLScriptElement && event.target.type === 'module') sceneFailed(event)
+  if (event.target instanceof HTMLScriptElement && ownModuleFailed(event.target, location.origin)) sceneFailed(event)
 }, true)
 
 const wanted = pageModels(location.pathname, location.search)

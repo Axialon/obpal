@@ -1,6 +1,7 @@
 /**
  * After a deploy: is the live site whole? Read only, as a visitor would, and nothing it prints is a credential.
- *   pages    every page at 1440 and 390 wide loads (HTTP 200) without a page error; the Viewer shows a pairing code
+ *   pages    every page at 1440 and 390 wide loads (HTTP 200) without a page error or a sim's "could not be loaded" card;
+ *            the Viewer shows a pairing code
  *   api      /api/health answers; /api/code turns away a code it doesn't know (404), a text/plain body (415) and a
  *            cross-site request (403)
  *   turn     /api/ice offers TURN to a room with a live host, and a DataChannel forced through the relay opens and echoes
@@ -15,6 +16,7 @@
  */
 import { resolveChromium, shortPath } from './lib/browser.mjs'
 import { LINK_REPO, PAGES, VIEWPORTS, latestRelease, linkInstallChecks, linkVersionLabel, pageHeaderChecks, releaseChecks, securityTxtCheck, shownCode, turnChecks } from './lib/live.mjs'
+import { deepText, probeRelay, watchIce } from './lib/live-browser.mjs'
 import { formatDuration, formatTable } from './lib/report.mjs'
 import { pendingWarning } from '../extension/scripts/store-manager.mjs'
 import { fileURLToPath } from 'node:url'
@@ -105,17 +107,6 @@ if (only.includes('pages') || only.includes('turn')) {
   }
 }
 
-/** Text in the page, shadow roots included (the pairing chip lives in one). */
-function deepText() {
-  const out = []
-  const walk = (n) => {
-    if (n.shadowRoot) walk(n.shadowRoot)
-    for (const c of n.childNodes) c.nodeType === 3 ? out.push(c.textContent) : walk(c)
-  }
-  walk(document.body)
-  return out.join(' ')
-}
-
 async function pages(browser) {
   const failed = []
   let code = null
@@ -128,7 +119,9 @@ async function pages(browser) {
       const status = await page.goto(ORIGIN + path, { waitUntil: 'load' }).then((r) => r?.status() ?? 0, (e) => `error ${String(e.message).slice(0, 60)}`)
       await page.waitForTimeout(path === '/view/' ? 6000 : 2000)
       if (path === '/view/' && w === VIEWPORTS[0][0]) code = shownCode(await page.evaluate(deepText))
-      if (status !== 200 || errors.length) failed.push(`${w} ${path}: ${status !== 200 ? `HTTP ${status}` : ''}${errors.length ? ` page error: ${errors.join(' | ')}` : ''}`)
+      // A sim that fails to start says so in a card (src/sim/kit/recovery.ts) and throws nothing the page reports.
+      const card = await page.evaluate(() => document.getElementById('sim-recovery')?.querySelector('[role=alert]')?.textContent ?? '').catch(() => '')
+      if (status !== 200 || errors.length || card) failed.push(`${w} ${path}: ${status !== 200 ? `HTTP ${status}` : ''}${errors.length ? ` page error: ${errors.join(' | ')}` : ''}${card ? ` the sim shows "${card.slice(0, 60)}"` : ''}`)
       await ctx.close()
     }
   }
@@ -140,45 +133,13 @@ async function pages(browser) {
 
 async function turn(browser) {
   const page = await (await browser.newContext()).newPage()
-  let room = ''
-  const hostTurn = []
-  page.on('response', async (r) => {
-    const u = new URL(r.url())
-    if (u.pathname !== '/api/ice') return
-    room = u.searchParams.get('room') ?? room
-    try { hostTurn.push(!!(await r.json()).turn) } catch { /* a response without a body */ }
-  })
+  const ice = watchIce(page)
   await page.goto(`${ORIGIN}/view/`, { waitUntil: 'load' })
-  for (let i = 0; i < 60 && !room; i++) await page.waitForTimeout(500)
+  for (let i = 0; i < 60 && !ice.room; i++) await page.waitForTimeout(500)
   await page.waitForTimeout(3000)
   // In the page, so the request is same-origin like the host's own. Only whether credentials came is kept, never them.
-  const check = room ? await page.evaluate(async (room) => {
-    const j = await (await fetch(`/api/ice?room=${room}`)).json()
-    return { turn: !!j.turn, urls: j.iceServers.flatMap((s) => [].concat(s.urls)), creds: j.iceServers.some((s) => s.username && s.credential) }
-  }, room) : null
-  // Two peers in this page, forced through the relay alone: does a DataChannel open and echo?
-  const relay = check?.turn ? await page.evaluate(async (room) => {
-    const { iceServers } = await (await fetch(`/api/ice?room=${room}`)).json()
-    const cfg = { iceServers, iceTransportPolicy: 'relay' }
-    const a = new RTCPeerConnection(cfg), b = new RTCPeerConnection(cfg)
-    a.onicecandidate = (e) => e.candidate && b.addIceCandidate(e.candidate)
-    b.onicecandidate = (e) => e.candidate && a.addIceCandidate(e.candidate)
-    const t0 = performance.now()
-    const ch = a.createDataChannel('check')
-    b.ondatachannel = (e) => { e.channel.onmessage = (m) => e.channel.send(m.data) }
-    await a.setLocalDescription(); await b.setRemoteDescription(a.localDescription)
-    await b.setLocalDescription(); await a.setRemoteDescription(b.localDescription)
-    const opened = await Promise.race([new Promise((r) => (ch.onopen = () => r(true))), new Promise((r) => setTimeout(() => r(false), 15000))])
-    if (!opened) { a.close(); b.close(); return { opened } }
-    const openMs = Math.round(performance.now() - t0)
-    const echoMs = await new Promise((r) => { const s = performance.now(); ch.onmessage = () => r(Math.round(performance.now() - s)); ch.send('ping') })
-    const stats = [...(await a.getStats()).values()]
-    const pair = stats.find((s) => s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded')
-    const local = pair && stats.find((s) => s.id === pair.localCandidateId)
-    a.close(); b.close()
-    return { opened, openMs, echoMs, localType: local?.candidateType, relayProtocol: local?.relayProtocol ?? local?.protocol }
-  }, room) : null
-  for (const r of turnChecks({ hostTurn, check, relay })) add('turn', r)
+  const { check, relay } = await probeRelay(page, ice.room)
+  for (const r of turnChecks({ hostTurn: ice.hostTurn, check, relay })) add('turn', r)
 }
 
 // ---- the summary ---------------------------------------------------------------------------------------------------

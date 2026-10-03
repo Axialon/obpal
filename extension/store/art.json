@@ -1,14 +1,13 @@
 {
-  "sourceSha256": "4db0a174d35e23309429a647229c9bca96c973d137ab4438949c45ab5295b913",
+  "sourceSha256": "8cdb9fcf4b0b32c044fb97ad1c394cf779b29a722ed643d00edb495066670739",
   "images": {
     "icon-128.png": "24957523bd3ea11be184a2b051668ba290508fdc20ed49de1dd20f5e17f0af4f",
-    "screenshot-1.png": "abe7a6bfb5f2b9b9c460a3e4eecbd8768d8079f2e314c89e308ba53dee40d0a4",
-    "screenshot-2.png": "b056704a96afe35617d8ba3d6a2f8c8082c537baac005456a2eed02c701d7f71",
-    "screenshot-3.png": "9fabbe8990969cbd5f7478c81893a2f2a18257cc185145789a9e1634363cdb26",
-    "screenshot-4.png": "1ec8e2985cbd4cd3b2db9279e0010ffe3abadbc1bde084314bd8a55816ee16fd",
-    "screenshot-5.png": "3ac4428b8c0e377e483bec3fb32e60edba0ac6a9d0a20b25ac0d749246f2ee54",
-    "tile-440x280.png": "1340ec53b1e1187d1578be6efc578576f2cc7738b17de7e690084a48099d946a",
-    "marquee-1400x560.png": "0996454bd084b04f463d899743f743042f4fb0e52f801f24e9cf761031a998ea"
-  },
-  "note": "Store images retained unchanged; shared vector code now resolves theme tokens on live surfaces"
+    "screenshot-1.png": "269c8d8da500cf74211fafa7db75815fa4481b37f6383a6e35e8cf1c1eb4009c",
+    "screenshot-2.png": "1970bfeec07d4e604cb9ac0fe91e9e5515409b44960b333aaf29758e42daa5e6",
+    "screenshot-3.png": "62fa87c3607be4b9a81af2e4faee175032ccec269bf3e7aed67a14408b806db1",
+    "screenshot-4.png": "f9279a7936a15fbb2b99f9d3dfcccf7127d58c9d16a40effbfa2ae829cc002d1",
+    "screenshot-5.png": "5697d6f50060458c52ddc2e75e47b718eb85b8039fab57b5859350477942708c",
+    "tile-440x280.png": "45dbbadab2df0ff98e4b11f51f1a0a802807a20e3ddb676e86302048447baf0a",
+    "marquee-1400x560.png": "7ad14c0a6bd2a0aff4d97a5f5288aab106dbf06ff6461f4f7733e07a7b78e086"
+  }
 }

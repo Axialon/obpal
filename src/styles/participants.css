@@ -15,7 +15,6 @@
 .participant-strip input { width: 62px; }
 .participant-strip summary { margin-top: 6px; cursor: pointer; list-style: none; }
 .participant-strip summary::-webkit-details-marker { display: none; }
-.participant-strip :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .participant-settings { max-height: 220px; overflow-y: auto; }
 .audience-queue { flex-basis: 100%; text-align: center; }
 .audience-votes { width: 64px; height: 64px; position: relative; border: 1px solid var(--line); border-radius: 50%; background: rgb(var(--surface-rgb)); }

@@ -189,7 +189,6 @@
   text-rendering: optimizeLegibility;
 }
 .bb-family ::selection { background: rgb(var(--bb-accent-rgb) / 0.35); color: var(--bb-ink); }
-.bb-family :focus-visible { outline: none; box-shadow: var(--bb-focus); }
 
 .bb-display { font: 800 clamp(40px, 4.8vw, 68px)/1.06 var(--bb-font-display); letter-spacing: -0.035em; text-wrap: balance; }
 .bb-headline { font: 700 26px/1.2 var(--bb-font-display); letter-spacing: -0.025em; }
@@ -221,10 +220,10 @@
   font: 650 14px/1 var(--bb-font-ui); text-decoration: none; cursor: pointer;
   transition: background var(--bb-dur-2) var(--bb-ease), border-color var(--bb-dur-2), transform var(--bb-dur-1) var(--bb-ease), color var(--bb-dur-2);
 }
-.bb-btn:hover { background: color-mix(in srgb, var(--bb-wash) 100%, var(--bb-ink) 6%); border-color: var(--bb-line-strong); }
+@media (hover: hover) { .bb-btn:hover { background: color-mix(in srgb, var(--bb-wash) 100%, var(--bb-ink) 6%); border-color: var(--interaction-hover-edge, var(--bb-accent-text)); } }
 .bb-btn:active { transform: scale(0.97); }
 .bb-btn.primary { background: var(--bb-glass-accent); color: var(--bb-accent-ink); border-color: rgb(255 255 255 / 0.28); box-shadow: 0 10px 28px -14px rgb(var(--bb-accent-rgb) / 0.8), inset 0 1px 0 rgb(255 255 255 / 0.4); }
-.bb-btn.primary:hover { filter: brightness(1.05); }
+@media (hover: hover) { .bb-btn.primary:hover { border-color: var(--interaction-hover-edge, var(--bb-accent-text)); box-shadow: 0 10px 28px -14px rgb(var(--bb-accent-rgb) / 0.8), var(--interaction-hover-rim, inset 0 1px 0 var(--bb-accent-text)); } }
 .bb-btn .bb-ic { width: 18px; height: 18px; }
 
 .bb-tool {
@@ -263,8 +262,6 @@
   transition: transform var(--bb-dur-1) var(--bb-ease), box-shadow var(--bb-dur-2) var(--bb-ease);
 }
 :where(:root:not([data-bb-product='obpal'])) .bb-range:active::-webkit-slider-thumb { transform: scale(1.12); }
-.bb-range:focus-visible { outline: none; box-shadow: none; }
-:where(:root:not([data-bb-product='obpal'])) .bb-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 2px 6px rgb(0 0 0 / 0.24), 0 0 0 4px rgb(var(--bb-accent-rgb) / 0.4); }
 :where(:root:not([data-bb-product='obpal'])) .bb-range::-moz-range-track { height: 4px; border: 0; border-radius: 999px; background: var(--bb-line-strong); }
 :where(:root:not([data-bb-product='obpal'])) .bb-range::-moz-range-progress { height: 4px; border-radius: 999px; background: var(--bb-accent); }
 :where(:root:not([data-bb-product='obpal'])) .bb-range::-moz-range-thumb { width: 22px; height: 22px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 2px 6px rgb(0 0 0 / 0.24), 0 0 0 0.5px rgb(0 0 0 / 0.1); }
@@ -502,8 +499,6 @@
 }
 :where(:root[data-bb-product='obpal']) .bb-range:active::-webkit-slider-thumb { transform: scale(1.1); box-shadow: var(--bb-range-knob-lift); }
 :where(:root[data-bb-product='obpal']) .bb-range:active::-moz-range-thumb { transform: scale(1.1); box-shadow: var(--bb-range-knob-lift); }
-:where(:root[data-bb-product='obpal']) .bb-range:focus-visible::-webkit-slider-thumb { box-shadow: var(--bb-range-knob-shadow), 0 0 0 4px var(--bb-range-ring); }
-:where(:root[data-bb-product='obpal']) .bb-range:focus-visible::-moz-range-thumb { box-shadow: var(--bb-range-knob-shadow), 0 0 0 4px var(--bb-range-ring); }
 :where(:root[data-bb-product='obpal']) .bb-range:disabled { --bb-range-tint: rgb(var(--bb-hl-rgb) / 0.32); opacity: 0.55; cursor: not-allowed; }
 :where(:root[data-bb-product='obpal']) .bb-range:disabled::-webkit-slider-thumb { transform: none; box-shadow: var(--bb-range-knob-shadow); }
 :where(:root[data-bb-product='obpal']) .bb-range:disabled::-moz-range-thumb { transform: none; box-shadow: var(--bb-range-knob-shadow); }
@@ -581,7 +576,6 @@
 }
 
 :where(:root[data-bb-product='obpal']) .bb-menu { position: absolute; z-index: var(--bb-z-menu); min-width: 260px; padding: 8px; border-radius: var(--bb-r-xl); animation: bb-rise var(--bb-dur-3) var(--bb-ease-out); }
-:where(:root[data-bb-product='obpal']) .bb-menu-item:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: -2px; box-shadow: none; }
 :where(:root[data-bb-product='obpal']) .bb-themes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; min-width: min(300px, 100%); }
 :where(:root[data-bb-product='obpal']) .bb-accents { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 4px; padding: 4px 4px 6px; }
 :where(:root[data-bb-product='obpal']) .bb-accent {
@@ -590,8 +584,7 @@
   color: #0b0b0c; transition: transform var(--bb-dur-1) var(--bb-ease), box-shadow var(--bb-dur-2) var(--bb-ease);
 }
 :where(:root[data-bb-product='obpal']) .bb-accent::before { content: ''; position: absolute; inset: 6px; border-radius: 50%; background: var(--sw); box-shadow: 0 0 10px -2px var(--sw); }
-:where(:root[data-bb-product='obpal']) .bb-accent[aria-checked='true'] { box-shadow: 0 0 0 2px var(--bb-page), 0 0 0 3.5px var(--sw), inset 0 0 0 1px var(--bb-line-strong); }
-:where(:root[data-bb-product='obpal']) .bb-accent:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: 4px; }
+:where(:root[data-bb-product='obpal']) .bb-accent[aria-checked='true'] { box-shadow: var(--interaction-selected-shadow); }
 :where(:root[data-bb-product='obpal']) .bb-accent .bb-ic { position: relative; width: 12px; height: 12px; opacity: 0; }
 :where(:root[data-bb-product='obpal']) .bb-accent.product::before { background: conic-gradient(from 210deg, var(--sw), color-mix(in srgb, var(--sw) 55%, white), var(--sw)); }
 :where(:root[data-bb-product='obpal']) .bb-theme {
@@ -599,15 +592,14 @@
   border: 1px solid var(--bb-line); background: var(--bb-wash); color: var(--bb-ink-2); cursor: pointer; font: 600 12px/1 var(--bb-font-ui);
   transition: border-color var(--bb-dur-2) var(--bb-ease), box-shadow var(--bb-dur-2), background var(--bb-dur-2);
 }
-:where(:root[data-bb-product='obpal']) .bb-theme:hover { border-color: var(--bb-line-strong); }
-:where(:root[data-bb-product='obpal']) .bb-theme:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: 2px; }
+@media (hover: hover) { :where(:root[data-bb-product='obpal']) .bb-theme:hover { border-color: var(--interaction-hover-edge, var(--bb-accent-text)); } }
 :where(:root[data-bb-product='obpal']) .bb-theme i { position: relative; display: block; width: 100%; max-width: 64px; height: 36px; border-radius: 10px; overflow: hidden; border: 1px solid rgb(255 255 255 / 0.16); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1); }
 :where(:root[data-bb-product='obpal']) .bb-theme i::before { content: ''; position: absolute; left: 6px; right: 6px; top: 6px; height: 6px; border-radius: 3px; background: rgb(128 128 128 / 0.32); }
 :where(:root[data-bb-product='obpal']) .bb-theme i::after { content: ''; position: absolute; right: 6px; bottom: 6px; width: 22px; height: 10px; border-radius: 5px; background: var(--bb-accent); box-shadow: 0 0 10px rgb(var(--bb-accent-rgb) / 0.6); }
 :where(:root[data-bb-product='obpal']) .bb-theme[aria-checked='true'] { border-color: rgb(var(--bb-accent-rgb) / 0.85); color: var(--bb-ink); background: rgb(var(--bb-accent-rgb) / 0.1); box-shadow: 0 0 16px -4px rgb(var(--bb-accent-rgb) / 0.55); }
 :where([data-bb-product='obpal'])[data-bb-theme='light'] .bb-theme { border-color: var(--bb-line-strong); }
 :where([data-bb-product='obpal'])[data-bb-theme='light'] .bb-theme[aria-checked='true'] { border-color: var(--bb-accent-text); box-shadow: inset 0 0 0 1px var(--bb-accent-text); }
-:where([data-bb-product='obpal'])[data-bb-theme='light'] .bb-accent[aria-checked='true'] { box-shadow: 0 0 0 2px var(--bb-page), 0 0 0 3.5px var(--bb-ink-2); }
+:where([data-bb-product='obpal'])[data-bb-theme='light'] .bb-accent[aria-checked='true'] { box-shadow: var(--interaction-selected-shadow); }
 
 :where(:root[data-bb-product='obpal']) .bb-tip {
   position: fixed; z-index: var(--bb-z-tip); pointer-events: none; padding: 6px 9px; border-radius: 9px;

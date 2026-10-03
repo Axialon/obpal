@@ -70,7 +70,7 @@ export interface Hero {
   readonly tilting: boolean
   readonly enabled: boolean
   toggleField(): void
-  activity(): { draws: number; layouts: number; active: number; enabled: boolean; moving: number; reads: number; motionMs: number; stepMs: number }
+  activity(): { draws: number; layouts: number; active: number; enabled: boolean; moving: number; reads: number; motionMs: number; stepMs: number; renderMs: number; scroll: number }
   /** A card being directly played takes the motion budget until it settles. */
   sceneActive(active: boolean): boolean
   /** The marbles' sound (./glass.ts): on, blocked (waiting for a click or a tap), off, or none. */
@@ -82,7 +82,7 @@ export interface Hero {
   /** The sound's state, hits and output level (the ?debug=audio readout, tests). */
   audio(): GlassStats
   /** Where each marble is on screen, how lit, how high it is (em, above the floor) and what it's on (for tests). */
-  tips(): { id: string; x: number; y: number; life: number; h: number; on: number; held: boolean }[]
+  tips(): { id: string; x: number; y: number; vx: number; vy: number; ring: boolean; life: number; h: number; on: number; held: boolean; airborne: boolean; phase: string; age: number; drop: boolean; radius: number; free: boolean }[]
   /** Where the full stop's landing spot is on screen (for tests), once the field is up. */
   dot(): { x: number; y: number } | null
   /** The buttons marbles can roll onto now, in the order tips() counts them (on: 1000 + index): their text (tests). */
@@ -96,6 +96,8 @@ export interface Hero {
   gfx(): (Gfx & { level: number; steps: Step[]; pinned: boolean }) | null
   /** Drop the lime marble in from a little above the letters' tops, over a point on the hero (hero px; tests). */
   drop(x: number, y: number): void
+  /** Start a grounded roll in viewport pixels, with a pixel-per-second velocity (tests). */
+  roll(x: number, y: number, vx: number, vy: number): void
   /** Where each letter's counters are on the hero (hero px: the deepest point of each, on the letters' tops; tests). */
   counters(): { letter: number; x: number; y: number }[]
   /** The gaps between two letters narrower than a marble, where each is narrowest (hero px, on the letters' tops; tests). */
@@ -149,7 +151,10 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     document.documentElement.classList.toggle('field3d', enabled && !!field)
   }
   preference()
-  fieldToggle.addEventListener('click', () => heroApi.toggleField())
+  fieldToggle.addEventListener('click', () => {
+    if (field?.release()) { local.at = -1e9; anchor = null; tour = false; dirty = true; wake(); return }
+    heroApi.toggleField()
+  })
   let W = 1, H = 1
   const local = { x: 0, y: 0, at: -1e9, any: false }
   /** Where a click hopped the marble: it stays there until the mouse moves on (screen px of the click, and the spot). */
@@ -219,6 +224,8 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     const play = playArea()
     field.play(play.top, play.bottom)
     field.pads(measurePads(includePage))
+    const peg = fieldToggle.getBoundingClientRect()
+    field.dock({ x: peg.left + peg.width / 2, y: peg.top + peg.height / 2 })
     drawSides(field)
     field.scroll(pendingScroll, false)
     appliedScroll = pendingScroll
@@ -710,6 +717,12 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     frameAt = now
     const stepAt = performance.now()
     const busy = f.step(dt)
+    const holding = f.orbs().some(o => o.m.motion.phase === 'docked' || o.m.motion.phase === 'dock')
+    if (fieldToggle.hasAttribute('data-holding') !== holding) {
+      fieldToggle.toggleAttribute('data-holding', holding)
+      fieldToggle.setAttribute('aria-label', holding ? 'Release marble' : 'Marbles on')
+      fieldToggle.title = holding ? 'Release marble' : 'Marbles on — turn off'
+    }
     stepMs = performance.now() - stepAt
     foresee(f, dt)
     const padsBusy = answerPads(dt)
@@ -810,7 +823,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     clearSeeds() { for (const o of field?.orbs() ?? []) if (o.id.startsWith('proof-')) field?.removeOrb(o.id) },
     onSound: null,
     get enabled() { return enabled },
-    activity: () => ({ draws, layouts, active: field?.active ?? 0, enabled, moving: motionRects.length, reads: geometryReads, motionMs, stepMs }),
+    activity: () => ({ draws, layouts, active: field?.active ?? 0, enabled, moving: motionRects.length, reads: geometryReads, motionMs, stepMs, renderMs: renderWork, scroll: appliedScroll }),
     sceneActive(active) {
       const changed = active !== sceneBusy
       sceneBusy = active
@@ -860,11 +873,12 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
         // Where it's drawn (a step behind the physics at most).
         const [x, y, z] = o.m.shown
         const p = f.project(x, y, z)
+        const v = f.project(x + o.orb.vx, y + o.orb.vy, z + o.orb.vz)
         const s = f.surface(x, z)
         // What it's on: a letter, a button (1000 + its number: pads()), the floor (-1), or nothing yet (in the air, -2);
         // held: sitting on a rim (of a letter's counter, or across a narrow gap).
         const on = Math.abs(y - o.orb.r - s.h) < 0.01 && Math.abs(o.orb.vy) < 0.5 ? s.id : -2
-        return { id: o.id, x: p.x, y: p.y, life: o.life, h: y - o.orb.r, on, held: !!o.orb.held }
+        return { id: o.id, x: p.x, y: p.y, vx: v.x - p.x, vy: v.y - p.y, ring: o.landingRing.material.opacity > 0, life: o.life, h: y - o.orb.r, on, held: !!o.orb.held, airborne: o.orb.flying || Math.abs(o.orb.vy) > .6 || y - o.orb.r - s.h > .05, phase: o.m.motion.phase, age: o.m.motion.age, drop: o.m.motion.drop, radius: Math.abs(f.project(x + R, y, z).x - p.x), free: f.free(p.x, p.y, Math.abs(f.project(x + R, y, z).x - p.x)) }
       })
     },
     pads: () => padEls.map((el) => el.textContent?.trim() || el.getAttribute('aria-label') || ''),
@@ -886,6 +900,22 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       takeOver()
       const p = field.planeAt(x, y, TOP)
       Object.assign(me().orb, { x: p.x, z: p.z, y: TOP + R + 0.3, vx: 0, vy: 0, vz: 0, target: null, route: [], flying: false, toss: null, resting: false })
+      anchor = null
+      local.at = -1e9
+      wake()
+    },
+    roll: (x, y, vx, vy) => {
+      if (!field) return
+      takeOver()
+      const p = field.planeAt(x, y, R), v = field.planeAt(x + vx, y + vy, R)
+      const marble = me(), o = marble.orb
+      Object.assign(o, { x: p.x, z: p.z, y: R, vx: v.x - p.x, vy: 0, vz: v.z - p.z, target: null, route: [], aim: null, held: false, flying: false, toss: null, resting: false })
+      delete o.mem
+      Object.assign(marble.m.motion, { phase: 'ground', age: 0, drop: false, contact: false })
+      marble.m.was = marble.m.now = marble.m.shown = [o.x, o.y, o.z]
+      marble.ringAt = -10
+      marble.landingRing.material.opacity = 0
+      field.step(0)
       anchor = null
       local.at = -1e9
       wake()

@@ -41,7 +41,6 @@
 .sims-search > .ic { position: absolute; left: 12px; width: 17px; height: 17px; color: var(--muted); pointer-events: none; }
 .sims-search input { width: 100%; min-width: 0; height: 42px; padding: 0 36px 0 38px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(180deg, rgb(var(--hl-rgb) / 0.075), rgb(var(--hl-rgb) / 0.03)); box-shadow: inset 0 1px 0 var(--bb-hi); color: var(--ink); font: 500 14px var(--font); transition: border-color 0.2s, box-shadow 0.2s; }
 .sims-search input::placeholder { color: var(--muted); opacity: 1; }
-.sims-search input:focus { outline: none; border-color: rgb(var(--accent-rgb) / 0.75); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.14); }
 .sims-search input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; margin-right: -4px; border-radius: 50%; background: rgb(var(--hl-rgb) / 0.3) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M5 5l6 6M11 5l-6 6' stroke='%23101316' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E") center / 12px no-repeat; cursor: pointer; }
 .sims-key { position: absolute; right: 9px; display: grid; place-items: center; min-width: 22px; height: 22px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); font: 600 11px/1 var(--font-data); pointer-events: none; }
 .sims-search:focus-within .sims-key, .sims-search:has(input:not(:placeholder-shown)) .sims-key { display: none; }
@@ -78,7 +77,7 @@
 .sims-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 18px; }
 .dcard { position: relative; display: flex; flex-direction: column; min-width: 0; padding: 0; border-radius: 26px; overflow: hidden; transition: transform 0.25s var(--ease), border-color 0.25s, box-shadow 0.25s; }
 .dcard[hidden] { display: none; }
-.dcard:hover { transform: translateY(-3px); border-color: rgb(var(--accent-rgb) / 0.5); box-shadow: 0 26px 60px -24px rgb(0 0 0 / 0.7), 0 0 0 1px rgb(var(--accent-rgb) / 0.18), inset 0 1px 0 rgb(255 255 255 / 0.1); }
+@media (hover: hover) { .dcard:hover { transform: translateY(-3px); border-color: var(--interaction-hover-edge); box-shadow: 0 26px 60px -24px rgb(0 0 0 / 0.7), 0 0 0 1px var(--interaction-hover-glow), var(--interaction-hover-rim); } }
 .dcard-stage { position: relative; display: block; aspect-ratio: 16 / 10; overflow: hidden; background: radial-gradient(120% 90% at 50% 0%, #2c3632, #151b19 70%); }
 .dcard-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; opacity: 0; transition: opacity 0.6s var(--ease); }
 .dcard-stage.live canvas { opacity: 1; }

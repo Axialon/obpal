@@ -24,8 +24,11 @@ export const SEAL_SURFACE_STYLE = `
 .seal-stage[data-qr]{background:#fff}
 .seal-stage[data-qr] .seal-flight{--seal-plate:#fff;--ob-dot-active:#14171c;--ob-dot-light:#14171c;--ob-dot-ink:#14171c;--ob-dot-muted:#14171c;--ob-dot-depth:#14171c}
 .seal-action{display:grid;place-items:center;flex:none;width:44px;height:44px;border:0;background:transparent;color:var(--seal-ink,var(--bb-ink,var(--ink,#fff)));border-radius:50%;font:300 24px/1 system-ui;cursor:pointer}
-.seal-stage>.seal-action{position:absolute;right:2px;bottom:2px;z-index:2;background:var(--seal-plate,var(--bb-sheet,var(--sheet,#141415)))}
-.seal-action:focus-visible,.seal-stage .seal-peer:focus-visible{outline:2px solid currentColor;outline-offset:-3px}
+.seal-stage>.seal-action{--interaction-ring-offset:-3px;position:absolute;right:2px;bottom:2px;z-index:2;background:var(--seal-plate,var(--bb-sheet,var(--sheet,#141415)))}
+.seal-action:focus:not(:focus-visible),.seal-stage .seal-peer:focus:not(:focus-visible){outline:none}
+.seal-action:focus-visible,.seal-stage .seal-peer:focus-visible{outline:var(--interaction-ring-width,2px) solid var(--interaction-ring,var(--bb-accent-text,#c6ff34));outline-offset:var(--interaction-ring-offset,3px);filter:drop-shadow(0 0 5px var(--interaction-glow,#c6ff3452))}
+.seal-stage[data-qr] .seal-action{--interaction-ring:#4d7c0f;--interaction-ring-offset:-3px}
+@media(forced-colors:active){.seal-action:focus-visible,.seal-stage .seal-peer:focus-visible{outline-color:Highlight;filter:none}}
 .seal-stage[data-qr] .seal-action{background:#fff;color:#14171c}
 .seal-action[hidden],.seal-stage [hidden]{display:none!important}
 @media(prefers-reduced-motion:reduce){.seal-stage .seal-plane{transform:none!important;filter:none!important}}

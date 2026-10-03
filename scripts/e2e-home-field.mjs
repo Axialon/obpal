@@ -38,7 +38,12 @@ export async function runHomeField(functionalBrowser, local, check) {
         // Navigation and controls receive the original first click. The fixed canvas ignores every pointer event.
         await page.locator('.hero a[href="#see"]')[width === 390 ? 'tap' : 'click']()
         await page.waitForFunction(() => location.hash === '#see')
+        const holding = await page.locator('[data-field-toggle]').evaluate(el => el.hasAttribute('data-holding'))
         await page.locator('[data-field-toggle]')[width === 390 ? 'tap' : 'click']()
+        if (holding) {
+          if (await page.locator('[data-field-toggle]').getAttribute('aria-pressed') !== 'true') throw new Error('first click disabled a held marble instead of releasing it')
+          await page.locator('[data-field-toggle]')[width === 390 ? 'tap' : 'click']()
+        }
         if (await page.locator('[data-field-toggle]').getAttribute('aria-pressed') !== 'false') throw new Error('first click did not switch the field off')
         await page.locator('.closer a[href="/sim/"]').click()
         await page.waitForURL('**/sim/')

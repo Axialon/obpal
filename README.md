@@ -73,6 +73,7 @@ pnpm run check    # typecheck + tests
 pnpm run e2e:all  # every end-to-end suite against a local worker, one table (-- phone shared for some)
 pnpm run deploy   # test, build, deploy to obpal.blackboxes.net
 pnpm run check:live  # after a deploy: pages, pairing code, API rules, TURN, security headers, and that /link/ shows the release it downloads (-- --origin for yours)
+pnpm run demo:preflight  # before presenting: the live site as a visitor, a phone joins, three sims, a watch link, TURN, /link/ (docs/PRESENTATION.md)
 ```
 
 Working with Claude Code agents: `.claude/README.md` lists the lane agent, the skills, the guard hook and the merge tool.

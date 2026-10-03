@@ -92,16 +92,40 @@ describe('the cross-lane GPU semaphore', () => {
 
   it('preserves FIFO when a shared waiter is ahead of an exclusive waiter', async () => {
     const file = await lock(), first = await acquire(file, { slots: 1 })
-    const shared = acquire(file, { slots: 1, suite: 'first-waiter' })
-    await until(async () => (await gpuStatus({ file })).queue.length === 1)
-    const exclusive = acquire(file, { slots: 1, mode: 'exclusive' })
-    await until(async () => (await gpuStatus({ file })).queue.length === 2)
-    await first!()
-    const endShared = await shared
-    expect((await gpuStatus({ file })).holders[0].suite).toBe('first-waiter')
-    await endShared!()
-    await (await exclusive)!()
-  })
+    const controller = new AbortController()
+    const pending: ReturnType<typeof acquire>[] = []
+    const enqueue = async (mode: 'shared' | 'exclusive', suite: string) => {
+      let queued!: () => void
+      const waiting = new Promise<void>(resolve => { queued = resolve })
+      const request = acquire(file, { slots: 1, mode, suite, timeoutMs: 60_000, signal: controller.signal, waiting: queued })
+      pending.push(request)
+      // The notification follows a committed queue entry and a refused admission.
+      await Promise.race([waiting, request.then(() => { throw new Error(`${suite} entered before its turn`) })])
+      return { request }
+    }
+    try {
+      const shared = await enqueue('shared', 'first-waiter')
+      const exclusive = await enqueue('exclusive', 'second-waiter')
+      expect((await gpuStatus({ file })).queue.map(owner => owner.suite)).toEqual(['first-waiter', 'second-waiter'])
+      await first!()
+      const endShared = await shared.request
+      const sharedStatus = await gpuStatus({ file })
+      expect(sharedStatus.holders.map(owner => [owner.suite, owner.mode])).toEqual([['first-waiter', 'shared']])
+      expect(sharedStatus.queue.map(owner => owner.suite)).toEqual(['second-waiter'])
+      await endShared!()
+      const endExclusive = await exclusive.request
+      const exclusiveStatus = await gpuStatus({ file })
+      expect(exclusiveStatus.holders.map(owner => [owner.suite, owner.mode])).toEqual([['second-waiter', 'exclusive']])
+      expect(exclusiveStatus.queue).toEqual([])
+      await endExclusive!()
+    } finally {
+      controller.abort(new Error('FIFO test finished'))
+      await first!()
+      const settled = await Promise.allSettled(pending)
+      await Promise.all(settled.map(result => result.status === 'fulfilled' && result.value ? result.value() : undefined))
+    }
+    expect((await gpuStatus({ file })).holders).toEqual([])
+  }, 30_000)
 
   it('does not let a faster polling shared waiter overtake an earlier shared waiter', async () => {
     const file = await lock(), first = await acquire(file, { slots: 1 })

@@ -3,6 +3,8 @@
  * family tokens; the visitor's accent is independent of the surface, just as it is in the apps.
  */
 html.site {
+  --interaction-glow: rgb(179 164 255 / 0.38);
+  --interaction-hover-glow: rgb(179 164 255 / 0.48);
   --haze-rgb: var(--bb-hl-rgb);
   --uv-rgb: var(--bb-aurora);
   --hero-top: var(--bb-sheet);

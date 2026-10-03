@@ -91,7 +91,7 @@ quickAction(desk ? {
 })
 mountQuick({ scroll: false, defer: fn => window.setTimeout(fn, 0) })
 // For the end-to-end test (scripts/e2e-home.mjs), as the viewer exposes its own.
-Object.assign(window, { __home: { contacts: () => hero.contacts(), seed: (id: string, x: number, y: number) => hero.seed(id, x, y), showSeeds: () => hero.showSeeds(), clearSeeds: () => hero.clearSeeds(), tips: () => hero.tips(), dot: () => hero.dot(), pads: () => hero.pads(), outline: (id: string) => hero.outline(id), gfx: () => hero.gfx(), audio: () => hero.audio(), drop: (x: number, y: number) => hero.drop(x, y), counters: () => hero.counters(), gaps: () => hero.gaps(), steps: () => hero.steps(), activity: () => hero.activity(), sim: () => hero.sim() } })
+Object.assign(window, { __home: { contacts: () => hero.contacts(), seed: (id: string, x: number, y: number) => hero.seed(id, x, y), showSeeds: () => hero.showSeeds(), clearSeeds: () => hero.clearSeeds(), tips: () => hero.tips(), dot: () => hero.dot(), pads: () => hero.pads(), outline: (id: string) => hero.outline(id), gfx: () => hero.gfx(), audio: () => hero.audio(), drop: (x: number, y: number) => hero.drop(x, y), roll: (x: number, y: number, vx: number, vy: number) => hero.roll(x, y, vx, vy), counters: () => hero.counters(), gaps: () => hero.gaps(), steps: () => hero.steps(), activity: () => hero.activity(), sim: () => hero.sim() } })
 if (debug.size) void import('./debug').then(({ mountDebug }) => mountDebug(debug, { audio: () => hero.audio(), gfx: () => hero.gfx(), contacts: () => hero.contacts() }))
 
 if (desk) {

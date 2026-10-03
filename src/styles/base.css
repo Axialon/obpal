@@ -23,7 +23,20 @@
   --aurora-3-rgb: var(--bb-surface-rgb);
   /* Highlight channel for subtle fills and hairlines: white on dark surfaces, slate ink on the light one. */
   --hl-rgb: 255 255 255;
-  --focus: var(--accent-text);
+  /* Interaction roles inherit the surface and the visitor's accent, including Link. */
+  --interaction-ring: var(--bb-accent-text);
+  --interaction-glow: color-mix(in srgb, var(--bb-accent) 32%, transparent);
+  --interaction-hover-glow: color-mix(in srgb, var(--bb-accent) 34%, transparent);
+  --interaction-hover-edge: color-mix(in srgb, var(--bb-accent-text) 85%, transparent);
+  --interaction-hover-rim: inset 0 1px 0 color-mix(in srgb, var(--bb-accent-text) 75%, transparent);
+  --interaction-hover-inset: inset 0 0 0 1px color-mix(in srgb, var(--bb-accent-text) 65%, transparent);
+  --interaction-hover-lift: -2px;
+  --interaction-selected-fill: color-mix(in srgb, var(--bb-accent) 14%, transparent);
+  --interaction-selected-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bb-accent-text) 65%, transparent), inset 0 0 18px var(--interaction-selected-fill);
+  --interaction-ring-width: 2px;
+  --interaction-ring-offset: 3px;
+  --interaction-focus-backplate: var(--bb-page);
+  --focus: var(--interaction-ring);
   --line: var(--bb-line);
   --ok: #6ee7b7;
   --warn: #fcd34d;
@@ -53,7 +66,37 @@
 html, body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.55 var(--font); font-optical-sizing: auto; -webkit-font-smoothing: antialiased; transition: background-color 0.5s var(--ease); }
 button { font: inherit; color: inherit; cursor: pointer; }
 a { color: var(--accent-text); }
-:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* The outline follows the control's radius; the glow preserves its existing raised/glass shadows.
+   Pointer focus never retains the browser's default ring. Keyboard focus always has a solid edge. */
+:root :focus:not(:focus-visible) { outline: none; }
+:root :focus-visible {
+  outline: var(--interaction-ring-width) solid var(--interaction-ring);
+  outline-offset: var(--interaction-ring-offset);
+  filter: drop-shadow(0 0 5px var(--interaction-glow));
+}
+/* A canvas fills its viewport, so its indicator must sit inside the visible edge. */
+:root canvas:focus-visible { outline-offset: -3px; }
+@media (hover: hover) {
+  :root :where(button, a[href], input, select, textarea, summary, [role='button'], [role='tab'], [role='radio']):not(:disabled, [aria-disabled='true'], :focus-visible):hover {
+    border-color: var(--interaction-hover-edge);
+    filter: drop-shadow(0 3px 9px var(--interaction-hover-glow));
+  }
+  /* Borderless glass controls need an inner rim; their selected fill keeps its own treatment. */
+  :root :where(.top-nav a, .tool):not(:disabled, [aria-disabled='true'], [aria-pressed='true'], [aria-current='page'], .accent, :focus-visible):hover {
+    box-shadow: var(--interaction-hover-inset);
+  }
+}
+/* Press and selection are contained within the face, separate from the offset keyboard ring. */
+:root :where(button, a[href], summary, [role='button']):not(:disabled, [aria-disabled='true']):active {
+  filter: brightness(0.94);
+}
+:root :where(button, a, input, [role='tab'], [role='option'], [role='radio']):is([aria-pressed='true'], [aria-checked='true'], [aria-selected='true'], [aria-current='page'], :checked, .is-active) {
+  box-shadow: var(--interaction-selected-depth, 0 0 transparent), var(--interaction-selected-shadow);
+}
+@media (forced-colors: active) {
+  :root :focus-visible { outline-color: Highlight; filter: none; }
+  :root :where(button, a, input, [role='tab'], [role='option'], [role='radio']):is([aria-pressed='true'], [aria-checked='true'], [aria-selected='true'], :checked, .is-active) { border-color: Highlight; }
+}
 [hidden] { display: none !important; }
 
 .glass { --muted: var(--secondary); --bb-ink-3: var(--bb-ink-2); background: var(--frost); border: 1px solid var(--frost-edge); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); box-shadow: var(--frost-shadow); }
@@ -76,7 +119,9 @@ a { color: var(--accent-text); }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; padding: 0 20px; border-radius: var(--r-action); border: 1px solid var(--glass-edge); background: var(--glass); font-weight: 650; letter-spacing: -0.01em; -webkit-tap-highlight-color: transparent; touch-action: manipulation; transition: filter 0.15s, transform 0.12s var(--ease); }
 .btn:active { transform: scale(0.98); }
 .btn.primary { background: var(--glass-light); border-color: rgb(255 255 255 / 0.25); color: var(--accent-ink); box-shadow: 0 12px 30px rgb(var(--accent-rgb) / 0.22), inset 0 1px 0 rgb(255 255 255 / 0.45); }
-.btn.primary:hover { filter: brightness(1.04); }
+@media (hover: hover) {
+  .btn.primary:hover { box-shadow: 0 12px 30px var(--interaction-hover-glow), var(--interaction-hover-rim); }
+}
 .btn.big { min-height: 56px; font-size: 17px; width: 100%; }
 
 /* theme swatches */

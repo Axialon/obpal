@@ -207,7 +207,6 @@ sealStyle.textContent = SEAL_STYLE + SEAL_SURFACE_STYLE + DOT_LOADER_STYLE + `
 .seal-popup:not([data-expanded]){padding:6px 12px}
 .seal-popup:not([data-expanded])>b,.seal-popup:not([data-expanded])>p{display:none}
 #seal-glyphs{display:grid;place-items:center;min-height:44px;cursor:pointer;border-radius:12px}
-#seal-glyphs:focus-visible{outline:2px solid var(--bb-accent-text);outline-offset:2px}
 `
 document.head.append(sealStyle)
 const surface = new SealSurface({ add: () => {}, compare: () => { $('link-seal').hidden = false; if (!$('link-seal').hasAttribute('data-expanded')) $('seal-open').click() } })

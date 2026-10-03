@@ -99,6 +99,10 @@ html.in-tab .pop { width: auto; max-width: 720px; margin: 0 auto; padding: 16px;
   transition: transform 0.4s var(--spring), background 0.3s var(--ease), box-shadow 0.3s var(--ease);
 }
 .codes:has(.code[data-code='lan'][aria-checked='true'])::before { transform: translate3d(100%, 0, 0); background: linear-gradient(150deg, rgb(var(--haze-rgb) / 0.98), rgb(var(--haze-rgb) / 0.8)); box-shadow: 0 8px 18px -10px rgb(var(--haze-rgb) / 0.9), inset 0 1px 0 rgb(255 255 255 / 0.45); }
+@media (hover: hover) {
+  .codes:hover::before { box-shadow: 0 8px 18px -10px rgb(var(--accent-rgb) / 0.9), var(--interaction-hover-rim); }
+  .codes:has(.code[data-code='lan'][aria-checked='true']):hover::before { box-shadow: 0 8px 18px -10px rgb(var(--haze-rgb) / 0.9), var(--interaction-hover-rim); }
+}
 .code {
   position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 11px;
   border: 0; border-radius: 999px; background: transparent; color: var(--muted); font: 700 12px/1 var(--font); transition: color 0.25s var(--ease);
@@ -114,7 +118,7 @@ html.in-tab .pop { width: auto; max-width: 720px; margin: 0 auto; padding: 16px;
   display: inline-flex; align-items: center; min-width: 0; max-width: 100%; height: 28px; padding-left: 2px; border-radius: 999px; border: 1px solid var(--line);
   background: var(--fill); color: var(--secondary); font: 650 11px/1 var(--font); transition: border-color 0.25s, background 0.25s, color 0.25s;
 }
-.phone:hover { border-color: var(--line-strong); color: var(--ink); }
+@media (hover: hover) { .phone:hover { border-color: var(--interaction-hover-edge); color: var(--ink); } }
 .phone[aria-current='true'] { border-color: rgb(var(--haze-rgb) / 0.6); background: rgb(var(--haze-rgb) / 0.1); color: var(--ink); }
 .phone-pick { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 150px; height: 100%; padding: 0 1px 0 6px; border: 0; background: none; color: inherit; font: inherit; }
 .phone-pick .ic { width: 12px; height: 12px; }
@@ -147,6 +151,7 @@ html.in-tab .pop { width: auto; max-width: 720px; margin: 0 auto; padding: 16px;
 .chips:has(.chip[data-mode='viewer'][aria-checked='true']) { --at: 1; }
 .chips:has(.chip[data-mode='keys'][aria-checked='true']) { --at: 2; }
 .chips:has(.chip[data-mode='pc'][aria-checked='true']) { --at: 3; }
+@media (hover: hover) { .chips:hover::before { box-shadow: 0 12px 26px -12px rgb(var(--accent-rgb) / 0.85), var(--interaction-hover-rim); } }
 .chip {
   position: relative; z-index: 1; display: grid; justify-items: center; gap: 7px; min-width: 0; padding: 11px 2px; border: 0; border-radius: 15px;
   background: transparent; color: var(--secondary); text-align: center; transition: color 0.3s var(--ease), background 0.2s, transform 0.12s var(--ease);

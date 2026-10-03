@@ -11,8 +11,8 @@
 :root {
   /* A control's height; fingers get 44px. */
   --kit-h: 40px;
-  /* The chosen item among many: a hairline ring in the accent with a soft glow. */
-  --kit-ring: 0 0 0 1.5px rgb(var(--bb-accent-rgb) / 0.9), 0 0 16px -3px rgb(var(--bb-accent-rgb) / 0.55);
+  /* Selection stays within the face, separate from the shared keyboard ring. */
+  --kit-ring: var(--interaction-selected-shadow);
   --kit-fill: linear-gradient(180deg, rgb(var(--bb-hl-rgb) / 0.075), rgb(var(--bb-hl-rgb) / 0.03));
   --kit-fill-hover: linear-gradient(180deg, rgb(var(--bb-hl-rgb) / 0.11), rgb(var(--bb-hl-rgb) / 0.05));
   --kit-pop-shadow: 0 28px 64px -22px rgb(0 0 0 / 0.72), 0 0 0 1px rgb(0 0 0 / 0.18), inset 0 1px 0 var(--bb-hi);
@@ -43,7 +43,7 @@ html.kit-locked { overflow: hidden; scrollbar-gutter: stable; }
 /* ---- icon button: a round glass button for one icon (close, collapse) ---------------------------------------------- */
 
 button.kit-icon-btn { display: grid; place-items: center; flex: none; width: 36px; height: 36px; padding: 0; border: 1px solid var(--bb-line); border-radius: 12px; background: var(--kit-fill); color: var(--bb-ink-2); cursor: pointer; -webkit-tap-highlight-color: transparent; transition: background var(--bb-dur-2) var(--bb-ease), color var(--bb-dur-2), border-color var(--bb-dur-2), transform var(--bb-dur-1) var(--bb-ease); }
-button.kit-icon-btn:hover { background: var(--kit-fill-hover); color: var(--bb-ink); border-color: var(--bb-line-strong); }
+@media (hover: hover) { button.kit-icon-btn:hover { background: var(--kit-fill-hover); color: var(--bb-ink); border-color: var(--interaction-hover-edge); } }
 button.kit-icon-btn:active { transform: scale(0.94); }
 button.kit-icon-btn .ic { width: 18px; height: 18px; }
 @media (pointer: coarse) { button.kit-icon-btn { width: 44px; height: 44px; border-radius: 14px; } }
@@ -58,9 +58,8 @@ button.kit-select[role='combobox'] {
   cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
   transition: border-color var(--bb-dur-2) var(--bb-ease), background var(--bb-dur-2), box-shadow var(--bb-dur-2);
 }
-button.kit-select[role='combobox']:hover { border-color: var(--bb-line-strong); background: var(--kit-fill-hover); }
+@media (hover: hover) { button.kit-select[role='combobox']:hover { --bb-hi: var(--interaction-hover-edge); border-color: var(--interaction-hover-edge); background: var(--kit-fill-hover); } }
 button.kit-select[role='combobox'][aria-expanded='true'] { border-color: rgb(var(--bb-accent-rgb) / 0.75); box-shadow: 0 0 0 3px rgb(var(--bb-accent-rgb) / 0.14), inset 0 1px 0 var(--bb-hi); }
-button.kit-select[role='combobox']:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: 2px; }
 button.kit-select[role='combobox']:disabled { opacity: 0.5; cursor: not-allowed; }
 button.kit-select[role='combobox'][hidden] { display: none; }
 .kit-select-ic { display: grid; place-items: center; flex: none; color: var(--bb-accent-text); }
@@ -79,7 +78,7 @@ button.kit-select[aria-expanded='true'] .kit-select-chev .ic { transform: rotate
   min-width: 220px; max-width: min(360px, calc(100vw - 16px)); padding: 6px;
   border-radius: 18px; background: var(--bb-frost); border: 1px solid var(--bb-frost-edge);
   -webkit-backdrop-filter: var(--bb-frost-blur); backdrop-filter: var(--bb-frost-blur); box-shadow: var(--kit-pop-shadow);
-  color: var(--bb-ink); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; outline: none; --bb-scroll-inset: 12px;
+  color: var(--bb-ink); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; --bb-scroll-inset: 12px;
   /* It moves where it's put at once: nothing transitions, even where reduced motion makes every change a short one. */
   transition-property: none;
 }
@@ -116,7 +115,7 @@ button.kit-select[aria-expanded='true'] .kit-select-chev .ic { transform: rotate
 
 /* The accent pill with its arrow in a dark disc: the one thing to do next. */
 .kit-cta { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; padding: 0 13px; border: 1px solid rgb(255 255 255 / 0.25); border-radius: 999px; background: var(--bb-glass-accent); box-shadow: 0 12px 30px -12px rgb(var(--bb-accent-rgb) / 0.8), inset 0 1px 0 rgb(255 255 255 / 0.45); color: var(--bb-accent-ink); font: 700 14px/1 var(--bb-font-ui); letter-spacing: -0.01em; text-decoration: none; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: filter var(--bb-dur-2), transform var(--bb-dur-1) var(--bb-ease); }
-.kit-cta:hover { filter: brightness(1.05); }
+@media (hover: hover) { .kit-cta:hover { border-color: var(--interaction-hover-edge); box-shadow: 0 12px 30px -12px rgb(var(--bb-accent-rgb) / 0.8), var(--interaction-hover-rim); } }
 .kit-cta:active { transform: scale(0.98); }
 .kit-cta > .ic { width: 32px; height: 32px; padding: 7px; box-sizing: border-box; border-radius: 50%; background: rgb(0 0 0 / 0.82); color: var(--bb-accent); stroke-width: 2; transition: transform var(--bb-dur-2) var(--bb-ease); }
 
@@ -145,7 +144,6 @@ button.kit-select[aria-expanded='true'] .kit-select-chev .ic { transform: rotate
 .kit-side-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 button.kit-side-item { position: relative; display: flex; align-items: center; gap: 12px; box-sizing: border-box; width: 100%; min-height: 44px; margin: 0; padding: 4px 10px; border: 0; border-radius: 16px; background: transparent; color: var(--bb-ink-2); font: 600 14px/1.2 var(--bb-font-ui); letter-spacing: -0.01em; text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: background var(--bb-dur-2) var(--bb-ease), color var(--bb-dur-2); }
 button.kit-side-item:hover { background: rgb(var(--bb-hl-rgb) / 0.06); color: var(--bb-ink); }
-button.kit-side-item:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: -2px; }
 .kit-side-ic { display: grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: 50%; background: rgb(var(--bb-hl-rgb) / 0.05); box-shadow: inset 0 0 0 1px var(--bb-line); color: var(--bb-ink-2); transition: box-shadow var(--bb-dur-2) var(--bb-ease), color var(--bb-dur-2), background var(--bb-dur-2); }
 .kit-side-ic .ic { width: 17px; height: 17px; }
 .kit-side-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -207,7 +205,6 @@ button.kit-side-item.kit-empty:not([aria-pressed='true']) .kit-side-ic { opacity
 button.kit-seg-item[role='radio'] { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 7px; flex: 1 1 auto; min-width: 36px; height: 34px; margin: 0; padding: 0 12px; border: 0; border-radius: 12px; background: transparent; color: var(--bb-ink-2); font: 600 13px/1 var(--bb-font-ui); white-space: nowrap; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: background var(--bb-dur-2) var(--bb-ease), color var(--bb-dur-2), box-shadow var(--bb-dur-2); }
 button.kit-seg-item[role='radio']:hover { color: var(--bb-ink); background: rgb(var(--bb-hl-rgb) / 0.06); }
 button.kit-seg-item[role='radio'][aria-checked='true'] { color: var(--bb-accent-text); background: rgb(var(--bb-accent-rgb) / 0.12); box-shadow: var(--kit-ring); }
-button.kit-seg-item[role='radio']:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: 2px; }
 button.kit-seg-item[role='radio']:disabled { opacity: 0.38; cursor: default; }
 .kit-seg-ic { display: grid; place-items: center; }
 .kit-seg-ic:empty { display: none; }
@@ -234,9 +231,8 @@ button.kit-seg-item[role='radio']:disabled { opacity: 0.38; cursor: default; }
 .kit-slider-fill { width: var(--fill); background: linear-gradient(90deg, rgb(var(--bb-accent-rgb) / 0.55), var(--bb-accent)); box-shadow: 0 0 12px -2px rgb(var(--bb-accent-rgb) / 0.6); }
 .kit-slider-detent { position: absolute; top: 50%; left: var(--at); width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%; background: rgb(var(--bb-hl-rgb) / 0.5); pointer-events: none; }
 .kit-slider-detent.kit-passed { background: rgb(0 0 0 / 0.4); }
-.kit-slider-knob { position: absolute; top: 50%; left: var(--fill); box-sizing: border-box; width: 24px; height: 24px; margin: -12px 0 0 -12px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.1), 0 2px 8px rgb(0 0 0 / 0.38); outline: none; transition: transform var(--bb-dur-1) var(--bb-ease), box-shadow var(--bb-dur-2); }
+.kit-slider-knob { position: absolute; top: 50%; left: var(--fill); box-sizing: border-box; width: 24px; height: 24px; margin: -12px 0 0 -12px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.1), 0 2px 8px rgb(0 0 0 / 0.38); transition: transform var(--bb-dur-1) var(--bb-ease), box-shadow var(--bb-dur-2); }
 .kit-slider-knob::after { content: ''; position: absolute; inset: 8px; border-radius: 50%; background: var(--bb-accent); }
-.kit-slider-knob:focus-visible { box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.1), 0 2px 8px rgb(0 0 0 / 0.38), 0 0 0 5px rgb(var(--bb-accent-rgb) / 0.4); }
 .kit-slider.kit-held .kit-slider-knob { transform: scale(1.12); }
 .kit-slider-labels { position: relative; height: 14px; }
 .kit-slider-labels span { position: absolute; top: 0; left: var(--at); transform: translateX(-50%); color: var(--bb-ink-3); font: 600 11px/1.2 var(--bb-font-ui); white-space: nowrap; transition: color var(--bb-dur-2); }
@@ -261,7 +257,6 @@ input.kit-switch { -webkit-appearance: none; appearance: none; position: relativ
 input.kit-switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / 0.4); transition: transform var(--bb-dur-3) var(--bb-ease-out); }
 input.kit-switch:checked { background: var(--bb-accent); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.2), 0 0 16px -2px rgb(var(--bb-accent-rgb) / 0.6); }
 input.kit-switch:checked::after { transform: translateX(18px); }
-input.kit-switch:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: 3px; }
 input.kit-switch:disabled { opacity: 0.45; cursor: not-allowed; }
 @media (pointer: coarse) { input.kit-switch { width: 50px; height: 30px; } input.kit-switch::after { width: 24px; height: 24px; } input.kit-switch:checked::after { transform: translateX(20px); } }
 
@@ -277,9 +272,8 @@ input.kit-switch:disabled { opacity: 0.45; cursor: not-allowed; }
 .kit-ring-mid { position: relative; display: grid; justify-items: center; gap: 4px; text-align: center; pointer-events: none; }
 .kit-ring-value { color: var(--bb-ink); font: 700 calc(var(--size, 120px) * 0.2)/1 var(--bb-font-display); letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
 .kit-ring-mid small { color: var(--bb-ink-3); font: 600 10px/1 var(--bb-font-data); letter-spacing: 0.1em; text-transform: uppercase; }
-.kit-dial { border-radius: 50%; cursor: grab; touch-action: none; outline: none; }
+.kit-dial { border-radius: 50%; cursor: grab; touch-action: none; }
 .kit-dial:active { cursor: grabbing; }
-.kit-dial:focus-visible { box-shadow: 0 0 0 3px rgb(var(--bb-accent-rgb) / 0.45); }
 
 .kit-capsule { position: relative; flex: none; width: 120px; height: 30px; border-radius: 999px; background: linear-gradient(180deg, rgb(var(--bb-hl-rgb) / 0.1), rgb(var(--bb-hl-rgb) / 0.04)); box-shadow: inset 0 0 0 1px var(--bb-line), inset 0 2px 6px rgb(0 0 0 / 0.4); overflow: hidden; }
 .kit-capsule-fill { position: absolute; left: 3px; top: 3px; bottom: 3px; width: max(0px, calc(var(--fill, 0%) - 6px)); border-radius: 999px; background: linear-gradient(90deg, var(--bb-accent), color-mix(in srgb, var(--bb-accent) 55%, #fff)); box-shadow: 0 0 18px -2px rgb(var(--bb-accent-rgb) / 0.7), inset 0 1px 0 rgb(255 255 255 / 0.5); transition: width var(--bb-dur-3) var(--bb-ease), height var(--bb-dur-3) var(--bb-ease); }
@@ -327,9 +321,8 @@ input.kit-switch:disabled { opacity: 0.45; cursor: not-allowed; }
 /* ---- actions: an icon and a word, for what a panel can do ------------------------------------------------------------ */
 
 button.kit-action, a.kit-action { display: inline-flex; align-items: center; justify-content: center; gap: 7px; box-sizing: border-box; min-width: 0; height: 36px; margin: 0; padding: 0 12px; border: 1px solid var(--bb-line); border-radius: 12px; background: var(--kit-fill); box-shadow: inset 0 1px 0 var(--bb-hi); color: var(--bb-ink); font: 650 12.5px/1 var(--bb-font-ui); letter-spacing: -0.005em; text-decoration: none; white-space: nowrap; cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; transition: background var(--bb-dur-2) var(--bb-ease), border-color var(--bb-dur-2), box-shadow var(--bb-dur-2), transform var(--bb-dur-1) var(--bb-ease); }
-button.kit-action:hover, a.kit-action:hover { background: var(--kit-fill-hover); border-color: var(--bb-line-strong); }
+@media (hover: hover) { button.kit-action:hover, a.kit-action:hover { --bb-hi: var(--interaction-hover-edge); background: var(--kit-fill-hover); border-color: var(--interaction-hover-edge); } }
 button.kit-action:active { transform: scale(0.97); }
-button.kit-action:focus-visible, a.kit-action:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: 2px; }
 button.kit-action:disabled { opacity: 0.45; cursor: default; transform: none; }
 .kit-action[hidden] { display: none; }
 button.kit-action[aria-pressed='true'] { border-color: rgb(var(--bb-accent-rgb) / 0.7); background: rgb(var(--bb-accent-rgb) / 0.12); box-shadow: var(--kit-ring); color: var(--bb-ink); }
@@ -338,6 +331,7 @@ button:is(.kit-action, .kit-icon-action)[aria-pressed='true'] > .ic { color: var
 /* Accent-filled controls use the family's contrasting ink; neutral actions inherit their text colour. */
 button.tray-btn.kit-icon-action[aria-pressed='true'] > .ic { color: var(--bb-accent-ink); }
 button.kit-action.kit-primary { border-color: rgb(255 255 255 / 0.25); background: var(--bb-glass-accent); box-shadow: 0 10px 26px -14px rgb(var(--bb-accent-rgb) / 0.9), inset 0 1px 0 rgb(255 255 255 / 0.45); color: var(--bb-accent-ink); }
+@media (hover: hover) { button.kit-action.kit-primary:hover { border-color: var(--interaction-hover-edge); box-shadow: 0 10px 26px -14px rgb(var(--bb-accent-rgb) / 0.9), var(--interaction-hover-rim); } }
 button.kit-action.kit-primary > .ic { color: var(--bb-accent-ink); }
 @media (pointer: coarse) { button.kit-action, a.kit-action { height: 42px; } }
 

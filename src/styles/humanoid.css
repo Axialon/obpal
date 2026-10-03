@@ -23,7 +23,6 @@
 .range-steps button[data-state='done']::after { background: var(--bb-accent-text); opacity: .55; }
 .range-steps button[data-state='skipped']::after { background: var(--bb-ink-3); opacity: .35; }
 .range-steps button[aria-current='true']::after { background: var(--bb-accent-text); box-shadow: 0 0 16px rgb(var(--bb-accent-rgb) / .25); }
-.range-steps button:focus-visible, .range-reset:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: 2px; }
 .range-figure { position: relative; height: min(340px, 40dvh); margin: 8px -12px; }
 .range-figure canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .range-figure canvas:last-child { pointer-events: none; }

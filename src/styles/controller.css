@@ -40,9 +40,8 @@ body.live .aurora i { animation-play-state: paused; }
 .code-form { display: flex; flex-direction: column; align-items: stretch; gap: 10px; width: 100%; max-width: 320px; margin-top: 8px; }
 .code-in { width: 100%; height: 64px; padding: 0 12px; border-radius: 18px; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.06);
   color: var(--ink); font: 700 28px/1 var(--font-data, var(--font)); letter-spacing: 0.08em; text-align: center; font-variant-numeric: tabular-nums;
-  caret-color: var(--accent); outline: none; transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease); }
+  caret-color: var(--accent); transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease); }
 .code-in::placeholder { color: rgb(var(--hl-rgb) / 0.22); }
-.code-in:focus { border-color: rgb(var(--accent-rgb) / 0.75); box-shadow: 0 0 0 4px rgb(var(--accent-rgb) / 0.16); }
 .code-in[aria-invalid='true'] { border-color: rgb(251 113 133 / 0.8); }
 .code-in[readonly] { opacity: 0.7; }
 .code-form .btn { margin-top: 0; }
@@ -128,13 +127,15 @@ body.live .aurora i { animation-play-state: paused; }
    slot across as it grows. The best slot for this screen carries the catalogue's spark as a dot. */
 .ctl-bar { flex: none; display: flex; align-items: center; gap: var(--sp-1); min-width: 0; padding: 6px; border-radius: 24px; container: ctl-bar / inline-size; }
 .ctl-tabs { flex: 1; min-width: 0; display: flex; gap: var(--sp-1); overflow-x: auto; scrollbar-width: none; container: ctl-tabs / inline-size; }
-.ctl-tab { position: relative; flex: 1 1 0; min-width: var(--tap); height: var(--tap-lg); display: flex; align-items: center; justify-content: center; gap: 0; padding: 0 12px; border: 0; border-radius: 18px;
+/* The scrolling strip clips outer rings. Keep focus inside the face, using accent ink on the selected fill. */
+.ctl-tab { --interaction-ring-offset: -4px; position: relative; flex: 1 1 0; min-width: var(--tap); height: var(--tap-lg); display: flex; align-items: center; justify-content: center; gap: 0; padding: 0 12px; border: 0; border-radius: 18px;
   background: transparent; color: var(--muted); touch-action: manipulation;
   transition: flex-grow 0.34s var(--ease), background 0.28s var(--ease), color 0.2s, box-shadow 0.28s, gap 0.34s var(--ease); }
 .ctl-tab:active { background: rgb(var(--hl-rgb) / 0.07); }
 /* The slot in use sizes to its icon and name (its name opens out as it lights); the others share what's left. */
-.ctl-tab[aria-selected='true'] { flex: 0 1 auto; gap: 8px; padding: 0 15px; background: var(--glass-light); color: var(--accent-ink);
+.ctl-tab[aria-selected='true'] { --interaction-ring: var(--accent-ink); flex: 0 1 auto; gap: 8px; padding: 0 15px; background: var(--glass-light); color: var(--accent-ink);
   box-shadow: 0 10px 26px -10px rgb(var(--accent-rgb) / 0.6), inset 0 1px 0 rgb(255 255 255 / 0.45); }
+@media (hover: hover) { .ctl-tab[aria-selected='true']:hover { box-shadow: 0 10px 26px -10px var(--interaction-hover-glow), var(--interaction-hover-rim); } }
 .ctl-tab-ic { position: relative; display: grid; place-items: center; flex: none; }
 .ctl-tab .ic { width: 22px; height: 22px; }
 .ctl-tab-t { min-width: 0; max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0; font: 750 14px/1 var(--font); letter-spacing: -0.012em;
@@ -760,7 +761,7 @@ body.resting .rest { display: grid; }
 .kbd-in:focus-within .kbd-ic { color: var(--accent-text); }
 .kbd-ic .ic { width: 20px; height: 20px; }
 /* 16px: any smaller and iOS zooms the page in on the field. */
-.kbd-field { flex: 1; min-width: 0; height: 46px; margin: 0; padding: 0; border: 0; outline: none; background: transparent; color: var(--ink); caret-color: var(--accent);
+.kbd-field { flex: 1; min-width: 0; height: 46px; margin: 0; padding: 0; border: 0; background: transparent; color: var(--ink); caret-color: var(--accent);
   font: 500 16px/46px var(--font); letter-spacing: -0.005em; resize: none; overflow: hidden; white-space: pre; -webkit-user-select: text; user-select: text; touch-action: pan-x; }
 .kbd-ph, .kbd-dots { position: absolute; left: 44px; right: 14px; top: 0; bottom: 0; display: flex; align-items: center; pointer-events: none; overflow: hidden; white-space: nowrap; }
 .kbd-ph { color: var(--muted); font: 500 16px var(--font); visibility: hidden; }

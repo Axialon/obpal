@@ -36,7 +36,6 @@ html.quick-on { --quick-reserve: 46px; }
 .quick-tab::before { content: ''; position: absolute; inset: -6px 0 -6px -18px; }
 .quick-tab .ic { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .quick-tab:hover, .quick-tab:focus-visible { opacity: 1; color: var(--bb-ink); }
-.quick-tab:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: 2px; }
 .quick-tab[hidden] { display: none; }
 .quick-tray[data-open='true'] .quick-tab { opacity: 0; transform: translate(12px, -50%); pointer-events: none; }
 
@@ -60,7 +59,6 @@ button.quick-btn {
 button.quick-btn .ic { display: block; width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 button.quick-btn:hover { background: rgb(var(--bb-hl-rgb) / 0.09); color: var(--bb-ink); }
 button.quick-btn:active { transform: scale(0.92); }
-button.quick-btn:focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: 1px; }
 /* A switch that's on (sound, fullscreen), and pairing while its card is open: lit, and ringed in the accent. */
 button.quick-btn[aria-pressed='true'], button.quick-btn[aria-expanded='true'] { background: rgb(var(--bb-accent-rgb) / 0.13); box-shadow: var(--kit-ring); color: var(--bb-accent-text); }
 
@@ -88,7 +86,7 @@ button.quick-btn[aria-pressed='true'], button.quick-btn[aria-expanded='true'] { 
   .quick-themes .bb-accent::before { inset: 10px; }
 }
 /* Pairing asked for from the tray on the home page: the hero's own card rings once in the accent. */
-.pair-called { outline: none; animation: quick-called 1.6s var(--bb-ease) 1; }
+.pair-called { animation: quick-called 1.6s var(--bb-ease) 1; }
 @keyframes quick-called {
   30% { box-shadow: 0 0 0 3px rgb(var(--bb-accent-rgb) / 0.85), 0 0 44px rgb(var(--bb-accent-rgb) / 0.35); }
 }

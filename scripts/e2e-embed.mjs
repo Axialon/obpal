@@ -20,6 +20,7 @@ import { cspCheck } from './csp-watch.mjs'
 import { startLocal } from '../extension/e2e/local.mjs'
 import { startWorker } from './local-worker.mjs'
 import { e2eBrowserOptions } from './lib/browser.mjs'
+import { chipInteractionStates } from './lib/interaction-states.mjs'
 
 const HEADED = process.argv.includes('--headed')
 const SHOTS = process.env.OBPAL_SHOTS || ''
@@ -330,6 +331,8 @@ try {
     if (SHOTS) { await site.bringToFront(); await sleep(500); await site.screenshot({ path: join(SHOTS, 'embed-another-site.png') }) }
     return look.map((l) => `${l.h}px chip, ${l.size}, ${l.bottom}px from the bottom`).join('; ')
   })
+
+  await check('standalone chip: branded keyboard ring and contrast on dark and light glass', () => chipInteractionStates(site, '#right .pill'))
 
   await check('a phone pairs cross-origin with one of them, and opens the controller that page suggests first', async () => {
     const p = await phoneFor(leftInvite)

@@ -49,8 +49,6 @@
 .panel-btn:active { transform: scale(0.92); }
 .panel-btn .panel-icon { width: 15px; height: 15px; }
 .panel-btn[aria-label^='Close ']:hover { background: rgb(251 113 133 / 0.16); color: var(--bb-ink); }
-.sim-window :focus-visible, .panel-dock :focus-visible { outline: 2px solid var(--bb-accent-text); outline-offset: -2px; }
-.sim-window .panel-handle:focus-visible { outline-offset: 0; }
 
 /* ---- the body: the window's content, scrolling inside its own corners when it's longer than the window ------------- */
 
@@ -70,7 +68,7 @@
 .sim-window .presence-controls .kit-select { max-width: 150px; }
 /* No display here: the row shows and hides its own buttons (overview, first person, hidden ones). */
 .sim-window .presence-controls > button, .sim-window .presence-controls > a { height: 36px; min-height: 36px; box-sizing: border-box; padding: 0 12px; border: 1px solid var(--bb-line); border-radius: 12px; background: var(--kit-fill); box-shadow: inset 0 1px 0 var(--bb-hi); color: var(--bb-ink); font: 650 12.5px/1 var(--bb-font-ui); text-decoration: none; transition: background var(--bb-dur-2), border-color var(--bb-dur-2); }
-.sim-window .presence-controls > button:hover:not(:disabled) { background: var(--kit-fill-hover); border-color: var(--bb-line-strong); }
+@media (hover: hover) { .sim-window .presence-controls > button:hover:not(:disabled) { background: var(--kit-fill-hover); border-color: var(--interaction-hover-edge); } }
 .sim-window .presence-controls > .presence-enter { border-color: rgb(var(--bb-accent-rgb) / 0.7); background: rgb(var(--bb-accent-rgb) / 0.1); box-shadow: var(--kit-ring); }
 .sim-window .presence-controls > button[aria-expanded='true'] { border-color: rgb(var(--bb-accent-rgb) / 0.6); }
 .sim-window .presence-controls > label { gap: 8px; padding: 4px 2px; color: var(--bb-ink-2); font: 600 12.5px/1.2 var(--bb-font-ui); }
@@ -137,8 +135,10 @@
 .panel-resize-sw { left: -4px; bottom: -4px; cursor: nesw-resize; }
 /* The corner grip: a short arc that follows the window's rounded corner. */
 .panel-resize-se::after { content: ''; position: absolute; right: 7px; bottom: 7px; width: 12px; height: 12px; border-right: 2px solid rgb(var(--bb-hl-rgb) / 0.22); border-bottom: 2px solid rgb(var(--bb-hl-rgb) / 0.22); border-radius: 0 0 11px 0; transition: border-color var(--bb-dur-2); }
-.sim-window:hover .panel-resize-se::after { border-color: rgb(var(--bb-hl-rgb) / 0.45); }
-.panel-resize-se:hover::after { border-color: var(--bb-accent-text); }
+@media (hover: hover) {
+  .sim-window:hover .panel-resize-se::after { border-color: var(--interaction-hover-edge); }
+  .sim-window .panel-resize-se:hover::after { border-color: var(--bb-accent-text); }
+}
 
 /* ---- the dock: a slim rail of round icon buttons on the left; faint until pointed at ------------------------------- */
 
@@ -154,7 +154,8 @@
   -webkit-backdrop-filter: var(--bb-frost-blur); backdrop-filter: var(--bb-frost-blur); box-shadow: var(--bb-frost-shadow);
   opacity: 0.5; transition: opacity 200ms var(--bb-ease), transform 260ms var(--bb-ease-out), box-shadow 200ms;
 }
-.panel-dock:hover, .panel-dock:focus-within, .panel-dock[data-open='true'] { opacity: 1; box-shadow: 0 20px 44px -22px rgb(0 0 0 / 0.8), inset 0 1px 0 var(--bb-hi); }
+.panel-dock:focus-within, .panel-dock[data-open='true'] { opacity: 1; box-shadow: 0 20px 44px -22px rgb(0 0 0 / 0.8), var(--interaction-hover-rim); }
+@media (hover: hover) { .panel-dock:hover { opacity: 1; border-color: var(--interaction-hover-edge); box-shadow: 0 20px 44px -22px rgb(0 0 0 / 0.8), var(--interaction-hover-rim); } }
 .panel-dock-items { display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 0; overflow-y: auto; scrollbar-width: none; margin: -3px; padding: 3px; }
 .panel-dock-items::-webkit-scrollbar { display: none; }
 .panel-dock button { position: relative; display: grid; place-items: center; flex: none; margin: 0; padding: 0; border: 0; background: transparent; cursor: pointer; -webkit-tap-highlight-color: transparent; }

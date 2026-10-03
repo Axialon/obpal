@@ -30,6 +30,7 @@ import { guardSiteButtons, SITE_BUTTON_ROUTES } from './lib/surface-buttons.mjs'
 import { runGraphicsRecoveryLayouts } from './e2e-graphics-recovery.mjs'
 import { e2eBrowserOptions } from './lib/browser.mjs'
 import { runStoreKit } from './e2e-store-kit.mjs'
+import { siteInteractionStates } from './lib/interaction-states.mjs'
 import { runBrand } from './e2e-brand.mjs'
 
 const PORT = Number(process.env.OBPAL_E2E_WORKER_PORT) || 5179
@@ -37,7 +38,7 @@ const HEADED = process.argv.includes('--headed')
 const SHOTS = process.env.OBPAL_SHOTS || ''
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
 const ONLY = process.env.OBPAL_E2E_PAGES_ONLY || ''
-if (ONLY && !['try', 'viewer', 'store'].includes(ONLY)) throw new Error(`unknown pages selector: ${ONLY}`)
+if (ONLY && !['try', 'viewer', 'store', 'interactions'].includes(ONLY)) throw new Error(`unknown pages selector: ${ONLY}`)
 const PAGES = ['/', '/p/', '/view/', '/sim/', '/sim/arm/', '/sim/arena/', '/sim/humanoid/', '/sim/device/', '/embed/', '/link/', '/link/desktop/', '/link/try/', '/catalogue/', '/buttons/', '/sponsor/', '/donate/', '/privacy/', '/trust/']
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const results = []
@@ -169,7 +170,10 @@ try {
     await check('Try keeps readable controller feedback without constellation motion', () => runTry(browser, worker.origin))
   } else if (ONLY === 'viewer') {
     await runViewerScene(browser, worker.origin, check)
+  } else if (ONLY === 'interactions') {
+    await siteInteractionStates(browser, worker.origin, check, (process.env.OBPAL_E2E_INTERACTIONS_ONLY || '').split(',').filter(Boolean))
   } else if (!ONLY) {
+  await siteInteractionStates(browser, worker.origin, check)
   await runLinkHero(browser, worker.origin, check)
   await guardSiteButtons(browser, worker.origin, SITE_BUTTON_ROUTES.filter(([name]) => name !== 'home'), check)
   await check('IndexNow key is served at its matching public URL', async () => {

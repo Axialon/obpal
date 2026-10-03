@@ -470,13 +470,11 @@ let browser, releaseGpu
 const started = Date.now()
 const artSourceSha256 = inputHash(repo, artPath)
 try {
-  if (['1', 'swiftshader'].includes(process.env.OBPAL_E2E_GPU)) {
+  if (process.env.OBPAL_E2E_GPU === '1') {
     releaseGpu = await acquireGpuLease({ waiting: () => console.log('Store art waiting for GPU lease') })
-    if (process.env.OBPAL_E2E_GPU === '1') {
-      const gpu = await detectE2eGpu(executablePath)
-      console.log(`Store art renderer: ${gpu.renderer}; fallback: ${gpu.hardware ? 'none' : 'SwiftShader'}`)
-      if (!gpu.hardware) process.env.OBPAL_E2E_GPU = 'swiftshader'
-    }
+    const gpu = await detectE2eGpu(executablePath)
+    console.log(`Store art renderer: ${gpu.renderer}; fallback: ${gpu.hardware ? 'none' : 'SwiftShader'}`)
+    if (!gpu.hardware) process.env.OBPAL_E2E_GPU = 'swiftshader'
   }
   if ((doShots || doArt) && !kept) {
     for (const port of [Number(process.env.OBPAL_E2E_PORT), Number(process.env.OBPAL_E2E_WORKER_PORT)]) {

@@ -111,7 +111,7 @@ describe('scan: what must never be committed or published', () => {
   it('passes its own scan: the dev tools, their docs and these tests hold nothing it refuses', () => {
     const files = [
       'scripts/lib/scan.mjs', 'scripts/lib/e2e.mjs', 'scripts/lib/live.mjs', 'scripts/lib/merge.mjs', 'scripts/lib/report.mjs',
-      'scripts/lib/browser.mjs', 'scripts/e2e-all.mjs', 'scripts/check-live.mjs', 'scripts/merge-lane.mjs', 'scripts/open-source.mjs',
+      'scripts/lib/browser.mjs', 'scripts/lib/live-browser.mjs', 'scripts/lib/preflight.mjs', 'scripts/e2e-all.mjs', 'scripts/check-live.mjs', 'scripts/demo-preflight.mjs', 'scripts/merge-lane.mjs', 'scripts/open-source.mjs', 'docs/PRESENTATION.md',
       '.claude/hooks/guard.mjs', '.claude/settings.json', '.claude/agents/obpal-lane.md', '.claude/README.md',
       '.claude/skills/spawn-lane/SKILL.md', '.claude/skills/merge-lane/SKILL.md', '.claude/skills/deploy-and-verify/SKILL.md',
       '.claude/skills/release/SKILL.md', '.claude/skills/release/reference.md', '.claude/skills/spawn-lane/prompt-template.md',
