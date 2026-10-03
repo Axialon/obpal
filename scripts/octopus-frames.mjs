@@ -28,6 +28,19 @@ export const DRIVEN = [
 ]
 /** The showcase: nobody holds it, so after six seconds it seeks the ball, carries it to the ring, curls and pulses. */
 export const SHOWCASE = [7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29].map((at) => ({ at, label: `showcase ${at} s` }))
+/** Motion study: a steady forward crawl sampled every quarter second, to see the arms' phases. */
+export const CRAWL = [{ at: 1.5, axes: [0, -1], label: 'crawl begins' },
+  ...Array.from({ length: 11 }, (_, i) => ({ at: 3 + i * 0.25, label: `crawl ${(3 + i * 0.25).toFixed(2)} s` }))]
+/** Motion study: the showcase's reach, grab and carry, sampled every 0.6 s. */
+export const GRAB = Array.from({ length: 12 }, (_, i) => ({ at: 7.5 + i * 0.6, label: `reach, grab, carry ${(7.5 + i * 0.6).toFixed(1)} s` }))
+/** Motion study: a held phone and a still stick, so only idle life moves. */
+export const IDLE = Array.from({ length: 12 }, (_, i) => ({ at: 1.5 + i * 0.7, label: `idle ${(1.5 + i * 0.7).toFixed(1)} s` }))
+
+/** One sheet: a row of six frames from each motion study, labelled, at identical cell sizes. */
+export async function motionSheet(rows, path) {
+  const frames = rows.flatMap(({ frames }) => frames.filter((_, i) => i % 2 === 1).slice(0, 6))
+  await strip(frames, path, { across: 6, cell: [400, 250] })
+}
 
 /** Replace unit 0's input with a scripted gamepad, so captures need no paired phone. Test-only: nothing ships it. */
 async function script(page) {
@@ -118,7 +131,7 @@ async function free(port) {
   })
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const out = process.argv[2]
   if (!out || !out.replaceAll('\\', '/').startsWith('artifacts/')) throw new Error('Give an output folder under artifacts/')
   for (const key of ['OBPAL_E2E_PORT', 'OBPAL_E2E_WORKER_PORT']) {
@@ -141,6 +154,12 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     if (!only || only === 'driven') await captureOctopus(page, local.origin, out)
     if (!only || only === 'showcase') await captureOctopus(page, local.origin, out, { scenario: SHOWCASE, name: 'showcase', driven: false })
     if (!only || only === 'phone') await captureOctopus(page, local.origin, out, { scenario: DRIVEN.slice(0, 6), name: 'phone', width: 390, height: 844 })
+    if (!only || only === 'motion') {
+      const crawl = await captureOctopus(page, local.origin, out, { scenario: CRAWL, name: 'crawl' })
+      const grab = await captureOctopus(page, local.origin, out, { scenario: GRAB, name: 'grab', driven: false })
+      const idle = await captureOctopus(page, local.origin, out, { scenario: IDLE, name: 'idle' })
+      await motionSheet([{ frames: crawl }, { frames: grab }, { frames: idle }], join(out, 'motion-sheet.png'))
+    }
     if (errors.length) throw new Error(errors.join('\n'))
     console.log(`Octopus frames in ${out}`)
   } finally {

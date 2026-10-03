@@ -321,25 +321,29 @@ VR ride and control space come from the existing device framework. It has one
 seat. Water, climbing, a second seat, hand/body capture mappings, the Blender
 skinned arms and phase 6.4 are deferred.
 
-**Motion.** The body turns only about its vertical axis and moves kinematically
-at up to 0.3 m/s. Each arm plants its contact site (55% along the arm) on the
-floor and holds it while the body moves; `src/sim/continuum/solve.ts` places it
-with a damped least-squares solve over the four sections' bend and strain,
-within the profile's limits, with a one-sided floor and a weak shape bias. An
-arm re-plants when the travel has displaced it or carried it toward the edge
-of its reach band, never beside a stepping neighbour and never leaving fewer
-than four planted, so the stepping follows contact and direction, not a clock.
-The body slows as a planted arm nears the band's edge and waits there for it to
-re-plant: arms pull the body rather than slide. Curled arms follow the routed
-tendon elasticity, and an unsupported body falls under gravity onto whatever
-part of it touches the floor. Ticks are fixed at 120 Hz.
+**Motion (reworked 2026-10-04 after the owner's test).** The first build
+placed arms by inverse kinematics and re-planted them like legs; it read as a
+stiff walker. The arms are now soft rods that follow published octopus
+mechanics, adapted to a small real-time model:
 
-**Controls.** Stick, drag or tilt crawls and turns; A or a tap grabs or lets
-go; B curls; X pulses; Y or the tray's worded Stop holds everything until a
-fresh command. Grab wraps the front pair round the ball by solving two points
-of each arm onto its surface; out of reach, the pair reaches ahead instead.
-Pulse runs the jet cycle's mantle squeeze, scaled to Cove's cavity (design
-values); with no water it moves the body only by the planted arms' elongation.
+| Behaviour | Source | How the sim adapts it |
+| --- | --- | --- |
+| Soft, damped arm with constant volume | Muscular hydrostats elongate, shorten, bend and twist with no skeleton, at constant volume ([Kier & Smith 1985](https://doi.org/10.1111/j.1096-3642.1985.tb01178.x)); the octopus arm modelled as constant-volume segments with muscle, drag and buoyancy forces ([Yekutieli et al. 2005](https://doi.org/10.1152/jn.00684.2004)). | `src/sim/continuum/rod.ts`: a 16-segment position-based rod ([Müller et al. 2007](https://doi.org/10.1016/j.jvcir.2007.01.005)) whose segment lengths are a longitudinal muscle, whose joints relax toward a target bend with stiffness falling from root to tip, with viscous damping, reduced gravity and a floor. The section is radius / sqrt(elongation). Every target eases and every correction is bounded, so nothing snaps. It is not a Cosserat rod solver (as in [Gazzola et al. 2018](https://doi.org/10.1098/rsos.171628)); stiffness, damping and limits are design values. |
+| Crawling by pushing-by-elongation | Crawling has no apparent rhythm, the body's orientation and crawl direction are controlled separately, and arms push the body by elongating; the brain chooses moment to moment which arms push ([Levy, Flash & Hochner 2015](https://doi.org/10.1016/j.cub.2015.02.064)). | A holding arm's muscle spans from its root to its hold, so as the body glides away the arm lengthens and pushes, thinning as it does. At the end of its range (0.62 to 1.32 of rest) it peels, shortens and is drawn in, then reaches out again in its own sector. The body's speed is set by how many holding arms behind its course can still push, so there is no gait, phases differ arm to arm, and the right stick or a two-finger pan crawls sideways with the heading unchanged. |
+| Suckers attach and release | Rim seal, pressure differential and muscular release ([Tramacere et al. 2013](https://pmc.ncbi.nlm.nih.gov/articles/PMC3672162/)). | Holds form where the unrolled arm touches down near its target, seal over the profile's 120 ms and release from the tip back toward the base, one sucker every 25 ms. A hold dragged past the longest elongation slips (counted) rather than tearing. |
+| Reaching by bend propagation | A bend forms near the base and travels toward the tip ([Gutfreund et al. 1996](https://pmc.ncbi.nlm.nih.gov/articles/PMC6578955/)), driven by a peripheral motor program ([Sumbre et al. 2001](https://doi.org/10.1126/science.1060976)); a stiffening wave pushes the bend forward ([Yekutieli et al. 2005](https://doi.org/10.1152/jn.00684.2004)). | The bend's place comes from the foundation's force-driven bend model (Gutfreund 1998 parameters, at 1.8 times the reference effort), so its speed rises and falls. Behind the bend the arm straightens toward the target; ahead of it the arm stays rolled. Grab uses the same reach, then wraps the arm round the ball with the ball's curvature. |
+| Life | Not a measured behaviour. | Slow waves travel root to tip on free parts with a bend that tapers toward the tip; tips curl; the last third of a holding arm stays free; at rest an arm now and then lets go and reaches nearby; the mantle breathes and squeezes with each pulse. |
+
+Ticks stay fixed at 120 Hz. The body is carried at crawl height while three or
+more arms hold, and otherwise settles onto its arms and web.
+
+**Controls.** Stick, drag or tilt crawls and turns; the right stick or a
+two-finger pan crawls sideways; A or a tap grabs or lets go; B curls; X
+pulses; Y or the tray's worded Stop holds everything until a fresh command.
+Grab sends the two arms nearest the ball, whichever way the body faces; out of
+reach, the pair ahead reaches instead. Pulse runs the jet cycle's mantle
+squeeze, scaled to Cove's cavity (design values); with no water it moves the
+body only by the holding arms' elongation.
 Nobody holding it for four seconds starts a showcase that seeks the ball,
 wraps it, carries it into the ring, curls and pulses, without scoring or
 events.
@@ -347,18 +351,22 @@ events.
 **Model.** Procedural three.js, original: a satin obsidian egg mantle (0.38 m
 along its axis, 0.30 m across) leaning back on a soft collar, with panel seams,
 one lime seam, a smoked-glass belt over a lime core, and eight graphite arms
-swept as tapered superellipse tubes with two dorsal sheaths along the logic's
-exact section frames. 128 cups are one instanced mesh; a membrane joins the
-proximal arms. A slow travelling wave runs root to tip in the shape bias,
-tapering toward the tip and absent from a planted arm's floor section; the arm
+swept as tapered superellipse tubes with two dorsal sheaths through a smooth
+curve of each rod's particles, the oral side carried by parallel transport.
+128 cups are one instanced mesh; a membrane joins the proximal arms. The arm
 skin darkens toward the root with a paler oral side and a soft rim term, on a
 Carbon floor. No meshes or textures are downloaded, only the ball casts a shadow
 map, and the page caps its pixel ratio at 1.5.
 
-**Measured (desktop, `tests/octopus.test.ts`).** Across the working band the
-solver places a planted site within 1 cm; over a scripted crawl and turn the
-planted sites hold within 1.5 cm (p95 under 5 mm), with at least four arms
-planted throughout. 30, 60 and 120 Hz replays agree within 1e-6. These
-are logic measurements on a shared desktop, not device frame rates; frames,
-strips and timings from the browser are retained under
-`artifacts/octopus/`. Physical-phone performance remains unverified.
+**Measured (desktop, `tests/octopus.test.ts`).** Over a scripted crawl and
+turn the body's velocity changes by at most its acceleration limit, no rod
+particle moves more than 3 cm in a 1/120 s step, at least three arms hold at
+all times, holds stay put except for counted slips (each under 3 cm a step),
+and a holding arm elongates by more than 0.15 of rest as it pushes. Arms let
+go at irregular intervals (coefficient of variation above 0.2). A reach's bend
+front only advances, its speed peaking mid-reach, and the hold nearest each
+reach target lands within 5 cm at the median (under 12 cm at worst). 30, 60
+and 120 Hz replays agree within 1e-6. These are logic measurements on a
+shared desktop, not device frame rates; frames, strips and timings from the
+browser are retained under `artifacts/octopus/`. Physical-phone performance
+remains unverified.

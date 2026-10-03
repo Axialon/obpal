@@ -140,7 +140,7 @@ function robot(logic: OctopusLogic) {
   shell.position.y = 0.02
   lean.add(shell)
   body.add(collar(m))
-  const arms = new ArmSweep(OCTOPUS_PROFILE), cups = new CupSweep(OCTOPUS_PROFILE, m.cups), web = new WebSweep(OCTOPUS_PROFILE)
+  const arms = new ArmSweep(OCTOPUS_PROFILE), cups = new CupSweep(OCTOPUS_PROFILE, m.cups, arms), web = new WebSweep(OCTOPUS_PROFILE)
   const skin = new THREE.Mesh(arms.geometry, m.arms)
   skin.name = 'arms'
   skin.frustumCulled = false
@@ -149,7 +149,10 @@ function robot(logic: OctopusLogic) {
   membrane.name = 'web'
   membrane.frustumCulled = false
   cups.mesh.name = 'cups'
-  body.add(skin, membrane, cups.mesh)
+  // The soft parts are swept in world coordinates from the rods; they hang from the scene, not the body.
+  const soft = new THREE.Group()
+  soft.name = 'octopus-soft'
+  soft.add(skin, membrane, cups.mesh)
   // The ride camera: at the front of the belt, looking where the octopus faces (the profile's +z).
   pov(body, [0, 0.16, 0.2], [0, 0, 1])
   const shadow = blobShadow(0.62, 0.42)
@@ -170,14 +173,14 @@ function robot(logic: OctopusLogic) {
     const squeeze = Math.cbrt(Math.max(0.3, u.mantle))
     shell.scale.set(squeeze * (1 + breath), 1 / Math.sqrt(squeeze) - breath * 0.5, squeeze * (1 + breath))
     arms.update(u)
-    cups.update(u, arms.kinematics)
-    web.update(arms.kinematics)
+    cups.update(u, arms)
+    web.update(arms)
     // The lime seam brightens as a pulse squeezes the mantle.
     m.signal.emissiveIntensity = u.stopped ? 0.25 : 0.7 + 4 * Math.max(0, 1 - u.mantle)
     m.core.emissive.set(color ?? LIME)
     m.core.emissiveIntensity = u.stopped ? 0.4 : color ? 2.2 : 1.6
   }
-  return { root, step }
+  return { root, soft, step }
 }
 
 function studio(scene: THREE.Scene, logic: OctopusLogic) {
@@ -219,7 +222,7 @@ function studio(scene: THREE.Scene, logic: OctopusLogic) {
   scene.add(ball, ballShadow)
   contactSurface(floor)
   const model = robot(logic)
-  scene.add(model.root)
+  scene.add(model.root, model.soft)
   return {
     step(t: number, dt: number, color: string | null = null) {
       model.step(u, t, dt, color)

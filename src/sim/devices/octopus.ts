@@ -1,31 +1,34 @@
 /**
- * The octopus (/sim/octopus/): Cove, a soft eight-arm robot on a dry studio floor, driven by one phone. Its arms are the
- * continuum foundation's (src/sim/continuum): four piecewise-constant-curvature sections each, within the profile's
- * bend and strain limits, moved through the routed tendon elasticity.
+ * The octopus (/sim/octopus/): Cove, a soft eight-arm robot on a dry studio floor, driven by one phone. Each arm is a
+ * soft, damped rod (../continuum/rod.ts) whose stiffness falls toward the tip and whose section thins as it elongates.
+ * The arms are not stepped like legs. Following the published octopus mechanics (docs/OCTOPUS.md):
  *
- * Crawling plants each arm's contact site on the floor and holds it there while the body moves. An arm re-plants only
- * when the travel has stretched or displaced it too far, and only while at least four other arms stay planted (the
- * plan's support policy), so the stepping follows contact and direction rather than a fixed rhythm. Planted arms are
- * placed by a bounded damped least-squares solve (../continuum/solve.ts); free arms (curl) follow the tendon layer.
- * Grab wraps the front pair round the ball; Pulse squeezes the mantle through the jet cycle and pushes off by arm
- * elongation, since there is no water here; Curl rolls the arms up and the body settles on them.
+ *   - Crawling is pushing by elongation (Levy, Flash and Hochner 2015). An arm holds the floor with its suckers and
+ *     elongates as the body glides away from that hold; at the end of its range it peels from the tip back toward the
+ *     base, shortens and is drawn in, then reaches out again. Which arms push follows the moment's travel direction,
+ *     so there is no gait or fixed phase order, several arms are at different phases at once, and the body's heading
+ *     is steered separately from its crawl direction.
+ *   - Reaching, including Grab, is a bend that travels from the base to the tip and unrolls the arm toward its target
+ *     (Gutfreund et al. 1996; Sumbre et al. 2001). The bend's progress comes from the foundation's force-driven bend
+ *     dynamics (../continuum/primitives.ts), so its speed rises and falls in a bell-shaped profile.
+ *   - Free parts of the arms carry slow travelling waves and curled tips; held parts stay still.
  *
- * This is kinematic placement with elastic smoothing: there is no rod dynamics, friction or contact-force solve, and
- * dimensions, speeds and timings are simulation choices, not measured hardware. Logic is pure (three.js maths only)
- * and advances in fixed 120 Hz ticks, so 30, 60 and 120 Hz screens replay alike.
+ * Grab wraps two arms round the ball and carries it; Pulse squeezes the mantle through the jet cycle and, on this dry
+ * floor, pushes off by elongating the holding arms; Curl coils the arms and the body settles on them; Stop holds
+ * everything. This is a reduced, kinematically stable soft-body model: rod stiffness, damping, ranges and timings
+ * are design values, not measured animal or hardware parameters. Logic is pure (three.js maths only) and advances in
+ * fixed 120 Hz ticks, so 30, 60 and 120 Hz screens replay alike.
  */
 import { Controller, PadButton } from '@obpal/core'
-import { Quaternion, Vector3 } from 'three'
-import { ArmKinematics } from '../continuum/kinematics'
-import { JetMantle, REFERENCE_JET, type JetSettings } from '../continuum/primitives'
-import { bounded, straight, type ContinuumArm, type Shape } from '../continuum/profile'
-import { ArmSolver, surfaceRadius } from '../continuum/solve'
-import { ArmTendons, ContinuumClock, route, unroute } from '../continuum/tendons'
+import { Vector3 } from 'three'
+import { BendDynamics, JetMantle, REFERENCE_BEND, REFERENCE_JET, type JetSettings } from '../continuum/primitives'
+import { ArmRod, FLOOR, FREE, OBJECT, ROD_SEGMENTS, surfaceRadius } from '../continuum/rod'
+import { ContinuumClock } from '../continuum/tendons'
 import { action, drive, Machine, timestep } from './common'
-import { approach, clamp, DragStick, wrapPi } from './input'
+import { approach, axis, clamp, DragStick, wrapPi } from './input'
 import type { DeviceEvent, DeviceInput, DeviceSpec } from './types'
 import {
-  OCTOPUS_ARMS, OCTOPUS_CUPS, OCTOPUS_PROFILE as PROFILE, OCTOPUS_SECTIONS, SHAPE_STRIDE, profileYaw, shapeAt,
+  ARM_POINTS, OCTOPUS_ARMS, OCTOPUS_CUPS, OCTOPUS_PROFILE as PROFILE, armRoot, pointAt, profileYaw,
   type ArmRole, type Octopus,
 } from './octopus-types'
 
@@ -37,11 +40,11 @@ export const OCTOPUS_SPEC: DeviceSpec = {
   kind: 'Robot',
   category: 'robotics',
   blurb: 'Crawl a soft eight-armed robot across the floor, wrap its arms round a ball and carry it to the ring.',
-  teaches: 'One stick and a few buttons coordinate eight continuum arms',
+  teaches: 'One stick and a few buttons coordinate eight soft arms',
   controllers: [Controller.gamepad, Controller.trackpad],
   how: {
-    'face.gamepad': 'Left stick crawls and turns · A grabs or lets go · B curls · X pulses · Y stops',
-    'face.trackpad': 'Drag or tilt to crawl · tap grabs or lets go · Curl, Pulse and Stop in the tray',
+    'face.gamepad': 'Left stick crawls and turns · right stick crawls sideways · A grabs or lets go · B curls · X pulses · Y stops',
+    'face.trackpad': 'Drag or tilt to crawl · two fingers crawl sideways · tap grabs or lets go · Curl, Pulse and Stop in the tray',
   },
   tray: [
     { id: 'grab', label: 'Grab', type: 'button', icon: 'grip-close' },
@@ -52,25 +55,27 @@ export const OCTOPUS_SPEC: DeviceSpec = {
   buttons: { 'media:playpause': 'tray:grab', 'key:Space': 'tray:grab', 'key:KeyC': 'tray:curl', 'key:KeyP': 'tray:pulse' },
 }
 
-/** Body and stepping choices (metres, seconds). Design values for this studio, not hardware measurements. */
-export const OCTOPUS_LIMITS = { x: 3.1, z: 2.1, crawlHeight: 0.2, speed: 0.3, turn: 0.6 }
+/** Body choices (metres, seconds). Design values for this studio, not hardware measurements. */
+export const OCTOPUS_LIMITS = { x: 3.1, z: 2.1, crawlHeight: 0.15, restHeight: 0.085, speed: 0.24, turn: 0.6, accel: 0.45 }
 /**
- * The planted contact site's band, as a radius from the body's centre. The body stops `edge` inside it until an arm
- * there re-plants, and across that working band the solver places the site within a centimetre (tests/octopus.test.ts).
+ * How far a holding arm may elongate or shorten between its root and its first hold before it peels, as a fraction of
+ * its rest length (a muscular hydrostat both elongates and shortens; these bounds are design values).
  */
-export const REACH = { home: 0.64, near: 0.57, far: 0.72, edge: 0.015 }
-/** Seconds of travel a step looks ahead, and how far ahead that may put it. */
-const LEAD = 0.25, LEAD_MAX = 0.06
-/** The planted material point, inside the third section: cups from here to the tip carry the arm's contact. */
-export const CONTACT = 0.55
-const STEP_MOVING = 0.075, STEP_IDLE = 0.045
+export const ELONGATION = { shortest: 0.62, longest: 1.32, slip: 1.42 }
+/** Where an arm first holds the floor, as a fraction along it: the proximal part stays free to push. */
+export const HOLD_FROM = 0.44
+/** Reach targets: distance from the body's centre at rest and how far travel moves them ahead. */
+const REACH = { radius: 0.68, lead: 0.5 }
 export const BALL_RADIUS = 0.09
 const DEN_RADIUS = 0.3
 const BALL_ROUTE = [[0.15, -0.55], [-1.6, -0.9], [1.5, -1.2], [-0.9, -1.5], [1.8, 0.4]] as const
 const START = { x: 0, z: 0.9 }
 const DEN: [number, number] = [-1.7, 0.5]
-/** Underside of the oral web below the collar: what the body rests on when nothing else touches. */
-const UNDERSIDE = 0.05
+/**
+ * The reach's travelling bend: the foundation's Gutfreund 1998 force model at 1.8 times the reference effort, so a
+ * Cove arm's bend runs base to tip in about two thirds of a second (a design choice; the bell-shaped speed profile is the model's).
+ */
+const REACHING = { ...REFERENCE_BEND, force: REFERENCE_BEND.force * 1.8 }
 /** Seconds without a holder before the octopus starts showing itself. */
 export const SHOWCASE_AFTER = 4
 
@@ -78,43 +83,32 @@ export const SHOWCASE_AFTER = 4
 export const COVE_JET: JetSettings = { ...REFERENCE_JET, period: 0.9, contraction: 0.3, capacity: 4e-3, nozzle: Math.PI * 0.02 ** 2, thrustCap: 45 }
 
 const smooth = (t: number) => { const x = clamp(t, 0, 1); return x * x * (3 - 2 * x) }
-const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 /** A small deterministic sequence for idle exploration (no wall clock, no Math.random). */
 const hash = (n: number) => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s) }
+const particle = (fraction: number) => Math.round(clamp(fraction, 0, 1) * ROD_SEGMENTS)
 
-type GrabPhase = 'none' | 'reach' | 'wrap' | 'hold' | 'gesture'
-
-/** The front pair: the two arms whose roots point most nearly forward (the profile's +z). */
-export const FRONT: readonly number[] = PROFILE.arms
-  .map((arm, index) => ({ index, off: Math.abs(Math.atan2(arm.position.x, arm.position.z)) }))
-  .sort((a, b) => a.off - b.off || a.index - b.index).slice(0, 2).map((a) => a.index)
+type GrabPhase = 'none' | 'reach' | 'hold' | 'gesture'
 
 interface Arm {
   index: number
-  profile: ContinuumArm
-  /** Root azimuth in the profile frame, and which side of the body it is on (-1 or +1). */
+  /** Root azimuth in the profile frame and side (-1, +1). */
   angle: number
   side: number
   neighbours: [number, number]
-  solver: ArmSolver
-  tendons: ArmTendons
-  kinematics: ArmKinematics
+  rod: ArmRod
   role: ArmRole
-  /** Placed by the solver (1) or by the tendon layer alone (0), eased between. */
-  blend: number
-  anchor: Vector3
-  from: Vector3
-  to: Vector3
-  progress: number
-  duration: number
-  lift: number
-  shown: Shape[]
-  free: Shape[]
-  /** Idle exploration: a small body-frame offset from home that this arm next steps to. */
-  jitter: Vector3
-  /** Its contact cups touch the floor: a planted arm then bears weight. */
-  touching: boolean
-  start: [Vector3, Vector3]
+  time: number
+  /** Seal at each particle, 0…1. */
+  seal: Float64Array
+  /** Where a held object particle sits relative to the ball's centre. */
+  offset: Float64Array
+  /** The bend the controller wants at each joint; the rod's own targets ease toward it, so no change is a snap. */
+  oral: Float64Array
+  lateral: Float64Array
+  /** The travelling bend of a reach, its target and its own wave phase. */
+  bend: BendDynamics
+  target: Vector3
+  phase: number
 }
 
 interface Runtime {
@@ -124,38 +118,29 @@ interface Runtime {
   drag: DragStick
   time: number
   ticks: number
+  /** Body velocity (world, m/s) and vertical speed. */
+  velocity: Vector3
   vy: number
-  surge: number
-  power: number
+  /** Commanded crawl (body frame: forward, right) and turn, held through a frame's ticks. */
+  forward: number
+  right: number
   steer: number
   grab: GrabPhase
   grabTime: number
+  grabbers: number[]
   idle: number
   explore: number
   explored: number
-  /** Stop latches until the drive returns to neutral and then moves, or another command arrives. */
   rearm: boolean
   nobody: number
   show: { phase: 'seek' | 'carry' | 'curl' | 'pulse'; time: number }
   ballVy: number
   route: number
+  slips: number
   pending: { grab: boolean; curl: boolean; pulse: boolean; stop: boolean }
 }
 
-const scratch = { a: new Vector3(), b: new Vector3(), c: new Vector3(), d: new Vector3(), q: new Quaternion(), inverse: new Quaternion(), up: new Vector3(0, 1, 0) }
-
-/** Hold the tendon layer exactly at a pose, at rest. */
-function holdTendons(tendons: ArmTendons, shapes: readonly Shape[]) {
-  tendons.state.forEach((state, i) => {
-    const section = tendons.arm.sections[i]
-    route(section, shapes[i], state.targets)
-    state.springs.forEach((spring, j) => { spring.x = state.targets[j]; spring.v = 0 })
-    state.strokes.splice(0, 4, ...state.targets)
-    state.torsion.x = shapes[i].twist
-    state.torsion.v = 0
-    unroute(section, state.strokes, shapes[i].twist, tendons.pose[i])
-  })
-}
+const scratch = { a: new Vector3(), b: new Vector3(), c: new Vector3(), root: new Vector3(), out: new Vector3(), dorsal: new Vector3() }
 
 export class OctopusLogic extends Machine {
   readonly spec = OCTOPUS_SPEC
@@ -170,7 +155,7 @@ export class OctopusLogic extends Machine {
   private fresh(): Octopus {
     return {
       x: START.x, y: OCTOPUS_LIMITS.crawlHeight, z: START.z, h: 0, v: 0, turn: 0, mode: 'crawl', stopped: false, mantle: 1,
-      shapes: new Array(OCTOPUS_ARMS * OCTOPUS_SECTIONS * SHAPE_STRIDE).fill(0),
+      arms: new Array(OCTOPUS_ARMS * ARM_POINTS * 3).fill(0),
       cups: new Array(OCTOPUS_ARMS * OCTOPUS_CUPS).fill(0),
       roles: new Array<ArmRole>(OCTOPUS_ARMS).fill('plant'),
       ball: { x: START.x + BALL_ROUTE[0][0], y: BALL_RADIUS, z: BALL_ROUTE[0][1], held: false },
@@ -180,67 +165,56 @@ export class OctopusLogic extends Machine {
 
   private runtime(): Runtime {
     const arms = PROFILE.arms.map((profile, index): Arm => ({
-      index, profile,
+      index,
       angle: Math.atan2(profile.position.x, profile.position.z),
       side: Math.sign(profile.position.x) || 1,
       neighbours: [0, 0],
-      solver: new ArmSolver(profile, 2),
-      tendons: new ArmTendons(PROFILE, profile),
-      kinematics: new ArmKinematics(profile, 3),
-      role: 'plant', blend: 1,
-      anchor: new Vector3(), from: new Vector3(), to: new Vector3(), progress: 0, duration: 0.4, lift: 0,
-      shown: profile.sections.map(straight), free: profile.sections.map(straight),
-      jitter: new Vector3(), touching: true, start: [new Vector3(), new Vector3()],
+      rod: new ArmRod(profile),
+      role: 'plant', time: 0,
+      seal: new Float64Array(ARM_POINTS),
+      oral: new Float64Array(ARM_POINTS), lateral: new Float64Array(ARM_POINTS),
+      offset: new Float64Array(ARM_POINTS * 3),
+      bend: new BendDynamics(REACHING),
+      target: new Vector3(),
+      phase: hash(index * 3.1) * Math.PI * 2,
     }))
-    // Ring order by root azimuth gives each arm its two neighbours, across the back as well.
     const ring = [...arms].sort((a, b) => a.angle - b.angle)
     ring.forEach((arm, i) => { arm.neighbours = [ring[(i + ring.length - 1) % ring.length].index, ring[(i + 1) % ring.length].index] })
     return {
-      arms, clock: new ContinuumClock(), mantle: new JetMantle(COVE_JET), drag: new DragStick(), time: 0, ticks: 0, vy: 0, surge: 0,
-      power: 0, steer: 0, grab: 'none', grabTime: 0, idle: 0, explore: 0, explored: 0, rearm: false, nobody: 0,
-      show: { phase: 'seek', time: 0 }, ballVy: 0, route: 0, pending: { grab: false, curl: false, pulse: false, stop: false },
+      arms, clock: new ContinuumClock(), mantle: new JetMantle(COVE_JET), drag: new DragStick(), time: 0, ticks: 0,
+      velocity: new Vector3(), vy: 0, forward: 0, right: 0, steer: 0, grab: 'none', grabTime: 0, grabbers: [],
+      idle: 0, explore: 0, explored: 0, rearm: false, nobody: 0, show: { phase: 'seek', time: 0 }, ballVy: 0, route: 0,
+      slips: 0, pending: { grab: false, curl: false, pulse: false, stop: false },
     }
   }
 
-  private pose(u: Octopus) {
-    scratch.q.setFromAxisAngle(scratch.up, profileYaw(u.h))
-    scratch.inverse.copy(scratch.q).invert()
-  }
-  private toBody(u: Octopus, world: Vector3, out: Vector3) {
-    return out.set(world.x - u.x, world.y - u.y, world.z - u.z).applyQuaternion(scratch.inverse)
-  }
-  private toWorld(u: Octopus, body: Vector3, out: Vector3) {
-    out.copy(body).applyQuaternion(scratch.q)
-    return out.set(out.x + u.x, out.y + u.y, out.z + u.z)
-  }
-  /** An arm's home: its contact site's resting place on the floor, in the body frame. */
-  private homeOf(u: Octopus, arm: Arm, out: Vector3) {
-    return out.set(Math.sin(arm.angle) * REACH.home, -u.y, Math.cos(arm.angle) * REACH.home)
-  }
+  /** Sucker slips: holds dragged because an arm reached its elongation limit before it could peel. */
+  get slips() { return this.run[0].slips }
 
   home(n: number) {
     if (n !== 0) return
     // Keep the state's own objects: views and snapshots hold references to them.
     const u = this.units[0], fresh = this.fresh()
-    Object.assign(u, { ...fresh, shapes: u.shapes, cups: u.cups, roles: u.roles, ball: u.ball, den: u.den, score: u.score, actions: u.actions })
+    Object.assign(u, { ...fresh, arms: u.arms, cups: u.cups, roles: u.roles, ball: u.ball, den: u.den, score: u.score, actions: u.actions })
     Object.assign(u.ball, fresh.ball)
     u.cups.fill(0)
     const run = this.run[0] = this.runtime()
-    this.pose(u)
+    // Lay each arm out from its root, let it settle onto the floor, then hold where it rests.
     for (const arm of run.arms) {
-      this.toWorld(u, this.homeOf(u, arm, scratch.a), arm.anchor)
-      arm.anchor.y = 0
-      this.plantGoals(u, arm)
-      this.bias(arm, 0, false)
-      for (let i = 0; i < 10; i++) arm.solver.solve(6)
-      holdTendons(arm.tendons, arm.solver.shapes)
-      arm.shown.forEach((s, i) => Object.assign(s, arm.solver.shapes[i]))
+      armRoot(u, arm.index, scratch.root, scratch.out, scratch.dorsal)
+      arm.rod.place(scratch.root, scratch.out, scratch.dorsal)
+    }
+    for (let i = 0; i < 240; i++) for (const arm of run.arms) {
+      this.relax(arm, 0, 0)
+      this.shape(arm, 1)
+      armRoot(u, arm.index, scratch.root, scratch.out, scratch.dorsal)
+      arm.rod.step(1 / 120, scratch.root, scratch.out, scratch.dorsal, 0)
+    }
+    for (const arm of run.arms) {
+      for (let i = particle(HOLD_FROM); i < particle(0.72); i++) if (arm.rod.contact[i]) { arm.rod.hold(i); arm.seal[i] = 1 }
+      arm.role = 'plant'
     }
     this.publish(u, run)
-    for (const arm of run.arms) for (let c = 0; c < OCTOPUS_CUPS; c++) {
-      const cup = arm.profile.cups[c]
-      u.cups[arm.index * OCTOPUS_CUPS + c] = cup.fraction >= CONTACT - 0.02 ? 1 : 0
-    }
   }
 
   readout(n: number) {
@@ -259,7 +233,7 @@ export class OctopusLogic extends Machine {
     this.publish(u, run)
   }
 
-  /** One frame's intention: presses become pending commands, the stick a power and a steer, held through its ticks. */
+  /** One frame's intention: presses become pending commands; the sticks a crawl and a turn, held through its ticks. */
   private read(u: Octopus, run: Runtime, input: DeviceInput | null, dt: number) {
     const live = input && !input.quiet ? input : null
     run.nobody = input ? 0 : run.nobody + dt
@@ -269,24 +243,26 @@ export class OctopusLogic extends Machine {
       if (showing) run.show = { phase: 'seek', time: 0 }
     }
     if (showing) { this.showcase(u, run, dt); return }
-    const pad = live?.pad ?? null, pressed = live?.padPressed ?? 0
+    const pressed = live?.padPressed ?? 0
     const grab = !!live && action(live, 'grab')
     const curl = !!live && (live.presses.includes('curl') || !!(pressed & (1 << PadButton.B)))
     const pulse = !!live && (live.presses.includes('pulse') || !!(pressed & (1 << PadButton.X)))
     const stop = !!input && (input.presses.includes('stop') || !!((input.padPressed ?? 0) & (1 << PadButton.Y)))
     const [steer, power] = drive(live, run.drag)
-    run.power = Number.isFinite(power) ? clamp(power, -1, 1) : 0
+    // Sideways crawl: the right stick across, or a two-finger pan, with the heading left as it is.
+    const across = live?.pad ? axis(live.pad.axes[2]) : live ? clamp((live.pan?.[0] ?? 0) / 40, -1, 1) : 0
+    run.forward = Number.isFinite(power) ? clamp(power, -1, 1) : 0
     run.steer = Number.isFinite(steer) ? clamp(steer, -1, 1) : 0
-    if (pad && Math.abs(run.power) < 0.02 && Math.abs(run.steer) < 0.02) { run.power = 0; run.steer = 0 }
+    run.right = Number.isFinite(across) ? clamp(across, -1, 1) : 0
     if (stop) { run.pending.stop = true; return }
     if (u.stopped) {
-      const moving = Math.abs(run.power) > 0.05 || Math.abs(run.steer) > 0.05
+      const moving = Math.abs(run.forward) > 0.05 || Math.abs(run.steer) > 0.05 || Math.abs(run.right) > 0.05
       if (!moving) run.rearm = true
       if (grab || curl || pulse || (run.rearm && moving)) {
         u.stopped = false
         this.events.push({ unit: 0, kind: 'tick', text: 'Moving again' })
       }
-      run.power = run.steer = 0
+      run.forward = run.steer = run.right = 0
       return
     }
     run.pending.grab ||= grab
@@ -294,59 +270,55 @@ export class OctopusLogic extends Machine {
     run.pending.pulse ||= pulse
   }
 
-  /** Nobody holds it: it seeks the ball, carries it to the ring, curls and pulses, without scoring or events. */
+  /**
+   * Nobody holds it: it crawls toward the ball (its heading turning more slowly than its course, as an octopus's
+   * does), wraps it, carries it into the ring, curls and pulses, without scoring or events.
+   */
   private showcase(u: Octopus, run: Runtime, dt: number) {
     const show = run.show
     show.time += dt
-    this.pose(u)
     const target = show.phase === 'carry' ? scratch.a.set(u.den[0], 0, u.den[1]) : scratch.a.set(u.ball.x, 0, u.ball.z)
-    const body = this.toBody(u, target, scratch.b)
-    const bearing = Math.atan2(body.x, body.z), distance = Math.hypot(body.x, body.z)
-    run.steer = clamp(-bearing * 1.6, -1, 1) * (u.mode === 'crawl' ? 1 : 0)
-    run.power = 0
+    const dx = target.x - u.x, dz = target.z - u.z, distance = Math.hypot(dx, dz)
+    // Course in the body frame: forward is (-sin h, -cos h), right is (cos h, -sin h).
+    const fx = -Math.sin(u.h), fz = -Math.cos(u.h), rx = Math.cos(u.h), rz = -Math.sin(u.h)
+    const ahead = (dx * fx + dz * fz) / (distance || 1), across = (dx * rx + dz * rz) / (distance || 1)
+    const bearing = Math.atan2(across, ahead)
+    run.steer = clamp(bearing * 0.8, -0.6, 0.6) * (u.mode === 'crawl' ? 1 : 0)
+    run.forward = run.right = 0
+    const go = (speed: number) => { run.forward = ahead * speed; run.right = across * speed }
     if (show.phase === 'seek') {
-      run.power = Math.abs(bearing) < 0.6 ? clamp((distance - 0.62) * 1.4, 0, 0.8) : 0
+      go(clamp((distance - 0.6) * 1.5, 0, 0.8))
       if (u.mode === 'curl') run.pending.curl = true
-      else if (this.reachable(u, scratch.c) && distance < 0.75 && run.grab === 'none') run.pending.grab = true
+      else if (distance < 0.8 && run.grab === 'none') run.pending.grab = true
       if (u.ball.held) show.phase = 'carry', show.time = 0
-      if (show.time > 25) show.phase = 'curl', show.time = 0
+      if (show.time > 30) show.phase = 'curl', show.time = 0
     } else if (show.phase === 'carry') {
-      // Head for the ring until the held ball, carried ahead of the body, is over it; then let go.
       const over = Math.hypot(u.ball.x - u.den[0], u.ball.z - u.den[1])
-      run.power = Math.abs(bearing) < 0.6 ? clamp(over * 2, 0.2, 0.7) : 0
+      go(clamp(over * 1.6, 0.25, 0.7))
       if (over < DEN_RADIUS * 0.6 && u.ball.held) run.pending.grab = true
       if (!u.ball.held && run.grab === 'none') show.phase = 'curl', show.time = 0
-      if (show.time > 25) { if (u.ball.held) run.pending.grab = true; show.phase = 'curl'; show.time = 0 }
+      if (show.time > 30) { if (u.ball.held) run.pending.grab = true; show.phase = 'curl'; show.time = 0 }
     } else if (show.phase === 'curl') {
       if (show.time < 0.1 && u.mode === 'crawl') run.pending.curl = true
       if (show.time > 2.6 && u.mode === 'curl') run.pending.curl = true
-      if (show.time > 4) show.phase = 'pulse', show.time = 0
+      if (show.time > 4.2) show.phase = 'pulse', show.time = 0
     } else {
-      run.power = 0.5
       if (show.time > 0.6 && show.time < 0.7) run.pending.pulse = true
       if (show.time > 2.5) show.phase = 'seek', show.time = 0
     }
   }
 
-  /** The ball, in the body frame, if the front pair can take it from here. */
-  private reachable(u: Octopus, out: Vector3) {
-    this.toBody(u, scratch.d.set(u.ball.x, u.ball.y, u.ball.z), out)
-    const across = Math.hypot(out.x, out.z)
-    return out.z > 0.25 && across > 0.32 && across < 0.95 && Math.abs(Math.atan2(out.x, out.z)) < 0.95
-  }
-
   private tick(u: Octopus, run: Runtime, dt: number) {
     run.time += dt
     run.ticks++
-    this.pose(u)
     const pending = run.pending
     if (pending.stop) {
       pending.stop = pending.grab = pending.curl = pending.pulse = false
       if (!u.stopped) {
         u.stopped = true
         run.rearm = false
-        u.v = u.turn = run.surge = 0
-        for (const arm of run.arms) arm.tendons.freeze()
+        u.v = u.turn = 0
+        run.velocity.set(0, 0, 0)
         this.emit({ unit: 0, kind: 'tick', text: 'Stopped' }, u)
       }
     }
@@ -356,16 +328,17 @@ export class OctopusLogic extends Machine {
     if (pending.pulse) {
       pending.pulse = false
       if (run.mantle.pulse()) {
-        if (u.mode === 'crawl') run.surge = 0.5
         u.actions++
+        // On a dry floor the squeeze's push comes from the holding arms elongating all at once.
+        if (u.mode === 'crawl' && this.holding(run) >= 3)
+          run.velocity.addScaledVector(scratch.c.set(-Math.sin(u.h), 0, -Math.cos(u.h)), 0.42)
         this.emit({ unit: 0, kind: 'tick', text: 'Pulse', audio: { action: 'pulse' } }, u)
       }
     }
     run.mantle.step(dt)
     this.moveBody(u, run, dt)
-    this.pose(u)
     this.grabStep(u, run, dt)
-    this.stepArms(u, run, dt)
+    this.arms(u, run, dt)
     this.ballStep(u, run, dt)
   }
 
@@ -373,39 +346,59 @@ export class OctopusLogic extends Machine {
     if (!u.showing) this.events.push(event)
   }
 
+  /** Arms holding the floor. */
+  private holding(run: Runtime) {
+    let count = 0
+    for (const arm of run.arms) if (arm.role === 'plant' && this.firstHold(arm) >= 0) count++
+    return count
+  }
+  private firstHold(arm: Arm) {
+    for (let i = 2; i < ARM_POINTS; i++) if (arm.rod.held[i] === FLOOR) return i
+    return -1
+  }
+
   private toggleCurl(u: Octopus, run: Runtime) {
     u.actions++
     if (u.mode === 'curl') {
       u.mode = 'crawl'
-      this.pose(u)
-      for (const arm of run.arms) {
-        arm.solver.seed(arm.shown)
-        this.toWorld(u, this.homeOf(u, arm, scratch.a), arm.anchor)
-        arm.anchor.y = 0
-        arm.role = 'plant'
-      }
+      // Uncoil by reaching back down to the floor, each arm with its own travelling bend.
+      for (const arm of run.arms) this.beginReach(u, run, arm, 0.18 * hash(arm.index + run.ticks))
       this.emit({ unit: 0, kind: 'tick', text: 'Uncurled' }, u)
       return
     }
     if (u.ball.held || run.grab !== 'none') this.release(u, run, false)
     u.mode = 'curl'
-    for (const arm of run.arms) arm.role = 'free'
+    for (const arm of run.arms) { arm.role = 'free'; arm.time = 0 }
     this.emit({ unit: 0, kind: 'tick', text: 'Curled' }, u)
+  }
+
+  /** The two arms whose roots point most nearly toward a world point. */
+  private nearest(u: Octopus, run: Runtime, x: number, z: number) {
+    const yaw = profileYaw(u.h), bx = x - u.x, bz = z - u.z
+    // World to profile frame: rotate by -yaw.
+    const c = Math.cos(-yaw), s = Math.sin(-yaw), px = c * bx + s * bz, pz = -s * bx + c * bz
+    const bearing = Math.atan2(px, pz)
+    return [...run.arms].sort((a, b) => Math.abs(wrapPi(a.angle - bearing)) - Math.abs(wrapPi(b.angle - bearing)) || a.index - b.index)
+      .slice(0, 2).map((a) => a.index)
   }
 
   private toggleGrab(u: Octopus, run: Runtime) {
     if (u.mode !== 'crawl') return
     u.actions++
-    if (run.grab === 'reach' || run.grab === 'wrap' || run.grab === 'hold') { this.release(u, run, true); return }
+    if (run.grab === 'reach' || run.grab === 'hold') { this.release(u, run, true); return }
     if (run.grab === 'gesture') return
-    const reachable = this.reachable(u, scratch.c)
+    const distance = Math.hypot(u.ball.x - u.x, u.ball.z - u.z), reachable = distance > 0.3 && distance < 0.95 && u.ball.y < 0.4
     run.grab = reachable ? 'reach' : 'gesture'
     run.grabTime = 0
-    for (const index of FRONT) {
+    // The pair nearest the ball reaches for it, whichever way the body faces; out of reach, the pair ahead gestures.
+    run.grabbers = reachable ? this.nearest(u, run, u.ball.x, u.ball.z)
+      : this.nearest(u, run, u.x - Math.sin(u.h), u.z - Math.cos(u.h))
+    for (const index of run.grabbers) {
       const arm = run.arms[index]
-      arm.role = 'reach'
-      arm.solver.pointAt(0.62, arm.start[0])
-      arm.solver.pointAt(0.92, arm.start[1])
+      this.peelAll(arm)
+      if (reachable) arm.target.set(u.ball.x, u.ball.y, u.ball.z)
+      else arm.target.set(u.x - Math.sin(u.h) * 0.95, 0.3, u.z - Math.cos(u.h) * 0.95)
+      this.beginReach(u, run, arm, 0, reachable ? 'wrap' : 'reach')
     }
     this.emit({ unit: 0, kind: 'tick', text: reachable ? 'Grabbing' : 'Reaching' }, u)
   }
@@ -415,321 +408,381 @@ export class OctopusLogic extends Machine {
     u.ball.held = false
     run.ballVy = 0
     run.grab = 'none'
-    this.pose(u)
-    for (const index of FRONT) this.beginStep(u, run.arms[index], scratch.a.set(0, 0, 0))
+    for (const index of run.grabbers) {
+      const arm = run.arms[index]
+      arm.rod.wrapRadius = 0
+      arm.role = 'peel'
+      arm.time = 0
+      arm.rod.sync()
+    }
+    run.grabbers = []
     if (say) this.emit({ unit: 0, kind: 'tick', text: held ? 'Let go' : 'Grab cancelled' }, u)
   }
 
-  /** The body moves only while it is carried: travel is kinematic, height follows support or falls onto the arms. */
+  /** The body glides: its velocity eases toward the command as far as the holding, pushing arms allow. */
   private moveBody(u: Octopus, run: Runtime, dt: number) {
-    const limits = OCTOPUS_LIMITS
-    // Bearing weight needs contact, not suction: a planted arm whose contact cups touch the floor supports the body.
-    const planted = run.arms.filter((a) => a.role === 'plant' && a.touching).length
-    const supported = u.mode === 'crawl' && planted >= PROFILE.support.minimumArms
-    const crawling = u.mode === 'crawl'
-    // The body goes only as fast as its planted arms allow: it slows as one is stretched or carried toward the edge
-    // of the reach band, and waits there while that arm re-plants. Arms pull the body; they do not slide.
-    let strain = 0, edge = -1
-    for (const arm of run.arms) if (arm.role === 'plant') {
-      strain = Math.max(strain, arm.solver.residual)
-      const anchor = this.toBody(u, arm.anchor, scratch.a), radius = Math.hypot(anchor.x, anchor.z)
-      edge = Math.max(edge, REACH.near + REACH.edge - radius, radius - REACH.far + REACH.edge)
+    const limits = OCTOPUS_LIMITS, crawling = u.mode === 'crawl'
+    const fx = -Math.sin(u.h), fz = -Math.cos(u.h), rx = Math.cos(u.h), rz = -Math.sin(u.h)
+    const want = scratch.a.set(fx * run.forward + rx * run.right, 0, fz * run.forward + rz * run.right)
+    if (want.length() > 1) want.normalize()
+    want.multiplyScalar(limits.speed)
+    // Pushers hold the floor behind the course: they are what moves the body (pushing by elongation).
+    let pushers = 0, holders = 0
+    const course = want.lengthSq() > 1e-6 ? scratch.b.copy(want).normalize() : null
+    for (const arm of run.arms) {
+      const hold = arm.role === 'plant' ? this.firstHold(arm) : -1
+      if (hold < 0) continue
+      holders++
+      const k = hold * 3, ax = arm.rod.position[k] - u.x, az = arm.rod.position[k + 2] - u.z
+      // Only an arm with elongation left to give can push; one at the end of its range waits to be relieved.
+      if ((!course || ax * course.x + az * course.z < 0.15) && this.need(arm, hold) < ELONGATION.longest - 0.04) pushers++
     }
-    const allowed = supported ? Math.min(clamp(1 - (strain - 0.01) / 0.025, 0.15, 1), clamp(-edge / 0.03, 0, 1)) : 0
-    u.v = approach(u.v, crawling ? run.power * limits.speed * allowed : 0, 0.9, dt)
-    u.turn = approach(u.turn, crawling ? -run.steer * limits.turn * allowed : 0, 2, dt)
-    run.surge *= Math.exp(-dt / 0.35)
-    if (!supported) run.surge = 0
+    const capacity = crawling ? clamp(pushers / 2.5, 0, 1) * clamp((holders - 1) / 2, 0, 1) : 0
+    want.multiplyScalar(capacity)
+    const change = scratch.c.subVectors(want, run.velocity), most = limits.accel * dt
+    if (change.length() > most) change.setLength(most)
+    run.velocity.add(change)
+    if (!crawling) run.velocity.multiplyScalar(Math.exp(-dt * 6))
+    u.turn = approach(u.turn, crawling ? -run.steer * limits.turn * clamp(holders / 4, 0, 1) : 0, 1.6, dt)
     u.h = wrapPi(u.h + u.turn * dt)
-    const speed = u.v + run.surge
-    const x = u.x - Math.sin(u.h) * speed * dt, z = u.z - Math.cos(u.h) * speed * dt
+    const x = u.x + run.velocity.x * dt, z = u.z + run.velocity.z * dt
     u.x = clamp(x, -limits.x, limits.x)
     u.z = clamp(z, -limits.z, limits.z)
-    if ((x !== u.x || z !== u.z) && Math.abs(speed) > 0.15) {
-      this.emit({ unit: 0, kind: 'bump', strength: 0.3, audio: { speed: Math.abs(speed) } }, u)
-      u.v = 0
-      run.surge = 0
+    if (x !== u.x || z !== u.z) {
+      if (run.velocity.length() > 0.15) this.emit({ unit: 0, kind: 'bump', strength: 0.3, audio: { speed: run.velocity.length() } }, u)
+      if (x !== u.x) run.velocity.x = 0
+      if (z !== u.z) run.velocity.z = 0
     }
-    // Planted arms carry the body at crawl height; otherwise it falls and rests on whatever touches the floor.
-    if (supported) {
-      const target = limits.crawlHeight + 0.012 * Math.min(1, Math.abs(speed) / limits.speed)
-      run.vy += (60 * (target - u.y) - 2 * Math.sqrt(60) * run.vy) * dt
-    } else run.vy -= 9.81 * dt
+    u.v = run.velocity.x * fx + run.velocity.z * fz
+    // Holding arms carry the body at crawl height; without them it settles onto its arms and web.
+    const supported = crawling && holders >= 3
+    const target = supported ? limits.crawlHeight : limits.restHeight
+    if (supported || u.y < target) run.vy += (40 * (target - u.y) - 2 * Math.sqrt(40) * run.vy) * dt
+    else run.vy -= 9.81 * dt
     u.y += run.vy * dt
-    const ground = this.ground(run, supported)
-    if (u.y < ground) {
-      u.y = ground
-      if (run.vy < 0) {
-        if (run.vy < -0.6) this.emit({ unit: 0, kind: 'bump', strength: clamp(-run.vy / 2, 0, 1), audio: { speed: -run.vy } }, u)
-        run.vy = 0
-      }
+    if (u.y < limits.restHeight) {
+      if (run.vy < -0.6) this.emit({ unit: 0, kind: 'bump', strength: clamp(-run.vy / 2, 0, 1), audio: { speed: -run.vy } }, u)
+      u.y = limits.restHeight
+      run.vy = Math.max(0, run.vy)
     }
-  }
-
-  /** The collar height at which the body's underside or a free arm's surface meets the floor. */
-  private ground(run: Runtime, supported: boolean) {
-    let lowest = -UNDERSIDE
-    if (!supported) for (const arm of run.arms) {
-      if (arm.blend > 0.5 && arm.role !== 'free') continue
-      const samples = arm.kinematics.update(arm.shown), per = arm.kinematics.samplesPerSection
-      for (let i = 1; i < samples.length; i++) {
-        const section = arm.shown[Math.min(OCTOPUS_SECTIONS - 1, Math.floor((i - 1) / per))]
-        lowest = Math.min(lowest, samples[i].position.y - surfaceRadius(arm.profile, i / (samples.length - 1), section.strain))
-      }
-    }
-    // A few millimetres of tolerance keep a resting body from creeping on its own contact.
-    return -lowest - 0.003
   }
 
   private grabStep(u: Octopus, run: Runtime, dt: number) {
     if (run.grab === 'none') return
     run.grabTime += dt
     if (run.grab === 'gesture') {
-      if (run.grabTime > 1.1) {
+      if (run.grabTime > 1.3) {
         run.grab = 'none'
-        for (const index of FRONT) this.beginStep(u, run.arms[index], scratch.a.set(0, 0, 0))
+        for (const index of run.grabbers) { const arm = run.arms[index]; arm.role = 'peel'; arm.time = 0 }
+        run.grabbers = []
       }
       return
     }
-    if (!u.ball.held && !this.reachable(u, scratch.c) && run.grab === 'reach' && run.grabTime > 0.2) {
-      // The ball went out of reach mid-grab: give up rather than stretch past the profile's limits.
-      this.release(u, run, true)
-      return
-    }
-    if (run.grab === 'reach' && run.grabTime > 0.55) { run.grab = 'wrap'; run.grabTime = 0 }
-    else if (run.grab === 'wrap' && run.grabTime > 0.3) {
+    let held = 0
+    for (const index of run.grabbers) for (let i = 0; i < ARM_POINTS; i++) if (run.arms[index].rod.held[i] === OBJECT) held++
+    if (run.grab === 'reach' && held >= 5) {
       run.grab = 'hold'
-      run.grabTime = 0
       u.ball.held = true
+      for (const index of run.grabbers) run.arms[index].role = 'hold'
       this.emit({ unit: 0, kind: 'tick', text: 'Holding the ball', audio: { action: 'grab' } }, u)
     }
-    const role: ArmRole = run.grab === 'wrap' ? 'wrap' : run.grab === 'hold' ? 'hold' : 'reach'
-    for (const index of FRONT) run.arms[index].role = role
+    if (run.grab === 'reach' && run.grabTime > 2.2) { this.release(u, run, true); return }
     if (u.ball.held) {
-      // Carried ahead of the mouth, between the front pair.
-      this.toWorld(u, scratch.a.set(0, -u.y + 0.2, 0.46), scratch.b)
-      const k = 1 - Math.exp(-dt / 0.18)
-      u.ball.x += (scratch.b.x - u.ball.x) * k
-      u.ball.y += (scratch.b.y - u.ball.y) * k
-      u.ball.z += (scratch.b.z - u.ball.z) * k
+      // Carried beside the body on the holding pair's side, lifted clear of the floor.
+      let ax = 0, az = 0
+      for (const index of run.grabbers) {
+        armRoot(u, index, scratch.root, scratch.out, scratch.dorsal)
+        ax += scratch.out.x; az += scratch.out.z
+      }
+      const length = Math.hypot(ax, az) || 1
+      const k = 1 - Math.exp(-dt / 0.35)
+      u.ball.x += (u.x + (ax / length) * 0.46 - u.ball.x) * k
+      u.ball.y += (u.y + 0.08 - u.ball.y) * k
+      u.ball.z += (u.z + (az / length) * 0.46 - u.ball.z) * k
     }
   }
 
-  /** Begin re-planting an arm at its home plus `offset` (body frame), looking ahead along the travel. */
-  private beginStep(u: Octopus, arm: Arm, offset: Vector3) {
-    const run = this.run[0]
-    arm.solver.pointAt(CONTACT, scratch.c)
-    this.toWorld(u, scratch.c, arm.from)
-    arm.from.y = Math.max(0, arm.from.y - surfaceRadius(arm.profile, CONTACT))
-    const target = this.ahead(u, run, arm, LEAD + 0.5 * arm.duration, scratch.c).add(offset)
-    const across = Math.hypot(target.x, target.z), radius = clamp(across, REACH.near + 0.02, REACH.far - 0.02)
-    if (across > 1e-6) { target.x *= radius / across; target.z *= radius / across }
-    this.toWorld(u, target, arm.to)
-    arm.to.y = 0
-    arm.to.x = clamp(arm.to.x, -OCTOPUS_LIMITS.x - 0.75, OCTOPUS_LIMITS.x + 0.75)
-    arm.to.z = clamp(arm.to.z, -OCTOPUS_LIMITS.z - 0.75, OCTOPUS_LIMITS.z + 0.75)
-    const distance = arm.from.distanceTo(arm.to)
-    arm.duration = clamp(0.36 - Math.abs(u.v) * 0.5, 0.22, 0.36) + distance * 0.2
-    arm.lift = 0.05 + 0.18 * Math.min(0.5, distance)
-    arm.progress = 0
-    arm.role = 'step'
+  /** Begin a reach: the arm shortens a little and a bend starts travelling from its base toward the tip. */
+  private beginReach(u: Octopus, run: Runtime, arm: Arm, delay = 0, role: ArmRole = 'reach') {
+    arm.role = role
+    arm.time = -delay
+    arm.bend.position = arm.bend.velocity = 0
+    if (!run.grabbers.includes(arm.index)) this.reachTarget(u, run, arm)
   }
 
-  /** Where an arm's home will be after `seconds` of the current travel and turn, in today's body frame. */
-  private ahead(u: Octopus, run: Runtime, arm: Arm, seconds: number, out: Vector3) {
-    const home = this.homeOf(u, arm, out), turn = clamp(u.turn * seconds, -0.3, 0.3)
-    const cos = Math.cos(turn), sin = Math.sin(turn), x = home.x, z = home.z
-    out.x = cos * x + sin * z
-    out.z = -sin * x + cos * z + clamp((u.v + run.surge) * seconds, -LEAD_MAX, LEAD_MAX)
-    return out
-  }
-
-  /** Goals for a planted or stepping arm: the contact site on its anchor, resting on the floor. */
-  private plantGoals(u: Octopus, arm: Arm) {
-    const solver = arm.solver, goal = solver.goals[0]
-    let at = arm.anchor
-    if (arm.role === 'step') {
-      const s = smooth(arm.progress)
-      at = scratch.c.lerpVectors(arm.from, arm.to, s)
-      at.y += arm.lift * Math.sin(Math.PI * clamp(arm.progress, 0, 1))
+  /** Where a crawling arm reaches: outward from its root, swung toward the course, ahead by the travel. */
+  private reachTarget(u: Octopus, run: Runtime, arm: Arm) {
+    armRoot(u, arm.index, scratch.root, scratch.out, scratch.dorsal)
+    const speed = run.velocity.length(), course = speed > 0.02 ? scratch.c.copy(run.velocity).multiplyScalar(1 / speed) : scratch.c.set(0, 0, 0)
+    // Each arm keeps to its own sector: the course swings its reach by at most 45 degrees, so no arm sweeps round
+    // the body like a leg.
+    const own = Math.atan2(scratch.out.x, scratch.out.z)
+    let bias = 0
+    if (speed > 0.02) {
+      const toward = Math.atan2(course.x, course.z), off = wrapPi(toward - own)
+      bias = clamp(off, -Math.PI / 4, Math.PI / 4) * clamp(speed / 0.15, 0, 1) * Math.cos(off / 2)
     }
-    goal.fraction = CONTACT
-    goal.weight = 400
-    goal.active = true
-    this.toBody(u, scratch.d.copy(at), goal.target)
-    goal.target.y += surfaceRadius(arm.profile, CONTACT) + 0.006
-    solver.goals[1].active = false
-    solver.floorNormal.set(0, 1, 0)
-    solver.floorOffset = -u.y
+    const ox = Math.sin(own + bias), oz = Math.cos(own + bias)
+    // Idle exploration nudges the spot a little, deterministically.
+    const jitter = run.explore > 0 ? (hash(run.explored * 7.31 + arm.index) - 0.5) * 0.12 : 0
+    const reach = REACH.radius + speed * REACH.lead + jitter
+    arm.target.set(u.x + ox * reach, surfaceRadius(arm.rod.arm, 0.6) * 0.85, u.z + oz * reach)
+  }
+
+  private peelAll(arm: Arm) {
+    for (let i = 0; i < ARM_POINTS; i++) arm.rod.held[i] = FREE
   }
 
   /**
-   * The shape the solver relaxes toward where goals and the floor leave freedom: a raised then descending root, a gentle
-   * S across the floor (mirrored left and right) and a curled tip that slowly explores. Radians across each section.
-   * A travelling wave runs from root to tip, each section a fixed phase behind the last and each arm offset from its
-   * neighbours; its bend tapers toward the tip, livelier while the body moves or the arm swings. A planted arm's floor
-   * section keeps no wave, so what lies on the floor stays still while the solver holds the contact.
+   * The relaxed shape every arm returns to where nothing else holds it: a slight droop at the root, a gentle S across
+   * the floor mirrored left and right, and a tip curled back, with a slow wave travelling from root to tip whose bend
+   * tapers toward the tip. `life` scales the wave (idle drift is larger than crawling's).
    */
-  private bias(arm: Arm, time: number, idle: boolean, moving = 0) {
-    const phase = arm.index * 1.37, life = idle ? 1 : 0.6, side = arm.side, s = arm.solver
-    const lively = arm.role === 'step' ? 1.8 : 1 + moving, planted = arm.role === 'plant'
-    const wave = (i: number, amplitude: number) => amplitude * lively * Math.sin(1.6 * time - 1.2 * i + phase)
-    s.relax(0, 0.2 + wave(0, 0.06), 0.12 * side + wave(0.4, 0.1), 0, 0.02)
-    s.relax(1, 0.1 + wave(1, 0.05), -0.42 * side + wave(1.4, 0.08), 0, 0.02)
-    s.relax(2, -0.1 + (planted ? 0 : wave(2, 0.04)), 0.5 * side + (planted ? 0 : wave(2.4, 0.06)), 0, 0.02)
-    s.relax(3, -0.85 + 0.3 * life * Math.sin(0.8 * time + phase) + wave(3, 0.03),
-      (0.45 + 0.35 * life * Math.sin(0.55 * time + 1.7 * phase)) * side + wave(3.4, 0.04), 0, 0.4)
-  }
-
-  private wrapGoals(u: Octopus, run: Runtime, arm: Arm) {
-    const solver = arm.solver, ball = this.toBody(u, scratch.d.set(u.ball.x, u.ball.y, u.ball.z), scratch.a)
-    const radius = BALL_RADIUS + 0.024
-    // Toward the ball from the body, and across it on this arm's own side.
-    const forward = scratch.b.set(ball.x, 0, ball.z)
-    if (forward.lengthSq() < 1e-6) forward.set(0, 0, 1)
-    forward.normalize()
-    const across = scratch.c.set(forward.z, 0, -forward.x).multiplyScalar(-arm.side)
-    const a = solver.goals[0], b = solver.goals[1]
-    a.fraction = 0.62
-    a.target.copy(ball).addScaledVector(across, radius * 0.96).addScaledVector(forward, -radius * 0.28)
-    b.fraction = 0.92
-    b.target.copy(ball).addScaledVector(forward, radius * 0.9).addScaledVector(across, -radius * 0.42)
-    b.target.y -= radius * 0.15
-    a.weight = 300
-    b.weight = 120
-    a.active = b.active = true
-    if (run.grab === 'reach') {
-      // Arc over from where the arm was, the bend leading toward the ball.
-      const t = smooth(run.grabTime / 0.55), lift = 0.14 * Math.sin(Math.PI * t)
-      a.target.lerpVectors(arm.start[0], a.target, t)
-      a.target.y += lift
-      b.target.lerpVectors(arm.start[1], b.target, t)
-      b.target.y += lift * 1.4
+  private relax(arm: Arm, time: number, life: number) {
+    const side = arm.side
+    for (let j = 1; j < ROD_SEGMENTS; j++) {
+      const f = j / ROD_SEGMENTS, taper = 1 - 0.65 * f
+      const wave = Math.sin(1.7 * time - 7.5 * f + arm.phase)
+      arm.oral[j] = 0.03 * (1 - f) - (f > 0.72 ? 0.2 * smooth((f - 0.72) / 0.2) : 0) + 0.055 * life * taper * Math.cos(1.7 * time - 7.5 * f + arm.phase)
+      arm.lateral[j] = (f < 0.35 ? 0.04 : f < 0.7 ? -0.05 : 0.07) * side + 0.11 * life * taper * wave
     }
-    solver.floorNormal.set(0, 1, 0)
-    solver.floorOffset = -u.y
-    solver.relax(3, -0.9, 0, 0, 0.05)
   }
 
-  private gestureGoals(u: Octopus, run: Runtime, arm: Arm) {
-    const solver = arm.solver, t = smooth(run.grabTime / 0.45) * (1 - smooth((run.grabTime - 0.75) / 0.35))
-    const a = solver.goals[0], b = solver.goals[1]
-    a.active = false
-    b.fraction = 1
-    b.weight = 150 * t + 1
-    b.active = true
-    b.target.set(arm.side * 0.3, 0.22, 0.86)
-    b.target.lerpVectors(arm.start[1], b.target, t)
-    solver.floorOffset = -u.y
-  }
-
-  /** Curl: proximal shortening, then the arm rolls up into a spiral that ends near the mantle, breathing slightly. */
-  private curlShapes(arm: Arm, time: number) {
-    const turn = arm.index % 2 ? 1 : -1, sway = 0.06 * Math.sin(1.1 * time + arm.index * 1.37)
-    arm.profile.sections.forEach((section, i) => {
-      const angle = [-0.15, -1.0, -1.3, -1.3][i] + sway * (1 - i / 4), across = [0, 0.12, 0.2, 0.25][i] * turn
-      Object.assign(arm.free[i], { kx: angle / section.length, ky: across / section.length, strain: -0.08, twist: 0 })
-      bounded(section, arm.free[i], arm.free[i])
-    })
-  }
-
-  private stepArms(u: Octopus, run: Runtime, dt: number) {
-    const moving = Math.abs(u.v) + Math.abs(run.surge) > 0.03 || Math.abs(u.turn) > 0.08
-    const commanded = Math.abs(run.power) > 0.05 || Math.abs(run.steer) > 0.05
+  private arms(u: Octopus, run: Runtime, dt: number) {
+    const moving = run.velocity.length() > 0.03 || Math.abs(u.turn) > 0.08
+    const commanded = Math.abs(run.forward) + Math.abs(run.right) + Math.abs(run.steer) > 0.05
     run.idle = commanded || moving || run.grab !== 'none' ? 0 : run.idle + dt
-    const idle = run.idle > 1.5
-    const front = FRONT
-    // Choose which planted arms re-plant this tick: the most displaced first, never a neighbour of a stepping arm,
-    // and never so many that fewer than four remain planted.
-    if (u.mode === 'crawl') {
-      if (idle) {
-        run.explore += dt
-        if (run.explore > 2.4) {
-          run.explore = 0
-          const order = [5, 2, 7, 0, 3, 6, 1, 4], arm = run.arms[order[run.explored++ % order.length]]
-          if (!(front.includes(arm.index) && run.grab !== 'none')) {
-            const k = run.explored * 7.31
-            arm.jitter.set((hash(k) - 0.5) * 0.16, 0, (hash(k + 1) - 0.5) * 0.16)
-          }
-        }
-      } else run.explore = 0
-      const crawlers = run.arms.filter((a) => a.role === 'plant' || a.role === 'step')
-      let stepping = crawlers.filter((a) => a.role === 'step').length
-      const limit = Math.max(0, crawlers.length - PROFILE.support.minimumArms), trigger = idle ? STEP_IDLE : STEP_MOVING
-      const candidates: { arm: Arm; urgency: number }[] = []
-      for (const arm of crawlers) {
-        if (arm.role !== 'plant') continue
-        const anchor = this.toBody(u, arm.anchor, scratch.a)
-        const want = this.ahead(u, run, arm, LEAD, scratch.b).add(arm.jitter)
-        const off = Math.hypot(anchor.x - want.x, anchor.z - want.z), radius = Math.hypot(anchor.x, anchor.z)
-        // Nearing the edge of the reach band is the most urgent of all: the body slows there until this arm re-plants.
-        const edge = Math.max(REACH.near + REACH.edge - radius, radius - REACH.far + REACH.edge)
-        const urgency = Math.max(off - trigger, arm.solver.residual - 0.02, edge > -0.03 ? 1 + edge : -1)
-        if (urgency > 0) candidates.push({ arm, urgency })
+    const idle = run.idle > 1.2
+    // Idle life: now and then one arm lets go and reaches somewhere close by.
+    if (idle && u.mode === 'crawl') {
+      run.explore += dt
+      if (run.explore > 2.1) {
+        run.explore = 0.001
+        const order = [5, 2, 7, 0, 3, 6, 1, 4], arm = run.arms[order[run.explored++ % order.length]]
+        if (arm.role === 'plant' && !run.grabbers.includes(arm.index)) { arm.role = 'peel'; arm.time = 0; arm.rod.sync() }
       }
-      candidates.sort((a, b) => b.urgency - a.urgency || a.arm.index - b.arm.index)
-      let started = 0
-      for (const { arm } of candidates) {
-        if (stepping >= limit || started >= (idle ? 1 : 3)) break
-        if (arm.neighbours.some((n) => run.arms[n].role === 'step')) continue
-        this.beginStep(u, arm, arm.jitter)
-        arm.jitter.set(0, 0, 0)
-        stepping++
-        started++
-      }
-    }
-    const strain = run.surge > 0.05 ? 0.1 : 0
+    } else run.explore = 0
+    if (u.mode === 'crawl') this.recruit(u, run)
+    const life = idle ? 1 : 0.6 + 0.4 * clamp(run.velocity.length() / OCTOPUS_LIMITS.speed, 0, 1)
     for (const arm of run.arms) {
-      const placed = arm.role !== 'free'
-      if (arm.role === 'step') {
-        arm.progress += dt / arm.duration
-        if (arm.progress >= 1) { arm.role = 'plant'; arm.anchor.copy(arm.to) }
+      arm.time += dt
+      const rod = arm.rod
+      this.relax(arm, run.time, life)
+      rod.aimStrength = 0
+      if (!run.grabbers.includes(arm.index)) rod.wrapRadius = 0
+      switch (arm.role) {
+        case 'plant': this.plant(u, run, arm, dt); break
+        case 'peel': this.peel(arm, dt); break
+        case 'recover': this.recover(u, run, arm, dt); break
+        case 'reach': case 'wrap': this.reach(u, run, arm, dt); break
+        case 'hold': this.hold(u, run, arm, dt); break
+        case 'free': this.coil(arm, run.time, dt); break
       }
-      // Planted arms move slowly relative to the body, so they are solved on alternate ticks (every fourth at rest),
-      // staggered across the arms; moving roles are solved every tick. The count is of ticks, so replays agree.
-      const due = arm.role !== 'plant' || arm.blend < 1 || (run.ticks + arm.index) % (idle ? 4 : 2) === 0
-      if (placed && due) {
-        this.bias(arm, run.time, idle, Math.min(1, Math.abs(u.v) / OCTOPUS_LIMITS.speed + Math.abs(u.turn)))
-        if (strain) for (let s = 0; s < 3; s++) arm.solver.bias[s * 3 + 2] = strain
-        if (arm.role === 'plant' || arm.role === 'step') this.plantGoals(u, arm)
-        else if (run.grab === 'gesture') this.gestureGoals(u, run, arm)
-        else this.wrapGoals(u, run, arm)
-        arm.solver.solve(1)
-      } else if (!placed) this.curlShapes(arm, run.time)
-      arm.blend = approach(arm.blend, placed ? 1 : 0, placed ? 2 : 3.5, dt)
-      arm.tendons.step(placed ? arm.solver.shapes : arm.free, dt, 0)
-      const b = smooth(arm.blend)
-      for (let s = 0; s < OCTOPUS_SECTIONS; s++) {
-        const from = arm.tendons.pose[s], to = arm.solver.shapes[s], out = arm.shown[s]
-        out.kx = lerp(from.kx, to.kx, b)
-        out.ky = lerp(from.ky, to.ky, b)
-        out.strain = lerp(from.strain, to.strain, b)
-        out.twist = lerp(from.twist, to.twist, b)
+      this.shape(arm, dt)
+      // Object holds ride on the ball.
+      for (let i = 0; i < ARM_POINTS; i++) if (rod.held[i] === OBJECT) {
+        const k = i * 3
+        rod.anchor[k] = u.ball.x + arm.offset[k]; rod.anchor[k + 1] = u.ball.y + arm.offset[k + 1]; rod.anchor[k + 2] = u.ball.z + arm.offset[k + 2]
       }
-      this.cupStep(u, run, arm, dt)
+      armRoot(u, arm.index, scratch.root, scratch.out, scratch.dorsal)
+      rod.step(dt, scratch.root, scratch.out, scratch.dorsal, 0)
+      this.seals(arm, dt)
     }
   }
 
-  /** Cups seal where they touch the floor or the ball and release distal-first as an arm lifts away. */
-  private cupStep(u: Octopus, run: Runtime, arm: Arm, dt: number) {
-    const suction = PROFILE.suction
-    arm.kinematics.update(arm.shown)
-    const ball = this.toBody(u, scratch.d.set(u.ball.x, u.ball.y, u.ball.z), scratch.b)
-    const peeling = arm.role === 'step' ? 1 - clamp(arm.progress / 0.35, 0, 1) : 1
-    arm.touching = false
-    for (let c = 0; c < OCTOPUS_CUPS; c++) {
-      const cup = arm.profile.cups[c], i = arm.index * OCTOPUS_CUPS + c
-      const p = arm.kinematics.at(cup.fraction, frameScratch).position
-      const radius = surfaceRadius(arm.profile, cup.fraction)
-      const onFloor = p.y + u.y - radius < 0.016
-      const onBall = (arm.role === 'wrap' || arm.role === 'hold') && p.distanceTo(ball) < BALL_RADIUS + radius + 0.02
-      const touching = (onFloor && arm.role !== 'free') || onBall
-      if (onFloor && cup.fraction >= CONTACT - 0.02 && cup.fraction <= CONTACT + 0.2) arm.touching = true
-      const seal = u.cups[i]
-      u.cups[i] = touching && (arm.role !== 'step' || cup.fraction <= peeling)
-        ? Math.min(1, seal + dt / suction.sealTime)
-        : Math.max(0, seal - dt / suction.releaseTime)
+  /**
+   * Which holding arms let go now: those carried to the end of their elongation range or swung far round by a turn,
+   * most urgent first, never so many that fewer than four keep hold, and never beside an arm already letting go.
+   */
+  private recruit(u: Octopus, run: Runtime) {
+    const busy = run.arms.filter((a) => a.role !== 'plant').length
+    const holding = run.arms.filter((a) => a.role === 'plant' && this.firstHold(a) >= 0).length
+    const candidates: { arm: Arm; urgency: number }[] = []
+    for (const arm of run.arms) {
+      if (arm.role !== 'plant' || run.grabbers.includes(arm.index)) continue
+      const hold = this.firstHold(arm)
+      if (hold < 0) { candidates.push({ arm, urgency: 2 }); continue }
+      const need = this.need(arm, hold)
+      armRoot(u, arm.index, scratch.root, scratch.out, scratch.dorsal)
+      const k = hold * 3, hx = arm.rod.position[k] - scratch.root.x, hz = arm.rod.position[k + 2] - scratch.root.z
+      const swing = Math.acos(clamp((hx * scratch.out.x + hz * scratch.out.z) / (Math.hypot(hx, hz) * Math.hypot(scratch.out.x, scratch.out.z) || 1), -1, 1))
+      const urgency = Math.max((need - (ELONGATION.longest - 0.05)) * 4, (ELONGATION.shortest + 0.08 - need) * 4, swing - 1.15)
+      if (urgency > 0) candidates.push({ arm, urgency })
     }
+    candidates.sort((a, b) => b.urgency - a.urgency || a.arm.index - b.arm.index)
+    let letting = busy, kept = holding
+    for (const { arm } of candidates) {
+      if (letting >= 4 || kept <= 4 && this.firstHold(arm) >= 0) break
+      if (arm.neighbours.some((n) => run.arms[n].role === 'peel')) continue
+      arm.role = 'peel'
+      arm.time = 0
+      arm.rod.sync()
+      letting++
+      if (this.firstHold(arm) >= 0) kept--
+    }
+  }
+
+  /** The elongation a holding arm needs to span from its root to its first hold. */
+  private need(arm: Arm, hold: number) {
+    const p = arm.rod.position, k = hold * 3
+    const span = Math.hypot(p[k] - p[3], p[k + 1] - p[4], p[k + 2] - p[5])
+    return span / ((hold - 1) * arm.rod.rest)
+  }
+
+  /**
+   * Holding: the proximal arm's muscle elongates or shortens to span from the root to the hold, so as the body moves
+   * away the arm pushes it by lengthening, and thins as it does. Past its range the hold slips rather than tear.
+   */
+  private plant(u: Octopus, run: Runtime, arm: Arm, dt: number) {
+    const rod = arm.rod, hold = this.firstHold(arm)
+    if (hold < 0) {
+      // Nothing held: settle what touches the floor.
+      for (let i = particle(HOLD_FROM); i < ARM_POINTS; i++) if (rod.contact[i] && !rod.held[i]) rod.hold(i)
+      this.ease(rod, 1, dt)
+      return
+    }
+    let need = this.need(arm, hold)
+    if (need > ELONGATION.slip) {
+      // A sucker slip: the whole hold slides toward the root, at most three centimetres a step, until back within range.
+      const k = hold * 3, p = rod.position
+      const dx = p[3] - rod.anchor[k], dz = p[5] - rod.anchor[k + 2], d = Math.hypot(dx, dz) || 1
+      const slide = Math.min(0.03, (need - ELONGATION.slip) * (hold - 1) * rod.rest) / d
+      for (let i = hold; i < ARM_POINTS; i++) if (rod.held[i]) {
+        const m = i * 3
+        rod.anchor[m] += dx * slide
+        rod.anchor[m + 2] += dz * slide
+      }
+      run.slips++
+      need = ELONGATION.slip
+    }
+    // The muscle always spans what it holds with a little slack, so the rod is never stretched between two fixed ends
+    // and curves into its hold rather than meeting it at an angle.
+    const target = clamp(need * 1.06, ELONGATION.shortest, 1.6)
+    for (let s = 1; s < ROD_SEGMENTS; s++) {
+      const value = s < hold ? target : 1
+      rod.stretch[s] = s < hold && value > rod.stretch[s] ? value : rod.stretch[s] + (value - rod.stretch[s]) * (1 - Math.exp(-dt / 0.06))
+    }
+    // The held stretch keeps still; the free end beyond it curls and drifts.
+    // A few suckers past the first take hold too; the last third of the arm stays free to curl and drift.
+    for (let i = hold; i < Math.min(hold + 4, particle(0.72)); i++) if (!rod.held[i] && rod.contact[i]) rod.hold(i)
+  }
+
+  /** Letting go: suckers release from the tip back toward the base, and the freed end curls back as it lifts. */
+  private peel(arm: Arm, dt: number) {
+    const rod = arm.rod
+    let last = -1
+    for (let i = ARM_POINTS - 1; i >= 0; i--) if (rod.held[i]) { last = i; break }
+    if (last >= 0 && arm.time >= 0.025) { rod.held[last] = FREE; arm.time = 0 }
+    for (let j = 1; j < ROD_SEGMENTS; j++) if (j >= last) arm.oral[j] -= 0.12
+    // Behind the remaining holds the muscle keeps the length it has, so nothing is left in tension to snap free.
+    rod.sync()
+    if (last < 0) { arm.role = 'recover'; arm.time = 0 }
+  }
+
+  /** Recovering: shortened and thickened, drawn in toward the body, then reaching out again. */
+  private recover(u: Octopus, run: Runtime, arm: Arm, dt: number) {
+    const rod = arm.rod
+    this.ease(rod, 0.8, dt, 0.3)
+    for (let j = 1; j < ROD_SEGMENTS; j++) {
+      const f = j / ROD_SEGMENTS
+      arm.oral[j] -= 0.07 * smooth((f - 0.3) / 0.4)
+    }
+    if (arm.time > 0.2) this.beginReach(u, run, arm)
+  }
+
+  /**
+   * Reaching: the bend's place along the arm comes from the foundation's force-driven bend dynamics. Behind the bend
+   * the arm straightens toward its target; ahead of it the arm is still rolled up. Suckers that touch the floor near
+   * the target take hold as the arm unrolls; for Grab, those that touch the ball hold it and the end wraps round.
+   */
+  private reach(u: Octopus, run: Runtime, arm: Arm, dt: number) {
+    const rod = arm.rod
+    if (arm.time < 0) { this.ease(rod, 0.85, dt); return }
+    const grab = run.grabbers.includes(arm.index) && run.grab !== 'gesture'
+    if (grab) arm.target.set(u.ball.x, u.ball.y, u.ball.z)
+    arm.bend.step(dt)
+    // The force-driven bend coasts after its muscle stops at 70% (the model's withdrawal); 85% counts as arrived.
+    const front = clamp(arm.bend.position / (arm.bend.settings.length * 0.85), 0, 1)
+    this.ease(rod, grab ? 1.05 : 1.06, dt)
+    for (let j = 1; j < ROD_SEGMENTS; j++) {
+      const f = j / ROD_SEGMENTS
+      if (f <= front) { arm.oral[j] *= 0.3; arm.lateral[j] *= 0.3 }
+      else arm.oral[j] = -0.2 * smooth((f - front) / 0.28)
+    }
+    rod.aim.copy(arm.target)
+    if (grab) {
+      // Aim beside the ball on this arm's side, then wrap round it.
+      armRoot(u, arm.index, scratch.root, scratch.out, scratch.dorsal)
+      const tx = arm.target.x - scratch.root.x, tz = arm.target.z - scratch.root.z, l = Math.hypot(tx, tz) || 1
+      const sx = -tz / l * arm.side * (BALL_RADIUS + 0.03), sz = tx / l * arm.side * (BALL_RADIUS + 0.03)
+      rod.aim.set(arm.target.x + sx, arm.target.y, arm.target.z + sz)
+      rod.wrapCentre.set(u.ball.x, u.ball.y, u.ball.z)
+      rod.wrapRadius = front > 0.55 ? BALL_RADIUS + 0.02 : 0
+      rod.wrapFrom = particle(0.5)
+    }
+    rod.aimUntil = Math.max(2, Math.floor(front * ROD_SEGMENTS))
+    rod.aimStrength = 0.14
+    // Holds form where the unrolled arm touches down near its target, or on the ball.
+    if (front > 0.5) for (let i = particle(HOLD_FROM); i <= Math.min(ROD_SEGMENTS, particle(front) + 1); i++) {
+      if (rod.held[i]) continue
+      const k = i * 3, p = rod.position
+      if (grab) {
+        const r = surfaceRadius(rod.arm, i / ROD_SEGMENTS)
+        if (Math.hypot(p[k] - u.ball.x, p[k + 1] - u.ball.y, p[k + 2] - u.ball.z) < BALL_RADIUS + r + 0.015) {
+          rod.hold(i, OBJECT)
+          arm.offset[k] = p[k] - u.ball.x; arm.offset[k + 1] = p[k + 1] - u.ball.y; arm.offset[k + 2] = p[k + 2] - u.ball.z
+        }
+      } else if (rod.contact[i] && Math.hypot(p[k] - arm.target.x, p[k + 2] - arm.target.z) < 0.08) rod.hold(i)
+    }
+    if (!grab && (front >= 1 || arm.time > 1.2) && arm.role === 'reach' && !(run.grab === 'gesture' && run.grabbers.includes(arm.index))) {
+      for (let i = particle(HOLD_FROM); i < ARM_POINTS; i++) if (rod.contact[i] && !rod.held[i]) rod.hold(i)
+      arm.role = 'plant'
+      arm.time = 0
+    }
+  }
+
+  /** Holding the ball: wrapped round it and carried; the rest of the arm follows softly. */
+  private hold(u: Octopus, run: Runtime, arm: Arm, dt: number) {
+    const rod = arm.rod
+    this.ease(rod, 1, dt)
+    rod.wrapCentre.set(u.ball.x, u.ball.y, u.ball.z)
+    rod.wrapRadius = BALL_RADIUS + 0.02
+    rod.wrapFrom = particle(0.5)
+  }
+
+  /** Curl: shortened and coiled back over itself, swaying a little. */
+  private coil(arm: Arm, time: number, dt: number) {
+    const rod = arm.rod
+    for (let i = 0; i < ARM_POINTS; i++) rod.held[i] = FREE
+    this.ease(rod, 0.82, dt)
+    const sway = 0.04 * Math.sin(1.1 * time + arm.phase)
+    for (let j = 1; j < ROD_SEGMENTS; j++) {
+      const f = j / ROD_SEGMENTS
+      arm.oral[j] = -(0.08 + 0.42 * smooth((f - 0.1) / 0.5)) + sway * (1 - f)
+      arm.lateral[j] = 0.05 * arm.side * f
+    }
+  }
+
+  /** Ease the rod's joint targets toward the controller's, at a muscle's finite rate. */
+  private shape(arm: Arm, dt: number) {
+    const k = 1 - Math.exp(-dt / 0.09), rod = arm.rod
+    for (let j = 1; j < ROD_SEGMENTS; j++) {
+      rod.bendOral[j] += (arm.oral[j] - rod.bendOral[j]) * k
+      rod.bendSide[j] += (arm.lateral[j] - rod.bendSide[j]) * k
+    }
+  }
+
+  /** Ease every segment's elongation toward a value (a muscle's finite rate). */
+  private ease(rod: ArmRod, value: number, dt: number, seconds = 0.15) {
+    const k = 1 - Math.exp(-dt / seconds)
+    for (let s = 1; s < ROD_SEGMENTS; s++) rod.stretch[s] += (value - rod.stretch[s]) * k
+  }
+
+  /** Seals form over the profile's seal time where a sucker holds, and release over its release time. */
+  private seals(arm: Arm, dt: number) {
+    const suction = PROFILE.suction
+    for (let i = 0; i < ARM_POINTS; i++)
+      arm.seal[i] = arm.rod.held[i] ? Math.min(1, arm.seal[i] + dt / suction.sealTime) : Math.max(0, arm.seal[i] - dt / suction.releaseTime)
   }
 
   private ballStep(u: Octopus, run: Runtime, dt: number) {
@@ -752,7 +805,7 @@ export class OctopusLogic extends Machine {
       }
     }
     // The body pushes a loose ball aside instead of passing through it.
-    const dx = ball.x - u.x, dz = ball.z - u.z, d = Math.hypot(dx, dz), clear = 0.3 + BALL_RADIUS
+    const dx = ball.x - u.x, dz = ball.z - u.z, d = Math.hypot(dx, dz), clear = 0.26 + BALL_RADIUS
     if (d < clear && ball.y < u.y + 0.2) {
       const k = d > 1e-6 ? (clear - d) / d : 0
       ball.x += dx * k
@@ -762,20 +815,18 @@ export class OctopusLogic extends Machine {
     ball.z = clamp(ball.z, -OCTOPUS_LIMITS.z - 0.6, OCTOPUS_LIMITS.z + 0.6)
   }
 
-  /** Copy the shown pose and roles into the presentation state. */
+  /** Copy rod positions, cup seals and roles into the presentation state. */
   private publish(u: Octopus, run: Runtime) {
     u.mantle = run.mantle.fraction
     for (const arm of run.arms) {
       u.roles[arm.index] = arm.role
-      for (let s = 0; s < OCTOPUS_SECTIONS; s++) {
-        const i = shapeAt(arm.index, s), shape = arm.shown[s]
-        u.shapes[i] = shape.kx
-        u.shapes[i + 1] = shape.ky
-        u.shapes[i + 2] = shape.strain
-        u.shapes[i + 3] = shape.twist
+      const p = arm.rod.position
+      for (let i = 0; i < ARM_POINTS; i++) {
+        const k = pointAt(arm.index, i)
+        u.arms[k] = p[i * 3]; u.arms[k + 1] = p[i * 3 + 1]; u.arms[k + 2] = p[i * 3 + 2]
       }
+      const cups = PROFILE.arms[arm.index].cups
+      for (let c = 0; c < OCTOPUS_CUPS; c++) u.cups[arm.index * OCTOPUS_CUPS + c] = arm.seal[particle(cups[c].fraction)]
     }
   }
 }
-
-const frameScratch = { position: new Vector3(), orientation: new Quaternion() }

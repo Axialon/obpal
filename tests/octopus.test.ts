@@ -1,57 +1,44 @@
 import { describe, expect, it } from 'vitest'
 import { Vector3 } from 'three'
 import { emptyPad, type PadState } from '@obpal/core'
-import { BALL_RADIUS, CONTACT, FRONT, OCTOPUS_LIMITS, OctopusLogic, REACH } from '../src/sim/devices/octopus'
-import { OCTOPUS_PROFILE, OCTOPUS_SECTIONS, SHAPE_STRIDE, profileYaw, shapeAt } from '../src/sim/devices/octopus-types'
-import { ArmSolver, surfaceRadius } from '../src/sim/continuum/solve'
+import { BALL_RADIUS, ELONGATION, OCTOPUS_LIMITS, OctopusLogic } from '../src/sim/devices/octopus'
+import { ARM_POINTS, OCTOPUS_PROFILE } from '../src/sim/devices/octopus-types'
+import { ArmRod, FLOOR, ROD_SEGMENTS, surfaceRadius } from '../src/sim/continuum/rod'
 import { restInput, type DeviceInput } from '../src/sim/devices/types'
 
-type Arm = { solver: ArmSolver; role: string; anchor: Vector3; touching: boolean; blend: number }
-const armsOf = (logic: OctopusLogic) => (logic as unknown as { run: { arms: Arm[] }[] }).run[0].arms
-const pad = (x: number, y: number, buttons = 0): PadState => ({ ...emptyPad(), axes: [x, y, 0, 0], buttons })
-const gamepad = (x = 0, y = 0, presses: string[] = []): DeviceInput => ({ ...restInput(), pad: pad(x, y), presses })
+type Rod = ArmRod
+type Arm = { rod: Rod; role: string; time: number; target: Vector3; bend: { position: number; velocity: number } }
+type Run = { arms: Arm[]; velocity: Vector3; route: number; grabbers: number[] }
+const runOf = (logic: OctopusLogic) => (logic as unknown as { run: Run[] }).run[0]
+const pad = (x: number, y: number, rx = 0): PadState => ({ ...emptyPad(), axes: [x, y, rx, 0] })
+const gamepad = (x = 0, y = 0, presses: string[] = [], rx = 0): DeviceInput => ({ ...restInput(), pad: pad(x, y, rx), presses })
 
-/** Where an arm's planted contact site is in the world, against where it was planted. */
-function slip(logic: OctopusLogic, arm: Arm) {
-  const u = logic.units[0], p = arm.solver.pointAt(CONTACT, new Vector3())
-  const yaw = profileYaw(u.h), c = Math.cos(yaw), s = Math.sin(yaw)
-  return Math.hypot(c * p.x + s * p.z + u.x - arm.anchor.x, -s * p.x + c * p.z + u.z - arm.anchor.z)
-}
-
-describe('the octopus solver', () => {
-  it('places a planted contact within a centimetre across the working reach band, from a warm start', () => {
-    const arm = OCTOPUS_PROFILE.arms[0], angle = Math.atan2(arm.position.x, arm.position.z), solver = new ArmSolver(arm, 1)
-    solver.relax(0, 0.2, 0.12, 0, 0.02); solver.relax(1, 0.1, -0.42, 0, 0.02); solver.relax(2, -0.1, 0.5, 0, 0.02); solver.relax(3, -0.85, 0.45, 0, 0.4)
-    solver.floorOffset = -OCTOPUS_LIMITS.crawlHeight
-    const goal = solver.goals[0]
-    Object.assign(goal, { fraction: CONTACT, weight: 400, active: true })
-    const at = (radius: number, bearing: number) =>
-      goal.target.set(Math.sin(angle + bearing) * radius, -OCTOPUS_LIMITS.crawlHeight + surfaceRadius(arm, CONTACT) + 0.006, Math.cos(angle + bearing) * radius)
-    at(REACH.home, 0)
-    for (let i = 0; i < 30; i++) solver.solve(2)
-    let worst = 0
-    const near = REACH.near + REACH.edge, far = REACH.far - REACH.edge
-    for (const radius of [near, (near + REACH.home) / 2, REACH.home, (REACH.home + far) / 2, far]) for (const bearing of [-0.2, 0, 0.2]) {
-      // Track there from home, as a planted arm does, then hold.
-      for (let k = 1; k <= 30; k++) { at(REACH.home + (radius - REACH.home) * k / 30, bearing * k / 30); solver.solve(1) }
-      for (let k = 0; k < 10; k++) solver.solve(1)
-      worst = Math.max(worst, solver.residual)
-      for (let k = 1; k <= 30; k++) { at(radius + (REACH.home - radius) * k / 30, bearing * (1 - k / 30)); solver.solve(1) }
+describe('the soft arm rod', () => {
+  const arm = OCTOPUS_PROFILE.arms[0]
+  it('keeps constant volume: the section narrows as the arm elongates and thickens as it shortens', () => {
+    for (const f of [0, 0.3, 0.7]) {
+      expect(surfaceRadius(arm, f, 1.25)).toBeCloseTo(surfaceRadius(arm, f) / Math.sqrt(1.25), 9)
+      expect(surfaceRadius(arm, f, 0.8)).toBeGreaterThan(surfaceRadius(arm, f))
     }
-    expect(worst).toBeLessThan(0.01)
   })
 
-  it('keeps every section within the profile’s bend and strain limits, and the surface on or above the floor', () => {
-    const logic = new OctopusLogic(), u = logic.units[0]
-    for (let f = 0; f < 600; f++) logic.step([gamepad(f < 300 ? 0 : 0.8, -1)], 1 / 60)
-    for (let a = 0; a < OCTOPUS_PROFILE.arms.length; a++) for (let s = 0; s < OCTOPUS_SECTIONS; s++) {
-      const section = OCTOPUS_PROFILE.arms[a].sections[s], i = shapeAt(a, s)
-      const [kx, ky, strain] = u.shapes.slice(i, i + 3)
-      expect(Math.hypot(kx, ky) * section.length * (1 + strain)).toBeLessThanOrEqual(section.bend + 1e-9)
-      expect(strain).toBeGreaterThanOrEqual(section.strain[0] - 1e-9)
-      expect(strain).toBeLessThanOrEqual(section.strain[1] + 1e-9)
+  it('settles under gravity onto the floor without passing through it, and holds stay where they are', () => {
+    const rod = new ArmRod(arm), root = new Vector3(0, 0.15, 0), direction = new Vector3(0, -0.15, 1).normalize(), up = new Vector3(0, 1, 0)
+    rod.place(root, direction, up)
+    // A gentle droop toward the oral side, as the octopus's relaxed arms have.
+    rod.bendOral.fill(0.06)
+    for (let i = 0; i < 480; i++) rod.step(1 / 120, root, direction, up, 0)
+    for (let i = 2; i < rod.count; i++) expect(rod.position[i * 3 + 1]).toBeGreaterThanOrEqual(surfaceRadius(arm, i / ROD_SEGMENTS) * 0.85 - 1e-9)
+    expect(rod.contact.reduce((a, b) => a + b, 0)).toBeGreaterThan(5)
+    rod.hold(12, FLOOR)
+    const held = rod.position.slice(36, 39)
+    // Move the root about: the hold does not move and nothing jumps.
+    for (let i = 0; i < 240; i++) {
+      root.x = 0.15 * Math.sin(i / 30)
+      rod.step(1 / 120, root, direction, up, 0)
+      expect(Array.from(rod.position.slice(36, 39))).toEqual(Array.from(held))
+      expect(rod.speed()).toBeLessThan(0.03)
     }
-    expect(u.shapes.length).toBe(OCTOPUS_PROFILE.arms.length * OCTOPUS_SECTIONS * SHAPE_STRIDE)
   })
 })
 
@@ -65,97 +52,156 @@ describe('the octopus crawl', () => {
     const [a, b, c] = [30, 60, 120].map(run)
     for (const other of [b, c]) {
       for (const key of ['x', 'y', 'z', 'h', 'v', 'turn', 'mantle'] as const) expect(Math.abs(other[key] - a[key])).toBeLessThan(1e-6)
-      expect(Math.max(...other.shapes.map((v, i) => Math.abs(v - a.shapes[i])))).toBeLessThan(1e-6)
+      expect(Math.max(...other.arms.map((v, i) => Math.abs(v - a.arms[i])))).toBeLessThan(1e-6)
       expect(other.roles).toEqual(a.roles)
     }
   })
 
-  it('crawls on planted arms: at least four carry it, planted sites hold within 1.5 cm (p95 5 mm), the body stays up', () => {
-    const logic = new OctopusLogic(), arms = armsOf(logic), u = logic.units[0], slips: number[] = []
-    const planted = arms.map(() => 0)
-    let least = 8, lowest = Infinity
-    for (let f = 0; f < 900; f++) {
-      const t = f / 60
-      logic.step([gamepad(t > 5 && t < 8 ? 0.8 : t > 11 ? -0.6 : 0, t < 13 ? -1 : 0)], 1 / 60)
-      arms.forEach((arm, i) => {
-        planted[i] = arm.role === 'plant' ? planted[i] + 1 : 0
-        if (planted[i] > 4 && arm.blend >= 1) slips.push(slip(logic, arm))
-      })
-      least = Math.min(least, arms.filter((a) => a.role === 'plant').length)
-      if (f > 30) lowest = Math.min(lowest, u.y)
+  it('glides by pushing: holding arms elongate as the body moves away, the body never jumps, holds never slide', () => {
+    const logic = new OctopusLogic(), u = logic.units[0], run = runOf(logic)
+    const anchors = run.arms.map(() => new Map<number, number[]>())
+    let fastest = 0, worstChange = 0, least = 8, slid = 0, elongated = 0
+    const previous = run.velocity.clone(), lengths = run.arms.map(() => 0)
+    const roles = new Set<string>()
+    for (let f = 0; f < 600; f++) {
+      logic.step([gamepad(f > 300 && f < 420 ? 0.7 : 0, -1)], 1 / 60)
+      worstChange = Math.max(worstChange, run.velocity.distanceTo(previous))
+      previous.copy(run.velocity)
+      let holding = 0
+      for (const [i, arm] of run.arms.entries()) {
+        fastest = Math.max(fastest, arm.rod.speed())
+        roles.add(arm.role)
+        const first = Array.from(arm.rod.held).findIndex((h, k) => k > 1 && h === FLOOR)
+        if (arm.role === 'plant' && first > 0) {
+          holding++
+          // Elongation of the arm between root and hold, relative to when it took hold.
+          const stretch = arm.rod.stretch[2]
+          if (!lengths[i]) lengths[i] = stretch
+          elongated = Math.max(elongated, stretch - lengths[i])
+        } else lengths[i] = 0
+        for (let k = 2; k < ARM_POINTS; k++) {
+          const at = Array.from(arm.rod.position.slice(k * 3, k * 3 + 3))
+          if (arm.rod.held[k] !== FLOOR) { anchors[i].delete(k); continue }
+          const was = anchors[i].get(k)
+          if (was) slid = Math.max(slid, Math.hypot(at[0] - was[0], at[2] - was[2]))
+          anchors[i].set(k, at)
+        }
+      }
+      if (f > 30) least = Math.min(least, holding)
     }
-    slips.sort((a, b) => a - b)
-    expect(least).toBeGreaterThanOrEqual(OCTOPUS_PROFILE.support.minimumArms)
-    expect(slips[Math.floor(slips.length * 0.95)]).toBeLessThan(0.005)
-    expect(slips[slips.length - 1]).toBeLessThan(0.015)
-    expect(lowest).toBeGreaterThan(OCTOPUS_LIMITS.crawlHeight - 0.03)
-    expect(Math.hypot(u.x, u.z - 0.9)).toBeGreaterThan(1)
+    // Two frames of acceleration at most: the body eases, it never jumps.
+    expect(worstChange).toBeLessThanOrEqual(OCTOPUS_LIMITS.accel * (2 / 60) + 1e-9)
+    expect(fastest).toBeLessThan(0.03)
+    expect(least).toBeGreaterThanOrEqual(3)
+    expect(elongated).toBeGreaterThan(0.15)
+    // Holds stay put except for counted sucker slips, each at most 3 cm a step.
+    expect(slid).toBeLessThan(0.15)
+    expect(logic.slips).toBeLessThan(40)
+    expect(Math.hypot(u.x, u.z - 0.9)).toBeGreaterThan(1.2)
+    // Several arms at different phases at once.
+    expect([...roles].filter((r) => ['plant', 'peel', 'recover', 'reach'].includes(r)).length).toBe(4)
   })
 
-  it('steps by contact, not a clock: standing still it settles and stops stepping', () => {
-    const logic = new OctopusLogic(), arms = armsOf(logic)
-    for (let f = 0; f < 120; f++) logic.step([gamepad(0, -1)], 1 / 60)
-    let steps = 0
-    for (let f = 0; f < 120; f++) {
-      logic.step([gamepad()], 1 / 60)
-      if (f > 60) steps += arms.filter((a) => a.role === 'step').length
+  it('has no fixed rhythm: arms let go at irregular intervals, each when its own hold runs out', () => {
+    const logic = new OctopusLogic(), run = runOf(logic), starts: number[][] = run.arms.map(() => [])
+    const was = run.arms.map((a) => a.role)
+    for (let f = 0; f < 900; f++) {
+      logic.step([gamepad(f > 400 && f < 520 ? -0.6 : 0, -1)], 1 / 60)
+      run.arms.forEach((arm, i) => { if (arm.role === 'peel' && was[i] !== 'peel') starts[i].push(f); was[i] = arm.role })
     }
-    // After the body stops, only the settling steps of arms that were mid-stride remain.
-    expect(steps).toBeLessThan(60)
+    const intervals = starts.flatMap((s) => s.slice(1).map((f, k) => f - s[k]))
+    const mean = intervals.reduce((a, b) => a + b, 0) / intervals.length
+    const spread = Math.sqrt(intervals.reduce((a, b) => a + (b - mean) ** 2, 0) / intervals.length) / mean
+    expect(intervals.length).toBeGreaterThan(10)
+    expect(spread).toBeGreaterThan(0.2)
+  })
+
+  it('crawls sideways with its heading unchanged: course and heading are separate', () => {
+    const logic = new OctopusLogic(), u = logic.units[0]
+    for (let f = 0; f < 360; f++) logic.step([gamepad(0, 0, [], 1)], 1 / 60)
+    expect(Math.abs(u.h)).toBeLessThan(1e-9)
+    expect(u.x - 0).toBeGreaterThan(0.4)
+    expect(Math.abs(u.z - 0.9)).toBeLessThan(0.12)
+  })
+
+  it('reaches by a bend travelling from base to tip, its speed rising then falling, and holds within centimetres of its target', () => {
+    const logic = new OctopusLogic(), run = runOf(logic)
+    let watched = -1, done = false
+    const front: number[] = []
+    const misses: number[] = []
+    for (let f = 0; f < 600; f++) {
+      logic.step([gamepad(0, -1)], 1 / 60)
+      for (const [i, arm] of run.arms.entries()) {
+        if (watched < 0 && arm.role === 'reach' && arm.time > 0) watched = i
+        // The first whole reach of the first arm seen reaching.
+        if (i === watched && !done) { if (arm.role === 'reach') front.push(arm.bend.position); else if (front.length) done = true }
+        if (arm.role === 'plant' && arm.time === 0) {
+          // Just landed: how far its holds are from where it reached.
+          const held = Array.from(arm.rod.held).map((h, k) => h === FLOOR ? k : -1).filter((k) => k >= 0)
+          // The hold nearest the target: where the unrolled arm actually took the floor there.
+          if (held.length) misses.push(Math.min(...held.map((h) => Math.hypot(arm.rod.position[h * 3] - arm.target.x, arm.rod.position[h * 3 + 2] - arm.target.z))))
+        }
+      }
+    }
+    const speeds = front.slice(1).map((p, i) => p - front[i])
+    const peak = speeds.indexOf(Math.max(...speeds))
+    expect(front.every((p, i) => i === 0 || p >= front[i - 1])).toBe(true)
+    expect(peak).toBeGreaterThan(0)
+    expect(peak).toBeLessThan(speeds.length - 1)
+    misses.sort((a, b) => a - b)
+    expect(misses.length).toBeGreaterThan(5)
+    expect(misses[Math.floor(misses.length / 2)]).toBeLessThan(0.05)
+    expect(misses[misses.length - 1]).toBeLessThan(0.12)
   })
 })
 
 describe('the octopus controls', () => {
-  it('grabs the ball with the front pair, carries it and scores in the ring', () => {
-    const logic = new OctopusLogic(), u = logic.units[0]
-    // Put the ball just ahead of the mouth.
-    const yaw = profileYaw(u.h)
-    Object.assign(u.ball, { x: u.x + Math.sin(yaw) * 0.6, z: u.z + Math.cos(yaw) * 0.6, y: BALL_RADIUS })
+  it('grabs the ball with the pair nearest it, carries it and scores in the ring', () => {
+    const logic = new OctopusLogic(), u = logic.units[0], run = runOf(logic)
+    Object.assign(u.ball, { x: u.x + 0.6, z: u.z, y: BALL_RADIUS })
     logic.step([gamepad(0, 0, ['grab'])], 1 / 60)
-    for (let f = 0; f < 70; f++) logic.step([gamepad()], 1 / 60)
+    for (let f = 0; f < 150 && !u.ball.held; f++) logic.step([gamepad()], 1 / 60)
     expect(u.ball.held).toBe(true)
-    expect(u.roles.filter((r, i) => FRONT.includes(i) && r === 'hold')).toHaveLength(2)
-    expect(u.ball.y).toBeGreaterThan(BALL_RADIUS + 0.05)
-    // Carry it over the ring and let go.
-    Object.assign(u, { x: u.den[0] - Math.sin(yaw) * 0.46, z: u.den[1] - Math.cos(yaw) * 0.46 })
+    expect(run.grabbers.every((i) => u.roles[i] === 'hold')).toBe(true)
     for (let f = 0; f < 60; f++) logic.step([gamepad()], 1 / 60)
+    expect(u.ball.y).toBeGreaterThan(BALL_RADIUS + 0.03)
+    // Carry it over the ring and let go.
+    const dx = u.ball.x - u.x, dz = u.ball.z - u.z
+    Object.assign(u, { x: u.den[0] - dx, z: u.den[1] - dz })
+    Object.assign(u.ball, { x: u.den[0], z: u.den[1] })
+    for (let f = 0; f < 30; f++) logic.step([gamepad()], 1 / 60)
     logic.drain()
     logic.step([gamepad(0, 0, ['grab'])], 1 / 60)
-    for (let f = 0; f < 90; f++) logic.step([gamepad()], 1 / 60)
+    for (let f = 0; f < 120; f++) logic.step([gamepad()], 1 / 60)
     expect(u.ball.held).toBe(false)
     expect(u.score).toBe(1)
     expect(logic.drain().some((e) => e.kind === 'score')).toBe(true)
-    expect(u.roles.every((r) => r === 'plant' || r === 'step')).toBe(true)
   })
 
-  it('reaches instead when the ball is out of reach, and keeps crawling on the other arms', () => {
+  it('reaches instead when the ball is out of reach', () => {
     const logic = new OctopusLogic(), u = logic.units[0]
     logic.step([gamepad(0, 0, ['grab'])], 1 / 60)
     expect(logic.drain().map((e) => e.text)).toContain('Reaching')
-    for (let f = 0; f < 30; f++) logic.step([gamepad()], 1 / 60)
-    expect(FRONT.every((i) => u.roles[i] === 'reach')).toBe(true)
-    for (let f = 0; f < 120; f++) logic.step([gamepad()], 1 / 60)
+    for (let f = 0; f < 200; f++) logic.step([gamepad()], 1 / 60)
     expect(u.ball.held).toBe(false)
-    expect(FRONT.every((i) => u.roles[i] !== 'reach')).toBe(true)
   })
 
-  it('curls onto its arms and rests on the floor, then plants again', () => {
+  it('curls onto its arms and rests, then reaches back down and holds again', () => {
     const logic = new OctopusLogic(), u = logic.units[0]
     logic.step([gamepad(0, 0, ['curl'])], 1 / 60)
     for (let f = 0; f < 120; f++) logic.step([gamepad(0, -1)], 1 / 60)
     expect(u.mode).toBe('curl')
     expect(u.roles.every((r) => r === 'free')).toBe(true)
-    // It cannot crawl while curled, and it rests rather than hovering at crawl height.
     expect(Math.hypot(u.x, u.z - 0.9)).toBeLessThan(0.05)
     expect(u.y).toBeLessThan(OCTOPUS_LIMITS.crawlHeight - 0.03)
-    expect(u.y).toBeGreaterThan(0)
     logic.step([gamepad(0, 0, ['curl'])], 1 / 60)
-    for (let f = 0; f < 120; f++) logic.step([gamepad()], 1 / 60)
+    for (let f = 0; f < 150; f++) logic.step([gamepad()], 1 / 60)
     expect(u.mode).toBe('crawl')
+    expect(u.roles.filter((r) => r === 'plant').length).toBeGreaterThanOrEqual(4)
     expect(u.y).toBeGreaterThan(OCTOPUS_LIMITS.crawlHeight - 0.02)
   })
 
-  it('pulses the mantle through the jet cycle and pushes off on its arms', () => {
+  it('pulses the mantle through the jet cycle and pushes off on its holding arms', () => {
     const logic = new OctopusLogic(), u = logic.units[0], z = u.z
     logic.step([gamepad(0, 0, ['pulse'])], 1 / 60)
     let least = 1
@@ -170,12 +216,11 @@ describe('the octopus controls', () => {
     const logic = new OctopusLogic(), u = logic.units[0]
     for (let f = 0; f < 60; f++) logic.step([gamepad(0, -1)], 1 / 60)
     logic.step([gamepad(0, -1, ['stop'])], 1 / 60)
-    const at = [u.x, u.z, ...u.shapes]
+    const at = [u.x, u.z, ...u.arms]
     for (let f = 0; f < 60; f++) logic.step([gamepad(0, -1)], 1 / 60)
     expect(u.stopped).toBe(true)
-    expect([u.x, u.z, ...u.shapes]).toEqual(at)
+    expect([u.x, u.z, ...u.arms]).toEqual(at)
     expect(logic.readout(0)).toMatch(/^Stopped/)
-    // Back to neutral, then a fresh push resumes.
     logic.step([gamepad()], 1 / 60)
     logic.step([gamepad(0, -1)], 1 / 60)
     expect(u.stopped).toBe(false)
@@ -183,18 +228,18 @@ describe('the octopus controls', () => {
     expect(u.z).toBeLessThan(at[1])
   })
 
-  it('falls safely when its support goes: down onto what touches the floor, never through it', () => {
+  it('falls safely when its support goes, settling onto its arms and web, never below them', () => {
     const logic = new OctopusLogic(), u = logic.units[0]
     logic.step([gamepad(0, 0, ['curl'])], 1 / 60)
     u.y = 0.6
     let lowest = Infinity
     for (let f = 0; f < 120; f++) { logic.step([gamepad()], 1 / 60); lowest = Math.min(lowest, u.y) }
     expect(u.y).toBeLessThan(0.2)
-    expect(lowest).toBeGreaterThan(0.04)
+    expect(lowest).toBeGreaterThanOrEqual(OCTOPUS_LIMITS.restHeight - 1e-9)
   })
 
   it('shows itself when nobody holds it: wraps the ball, carries it into the ring, without scoring or events', () => {
-    const logic = new OctopusLogic(), u = logic.units[0], run = (logic as unknown as { run: { route: number }[] }).run[0]
+    const logic = new OctopusLogic(), u = logic.units[0], run = runOf(logic)
     let held = false
     for (let f = 0; f < 60 * 45 && !run.route; f++) { logic.step([null], 1 / 60); held ||= u.ball.held }
     expect(u.showing).toBe(true)
@@ -213,8 +258,9 @@ describe('the octopus controls', () => {
     input.quiet = true
     for (const dt of [NaN, Infinity, -1, 0, 0.05]) logic.step([input], dt)
     expect(logic.readout(0)).not.toMatch(/NaN|Infinity/)
-    expect([u.x, u.y, u.z, u.h, ...u.shapes, ...u.cups].every(Number.isFinite)).toBe(true)
+    expect([u.x, u.y, u.z, u.h, ...u.arms, ...u.cups].every(Number.isFinite)).toBe(true)
     logic.home(0)
     expect([u.x, u.z, u.h, u.mode]).toEqual([0, 0.9, 0, 'crawl'])
+    expect(ELONGATION.shortest).toBeLessThan(1)
   })
 })

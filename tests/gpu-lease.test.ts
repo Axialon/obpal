@@ -1,10 +1,27 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm, mkdir, writeFile, tmpdir, join, pid, childGpuPath, startGpuChild } from './gpu-node.mjs'
 import { acquireGpuLease, gpuStatus } from '../scripts/lib/gpu-lease.mjs'
 import { detectE2eGpu, e2eBrowserOptions } from '../scripts/lib/browser.mjs'
 
+/** Paths whose reads fail like Windows refusing a name that is mid-delete, and how many reads that has refused. */
+const refused = vi.hoisted(() => ({ paths: new Set<string>(), reads: 0 }))
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<{ readFile: (...args: unknown[]) => Promise<unknown> }>()
+  const readFile = async (path: unknown, ...rest: unknown[]) => {
+    if (typeof path === 'string' && refused.paths.has(path)) {
+      refused.reads++
+      throw Object.assign(new Error(`EPERM: operation not permitted, open '${path}'`), { code: 'EPERM' })
+    }
+    return actual.readFile(path, ...rest)
+  }
+  return { ...actual, readFile, default: { ...actual, readFile } }
+})
+
 const dirs: string[] = []
-afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }) })
+afterEach(async () => {
+  refused.paths.clear()
+  for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true })
+})
 const lock = async () => { const dir = await mkdtemp(join(tmpdir(), 'obpal-gpu-test-')); dirs.push(dir); return join(dir, 'gpu.lock') }
 const processStart = async (ownerPid: number) => ownerPid === pid ? 'current-start' : null
 const acquire = (file: string, options: Parameters<typeof acquireGpuLease>[0] = {}) => acquireGpuLease({ file, pollMs: 2, processStart, ...options })
@@ -140,6 +157,63 @@ describe('the cross-lane GPU semaphore', () => {
     if (admitted === 'older') { await (await older)!(); await (await newer)!() }
     else { await (await newer)!(); await (await older)!() }
     expect(admitted).toBe('older')
+  })
+
+  it('keeps an earlier entry it cannot read in line, then admits behind it once it is gone', async () => {
+    const file = await lock(), ahead = join(`${file}.d`, 'queue-1.json')
+    await seed(file, 'queue-1.json', { pid, processStartedAt: 'current-start', token: 'ahead' })
+    refused.paths.add(ahead)
+    const controller = new AbortController()
+    let refusedOnce!: () => void
+    const firstRefusal = new Promise<void>(resolve => { refusedOnce = resolve })
+    let entered = false
+    const request = acquire(file, { slots: 1, signal: controller.signal, waiting: refusedOnce }).then(release => { entered = true; return release })
+    try {
+      await Promise.race([firstRefusal, request])
+      const seen = refused.reads
+      // Each refused poll reads the entry again; two more polls pass without anyone getting ahead of it.
+      await until(async () => refused.reads >= seen + 22, 400)
+      expect(entered).toBe(false)
+      expect((await gpuStatus({ file })).queue.map(owner => owner.order)).toEqual([2])
+      refused.paths.clear()
+      await rm(ahead, { recursive: false, force: true })
+      const release = await request
+      expect((await gpuStatus({ file })).holders).toHaveLength(1)
+      await release!()
+    } finally { controller.abort(new Error('done')); await request.catch(() => {}) }
+  })
+
+  it('hands out tickets above every listed waiter even when the counter is lost', async () => {
+    const file = await lock()
+    await seed(file, 'queue-5.json', { pid, processStartedAt: 'current-start', token: 'ahead' })
+    const controller = new AbortController(), request = acquire(file, { slots: 1, signal: controller.signal })
+    const rejected = expect(request).rejects.toThrow('stop')
+    await until(async () => (await gpuStatus({ file })).queue.length === 2)
+    expect((await gpuStatus({ file })).queue.map(owner => owner.order)).toEqual([5, 6])
+    controller.abort(new Error('stop'))
+    await rejected
+  })
+
+  it('waits on a lock it cannot read instead of failing or stealing it', async () => {
+    const file = await lock()
+    await seed(file, 'legacy')
+    const original = await readFile(file, 'utf8')
+    const live = async (ownerPid: number) => ownerPid === pid ? 'current-start' : 'old-start'
+    refused.paths.add(file)
+    expect(await acquire(file, { timeoutMs: 40, processStart: live })).toBeNull()
+    expect(refused.reads).toBeGreaterThan(0)
+    refused.paths.clear()
+    expect(await readFile(file, 'utf8')).toBe(original)
+    refused.paths.add(file)
+    const request = acquire(file, { timeoutMs: 60_000, processStart: live })
+    const seen = refused.reads
+    await until(async () => refused.reads >= seen + 11, 400)
+    refused.paths.clear()
+    await rm(file, { recursive: false, force: true })
+    const release = await request
+    expect(release).not.toBeNull()
+    await release!()
+    await expect(readFile(file)).rejects.toThrow()
   })
 
   it.each(['dead PID', 'reused PID'])('reclaims a %s slot and queue with a log for each owner', async reason => {
