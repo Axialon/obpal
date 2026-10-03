@@ -58,6 +58,7 @@ import { runHomeQr } from './e2e-home-qr.mjs'
 import { runHomeSurfaces } from './e2e-home-surfaces.mjs'
 import { runHomeMatrix } from './e2e-home-matrix.mjs'
 import { runHomeHeadings } from './e2e-home-headings.mjs'
+import { runHomeScrollProof } from './e2e-home-scroll-proof.mjs'
 import { rawRun } from './lib/distill.mjs'
 import { startupProbe, startupPath, startupText, watchStartup } from './lib/home-startup.mjs'
 
@@ -209,6 +210,7 @@ try {
   if (!ONLY || ONLY === 'warm-up' || FIELD_PROFILE) await runWarmup(local, check, { home: true })
 
   await runHomeContacts(browser, local, check)
+  await runHomeScrollProof(browser, local, check)
   await runHomeMotion(browser, local, check)
   await runHomeQr(browser, local, check)
   await runHomeSurfaces(browser, local, check)
@@ -1110,6 +1112,8 @@ try {
   })
 
   await check('a click hops the marble onto the letter clicked, and it stays there while the mouse does', async () => {
+    await field3d(screen)
+    await until('the local marble ready for a click', () => me(screen))
     const letters = await screen.evaluate(() => { const r = document.createRange(); const h = document.getElementById('hero-h'); r.selectNodeContents(h); const b = r.getClientRects()[0]; return { x: b.left, y: b.top, w: b.width, h: b.height } })
     // The middle of "phone" (the first line's second word), about halfway up its letters.
     const x = letters.x + letters.w * 0.58, y = letters.y + letters.h * 0.55

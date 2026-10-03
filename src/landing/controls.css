@@ -12,3 +12,6 @@
   .home .pair { display: block; }
   .home .pair-note { margin: 14px 0 0; }
 }
+
+/* The marble peg holds a marble when the page has no clear landing. */
+.field-controls .field-toggle[data-holding] { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #c6ff34) 24%, transparent), 0 0 18px #c6ff3426; }

@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { createWorld, DEPTH, ORB_R } from '../src/landing/world'
+import { createWorld, DEPTH, ORB_R, type WorldMarble } from '../src/landing/world'
 import { fieldAwake, nearViewport, obstacleLetter, obstacleRect } from '../src/landing/obstacles'
 import { inside } from '../src/landing/bounce'
 
 const rect = { x: 40, y: 1000, w: 220, h: 160, r: 20 }
+
+/** Test placement is the previous drawn frame, not an unrendered teleport from the opening. */
+function placed(m: WorldMarble) { m.was = m.now = m.shown = [m.orb.x, m.orb.y, m.orb.z] }
 
 describe('the viewport marble field', () => {
   it('extracts solid content blocks, round pegs and low ramps from rects', () => {
@@ -30,8 +33,11 @@ describe('the viewport marble field', () => {
       world.play(65, 900)
       const heading = { x: 40, y: 460, w: width - 80, h: 48, r: 0, height: .12, text: true, exclude: true, step: false }
       world.setPads([heading])
-      const m = world.marble('heading'), at = world.planeAt(width / 2, heading.y + 1, height)
+      const sphere = ORB_R * (1 + DEPTH * Math.max(0, height - ORB_R))
+      const drawnRadius = world.project(sphere, height, 0).x - world.project(0, height, 0).x
+      const m = world.marble('heading'), at = world.planeAt(width / 2, heading.y - drawnRadius + 1, height)
       Object.assign(m.orb, { ...at, y: height, resting: false })
+      placed(m)
       const contacts = []
       for (let i = 0; i < 120; i++) {
         contacts.push(...world.step(1 / 60).hits.filter(h => h.pad === 0))
@@ -125,6 +131,7 @@ describe('the viewport marble field', () => {
       world.setPads([card])
       const m = world.marble('me'), p = world.planeAt(width / 2, 350, ORB_R)
       Object.assign(m.orb, { ...p, y: ORB_R, resting: true })
+      placed(m)
       world.step(0)
       const before = world.project(m.orb.x, m.orb.y, m.orb.z)
       world.scroll(650)
@@ -137,7 +144,7 @@ describe('the viewport marble field', () => {
         for (let i = 0; i < 30; i++) {
           world.step(1 / 60)
           const q = world.project(...m.shown)
-          expect(q.x > card.x && q.x < card.x + card.w && q.y > card.y - y && q.y < card.y + card.h - y).toBe(false)
+          if (m.motion.phase === 'ground') expect(q.x > card.x && q.x < card.x + card.w && q.y > card.y - y && q.y < card.y + card.h - y).toBe(false)
         }
       }
       const at = world.project(m.orb.x, m.orb.y, m.orb.z)
@@ -145,7 +152,8 @@ describe('the viewport marble field', () => {
       world.setPads([newCard])
       world.step(0)
       const q = world.project(...m.shown)
-      expect(q.x > newCard.x && q.x < newCard.x + 80 && q.y > newCard.y && q.y < newCard.y + 80).toBe(false)
+      if (m.motion.phase === 'ground') expect(q.x > newCard.x && q.x < newCard.x + 80 && q.y > newCard.y && q.y < newCard.y + 80).toBe(false)
+      else expect(['lift', 'land', 'dock', 'docked']).toContain(m.motion.phase)
     }
   })
   it('keeps centres outside every border at several angles and speeds, including narrow gutters', () => {
@@ -209,7 +217,7 @@ describe('the viewport marble field', () => {
     for (let i = 0; i < 60; i++) world.step(1 / 60)
     expect(world.project(m.orb.x, m.orb.y, m.orb.z).y).toBeLessThan(before.y - 2)
   })
-  it('flows visibly along a phone gutter that is narrower than a marble', () => {
+  it('docks instead of getting trapped in a phone gutter narrower than a marble', () => {
     const world = createWorld(true, true)
     world.layout(['Your phone.'], 390, 844, { x: 20, y: 140, w: 350, h: 100 })
     world.play(65, 844)
@@ -217,13 +225,15 @@ describe('the viewport marble field', () => {
     world.setPads([card])
     const m = world.marble('me'), p = world.planeAt(18, 300, ORB_R)
     Object.assign(m.orb, { ...p, y: ORB_R, vx: 0, vy: 0, vz: 0, resting: false })
+    placed(m)
     const start = world.project(m.orb.x, m.orb.y, m.orb.z)
     for (let i = 0; i < 180; i++) {
       world.step(1 / 60)
       const q = world.project(...m.shown)
-      expect(q.x > card.x && q.x < card.x + card.w && q.y > card.y && q.y < card.y + card.h).toBe(false)
+      if (m.motion.phase === 'ground') expect(q.x > card.x && q.x < card.x + card.w && q.y > card.y && q.y < card.y + card.h).toBe(false)
     }
     expect(world.project(...m.shown).y - start.y).toBeGreaterThan(30)
+    expect(m.motion.phase).toBe('docked')
   })
   it('uses the drawn sphere radius at all four exclusion edges, including airborne contacts', () => {
     for (const width of [1920, 1440, 390]) for (const height of [ORB_R, ORB_R + .5]) {
@@ -232,11 +242,14 @@ describe('the viewport marble field', () => {
       world.play(65, 900)
       const card = { x: width / 2 - 60, y: 400, w: 120, h: 200, r: 30, exclude: true }
       world.setPads([card])
+      const sphere = ORB_R * (1 + DEPTH * Math.max(0, height - ORB_R))
+      const drawnRadius = world.project(sphere, height, 0).x - world.project(0, height, 0).x
       for (const side of ['left', 'right', 'top', 'bottom']) {
         const m = world.marble(side)
-        const x = side === 'left' ? card.x : side === 'right' ? card.x + card.w : width / 2
-        const y = side === 'top' ? card.y : side === 'bottom' ? card.y + card.h : 500
+        const x = side === 'left' ? card.x - drawnRadius + 1 : side === 'right' ? card.x + card.w + drawnRadius - 1 : width / 2
+        const y = side === 'top' ? card.y - drawnRadius + 1 : side === 'bottom' ? card.y + card.h + drawnRadius - 1 : 500
         Object.assign(m.orb, { ...world.planeAt(x, y, height), y: height, resting: false })
+        placed(m)
         world.step(0)
         const p = world.project(...m.shown)
         const edge = world.project(m.shown[0] + ORB_R * (1 + DEPTH * Math.max(0, height - ORB_R)), height, m.shown[2])
@@ -252,8 +265,11 @@ describe('the viewport marble field', () => {
     world.layout(['Your phone.'], 1440, 900, { x: 100, y: 140, w: 650, h: 140 })
     const peg = { x: 1100, y: 700, w: 44, h: 44, r: 22, exclude: true, fixed: true }
     world.setPads([peg])
-    const m = world.marble('me'), p = world.planeAt(1100, 700, ORB_R)
+    const drawnRadius = world.project(ORB_R, ORB_R, 0).x - world.project(0, ORB_R, 0).x
+    const diagonal = (22 + drawnRadius - 1) / Math.SQRT2
+    const m = world.marble('me'), p = world.planeAt(1122 - diagonal, 722 - diagonal, ORB_R)
     Object.assign(m.orb, { ...p, y: ORB_R, resting: false })
+    placed(m)
     world.step(0)
     const q = world.project(...m.shown), radius = world.project(m.shown[0] + ORB_R, ORB_R, m.shown[2]).x - q.x
     expect(Math.abs(Math.hypot(q.x - 1122, q.y - 722) - 22 - radius)).toBeLessThan(1)

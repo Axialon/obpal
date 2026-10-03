@@ -45,23 +45,28 @@ export async function runHomeContacts(browser, local, check) {
                 window.__home.showSeeds()
                 return probes
               }, seed)
-              const samples = [], slow = new Map(), stuck = new Set(), hidden = new Map(), interiors = new Map()
+              const samples = [], slow = new Map(), stuck = new Set(), hidden = new Map(), interiors = new Map(), raisedInteriors = new Map()
               const start = Date.now()
               for (let sample = 0; sample < 51; sample++) {
                 const state = await page.evaluate(() => ({ t: window.__home.sim().t, tips: window.__home.tips(), contacts: window.__home.contacts(), scroll: scrollY }))
                 for (const p of probes) {
                   const m = state.tips.find(m => m.id === p.id), body = state.contacts.marbles.find(m => m.id === p.id)
                   if (!m || !body) continue
+                  const grounded = !m.phase || m.phase === 'ground'
                   for (const card of probes.filter(p => /(?:scene|build-card)/.test(p.owner))) {
                     const r = card.r, x = Math.abs(m.x - r.x - r.w / 2) - r.w / 2 + r.radius, y = Math.abs(m.y - r.y - r.h / 2) - r.h / 2 + r.radius
                     // The unpainted corner outside a rounded border is not a demo interior.
-                    if (Math.hypot(Math.max(x, 0), Math.max(y, 0)) + Math.min(Math.max(x, y), 0) < r.radius) interiors.set(card.owner, (interiors.get(card.owner) || 0) + 1)
+                    if (Math.hypot(Math.max(x, 0), Math.max(y, 0)) + Math.min(Math.max(x, y), 0) < r.radius) {
+                      const overlaps = grounded ? interiors : raisedInteriors
+                      overlaps.set(card.owner, (overlaps.get(card.owner) || 0) + 1)
+                    }
                   }
                   const near = state.contacts.rects.some(b => m.x >= b.rect.x - 25 && m.x <= b.rect.x + b.rect.w + 25 && m.y >= b.rect.y - state.scroll - 25 && m.y <= b.rect.y + b.rect.h - state.scroll + 25)
-                  if (body.speed < .05 && near && (m.h > .025 || m.held)) {
+                  if (grounded && body.speed < .05 && near && (m.h > .025 || m.held)) {
                     if (!slow.has(p.id)) slow.set(p.id, Date.now())
                     if (Date.now() - slow.get(p.id) > 1500) stuck.add(p.id)
                   } else slow.delete(p.id)
+                  if (['lift', 'land', 'dock'].includes(m.phase) && m.age > 3) stuck.add(p.id)
                   if (!p.registered && p.above && m.x >= p.r.x && m.x <= p.r.x + p.r.w && m.y >= p.r.y && m.y <= p.r.y + p.r.h) hidden.set(p.id, (hidden.get(p.id) || 0) + 1)
                 }
                 samples.push({ t: state.t, tips: state.tips, marbles: state.contacts.marbles, scroll: state.scroll })
@@ -74,7 +79,7 @@ export async function runHomeContacts(browser, local, check) {
                 }
                 await page.waitForTimeout(100)
               }
-              results.push({ viewport: [width, height], section: section.name, part, seed, seconds: (Date.now() - start) / 1000, interiors: Object.fromEntries(interiors), probes: probes.map(p => ({ ...p, stuck: stuck.has(p.id), hiddenFrames: hidden.get(p.id) || 0 })), samples })
+              results.push({ viewport: [width, height], section: section.name, part, seed, seconds: (Date.now() - start) / 1000, interiors: Object.fromEntries(interiors), raisedInteriors: Object.fromEntries(raisedInteriors), probes: probes.map(p => ({ ...p, stuck: stuck.has(p.id), hiddenFrames: hidden.get(p.id) || 0 })), samples })
               await writeFile(join(out, 'measurements.json'), JSON.stringify({ seeds: [17, 29], results }, null, 2))
               console.log(`    ${width} ${section.name}/${part} seed ${seed}: stuck ${stuck.size}, hidden frames ${[...hidden.values()].reduce((a, b) => a + b, 0)}`)
             }
