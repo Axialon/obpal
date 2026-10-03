@@ -52,7 +52,7 @@ const JOLT_PX = 1.6
 /** The rounded edge a letter's top has (em). */
 const EDGE = 0.016
 /** At most this many raised things (the buttons, the hint, the sound control, the steps' icons) keep the dots off them. */
-const MAX_PADS = 8
+const MAX_PADS = 16
 
 const LAVENDER = new Color('#b3a4ff')
 
@@ -123,6 +123,8 @@ function spring(w: Wobble, dt: number, hz: number, zeta: number) {
 const settled = (w: Wobble) => Math.abs(w.x) < 1e-4 && Math.abs(w.v) < 1e-3
 
 export interface Gfx {
+  /** Visible real surfaces masked out of the ground's light; overflow must remain zero. */
+  surfaceMasks: { count: number; overflow: number }
   /** The canvas's size in CSS pixels, its drawing buffer's, and drawing-buffer pixels per CSS pixel. */
   css: [number, number]
   buffer: [number, number]
@@ -340,6 +342,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
   const hides = new MeshBasicMaterial({ colorWrite: false, side: DoubleSide })
   /** The raised things' boxes (canvas px), which the dots keep off. */
   let padRects: PadRect[] = []
+  let surfaceMasks = { count: 0, overflow: 0 }
   let W = 1, H = 1
   let celebrateAt = -1
   let clock = 0
@@ -351,6 +354,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
     uDist: { value: 10 },
     uHaze: { value: new Color(LAVENDER) },
     uFar: { value: new Vector2(0, 1) },
+    uScroll: { value: 0 },
     uView: { value: buf },
     // The buttons over the dots (drawing-buffer px from the bottom left: x0, y0, x1, y1, and their corners' radius).
     uPads: { value: Array.from({ length: MAX_PADS }, () => new Vector4(0, 0, 0, 0)) },
@@ -366,6 +370,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
       uniform float uSize;
       uniform float uDist;
       uniform vec2 uFar;
+      uniform float uScroll;
       varying vec3 vColor;
       varying float vGlow;
       varying float vFade;
@@ -386,10 +391,10 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
         return d;
       }
       void main() {
-        vec3 p = position;
+        vec3 p = position + vec3(0.0, 0.0, uScroll);
         vec3 g = glowAt(p, 1.3);
         float k = min(max(g.r, max(g.g, g.b)), 1.0);
-        p += wake(position);
+        p += wake(p);
         p.y += k * 0.05;
         vGlow = k;
         vColor = k > 0.0 ? g / max(k, 1e-3) : vec3(0.0);
@@ -433,6 +438,8 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
       }`,
   }))
   scene.add(dots)
+  // The shader carries the reused grid through the document. Its original CPU bounds must not cull it.
+  dots.frustumCulled = false
 
   // ---- marbles ----
   const orbMap = new Map<string, FieldOrb>()
@@ -694,12 +701,21 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
   // ---- the dots, where the camera sees the floor; and the raised things they keep off ----
 
   /** The dots cover what the camera sees of the floor (a little wider apart on a phone), sized for the buffer. */
+  const dotGap = opts.coarse ? 0.26 : 0.2
+  let dotAnchor = 0
+  function scrollDots() {
+    const offset = Math.round((world.planeAt(0, 0, 0).z - dotAnchor) / dotGap) * dotGap
+    dotUniforms.uScroll.value = offset
+    dotUniforms.uFar.value.set(world.bounds[1] + offset, world.bounds[3] + offset)
+  }
   function fitDots() {
     const bounds = world.bounds
-    const gap = opts.coarse ? 0.26 : 0.2
+    const gap = dotGap
+    dotAnchor = world.planeAt(0, 0, 0).z
+    dotUniforms.uScroll.value = 0
     const verts: number[] = []
-    for (let x = Math.floor(bounds[0] / gap) * gap; x <= bounds[2]; x += gap) {
-      for (let z = Math.floor(bounds[1] / gap) * gap; z <= bounds[3]; z += gap) verts.push(x, 0.002, z)
+    for (let x = Math.floor(bounds[0] / gap) * gap - gap * 2; x <= bounds[2] + gap * 2; x += gap) {
+      for (let z = Math.floor(bounds[1] / gap) * gap - gap * 2; z <= bounds[3] + gap * 2; z += gap) verts.push(x, 0.002, z)
     }
     dots.geometry.dispose()
     dots.geometry = new BufferGeometry()
@@ -713,8 +729,10 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
   /** The dots keep off the raised things: their boxes in drawing-buffer pixels, from the bottom left. */
   function padsForDots() {
     const kx = buf.x / W, ky = buf.y / H
+    const visible = padRects.filter(b => b.w > 0 && b.h > 0 && b.y + b.h >= (b.fixed ? 0 : scrollY) && b.y <= (b.fixed ? 0 : scrollY) + H)
+    surfaceMasks = { count: Math.min(visible.length, MAX_PADS), overflow: Math.max(0, visible.length - MAX_PADS) }
     dotUniforms.uPads.value.forEach((v, i) => {
-      const b = padRects[i]
+      const b = visible[i]
       const offset = b?.fixed ? 0 : scrollY
       if (b && b.w > 0) v.set(b.x * kx, buf.y - (b.y + b.h - offset) * ky, (b.x + b.w) * kx, buf.y - (b.y - offset) * ky)
       else v.set(0, 0, 0, 0)
@@ -778,6 +796,8 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
     movePads(updates, seconds) {
       for (const { index, rect } of updates) padRects[index] = rect
       world.movePads(updates, seconds)
+      padsForDots()
+      if (updates.some(({ rect }) => !rect.exclude && !rect.fixed)) buildPadBlocks()
     },
     get active() { return world.active },
     avoid(rect) {
@@ -789,11 +809,12 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
     scroll(y, impulse = true) {
       scrollY = y
       world.scroll(y, impulse)
+      scrollDots()
       padsForDots()
       for (const child of padGroup.children) {
         child.visible = child.userData.bottom >= y - 100 && child.userData.top <= y + H + 100
       }
-      dots.visible = quality.glass > 0 && y < H
+      dots.visible = quality.glass > 0
     },
     play: (top, bottom) => world.play(top, bottom),
     padHeight: PAD_H,
@@ -848,7 +869,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
       qualityLevel = lv
       if (q.pr === quality.pr && q.glass === quality.glass) return
       quality = q
-      dots.visible = q.glass > 0 && scrollY < H
+      dots.visible = q.glass > 0
       size()
       fitDots()
     },
@@ -866,7 +887,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
     },
     gfx: () => ({
       css: [W, H], buffer: [buf.x, buf.y], pr: Math.round((buf.x / W) * 1000) / 1000, device: exact, samples,
-      behind: quality.glass ? [behind.width, behind.height] : [0, 0], glass: quality.glass, gpuMs: gpuLast?.ms ?? null,
+      behind: quality.glass ? [behind.width, behind.height] : [0, 0], glass: quality.glass, gpuMs: gpuLast?.ms ?? null, surfaceMasks,
     }),
     step(dt) {
       clock += dt

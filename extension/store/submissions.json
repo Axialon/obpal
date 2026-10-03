@@ -54,6 +54,55 @@
         "marquee-1400x560.png": "683ab97b913111565c1581a5a6b440f4b50ec0b2d9fc9f72a6bbd89b47b3aa8a"
       },
       "outcomeDateSource": "Observed published on migration date; original publication date unavailable"
+    },
+    {
+      "version": "1.8.0",
+      "submittedAt": "2026-10-03",
+      "commit": "90a0e047ad4841d47fa552974dafe4d60187c50e",
+      "state": "submitted",
+      "zipSha256": "393c49489c2464491bc8fdb4ea797ec5378046223393695ec04cff150b34865d",
+      "sourceSha256": "f6232938ddc6a81e59ce6adf62e99ac84e6ff6b3532d9a11a05eab37ccddf0e1",
+      "fields": {
+        "Store listing tab/Name": "386d6e7e1983cfd50743d06c1cb4a3de9833d65e6697702327f171c839e44e0f",
+        "Store listing tab/Summary": "5445ecc170fe1fa012601cf6604eb7b01b9da8f0b9b5cb70cc3464a82f683cd5",
+        "Store listing tab/Description": "62f7142e6073c04bc1d2df511f42ae53a55e05f31ef6305404c8956aa7de9e62",
+        "Store listing tab/Category": "10f51fc353828fd96ca5b4a9f9cf7a8a5b9952b45c015f763e4eb2db1882c0fa",
+        "Store listing tab/Language": "3926d046ab47c0f886450fa75cdf4b1fcd3d80fb7d98edb6846759da57811d7f",
+        "Store listing tab/Official URL": "a05a4359e8580b5688f752b81a372cb515852624203df49b71ed47c9beb0ee09",
+        "Store listing tab/Homepage URL": "cddfcf456ac52a705138f0099efa0ab1e4731e501c6582d8808cc737989637cc",
+        "Store listing tab/Support URL": "e4b15ae845a4cd435e350c082ab4d43cdab2cae4abfce930373ef8a002d45fb8",
+        "Store listing tab/Mature content": "38178a20b470cfd18299fb1593dd4ba706f1a83321dac051d01086efd8b7a96f",
+        "Privacy practices tab/Single purpose": "5a66d32dff2d11cb8d3b638a3554bc1d43a892f924accb3f498dd0889980a52c",
+        "Privacy practices tab/offscreen": "e61369023d8d97e24406e3cd06d65d793fc18f9041685e66da3d332528d04343",
+        "Privacy practices tab/storage": "61b29cab8384c343fe757b05efd61dd0e585fbad7a51ed1d7de42510b36d9e73",
+        "Privacy practices tab/activeTab": "1e8b2d089d674171fea3b7eb069c66ce9752b5c8ebad8ddfce19681807dc9bc3",
+        "Privacy practices tab/scripting": "f16da10bcf37373b6f751f8eae0735ff204b7b4ce282b4120e1d2e317e3f7f74",
+        "Privacy practices tab/Host permission https://obpal.blackboxes.net/*": "ced23f0c6e7dd6e7ba2d3fb4d49519aac85b32b3047462a3cde6fa6df11b1b07",
+        "Privacy practices tab/Optional host permission <all_urls>": "f2e1b16ce65ef7c4ce521f521ec9d0db19a82e90af1add645854114b654c69b4",
+        "Privacy practices tab/Optional permission nativeMessaging": "6c9cb82fc6b33510a3eaeba3f9dd81979446bd1bf00a62688d7eaa545247ad8c",
+        "Privacy practices tab/Optional permission notifications": "21f5f84814d5d0525c5e474f981fd0b09d4a5ae1eeac13a89e2fe8d5f9abe4b4",
+        "Privacy practices tab/Are you using remote code?": "38178a20b470cfd18299fb1593dd4ba706f1a83321dac051d01086efd8b7a96f",
+        "Privacy practices tab/Remote code explanation": "979ba3d7f61c4004640f1c28c8b7cb2737af4b041e037280d1e5fee75f82c80c",
+        "Privacy practices tab/Data usage": "e473dfd3330131292a225f6f6775c2774467e1002e640b0a5feba57de41bd3d9",
+        "Privacy practices tab/I do not sell or transfer user data to third parties, outside of the approved use cases.": "98c95268220bddfe87be5b5b26859bc35353518f5ab7ec1ce654a30e4e64c0e2",
+        "Privacy practices tab/I do not use or transfer user data for purposes that are unrelated to my item's single purpose.": "98c95268220bddfe87be5b5b26859bc35353518f5ab7ec1ce654a30e4e64c0e2",
+        "Privacy practices tab/I do not use or transfer user data to determine creditworthiness or for lending purposes.": "98c95268220bddfe87be5b5b26859bc35353518f5ab7ec1ce654a30e4e64c0e2",
+        "Privacy practices tab/Privacy policy URL": "6033366b0fe5039a566516ba363effeb7ba9da918a3a4b07befc2e93598b20ac",
+        "Distribution tab/Visibility": "3c6d7358c46f669d8ce4d8949a2a084ae3101eec76be748cbe85b8a81af436ed",
+        "Distribution tab/Distribution": "31c72478ed3c4617691fd1972a6238a97aab17911347b282ce5b819e007edf5b",
+        "Distribution tab/No in-app purchases": "43d857cb2b0208d78422163a251ccec1061399d92a097da8b85bebea984f1569",
+        "Test instructions tab (notes for the reviewer)/Test instructions tab (notes for the reviewer)": "d242c1f863ed87e5514a0f2f7e9e117692dc5764114da80d214e54fd09c64141"
+      },
+      "images": {
+        "icon-128.png": "24957523bd3ea11be184a2b051668ba290508fdc20ed49de1dd20f5e17f0af4f",
+        "screenshot-1.png": "abe7a6bfb5f2b9b9c460a3e4eecbd8768d8079f2e314c89e308ba53dee40d0a4",
+        "screenshot-2.png": "b056704a96afe35617d8ba3d6a2f8c8082c537baac005456a2eed02c701d7f71",
+        "screenshot-3.png": "9fabbe8990969cbd5f7478c81893a2f2a18257cc185145789a9e1634363cdb26",
+        "screenshot-4.png": "1ec8e2985cbd4cd3b2db9279e0010ffe3abadbc1bde084314bd8a55816ee16fd",
+        "screenshot-5.png": "3ac4428b8c0e377e483bec3fb32e60edba0ac6a9d0a20b25ac0d749246f2ee54",
+        "tile-440x280.png": "1340ec53b1e1187d1578be6efc578576f2cc7738b17de7e690084a48099d946a",
+        "marquee-1400x560.png": "0996454bd084b04f463d899743f743042f4fb0e52f801f24e9cf761031a998ea"
+      }
     }
   ]
 }

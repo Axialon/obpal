@@ -5,7 +5,7 @@ import { prepareHomeSmoothness, measureHomeSmoothness } from './lib/smoothness-h
 
 export async function runHomeField(functionalBrowser, local, check) {
   const only = process.env.OBPAL_E2E_HOME_ONLY || process.argv.find(arg => arg.startsWith('--only='))?.slice(7)
-  if (only && !only.includes('viewport field')) return
+  if (only && !only.includes('viewport field') && only !== 'surface and pacing') return
   // Software WebGL remains in the legacy physics checks. Pacing measures the default GPU path separately.
   const browser = await functionalBrowser.browserType().launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true, args: ['--ignore-certificate-errors'] })
   try {
@@ -91,7 +91,8 @@ export async function runHomeField(functionalBrowser, local, check) {
       await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 })
       const result = await measureHomeSmoothness(page)
       await save('cpu-4x.json', { ...result, gpu: 'default ANGLE', cpuRate: 4, viewport: [1280, 844], dpr: 1, seconds: 10 })
-      if (result.p95 > 20) throw new Error(`4x CPU p95 ${result.p95.toFixed(1)}ms >20ms`)
+      // Timestamp subtraction can leave a binary floating-point remainder at exactly 16.9 ms.
+      if (result.p95 - 16.9 > 1e-6) throw new Error(`4x CPU p95 ${result.p95.toFixed(1)}ms >16.9ms`)
       if (result.longTasks.length || result.layoutReads || result.escapes.length || result.cls) throw new Error('4x CPU scroll violated long-task, layout or containment budget')
       return `${result.samples} frames, p95 ${result.p95.toFixed(1)}ms, maximum ${result.max.toFixed(1)}ms, long tasks 0`
     } finally { await context.close() }

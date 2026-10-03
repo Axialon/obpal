@@ -33,10 +33,14 @@ export async function runHomeMotion(browser, local, check) {
             const m = window.__home.tips().find(m => m.id === 'proof-moving')
             const cards = [...document.querySelectorAll('.scene, .build-card')].map(el => {
               const r = el.getBoundingClientRect()
-              return { x: r.x, y: r.y, w: r.width, h: r.height }
+              return { x: r.x, y: r.y, w: r.width, h: r.height, radius: Math.min(parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0, r.width / 2, r.height / 2) }
             })
             const body = window.__home.contacts().marbles.find(m => m.id === 'proof-moving')
-            return { wall: performance.now(), t: window.__home.sim().t, m, body, interior: cards.some(r => m.x > r.x && m.x < r.x + r.w && m.y > r.y && m.y < r.y + r.h), cards, activity: window.__home.activity() }
+            const interior = cards.some(r => {
+              const x = Math.abs(m.x - r.x - r.w / 2) - r.w / 2 + r.radius, y = Math.abs(m.y - r.y - r.h / 2) - r.h / 2 + r.radius
+              return Math.hypot(Math.max(x, 0), Math.max(y, 0)) + Math.min(Math.max(x, y), 0) < r.radius
+            })
+            return { wall: performance.now(), t: window.__home.sim().t, m, body, interior, cards, activity: window.__home.activity() }
           }))
           if ([0, 15, 45, 75, 99].includes(sample)) {
             await mkdir(join(raw, String(width)), { recursive: true })

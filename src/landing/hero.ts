@@ -382,11 +382,12 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   const motionWatch = new IntersectionObserver(entries => {
     for (const e of entries) { if (e.isIntersecting) onscreen.add(e.target); else onscreen.delete(e.target) }
   }, { rootMargin: '50px' })
-  for (const el of document.querySelectorAll('.scene, .build-card, .pair, .hero-hint')) motionWatch.observe(el)
+  const motionTargets = '.scene, .build-card, .pair, .hero-hint, main a, main button, .field-controls button'
+  for (const el of document.querySelectorAll(motionTargets)) motionWatch.observe(el)
   const motionStart = (e: Event) => {
     if (e instanceof TransitionEvent && e.propertyName !== 'transform') return
     const el = e.target as Element
-    if (el.matches('.scene, .build-card, .pair, .hero-hint')) { settling.delete(el); moving.add(el); wake() }
+    if (el.matches(motionTargets)) { settling.delete(el); moving.add(el); wake() }
   }
   const motionEnd = (e: Event) => {
     if (e instanceof TransitionEvent && e.propertyName !== 'transform') return
@@ -405,9 +406,8 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       if (!onscreen.has(el)) continue
       const index = padOwners.indexOf(el as HTMLElement), base = padRects[index]
       if (!base) continue
-      const r = el.getBoundingClientRect()
       geometryReads++
-      motionRects.push({ index, rect: { ...base, x: r.x, y: r.y + (base.fixed ? 0 : scrollY), w: r.width, h: r.height } })
+      motionRects.push({ index, rect: { ...base, ...borderBox(el as HTMLElement) } })
     }
     // End and cancellation can restore a transform instantly. Read that final pose once before caching it again.
     for (const el of settling) moving.delete(el)
@@ -429,39 +429,32 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   let ping: { el: HTMLElement; timer: number } | null = null
   /** Each raised thing's side as last drawn (px, to the half pixel): where its foot is on screen from its top. */
   const padSide = padEls.map(() => '')
+  /** The border box after transforms, in CSS pixels. Shadows and focus outlines are light, not solid edges. */
+  function borderBox(el: HTMLElement): PadRect {
+    const r = el.getBoundingClientRect(), css = getComputedStyle(el)
+    const fixed = el.closest('.field-controls') !== null
+    const value = css.borderTopLeftRadius
+    const radius = value.endsWith('%') ? parseFloat(value) / 100 * Math.min(r.width, r.height)
+      : (parseFloat(value) || 0) * (el.offsetWidth ? r.width / el.offsetWidth : 1)
+    return { x: r.left, y: r.top + (fixed ? 0 : scrollY), w: r.width, h: r.height, r: Math.min(radius, r.width / 2, r.height / 2), fixed }
+  }
   function measurePads(includePage = true): PadRect[] {
     padOwners = [...padEls]
     padRects = padEls.map((el) => {
       if (el.hidden || el.classList.contains('gone') || !el.getClientRects().length) return { x: 0, y: 0, w: 0, h: 0, r: 0 }
-      const r = el.getBoundingClientRect()
-      const radius = parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0
-      const fixed = el.closest('.field-controls') !== null
-      return { x: r.left, y: r.top + (fixed ? 0 : scrollY), w: r.width, h: r.height, r: radius, fixed }
+      const rect = borderBox(el)
+      return rect.fixed ? { ...rect, r: rect.w / 2, height: .22, exclude: true, step: false } : rect
     })
     if (!pageGeometry || !includePage) return padRects
-    for (const el of document.querySelectorAll<HTMLElement>('main .pair, main .scene, main .build-card, main a, main button, main .live-dot, main .sec-head, .site-foot')) {
-      if ((hero.contains(el) && !el.matches('.pair')) || !el.getClientRects().length) continue
+    // Later headings and transparent containers stay below the field, without depth masks. Card titles share
+    // their solid card's border; the hero retains its drawn, colliding letters.
+    for (const el of document.querySelectorAll<HTMLElement>('main .pair, main .scene, main .build-card, main a, main button, main .live-dot')) {
+      if ((hero.contains(el) && !el.matches('.pair, .live-dot')) || !el.getClientRects().length) continue
       // Content inside a solid card shares its collider; nested controls never make trapping seams.
       if (!el.matches('.pair, .scene, .build-card') && el.closest('.pair, .scene, .build-card')) continue
-      const r = el.getBoundingClientRect()
-      const kind = el.matches('.pair, .scene, .build-card') ? 'rail' : el.matches('.live-dot') ? 'peg' : el.matches('.sec-head, .site-foot') ? 'ramp' : 'block'
+      const kind = el.matches('.pair, .scene, .build-card') ? 'rail' : el.matches('.live-dot') ? 'peg' : 'block'
       padOwners.push(el)
-      padRects.push(pageGeometry.obstacleRect({ x: r.x, y: r.y + scrollY, w: r.width, h: kind === 'ramp' ? 4 : r.height, r: parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0 }, kind))
-    }
-    for (const heading of document.querySelectorAll('main h2')) {
-      const fontSize = parseFloat(getComputedStyle(heading).fontSize)
-      const walker = document.createTreeWalker(heading, NodeFilter.SHOW_TEXT)
-      const range = document.createRange()
-      while (walker.nextNode()) {
-        const text = walker.currentNode as Text
-        for (let i = 0; i < text.length; i++) {
-          if (/\s/.test(text.data[i])) continue
-          range.setStart(text, i); range.setEnd(text, i + 1)
-          const r = range.getBoundingClientRect()
-          const letter = pageGeometry.obstacleLetter(text.data[i], { x: r.x, y: r.y + scrollY, w: r.width, h: r.height, r: 0 }, fontSize)
-          if (letter) { padRects.push(letter); padOwners.push(heading as HTMLElement) }
-        }
-      }
+      padRects.push(pageGeometry.obstacleRect(borderBox(el), kind))
     }
     return padRects
   }

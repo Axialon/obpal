@@ -55,6 +55,7 @@ import { runHomeField } from './e2e-home-field.mjs'
 import { runHomeContacts } from './e2e-home-contacts.mjs'
 import { runHomeMotion } from './e2e-home-motion.mjs'
 import { runHomeQr } from './e2e-home-qr.mjs'
+import { runHomeSurfaces } from './e2e-home-surfaces.mjs'
 import { rawRun } from './lib/distill.mjs'
 import { startupProbe, startupPath, startupText, watchStartup } from './lib/home-startup.mjs'
 
@@ -66,6 +67,8 @@ const HEADED = process.argv.includes('--headed')
 const ONLY = process.argv.find((arg) => arg.startsWith('--only='))?.slice(7) || process.env.OBPAL_E2E_HOME_ONLY || ''
 // The field group retains the full run's control and graphics warm-up before measuring pacing.
 const FIELD_PROFILE = ONLY === 'viewport field'
+// One guarded lease for the final border proof and the strict 4x pacing case.
+const SURFACE_PROFILE = ONLY === 'surface and pacing'
 const ONLY_DONE = Symbol('only test finished')
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
 // Software WebGL by default; e2eBrowserOptions can opt into the measured Windows GPU path.
@@ -177,6 +180,8 @@ async function rimAt(page, wall, at, a) {
 async function check(name, fn) {
   if (ONLY === 'remote') {
     if (!/with nobody steering|a computer shows a code|a phone that opens the code|the phone's marble follows|the phone flicked upward|the phone held as a tray|a phone that leaves|no page errors on the computer|no Content Security Policy/.test(name)) return
+  } else if (SURFACE_PROFILE) {
+    if (!/surface audit|native GPU pacing under 4x CPU throttle/.test(name)) return
   } else if (ONLY && !FIELD_PROFILE && !name.includes(ONLY)) return
   try {
     const detail = await fn()
@@ -186,7 +191,7 @@ async function check(name, fn) {
     results.push({ name, ok: false })
     console.log(`  ✗ ${name}: ${e?.message ?? e}`)
   }
-  if (ONLY && ONLY !== 'remote' && !FIELD_PROFILE) throw ONLY_DONE
+  if (ONLY && ONLY !== 'remote' && !FIELD_PROFILE && !SURFACE_PROFILE) throw ONLY_DONE
 }
 
 // OBPAL_E2E_PORT runs the stand-in elsewhere than its usual 5176, beside another run.
@@ -204,8 +209,9 @@ try {
   await runHomeContacts(browser, local, check)
   await runHomeMotion(browser, local, check)
   await runHomeQr(browser, local, check)
+  await runHomeSurfaces(browser, local, check)
   await runHomeField(browser, local, check)
-  if (FIELD_PROFILE) throw ONLY_DONE
+  if (FIELD_PROFILE || SURFACE_PROFILE) throw ONLY_DONE
 
   await check('no sideways scroll on phone widths', async () => {
     const seen = []

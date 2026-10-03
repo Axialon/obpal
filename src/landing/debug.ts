@@ -1,5 +1,6 @@
 /**
- * ?debug=audio,gfx on the home page: a small readout in the corner, to read on a real device what the tests can't
+ * ?debug=colliders outlines cached border boxes without taking layout reads. ?debug=audio,gfx on the home page:
+ * a small readout in the corner, to read on a real device what the tests can't
  * hear or see there. audio: the audio context's state (and an iPhone's audio session: `playback` is heard with the
  * silent switch on), the output's level (what reaches the speakers, from a meter at the very end of the chain), the
  * hits played (of each kind: a wall is the edge of the screen) and skipped, the output's latency (the context's base
@@ -14,8 +15,38 @@
  */
 import type { GlassStats } from './glass'
 import type { Hero } from './hero'
+import { addActor } from './ticker'
 
-export function mountDebug(kinds: Set<string>, src: { audio: () => GlassStats; gfx: Hero['gfx'] }) {
+export function mountDebug(kinds: Set<string>, src: { audio: () => GlassStats; gfx: Hero['gfx']; contacts: Hero['contacts'] }) {
+  if (kinds.has('colliders')) {
+    const ns = 'http://www.w3.org/2000/svg'
+    const overlay = document.createElementNS(ns, 'svg')
+    overlay.dataset.colliderDebug = ''
+    overlay.setAttribute('aria-hidden', 'true')
+    overlay.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;z-index:89;pointer-events:none;overflow:hidden'
+    document.body.appendChild(overlay)
+    const nodes = new Map<number, SVGRectElement>()
+    addActor(() => {
+      const seen = new Set<number>()
+      for (const { id, rect } of src.contacts().rects) {
+        seen.add(id)
+        let node = nodes.get(id)
+        if (!node) {
+          node = document.createElementNS(ns, 'rect')
+          node.dataset.collider = String(id)
+          node.setAttribute('fill', 'none')
+          node.setAttribute('stroke', '#ff56bc')
+          node.setAttribute('stroke-width', '1')
+          overlay.appendChild(node)
+          nodes.set(id, node)
+        }
+        for (const [name, value] of Object.entries({ x: rect.x, y: rect.y - (rect.fixed ? 0 : scrollY), width: rect.w, height: rect.h, rx: rect.r })) node.setAttribute(name, String(value))
+      }
+      for (const [id, node] of nodes) if (!seen.has(id)) { node.remove(); nodes.delete(id) }
+      return false
+    })
+  }
+  if (!kinds.has('audio') && !kinds.has('gfx')) return
   const box = document.createElement('pre')
   box.setAttribute('aria-hidden', 'true')
   Object.assign(box.style, {

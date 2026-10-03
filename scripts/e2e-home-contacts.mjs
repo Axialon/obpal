@@ -40,7 +40,7 @@ export async function runHomeContacts(browser, local, check) {
                   const id = `${seed}-${i}`
                   window.__home.seed(id, x, y)
                   const registered = rects.some(b => Math.abs(b.rect.x - r.x) < 1 && Math.abs(b.rect.y - scrollY - r.y) < 1 && Math.abs(b.rect.w - r.width) < 1)
-                  return [{ id: `proof-${id}`, owner: `${el.tagName}.${el.className}`, registered, r: { x: r.x, y: r.y, w: r.width, h: r.height }, above: Number(css.zIndex) >= Number(getComputedStyle(document.querySelector('.hero-stage')).zIndex) }]
+                  return [{ id: `proof-${id}`, owner: `${el.tagName}.${el.className}`, registered, r: { x: r.x, y: r.y, w: r.width, h: r.height, radius: Math.min(parseFloat(css.borderTopLeftRadius) || 0, r.width / 2, r.height / 2) }, above: Number(css.zIndex) >= Number(getComputedStyle(document.querySelector('.hero-stage')).zIndex) }]
                 })
                 window.__home.showSeeds()
                 return probes
@@ -53,7 +53,9 @@ export async function runHomeContacts(browser, local, check) {
                   const m = state.tips.find(m => m.id === p.id), body = state.contacts.marbles.find(m => m.id === p.id)
                   if (!m || !body) continue
                   for (const card of probes.filter(p => /(?:scene|build-card)/.test(p.owner))) {
-                    if (m.x > card.r.x && m.x < card.r.x + card.r.w && m.y > card.r.y && m.y < card.r.y + card.r.h) interiors.set(card.owner, (interiors.get(card.owner) || 0) + 1)
+                    const r = card.r, x = Math.abs(m.x - r.x - r.w / 2) - r.w / 2 + r.radius, y = Math.abs(m.y - r.y - r.h / 2) - r.h / 2 + r.radius
+                    // The unpainted corner outside a rounded border is not a demo interior.
+                    if (Math.hypot(Math.max(x, 0), Math.max(y, 0)) + Math.min(Math.max(x, y), 0) < r.radius) interiors.set(card.owner, (interiors.get(card.owner) || 0) + 1)
                   }
                   const near = state.contacts.rects.some(b => m.x >= b.rect.x - 25 && m.x <= b.rect.x + b.rect.w + 25 && m.y >= b.rect.y - state.scroll - 25 && m.y <= b.rect.y + b.rect.h - state.scroll + 25)
                   if (body.speed < .05 && near && (m.h > .025 || m.held)) {

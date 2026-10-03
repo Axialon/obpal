@@ -203,4 +203,37 @@ describe('the viewport marble field', () => {
     }
     expect(world.project(...m.shown).y - start.y).toBeGreaterThan(30)
   })
+  it('uses the drawn sphere radius at all four exclusion edges, including airborne contacts', () => {
+    for (const width of [1920, 1440, 390]) for (const height of [ORB_R, ORB_R + .5]) {
+      const world = createWorld(true, true)
+      world.layout(['Your phone.'], width, 900, { x: 30, y: 140, w: Math.min(650, width - 60), h: 140 })
+      world.play(65, 900)
+      const card = { x: width / 2 - 60, y: 400, w: 120, h: 200, r: 30, exclude: true }
+      world.setPads([card])
+      for (const side of ['left', 'right', 'top', 'bottom']) {
+        const m = world.marble(side)
+        const x = side === 'left' ? card.x : side === 'right' ? card.x + card.w : width / 2
+        const y = side === 'top' ? card.y : side === 'bottom' ? card.y + card.h : 500
+        Object.assign(m.orb, { ...world.planeAt(x, y, height), y: height, resting: false })
+        world.step(0)
+        const p = world.project(...m.shown)
+        const edge = world.project(m.shown[0] + ORB_R * (1 + DEPTH * Math.max(0, height - ORB_R)), height, m.shown[2])
+        const radius = edge.x - p.x
+        const gap = side === 'left' ? card.x - p.x - radius : side === 'right' ? p.x - radius - card.x - card.w
+          : side === 'top' ? card.y - p.y - radius : p.y - radius - card.y - card.h
+        expect(Math.abs(gap)).toBeLessThanOrEqual(1)
+      }
+    }
+  })
+  it('lets a marble meet a round peg diagonally without a square invisible corner', () => {
+    const world = createWorld(true, true)
+    world.layout(['Your phone.'], 1440, 900, { x: 100, y: 140, w: 650, h: 140 })
+    const peg = { x: 1100, y: 700, w: 44, h: 44, r: 22, exclude: true, fixed: true }
+    world.setPads([peg])
+    const m = world.marble('me'), p = world.planeAt(1100, 700, ORB_R)
+    Object.assign(m.orb, { ...p, y: ORB_R, resting: false })
+    world.step(0)
+    const q = world.project(...m.shown), radius = world.project(m.shown[0] + ORB_R, ORB_R, m.shown[2]).x - q.x
+    expect(Math.abs(Math.hypot(q.x - 1122, q.y - 722) - 22 - radius)).toBeLessThan(1)
+  })
 })

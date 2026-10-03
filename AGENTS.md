@@ -9,6 +9,12 @@ Instructions for coding agents, Codex and others, working in this repository. A 
 - Stay inside the task's files. If you need something outside them, say so in the hand-back.
 - Test what your change touches, not everything: the suites the brief names, plus any your change could break.
 - Write hand-backs and commit messages in plain sentences.
+- **Work efficiently; usage is limited.**
+  - Delegate bounded subtasks to subagents where your tools allow: codebase searches, evidence capture, log triage, independent fixes and parallel test runs. Keep your own context for design, integration and verification.
+  - Read excerpts rather than whole files.
+  - Rerun only the failing suite or case, not everything.
+  - Distil evidence rather than keeping raw frames.
+  - Stop once the definition of done is met.
 
 ## Commands
 - Install when dependencies are absent or the lockfile moved: `pnpm install --frozen-lockfile --store-dir "$TEMP/pnpm-store-obpal"` (PowerShell: `"$env:TEMP/pnpm-store-obpal"`).

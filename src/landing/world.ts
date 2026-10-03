@@ -208,7 +208,7 @@ export function createWorld(viewport = true, flowing = false): World {
       if (Math.max(a.y + a.h, b.y + b.h) < playTop || Math.min(a.y, b.y) > Hc) continue
       for (const m of map.values()) {
         const o = m.orb, p = project(o.x, o.y, o.z)
-        const radius = Math.abs(project(o.x + o.r, o.y, o.z).x - p.x)
+        const radius = drawnRadius(o)
         // Slab intersection of a stationary marble with a moving, radius-expanded block.
         let enter = 0, leave = 1, nx = 0, ny = 0
         for (const [point, delta, low, high, axis] of [[p.x, -vx * seconds, a.x - radius, a.x + a.w + radius, 0], [p.y, -vy * seconds, a.y - radius, a.y + a.h + radius, 1]]) {
@@ -235,6 +235,23 @@ export function createWorld(viewport = true, flowing = false): World {
   function cacheBlocks() {
     blocks = padRects.filter(b => b.exclude && b.w > 0 && b.h > 0 && (b.fixed || b.y + b.h >= scroll && b.y <= scroll + Hc))
       .map(b => ({ ...b, y: b.y - (b.fixed ? 0 : scroll) }))
+  }
+
+  /** The visible rounded border in CSS pixels, with its outward normal at the nearest point. */
+  function border(b: PadRect, x: number, y: number) {
+    const r = Math.min(b.r, b.w / 2, b.h / 2)
+    const dx = x - b.x - b.w / 2, dy = y - b.y - b.h / 2
+    const qx = Math.abs(dx) - b.w / 2 + r, qy = Math.abs(dy) - b.h / 2 + r
+    const ax = Math.max(qx, 0), ay = Math.max(qy, 0), length = Math.hypot(ax, ay)
+    const sx = dx < 0 ? -1 : 1, sy = dy < 0 ? -1 : 1
+    return { d: length + Math.min(Math.max(qx, qy), 0) - r,
+      nx: length ? sx * ax / length : qx >= qy ? sx : 0,
+      ny: length ? sy * ay / length : qy > qx ? sy : 0 }
+  }
+
+  function drawnRadius(o: Orb) {
+    const p = project(o.x, o.y, o.z)
+    return Math.abs(project(o.x + o.r * (1 + DEPTH * Math.max(0, o.y - o.r)), o.y, o.z).x - p.x)
   }
 
   function rawFloorAt(sx: number, sy: number, h = 0) {
@@ -340,7 +357,9 @@ export function createWorld(viewport = true, flowing = false): World {
       return p.y > -margin && p.y < Hc + margin
     }), ...pads.filter((fp) => {
       const b = padRects[fp.id - PAD_ID]
-      return b.fixed || b.y + b.h >= scroll - margin && b.y <= scroll + Hc + margin
+      // Screen-space exclusions already resolve the full drawn sphere, at every height. A second, raised
+      // footprint would shift the contact on the camera's sloping floor and create a false ledge.
+      return !b.exclude && (b.fixed || b.y + b.h >= scroll - margin && b.y <= scroll + Hc + margin)
     })]
   }
 
@@ -363,18 +382,22 @@ export function createWorld(viewport = true, flowing = false): World {
   function clearCards(m: WorldMarble, margin = 0, moving = 0, drawing = false) {
     if (!viewport || (!blocks.length && !repelled)) return
     const o = m.orb, p = project(o.x, o.y, o.z)
-    const radius = Math.abs(project(o.x + o.r, o.y, o.z).x - p.x)
+    const radius = drawnRadius(o)
     const obstacles = repelled ? [...blocks, repelled] : blocks
-    const overlap = (b: PadRect, x: number, y: number, extra: number) => x > b.x - extra && x < b.x + b.w + extra && y > b.y - extra && y < b.y + b.h + extra
+    const overlap = (b: PadRect, x: number, y: number, extra: number) => border(b, x, y).d < extra - 1e-6
     const hit = obstacles.find(b => overlap(b, p.x, p.y, radius + margin))
     if (!hit) return
     // Search all four exits of the connected cards, rather than alternating between two tight borders.
-    const candidates = obstacles.flatMap(b => [
-      { x: b.x - radius - margin - .1, y: p.y, nx: -1, ny: 0 },
-      { x: b.x + b.w + radius + margin + .1, y: p.y, nx: 1, ny: 0 },
-      { x: p.x, y: b.y - radius - margin - .1, nx: 0, ny: -1 },
-      { x: p.x, y: b.y + b.h + radius + margin + .1, nx: 0, ny: 1 },
-    ]).filter(q => q.x >= radius && q.x <= W - radius && q.y >= playTop + radius && q.y <= Math.min(playBottom, Hc) - radius && !obstacles.some(b => overlap(b, q.x, q.y, radius + margin)))
+    const candidates = obstacles.flatMap(b => {
+      const edge = border(b, p.x, p.y), distance = radius + margin + .1 - edge.d
+      return [
+        { x: p.x + edge.nx * distance, y: p.y + edge.ny * distance, nx: edge.nx, ny: edge.ny },
+        { x: b.x - radius - margin - .1, y: p.y, nx: -1, ny: 0 },
+        { x: b.x + b.w + radius + margin + .1, y: p.y, nx: 1, ny: 0 },
+        { x: p.x, y: b.y - radius - margin - .1, nx: 0, ny: -1 },
+        { x: p.x, y: b.y + b.h + radius + margin + .1, nx: 0, ny: 1 },
+      ]
+    }).filter(q => q.x >= radius && q.x <= W - radius && q.y >= playTop + radius && q.y <= Math.min(playBottom, Hc) - radius && !obstacles.some(b => overlap(b, q.x, q.y, radius + margin)))
     // A phone's narrow gutter can hold a centre even when the drawn rim meets both borders.
     if (!candidates.length && margin === 0) candidates.push(...obstacles.flatMap(b => [
       { x: b.x - .1, y: p.y, nx: -1, ny: 0, gutter: true }, { x: b.x + b.w + .1, y: p.y, nx: 1, ny: 0, gutter: true },

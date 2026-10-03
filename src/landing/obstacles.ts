@@ -10,7 +10,7 @@ export function obstacleRect(rect: PadRect, kind: ObstacleKind): PadRect {
   if (rect.w <= 0 || rect.h <= 0) return { ...rect, w: 0, h: 0 }
   if (kind === 'peg') {
     const d = Math.min(rect.w, rect.h)
-    return { ...rect, x: rect.x + (rect.w - d) / 2, y: rect.y + (rect.h - d) / 2, w: d, h: d, r: d / 2, height: 0.22 }
+    return { ...rect, x: rect.x + (rect.w - d) / 2, y: rect.y + (rect.h - d) / 2, w: d, h: d, r: d / 2, height: 0.22, exclude: true, step: false }
   }
   if (kind === 'ramp') return { ...rect, h: Math.max(3, rect.h), r: 1, height: 0.055 }
   if (kind === 'rail' && Math.min(rect.w, rect.h) > 32) {

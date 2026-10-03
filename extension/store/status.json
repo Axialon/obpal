@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "published": "1.6.2",
-  "pending": null,
-  "prepared": "1.8.0",
-  "updated": "2026-10-02"
+  "pending": "1.8.0",
+  "prepared": null,
+  "updated": "2026-10-03"
 }

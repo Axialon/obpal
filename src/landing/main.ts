@@ -48,7 +48,7 @@ const settleHint = () => {
   if (hintAway) return
   hintAway = window.setTimeout(() => hint.classList.add('gone'), 1400)
 }
-/** ?debug=audio,gfx: a small readout of the sound and the drawing, for checking a real device. */
+/** ?debug=audio,gfx,colliders: sound, drawing and cached border outlines for checking a real device. */
 const debug = new Set((new URLSearchParams(location.search).get('debug') ?? '').split(',').filter(Boolean))
 const hero = mountHero(heroEl, $<HTMLCanvasElement>('.hero-stage'), $('#hero-h'), { still, onInput: settleHint, meter: debug.has('audio') })
 // The marbles' sound: a button in the corner says whether it's on, off, or waiting for a click (browsers start sound
@@ -92,7 +92,7 @@ quickAction(desk ? {
 mountQuick({ scroll: false, defer: fn => window.setTimeout(fn, 0) })
 // For the end-to-end test (scripts/e2e-home.mjs), as the viewer exposes its own.
 Object.assign(window, { __home: { contacts: () => hero.contacts(), seed: (id: string, x: number, y: number) => hero.seed(id, x, y), showSeeds: () => hero.showSeeds(), clearSeeds: () => hero.clearSeeds(), tips: () => hero.tips(), dot: () => hero.dot(), pads: () => hero.pads(), outline: (id: string) => hero.outline(id), gfx: () => hero.gfx(), audio: () => hero.audio(), drop: (x: number, y: number) => hero.drop(x, y), counters: () => hero.counters(), gaps: () => hero.gaps(), steps: () => hero.steps(), activity: () => hero.activity(), sim: () => hero.sim() } })
-if (debug.size) void import('./debug').then(({ mountDebug }) => mountDebug(debug, { audio: () => hero.audio(), gfx: () => hero.gfx() }))
+if (debug.size) void import('./debug').then(({ mountDebug }) => mountDebug(debug, { audio: () => hero.audio(), gfx: () => hero.gfx(), contacts: () => hero.contacts() }))
 
 if (desk) {
   // A real code, made on the first sign that someone's here; each phone that scans it gets an orb.
