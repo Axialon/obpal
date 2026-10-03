@@ -97,6 +97,104 @@ export function installFixture() {
   }, 33)
 }
 
+const p95 = (a) => [...a].sort((a, b) => a - b)[Math.floor(a.length * 0.95)] ?? null
+const p50 = (a) => [...a].sort((a, b) => a - b)[Math.floor(a.length * 0.5)] ?? null
+
+/**
+ * A fake connected phone camera (the phone's own BodyTracker with an injected model result, real BODY over WebRTC)
+ * drives seat 1, then seat 2. The other seat never moves with it; a seat switch starts a fresh feed and a closed
+ * camera goes quiet. The person is built by the host fixture, turned about their own vertical by `turn` degrees.
+ */
+async function phoneBodySeats(host, phone, owners) {
+  const read = () =>
+    host.evaluate(() =>
+      window.__humanoid.snapshot().actors.map((a) => ({
+        owner: a.owner, feed: a.feed, generation: a.feedGeneration, tracked: !!a.tracked, stopped: a.stopped,
+        heading: a.heading, facing: a.facing, q: { ...a.q },
+      })),
+    )
+  const send = async (angles, turn) => {
+    const body = await host.evaluate((angles) => {
+      window.fixture.angles = angles
+      return window.fixtureBody()
+    }, angles)
+    await phone.evaluate(
+      ({ body, turn }) => {
+        const h = (turn * Math.PI) / 180, c = Math.cos(h), s = Math.sin(h)
+        window.__cameraBody.inject({
+          worldLandmarks: [body.landmarks.map(([x, y, z]) => ({ x: x * c + z * s, y: -y, z: -(z * c - x * s), visibility: 1 }))],
+          landmarks: [body.landmarks.map(() => ({ x: 0.5, y: 0.5, z: 0, visibility: 1 }))],
+        })
+      },
+      { body, turn },
+    )
+  }
+  const raise = { 'left.arm.pitch': 1.4, 'left.arm.elbow': 0.2 }
+  const changed = (a, b) => Object.keys(a.q).some((id) => Math.abs(a.q[id] - b.q[id]) > 1e-6)
+  let last = null
+  const at = async (label, test, ms = 8000) => {
+    try {
+      return await until(async () => {
+        last = await read()
+        return test(last) && last
+      }, ms, label)
+    } catch (e) {
+      const seats = last?.map(({ owner, feed, generation, tracked, stopped, heading }) => ({ owner, feed, generation, tracked, stopped, heading }))
+      const stats = await phone.evaluate(() => window.__cameraBody?.stats()).catch(() => null)
+      throw new Error(`${e.message}; seats ${JSON.stringify(seats)}; phone ${JSON.stringify(stats && { packets: stats.packets, dropped: stats.dropped, frames: stats.frames })}`)
+    }
+  }
+  const [, other] = await read()
+  await send(raise, 0)
+  // Mirror is on by default: the person's left arm raises the robot's right.
+  await at('phone BODY raises seat 1', (s) => s[0].feed === `phone:${owners[0]}` && s[0].tracked && s[0].q['right.arm.pitch'] > 1)
+  await sleep(1300)
+  await send(raise, 40)
+  const turned = await at('phone BODY turns seat 1', (s) => s[0].heading < -0.45 && s[0].heading >= -Math.PI / 3 - 1e-6)
+  assert(turned[1].feed === `phone:${owners[1]}` && !turned[1].tracked && turned[1].heading === 0, 'Seat 2 took seat 1 BODY')
+  assert(!changed(turned[1], other), 'Seat 2 moved with seat 1 BODY')
+  await host.evaluate(() => window.__humanoid.resetMetrics())
+  await sleep(3000)
+  const timing = await host.evaluate(() => window.__humanoid.metrics().visibleTimes)
+  const visible = { samples: timing.length, p50: p50(timing), p95: p95(timing), max: Math.max(...timing) }
+  assert(visible.samples > 30, 'Too few phone BODY samples were drawn')
+  // Switch: the phone takes seat 2. Seat 1 goes quiet and holds; seat 2 starts its own feed and calibration.
+  const before = await host.evaluate(
+    ([from, to]) => {
+      const claims = window.__sim.claims
+      claims.release(to)
+      claims.take('robot-2', from)
+      return window.__humanoid.snapshot().actors.map((a) => a.feedGeneration)
+    },
+    owners,
+  )
+  const switched = await at('phone BODY on seat 2', (s) => s[1].feed === `phone:${owners[0]}` && s[1].tracked && s[1].q['right.arm.pitch'] > 1)
+  assert(switched[1].generation > before[1], 'Seat 2 kept the previous feed')
+  assert(!switched[0].owner && switched[0].feed === '' && switched[0].stopped, 'Seat 1 kept driving after the switch')
+  await sleep(1500)
+  const fresh = await read()
+  // The switched person still stands turned 40°, but that is seat 2's new calibrated front: no stale turn carries over.
+  assert(Math.abs(fresh[1].heading) < 0.15, `Seat 2 continued the stale heading ${fresh[1].heading}`)
+  await send({ 'left.arm.pitch': 0.2, 'left.arm.roll': 1 }, 40)
+  await at('seat 2 follows the next pose', (s) => s[1].q['right.arm.roll'] > 0.8)
+  assert(!changed((await read())[0], fresh[0]), 'Seat 1 moved after it lost the phone')
+  // Loss: closing the phone camera leaves the claim but no BODY; seat 2 eases to rest and faces its classical heading.
+  await phone.getByRole('button', { name: 'Close camera', exact: true }).first().click()
+  const quiet = await at('seat 2 quiet after camera loss', (s) => !s[1].tracked && Math.abs(s[1].heading) < 0.02 && Math.abs(s[1].q['right.arm.roll']) < 0.05, 6000)
+  assert(quiet[1].owner === owners[0], 'Camera loss released the seat')
+  // Restore the original seats for the disconnect check that follows.
+  await host.evaluate(
+    ([from, to]) => {
+      const claims = window.__sim.claims
+      claims.take('robot-1', from)
+      claims.take('robot-2', to)
+    },
+    owners,
+  )
+  await at('seats restored', (s) => s[0].owner === owners[0] && s[1].owner === owners[1])
+  return { receiveToVisibleMs: visible, headingAtFortyDegrees: turned[0].heading }
+}
+
 export async function runHumanoid(local, check) {
   const temps = tempScope()
   try {
@@ -619,6 +717,8 @@ export async function runHumanoid(local, check) {
           5000,
           'finger relaxation',
         )
+        const seated = await phoneBodySeats(host.page, phones[0].p, owners)
+        report.measurements.push({ phoneBody: seated })
         await phones[0].c.close()
         await until(
           () => host.page.evaluate(() => !window.__humanoid.snapshot().actors[0].owner),
@@ -629,7 +729,7 @@ export async function runHumanoid(local, check) {
           await host.page.evaluate(() => window.__humanoid.snapshot().actors[0].stopped),
           'Disconnect did not hold actor',
         )
-        return 'Two exclusive claims, spectator, real WebRTC BODY/HAND, opt-in finger fusion and loss, disconnect hold'
+        return `Two exclusive claims, spectator, real WebRTC BODY/HAND, opt-in finger fusion and loss, disconnect hold; ${JSON.stringify(seated)}`
       } catch (e) {
         report.phoneDebug = {
           host: await host.page.evaluate(() => ({
@@ -688,6 +788,9 @@ export async function runHumanoid(local, check) {
         durationMs: Date.now() - begin,
         frames: m.frameTimes.length,
         frameP95: p95(m.frameTimes),
+        frameP99: [...m.frameTimes].sort((a, b) => a - b)[Math.floor(m.frameTimes.length * 0.99)] ?? null,
+        receiveToVisibleP50: p50(m.visibleTimes),
+        receiveToVisibleP95: p95(m.visibleTimes),
         logicP95: p95(m.logicTimes),
         renderSubmitP95: p95(m.renderTimes),
         gpuP95: p95(m.gpuTimes),

@@ -48,6 +48,12 @@ shells; distant non-socket parts are simplified to fit the 10k budget. The live
 rig uses 5.5/6.5 m hysteresis and preserves all angles during swaps. The arena's
 7,360 triangles and six material batches fit its 15k budget without another LOD.
 
+The abdominal core is one elastomer envelope shared by two bodies. The thorax half (`spine_roll`) carries
+the plates; the lumbar sleeve (`spine_yaw`) is the same envelope's lower half, so it twists with the waist
+but stays seated in the hip bridge through pitch and roll. The halves overlap about the pivot so no bend
+opens a gap. The sleeve, and at the distant LOD both halves, keep their own rings outside the tessellation
+budget. `render_humanoids.py -- --lumbar [--lod]` renders waist stills at the spine's twist and bend limits.
+
 `humanoid_clearance.py` cuts moving sleeve envelopes, expanded by 8 mm, from the
 fixed shoulder/hip shells and collar surround. It samples each independent axis
 at 17 positions; internal spherical bearings remain closed. The authoring audit

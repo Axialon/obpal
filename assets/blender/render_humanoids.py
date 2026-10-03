@@ -69,6 +69,48 @@ def studio(arena=False):
     return camera
 
 
+def lumbar_stills():
+    """Waist close-ups at spine twist and bend extremes, one still per pose and view.
+
+    `--lumbar [--lod] [--tile 640]` renders each pose of the three independent spine
+    axes (they share one pivot) from the front, three-quarter and side, for Keel and
+    Morrow. Files are named <robot>[-lod]-<pose>-<view>.png under --out.
+    """
+    tile = int(sys.argv[sys.argv.index('--tile')+1]) if '--tile' in sys.argv else 640
+    poses = [('rest', {}), ('yaw-35', {'spine.yaw': -35}), ('yaw+35', {'spine.yaw': 35}),
+             ('yaw+35-pitch+30', {'spine.yaw': 35, 'spine.pitch': 30}),
+             ('yaw-35-pitch-20-roll+20', {'spine.yaw': -35, 'spine.pitch': -20, 'spine.roll': 20}),
+             ('yaw+35-pitch+30-roll-20', {'spine.yaw': 35, 'spine.pitch': 30, 'spine.roll': -20})]
+    axes = {'spine.yaw': 1, 'spine.pitch': 0, 'spine.roll': 2}
+    for name in ['keel', 'morrow']:
+        lod = '--lod' in sys.argv
+        nodes = build_robot(name, lod)
+        camera = studio()
+        scene = bpy.context.scene
+        scene.render.resolution_x = scene.render.resolution_y = tile
+        camera.data.ortho_scale = .56
+        # The arms hang beside the waist and hide the bend; the waist stills omit them.
+        for side in ['left', 'right']:
+            for obj in nodes[side+'.arm.roll'].children_recursive:
+                obj.hide_render = True
+        focus = nodes['spine.yaw'].matrix_world.translation + Vector((0, .05, 0))
+        for label, angles in poses:
+            for joint, axis in axes.items():
+                nodes[joint].rotation_euler[axis] = math.radians(angles.get(joint, 0))
+            bpy.context.view_layer.update()
+            for view, angle in [('front', 0), ('three-quarter', 35), ('side', 90)]:
+                a = math.radians(angle)
+                camera.location = (4*math.sin(a), focus.y+.12, -4*math.cos(a))
+                aim(camera, focus)
+                scene.render.filepath = str(OUT / f'{name}{"-lod" if lod else ""}-{label}-{view}.png')
+                bpy.ops.render.render(write_still=True)
+
+
+if '--lumbar' in sys.argv:
+    lumbar_stills()
+    raise SystemExit
+
+
 for name in ['keel', 'morrow']:
     nodes = build_robot(name)
     camera = studio()

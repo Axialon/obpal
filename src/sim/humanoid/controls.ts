@@ -2,6 +2,9 @@
 import { Vector3 } from 'three'
 import type { DeviceInput } from '../devices/types'
 import { bounded, clamp, neutral, rad, type Angles, type RigProfile } from './profile'
+import { HEADING_LIMIT } from './retarget'
+/** The fastest the body heading turns the root, radians per second; a lost or switched source eases back as slowly. */
+export const HEADING_RATE = 4
 export const PRESETS = ['guard', 'jab', 'cross', 'uppercut', 'block', 'wave'] as const
 export type Preset = (typeof PRESETS)[number]
 export interface Intent {
@@ -66,7 +69,10 @@ export function presetPose(profile: RigProfile, name: Preset, phase: number): An
 export class ActorControl {
   q: Angles
   position = new Vector3()
+  /** The classical heading: sticks, tilt and keys turn it; BODY never writes it. */
   yaw = 0
+  /** BODY's bounded turn on top of the classical heading, eased and rate limited; it returns to zero without BODY. */
+  heading = 0
   stopped = false
   moving = false
   preset: Preset | null = null
@@ -76,6 +82,10 @@ export class ActorControl {
   private legWeight = 0
   constructor(readonly profile: RigProfile) {
     this.q = neutral(profile)
+  }
+  /** The rendered root heading. Walking still follows the classical yaw alone. */
+  get facing() {
+    return this.yaw + this.heading
   }
   stop() {
     this.stopped = true
@@ -100,9 +110,11 @@ export class ActorControl {
       this.previousBody = null
     }
   }
-  step(dt: number, intent: Intent, body: Angles | null) {
+  step(dt: number, intent: Intent, body: Angles | null, bodyHeading = 0) {
     dt = clamp(dt, 0, 0.05)
     if (this.stopped) return this.q
+    const goal = body && Number.isFinite(bodyHeading) ? clamp(bodyHeading, -HEADING_LIMIT, HEADING_LIMIT) : 0
+    this.heading += clamp((goal - this.heading) * (1 - Math.exp(-dt / 0.06)), -HEADING_RATE * dt, HEADING_RATE * dt)
     const bodyMoved =
       body && this.previousBody && Object.keys(body).some((id) => Math.abs(body[id] - this.previousBody![id]) > 0.13)
     this.previousBody = body ? { ...body } : null

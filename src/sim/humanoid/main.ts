@@ -104,6 +104,12 @@ const actors = ['Keel', 'Morrow'].map((name, i) => {
     balance: new FootBalance(),
     owner: '',
     source: 'classical',
+    /** Which BODY stream may drive this seat: its claimed phone, this computer's camera, or the loopback seam. */
+    feed: '',
+    /** Counts feed changes; everything derived from an earlier feed (pose, heading, anchors) was discarded with it. */
+    feedGeneration: 0,
+    /** Host acceptance time of the newest BODY sample this seat rendered, for receive-to-visible timing. */
+    bodyAt: -1,
     calibrationKey: '',
     saved: '',
     last: null as Retargeted | null,
@@ -119,6 +125,8 @@ let selected = 0,
   seats: Seats | null = null,
   localSource = 'classical',
   localActive = false,
+  // The one seat this computer's keys and camera drive, fixed when it is taken; choosing another seat only selects it.
+  localSeat = 0,
   stopped = false
 const localCaptureOrigin = performance.now()
 const localBody = mountBodyCapture({
@@ -290,6 +298,7 @@ function takeLocal(source = localSource) {
   if (!stopped) actor.control.resume()
   localActive = true
   localSource = source
+  localSeat = selected
   return true
 }
 $('local-body').onclick = () => toggleBodyCapture()
@@ -401,7 +410,7 @@ const layout: Layout = {
 const shared = new SharedPresence({
   sim: 'humanoid', hardwareLive: () => drivers.session.state === 'live',
   rides: () => actors.map(a => ({ id: a.id, name: a.name, style: 'body' as const, pose: () => { const p = anchorPose(a.rig.root); p.p.y += 1.3; return p } })),
-  capture: () => ({ actors: actors.map(a => ({ p: a.control.position.toArray(), yaw: a.control.yaw, q: a.control.q })) }),
+  capture: () => ({ actors: actors.map(a => ({ p: a.control.position.toArray(), yaw: a.control.facing, q: a.control.q })) }),
   apply(state: SimValue) {
     const s = state as unknown as { actors: { p: [number, number, number]; yaw: number; q: typeof actors[number]['control']['q'] }[] }
     if (!Array.isArray(s?.actors)) return
@@ -457,7 +466,11 @@ let lastSound = 0,
 const frameTimes: number[] = [],
   logicTimes: number[] = [],
   gpuTimes: number[] = [],
-  renderTimes: number[] = []
+  renderTimes: number[] = [],
+  // Receive-to-visible: from BodyInput accepting a sample to the next frame's start, by which the frame that first
+  // drew it has been handed to the compositor. Display scan-out adds at most one refresh interval.
+  visibleTimes: number[] = [],
+  pendingVisible: number[] = []
 const test =
   ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) &&
   ['humanoid', 'humanoid-live', 'load'].includes(new URLSearchParams(location.search).get('test') ?? '')
@@ -483,10 +496,14 @@ stage.onFrame = (t, dt) => {
     now = t * 1000,
     inputs = seats?.read(now),
     local = localBody.read(now)
+  if (test) {
+    for (const at of pendingVisible) visibleTimes.push(now - at)
+    pendingVisible.length = 0
+  }
   const localFrames = localControls?.frames(n => { const who = sim?.claims.holder(actors[n].id); return !!who && who !== 'host' }, dt) ?? new Map()
   for (let i = 0; i < actors.length; i++) {
     const a = actors[i],
-      owner = sim?.claims.holder(a.id) ?? (localFrames.has(i) || localActive && selected === i ? 'host' : '')
+      owner = sim?.claims.holder(a.id) ?? (localFrames.has(i) || localActive && localSeat === i ? 'host' : '')
     a.rig.detail(stage.camera.position)
     a.rig.face(t, !!a.last?.tracked && !a.control.stopped, faceMotion.matches)
     if (owner !== a.owner) {
@@ -505,14 +522,25 @@ stage.onFrame = (t, dt) => {
     const raw = owner && owner !== 'host' ? inputs?.get(owner) : localFrames.get(i)
     const input = raw ? mapFaceInput('humanoid', ['face.gamepad', 'face.trackpad'], raw, dt) : undefined
     const intent = classical(input)
-    if (owner === 'host' && selected === i && !localFrames.has(i)) {
+    if (owner === 'host' && localSeat === i && !localFrames.has(i)) {
       intent.x = Number(keys.has('d')) - Number(keys.has('a'))
       intent.z = Number(keys.has('s')) - Number(keys.has('w'))
       intent.yaw = Number(keys.has('e')) - Number(keys.has('q'))
       intent.manual = !!keys.size
     }
-    let body: BodyFrame | null = test ? (injected.get(i)?.read(now) ?? null) : null
-    body ??= owner === 'host' && localSource === 'body' ? local : (input?.body ?? null)
+    // One BODY owner per seat. A phone's stream reaches only the seat it holds, this computer's camera only the seat
+    // it reserved, never the selected one. Any change of feed discards every state the previous feed produced.
+    const seam = test ? (injected.get(i)?.read(now) ?? null) : null
+    const feed = seam ? 'test' : !owner ? '' : owner !== 'host' ? `phone:${owner}` : localSource === 'body' && localSeat === i ? 'camera' : ''
+    if (feed !== a.feed) {
+      a.feed = feed
+      a.feedGeneration++
+      a.retarget.reset()
+      a.balance.reset()
+      a.control.resetSource()
+      a.generation = -1
+    }
+    const body: BodyFrame | null = feed === 'test' ? seam : feed === 'camera' ? local : feed ? (input?.body ?? null) : null
     const source = body ? 'body' : intent.manual || intent.preset ? 'classical' : a.source
     if (source !== a.source) {
       a.source = source
@@ -532,7 +560,7 @@ stage.onFrame = (t, dt) => {
       continue
     }
     save(a)
-    const q = a.control.step(dt, intent, source === 'body' ? a.last.q : null)
+    const q = a.control.step(dt, intent, source === 'body' ? a.last.q : null, a.last.heading)
     if (!a.control.stopped) {
       const balance = a.balance.step(a.control.profile, q, dt, a.control.moving)
       a.offset.copy(balance.root)
@@ -546,8 +574,12 @@ stage.onFrame = (t, dt) => {
         const lowest = Math.min(...legs.map((c) => fk.get(c.end)!.p.y - 0.08))
         a.offset.y = clamp(-lowest, -Math.max(0, fk.get(a.control.profile.root)!.p.y - 0.12), 0.4)
       }
-      a.rig.pose(pose, a.control.position, a.control.yaw, a.offset)
+      a.rig.pose(pose, a.control.position, a.control.facing, a.offset)
       a.rig.grip(a.tendons.grip)
+      if (test && body && source === 'body' && body.receivedAt !== a.bodyAt) {
+        a.bodyAt = body.receivedAt
+        pendingVisible.push(body.receivedAt)
+      }
       for (const foot of balance.landed)
         sound.bus.emit({
           kind: 'footstep',
@@ -637,7 +669,7 @@ stage.onFrame = (t, dt) => {
     const gfx = stage.view.gfx()
     if (gfx.gpuMs !== null) gpuTimes.push(gfx.gpuMs)
     renderTimes.push(gfx.renderMs)
-    for (const a of [frameTimes, logicTimes, gpuTimes, renderTimes]) if (a.length > 18000) a.shift()
+    for (const a of [frameTimes, logicTimes, gpuTimes, renderTimes, visibleTimes]) if (a.length > 18000) a.shift()
   }
 }
 if (test)
@@ -650,6 +682,12 @@ if (test)
       actors,
       changeRobot: (index: number, id: string, form = 0) => { choose(index); changeRobot(id, form) },
       camera: stage.camera,
+      /** Point the live camera for a matched capture; the scene keeps updating, unlike inspect(). */
+      view: (position: [number, number, number], target: [number, number, number]) => {
+        stage.controls.target.set(...target)
+        stage.camera.position.set(...position)
+        stage.controls.update()
+      },
       /** Loopback-only stills and joint sweeps use the actual live renderer and skins. */
       inspect: () => {
         inspecting = true
@@ -673,8 +711,13 @@ if (test)
           id: a.id,
           owner: a.owner,
           source: a.source,
+          feed: a.feed,
+          feedGeneration: a.feedGeneration,
           q: a.control.q,
           position: a.control.position.toArray(),
+          yaw: a.control.yaw,
+          heading: a.control.heading,
+          facing: a.control.facing,
           preset: a.control.preset,
           stopped: a.control.stopped,
           tracked: a.last?.tracked,
@@ -685,9 +728,10 @@ if (test)
         done: [...walkthrough.walk.done],
         saved: actors[selected].retarget.data,
       }),
-      metrics: () => ({ frameTimes, logicTimes, gpuTimes, renderTimes, gfx: stage.view.gfx() }),
+      metrics: () => ({ frameTimes, logicTimes, gpuTimes, renderTimes, visibleTimes, gfx: stage.view.gfx() }),
       resetMetrics: () => {
-        frameTimes.length = logicTimes.length = gpuTimes.length = renderTimes.length = 0
+        frameTimes.length = logicTimes.length = gpuTimes.length = renderTimes.length = visibleTimes.length = 0
+        pendingVisible.length = 0
         previousFrame = 0
       },
       screenBounds: () =>

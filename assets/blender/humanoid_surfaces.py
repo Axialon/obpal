@@ -99,11 +99,13 @@ def oval_band(parent, rx, ry, z, tube, material='obsidian', low=False, at_y=.25,
     return obj
 
 
-def anatomy(parent, sections, material='obsidian', low=False, at=(0, 0, 0)):
+def anatomy(parent, sections, material='obsidian', low=False, at=(0, 0, 0), keep=None):
     """Smooth superellipse sections for pectoral, deltoid and muscle-led volume.
 
     The original joint centres stay fixed. These are authored shell envelopes,
-    not copied anatomy or a physical soft-body/cloth simulation.
+    not copied anatomy or a physical soft-body/cloth simulation. `keep=(low, high)`
+    closes the same shell between two of its own rings, so two bodies can share
+    one continuous envelope and overlap where they bend.
     """
     rings = []
     count, subdivisions = (12, 2) if low else (16, 3)
@@ -118,6 +120,8 @@ def anatomy(parent, sections, material='obsidian', low=False, at=(0, 0, 0)):
                 values.append(.5*((2*q)+(-p+r)*t+(2*p-5*q+4*r-s)*t*t+(-p+3*q-3*r+s)*t*t*t))
             rings.append(values)
     rings.append(sections[-1])
+    if keep:
+        rings = [ring for ring in rings if keep[0]-1e-6 <= ring[0] <= keep[1]+1e-6]
     vertices = []
     for y, w, d, z in rings:
         for i in range(count):

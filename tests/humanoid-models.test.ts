@@ -144,6 +144,29 @@ describe('authored humanoids', () => {
         }
       })
     }
+    for (const suffix of ['', '-lod']) {
+      it(`${name}${suffix} gives the lumbar body (spine.yaw) an authored skin around its pivot`, async () => {
+        const scene = await load(name + suffix),
+          pivot = modelPivots(scene, profile).get('spine.yaw')!
+        // spine.pitch and spine.roll hang below this pivot; only its own meshes belong to the lumbar body.
+        const skin = pivot.children.filter((child): child is THREE.Mesh => (child as THREE.Mesh).isMesh)
+        expect(skin.length).toBeGreaterThan(0)
+        const box = new THREE.Box3()
+        let triangles = 0
+        for (const mesh of skin) {
+          triangles += mesh.geometry.index!.count / 3
+          box.expandByObject(mesh)
+        }
+        // A real sleeve, not a placeholder sliver: it spans the pivot with the waist's girth.
+        expect(triangles).toBeGreaterThanOrEqual(60)
+        const at = pivot.getWorldPosition(new THREE.Vector3()),
+          size = box.getSize(new THREE.Vector3())
+        expect(box.min.y).toBeLessThan(at.y - 0.05)
+        expect(box.max.y).toBeGreaterThan(at.y + 0.01)
+        expect(size.x).toBeGreaterThan(0.15)
+        expect(size.x).toBeLessThan(0.3)
+      })
+    }
     it(`${name} retains its silhouette in the fallback LOD`, async () => {
       const high = new THREE.Box3().setFromObject(await load(name)),
         low = new THREE.Box3().setFromObject(await load(name + '-lod'))

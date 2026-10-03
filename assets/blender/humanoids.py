@@ -123,9 +123,23 @@ def build_robot(name, low=False, clear=True):
                     (.044, .182 if not morrow else .207, .100, 0),
                     (.096, .126 if not morrow else .159, .077, 0)], low=low)
     ball(torso, .104, low=low, material='elastomer', scale=(1, 1.15, 1))
-    # A quiet soft core and abdominal plates replace the exposed bearing rings.
-    anatomy(torso, [(-.095, .096, .081, .006), (-.025, .105, .086, .003),
-                    (.052, .111, .088, 0), (.119, .123, .096, -.002)], 'elastomer', low)
+    # A quiet soft core and abdominal plates replace the exposed bearing rings. One
+    # envelope is shared by two bodies. The thorax half carries the plates and bends
+    # with them. The lumbar half hangs from spine.yaw, so it twists with the waist but
+    # stays seated in the hip bridge through pitch and roll. The halves overlap about
+    # the pivot (75 mm hero, 74 mm distant), so no bend opens a gap, and the thorax half
+    # stands 0.75 mm proud, so the two surfaces never coincide. The lumbar sleeve, and at
+    # the distant LOD both halves, keep their own rings outside the budget below:
+    # simplification would collapse them to slivers.
+    core = [(-.095, .096, .081, .006), (-.025, .105, .086, .003),
+            (.052, .111, .088, 0), (.119, .123, .096, -.002)]
+    upper = anatomy(torso, [(y, w+.00075, d+.00075, z) for y, w, d, z in core], 'elastomer',
+                    distant, keep=(-.07 if distant else -.05, 1))
+    sleeve = anatomy(nodes['spine.yaw'], core, 'elastomer', distant, keep=(-1, .03))
+    upper['lumbarHalf'] = sleeve['lumbarHalf'] = True
+    sleeve['lumbarCore'] = True
+    if distant:
+        upper['lumbarCore'] = True
     for y, width in [(-.015, .125), (.041, .145), (.092, .174)]:
         plate(torso, (width, .043, .019), (0, y, -.092), 'obsidian', taper=.15, edge=.004)
     for x in [-.058, .058]:
@@ -310,7 +324,7 @@ def build_robot(name, low=False, clear=True):
             if obj.type == 'MESH':
                 for vertex in obj.data.vertices:
                     vertex.co *= scale
-    parts = [obj for obj in set(bpy.context.scene.objects)-existing if obj.type == 'MESH']
+    parts = [obj for obj in set(bpy.context.scene.objects)-existing if obj.type == 'MESH' and not obj.get('lumbarCore')]
     def triangles(obj):
         obj.data.calc_loop_triangles()
         return len(obj.data.loop_triangles)
@@ -320,7 +334,9 @@ def build_robot(name, low=False, clear=True):
     flexible = sum(triangles(obj) for obj in parts if not protected(obj))
     ratio = max(.02, min(1, ((8800 if distant else 23500)-fixed)/max(1, flexible)))
     for obj in parts:
-        if protected(obj) or len(obj.data.polygons) <= 3 or ratio >= 1:
+        # The thorax half still counts toward the budget but keeps its rim rings, so the
+        # lip it makes over the lumbar sleeve stays clean.
+        if protected(obj) or obj.get('lumbarHalf') or len(obj.data.polygons) <= 3 or ratio >= 1:
             continue
         mod = obj.modifiers.new('Distant shell simplification' if distant else 'Hero tessellation budget', 'DECIMATE')
         mod.ratio = ratio
@@ -347,6 +363,11 @@ def build_robot(name, low=False, clear=True):
             obj.data.set_sharp_from_angle(angle=math.radians(35))
         for polygon in obj.data.polygons:
             polygon.use_smooth = smooth
+    for obj in set(bpy.context.scene.objects)-existing:
+        if obj.type == 'MESH' and obj.get('lumbarHalf'):
+            # A cut end is a flat cap buried in the other half. Sharp rim edges keep
+            # it from tilting the smooth wall's normals where the wall stays visible.
+            obj.data.set_sharp_from_angle(angle=math.radians(35))
     return nodes
 
 
