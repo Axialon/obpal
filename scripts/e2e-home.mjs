@@ -56,6 +56,8 @@ import { runHomeContacts } from './e2e-home-contacts.mjs'
 import { runHomeMotion } from './e2e-home-motion.mjs'
 import { runHomeQr } from './e2e-home-qr.mjs'
 import { runHomeSurfaces } from './e2e-home-surfaces.mjs'
+import { runHomeMatrix } from './e2e-home-matrix.mjs'
+import { runHomeHeadings } from './e2e-home-headings.mjs'
 import { rawRun } from './lib/distill.mjs'
 import { startupProbe, startupPath, startupText, watchStartup } from './lib/home-startup.mjs'
 
@@ -210,6 +212,8 @@ try {
   await runHomeMotion(browser, local, check)
   await runHomeQr(browser, local, check)
   await runHomeSurfaces(browser, local, check)
+  await runHomeMatrix(browser, local, check)
+  await runHomeHeadings(browser, local, check)
   await runHomeField(browser, local, check)
   if (FIELD_PROFILE || SURFACE_PROFILE) throw ONLY_DONE
 
@@ -756,78 +760,58 @@ try {
         const rim = await rimAt(page, wall, wall === 'left' || wall === 'right' ? t.y : t.x, a)
         if (rim < 110) throw new Error(`${name}, ${wall}: no rim at the edge in the screenshot (brightest ${rim.toFixed(0)})`)
       }
+      const clearWays = () => page.evaluate(() => {
+        const outline = window.__home.outline('me'), a = outline.area
+        const m = Math.ceil((outline.right - outline.left) / 2) + 3
+        const blocks = window.__home.contacts().rects.filter(({ rect: r }) => r.w > 0 && r.h > 0).map(({ rect: r }) => ({ l: r.x, r: r.x + r.w, t: r.y - (r.fixed ? 0 : scrollY), b: r.y + r.h - (r.fixed ? 0 : scrollY) }))
+        const headline = document.getElementById('hero-h').getBoundingClientRect()
+        blocks.push({ l: headline.left, r: headline.right, t: headline.top, b: headline.bottom })
+        const free = (l, t, r, b) => blocks.every(q => q.r < l || q.l > r || q.b < t || q.t > b)
+        const side = left => {
+          const x = left ? a.left + m : a.right - m
+          for (let y = a.bottom - m; y >= a.top + m; y--) {
+            if (free(left ? a.left : x - m, y - m, left ? x + m : a.right, y + m)) return [x, y]
+          }
+          return [NaN, NaN]
+        }
+        const end = top => {
+          const y = top ? a.top + m : a.bottom - m, centre = (a.left + a.right) / 2
+          for (let offset = 0; offset < (a.right - a.left) / 2; offset += 2) for (const x of [centre + offset, centre - offset]) {
+            if (x < a.left + m || x > a.right - m) continue
+            if (free(x - m, top ? a.top : y - m, x + m, top ? y + m : a.bottom)) return [x, y]
+          }
+          return [NaN, NaN]
+        }
+        return [
+          ['left', ...side(true), 0, -16, a.left + 2, null],
+          ['right', ...side(false), 0, 16, a.right - 2, null],
+          ['bottom', ...end(false), 16, 0, null, a.bottom - 2],
+          ['top', ...end(true), -14, 0, null, a.top + 2],
+        ]
+      })
       if (size.hasTouch) {
         const tilt = tilter(page)
         await page.locator('[data-hint]').tap()
-        // (Tapping the hint may have scrolled it into view: the page back at its top.)
+        // Tapping the hint can scroll it into view; measure the lanes after returning to the top.
         await page.evaluate(() => scrollTo(0, 0))
         await tilt.on()
         await sleep(250)
-        // Before each press, hopped onto open floor (a tap there) with a clear way to that side, and tipped straight
-        // into it, harder than it takes to climb a raised thing: along the lowest row clear right across the screen
-        // (below the headline, clear of the raised things and their sides), and down the column clear from there to
-        // the bottom nearest the middle.
-        const ways = await page.evaluate(() => {
-          const blocks = [...document.querySelectorAll('.hero .cta .btn, .hero [data-hint], .field-controls .hero-sound, .hero .quick .qi, #hero-h')]
-            .map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0).map((r) => ({ l: r.left, t: r.top, r: r.right, b: r.bottom + 16 }))
-          const m = 16
-          const free = (l, t, r, b) => blocks.every((q) => q.r < l || q.l > r || q.b < t || q.t > b)
-          let row = NaN, col = NaN, down = NaN
-          for (let y = innerHeight - 30; y >= 90 && Number.isNaN(row); y -= 1) if (free(0, y - m, innerWidth, y + m)) row = y
-          // A short landscape viewport may have no full-width lane. Test each wall from nearby clear floor.
-          const side = (left) => {
-            if (!Number.isNaN(row)) return [innerWidth / 2, row]
-            const x = left ? m * 1.5 : innerWidth - m * 1.5
-            for (let y = innerHeight - 30; y >= 90; y--) if (free(left ? 0 : x - m, y - m, left ? x + m : innerWidth, y + m)) return [x, y]
-            return [NaN, NaN]
-          }
-          // The column down to the bottom: nearest the middle, starting as high up as it's clear.
-          for (let k = 0; k < innerWidth / 2 && Number.isNaN(col); k += 2) {
-            for (const x of [innerWidth / 2 + k, innerWidth / 2 - k]) {
-              if (!Number.isNaN(col) || x < m || x > innerWidth - m) continue
-              for (let y = 90; y <= innerHeight - 40; y += 1) if (free(x - m, y - m, x + m, innerHeight)) { col = x; down = y; break }
-            }
-          }
-          // Start the downward press on the same open row: higher taps can land among the step labels and their raised icons.
-          return [['left', ...side(true), 0, -16], ['right', ...side(false), 0, 16], ['bottom', col, Math.min(innerHeight - 30, Number.isNaN(row) ? down + 32 : Math.max(down, row)), 16, 0]]
-        })
-        if (ways.some((w) => Number.isNaN(w[1]) || Number.isNaN(w[2]))) throw new Error(`${name}: no clear way to an edge: ${JSON.stringify(ways)}`)
+        const ways = await clearWays()
         for (const [wall, x, y, down, right] of ways) {
-          await page.touchscreen.tap(x, y)
+          if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error(`${name}: no clear staging lane for ${wall}`)
+          // Stage beside this wall. Hopping from the previous wall would cross solid cards or heading text.
+          await page.evaluate(([x, y]) => window.__home.drop(x, y), [x, y])
           await simWait(page, 1.4)
           await settle(page, () => tilt.tip(down, right))
           await measure(wall)
           await tilt.tip(0, 0)
         }
-        // The top: onto the headline's first letter, a short hop to the line above it, and tipped away from you.
-        const first = await page.evaluate(() => { const r = document.createRange(); const h = document.getElementById('hero-h'); r.setStart(h.firstChild, 0); r.setEnd(h.firstChild, 1); const b = r.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height * 0.6 } })
-        await page.touchscreen.tap(first.x, first.y)
-        await simWait(page, 1.6)
-        const line = await page.evaluate(() => { const e = document.querySelector('.hero .eyebrow').getBoundingClientRect(); return { x: e.left + 40, y: e.top + e.height / 2 } })
-        await page.touchscreen.tap(line.x, line.y)
-        await simWait(page, 1.4)
-        await settle(page, () => tilt.tip(-14, 0))
-        await measure('top')
       } else {
-        // Stage near each boundary: steering through the solid QR card would test that card, not the viewport wall.
-        const ways = await page.evaluate(() => {
-          const outline = window.__home.outline('me'), a = outline.area
-          const m = Math.ceil((outline.right - outline.left) / 2) + 8
-          const blocks = [...document.querySelectorAll('.hero .cta .btn, .hero [data-hint], .hero .pair, .field-controls .hero-sound, .hero .quick .qi, #hero-h')]
-            .map(el => el.getBoundingClientRect()).filter(r => r.width > 0)
-          const free = (l, t, r, b) => blocks.every(q => q.right < l || q.left > r || q.bottom + 16 < t || q.top > b)
-          const side = left => {
-            const x = left ? 2 * m : a.right - 2 * m
-            for (let y = a.bottom - m; y >= a.top + m; y--) if (free(left ? 0 : x - m, y - m, left ? x + m : a.right, y + m)) return [x, y]
-            return [NaN, NaN]
-          }
-          return [['left', ...side(true), 2, null], ['right', ...side(false), a.right - 2, null], ['bottom', 2 * m, a.bottom - 2 * m, 2 * m, a.bottom - 2], ['top', 2 * m, a.top + 2 * m, 2 * m, a.top + 3]]
-        })
-        for (const [wall, sx, sy, x, targetY] of ways) {
+        for (const [wall, sx, sy, , , targetX, targetY] of await clearWays()) {
           if (!Number.isFinite(sx) || !Number.isFinite(sy)) throw new Error(`${name}: no clear staging lane for ${wall}`)
           await page.evaluate(([x, y]) => window.__home.drop(x, y), [sx, sy])
           await simWait(page, 1.2)
-          const y = targetY ?? sy
+          const x = targetX ?? sx, y = targetY ?? sy
           await settle(page, () => page.mouse.move(x + Math.random(), y))
           await measure(wall)
         }
@@ -1001,56 +985,81 @@ try {
     return `the most it moved in a frame: ${seen.join(', ')}`
   })
 
-  await check('the raised things are blocks 0.3 em tall, drawn as tall as the field sees them; the steps\' icons have a side, a glass top and a shadow like the sound control', async () => {
+  await check('the raised things are blocks 0.3 em tall with visible sides; fixed controls are circular glass with soft shadows and matching colliders', async () => {
     const seen = []
     for (const [name, size] of [['390x844', { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 }], ['1280x800', { viewport: { width: 1280, height: 800 } }]]) {
       const ctx = await browser.newContext({ ...size, ignoreHTTPSErrors: true, reducedMotion: 'reduce' })
       const page = await ctx.newPage()
-      await page.goto(`${local.origin}/?quality=low`)
-      await field3d(page)
-      await until('the raised things drawn', () => page.evaluate(() => window.__home.steps().some((s) => s.drawn.dy > 0)), 10000)
-      await sleep(300)
-      const steps = await page.evaluate(() => window.__home.steps())
-      const shown = steps.filter((s) => s.side)
-      if (shown.length < 6) throw new Error(`${name}: ${shown.length} raised things: ${JSON.stringify(steps)}`)
-      for (const s of shown) {
-        // Three times the first ones (0.1 em), and drawn as the field sees them, to the half pixel.
-        if (Math.abs(s.height - 0.3) > 1e-9) throw new Error(`${name}: "${s.text}" is ${s.height} em tall`)
-        if (Math.abs(s.drawn.dx - s.side.dx) > 0.5 || Math.abs(s.drawn.dy - s.side.dy) > 0.5) throw new Error(`${name}: "${s.text}" drawn ${JSON.stringify(s.drawn)}, seen ${JSON.stringify(s.side)}`)
-        if (s.drawn.dy < (name === '390x844' ? 3.5 : 7)) throw new Error(`${name}: "${s.text}" is drawn only ${s.drawn.dy} px tall`)
-      }
-      // The icons and the sound control: a glass top, and a side lighter than the floor's shadow below it.
-      const look = await page.evaluate(() => [...document.querySelectorAll('.hero .quick .qi, .field-controls [data-sound], .field-controls [data-field-toggle]')].map((el) => {
-        const r = el.getBoundingClientRect(), cs = getComputedStyle(el)
-        const alpha = (cs.backgroundColor.match(/[\d.]+/g) ?? []).map(Number)[3] ?? 1
-        return { sound: el.matches('[data-sound]'), fixed: !!el.closest('.field-controls'), x: r.left, y: r.top, w: r.width, h: r.height, alpha, dy: parseFloat(el.style.getPropertyValue('--pad-dy')) || 0, dx: parseFloat(el.style.getPropertyValue('--pad-dx')) || 0, shadow: cs.boxShadow }
-      }))
-      const shot = await page.screenshot()
-      const dpr = size.deviceScaleFactor ?? 1
-      const { data, info } = await sharp(shot).raw().toBuffer({ resolveWithObject: true })
-      const lum = (x0, y0, x1, y1) => {
-        let sum = 0, n = 0
-        for (let y = Math.max(0, Math.round(y0 * dpr)); y < Math.min(info.height, Math.round(y1 * dpr)); y++) for (let x = Math.max(0, Math.round(x0 * dpr)); x < Math.min(info.width, Math.round(x1 * dpr)); x++) {
-          const k = (y * info.width + x) * info.channels
-          sum += 0.2126 * data[k] + 0.7152 * data[k + 1] + 0.0722 * data[k + 2]; n++
+      const proof = {}
+      try {
+        await page.goto(`${local.origin}/?quality=low`)
+        await field3d(page)
+        await until('the raised things drawn', () => page.evaluate(() => window.__home.steps().some((s) => s.drawn.dy > 0)), 10000)
+        await sleep(300)
+        const steps = await page.evaluate(() => {
+          const rects = window.__home.contacts().rects
+          return window.__home.steps().map((s, i) => ({ ...s, fixed: !!rects[i]?.rect.fixed }))
+        })
+        proof.steps = steps
+        const shown = steps.filter((s) => s.side && !s.fixed)
+        if (shown.length < 6) throw new Error(`${name}: ${shown.length} raised things: ${JSON.stringify(steps)}`)
+        for (const s of shown) {
+          // Three times the first ones (0.1 em), and drawn as the field sees them, to the half pixel.
+          if (Math.abs(s.height - 0.3) > 1e-9) throw new Error(`${name}: "${s.text}" is ${s.height} em tall`)
+          if (Math.abs(s.drawn.dx - s.side.dx) > 0.5 || Math.abs(s.drawn.dy - s.side.dy) > 0.5) throw new Error(`${name}: "${s.text}" drawn ${JSON.stringify(s.drawn)}, seen ${JSON.stringify(s.side)}`)
+          if (s.drawn.dy < (name === '390x844' ? 3.5 : 7)) throw new Error(`${name}: "${s.text}" is drawn only ${s.drawn.dy} px tall`)
         }
-        return n ? sum / n : 0
-      }
-      const sides = []
-      for (const q of look) {
-        if (!q.sound && q.alpha < 0.3) throw new Error(`${name}: an icon's top is clear glass (alpha ${q.alpha})`)
-        if (!/px \d/.test(q.shadow) || q.shadow === 'none') throw new Error(`${name}: no side drawn: ${q.shadow}`)
-        // Its side: the band under its middle, as tall as it's drawn (leaning with it); the floor's shadow just under that.
-        const mx = q.x + q.w * 0.3 + q.dx * 0.5, bw = q.w * 0.4
-        const side = lum(mx, q.y + q.h + 1, mx + bw, q.y + q.h + q.dy - 1)
-        // The fixed stack's floor reference must clear its other button and stay inside the screenshot.
-        const floorX = q.fixed ? q.x - bw - 20 : mx + q.dx * 0.5
-        const floor = lum(floorX, q.y + q.h + q.dy + 3, floorX + bw, q.y + q.h + q.dy + 7)
-        if (!(side > floor + 6)) throw new Error(`${name}: ${q.sound ? 'the sound control' : 'an icon'} shows no side (side ${side.toFixed(1)}, floor ${floor.toFixed(1)})`)
-        sides.push(`${q.sound ? 'sound' : 'icon'} ${side.toFixed(0)}/${floor.toFixed(0)}`)
-      }
-      seen.push(`${name}: ${shown.length} blocks 0.3 em, drawn ${Math.min(...shown.map((s) => s.drawn.dy))}–${Math.max(...shown.map((s) => s.drawn.dy))} px tall; sides over floor ${sides.join(', ')}`)
-      await ctx.close()
+        // Raised icons have extruded sides. The fixed controls use round glass and a soft shadow instead.
+        const look = await page.evaluate(() => [...document.querySelectorAll('.hero .quick .qi, .field-controls [data-sound], .field-controls [data-field-toggle]')].map((el) => {
+          const r = el.getBoundingClientRect(), cs = getComputedStyle(el)
+          const alpha = (cs.backgroundColor.match(/[\d.]+/g) ?? []).map(Number)[3] ?? 1
+          const collider = window.__home.contacts().rects.find(b => b.rect.fixed && b.owner === el.className)?.rect
+          return { sound: el.matches('[data-sound]'), fixed: !!el.closest('.field-controls'), x: r.left, y: r.top, w: r.width, h: r.height, alpha, radius: Math.min(parseFloat(cs.borderTopLeftRadius), r.width / 2, r.height / 2), blur: cs.backdropFilter, collider, dy: parseFloat(el.style.getPropertyValue('--pad-dy')) || 0, dx: parseFloat(el.style.getPropertyValue('--pad-dx')) || 0, shadow: cs.boxShadow }
+        }))
+        proof.look = look
+        const shot = await page.screenshot()
+        const dpr = size.deviceScaleFactor ?? 1
+        const { data, info } = await sharp(shot).raw().toBuffer({ resolveWithObject: true })
+        const lum = (x0, y0, x1, y1) => {
+          let sum = 0, n = 0
+          for (let y = Math.max(0, Math.round(y0 * dpr)); y < Math.min(info.height, Math.round(y1 * dpr)); y++) for (let x = Math.max(0, Math.round(x0 * dpr)); x < Math.min(info.width, Math.round(x1 * dpr)); x++) {
+            const k = (y * info.width + x) * info.channels
+            sum += 0.2126 * data[k] + 0.7152 * data[k + 1] + 0.0722 * data[k + 2]; n++
+          }
+          return n ? sum / n : 0
+        }
+        const sides = []
+        for (const q of look) {
+          if (q.fixed) {
+            if (Math.abs(q.w - 44) > .5 || Math.abs(q.h - 44) > .5 || Math.abs(q.radius - 22) > .5) throw new Error(`${name}: fixed control is not a 44 px circle: ${JSON.stringify(q)}`)
+            if (!(q.alpha >= .3 && q.alpha < 1) || !q.blur.includes('blur(')) throw new Error(`${name}: fixed control has no frosted glass top: ${JSON.stringify(q)}`)
+            const shadow = [...q.shadow.matchAll(/(-?[\d.]+)px/g)].map(m => Number(m[1]))
+            if (!(shadow[2] > 0 && shadow[3] < 0)) throw new Error(`${name}: fixed control has no soft shadow: ${q.shadow}`)
+            const b = q.collider
+            if (!b?.exclude || b.step !== false || !b.fixed || Math.max(Math.abs(b.x - q.x), Math.abs(b.y - q.y), Math.abs(b.w - q.w), Math.abs(b.h - q.h), Math.abs(b.r - q.radius)) > .5) throw new Error(`${name}: fixed control collider differs from its circular border: ${JSON.stringify(q)}`)
+            sides.push(`${q.sound ? 'sound' : 'marbles'}: 44 px glass, shadow and matching exclusion`)
+            continue
+          }
+          if (!q.sound && q.alpha < 0.3) throw new Error(`${name}: an icon's top is clear glass (alpha ${q.alpha})`)
+          if (!/px \d/.test(q.shadow) || q.shadow === 'none') throw new Error(`${name}: no side drawn: ${q.shadow}`)
+          // Its side: the band under its middle, as tall as it's drawn (leaning with it); the floor's shadow just under that.
+          const mx = q.x + q.w * 0.3 + q.dx * 0.5, bw = q.w * 0.4
+          const side = lum(mx, q.y + q.h + 1, mx + bw, q.y + q.h + q.dy - 1)
+          const floorX = mx + q.dx * 0.5
+          const floor = lum(floorX, q.y + q.h + q.dy + 3, floorX + bw, q.y + q.h + q.dy + 7)
+          if (!(side > floor + 6)) throw new Error(`${name}: ${q.sound ? 'the sound control' : 'an icon'} shows no side (side ${side.toFixed(1)}, floor ${floor.toFixed(1)})`)
+          sides.push(`${q.sound ? 'sound' : 'icon'} ${side.toFixed(0)}/${floor.toFixed(0)}`)
+        }
+        seen.push(`${name}: ${shown.length} blocks 0.3 em, drawn ${Math.min(...shown.map((s) => s.drawn.dy))}–${Math.max(...shown.map((s) => s.drawn.dy))} px tall; sides over floor ${sides.join(', ')}`)
+      } catch (error) {
+        const out = join(process.env.OBPAL_E2E_EVIDENCE_ROOT, 'raised-controls', name)
+        await mkdir(out, { recursive: true })
+        const raw = rawRun(out)
+        await page.screenshot({ path: join(raw, 'failure.png') })
+        await writeFile(join(out, 'measurements.json'), JSON.stringify({ viewport: size, failure: String(error), ...proof }, null, 2))
+        await writeFile(join(out, 'evidence-frames.json'), JSON.stringify({ expectedCount: 1, frames: [{ path: 'failure.png', failed: true }] }, null, 2))
+        throw error
+      } finally { await ctx.close() }
     }
     return seen.join('; ')
   })

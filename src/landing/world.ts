@@ -88,8 +88,8 @@ export const foreseeable = (h: WorldHit) => !h.soft && h.speed > SURE * hearing(
 /** A hit's name: the marble and what it struck (the same for a knock foreseen and the knock itself). */
 export const keyOf = (h: WorldHit) => `${h.orb}|${h.kind}|${h.letter ?? h.pad ?? h.wall ?? h.other ?? ''}`
 
-/** A button in the hero, as the marbles' world sees it: its box on the canvas (CSS px) and its corners' radius. */
-export interface PadRect { x: number; y: number; w: number; h: number; r: number; height?: number; rings?: number[][]; step?: boolean; exclude?: boolean; fixed?: boolean }
+/** A page surface in canvas CSS pixels. Text lines collide without masking the ground light behind their gaps. */
+export interface PadRect { x: number; y: number; w: number; h: number; r: number; height?: number; rings?: number[][]; step?: boolean; exclude?: boolean; fixed?: boolean; text?: boolean }
 
 export interface WorldMarble {
   id: string
@@ -196,13 +196,13 @@ export function createWorld(viewport = true, flowing = false): World {
   const env: Env = { walls, grow: DEPTH }
   const ledges = new Map<string, { id: number; time: number; x: number; z: number }>()
   let repelled: PadRect | null = null
-  let blocks: PadRect[] = []
+  let blocks: (PadRect & { index: number })[] = []
   let scrollTime = 0
   /** Viewport-space kinematic motion, in CSS pixels and pixels per second. Static outlines stay untouched. */
   function sweptCards(previous: PadRect[], current: PadRect[], seconds: number) {
     for (let i = 0; i < current.length; i++) {
       const b = current[i], a = previous[i]
-      if (!a?.exclude || !b.exclude || b.w <= 0 || b.h <= 0) continue
+      if (!a?.exclude || !b.exclude || a.text || b.text || b.w <= 0 || b.h <= 0) continue
       const vx = (b.x - a.x) / seconds, vy = (b.y - a.y) / seconds
       if (!vx && !vy) continue
       if (Math.max(a.y + a.h, b.y + b.h) < playTop || Math.min(a.y, b.y) > Hc) continue
@@ -233,8 +233,8 @@ export function createWorld(viewport = true, flowing = false): World {
   }
 
   function cacheBlocks() {
-    blocks = padRects.filter(b => b.exclude && b.w > 0 && b.h > 0 && (b.fixed || b.y + b.h >= scroll && b.y <= scroll + Hc))
-      .map(b => ({ ...b, y: b.y - (b.fixed ? 0 : scroll) }))
+    blocks = padRects.flatMap((b, index) => b.exclude && b.w > 0 && b.h > 0 && (b.fixed || b.y + b.h >= scroll && b.y <= scroll + Hc)
+      ? [{ ...b, index, y: b.y - (b.fixed ? 0 : scroll) }] : [])
   }
 
   /** The visible rounded border in CSS pixels, with its outward normal at the nearest point. */
@@ -379,7 +379,7 @@ export function createWorld(viewport = true, flowing = false): World {
   const lerp3 = (a: [number, number, number], b: [number, number, number], k: number): [number, number, number] => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k]
 
   /** Resolve content blocks in the viewport plane, including airborne marbles and layouts appearing beneath them. */
-  function clearCards(m: WorldMarble, margin = 0, moving = 0, drawing = false) {
+  function clearCards(m: WorldMarble, margin = 0, moving = 0, drawing = false, hits?: WorldHit[]) {
     if (!viewport || (!blocks.length && !repelled)) return
     const o = m.orb, p = project(o.x, o.y, o.z)
     const radius = drawnRadius(o)
@@ -410,6 +410,12 @@ export function createWorld(viewport = true, flowing = false): World {
     const nx = dx / length, nz = dz / length, into = o.vx * nx + o.vz * nz
     o.x = at.x; o.z = at.z
     if (drawing) return
+    if (hits && hit.text && 'index' in hit && typeof hit.index === 'number') {
+      const contact: WorldHit = { orb: m.id, kind: 'button', pad: hit.index, speed: Math.max(0, -into),
+        landed: false, x: o.x, y: o.y, z: o.z, nx, ny: 0, nz, t: clock, soft: into >= -REPORT }
+      const key = keyOf(contact), last = knocked.get(key)
+      if (last === undefined || clock - last >= ONE_KNOCK) { hits.push(contact); knocked.set(key, clock) }
+    }
     const speed = Math.max(.7, -into * .55, Math.min(3, Math.abs(moving)))
     if (into < speed) { o.vx += (speed - into) * nx; o.vz += (speed - into) * nz }
     if ('gutter' in exit) {
@@ -535,7 +541,7 @@ export function createWorld(viewport = true, flowing = false): World {
     setPads(rects) {
       const same = rects.length === padRects.length && rects.every((r, i) => {
         const q = padRects[i]
-        return Math.abs(r.x - q.x) + Math.abs(r.y - q.y) + Math.abs(r.w - q.w) + Math.abs(r.h - q.h) + Math.abs(r.r - q.r) < 0.5 && r.height === q.height && r.rings === q.rings && r.exclude === q.exclude && r.fixed === q.fixed
+        return Math.abs(r.x - q.x) + Math.abs(r.y - q.y) + Math.abs(r.w - q.w) + Math.abs(r.h - q.h) + Math.abs(r.r - q.r) < 0.5 && r.height === q.height && r.rings === q.rings && r.exclude === q.exclude && r.fixed === q.fixed && r.text === q.text
       })
       if (same) return false
       const previous = padRects.map(b => ({ ...b, y: b.y - (b.fixed ? 0 : scroll) }))
@@ -668,7 +674,7 @@ export function createWorld(viewport = true, flowing = false): World {
       // at once, not slid there.
       for (const m of all) {
         const o = m.orb
-        clearCards(m)
+        clearCards(m, 0, 0, false, hits)
         if (o.x !== m.now[0] || o.y !== m.now[1] || o.z !== m.now[2]) { m.now = [o.x, o.y, o.z]; m.was = [...m.now] }
       }
       acc += Math.min(Math.max(0, dt), CATCH_UP)
@@ -677,7 +683,7 @@ export function createWorld(viewport = true, flowing = false): World {
         for (const m of all) m.was = m.now
         for (const m of all) { flow(m); repelStep(m) }
         const knocks = tick(bodies, solid, H, env)
-        for (const m of all) clearCards(m)
+        for (const m of all) clearCards(m, 0, 0, false, hits)
         for (const m of all) m.now = [m.orb.x, m.orb.y, m.orb.z]
         report(all, knocks, hits, clock, knocked)
         arrivals(all, hits)

@@ -175,6 +175,10 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
 
   /** The headline as the page wraps it: its lines of text, and the box its letters fill (hero px). */
   function measure() {
+    // The fixed canvas starts at the viewport origin. Its measured CSS box is the shared frame for DOM rects,
+    // physics and projection; innerWidth includes a classic scrollbar that the canvas's 100% width excludes.
+    // Keep fractional CSS pixels here. Only the renderer rounds when choosing its DPR-scaled backing buffer.
+    const viewport = stage.getBoundingClientRect()
     const range = document.createRange()
     const words: { text: string; top: number }[] = []
     const walker = document.createTreeWalker(title, NodeFilter.SHOW_TEXT)
@@ -193,14 +197,14 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     }
     range.selectNodeContents(title)
     const rects = [...range.getClientRects()].filter((q) => q.width > 0 && q.height > 0)
-    const box = { x: 0, y: 0, w: innerWidth, h: screenHeight() }
+    const box = { x: 0, y: 0, w: viewport.width, h: viewport.height }
     if (rects.length) {
       box.x = Math.min(...rects.map((q) => q.left))
       box.y = Math.min(...rects.map((q) => q.top)) + scrollY
       box.w = Math.max(...rects.map((q) => q.right)) - box.x
       box.h = Math.max(...rects.map((q) => q.bottom)) + scrollY - box.y
     }
-    return { lines: lines.length ? lines : [title.textContent ?? ''], box, W: innerWidth, H: screenHeight() }
+    return { lines: lines.length ? lines : [title.textContent ?? ''], box, W: viewport.width, H: viewport.height }
   }
 
   function layout(includePage = true) {
@@ -229,17 +233,6 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
    * bars showing (100svh), or the hero's bottom if that comes first. (On a phone the hero is taller than the screen.)
    */
   function playArea() { return { top: viewportTop, bottom: H } }
-  let probe: HTMLElement | null = null
-  /** The screen's height with the browser's bars showing (100svh: at the top of the page, they are). */
-  function screenHeight() {
-    if (!probe) {
-      probe = document.createElement('div')
-      probe.setAttribute('aria-hidden', 'true')
-      probe.style.cssText = 'position:fixed;left:0;top:0;width:0;height:100vh;height:100svh;visibility:hidden;pointer-events:none'
-      document.body.appendChild(probe)
-    }
-    return probe.getBoundingClientRect().height || innerHeight
-  }
 
   const me = () => field!.orb('me', family.accentColor())
   const palette = () => {
@@ -375,6 +368,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   /** Each button's box (hero px), in the order the field counts them; empty while one isn't there to stand on. */
   let padRects: PadRect[] = []
   let padOwners: (HTMLElement | null)[] = []
+  let headings: { el: HTMLElement; box: PadRect; lines: PadRect[] | null }[] = []
   const onscreen = new Set<Element>(), moving = new Set<Element>()
   const settling = new Set<Element>()
   let motionRects: { index: number; rect: PadRect }[] = []
@@ -446,8 +440,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       return rect.fixed ? { ...rect, r: rect.w / 2, height: .22, exclude: true, step: false } : rect
     })
     if (!pageGeometry || !includePage) return padRects
-    // Later headings and transparent containers stay below the field, without depth masks. Card titles share
-    // their solid card's border; the hero retains its drawn, colliding letters.
+    // Card titles share their solid card's border; the hero retains its drawn, colliding letters.
     for (const el of document.querySelectorAll<HTMLElement>('main .pair, main .scene, main .build-card, main a, main button, main .live-dot')) {
       if ((hero.contains(el) && !el.matches('.pair, .live-dot')) || !el.getClientRects().length) continue
       // Content inside a solid card shares its collider; nested controls never make trapping seams.
@@ -456,7 +449,40 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       padOwners.push(el)
       padRects.push(pageGeometry.obstacleRect(borderBox(el), kind))
     }
+    headings = [...document.querySelectorAll<HTMLElement>('main h2, main .eyebrow, main .sec-head > p')]
+      .filter(el => !el.closest('.pair, .scene, .build-card') && el.getClientRects().length)
+      .map(el => ({ el, box: borderBox(el), lines: null }))
+    prepareHeadingPads(false)
     return padRects
+  }
+  /** Read the browser's actual text lines only when they approach the viewport; scroll reuses those document boxes. */
+  function prepareHeadingPads(apply = true) {
+    if (!enabled || document.hidden || !pageGeometry || !headings.length) return
+    let changed = false
+    for (const heading of headings) {
+      if (heading.lines || !pageGeometry.nearViewport(heading.box, pendingScroll, H, 200)) continue
+      const range = document.createRange(), lines: PadRect[] = []
+      const walker = document.createTreeWalker(heading.el, NodeFilter.SHOW_TEXT)
+      while (walker.nextNode()) {
+        const text = walker.currentNode as Text, start = text.data.search(/\S/)
+        if (start < 0) continue
+        range.setStart(text, start)
+        range.setEnd(text, text.data.trimEnd().length)
+        for (const rect of range.getClientRects()) {
+          if (!rect.width || !rect.height) continue
+          const line = lines.find(line => Math.abs(line.y - rect.top - scrollY) < 1 && Math.abs(line.h - rect.height) < 1)
+          if (line) {
+            const right = Math.max(line.x + line.w, rect.right)
+            line.x = Math.min(line.x, rect.left); line.w = right - line.x
+          } else lines.push({ x: rect.left, y: rect.top + scrollY, w: rect.width, h: rect.height, r: 0, height: .12, step: false, exclude: true, text: true })
+        }
+      }
+      heading.lines = lines
+      for (const line of lines) { padRects.push(line); padOwners.push(heading.el) }
+      changed = true
+    }
+    if (!changed) return
+    if (apply) { field?.pads(padRects); dirty = true; wake() }
   }
   function padHit(h: Hit) {
     const owner = h.pad === undefined ? null : padOwners[h.pad]
@@ -534,11 +560,12 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   }
   const padWatch = new MutationObserver(scheduleLayout)
   const padSize = new ResizeObserver(scheduleLayout)
+  padSize.observe(stage)
   for (const el of padEls) { padWatch.observe(el, { attributes: true, attributeFilter: ['class', 'hidden', 'data-state'] }); padSize.observe(el) }
   const copy = hero.querySelector('.hero-copy')
   if (copy) padSize.observe(copy)
   for (const el of document.querySelectorAll('main > section, .scene, .build-card, .pair, .site-foot')) padSize.observe(el)
-  const sectionWatch = new IntersectionObserver(() => { dirty = true; wake() }, { rootMargin: '100px' })
+  const sectionWatch = new IntersectionObserver(() => { prepareHeadingPads(); dirty = true; wake() }, { rootMargin: '200px' })
   for (const section of document.querySelectorAll('main > section')) sectionWatch.observe(section)
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { glass.foresee([], 0); looping = false }
@@ -547,7 +574,12 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   addEventListener('resize', scheduleLayout, { passive: true })
   visualViewport?.addEventListener('resize', scheduleLayout, { passive: true })
   document.fonts?.addEventListener('loadingdone', scheduleLayout)
-  addEventListener('scroll', () => { pendingScroll = scrollY; sceneUnderPointer = false; lastInteraction = scrollAt = performance.now(); dirty = true; wake() }, { passive: true })
+  addEventListener('scroll', () => {
+    pendingScroll = scrollY
+    // A jump can bypass the observer's margin. Prepare newly visible text before the ticker draws this scroll.
+    prepareHeadingPads()
+    sceneUnderPointer = false; lastInteraction = scrollAt = performance.now(); dirty = true; wake()
+  }, { passive: true })
 
   // ---- what a hit sounds like, and the knock felt in the hand ----
 

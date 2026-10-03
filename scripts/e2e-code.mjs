@@ -24,6 +24,7 @@ import jsQR from 'jsqr'
 import zx from '@zxing/library'
 import { startWorker } from './local-worker.mjs'
 import { e2eBrowserOptions } from './lib/browser.mjs'
+import { runGpuSmoke } from './lib/gpu-smoke.mjs'
 
 const temps = tempScope()
 try {
@@ -101,6 +102,9 @@ try {
   const ORIGIN = worker.origin
   console.log(`ob.Pal pairing chip and short code e2e (${ORIGIN})`)
 
+  if (process.env.OBPAL_E2E_GPU_SMOKE === '1') {
+    await runGpuSmoke({ origin: ORIGIN, executablePath, check, readQr })
+  } else {
   const browser = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED, args: RTC_ARGS }))
   closers.push(browser)
   const screenCtx = await browser.newContext({ viewport: { width: 1280, height: 800 } })
@@ -529,6 +533,7 @@ try {
     await sleep(400)
     await shot(p, 'chip-viewer-phone-closed')
     await small.close()
+  }
   }
   await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {

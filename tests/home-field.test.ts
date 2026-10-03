@@ -23,6 +23,28 @@ describe('the viewport marble field', () => {
     expect(inside(world.pads[0], centre.x, centre.z)).toBe(false)
     expect(obstacleLetter(' ', rect)).toBeNull()
   })
+  it('keeps rendered rims outside heading lines at every height and reports the contact for light', () => {
+    for (const width of [1920, 390]) for (const height of [ORB_R, ORB_R + .8]) {
+      const world = createWorld(true, true)
+      world.layout(['Your phone.'], width, 900, { x: 30, y: 140, w: Math.min(650, width - 60), h: 140 })
+      world.play(65, 900)
+      const heading = { x: 40, y: 460, w: width - 80, h: 48, r: 0, height: .12, text: true, exclude: true, step: false }
+      world.setPads([heading])
+      const m = world.marble('heading'), at = world.planeAt(width / 2, heading.y + 1, height)
+      Object.assign(m.orb, { ...at, y: height, resting: false })
+      const contacts = []
+      for (let i = 0; i < 120; i++) {
+        contacts.push(...world.step(1 / 60).hits.filter(h => h.pad === 0))
+        const p = world.project(...m.shown)
+        const radius = world.project(m.shown[0] + ORB_R * (1 + DEPTH * Math.max(0, m.shown[1] - ORB_R)), m.shown[1], m.shown[2]).x - p.x
+        const dx = Math.max(heading.x - p.x, 0, p.x - heading.x - heading.w)
+        const dy = Math.max(heading.y - p.y, 0, p.y - heading.y - heading.h)
+        expect(Math.hypot(dx, dy)).toBeGreaterThanOrEqual(radius - .01)
+      }
+      expect(contacts[0]).toMatchObject({ kind: 'button', pad: 0, soft: true })
+      expect(contacts.filter(h => h.t < .1)).toHaveLength(1)
+    }
+  })
   it('culls distant obstacles and reuses the exact footprints through fast scrolls', () => {
     const world = createWorld(true)
     world.layout(['Your phone.'], 1280, 800, { x: 60, y: 160, w: 600, h: 140 })

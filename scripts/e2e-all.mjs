@@ -29,7 +29,8 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { detectE2eGpu, resolveChromium, shortPath } from './lib/browser.mjs'
-import { acquireGpuLease } from './lib/gpu-lease.mjs'
+import { acquireGpuLease, GPU_LEASE_FILE } from './lib/gpu-lease.mjs'
+import { gpuRuns } from './lib/gpu-policy.mjs'
 import { DEFAULT_PORT, DEFAULT_WORKER_PORT, failures, knownSuites, listeningPids, newSessionLines, parseArgs, parseResult, suitePorts, suiteTimeout } from './lib/e2e.mjs'
 import { formatDuration, formatTable } from './lib/report.mjs'
 import { distill } from './lib/distill.mjs'
@@ -149,7 +150,6 @@ console.log(`  ob.Pal Desktop log: ${logAtStart ? 'watched' : desktopLog ? 'none
 
 let current = null
 let releaseGpu = null
-let gpuLeasePromise = null
 let gpuProbePromise = null
 let interruptedCleanup = null
 let cancelCode = 0
@@ -157,6 +157,8 @@ let gpuDevice = null
 const startedAt = new Date().toISOString()
 const source = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true }).stdout.trim()
 const cancelled = new AbortController()
+const gpuRequested = env.OBPAL_E2E_GPU === '1'
+const gpuRunsResults = []
 async function interrupt(code, message) {
   if (cancelCode) return
   cancelCode = code
@@ -172,24 +174,6 @@ async function interrupt(code, message) {
 process.on('SIGINT', () => { void interrupt(130, 'interrupted') })
 process.on('SIGTERM', () => { void interrupt(143, 'terminated') })
 
-if (env.OBPAL_E2E_GPU === '1') {
-  try {
-    gpuLeasePromise = acquireGpuLease({ signal: cancelled.signal, waiting: () => console.log('  GPU lease busy; waiting up to 180 min') })
-    releaseGpu = await gpuLeasePromise
-    gpuProbePromise = detectE2eGpu(browser.path).catch(error => ({ hardware: false, renderer: '', reason: error.message }))
-    const device = await gpuProbePromise
-    cancelled.signal.throwIfAborted()
-    gpuDevice = device
-    env.OBPAL_E2E_GPU = device.hardware ? '1' : 'swiftshader'
-    console.log(`  renderer: ${device.renderer || 'unavailable'}${device.hardware ? '' : `; SwiftShader fallback (${device.reason})`}`)
-  } catch (error) {
-    await interruptedCleanup
-    await releaseGpu?.()
-    console.error(`e2e:all: ${error.message}`)
-    process.exit(cancelCode || 2)
-  }
-}
-
 let exitCode = 1
 try {
 const rows = []
@@ -197,28 +181,48 @@ const timings = []
 const details = []
 let guard = null
 let stopped = ''
-for (const suite of opts.suites) {
+const runs = opts.suites.flatMap(suite => gpuRequested ? gpuRuns(suite, env) : [{ suite, label: suite, env: {}, mode: 'shared' }])
+for (const run of runs) {
+  const { suite, label } = run
   cancelled.signal.throwIfAborted()
-  if (stopped) { rows.push([suite, 'not run', '', '', stopped]); continue }
+  if (stopped) { rows.push([label, 'not run', '', '', stopped]); continue }
   const { port, worker } = suitePorts(suite, env)
   const ports = [port, worker].filter((p) => p !== null)
   if (!(await waitFree(ports))) {
-    rows.push([suite, 'BUSY', '', '', `port ${ports.join('/')} still in use after ${opts.waitMin} min`])
+    rows.push([label, 'BUSY', '', '', `port ${ports.join('/')} still in use after ${opts.waitMin} min`])
     stopped = 'a port stayed busy'
     continue
   }
   const temps = tempScope({ keep: env.OBPAL_KEEP_TEMP === '1' })
   const suiteTemp = await temps.make(join(tmpdir(), 'obpal-e2e-suite-'))
-  const suiteEnv = { ...env, OBPAL_E2E_EVIDENCE_ROOT: join(env.OBPAL_E2E_EVIDENCE_ROOT, suite), TEMP: suiteTemp, TMP: suiteTemp, TMPDIR: suiteTemp }
+  const suiteEnv = { ...env, ...run.env, OBPAL_E2E_GPU_LEASE_FILE: GPU_LEASE_FILE,
+    OBPAL_E2E_EVIDENCE_ROOT: join(env.OBPAL_E2E_EVIDENCE_ROOT, label), TEMP: suiteTemp, TMP: suiteTemp, TMPDIR: suiteTemp }
   try {
+  if (gpuRequested && !(suite === 'code' && env.OBPAL_E2E_GPU_SMOKE === '1')) {
+    const waitingAt = Date.now()
+    releaseGpu = await acquireGpuLease({ mode: run.mode, suite: label, signal: cancelled.signal,
+      waiting: () => console.log(`  GPU ${run.mode} queued for ${label}; ${run.mode === 'exclusive' ? 'waiting until all holders drain' : `SwiftShader after ${process.env.OBPAL_E2E_GPU_WAIT_MIN ?? 20} min`}`) })
+    const waitMs = Date.now() - waitingAt
+    if (!releaseGpu) {
+      gpuDevice = { hardware: false, renderer: '', reason: 'shared slot wait expired' }
+    } else {
+      gpuProbePromise = detectE2eGpu(browser.path).catch(error => ({ hardware: false, renderer: '', reason: error.message }))
+      gpuDevice = await gpuProbePromise
+      cancelled.signal.throwIfAborted()
+    }
+    suiteEnv.OBPAL_E2E_GPU = gpuDevice.hardware ? '1' : 'swiftshader'
+    if (!gpuDevice.hardware && releaseGpu) { await releaseGpu(); releaseGpu = null }
+    gpuRunsResults.push({ suite: label, mode: run.mode, waitMs, rendererMode: suiteEnv.OBPAL_E2E_GPU, ...gpuDevice })
+    console.log(`  GPU ${label} (${run.mode}): ${gpuDevice.renderer || 'unavailable'}${gpuDevice.hardware ? '' : `; SwiftShader fallback (${gpuDevice.reason})`}`)
+  }
   mkdirSync(suiteEnv.OBPAL_E2E_EVIDENCE_ROOT, { recursive: true })
-  const logPath = join(out, `${suite}.log`)
+  const logPath = join(out, `${label}.log`)
   const fd = openSync(logPath, 'w')
   const sizeBefore = logSize()
   const t0 = Date.now()
-  process.stdout.write(`> e2e:${suite} … `)
+  process.stdout.write(`> e2e:${label} … `)
   let timedOut = false, timeoutCleanup
-  const timeoutMin = suiteTimeout(suite, opts, env)
+  const timeoutMin = suiteTimeout(suite, opts, suiteEnv)
   const code = await new Promise((r) => {
     cancelled.signal.throwIfAborted()
     current = spawn('pnpm', ['run', `e2e:${suite}`], { cwd: root, env: suiteEnv, shell: win, stdio: ['ignore', fd, fd], windowsHide: true, detached: !win })
@@ -230,16 +234,21 @@ for (const suite of opts.suites) {
   current = null
   closeSync(fd)
   const ms = Date.now() - t0
-  timings.push({ suite, ms })
+  timings.push({ suite: label, ms })
   const log = readFileSync(logPath, 'utf8')
   const res = parseResult(log)
+  if (gpuRequested && suite === 'code' && env.OBPAL_E2E_GPU_SMOKE === '1' && code === 0) {
+    const proof = JSON.parse(readFileSync(join(suiteEnv.OBPAL_E2E_EVIDENCE_ROOT, 'gpu-smoke.json'), 'utf8'))
+    gpuDevice = proof.exclusiveDevice
+    gpuRunsResults.push({ suite: label, mode: 'smoke', rendererMode: '1', ...gpuDevice })
+  }
   const tests = res ? `${res.passed}/${res.total}` : '?'
   const failed = failures(log)
   const ok = code === 0 && !timedOut && (!res || res.failed === 0)
   const result = timedOut ? 'TIMEOUT' : ok ? 'pass' : 'FAIL'
   console.log(`${result} ${tests} in ${formatDuration(ms)}`)
   let note = timedOut ? `stopped after ${timeoutMin} min` : !ok ? failed[0] ?? `exit ${code}; see ${suite}.log` : ''
-  if (!ok && failed.length) details.push([suite, failed])
+  if (!ok && failed.length) details.push([label, failed])
   if (worker !== null) {
     const leftover = await stopLeftoverWorker(worker)
     if (leftover) note = note ? `${note}; ${leftover}` : leftover
@@ -255,16 +264,18 @@ for (const suite of opts.suites) {
       stopped = `stopped: e2e:${suite} reached ob.Pal Desktop`
     }
   }
-  rows.push([suite, guard?.suite === suite ? 'GUARD' : result, tests, formatDuration(ms), note])
+  if (gpuRequested && gpuDevice && !gpuDevice.hardware) note = [note, `SwiftShader: ${gpuDevice.reason}`].filter(Boolean).join('; ')
+  rows.push([label, guard?.suite === suite ? 'GUARD' : result, tests, formatDuration(ms), note])
   } finally {
     if (current) { await killTree(current); current = null }
     if (worker !== null) await stopLeftoverWorker(worker)
+    await releaseGpu?.(); releaseGpu = null
     mkdirSync(suiteEnv.OBPAL_E2E_EVIDENCE_ROOT, { recursive: true })
     try { await distill(suiteEnv.OBPAL_E2E_EVIDENCE_ROOT, { keepRaw: process.argv.includes('--keep-raw') }) } catch (error) {
       console.error(`Evidence distillation failed: ${error.message}; raw TEMP retained`)
       temps.retain()
       stopped = 'evidence distillation failed'
-      rows.push([suite + ' evidence', 'FAIL', '', '', error.message])
+      rows.push([label + ' evidence', 'FAIL', '', '', error.message])
       continue
     }
     await temps.cleanup()
@@ -283,7 +294,7 @@ if (logAtEnd) {
 else console.log('\nob.Pal Desktop guard: no new sessions (no helper log present)')
 writeFileSync(join(out, 'results.json'), JSON.stringify({ rows, guard: guard || 'no new sessions', startedAt,
   source,
-  gpu: gpuDevice, rendererMode: env.OBPAL_E2E_GPU || 'original', simsOnly: env.OBPAL_E2E_SIMS_ONLY || null,
+  gpu: gpuDevice, gpuRuns: gpuRunsResults, rendererMode: gpuRequested ? (gpuRunsResults.every(r => r.hardware) ? '1' : gpuRunsResults.some(r => r.hardware) ? 'mixed' : 'swiftshader') : env.OBPAL_E2E_GPU || 'original', simsOnly: env.OBPAL_E2E_SIMS_ONLY || null,
   timings, elapsedMs: Date.now() - Date.parse(startedAt),
   browser: browser.from }, null, 2) + '\n')
 if (guard) {

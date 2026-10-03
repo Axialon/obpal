@@ -729,7 +729,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
   /** The dots keep off the raised things: their boxes in drawing-buffer pixels, from the bottom left. */
   function padsForDots() {
     const kx = buf.x / W, ky = buf.y / H
-    const visible = padRects.filter(b => b.w > 0 && b.h > 0 && b.y + b.h >= (b.fixed ? 0 : scrollY) && b.y <= (b.fixed ? 0 : scrollY) + H)
+    const visible = padRects.filter(b => !b.text && b.w > 0 && b.h > 0 && b.y + b.h >= (b.fixed ? 0 : scrollY) && b.y <= (b.fixed ? 0 : scrollY) + H)
     surfaceMasks = { count: Math.min(visible.length, MAX_PADS), overflow: Math.max(0, visible.length - MAX_PADS) }
     dotUniforms.uPads.value.forEach((v, i) => {
       const b = visible[i]

@@ -22,6 +22,7 @@ import { tmpdir } from 'node:os'
 import { join as joinPath } from 'node:path'
 import { chromium, devices } from 'playwright'
 import { e2eBrowserOptions } from './lib/browser.mjs'
+import { FULL_SIMS_GROUPS } from './lib/gpu-policy.mjs'
 import { cspCheck } from './csp-watch.mjs'
 import { runMusic } from './e2e-music.mjs'
 import { runControl } from './e2e-control.mjs'
@@ -53,6 +54,12 @@ const HEADED = process.argv.includes('--headed')
 const ONLY_TRACKING = process.argv.includes('--only=tracking') || process.env.OBPAL_E2E_SIMS_ONLY === 'tracking'
 const ONLY_PANELS = process.argv.includes('--only=panels') || process.env.OBPAL_E2E_SIMS_ONLY === 'panels'
 const ONLY_BUTTONS = process.argv.includes('--only=buttons') || process.env.OBPAL_E2E_SIMS_ONLY === 'buttons'
+// The guarded runner partitions the full suite at GPU ownership boundaries.
+const GROUPS = process.env.OBPAL_E2E_SIMS_GROUPS?.split(',').filter(Boolean) ?? null
+if (GROUPS && (!GROUPS.length || GROUPS.some(group => !FULL_SIMS_GROUPS.includes(group)) || GROUPS.includes('core') && GROUPS.length !== 1)) {
+  throw new Error('Invalid full-suite sims groups')
+}
+const CORE_ONLY = GROUPS?.[0] === 'core'
 const SHOTS = process.env.OBPAL_SHOTS || ''
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
 const RTC_ARGS = ['--disable-features=WebRtcHideLocalIpsWithMdns', '--ignore-certificate-errors']
@@ -174,7 +181,18 @@ async function phone(invite, { xr = true, way = 'motion' } = {}) {
 }
 
 try {
-  if (['local-control', 'local-control-before'].includes(process.env.OBPAL_E2E_SIMS_ONLY)) await runLocalControl(local, check, { baseline: process.env.OBPAL_E2E_SIMS_ONLY === 'local-control-before' })
+  if (GROUPS && !CORE_ONLY) {
+    const runners = {
+      'physics-bench': runPhysicsBench, 'humanoid-physics': runHumanoidPhysics,
+      smoothness: (local, check) => runSmoothness(local, check, { ids: ['pendulum'] }),
+      temporal: runTemporal, 'warm-up': runWarmup, 'graphics-recovery': runGraphicsRecovery,
+      load: runLoad, control: runControl, music: runMusic, vr: runVR, 'control-views': runControlViews,
+      audio: runAudio, panels: runPanels, 'arm-live': runArmLive, humanoid: runHumanoid,
+      'humanoid-live': runHumanoidLive, buttons: runSimButtons, 'local-control': runLocalControl,
+    }
+    for (const group of GROUPS) await runners[group](local, check)
+  }
+  else if (['local-control', 'local-control-before'].includes(process.env.OBPAL_E2E_SIMS_ONLY)) await runLocalControl(local, check, { baseline: process.env.OBPAL_E2E_SIMS_ONLY === 'local-control-before' })
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'local-faces') {
     const browser = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED, args: RTC_ARGS }))
     try { await runUniversalFaces(browser, local.origin, check, `${process.env.OBPAL_E2E_EVIDENCE_ROOT || 'artifacts/local-control'}/after`) } finally { await browser.close() }
@@ -208,8 +226,10 @@ try {
   else if (ONLY_PANELS) await runPanels(local, check)
   else {
   console.log('ob.Pal sims e2e')
-  await runPhysicsBench(local, check)
-  await runHumanoidPhysics(local, check)
+  if (!CORE_ONLY) {
+    await runPhysicsBench(local, check)
+    await runHumanoidPhysics(local, check)
+  }
   // ---- robot arm ----
   // The screen's camera: a picture the test paints, with a phone glowing in it (window.__fakeCam).
   const arm = await screenAt('/sim/arm/', () => {
@@ -568,6 +588,7 @@ try {
   closers.length = 0
   // The node strip on an arm and the excavator: switching parts mid-drag (./sims-strip.mjs), with its own browser.
   await simsStrip({ origin: local.origin, check, executablePath, headed: HEADED, shots: SHOTS })
+  if (!CORE_ONLY) {
   await runSmoothness(local, check, { ids: ['pendulum'] })
   await runTemporal(local, check)
   await runWarmup(local, check)
@@ -584,6 +605,7 @@ try {
   await runHumanoidLive(local, check)
   await runSimButtons(local, check)
   await runLocalControl(local, check)
+  }
   }
   }
   await check('no Content Security Policy violations on any page', cspCheck)
