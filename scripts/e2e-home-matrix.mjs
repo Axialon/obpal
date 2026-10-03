@@ -96,10 +96,6 @@ export async function runHomeMatrix(_browser, local, check) {
                   const r = el.getBoundingClientRect(), canvas = document.querySelector('.hero-stage'), c = canvas.getBoundingClientRect()
                   window.__home.clearSeeds()
                   window.__home.seed(side, side === 'left' ? r.left : side === 'right' ? r.right : r.x + r.width / 2, side === 'top' ? r.top : side === 'bottom' ? r.bottom : r.y + r.height / 2)
-                  const sphere = window.__home.outline(`proof-${side}`), seedRadius = (sphere.right - sphere.left) / 2
-                  const seedX = side === 'left' ? r.left - seedRadius + 1 : side === 'right' ? r.right + seedRadius - 1 : r.x + r.width / 2
-                  const seedY = side === 'top' ? r.top - seedRadius + 1 : side === 'bottom' ? r.bottom + seedRadius - 1 : r.y + r.height / 2
-                  window.__home.seed(side, seedX, seedY)
                   window.__home.showSeeds()
                   const o = window.__home.outline(`proof-${side}`), [W, H] = window.__home.gfx().css
                   const drawn = { left: c.x + o.left * c.width / W, right: c.x + o.right * c.width / W, top: c.y + o.top * c.height / H, bottom: c.y + o.bottom * c.height / H }

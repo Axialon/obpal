@@ -77,8 +77,6 @@ export interface FieldOrb {
   marble: Mesh
   /** A faint halo, so the marble's light reads at any size. */
   halo: Sprite
-  landingRing: Sprite
-  ringAt: number
   shadow: Mesh
   caustic: Mesh
   pool: Mesh
@@ -177,9 +175,6 @@ export interface Field {
   pads(rects: PadRect[]): void
   movePads(updates: { index: number; rect: PadRect }[], seconds: number): void
   scroll(y: number, impulse?: boolean): void
-  dock(point: { x: number; y: number }): void
-  release(): boolean
-  free(x: number, y: number, radius: number): boolean
   avoid(rect: PadRect | null): void
   readonly active: number
   /**
@@ -276,7 +271,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
   renderer.outputColorSpace = SRGBColorSpace
   const scene = new Scene()
   // The marbles' world (./world.ts): its camera is the one drawn with.
-  const world = createWorld(true, !opts.still, !!opts.still)
+  const world = createWorld(true, !opts.still)
   const camera = world.camera
   scene.add(new HemisphereLight(LAVENDER, new Color('#1c1244'), 1.35))
   const keyDir = new Vector3(-3, 8, 5).normalize()
@@ -451,7 +446,6 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
   const shadowTex = radial([[0, 'rgba(8,4,24,0.8)'], [1, 'rgba(8,4,24,0)']])
   const causticTex = radial([[0, 'rgba(255,255,255,1)'], [0.35, 'rgba(255,255,255,0.45)'], [1, 'rgba(255,255,255,0)']])
   const poolTex = radial([[0, 'rgba(255,255,255,0.8)'], [1, 'rgba(255,255,255,0)']])
-  const landingTex = radial([[0, 'rgba(255,255,255,0)'], [.68, 'rgba(255,255,255,0)'], [.73, 'rgba(255,255,255,.8)'], [.79, 'rgba(255,255,255,0)'], [1, 'rgba(255,255,255,0)']])
   const haloTex = radial([[0, 'rgba(255,255,255,0.9)'], [0.25, 'rgba(255,255,255,0.28)'], [1, 'rgba(255,255,255,0)']])
   const marbleGeo = new SphereGeometry(ORB_R, 48, 32)
 
@@ -469,7 +463,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
     premultipliedAlpha: true,
     uniforms: {
       uAvoid: { value: avoid }, uDirection: { value: camera.getWorldDirection(new Vector3()) },
-      uFade: { value: 1 }, uTint: { value: tint }, uLife: { value: 0 }, uKey: { value: keyDir },
+      uTint: { value: tint }, uLife: { value: 0 }, uKey: { value: keyDir },
       uScene: { value: behind.texture }, uRefract: { value: 1 }, uView: { value: buf }, uSteps: { value: 12 },
       uCenter: { value: new Vector2() }, uRad: { value: 1 }, uC: { value: new Vector3() }, uR: { value: ORB_R }, uSpin: { value: new Matrix3() },
       uAxis: { value: new Vector3(0, 1, 0) }, uSquash: { value: 0 },
@@ -485,7 +479,6 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
       uniform vec4 uAvoid;
       uniform vec3 uDirection;
       uniform vec3 uTint;
-      uniform float uFade;
       uniform float uLife;
       uniform vec3 uKey;
       uniform sampler2D uScene;
@@ -569,7 +562,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
         gl_FragColor = vec4(col, a);
         #include <colorspace_fragment>
         // Coverage after the colour's encoding, so an edge pixel half covered is half as bright on screen.
-        gl_FragColor *= cover * uFade;
+        gl_FragColor *= cover;
       }`,
   })
 
@@ -589,11 +582,9 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
     const caustic = flat(causticTex, ORB_R * 0.9, true)
     const halo = new Sprite(new SpriteMaterial({ map: haloTex, color: c, blending: AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.2 }))
     halo.renderOrder = 1
-    const landingRing = new Sprite(new SpriteMaterial({ map: landingTex, color: c, blending: AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 }))
-    landingRing.renderOrder = 1
-    scene.add(marble, halo, landingRing)
+    scene.add(marble, halo)
     const m = world.marble(id)
-    const fo: FieldOrb = { id, orb: m.orb, m, color: c, life: 0, live: false, push: null, marble, halo, landingRing, ringAt: -10, shadow, caustic, pool, spin: new Quaternion(), omega: new Vector3(), quietAt: -1, squash: { x: 0, v: 0 }, axis: new Vector3(0, 1, 0) }
+    const fo: FieldOrb = { id, orb: m.orb, m, color: c, life: 0, live: false, push: null, marble, halo, shadow, caustic, pool, spin: new Quaternion(), omega: new Vector3(), quietAt: -1, squash: { x: 0, v: 0 }, axis: new Vector3(0, 1, 0) }
     orbMap.set(id, fo)
     return fo
   }
@@ -809,9 +800,6 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
       if (updates.some(({ rect }) => !rect.exclude && !rect.fixed)) buildPadBlocks()
     },
     get active() { return world.active },
-    dock: point => world.dock(point),
-    release: () => world.release(),
-    free: (x, y, radius) => world.free(x, y, radius),
     avoid(rect) {
       world.repel(rect)
       const kx = buf.x / W, ky = buf.y / H
@@ -858,7 +846,6 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
       // The glass's tint is this same colour object; the rest carry copies.
       o.color.set(color)
       o.halo.material.color.set(color)
-      o.landingRing.material.color.set(color)
       for (const m of [o.pool, o.caustic]) (m.material as MeshBasicMaterial).color.set(color)
     },
     palette(ink, accent, side) {
@@ -870,10 +857,9 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
     removeOrb(id) {
       const o = orbMap.get(id)
       if (!o) return
-      scene.remove(o.marble, o.halo, o.landingRing, o.shadow, o.caustic, o.pool)
+      scene.remove(o.marble, o.halo, o.shadow, o.caustic, o.pool)
       ;(o.marble.material as ShaderMaterial).dispose()
       o.halo.material.dispose()
-      o.landingRing.material.dispose()
       for (const m of [o.shadow, o.caustic, o.pool]) { m.geometry.dispose(); (m.material as MeshBasicMaterial).dispose() }
       orbMap.delete(id)
       world.remove(id)
@@ -916,7 +902,6 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
       for (const h of moved.hits) {
         const o = orbMap.get(h.orb)
         if (!o) continue
-        if (h.scrollLanding) { o.ringAt = clock; o.landingRing.position.set(h.x, h.y, h.z) }
         const s = strength(h.speed)
         const at = { x: h.x, y: h.y, z: h.z, ago: shownAt - h.t, key: keyOf(h) }
         if (h.kind === 'wall') {
@@ -945,7 +930,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
           // Every bounce sends a ring of light out through the dots and the letters, stronger the harder it lands; the
           // marble squashes a little as it lands, and a very hard landing jolts the view.
           const impact = Math.min(1, h.speed / 5)
-          if (impact > 0.12 && !h.scrollLanding) ripple(h.x, h.z, 0.25 + 0.75 * impact, o.color)
+          if (impact > 0.12) ripple(h.x, h.z, 0.25 + 0.75 * impact, o.color)
           knock(o, 0, 1, 0, s)
           jolt(0, 1, s)
           if (l) {
@@ -972,13 +957,6 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
       }
       for (const o of all) {
         const b = o.orb
-        const u = (o.marble.material as ShaderMaterial).uniforms
-        const fade = opts.still && o.m.motion.phase !== 'ground' ? .25 : 1
-        u.uFade.value += (fade - u.uFade.value) * (1 - Math.exp(-dt * 22))
-        const ring = Math.max(0, 1 - (clock - o.ringAt) / .4)
-        o.landingRing.scale.setScalar(ORB_R * (opts.still ? 4 : 4 + (1 - ring) * 3))
-        o.landingRing.material.opacity = ring * .45
-        busy ||= ring > 0 || Math.abs(fade - u.uFade.value) > .01
         // It rolls on whatever it's on (turning with its speed); in the air it keeps turning as it was.
         const onSurface = b.y - b.r - world.surface(b.x, b.z).h < 0.01
         if (onSurface) o.omega.set(b.vz, 0, -b.vx).divideScalar(b.r)
@@ -1051,10 +1029,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
         const [bx, by, bz] = o.m.shown
         const b = { x: bx, y: by, z: bz, r: o.orb.r }
         // Nearer the eye the higher it is: a little bigger (the physics keeps its true size).
-        const motion = o.m.motion
-        const holding = motion.phase === 'docked'
-        const dockScale = motion.phase === 'dock' ? Math.max(.28, 1 - motion.age * 1.2) : holding ? .28 : 1
-        const scale = (1 + DEPTH * Math.max(0, b.y - b.r)) * dockScale
+        const scale = 1 + DEPTH * Math.max(0, b.y - b.r)
         const u = (o.marble.material as ShaderMaterial).uniforms
         u.uLife.value = o.life
         u.uRefract.value = refract ? 1 : 0
@@ -1075,15 +1050,15 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
         o.marble.scale.setScalar(scale * (1 + 2.5 / rad + Math.abs(o.squash.x)))
         o.halo.position.set(b.x, b.y, b.z)
         o.halo.scale.setScalar(ORB_R * 4.2 * scale)
-        o.halo.material.opacity = holding ? .35 : 0.05 + 0.12 * o.life
+        o.halo.material.opacity = 0.05 + 0.12 * o.life
         // On whatever is under the marble: its shadow (bigger and fainter the higher it is), the caustic its glass
         // focuses there (tight and bright when low, spreading as it rises), and the soft pool of its light.
         const s = world.surface(b.x, b.z)
         const hgt = Math.max(0, b.y - b.r - s.h)
         // Both fall away from the key light (behind and to the right of the marble, as seen), the caustic inside the shadow.
         o.shadow.position.set(b.x + 0.05 + hgt * 0.3, s.h + 0.004, b.z - 0.08 - hgt * 0.5)
-        o.shadow.scale.setScalar((1 + hgt * 1.5) * dockScale)
-        ;(o.shadow.material as MeshBasicMaterial).opacity = Math.max(0.08, 0.55 - hgt * (motion.phase === 'ground' ? .7 : .3))
+        o.shadow.scale.setScalar(1 + hgt * 0.8)
+        ;(o.shadow.material as MeshBasicMaterial).opacity = Math.max(0.08, 0.55 - hgt * 0.7)
         o.caustic.position.set(b.x + 0.07 + hgt * 0.3, s.h + 0.005, b.z - 0.12 - hgt * 0.5)
         o.caustic.scale.setScalar(1 + hgt * 2.2)
         ;(o.caustic.material as MeshBasicMaterial).opacity = (0.25 + 0.3 * o.life) / (1 + hgt * 3)
@@ -1099,7 +1074,7 @@ export function createField(canvas: HTMLCanvasElement, opts: { coarse: boolean; 
       if (q) gl.beginQuery(timer!.TIME_ELAPSED_EXT, q)
       // What's behind the marbles, for their glass: the scene without them (its dots sized for its pixels).
       if (refract && orbMap.size) {
-        const hide = (on: boolean) => { for (const o of orbMap.values()) for (const m of [o.marble, o.halo, o.landingRing, o.shadow, o.caustic, o.pool]) m.visible = on }
+        const hide = (on: boolean) => { for (const o of orbMap.values()) for (const m of [o.marble, o.halo, o.shadow, o.caustic, o.pool]) m.visible = on }
         hide(false)
         const dotSize = dotUniforms.uSize.value, padBoxes = dotUniforms.uPads.value
         dotUniforms.uSize.value = dotSize * (behind.width / buf.x)

@@ -36,12 +36,11 @@ export async function runHomeMotion(browser, local, check) {
               return { x: r.x, y: r.y, w: r.width, h: r.height, radius: Math.min(parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0, r.width / 2, r.height / 2) }
             })
             const body = window.__home.contacts().marbles.find(m => m.id === 'proof-moving')
-            const projectedInterior = cards.some(r => {
+            const interior = cards.some(r => {
               const x = Math.abs(m.x - r.x - r.w / 2) - r.w / 2 + r.radius, y = Math.abs(m.y - r.y - r.h / 2) - r.h / 2 + r.radius
               return Math.hypot(Math.max(x, 0), Math.max(y, 0)) + Math.min(Math.max(x, y), 0) < r.radius
             })
-            const interior = (!m.phase || m.phase === 'ground') && projectedInterior
-            return { wall: performance.now(), t: window.__home.sim().t, m, body, interior, projectedInterior, cards, activity: window.__home.activity() }
+            return { wall: performance.now(), t: window.__home.sim().t, m, body, interior, cards, activity: window.__home.activity() }
           }))
           if ([0, 15, 45, 75, 99].includes(sample)) {
             await mkdir(join(raw, String(width)), { recursive: true })
@@ -56,13 +55,11 @@ export async function runHomeMotion(browser, local, check) {
         let slowAt = null, stuck = false
         for (const s of samples) {
           const near = s.cards.some(r => s.m.x >= r.x - 25 && s.m.x <= r.x + r.w + 25 && s.m.y >= r.y - 25 && s.m.y <= r.y + r.h + 25)
-          if ((!s.m.phase || s.m.phase === 'ground') && s.body.speed < .05 && s.m.h > .025 && near) {
+          if (s.body.speed < .05 && s.m.h > .025 && near) {
             slowAt ??= s.wall
             if (s.wall - slowAt > 1500) stuck = true
           } else slowAt = null
         }
-        const last = samples.at(-1).m
-        if (['lift', 'land', 'dock'].includes(last.phase) && last.age > 3) stuck = true
         results.push({ width, movingColliders: 1, samples, interiors, travel, stuck: Number(stuck) })
         await writeFile(join(out, 'measurements.json'), JSON.stringify(results, null, 2))
         console.log(`    ${width}: moving card stuck ${Number(stuck)}, interior frames ${interiors}, marble travel ${travel.toFixed(1)}px`)

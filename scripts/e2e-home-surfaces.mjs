@@ -76,10 +76,6 @@ export async function runHomeSurfaces(browser, local, check) {
               const x = side === 'left' ? r.left : side === 'right' ? r.right : r.x + r.width / 2
               const y = side === 'top' ? r.top : side === 'bottom' ? r.bottom : r.y + r.height / 2
               window.__home.seed(side, x, y)
-              const sphere = window.__home.outline(`proof-${side}`), radius = (sphere.right - sphere.left) / 2
-              const contactX = side === 'left' ? x - radius + 1 : side === 'right' ? x + radius - 1 : x
-              const contactY = side === 'top' ? y - radius + 1 : side === 'bottom' ? y + radius - 1 : y
-              window.__home.seed(side, contactX, contactY)
               window.__home.showSeeds()
               const o = window.__home.outline(`proof-${side}`)
               const gap = side === 'left' ? r.left - o.right : side === 'right' ? o.left - r.right : side === 'top' ? r.top - o.bottom : o.top - r.bottom
@@ -92,8 +88,6 @@ export async function runHomeSurfaces(browser, local, check) {
               window.__home.clearSeeds()
               const r = document.querySelector('.pair').getBoundingClientRect()
               window.__home.seed('card-light', r.left, r.y + r.height / 2)
-              const sphere = window.__home.outline('proof-card-light')
-              window.__home.seed('card-light', r.left - (sphere.right - sphere.left) / 2 + 1, r.y + r.height / 2)
               window.__home.showSeeds()
               return { png: document.querySelector('.hero-stage').toDataURL(), x: r.x + 12, y: r.y + r.height / 2 - 35, w: 50, h: 70, cssWidth: innerWidth }
             })

@@ -77,8 +77,6 @@ export interface WorldHit {
   t: number
   /** Arriving on a raised thing without a knock (rolled up onto it): a soft tap as it takes the marble's weight. */
   soft?: boolean
-  /** First contact of a scroll landing, before its small rebound. */
-  scrollLanding?: boolean
 }
 
 /** How fast a knock must come in to be heard (em/s). */
@@ -104,8 +102,6 @@ export interface WorldMarble {
   shown: [number, number, number]
   /** What it last stood on (a surface's id), so arriving on a button is noticed. */
   on: number
-  /** Scroll choreography lives in viewport pixels, independent of the page camera. */
-  motion: { phase: 'ground' | 'lift' | 'land' | 'dock' | 'docked'; age: number; x: number; y: number; vx: number; vy: number; height: number; drop: boolean; contact?: boolean }
 }
 
 export interface World {
@@ -131,9 +127,6 @@ export interface World {
   movePads(updates: { index: number; rect: PadRect }[], seconds: number): void
   /** Move the cached page through a viewport field, carrying marbles and giving a bounded scroll impulse. */
   scroll(y: number, impulse?: boolean): void
-  dock(point: { x: number; y: number }): void
-  release(): boolean
-  free(x: number, y: number, radius: number): boolean
   readonly active: number
   /** What of the canvas the marbles may use, top to bottom (canvas px). */
   play(top: number, bottom: number): void
@@ -178,7 +171,7 @@ export interface World {
   foresee(horizon: number): WorldHit[]
 }
 
-export function createWorld(viewport = true, flowing = false, reducedMotion = false): World {
+export function createWorld(viewport = true, flowing = false): World {
   // Parallel projection keeps page footprints and marble sizes constant all the way down the document.
   const camera = viewport ? new OrthographicCamera(-1, 1, 1, -1, -20000, 20000) : new PerspectiveCamera(FOV, 1, 0.1, 200)
   const ray = new Raycaster()
@@ -205,122 +198,6 @@ export function createWorld(viewport = true, flowing = false, reducedMotion = fa
   let repelled: PadRect | null = null
   let blocks: (PadRect & { index: number })[] = []
   let scrollTime = 0
-  const presented = new Map<string, { x: number; y: number; airborne?: boolean }>()
-  const destinations = new Map<string, { x: number; y: number }>()
-  let geometryVersion = 0
-  const searched = new Map<string, number>()
-  let quiet = 1
-  let peg: { x: number; y: number } | null = null
-
-  function free(x: number, y: number, radius: number) {
-    if (x < radius + 1 || x > W - radius - 1 || y < playTop + radius + 1 || y > Math.min(Hc, playBottom) - radius - 1) return false
-    if (blocks.some(b => border(b, x, y).d < radius + 1) || (repelled && border(repelled, x, y).d < radius + 1)) return false
-    const p = rawFloorAt(x, y, ORB_R)
-    return !solid.some(fp => inside(fp, p.x, p.z) || nearest(fp, p.x, p.z).d < ORB_R * 1.1)
-  }
-
-  /** A reserved landing stays clear even when another marble rolls into it during the drop. */
-  function available(m: WorldMarble, x: number, y: number, radius: number) {
-    if (!free(x, y, radius)) return false
-    for (const other of map.values()) {
-      if (other === m) continue
-      const q = other.motion.phase === 'ground' ? project(other.orb.x, other.orb.y, other.orb.z) : other.motion.phase === 'land' ? destinations.get(other.id) : null
-      if (q && Math.hypot(x - q.x, y - q.y) < radius + drawnRadius(other.orb) + 3) return false
-    }
-    return true
-  }
-
-  /** Search the nearest clear floor, including narrow horizontal gaps between cards. Only runs after settling. */
-  function landing(m: WorldMarble) {
-    const s = m.motion, radius = drawnRadius({ ...m.orb, y: ORB_R }) + 2
-    const xs = [s.x, radius + 2, W - radius - 2]
-    const ys = [s.y, playTop + radius + 2, Math.min(Hc, playBottom) - radius - 2]
-    for (const b of blocks) { xs.push(b.x - radius - 2, b.x + b.w + radius + 2); ys.push(b.y - radius - 2, b.y + b.h + radius + 2) }
-    for (let x = radius + 2; x < W - radius; x += Math.max(12, radius)) xs.push(x)
-    for (let y = playTop + radius + 2; y < Math.min(Hc, playBottom) - radius; y += Math.max(12, radius)) ys.push(y)
-    const occupied = [...map.values()].filter(other => other !== m).flatMap(other => {
-      const q = other.motion.phase === 'ground' ? project(other.orb.x, other.orb.y, other.orb.z) : other.motion.phase === 'land' ? destinations.get(other.id) : null
-      return q ? [{ ...q, r: drawnRadius(other.orb) }] : []
-    })
-    let best: { x: number; y: number } | null = null, distance = Infinity
-    for (const x of xs) for (const y of ys) {
-      const d = (x - s.x) ** 2 + (y - s.y) ** 2
-      if (d >= distance || occupied.some(q => Math.hypot(x - q.x, y - q.y) < radius + q.r + 3)) continue
-      if (free(x, y, radius)) { best = { x, y }; distance = d }
-    }
-    return best
-  }
-
-  function lift(m: WorldMarble, point = project(...m.shown)) {
-    const s = m.motion
-    if (s.phase === 'lift') return
-    Object.assign(s, { phase: 'lift', age: 0, x: point.x, y: point.y, vx: 0, vy: 0, drop: false })
-    const o = m.orb
-    o.vx = o.vy = o.vz = 0; o.route = []; o.target = o.aim = null; o.flying = false; o.resting = false
-    delete o.mem
-  }
-
-  /** Existing hops and tosses already show a physical lift and landing; keep their full physics. */
-  function airborne(m: WorldMarble) {
-    return m.orb.flying || Math.abs(m.orb.vy) > .6 || m.orb.y - m.orb.r - surfaceAt(solid, m.orb.x, m.orb.z).h > .05
-  }
-
-  function place(m: WorldMarble) {
-    const s = m.motion, o = m.orb
-    o.y = ORB_R + s.height
-    const p = rawFloorAt(s.x, s.y - s.height * drawnRadius(o), o.y)
-    o.x = p.x; o.z = p.z
-    m.was = m.now = m.shown = [o.x, o.y, o.z]
-  }
-
-  function travel(m: WorldMarble, dt: number, hits: WorldHit[]) {
-    const s = m.motion
-    if (s.phase === 'ground') return
-    s.age += dt
-    let target = { x: Math.max(28, Math.min(W - 28, s.x)), y: Math.max(playTop + 32, Math.min(Math.min(Hc, playBottom) - 32, s.y)) }
-    if (quiet >= .15 && (s.phase === 'lift' || (s.phase === 'docked' && searched.get(m.id) !== geometryVersion))) {
-      searched.set(m.id, geometryVersion)
-      const spot = landing(m)
-      if (spot) { destinations.set(m.id, spot); s.phase = 'land'; s.age = 0; s.drop = false; s.contact = false; target = spot }
-      else if (s.phase !== 'docked') { s.phase = 'dock'; s.age = 0 }
-    }
-    if (s.phase === 'land') {
-      const previous = destinations.get(m.id)
-      const spot = previous && available(m, previous.x, previous.y, drawnRadius({ ...m.orb, y: ORB_R }) + 2) ? previous : landing(m)
-      if (spot) {
-        if (previous && (spot.x !== previous.x || spot.y !== previous.y)) { s.drop = false; s.contact = false; s.age = 0 }
-        destinations.set(m.id, spot)
-      }
-      if (!spot) { s.phase = 'dock'; s.age = 0; s.drop = false }
-      else {
-        target = spot
-        if (!s.drop && Math.hypot(target.x - s.x, target.y - s.y) < .8) { s.drop = true; s.age = 0 }
-      }
-    }
-    if (s.phase === 'dock' || s.phase === 'docked') target = peg ?? { x: W - 34, y: Hc - 34 }
-    // A critically damped spring, integrated in small steps even after a slow frame.
-    for (let left = dt; left > 1e-6; left -= 1 / 120) {
-      const h = Math.min(left, 1 / 120), k = reducedMotion ? 22 : 12
-      s.vx += ((target.x - s.x) * k * k - 2 * k * s.vx) * h
-      s.vy += ((target.y - s.y) * k * k - 2 * k * s.vy) * h
-      s.x += s.vx * h; s.y += s.vy * h
-    }
-    const high = reducedMotion ? 0 : .48
-    if (s.phase === 'land' && s.drop) {
-      const t = Math.min(1, s.age / (reducedMotion ? .12 : .36))
-      s.height = high * (t < .65 ? (1 - t / .65) ** 2 : .12 * Math.sin((t - .65) / .35 * Math.PI))
-      if (t >= .65 && !s.contact) {
-        s.contact = true
-        const at = rawFloorAt(s.x, s.y, ORB_R)
-        hits.push({ orb: m.id, kind: 'floor', landed: true, scrollLanding: true, speed: .8, x: at.x, y: ORB_R, z: at.z, nx: 0, ny: 1, nz: 0, t: clock })
-      }
-      if (t === 1 && available(m, s.x, s.y, drawnRadius({ ...m.orb, y: ORB_R }) + 2)) {
-        s.phase = 'ground'; s.height = 0; place(m); m.orb.resting = true; m.on = -1
-      }
-    } else s.height += ((s.phase === 'dock' || s.phase === 'docked' ? 0 : high) - s.height) * (1 - Math.exp(-dt * 14))
-    if (s.phase === 'dock' && Math.hypot(target.x - s.x, target.y - s.y) < .6) { s.phase = 'docked'; s.age = 0; m.orb.resting = true }
-    place(m)
-  }
   /** Viewport-space kinematic motion, in CSS pixels and pixels per second. Static outlines stay untouched. */
   function sweptCards(previous: PadRect[], current: PadRect[], seconds: number) {
     for (let i = 0; i < current.length; i++) {
@@ -330,7 +207,6 @@ export function createWorld(viewport = true, flowing = false, reducedMotion = fa
       if (!vx && !vy) continue
       if (Math.max(a.y + a.h, b.y + b.h) < playTop || Math.min(a.y, b.y) > Hc) continue
       for (const m of map.values()) {
-        if (m.motion.phase !== 'ground') continue
         const o = m.orb, p = project(o.x, o.y, o.z)
         const radius = drawnRadius(o)
         // Slab intersection of a stationary marble with a moving, radius-expanded block.
@@ -345,7 +221,6 @@ export function createWorld(viewport = true, flowing = false, reducedMotion = fa
         if (enter > leave || leave < 0 || enter > 1 || (!nx && !ny)) continue
         const x = nx < 0 ? b.x - radius - .1 : nx > 0 ? b.x + b.w + radius + .1 : p.x
         const y = ny < 0 ? b.y - radius - .1 : ny > 0 ? b.y + b.h + radius + .1 : p.y
-        if (Math.hypot(x - p.x, y - p.y) > 6) { lift(m); continue }
         const at = rawFloorAt(x, y, o.y), velocity = rawFloorAt(x + vx, y + vy, o.y)
         o.x = at.x; o.z = at.z
         // Contact velocity wakes a sleeping marble; clamp the impulse to the field's gentle scroll budget.
@@ -358,7 +233,6 @@ export function createWorld(viewport = true, flowing = false, reducedMotion = fa
   }
 
   function cacheBlocks() {
-    geometryVersion++
     blocks = padRects.flatMap((b, index) => b.exclude && b.w > 0 && b.h > 0 && (b.fixed || b.y + b.h >= scroll && b.y <= scroll + Hc)
       ? [{ ...b, index, y: b.y - (b.fixed ? 0 : scroll) }] : [])
   }
@@ -491,12 +365,6 @@ export function createWorld(viewport = true, flowing = false, reducedMotion = fa
 
   function contain() {
     for (const m of map.values()) {
-      if (m.motion.phase !== 'ground') {
-        const r = drawnRadius(m.orb) + 2
-        m.motion.x = Math.max(r, Math.min(W - r, m.motion.x))
-        m.motion.y = Math.max(playTop + r, Math.min(Math.min(Hc, playBottom) - r, m.motion.y))
-        place(m); continue
-      }
       const o = m.orb
       const p = withinWalls(walls, o.x, o.y, o.z, o.r * (1 + DEPTH * Math.max(0, o.y - o.r)))
       o.x = p.x; o.z = p.z
@@ -512,7 +380,7 @@ export function createWorld(viewport = true, flowing = false, reducedMotion = fa
 
   /** Resolve content blocks in the viewport plane, including airborne marbles and layouts appearing beneath them. */
   function clearCards(m: WorldMarble, margin = 0, moving = 0, drawing = false, hits?: WorldHit[]) {
-    if (!viewport || m.motion.phase !== 'ground' || (!blocks.length && !repelled)) return
+    if (!viewport || (!blocks.length && !repelled)) return
     const o = m.orb, p = project(o.x, o.y, o.z)
     const radius = drawnRadius(o)
     const obstacles = repelled ? [...blocks, repelled] : blocks
@@ -536,7 +404,7 @@ export function createWorld(viewport = true, flowing = false, reducedMotion = fa
     ]).filter(q => q.x >= radius && q.x <= W - radius && !obstacles.some(b => overlap(b, q.x, q.y, 0))))
     candidates.sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))
     const exit = candidates[0]
-    if (!exit || (!airborne(m) && (Math.hypot(exit.x - p.x, exit.y - p.y) > 6 || 'gutter' in exit))) { lift(m); return }
+    if (!exit) return
     const at = rawFloorAt(exit.x, exit.y, o.y), normal = rawFloorAt(exit.x + exit.nx, exit.y + exit.ny, o.y)
     const dx = normal.x - at.x, dz = normal.z - at.z, length = Math.hypot(dx, dz)
     const nx = dx / length, nz = dz / length, into = o.vx * nx + o.vz * nz
@@ -632,52 +500,30 @@ export function createWorld(viewport = true, flowing = false, reducedMotion = fa
     scroll(y, impulse = true) {
       if (!viewport || y === scroll) return
       const old = scroll
-      const positions = [...map.values()].map(m => ({ m, p: project(...m.shown) }))
-      for (const { m, p } of positions) if (!presented.has(m.id)) presented.set(m.id, p)
-      const delta = y - old
+      const previous = padRects.map(b => ({ ...b, y: b.y - (b.fixed ? 0 : old) }))
+      const positions = [...map.values()].map((m) => ({ m, p: project(m.orb.x, m.orb.y, m.orb.z) }))
       scroll = y
       ledges.clear()
       view.y = baseViewY + scroll
       camera.setViewOffset(W, Hc, view.x, view.y, W, Hc)
       camera.updateProjectionMatrix(); camera.updateMatrixWorld()
-      buildWalls(); cull(); cacheBlocks()
-      if (padRects.some(b => b.fixed)) buildPads(true)
-      const elapsed = Math.max(H, clock - scrollTime)
-      scrollTime = clock
-      if (Math.abs(delta) / elapsed > 12) quiet = 0
+      buildWalls(); cull()
       for (const { m, p } of positions) {
-        const o = m.orb, s = m.motion
-        if (s.phase === 'land') lift(m, p)
-        if (s.phase !== 'ground') { place(m); continue }
-        const carry = W <= 600
-        const to = { x: p.x, y: p.y - (carry ? delta : 0) }
-        const radius = drawnRadius(o)
-        // A fling or a squeezed tray starts from the last rendered position, never the corrected one.
-        if ((carry && Math.abs(delta) > 18) || to.y < playTop + radius + 2 || to.y > Math.min(Hc, playBottom) - radius - 2 || blocks.some(b => border(b, to.x, to.y).d < radius)) {
-          lift(m, p); place(m); continue
-        }
-        const at = rawFloorAt(to.x, to.y, o.y)
+        const o = m.orb, at = rawFloorAt(p.x, p.y, o.y)
         o.x = at.x; o.z = at.z
         o.route = []; o.flying = false; o.aim = null; o.target = null
-        if (impulse && !carry) { o.vz += Math.max(-.3, Math.min(.3, delta * -.001)); o.resting = false }
+        if (impulse) { o.vz += Math.max(-1.2, Math.min(1.2, (scroll - old) * -0.002)); o.resting = false }
         delete o.mem
-        m.was = m.now = m.shown = [o.x, o.y, o.z]
       }
-    },
-    dock(point) {
-      if (!peg || point.x !== peg.x || point.y !== peg.y) for (const m of map.values()) if (m.motion.phase === 'docked') m.motion.phase = 'dock'
-      peg = point
-    },
-    free,
-    release() {
-      let released = false
-      for (const m of map.values()) if (m.motion.phase === 'docked' || m.motion.phase === 'dock') {
-        lift(m); m.motion.y -= 1; quiet = -.3; released = true
-      }
-      return released
+      cacheBlocks()
+      const elapsed = Math.max(H, clock - scrollTime)
+      scrollTime = clock
+      sweptCards(previous, padRects.map(b => ({ ...b, y: b.y - (b.fixed ? 0 : scroll) })), elapsed)
+      if (padRects.some(b => b.fixed)) buildPads(true)
+      contain()
+      for (const m of map.values()) { clearCards(m, 0, (scroll - old) * .002); m.was = m.now = m.shown = [m.orb.x, m.orb.y, m.orb.z] }
     },
     layout(lines, w, h, box) {
-      geometryVersion++
       W = Math.max(1, w); Hc = Math.max(1, h)
       const k = lines.join('\n')
       const changed = k !== lastLines
@@ -689,7 +535,6 @@ export function createWorld(viewport = true, flowing = false, reducedMotion = fa
       fit(box)
       // Marbles stay where they were, on whatever is under them now (inside a letter now, they ease out onto it).
       contain()
-      presented.clear()
       world.wake()
       return changed
     },
@@ -721,7 +566,6 @@ export function createWorld(viewport = true, flowing = false, reducedMotion = fa
     },
     play(top, bottom) {
       if (top === playTop && bottom === playBottom) return
-      geometryVersion++
       playTop = top
       playBottom = bottom
       buildWalls()
@@ -807,16 +651,15 @@ export function createWorld(viewport = true, flowing = false, reducedMotion = fa
       const start = footprints.length ? footprints[footprints.length - 1].spot : [0, 0]
       const orb = newOrb(start[0], start[1], ORB_R, surfaceAt(footprints, start[0], start[1]).h)
       const p: [number, number, number] = [orb.x, orb.y, orb.z]
-      m = { id, orb, push: null, was: p, now: [...p], shown: [...p], on: -1, motion: { phase: 'ground', age: 0, x: 0, y: 0, vx: 0, vy: 0, height: 0, drop: false } }
+      m = { id, orb, push: null, was: p, now: [...p], shown: [...p], on: -1 }
       map.set(id, m)
       return m
     },
     marbles: () => [...map.values()],
-    remove(id) { map.delete(id); ledges.delete(id); destinations.delete(id); searched.delete(id); presented.delete(id) },
+    remove(id) { map.delete(id); ledges.delete(id) },
     toss(m, vy) { toss(m.orb, vy, solid) },
     wake() { for (const m of map.values()) m.orb.resting = false },
     repel(rect) {
-      geometryVersion++
       repelled = rect
       if (rect) {
         for (const m of map.values()) { clearCards(m); m.was = m.now = m.shown = [m.orb.x, m.orb.y, m.orb.z] }
@@ -826,13 +669,11 @@ export function createWorld(viewport = true, flowing = false, reducedMotion = fa
     step(dt) {
       const hits: WorldHit[] = []
       const all = [...map.values()]
-      for (const m of all) if (!presented.has(m.id) || dt === 0) presented.set(m.id, { ...project(...m.shown), airborne: airborne(m) })
-      quiet += Math.min(Math.max(0, dt), CATCH_UP)
+      const bodies = bodiesOf(all)
       // Moved by someone else since its last step (dropped in for the opening, set down on the full stop): drawn there
       // at once, not slid there.
       for (const m of all) {
         const o = m.orb
-        if (o.x !== m.now[0] || o.y !== m.now[1] || o.z !== m.now[2]) presented.set(m.id, project(o.x, o.y, o.z))
         clearCards(m, 0, 0, false, hits)
         if (o.x !== m.now[0] || o.y !== m.now[1] || o.z !== m.now[2]) { m.now = [o.x, o.y, o.z]; m.was = [...m.now] }
       }
@@ -840,13 +681,12 @@ export function createWorld(viewport = true, flowing = false, reducedMotion = fa
       while (acc >= H - 1e-9) {
         acc -= H
         for (const m of all) m.was = m.now
-        for (const m of all) if (m.motion.phase === 'ground') { flow(m); repelStep(m) }
-        const grounded = all.filter(m => m.motion.phase === 'ground')
-        const knocks = tick(bodiesOf(grounded), solid, H, env)
+        for (const m of all) { flow(m); repelStep(m) }
+        const knocks = tick(bodies, solid, H, env)
         for (const m of all) clearCards(m, 0, 0, false, hits)
         for (const m of all) m.now = [m.orb.x, m.orb.y, m.orb.z]
-        report(grounded, knocks, hits, clock, knocked)
-        arrivals(all.filter(m => m.motion.phase === 'ground'), hits)
+        report(all, knocks, hits, clock, knocked)
+        arrivals(all, hits)
         clock += H
       }
       acc = Math.max(0, acc)
@@ -854,12 +694,6 @@ export function createWorld(viewport = true, flowing = false, reducedMotion = fa
       const k = acc / H
       let moving = false
       for (const m of all) {
-        if (m.motion.phase !== 'ground') {
-          travel(m, Math.min(Math.max(0, dt), CATCH_UP), hits)
-          moving ||= m.motion.phase !== 'docked' || searched.get(m.id) !== geometryVersion
-          presented.set(m.id, { ...project(...m.shown), airborne: airborne(m) })
-          continue
-        }
         m.shown = lerp3(m.was, m.now, k)
         if (viewport) {
           const [x, y, z] = m.shown
@@ -872,16 +706,13 @@ export function createWorld(viewport = true, flowing = false, reducedMotion = fa
           m.shown = [m.orb.x, m.orb.y, m.orb.z]
           ;[m.orb.x, m.orb.y, m.orb.z] = saved
         }
-        const previous = presented.get(m.id)!, point = project(...m.shown)
-        if (viewport && (blocks.length > 0 || scroll !== 0) && dt > 0 && m.motion.phase === 'ground' && !airborne(m) && !previous.airborne && Math.hypot(point.x - previous.x, point.y - previous.y) > 18) { lift(m, previous); place(m) }
-        presented.set(m.id, { ...project(...m.shown), airborne: airborne(m) })
-        moving = moving || m.motion.phase !== 'ground' || !m.orb.resting || (flowing && ledges.has(m.id)) || m.was[0] !== m.now[0] || m.was[1] !== m.now[1] || m.was[2] !== m.now[2]
+        moving = moving || !m.orb.resting || (flowing && ledges.has(m.id)) || m.was[0] !== m.now[0] || m.was[1] !== m.now[1] || m.was[2] !== m.now[2]
       }
       return { hits, moving }
     },
     shownAt: () => clock - H + acc,
     foresee(horizon) {
-      const all = [...map.values()].filter(m => m.motion.phase === 'ground')
+      const all = [...map.values()]
       if (horizon <= 0 || all.every((m) => m.orb.resting)) return []
       // Copies, down to what each remembers from its last step.
       const copies = all.map((m) => ({ ...m, orb: copyOrb(m.orb) }))

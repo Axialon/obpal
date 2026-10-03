@@ -27,7 +27,6 @@ export async function runHomeHeadings(browser, local, check) {
           window.cancelAnimationFrame = id => { const scheduled = pending.get(id); if (scheduled !== undefined) cancel(scheduled); pending.delete(id) }
         })
         const page = await context.newPage()
-        let attempted = null
         try {
           await page.goto(`${local.origin}/?debug=colliders`)
           await page.mouse.move(3, 300)
@@ -59,45 +58,18 @@ export async function runHomeHeadings(browser, local, check) {
                 lines.push(...[...range.getClientRects()].filter(r => r.width && r.height))
               }
               const area = window.__home.outline('me')?.area
-              const visible = lines.filter(r => r.top > (area?.top ?? 0) + 1 && r.bottom < Math.min(innerHeight, area?.bottom ?? innerHeight) - 1)
-              if (!visible.length) return { error: 'no heading line inside the visible play area' }
-              const rects = window.__home.contacts().rects
-              window.__home.seed('heading', visible[0].left, visible[0].top)
-              const sphere = window.__home.outline('proof-heading'), radius = (sphere.right - sphere.left) / 2
-              const candidates = visible.flatMap(line => {
-                const target = rects.find(b => b.rect.text && Math.abs(b.rect.y - scrollY - line.top) < 2 && b.rect.x <= line.left + 1 && b.rect.x + b.rect.w >= line.right - 1)
-                if (!target) return []
-                const r = target.rect, y = r.y - scrollY
-                return [
-                  { x: r.x + r.w / 2, y: y - radius + 1 },
-                  { x: r.x + r.w / 2, y: y + r.h + radius - 1 },
-                  { x: r.x - radius + 1, y: y + r.h / 2 },
-                  { x: r.x + r.w + radius - 1, y: y + r.h / 2 },
-                ].map(point => ({ point, target, line }))
-              })
-              // Closely stacked phone headings have no room above them; find an exposed rim rather than squeezing
-              // the fixture between two text lines, which correctly requests a lift instead of a physical contact.
-              const contact = candidates.find(({ point: p, target }) => {
-                if (p.x - radius < 0 || p.x + radius > innerWidth || p.y - radius < (area?.top ?? 0) || p.y + radius > Math.min(innerHeight, area?.bottom ?? innerHeight)) return false
-                return !rects.some(b => {
-                  if (b.id === target.id || !b.rect.exclude) return false
-                  const r = b.rect, corner = Math.min(r.r, r.w / 2, r.h / 2)
-                  const x = Math.abs(p.x - r.x - r.w / 2) - r.w / 2 + corner
-                  const y = Math.abs(p.y - r.y + (r.fixed ? 0 : scrollY) - r.h / 2) - r.h / 2 + corner
-                  return Math.hypot(Math.max(x, 0), Math.max(y, 0)) + Math.min(Math.max(x, y), 0) - corner < radius + .1
-                })
-              })
-              if (!contact) return { error: 'heading has no exposed rim for a physical contact', radius, candidates }
-              const { line, target, point } = contact
+              const line = lines.find(r => r.top > (area?.top ?? 0) + 1 && r.bottom < Math.min(innerHeight, area?.bottom ?? innerHeight) - 1)
+              if (!line) return { error: 'no heading line inside the visible play area' }
+              const target = window.__home.contacts().rects.find(b => b.rect.text && Math.abs(b.rect.y - scrollY - line.top) < 2 && b.rect.x <= line.left + 1 && b.rect.x + b.rect.w >= line.right - 1)
+              if (!target) return { error: 'visible heading has no text collider' }
               window.__headingLit = false
               window.__headingObserver?.disconnect()
               window.__headingObserver = new MutationObserver(() => { if (el.classList.contains('field-hit')) window.__headingLit = true })
               window.__headingObserver.observe(el, { attributes: true, attributeFilter: ['class'] })
-              window.__home.seed('heading', point.x, point.y)
+              window.__home.seed('heading', line.left + line.width / 2, line.top + 1)
               window.__home.showSeeds()
-              return { line: { x: line.left, y: line.top, w: line.width, h: line.height }, target, seed: { ...point, radius }, tip: window.__home.tips().find(m => m.id === 'proof-heading') }
+              return { line: { x: line.left, y: line.top, w: line.width, h: line.height }, target }
             }, heading.index)
-            attempted = { heading: heading.text, index: heading.index, ...contact }
             if (contact.error) throw new Error(`${width} ${heading.text}: ${contact.error}`)
             await page.waitForFunction(() => window.__headingLit, null, { polling: 20, timeout: 5000 })
             const samples = []
@@ -127,14 +99,11 @@ export async function runHomeHeadings(browser, local, check) {
             if (samples.some(s => s.overlap)) throw new Error(`${width} ${heading.text}: rendered marble overlaps text`)
           }
         } catch (error) {
-          const state = await page.evaluate(() => ({ scroll: scrollY, frozen: window.__headingFrames.frozen,
-            lit: window.__headingLit, tips: window.__home.tips(), outline: window.__home.outline('proof-heading'),
-            rects: window.__home.contacts().rects.filter(b => b.rect.fixed || b.rect.y + b.rect.h >= scrollY && b.rect.y <= scrollY + innerHeight) }))
           const path = `${width}-failure.png`
           await page.screenshot({ path: join(raw, path) })
           frames.push({ path, failed: true })
-          results.push({ viewport: [width, height], failure: String(error), attempted, state })
-          throw new Error(`${width} ${attempted?.heading ?? 'heading setup'}: ${String(error)}; phase ${state.tips.find(m => m.id === 'proof-heading')?.phase ?? 'missing'}; see heading-contacts/measurements.json`)
+          results.push({ viewport: [width, height], failure: String(error) })
+          throw error
         } finally { await context.close() }
       }
     } finally {
