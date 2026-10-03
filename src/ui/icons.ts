@@ -142,10 +142,10 @@ export const ICONS: Record<string, string> = {
 
 export const icon = (name: string | undefined) => (name && ICONS[name]) || ''
 
-/** Static vector identity needs no animation clock. Retained for surfaces that previously settled an orbit. */
+/** The inline vector follows CSS tokens without an animation clock. */
 export function calmMarks(root: ParentNode, _orbits = 1) { syncBrand(root) }
 
-/** Existing header slots use the shared outlined lockup; isolated mark slots use the canonical SVG. */
+/** Header slots use the shared inline lockup; isolated mark slots use the canonical SVG. */
 export function mountMarks(root: ParentNode = document) {
   for (const slot of root.querySelectorAll<HTMLElement>('[data-mark]')) {
     const owner = slot.closest('.logo')

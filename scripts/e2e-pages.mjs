@@ -30,6 +30,7 @@ import { guardSiteButtons, SITE_BUTTON_ROUTES } from './lib/surface-buttons.mjs'
 import { runGraphicsRecoveryLayouts } from './e2e-graphics-recovery.mjs'
 import { e2eBrowserOptions } from './lib/browser.mjs'
 import { runStoreKit } from './e2e-store-kit.mjs'
+import { runBrand } from './e2e-brand.mjs'
 
 const PORT = Number(process.env.OBPAL_E2E_WORKER_PORT) || 5179
 const HEADED = process.argv.includes('--headed')
@@ -162,6 +163,7 @@ try {
   worker = await startWorker({ port: PORT })
   console.log(`ob.Pal pages e2e (${worker.origin})`)
   browser = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED }))
+  if (!ONLY) await check('Logos inherit live surface and accent tokens', () => runBrand(browser, worker.origin))
   if (!ONLY || ONLY === 'store') await runStoreKit(browser, check, SHOTS)
   if (ONLY === 'try') {
     await check('Try keeps readable controller feedback without constellation motion', () => runTry(browser, worker.origin))

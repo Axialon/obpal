@@ -4,6 +4,7 @@ import { Scanner, type CodeCorner } from '../controller/scanner'
 import { readScan, scanDestination } from '../controller/scan-code'
 import { dismissHint, hint } from './hints'
 import { ICONS } from './icons'
+import { brandMark } from './brand'
 import { setMarkup } from './markup'
 import { coverPoint } from './camera-space'
 import { dotLoading } from './kit/loading'
@@ -81,9 +82,7 @@ export class CameraView {
     const head = element('header', 'camera-head')
     const brand = element('div', 'camera-brand')
     const logo = element('span', 'camera-logo')
-    const mark = element('img')
-    mark.src = '/favicon.svg'
-    mark.alt = ''
+    const mark = brandMark()
     const word = element('span', '', 'ob.Pal')
     logo.append(mark)
     const syncLoader = () => dotLoading(logo, this.opened && ['opening', 'loading'].includes(this.dialog.dataset.state ?? ''), this.dialog.dataset.state === 'loading' ? 'Preparing tracking model' : 'Starting camera', 37)

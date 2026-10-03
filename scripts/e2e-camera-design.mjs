@@ -17,6 +17,50 @@ async function fixture(file, text) {
   await writeFile(file, Buffer.concat([Buffer.from('YUV4MPEG2 W640 H480 F60:1 Ip A1:1 C420jpeg\nFRAME\n'), y, Buffer.alloc(width * height / 2, 128)]))
 }
 
+/** The camera shares the canonical inline mark and inherits live page accents. */
+async function cameraBrand(page) {
+  const saved = await page.evaluate(() => ({
+    accent: window.BlackboxesFamily.getAccent(),
+    token: document.documentElement.style.getPropertyValue('--bb-accent'),
+    priority: document.documentElement.style.getPropertyPriority('--bb-accent'),
+  }))
+  try {
+    for (const mode of ['current', 'rose', 'custom']) {
+      if (mode === 'rose') await page.evaluate(() => window.BlackboxesFamily.setAccent('rose'))
+      if (mode === 'custom') await page.evaluate(() => document.documentElement.style.setProperty('--bb-accent', '#e123ab'))
+      // SVG paint servers resolve the inherited custom property on the next rendered frame.
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+      const failures = await page.locator('.camera-logo svg.mark').evaluate(mark => {
+        const failures = []
+        const probe = document.createElement('span')
+        probe.style.color = 'var(--bb-accent)'
+        mark.parentElement.append(probe)
+        const expected = getComputedStyle(probe).color
+        probe.remove()
+        const paints = [...mark.querySelectorAll('[style]')].flatMap(node => ['stroke', 'fill', 'stop-color']
+          .filter(property => node.style.getPropertyValue(property).includes('--bb-accent'))
+          .map(property => ({ node, property })))
+        if (paints.length < 3) failures.push('camera mark does not expose its accent paints')
+        for (const { node, property } of paints) {
+          const actual = getComputedStyle(node).getPropertyValue(property)
+          if (actual !== expected) failures.push(`${node.localName} ${property}: ${actual}, expected ${expected}`)
+        }
+        for (const node of mark.querySelectorAll('[stroke], [fill], [stop-color]')) {
+          for (const property of ['stroke', 'fill', 'stop-color']) if (/^#c6ff34$/i.test(node.getAttribute(property) || '')) failures.push(`fixed Lime ${property}`)
+        }
+        return failures
+      })
+      if (failures.length) throw new Error(`camera logo ${mode}: ${failures.join('; ')}`)
+    }
+  } finally {
+    await page.evaluate(saved => {
+      window.BlackboxesFamily.setAccent(saved.accent)
+      if (saved.token) document.documentElement.style.setProperty('--bb-accent', saved.token, saved.priority)
+      else document.documentElement.style.removeProperty('--bb-accent')
+    }, saved)
+  }
+}
+
 export async function cameraDesign(o) {
   const { check, need, until, sleep, directory, origin, screen, phone, cameraBrowser, mobile, probeCamera, handResult, emptyHand, qrFile, report } = o
   const shot = (page, name) => page.screenshot({ path: join(directory, `${name}.png`) })
@@ -65,6 +109,7 @@ export async function cameraDesign(o) {
           const frost = await checkFrost(page, '.camera-island', { text: ['.camera-status', '.camera-privacy small'] })
           const appearance = await page.locator('.obpal-camera').evaluate(el => ({ scheme: getComputedStyle(el).colorScheme, accent: getComputedStyle(el).getPropertyValue('--bb-accent').trim(), status: el.querySelector('.camera-status').textContent }))
           need(appearance.scheme === 'dark', 'Camera did not own its dark colour scheme')
+          if (state === 'idle') await cameraBrand(page)
           if (state === 'lock') {
             const corners = await page.locator('.camera-guide').evaluate(el => {
               const expected = JSON.parse(el.dataset.corners)
@@ -90,7 +135,7 @@ export async function cameraDesign(o) {
       await browser.close()
     }
     report.designScan = evidence
-    return '8 camera states; real jsQR corners within 2 px; text ≥4.5:1 over a white frame; zero reduced-motion animations'
+    return '8 camera states; live camera-logo accents; real jsQR corners within 2 px; text ≥4.5:1 over a white frame; zero reduced-motion animations'
   })
 
   await check('round 2 hand chips, mirrored skeleton, island hint, clutch dismissal and four Viewer cursors', async () => {

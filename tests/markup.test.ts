@@ -2,8 +2,17 @@ import { describe, expect, it } from 'vitest'
 import { guardMarkup, guardScriptURL, Markup } from '../src/ui/markup'
 import { ICONS } from '../src/ui/icons'
 import templates from 'virtual:obpal-templates'
+import markSource from '../public/logo-mark.svg?raw'
+import lockupSource from '../public/brand/obpal-link-lockup.svg?raw'
 
 describe('the code-owned HTML policy', () => {
+  it('accepts only the exact canonical vectors, before runtime theme decoration', () => {
+    for (const source of [markSource, lockupSource]) {
+      expect(guardMarkup(source)).toBe(source)
+      expect(() => guardMarkup(source.replace('<svg ', '<svg onload="alert(1)" '))).toThrow()
+      expect(() => guardMarkup(source.replace(/#c6ff34/i, '#e123ab'))).toThrow()
+    }
+  })
   it('accepts our static templates and icon vocabulary', () => {
     for (const s of templates) expect(guardMarkup(s)).toBe(s)
     for (const s of Object.values(ICONS)) expect(guardMarkup(s)).toBe(s)

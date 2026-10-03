@@ -1,5 +1,5 @@
 {
-  "sourceSha256": "5934683f9b8eb6b1359a5787be2d425edaf236c3246337f9f2c99c22ab48db12",
+  "sourceSha256": "4db0a174d35e23309429a647229c9bca96c973d137ab4438949c45ab5295b913",
   "images": {
     "icon-128.png": "24957523bd3ea11be184a2b051668ba290508fdc20ed49de1dd20f5e17f0af4f",
     "screenshot-1.png": "abe7a6bfb5f2b9b9c460a3e4eecbd8768d8079f2e314c89e308ba53dee40d0a4",
@@ -10,5 +10,5 @@
     "tile-440x280.png": "1340ec53b1e1187d1578be6efc578576f2cc7738b17de7e690084a48099d946a",
     "marquee-1400x560.png": "0996454bd084b04f463d899743f743042f4fb0e52f801f24e9cf761031a998ea"
   },
-  "note": "Existing 1.8.0 art adopted from the prepared kit; future full renders refresh this receipt"
+  "note": "Store images retained unchanged; shared vector code now resolves theme tokens on live surfaces"
 }

@@ -53,6 +53,8 @@ function files(dir) {
 
 export function templateCatalogue(root) {
   const out = new Set()
+  // Only these code-owned vector assets may enter the DOM template policy as raw markup.
+  for (const file of ['public/logo-mark.svg', 'public/brand/obpal-link-lockup.svg']) out.add(readFileSync(resolve(root, file), 'utf8'))
   for (const path of files(resolve(root, 'src'))) {
     if (path.endsWith('.d.ts')) continue
     let code = readFileSync(path, 'utf8')

@@ -55,7 +55,7 @@
 .camera-head-tools { display: flex; gap: 8px; }
 .camera-brand { display: inline-flex; align-items: center; gap: 9px; font: 700 23px/1 var(--font-display); letter-spacing: -.035em; }
 .camera-logo { position: relative; width: 37px; height: 37px; display: grid; place-items: center; }
-.camera-logo img { width: 29px; height: 29px; }
+.camera-logo > :is(img, svg) { width: 29px; height: 29px; }
 .camera-control, .camera-type { color: var(--bb-ink); -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .camera-control { position: relative; display: grid; place-items: center; flex: none; width: 44px; height: 44px; padding: 0; border-radius: 50%; font: 700 14px/1 var(--bb-font-data); }
 .camera-control[aria-pressed='true'] { background: var(--bb-accent); color: var(--bb-accent-ink); }
@@ -126,4 +126,4 @@ body:has(.sheet-wrap) .obpal-camera .hint { visibility: visible; }
 
 .camera-logo>.dot-loader { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
 .camera-logo:has(>.dot-loader:not([hidden])) { border-radius: 50%; background: var(--frost); border: 1px solid var(--frost-edge); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); }
-.obpal-camera:is([data-state="opening"], [data-state="loading"]) .camera-logo img { visibility: hidden; }
+.obpal-camera:is([data-state="opening"], [data-state="loading"]) .camera-logo > :is(img, svg) { visibility: hidden; }

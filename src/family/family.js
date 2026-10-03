@@ -15,11 +15,13 @@
   var doc = global.document;
   var markup = null;
   var reactiveRanges = false;
+  var obpalMark = null;
   function isObpal() { return doc.documentElement.getAttribute('data-bb-product') === 'obpal'; }
   /** Hosts with a DOM template policy supply their tag and sink, without importing product code here. */
   function configure(options) {
     options = options || {};
     if (options.markup) markup = options.markup;
+    if (options.obpalMark) obpalMark = options.obpalMark;
     if (options.reactiveRanges) { reactiveRanges = true; syncRanges(doc); }
   }
   function Template(strings, values) { this.strings = strings; this.values = values; }
@@ -171,6 +173,7 @@
   function mark(productId, opts) {
     opts = opts || {};
     var p = byId(PRODUCTS, productId) || PRODUCTS[0];
+    if (p.id === 'obpal' && obpalMark) return obpalMark(opts);
     var a = opts.accent || p.accent;
     var id = 'bbm' + (++markSeq);
     var orbit = p.id === 'obpal';

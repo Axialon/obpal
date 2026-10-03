@@ -1,4 +1,5 @@
 import { html, setMarkup, type Content } from '../ui/markup'
+import { familyBrandMark } from '../ui/brand'
 /**
  * Typed access to the shared Blackboxes family design system (vendored from the BlackBoxes repo, shared/family/;
  * refresh with `pnpm run sync:family`). family.js is a classic script that defines window.BlackboxesFamily.
@@ -26,7 +27,7 @@ export interface SwitcherOptions { href?: (product: FamilyProduct) => string; it
 
 export interface FamilyApi {
   /** Adapt the shared templates to this product's Trusted Types policy. */
-  configure(options: { markup?: { html: typeof html; setMarkup: typeof setMarkup }; reactiveRanges?: boolean }): void
+  configure(options: { markup?: { html: typeof html; setMarkup: typeof setMarkup }; reactiveRanges?: boolean; obpalMark?: typeof familyBrandMark }): void
   PRODUCTS: FamilyProduct[]
   THEMES: FamilyTheme[]
   ACCENTS: FamilyAccent[]
@@ -70,4 +71,4 @@ declare global {
 }
 
 export const family: FamilyApi = window.BlackboxesFamily
-family.configure({ markup: { html, setMarkup }, reactiveRanges: true })
+family.configure({ markup: { html, setMarkup }, reactiveRanges: true, obpalMark: familyBrandMark })
