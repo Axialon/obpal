@@ -1,7 +1,9 @@
 /** Meshopt-compress Blender's separate index/attribute streams; no external geometry or textures. */
 import { readFile, mkdir, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { MeshoptEncoder } from 'meshoptimizer/encoder'
 import { MeshoptDecoder } from 'meshoptimizer/decoder'
+import { addSkin } from './skin.mjs'
 
 await Promise.all([MeshoptEncoder.ready, MeshoptDecoder.ready])
 const [input, name, precision = '18'] = process.argv.slice(2)
@@ -10,10 +12,33 @@ if (!Number.isInteger(positionBits) || positionBits < 18 || positionBits > 24) t
 if (!/^[a-z][a-z0-9-]*$/.test(name)) throw new Error('Invalid model name')
 const raw = await readFile(input), jsonLength = raw.readUInt32LE(12)
 const doc = JSON.parse(raw.subarray(20, 20 + jsonLength).toString())
-const binary = raw.subarray(28 + jsonLength)
+let binary = raw.subarray(28 + jsonLength)
 const buffers = [], views = [], accessors = [], remaps = new Map()
 let offset = 0, fallback = 0
-const components = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 }
+const components = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT4: 16 }
+// A soft suit's weights and knit tones arrive in a sidecar beside the raw GLB (humanoid_skin.py).
+const sidecar = input.replace(/\.glb$/, '.skin.json')
+let inverseBinds = null
+if (existsSync(sidecar)) {
+  const read = (index) => {
+    const a = doc.accessors[index], v = doc.bufferViews[a.bufferView]
+    if (a.componentType !== 5126) throw new Error('Expected float positions')
+    const start = (v.byteOffset || 0) + (a.byteOffset || 0)
+    return new Float32Array(binary.buffer.slice(binary.byteOffset + start, binary.byteOffset + start + a.count * components[a.type] * 4))
+  }
+  const appended = []
+  let end = binary.length
+  const append = (typed, accessor) => {
+    const bytes = Buffer.from(typed.buffer, typed.byteOffset, typed.byteLength), pad = (4 - end % 4) % 4
+    appended.push(Buffer.alloc(pad), bytes)
+    doc.bufferViews.push({ buffer: 0, byteOffset: end + pad, byteLength: bytes.length })
+    end += pad + bytes.length
+    doc.accessors.push({ ...accessor, bufferView: doc.bufferViews.length - 1 })
+    return doc.accessors.length - 1
+  }
+  inverseBinds = addSkin(doc, JSON.parse(await readFile(sidecar, 'utf8')), read, append)
+  binary = Buffer.concat([binary, ...appended])
+}
 for (const mesh of doc.meshes) for (const primitive of mesh.primitives) {
   for (const [semantic, index] of [...Object.entries(primitive.attributes), ['indices', primitive.indices]]) {
     if (remaps.has(index)) { if (semantic === 'indices') primitive.indices = remaps.get(index); else primitive.attributes[semantic] = remaps.get(index); continue }
@@ -47,6 +72,14 @@ for (const mesh of doc.meshes) for (const primitive of mesh.primitives) {
     buffers.push(compressed, Buffer.alloc(pad)); offset += compressed.length + pad
     fallback += (decoded.length + 3) & ~3
   }
+}
+if (inverseBinds) {
+  // Inverse bind matrices are read once at load, so they stay plain floats in the main buffer.
+  const bytes = Buffer.from(inverseBinds.buffer)
+  views.push({ buffer: 0, byteOffset: offset, byteLength: bytes.length })
+  accessors.push({ bufferView: views.length - 1, componentType: 5126, count: inverseBinds.length / 16, type: 'MAT4' })
+  doc.skins[0].inverseBindMatrices = accessors.length - 1
+  buffers.push(bytes); offset += bytes.length
 }
 doc.accessors = accessors; doc.bufferViews = views
 doc.buffers = [{ byteLength: offset }, { byteLength: fallback, extensions: { EXT_meshopt_compression: { fallback: true } } }]

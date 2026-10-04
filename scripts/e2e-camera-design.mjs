@@ -230,7 +230,7 @@ export async function cameraDesign(o) {
       need(JSON.stringify(frozen) === JSON.stringify(await arm.evaluate(() => window.__arm.arms()[0].joints.map(j => j.target))), 'No held button did not hold the arm')
       await page.locator('[data-camera-stop]').click()
       need(await arm.evaluate(() => window.__arm.stopped()), 'Phone Stop did not latch the arm')
-      await arm.keyboard.press('?'); await arm.locator('[data-quick="stop"]').hover()
+      await arm.keyboard.press('?'); await arm.locator('[data-quick="fullscreen"]').hover()
       await shot(arm, 'dock-arm-stop')
       await page.locator('[data-camera-close]').click()
     } finally { await context.close(); await arm.close() }

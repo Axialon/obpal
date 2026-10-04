@@ -367,6 +367,8 @@ export async function runHumanoid(local, check) {
       await until(() => page.evaluate(() => window.__humanoid.contacts.scores['robot-1'] === 1))
       assert(await page.evaluate(() => window.__simAudio.contacts > 0), 'Contact did not reach the audio/feedback bus')
       await sleep(1100)
+      // Practice starts folded (its score is on the HUD); its chevron opens it.
+      if (await page.locator('#reset-score').isHidden()) await page.getByRole('button', { name: 'Show Practice', exact: true }).click()
       await page.locator('#reset-score').click()
       await page.locator('#scoring').uncheck()
       await page.locator('[data-move="jab"]').click()

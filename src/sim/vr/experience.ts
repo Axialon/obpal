@@ -131,7 +131,9 @@ export class Experience extends EventTarget {
     const enter = button('Enter VR', () => { void this.enterXR() }); enter.disabled = true; enter.title = 'Checking VR support'
     this.xrButton = enter
     if (navigator.xr) { enter.textContent = ''; enter.setAttribute('aria-label', 'Enter VR'); dotLoading(enter, true, 'Checking VR support') }
-    void navigator.xr?.isSessionSupported('immersive-vr').then(ok => { enter.disabled = !ok; enter.title = ok ? 'Look around inside this scene' : 'This browser does not offer immersive VR' }).catch(() => { enter.title = 'VR is unavailable here' }).finally(() => { dotLoading(enter, false); enter.textContent = 'Enter VR' })
+    // Shown only where immersive VR is on offer: a browser without it doesn't carry a dead button.
+    enter.hidden = !navigator.xr
+    void navigator.xr?.isSessionSupported('immersive-vr').then(ok => { enter.disabled = !ok; enter.hidden = !ok; enter.title = ok ? 'Look around inside this scene' : 'This browser does not offer immersive VR' }).catch(() => { enter.hidden = true; enter.title = 'VR is unavailable here' }).finally(() => { dotLoading(enter, false); enter.textContent = 'Enter VR' })
     if (!navigator.xr) enter.title = 'Use a WebXR headset browser to enter VR'
     this.leaveButton = button('Overview', () => { void this.leave() }); this.leaveButton.hidden = true
     this.viewButton = button('View', () => this.switchView()); this.viewButton.title = 'Switch viewpoint (V)'

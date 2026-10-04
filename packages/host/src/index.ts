@@ -15,6 +15,6 @@ export {
 export { focusOf, PartFocus, readLocks, type Focus } from './parts'
 export { handMove, handTurn, headingOf } from './hand'
 export { findBlob, GlowCamera, GlowFollower, glowMove, hsv, hueOf, type Blob } from './glow'
-export { PairingChip, type ChipCorner, type PairingChipOptions } from './chip'
+export { ChipSettle, PairingChip, type ChipCorner, type PairingChipOptions } from './chip'
 
 export { DOT_SIZES, DOT_TIMING, DOT_MATERIAL, resolveDotTokens, dotEase, dotTimeline, dotProgress, type DotRole, type DotScale, type DotTokens, type DotTimeline } from './dot-tokens'

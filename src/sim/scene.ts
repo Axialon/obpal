@@ -14,6 +14,8 @@ import { ControlSession } from './control-space'
 import { quickAction } from '../ui/quick-actions'
 import { mountBodyCapture } from '../ui/body-capture'
 import { mountLocalPlay } from './local-play'
+import { phoneCamera } from '../ui/camera'
+import { SEAL_SHOWN_MS } from './ui/chrome'
 
 export interface SimScene {
   remote: Remote
@@ -92,15 +94,23 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   const nodeName = (id: string) => { const n = nodes.find((x) => x.id === id); return n ? o.label?.(n) ?? n.name : id }
   const focus = new PartFocus(remote, (who) => { const id = claims.held(who); return id ? nodes.find((n) => n.id === id) : undefined }, (who) => o.focused?.(who))
   remote.setHostPerson({ name: 'Screen', color: family.accentColor() })
-  // The pairing chip: open while nobody is here. As a phone comes in it opens to show the seal, then folds by itself a
-  // few seconds after the seal settles (and by its own x, Escape, or a press outside it); the people chip's + opens it
-  // and closes it again. Its card never covers the panel (the e-stop), the people chip and list, the stop banner, the
-  // menus, a camera's picture (the device sims) or the open quick-actions tray: it folds while one is in the way.
+  // The pairing chip: open while nobody is here on a computer, folded on a phone (whose own camera scans other screens).
+  // It gets out of the way: a press anywhere else or Escape folds it, and a new phone's seal shows for a few seconds and
+  // then stays on the chip; a phone seen before reconnects without opening it. It opens again from the chip, the people
+  // chip's + (which closes it again too), or as the last phone leaves. Its card never covers the panel (the e-stop), the
+  // people chip and list, the stop banner, the menus, a camera's picture (the device sims), the presence cluster or the
+  // open quick-actions tray: it folds while one is in the way.
   const chip = new PairingChip({
-    remote, open: true, testLink: true, avoid: '.sim-window, #chip, #people, .stopped-banner, #switcher, #themes, .quick-panel, .quick-themes, .obpal-camera, .participant-strip, .presence-controls',
+    remote, open: !phoneCamera(), testLink: true, avoid: '.sim-window, #chip, #people, .stopped-banner, #switcher, #themes, .quick-panel, .quick-themes, .obpal-camera',
+    lightDismiss: true, toggles: '#chip-invite', foldAfterSealMs: SEAL_SHOWN_MS,
     onToggle: (open) => { $('chip-invite').setAttribute('aria-pressed', String(open)); document.documentElement.toggleAttribute('data-pair-open', open) },
   })
   addEventListener('obpal:viewmode', e => { if ((e as CustomEvent<string>).detail !== 'overview') chip.collapse() })
+  // On a phone the pill scans other screens; this screen's own code (for another phone to scan) is in the tray.
+  if (phoneCamera()) quickAction({
+    id: 'pair', group: 'primary', label: 'Show this screen’s code', hint: 'For another phone to scan', icon: 'scan',
+    expanded: () => chip.expanded, run: () => { if (chip.expanded) chip.collapse(); else chip.expand() },
+  })
   Object.assign(window, { __obpal: remote, __sim: { claims, approved, chip, control, allowed: (id: string) => allowed(id) } })
 
   const autoAllow = $('auto-allow') as HTMLInputElement | null
@@ -258,7 +268,8 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   }
 
   remote.on('connect', () => { $('chip').hidden = false })
-  remote.on('disconnect', () => { $('chip').hidden = true; chip.expand(); $('people').hidden = true })
+  // The last phone gone: the card offers the code again (on a computer; a phone's stage stays clear).
+  remote.on('disconnect', () => { $('chip').hidden = true; if (!phoneCamera()) chip.expand(); $('people').hidden = true })
   remote.on('join', (p) => {
     people.set(p.id, p)
     if (remote.isLocal(p.id)) approved.add(p.id)

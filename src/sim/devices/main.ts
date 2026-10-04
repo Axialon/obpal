@@ -48,8 +48,7 @@ const spec = entry.spec
 applyTheme(initialTheme())
 mountMarks()
 mountTopBar()
-family.mountThemes($('t-theme'), $('themes'))
-// The quick-actions tray, before the windows, which keep clear of its edge.
+// The quick-actions tray, before the windows, which keep clear of its edge. The theme lives there; the bar stays clear.
 mountQuick()
 family.watchTheme()
 
@@ -363,6 +362,13 @@ await entry.view().then((m) => {
   action('Reset view', 'center', play)
   if (view.inspect) action('Inspect model', 'zoom-in', close)
   if (view.overview) action('Overview', 'orbit', wide)
+  // The body camera's home (ui/body-capture.ts) joins the views' row, last, whenever the shared shell adds it.
+  const joinViews = () => {
+    const body = document.querySelector<HTMLElement>('.body-home [data-body-capture]')
+    if (!body) return false
+    const row = body.parentElement!; $('dev-view').append(body); row.remove(); return true
+  }
+  if (!joinViews()) { const mo = new MutationObserver(() => { if (joinViews()) mo.disconnect() }); mo.observe(document.querySelector('.dev-panel')!, { childList: true, subtree: true }) }
   // The tray's camera steps through the same framings and first person (the viewpoint row's own button; on a phone,
   // right after the play view), and a framing brings the scene back from first person first.
   const experience = presence.experience

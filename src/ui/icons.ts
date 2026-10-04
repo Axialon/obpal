@@ -101,6 +101,12 @@ export const ICONS: Record<string, string> = {
   car: s('<path d="M3.8 16.2V13a1.8 1.8 0 0 1 1.3-1.7l2-.6 2.3-3.2a1.9 1.9 0 0 1 1.5-.8h2.7a1.9 1.9 0 0 1 1.5.7l2.7 3.3 1.3.4a1.8 1.8 0 0 1 1.3 1.7v3.4"/><path d="M5.3 16.2h.5M9.6 16.2h4.8M18.2 16.2h.5"/><circle cx="7.7" cy="16.4" r="1.9"/><circle cx="16.3" cy="16.4" r="1.9"/><path d="M7.3 10.8h10"/>'),
   drone: s('<rect x="9.6" y="9.6" width="4.8" height="4.8" rx="1.4"/><path d="M9.7 9.7 7.6 7.6M14.3 9.7l2.1-2.1M9.7 14.3l-2.1 2.1M14.3 14.3l2.1 2.1"/><circle cx="5.9" cy="5.9" r="2.4"/><circle cx="18.1" cy="5.9" r="2.4"/><circle cx="5.9" cy="18.1" r="2.4"/><circle cx="18.1" cy="18.1" r="2.4"/>'),
   camera: s('<path d="M4.8 8.2h2.7l1.5-2h6l1.5 2h2.7a1.6 1.6 0 0 1 1.6 1.6v7.6a1.6 1.6 0 0 1-1.6 1.6H4.8a1.6 1.6 0 0 1-1.6-1.6V9.8a1.6 1.6 0 0 1 1.6-1.6Z"/><circle cx="12" cy="13.2" r="3.3"/>'),
+  /** The body camera: a figure in the camera's frame corners (its own glyph, apart from the camera view's). */
+  body: s('<path d="M3.5 8V5.5a2 2 0 0 1 2-2H8M16 3.5h2.5a2 2 0 0 1 2 2V8M20.5 16v2.5a2 2 0 0 1-2 2H16M8 20.5H5.5a2 2 0 0 1-2-2V16"/><circle cx="12" cy="7.6" r="1.8"/><path d="M8.6 11.2h6.8M12 10v4.4M12 14.4l-2.3 3.8M12 14.4l2.3 3.8"/>'),
+  /** The hand camera: an open hand in the camera's frame corners (apart from the 3D hand controller's bare hand). */
+  'hand-cam': s('<path d="M3.5 8V5.5a2 2 0 0 1 2-2H8M16 3.5h2.5a2 2 0 0 1 2 2V8M20.5 16v2.5a2 2 0 0 1-2 2H16M8 20.5H5.5a2 2 0 0 1-2-2V16"/><path d="M9.6 12.6V9a.9.9 0 0 1 1.8 0v3M11.4 11.6V8.1a.9.9 0 0 1 1.8 0v3.5M13.2 11.7V8.8a.9.9 0 0 1 1.8 0v4.6c0 2-1.4 3.4-3.3 3.4h-.5c-1.2 0-2-.6-2.7-1.4l-1.5-2a.8.8 0 0 1 1.2-1.1l1.4 1.3"/>'),
+  /** Minimise the screen's chrome: the corners drawn in toward the middle. */
+  'ui-min': s('<rect x="3.5" y="4.5" width="17" height="15" rx="3.2"/><path d="M8 9.5h8M8 14.5h4" opacity=".55"/><path d="M15.5 13.5v3h-3"/>'),
   factory: s('<path d="M3.5 20.5h17"/><path d="M4.6 20.5V11.2l4.8 3.1v-3.1l4.8 3.1V5.8h4v14.7"/><path d="M7.6 17.4h1.8M11.9 17.4h1.8"/>'),
   note: s('<path d="M9 17.4V6l10-2.2v11.6"/><path d="M9 9.3l10-2.2"/><circle cx="6.8" cy="17.4" r="2.3"/><circle cx="16.8" cy="15.4" r="2.3"/>'),
   piano: s('<rect x="3.5" y="5" width="17" height="14" rx="2.4"/><path d="M12 5v14M8.1 12.6V19M15.9 12.6V19"/><path d="M7 5h2.2v7.6H7ZM14.8 5H17v7.6h-2.2Z" fill="currentColor"/>'),

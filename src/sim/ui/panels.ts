@@ -8,9 +8,10 @@
 import '../../styles/kit.css'
 import '../../styles/panels.css'
 import { fitControlInk } from '../../ui/kit/ink'
+import { foldSections } from './sections'
 import { clampRect, clearLayout, defaultPlacement, fitHeight, layoutKey, LIMITS, readLayout, resizeRect, screenClass, snapMove, writeLayout, type Anchor, type Edge, type Layout, type LayoutStorage, type Limits, type PanelState, type Placement, type Rect } from './layout'
 
-export type PanelIcon = 'controls' | 'camera' | 'scores' | 'arm' | 'station' | 'record' | 'view' | 'sound'
+export type PanelIcon = 'controls' | 'camera' | 'scores' | 'arm' | 'station' | 'record' | 'view' | 'sound' | 'play'
 export interface PanelOptions {
   id: string
   title: string
@@ -31,6 +32,8 @@ const paths: Record<PanelIcon | 'close' | 'minimise' | 'expand' | 'restore' | 'r
   record: 'M6.5 3.5h11a1.5 1.5 0 0 1 1.5 1.5v14a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 19V5a1.5 1.5 0 0 1 1.5-1.5ZM8.5 8h7M8.5 12h7M8.5 16h4',
   view: 'M2.5 12s3.6-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.6 6.5-9.5 6.5S2.5 12 2.5 12ZM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z',
   sound: 'M4.5 9.6h3.1L12 6v12l-4.4-3.6H4.5ZM15.2 9.3a3.8 3.8 0 0 1 0 5.4M17.8 6.8a7.4 7.4 0 0 1 0 10.4',
+  /** Play on this device: a gamepad, apart from the Controls window's sliders. */
+  play: 'M7.5 7.5h9a4.5 4.5 0 0 1 4.4 5.4l-.9 4.2a2.3 2.3 0 0 1-4 1L14.6 16H9.4L8 18.1a2.3 2.3 0 0 1-4-1l-.9-4.2A4.5 4.5 0 0 1 7.5 7.5ZM8 10.5v3M6.5 12h3M15.5 11.2v.1M17 12.8v.1',
   close: 'M7 7l10 10M17 7 7 17', minimise: 'M6.5 12h11', expand: 'M9 4.5H4.5V9M15 4.5h4.5V9M4.5 15v4.5H9M19.5 15v4.5H15',
   restore: 'M4.5 9H9V4.5M19.5 9H15V4.5M9 19.5V15H4.5M15 19.5V15h4.5',
   reset: 'M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 4.5v4h4', dock: 'M9.5 6.5 15 12l-5.5 5.5',
@@ -321,6 +324,8 @@ export function numberSections(root: ParentNode = document) {
 export function mountSimPanels(sim: string, title: string) {
   const panels = simPanels(sim), controls = document.querySelector<HTMLElement>('.sim-panel')!
   panels.add(controls, { id: 'controls', title, purpose: 'Devices, seats, view, sound and scene controls', icon: 'controls', anchor: 'controls' })
+  // Its sections fold, remembered per sim and screen class (./sections.ts).
+  foldSections(controls, `obpal.sections.v1:${panels.sim}:${panels.kind}`)
   const log = controls.querySelector<HTMLDetailsElement>('.log-wrap')
   if (log) { log.open = true; panels.add(log, { id: 'record', title: 'Activity record', purpose: 'Who held what and what happened in the scene', icon: 'record', anchor: 'record' }) }
   return panels

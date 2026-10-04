@@ -426,8 +426,12 @@ export function mountPairCameraActions() {
   document.addEventListener('click', (event) => {
     const path = event.composedPath()
     const invite = path.some((el) => el instanceof Element && el.id === 'chip-invite')
-    const pill = path.some((el) => el instanceof Element && el.matches('button.pill')) &&
-      path.some((el) => el instanceof Element && el.classList.contains('obpal-chip'))
+    const button = path.find((el): el is Element => el instanceof Element && el.matches('button.pill'))
+    const chip = path.find((el): el is Element => el instanceof Element && el.classList.contains('obpal-chip'))
+    const pill = !!button && !!chip
+    // A light-dismiss chip (the sims') whose card is open folds it, as a press anywhere else does: its scanner is for
+    // the folded chip.
+    if (pill && chip.hasAttribute('data-light-dismiss') && button.getAttribute('aria-expanded') === 'true') return
     if (!invite && !pill) return
     event.preventDefault()
     event.stopImmediatePropagation()

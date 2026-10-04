@@ -244,5 +244,22 @@ body.stopped #stage { filter: saturate(0.4) brightness(0.8); transition: filter 
 .sim-sound { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
 .sim-sound label { display: flex; align-items: center; gap: 6px; font-size: 12px; }
 .sim-sound small { flex-basis: 100%; }
+
+/* A phone's bar, once phones are in: the people chip sits between the mark and the presence cluster (top right), so the
+   wordmark steps back to the mark and the chip shows its faces without the count's words. */
+@media (max-width: 600px) {
+  body.sim .sim-top:has(> .chip:not([hidden])) .logo .word { display: none; }
+  body.sim .sim-top:has(> .chip:not([hidden])) .logo:has(> .brand-lockup) { width: 40px; overflow: hidden; flex: none; }
+  body.sim .sim-top .chip .chip-text { display: none; }
+  body.sim .sim-top .chip { gap: 4px; }
+}
+/* On a computer the people chip (who is playing, invite, disconnect) joins the presence cluster at the bar's right edge,
+   just left of the watching count, Share and the audience settings: one place for who is here. */
+body.sim:not(.stream-view) .sim-top > .chip { position: absolute; top: 50%; right: calc(max(16px, env(safe-area-inset-right)) + var(--presence-w, 0px) + 6px); transform: translateY(-50%); }
+/* A phone: the chip's + would open the scanner, as the pairing pill does; the cluster sits nearer the edge. */
+@media (max-width: 600px) {
+  body.sim:not(.stream-view) .sim-top > .chip { right: calc(max(12px, env(safe-area-inset-right)) + var(--presence-w, 0px) + 6px); }
+  body.sim .sim-top #chip-invite { display: none; }
+}
 /* On a narrow screen the open pairing card takes the bottom right: notices sit above it rather than under it (folded, they stay low). */
 @media (max-width: 860px) { :root[data-pair-open] { --notice-bottom: 360px; } }

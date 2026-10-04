@@ -56,8 +56,41 @@ export interface PairingChipOptions {
    * opens again if it was open. A click on the chip still opens it. Keep the chip itself clear of them (--obpal-offset*).
    */
   avoid?: string
+  /**
+   * Light dismiss: a press anywhere outside the chip and its card, or Escape anywhere on the page, folds any open card,
+   * before a phone is in as well, and in every view (it stays folded until the chip is clicked again). Default false:
+   * only a connected card in its resting view closes so.
+   */
+  lightDismiss?: boolean
+  /** The page's own controls that open and close the card (a people chip's +), as a selector: a press on them is theirs. */
+  toggles?: string
+  /**
+   * Fold the card this long after a newly arrived phone's seal is revealed, leaving the seal on the chip; it holds while
+   * it is in use, as the default fold does. A phone already seen on this page, connecting again, doesn't open the card
+   * at all. Default: every connection opens it, and it folds about eight seconds after the seal settles.
+   */
+  foldAfterSealMs?: number
   /** It opened (true) or closed (false). */
   onToggle?: (open: boolean) => void
+}
+
+/**
+ * How a settling chip (PairingChipOptions.foldAfterSealMs) answers phones arriving, apart from the page: it opens to
+ * reveal a phone's seal the first time that phone is seen, and folds a set time after the last thing that opened it.
+ */
+export class ChipSettle {
+  private seen = new Set<string>()
+  constructor(readonly foldAfterMs: number) {}
+  /** A phone joined: whether it's new to this page, and when (from now) the card should fold. */
+  join(id: string): { fresh: boolean; foldInMs: number } {
+    return { fresh: !this.seen.has(id), foldInMs: this.foldAfterMs + 1500 }
+  }
+  /** A phone's seal is revealed after `delayMs`: whether the card opens for it, and when it folds. */
+  seal(id: string, delayMs: number): { open: boolean; foldInMs: number } {
+    const fresh = !this.seen.has(id)
+    this.seen.add(id)
+    return { open: fresh, foldInMs: delayMs + this.foldAfterMs }
+  }
 }
 
 const LIME: Rgb = [198, 255, 52]
@@ -181,6 +214,8 @@ export class PairingChip {
   private settleTimer = 0
   private dismissedAt = -Infinity
   private closeX = h('button', { class: 'card-x', type: 'button', 'aria-label': 'Close pairing card' }, icon(...CLOSE))
+  /** A chip that settles on its own time (foldAfterSealMs): its memory of the phones it has seen. */
+  private settling: ChipSettle | null = null
 
   constructor(opts: PairingChipOptions) {
     this.opts = opts
@@ -188,6 +223,8 @@ export class PairingChip {
     const id = `obpal-chip-${++seq}`
     this.el = document.createElement('div')
     this.el.className = 'obpal-chip'
+    // Says so on the page, for the page's own handlers of the chip (a phone's scanner leaves an open card's fold alone).
+    if (opts.lightDismiss) this.el.setAttribute('data-light-dismiss', '')
     this.root = this.el.attachShadow({ mode: 'open' })
     adoptStyle(this.root)
     const hidden = { 'aria-hidden': 'true' }
@@ -236,6 +273,7 @@ export class PairingChip {
       wrap.setAttribute('data-open', '')
       pill.setAttribute('aria-expanded', 'true')
     }
+    if (opts.foldAfterSealMs !== undefined && opts.variant !== 'panel') this.settling = new ChipSettle(Math.max(0, opts.foldAfterSealMs))
     this.wire()
     ;(opts.parent ?? document.body).appendChild(this.el)
     this.refresh()
@@ -249,7 +287,7 @@ export class PairingChip {
   get expanded() { return this.isOpen }
   /** Open the card; while a page panel is where it opens (avoid), as soon as that's gone. */
   expand() { if (this.blocked) this.unfold = true; else this.setOpen(true, true) }
-  collapse() { this.unfold = false; this.setOpen(false) }
+  collapse() { clearTimeout(this.settleTimer); this.unfold = false; this.setOpen(false) }
   /**
    * As a click on the + of a page's people chip. A connected card that is open folds again; a folded one opens on a fresh
    * code to add another phone. (A press that just closed the card by light dismiss was this click: it stays closed.)
@@ -266,6 +304,7 @@ export class PairingChip {
 
   /** Close the card by the person's own act: a fresh code being shown to add a phone ends with it, and the seal comes back. */
   private fold() {
+    this.unfold = false
     this.surface.cancelAdding()
     this.setOpen(false)
   }
@@ -347,6 +386,7 @@ export class PairingChip {
       const was = p && performance.now() - p.at < 1500 ? p.was : now()
       this.pressed = null
       this.unfold = false
+      // A click on the chip is a choice: it outranks a pending fold.
       clearTimeout(this.settleTimer)
       // A click on a card the pointer only peeked at keeps it open; otherwise it opens or closes.
       if (was === 'peek' && this.isOpen) { this.pinned = true; this.labelPill() }
@@ -366,6 +406,8 @@ export class PairingChip {
       if (e.pointerType !== 'mouse' || !this.isOpen || this.pinned || wrap.matches(':focus-within')) return
       this.leaveTimer = window.setTimeout(() => this.setOpen(false), 380)
     })
+    // A press in the card (comparing seals, adding a phone, its details) means someone is using it: it stays.
+    this.$.card.addEventListener('pointerdown', () => clearTimeout(this.settleTimer))
     this.$.facts.addEventListener('click', () => {
       const show = this.$.details.hidden
       this.$.details.hidden = !show
@@ -389,16 +431,26 @@ export class PairingChip {
     const reveal = (s: { id: string; seal: import('@obpal/core').ConnectionSeal; delayMs: number }) => {
       this.surface.sync(this.remote.seals)
       this.surface.reveal(s.id, s.delayMs)
-      this.expand()
-      this.settle(s.delayMs + SEAL_FLIGHT_MS + SETTLE_MS)
+      if (!this.settling) { this.expand(); this.settle(s.delayMs + SEAL_FLIGHT_MS + SETTLE_MS); return }
+      // On its own time (foldAfterSealMs): a new phone's seal is shown, then the card folds and leaves the seal on the chip.
+      const { open, foldInMs } = this.settling.seal(s.id, s.delayMs)
+      if (open) this.expand()
+      if (open || this.isOpen || this.unfold) this.settle(foldInMs)
     }
     this.remote.on('seal', reveal)
     this.listeners.push(['seal', reveal as (...a: never[]) => void])
     on('status', () => { this.render(); this.syncCode() })
     // A phone's arrival opens the card to show its seal, and the card folds again once the seal has settled (a phone that
-    // sends no seal gets the same time from its join).
-    on('connect', () => { this.expand(); this.settle(JOIN_GRACE_MS + SETTLE_MS) })
-    on('join', () => { this.expand(); this.render(); this.settle(JOIN_GRACE_MS + SETTLE_MS) })
+    // sends no seal gets the same time from its join). A chip on its own time opens for a new phone's seal, not for a
+    // connection, and one left open folds a while after anyone joins.
+    on('connect', () => { if (!this.settling) { this.expand(); this.settle(JOIN_GRACE_MS + SETTLE_MS) } })
+    const joined = (p: { id: string }) => {
+      if (!this.settling) { this.expand(); this.settle(JOIN_GRACE_MS + SETTLE_MS) }
+      else if (this.isOpen || this.unfold) this.settle(this.settling.join(p.id).foldInMs)
+      this.render()
+    }
+    this.remote.on('join', joined)
+    this.listeners.push(['join', joined as (...a: never[]) => void])
     on('leave', () => this.render())
     on('attention', () => this.render())
     on('disconnect', () => { this.render(); this.syncCode() })
@@ -419,8 +471,11 @@ export class PairingChip {
     if (open === this.isOpen) return
     this.isOpen = open
     if (!open) {
-      clearTimeout(this.settleTimer)
+      // (A card folded for a page panel keeps its fold timer: once its time is up, it stays folded when the panel goes.)
+      if (!this.unfold) clearTimeout(this.settleTimer)
       this.$.card.removeAttribute('data-seal-view')
+      // A light-dismiss card opens again on its QR code, its details folded.
+      if (this.opts.lightDismiss) this.$.card.querySelector('details.scan-cues')?.removeAttribute('open')
     }
     this.$.wrap.toggleAttribute('data-open', open)
     this.$.pill.setAttribute('aria-expanded', String(open))
@@ -437,28 +492,50 @@ export class PairingChip {
   }
 
   private settled() {
-    if (!this.isOpen || !this.el.isConnected) return
+    if (!this.el.isConnected) return
+    // Folded for a page panel meanwhile: it no longer opens again when the panel goes.
+    if (!this.isOpen) { this.unfold = false; return }
     // (Focus counts only when it is showing, a keyboard's: a click leaves the pill focused, and that must not hold the card open.)
     const inUse = this.$.wrap.matches(':hover') || !!this.root.querySelector(':focus-visible') || this.$.card.hasAttribute('data-seal-view') || this.surface.isAdding
     if (inUse) { this.settleTimer = window.setTimeout(() => this.settled(), SETTLE_HOLD_MS); return }
     this.setOpen(false)
   }
 
-  /** Escape closes a connected card from anywhere on the page (unless something else already took the key). */
+  /**
+   * Escape closes a connected card from anywhere on the page (unless something else already took the key); with light
+   * dismiss, any open card, and a card folded for a page panel no longer opens again when it goes.
+   */
   private onDocKey = (e: KeyboardEvent) => {
-    if (e.key !== 'Escape' || e.defaultPrevented || !this.isOpen || this.opts.variant === 'panel' || !this.remote.participants.length) return
+    if (e.key !== 'Escape' || e.defaultPrevented || this.opts.variant === 'panel') return
+    const light = !!this.opts.lightDismiss
+    if (light ? !this.isOpen && !this.unfold : !this.isOpen || !this.remote.participants.length) return
     const t = e.target instanceof Element ? e.target : null
     if (t && t !== document.body && t.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], dialog, [role=dialog]') && !this.el.contains(t)) return
+    // (Folded for a panel: the key is the panel's.)
+    if (!this.isOpen) { this.unfold = false; return }
     // The key is spent here: a layer beneath (the page's own Escape) does not also act on it.
     e.preventDefault()
     this.fold()
   }
 
-  /** A press outside a connected card in its resting view lets it go. (The comparison and a phone being added stay.) */
+  /**
+   * A press outside a connected card in its resting view lets it go. (The comparison and a phone being added stay.) With
+   * light dismiss, a press outside any open card and the page's own toggles (PairingChipOptions.toggles) folds it.
+   */
   private onDocPress = (e: PointerEvent) => {
-    if (!this.isOpen || !this.pinned || this.opts.variant === 'panel' || !this.remote.participants.length) return
+    if (this.opts.variant === 'panel') return
+    const path = e.composedPath()
+    if (path.includes(this.el)) return
+    if (this.opts.lightDismiss) {
+      if (!this.isOpen && !this.unfold) return
+      const toggles = this.opts.toggles
+      if (toggles && path.some((n) => n instanceof Element && n.matches(toggles))) return
+      if (this.isOpen) this.dismissedAt = performance.now()
+      this.fold()
+      return
+    }
+    if (!this.isOpen || !this.pinned || !this.remote.participants.length) return
     if (this.$.card.hasAttribute('data-seal-view') || this.surface.isAdding) return
-    if (e.composedPath().includes(this.el)) return
     this.dismissedAt = performance.now()
     this.setOpen(false)
   }

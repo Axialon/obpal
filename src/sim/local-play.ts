@@ -93,7 +93,12 @@ export function mountLocalPlay(remote: Remote, layout: Layout, firstNode?: strin
     if (firstNode) sink.control({ t: 'claim', node: firstNode })
     phone = new PhonePlay(sink, layout, sim)
   }
-  for (const [label, mode] of [['Play on this phone', 'phone'], ['Play here', 'local']]) { const b = document.createElement('button'); b.type = 'button'; b.className = 'kit-action'; b.textContent = label; b.onclick = () => play(mode); entry.append(b) }
+  // One way in from the window: Play here, which on a device without a fine pointer (a phone or a touch tablet) is its
+  // on-screen sticks and elsewhere this computer's keyboard, mouse or gamepad. Both stay in the Share panel by name (ui/share-panel.ts).
+  const touch = !matchMedia('(any-pointer: fine)').matches
+  const here = document.createElement('button'); here.type = 'button'; here.className = 'kit-action'; here.textContent = 'Play here'
+  here.title = touch ? 'On-screen controls on this device' : 'This device’s keyboard, mouse or gamepad'
+  here.onclick = () => play(touch ? 'phone' : 'local'); entry.append(here)
   document.querySelector('.presence-controls')?.after(entry)
   addEventListener('obpal:localplay', e => play((e as CustomEvent<string>).detail))
   addEventListener('pagehide', () => { phone?.close(); stop?.() }, { once: true })

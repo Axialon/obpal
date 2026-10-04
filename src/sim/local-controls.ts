@@ -82,7 +82,7 @@ export class LocalControls {
     lock.hidden = !opts.canvas.requestPointerLock
     this.help.className = 'local-bindings glass'; this.help.hidden = true; this.help.setAttribute('role', 'region'); this.help.setAttribute('aria-label', 'Control bindings'); document.body.append(this.help)
     this.help.addEventListener('keydown', e => { if (e.key === 'Escape') { this.help.hidden = true; this.remap = null; opts.canvas.focus(); e.stopPropagation() } })
-    const panel = simPanels().add(this.el, { id: 'local-control', title: 'Play on this device', purpose: 'Choose a controller and its bindings', icon: 'controls', anchor: 'controls', state: 'closed' })
+    const panel = simPanels().add(this.el, { id: 'local-control', title: 'Play on this device', purpose: 'Choose a controller and its bindings', icon: 'play', anchor: 'controls', state: 'closed' })
     installLocalInputSource(() => {
       input.clear()
       if (!['keyboard', 'gamepad'].includes(input.source)) input.source = 'keyboard'

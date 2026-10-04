@@ -41,7 +41,7 @@ export async function shareP2({ browser, origin, check }) {
       await host.waitForFunction(() => window.__obpal.participants.length === 3)
       assert.equal(await host.locator('.participant[data-role=play]').count(), 1); assert.equal(await host.locator('.participant[data-role=watch]').count(), 2)
       assert.match(await phone.locator('.participant-row').getAttribute('aria-label'), /1 players, 2 watchers/)
-      assert.match(await host.locator('.participant[data-role=play]').innerText(), /Rover 1/)
+      assert.match(await host.locator('.participant[data-role=play]').getAttribute('aria-label'), /Rover 1/) // the bar's cluster shows dots; the seat is in each dot's name
       await shot(host, 'presence-1280'); await shot(phone, 'presence-phone-390')
     })
     await check('P2 Ask and Accept promote in two taps within 1 s without Play or hardware authority', async () => {

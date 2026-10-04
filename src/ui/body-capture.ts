@@ -3,8 +3,7 @@ import { BodyInput } from '@obpal/host'
 import { BodyTracker } from '../controller/body-tracker'
 import { CameraView } from './camera'
 import { mountQuick, quickAction, quickChanged } from './quick'
-import { ICONS } from './icons'
-import { setMarkup } from './markup'
+import { iconAction } from './kit/action'
 
 let mounted: BodyInput | null = null
 let toggle: (() => void) | null = null
@@ -48,14 +47,20 @@ export function mountBodyCapture(options: { beforeOpen?: () => boolean; closed?:
     changed()
   }
   toggle = open
-  quickAction({ id: 'body', group: 'page', label: 'Body camera', hint: 'Camera frames stay on this device', icon: 'camera', pressed: () => camera?.capturing ?? false, run: open })
-  // Arms already use all four page shortcuts, including Stop. Keep capture available in their camera panel too.
+  quickAction({ id: 'body', group: 'page', label: 'Body camera', hint: 'Camera frames stay on this device', icon: 'body', pressed: () => camera?.capturing ?? false, run: open })
+  // Its home on the page: the arms' camera panel, else the sim's View section beside the views (a sim with its own
+  // Body camera button keeps that one). The tray on a sim keeps only system actions.
   const glow = document.querySelector('#glow-cam')
-  if (glow) {
+  const view = !glow && !document.querySelector('#local-body, #physics-body') ? document.querySelector('[data-presence-home]') : null
+  if (glow || view) {
     button = document.createElement('button'); button.type = 'button'; button.className = 'kit-action'
-    setMarkup(button, ICONS.camera); button.append(document.createTextNode('Body camera'))
     button.dataset.bodyCapture = ''; button.setAttribute('aria-pressed', 'false'); button.onclick = open
-    glow.after(button)
+    if (glow) { iconAction(button, 'body', 'Body camera'); glow.after(button) }
+    else {
+      iconAction(button, 'body', 'Body camera')
+      // A row of its own after the views (the device sims move it beside their Reset view, Inspect and Overview).
+      const row = document.createElement('div'); row.className = 'sim-actions body-home'; row.append(button); view!.after(row)
+    }
   }
   mountQuick()
   if (test) Object.assign(window, { __cameraBody: {

@@ -19,6 +19,20 @@ export function partPoints(scene, pivots) {
   const v = new THREE.Vector3()
   scene.traverse((object) => {
     if (!object.isMesh || object.material?.name === 'softSignal') return
+    if (object.isSkinnedMesh) {
+      // A skinned suit's vertex belongs to its most heavily weighted pivot, at its current pose.
+      const { position, skinIndex, skinWeight } = object.geometry.attributes
+      for (let i = 0; i < position.count; i++) {
+        let heaviest = 0
+        for (let k = 1; k < 4; k++) if (skinWeight.getComponent(i, k) > skinWeight.getComponent(i, heaviest)) heaviest = k
+        const name = object.skeleton.bones[skinIndex.getComponent(i, heaviest)].name
+        if (!pivots.has(name)) continue
+        const list = groups.get(name) ?? []
+        list.push(object.getVertexPosition(i, new THREE.Vector3()).applyMatrix4(object.matrixWorld))
+        groups.set(name, list)
+      }
+      return
+    }
     const name = owner(object, pivots)
     if (!name) return
     const list = groups.get(name) ?? []

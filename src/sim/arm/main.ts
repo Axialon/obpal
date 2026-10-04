@@ -1115,8 +1115,10 @@ const glowNote = document.createElement('p'); glowNote.className = 'feed-caption
 glowContent.append(glowView, glowNote)
 const glowPanel = panels.add(glowContent, { id: 'tracking-camera', title: 'Phone tracking camera', purpose: 'Camera tracking for glowing phones', icon: 'camera', anchor: 'camera', state: 'closed', camera: true })
 follower.onUnseen = (id) => sim?.remote.feedback({ haptic: 'bump', toast: 'The camera can’t see your glow: turn the screen toward it' }, id)
-follower.onCameraOff = () => sim?.note('A phone is glowing: turn on “Follow glowing phones with this camera”')
+follower.onCameraOff = () => sim?.note('A phone is glowing: turn on the glow camera icon beside Add arm')
 
+// An icon toggle beside Add arm (its words are its name and tooltip), not a full-width line of text.
+iconAction($('glow-cam') as HTMLButtonElement, 'glow', 'Follow glowing phones with this camera')
 $('glow-cam').onclick = async () => {
   if (follower.cam.on) follower.cam.stop()
   else {

@@ -269,3 +269,22 @@ html.gp-mode .hint { display: none !important; }
 
 .gp-sheet .pick-grid.profiles { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); }
 .gp-sheet .pick small { display: block; font-size: 10px; line-height: 1.4; }
+
+/* ---- More: what isn't play, one tap away (src/controller/gamepad.ts bindMore) ----
+   The connection and its seal and a shared scene's drop-ins sit in a card over the middle, so the face keeps the
+   controller; who is here stays a quiet line in the middle. The More button carries the connection's dot: mint while the link is up. */
+.gp .gp-more::after { content: ''; position: absolute; top: 7px; right: 7px; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 2px rgb(var(--base-rgb)); }
+.gp:has(.link-badge[data-state='up']) .gp-more::after { background: var(--ok, #6ee7b7); box-shadow: 0 0 0 2px rgb(var(--base-rgb)), 0 0 8px rgb(110 231 183 / 0.55); }
+.gp-meta { position: absolute; z-index: 6; left: 50%; transform: translateX(-50%); width: min(380px, calc(100% - 24px)); max-height: min(62%, 420px); overflow-y: auto; box-sizing: border-box; padding: 12px; border-radius: 22px; touch-action: pan-y; }
+.gp-meta[hidden] { display: none; }
+.gp-meta-list { display: grid; justify-items: center; gap: 10px; }
+.gp-mid > .participant-phone { background: none; border: 0; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; padding: 0; font-size: 11.5px; color: var(--muted); }
+.gp-meta .link-badge { width: auto; min-width: 126px; }
+/* Portrait: Aim, Steer and Point as icons on one row with the profile and centre, under View and Menu; the turn-sideways
+   cue keeps a row of its own, clear of the Guide. */
+@media (orientation: portrait) {
+  .gp-motion { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 6px; }
+  .gp-motion .gp-chip:not(.gp-prof):not(.gp-centre) > span { display: none; }
+  .gp-motion .gp .gp-chip:not(.gp-prof):not(.gp-centre), .gp .gp-motion .gp-chip:not(.gp-prof):not(.gp-centre) { width: var(--tap); padding: 0; justify-content: center; }
+  .gp { grid-template-rows: auto auto minmax(54px, 1fr) auto minmax(240px, 48%); }
+}

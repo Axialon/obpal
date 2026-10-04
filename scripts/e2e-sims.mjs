@@ -566,8 +566,86 @@ try {
   })
   if (arena.errors.length) console.log(`  page errors: ${arena.errors.join(' | ')}`)
 
+  // ---- transient chrome gets out of the way (light dismiss) ----
+  /** A point on the bare stage, clear of every window, card and bar (in the page). */
+  const stageSpot = () => {
+    for (const [fx, fy] of [[0.55, 0.3], [0.5, 0.5], [0.12, 0.5], [0.5, 0.2], [0.12, 0.8], [0.88, 0.2]]) {
+      const x = Math.round(innerWidth * fx), y = Math.round(innerHeight * fy)
+      if (document.elementFromPoint(x, y)?.id === 'stage') return { x, y }
+    }
+    return null
+  }
+  await check('the pairing card folds by itself after the phones’ seals, a stage press or Escape folds it, and the presence settings close the same way', async () => {
+    const page = arena.page
+    const chipOpen = () => page.evaluate(() => document.querySelector('.obpal-chip').shadowRoot.querySelector('.pill').getAttribute('aria-expanded') === 'true')
+    // Two phones joined the arena more than the seal's few seconds ago: the card has folded, the seal stays on the chip.
+    await until('the card folded after the seals', async () => !(await chipOpen()), 8000)
+    const seal = await page.evaluate(() => !!document.querySelector('.obpal-chip').shadowRoot.querySelector('.pill .seal-compact, .pill .chip-seal .connection-seal'))
+    await page.locator('.obpal-chip .pill').click()
+    await until('the card open to find the bare stage', chipOpen, 3000)
+    const stage = await page.evaluate(stageSpot)
+    await page.locator('.obpal-chip .pill').click()
+    if (!stage) throw new Error('no bare stage to press')
+    const folds = []
+    for (const how of ['a stage press', 'Escape']) {
+      await page.locator('.obpal-chip .pill').click()
+      await until('the card open', chipOpen, 3000)
+      if (how === 'Escape') { await page.mouse.move(stage.x, stage.y); await page.keyboard.press('Escape') } else await page.mouse.click(stage.x, stage.y)
+      await until(`${how} folded it`, async () => !(await chipOpen()), 2000)
+      folds.push(how)
+    }
+    // The presence cluster's audience settings: a press outside and Escape close them, as their own summary does.
+    const settings = () => page.evaluate(() => !!document.querySelector('.participant-strip details')?.open)
+    const summary = page.locator('.participant-strip summary')
+    let strip = 'no presence settings on this screen'
+    if (await summary.count()) {
+      await summary.click(); await until('settings open', settings, 2000)
+      await page.mouse.click(stage.x, stage.y); await until('a stage press closed the settings', async () => !(await settings()), 2000)
+      await summary.click(); await until('settings open again', settings, 2000)
+      await page.keyboard.press('Escape'); await until('Escape closed the settings', async () => !(await settings()), 2000)
+      strip = 'settings closed by a stage press and by Escape'
+    }
+    // Nothing transient sits in the HUD lane: the presence cluster is in the bar, notes (the notices) at the bottom centre.
+    const lanes = await page.evaluate(() => {
+      const r = (el) => el && el.getBoundingClientRect()
+      const strip = r(document.querySelector('.participant-strip:not([hidden])')), bar = r(document.querySelector('.sim-top')), notes = r(document.querySelector('.obpal-notices'))
+      return { strip: strip && { top: strip.top, right: innerWidth - strip.right }, bar: bar.bottom, noteBottom: notes ? innerHeight - notes.bottom : null, height: innerHeight }
+    })
+    if (lanes.strip && (lanes.strip.top > lanes.bar || lanes.strip.right > 40)) throw new Error(`the presence cluster is not in the bar: ${JSON.stringify(lanes)}`)
+    if (lanes.noteBottom === null || lanes.noteBottom > lanes.height / 4) throw new Error(`notes are not in the bottom lane: ${JSON.stringify(lanes)}`)
+    return `folded after the seals (seal on the chip: ${seal}); ${folds.join(' and ')} folded it; ${strip}`
+  })
+
+  await check('the Controls window folds its rarely used sections, remembers a choice across a reload, keeps the description behind ⓘ and offers Enter VR only where it works', async () => {
+    const b = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED, args: RTC_ARGS }))
+    closers.push(b)
+    const context = await b.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true, reducedMotion: 'reduce' })
+    try {
+      const page = await context.newPage()
+      const ready = async () => { await page.goto(`${local.origin}/sim/device/?d=drone`); await until('the controls', () => page.evaluate(() => !!document.querySelector('[data-panel="controls"] .kit-card-fold') && document.querySelectorAll('#dev-faces button').length > 0), 20000) }
+      await ready()
+      const shown = (sel) => page.evaluate((s) => { const el = document.querySelector(s); return !!el && el.checkVisibility() }, sel)
+      if (await shown('#dev-faces')) throw new Error('the controllers’ how-to started open')
+      if (!(await shown('#sim-sound'))) throw new Error('Sound’s mute went with its folded section')
+      if (await shown('#dev-blurb')) throw new Error('the description started open')
+      await page.getByRole('button', { name: 'Show Controllers', exact: true }).click()
+      if (!(await shown('#dev-faces'))) throw new Error('the chevron did not open Controllers')
+      await page.reload(); await ready()
+      await until('Controllers open after the reload', () => shown('#dev-faces'), 3000)
+      await page.getByRole('button', { name: 'About this sim', exact: true }).click()
+      if (!(await shown('#dev-blurb'))) throw new Error('ⓘ did not show the description')
+      const vr = await page.evaluate(async () => {
+        const b = [...document.querySelectorAll('.presence-controls button')].find((x) => x.textContent?.trim() === 'Enter VR' || x.getAttribute('aria-label') === 'Enter VR')
+        const supported = await navigator.xr?.isSessionSupported('immersive-vr').catch(() => false) ?? false
+        return { shown: !!b && b.checkVisibility(), supported }
+      })
+      if (vr.shown !== vr.supported) throw new Error(`Enter VR ${vr.shown ? 'shown' : 'hidden'} where immersive VR is ${vr.supported ? '' : 'not '}supported`)
+      return `Controllers folded, opened, kept open over a reload; ⓘ shows the description; Enter VR ${vr.shown ? 'shown' : 'hidden'}`
+    } finally { await context.close() }
+  })
+
   // ---- the pairing chip beside the panel, on phones ----
-  await check('on phones windows start docked, pairing fits below the bar and yields to overlapping windows', async () => {
+  await check('on phones windows start docked, the pairing card starts folded, fits below the bar when shown, and a stage tap or a window folds it', async () => {
     const b = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED, args: RTC_ARGS }))
     closers.push(b)
     const out = []
@@ -577,6 +655,12 @@ try {
       await page.goto(`${local.origin}/sim/arm/`)
       await until('the chip', () => page.evaluate(() => !!document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.qr svg')), 20000)
       const open = () => page.evaluate(() => document.querySelector('.obpal-chip').shadowRoot.querySelector('.pill').getAttribute('aria-expanded') === 'true')
+      const at = `${w}x${h}`
+      // A phone visiting a sim starts with the card folded: the stage is clear, and the pill scans another screen.
+      await sleep(600)
+      if (await open()) throw new Error(`${at}: the pairing card started open over the stage`)
+      // Shown as the page would (a seal, or the last phone leaving): it fits between the bar and the pill.
+      await page.evaluate(() => window.__sim.chip.expand())
       await until('the card open', open, 5000)
       await sleep(400)
       const g = await page.evaluate(() => {
@@ -584,7 +668,6 @@ try {
         const root = document.querySelector('.obpal-chip').shadowRoot
         return { card: r(root.querySelector('.card')), pill: r(root.querySelector('.pill')), open: document.querySelectorAll('.sim-window:not([hidden])').length, bar: r(document.querySelector('.sim-top')).bottom }
       })
-      const at = `${w}Ã—${h}`
       if (g.card.top < g.bar) throw new Error(`${at}: the card reaches ${Math.round(g.card.top)}px, under the top bar (to ${Math.round(g.bar)}px)`)
       if (g.card.bottom > g.pill.top || g.pill.bottom > h || g.open) throw new Error(`${at}: pairing or docked defaults do not fit: ${JSON.stringify(g)}`)
       await page.evaluate(() => { document.getElementById('people').hidden = false })
@@ -596,13 +679,22 @@ try {
       }), 3000)
       await page.evaluate(() => { document.getElementById('people').hidden = true })
       await until(`${at}: the card back`, open, 3000)
+      // A tap on the stage folds it (light dismiss), and it stays folded: no card ever holds the stage.
+      const spot = await page.evaluate(stageSpot)
+      if (!spot) throw new Error(`${at}: no bare stage left to tap`)
+      await page.touchscreen.tap(spot.x, spot.y)
+      await until(`${at}: a stage tap folds the card`, async () => !(await open()), 2000)
+      await sleep(500)
+      if (await open()) throw new Error(`${at}: the card came back after a stage tap`)
+      // Shown again, it folds for the control window as before.
+      await page.evaluate(() => window.__sim.chip.expand())
+      await until(`${at}: the card open again`, open, 3000)
       const controls = page.locator('[data-panel-toggle="controls"]')
       await controls.focus(); await controls.click()
       await until(`${at}: the card folds for the control window`, async () => !(await open()), 3000)
       await page.locator('[data-panel="controls"]').getByRole('button', { name: /^Minimise / }).click()
-      await until(`${at}: pairing returns after minimising`, open, 3000)
       if (SHOTS) await page.screenshot({ path: joinPath(SHOTS, `sim-arm-chip-${w}x${h}.png`) })
-      out.push(`${at}: card ${Math.round(g.card.top)}â€“${Math.round(g.card.bottom)}, windows docked`)
+      out.push(`${at}: folded at load; card ${Math.round(g.card.top)}â€“${Math.round(g.card.bottom)} when shown; a stage tap folds it; windows docked`)
       await ctx.close()
     }
     return out.join('; ')

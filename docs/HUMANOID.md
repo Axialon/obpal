@@ -495,7 +495,7 @@ synthetic motion tests do not certify hardware clearances or physical balance.
 
 Cairn, Rill and Hush exist as previews with two body forms, face lights, tendon
 hands, LODs and on-demand loading. Their meshes are the H2a rebuild (2026-10-04,
-below); owner review of the boards and the turnaround references remain open, so
+below) with the D2 knit suit (2026-10-05); owner review of the boards and the turnaround references remain open, so
 they stay previews. They are hidden from the default roster, catalogue, SEO and sitemap.
 Open `/sim/humanoid/?preview=soft` to opt in for the current browser session only;
 session storage remembers the opt-in, and preview pages carry `noindex`.
@@ -608,9 +608,8 @@ Open H2 decisions for the owner:
 1. **Joint frames (D1).** Kept. A soft-profile v2 with roughly human spacing (hips
    about ±0.09-0.10 m, shoulders about ±0.17-0.19 m) is a separate physics ticket,
    because every physical profile, the soft forms included, needs re-acceptance.
-2. **Knit covers (D2).** Rill and Hush use rigid overlapping covers with rolled lips.
-   A skinned cover bound to the existing pivots would read more continuous at the
-   joints; it needs a MODEL-STANDARD amendment and a rig binding change.
+2. **Knit covers (D2).** Built on 2026-10-05 (below): one skinned suit bound to the
+   existing pivots, with the MODEL-STANDARD amendment and the rig binding.
 3. **Textures (D3).** None added; the knit courses are procedural. Cairn's concept
    panel seams wait for a texture or `_SEAM` vertex-attribute path.
 4. **References (D4).** Orthographic turnarounds for A, B and C in both forms, and
@@ -675,6 +674,66 @@ all six forms' four 4K body views and two head views, concept/model comparisons,
 silhouettes, actual desktop/phone captures, clearance data and five-minute PC
 measurements. Phone captures are emulated; physical-phone fps, thermal behavior
 and simultaneous camera inference remain unverified.
+
+### D2 knit suit (2026-10-05)
+
+The trunk and limb covers and their dark joint gaskets are replaced by one skinned
+knit suit per form and level, built by
+`assets/blender/humanoid_skin.py`. The heads, visors, necks, collars, hands and shoes
+are unchanged rigid parts on their pivots, and every pivot, joint frame, rest
+proportion and physics box is unchanged.
+
+- **Form.** The H2a sections remain the design: each limb is one loft through its
+  elbow or knee (the upper and lower sections meet in a joint section, so there is no
+  band), and the thorax and pelvis covers are voxel remeshed into one trunk. The arms
+  join the trunk only at the shoulders, by an exact union made while they are
+  abducted 12° clear of the hips; the suit then returns to rest through the inverse
+  of its own blend. Each leg is a separate closed shell whose top tucks under the
+  pelvis at the hip seam, where all three concepts have a seam (Rill's panel, Cairn's
+  insert, Hush's leotard line); the hip seam is cleared by the H2a sweep relief.
+- **Weights.** Each vertex belongs to the pivot of its nearest source (a limb loft's
+  hinge plane splits it). Inside a ball around the waist, shoulders, elbows and knees
+  the weights are diffused over the surface; at most four influences, normalised.
+- **Relief.** At 33 samples per audited axis, wherever the suit's regions cross each
+  other or the other pivot's rigid covers outside the joint's bearing, the crossing
+  triangles' vertices step toward their own pivot's axis (against the trunk only the
+  moving side gives way), each step spread over the neighbouring rings with the
+  stepped vertices held, until no sampled pose crosses; rest folds are smoothed.
+- **Tones.** One white material per family (`cairnSuit`, `rillSuit`, `hushSuit`) and
+  vertex colours: Rill's graphite side panels, hip-to-ankle leg panels and shoulder
+  yoke stripes; Cairn's graphite bands at the elbows and knees and inserts where the
+  H2a armpit gaskets and crotch lining showed; Hush's
+  lighter knit yoke and knee patches. Desktop keeps the procedural knit, its courses
+  following the skinned limb.
+- **Export and runtime.** `humanoid_skin.sidecar` writes the weights and tones by
+  position; `assets/blender/skin.mjs`, run by `compress.mjs`, adds JOINTS_0,
+  WEIGHTS_0, COLOR_0 and a glTF skin whose joints are the existing pivot nodes.
+  `modelPivots` validates the suit's frame, and the rig binds it to its live pivots
+  under the rig root (`bindSuit`), uncullable, in each LOD's group.
+- **Audit.** `audit_humanoids.py` blends the suit at every audited pose and checks its
+  region on the moving pivot against its region on the stationary pivot and both
+  rigid sets, with the same bearings and no added tolerance; triangles sharing a
+  vertex across a region boundary are the suit's own surface.
+
+| D2 asset | Hero bytes / triangles / batches | Distant bytes / triangles / batches |
+| --- | ---: | ---: |
+| Cairn I | 272,472 / 23,770 / 33 | 136,312 / 9,079 / 33 |
+| Cairn II | 273,120 / 23,768 / 33 | 136,964 / 9,076 / 33 |
+| Rill I | 279,536 / 23,886 / 32 | 140,496 / 9,385 / 32 |
+| Rill II | 280,532 / 23,884 / 32 | 140,940 / 9,382 / 32 |
+| Hush I | 266,516 / 23,556 / 32 | 132,996 / 9,001 / 32 |
+| Hush II | 267,076 / 23,554 / 32 | 133,264 / 8,998 / 32 |
+
+All six forms and both levels pass **24,180 clearance poses with zero crossings**
+under the skinned audit, and the 93 model contract tests (budgets, pivots through
+the limits, outward normals, closed limb cores, landmarks, shoes, LOD silhouettes).
+The suit is the larger share of each hero (11,000 triangles) and keeps one draw.
+
+What it does not change: the hip seam remains, so the pelvis still reads as a
+fitted brief over the thigh tops, and the wide hip pivots (D1) keep the legs apart.
+Under the bright live stage the knit panels read subtly, since a rough knit's
+specular sheen dominates its dark albedo. The forearm still meets the hip at rest,
+as in H2a; that pair is not adjacent and is not audited.
 
 ## Open decisions — decided by the owner (2026-09-30)
 

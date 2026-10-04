@@ -35,9 +35,7 @@
         <button class="chip-x" id="chip-invite" aria-label="Invite another device" aria-pressed="false" data-icon="plus"></button>
         <button class="chip-x" id="chip-disc" aria-label="Disconnect everyone" data-icon="close"></button>
       </div>
-      <div class="sim-right">
-        <button class="dev-tool glass" id="t-theme" type="button" aria-label="Surface and accent" title="Surface and accent" data-icon="palette"></button>
-      </div>
+      <div class="sim-right"></div>
     </header>
 
     <aside class="sim-panel glass dev-panel" aria-labelledby="dev-name">
@@ -50,12 +48,12 @@
         <header class="kit-card-head"><span class="kit-card-n"></span><h2 class="kit-card-title" id="dev-view-h">View</h2></header>
         <div class="sim-presence" data-presence-home></div>
         <div class="sim-actions" id="dev-view"></div>
+        <div class="dev-scope" data-scope-home></div>
       </section>
       <section class="sim-sec" aria-labelledby="dev-faces-h">
         <header class="kit-card-head"><span class="kit-card-n"></span><h2 class="kit-card-title" id="dev-faces-h">Controllers</h2></header>
         <div class="dev-faces" id="dev-faces" role="group" aria-label="Controllers that suit it"></div>
         <p class="dev-how" id="dev-how" aria-live="polite"></p>
-        <div class="dev-scope" data-scope-home></div>
       </section>
       <section class="sim-sec" id="dev-units-sec" aria-labelledby="dev-units-h">
         <header class="kit-card-head"><span class="kit-card-n"></span><h2 class="kit-card-title" id="dev-units-h">Units</h2><span class="kit-card-aside"><span class="dev-count" id="dev-count"></span></span></header>
@@ -75,6 +73,5 @@
     </div>
     <p class="note" id="note" role="status"></p>
     <div class="bb-menu bb-glass switcher" id="switcher" aria-label="Blackboxes apps" hidden></div>
-    <div class="bb-menu bb-glass themes-menu" id="themes" aria-label="Surface and accent" hidden></div>
   </body>
 </html>

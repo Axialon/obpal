@@ -32,6 +32,8 @@ const PATH = () => icon(['circle', { cx: '6', cy: '17.5', r: '2.2' }], ['circle'
 const CLOCK = () => icon(['circle', { cx: '12', cy: '13', r: '7' }], ['path', { d: 'M12 9.5V13l2.3 1.8M10 3.5h4' }])
 const CLOSE = () => icon(['path', { d: 'M6.5 6.5l11 11M17.5 6.5l-11 11' }])
 const INFO = () => icon(['circle', { cx: '12', cy: '12', r: '8.5' }], ['path', { d: 'M12 11v5M12 8h.01' }])
+/** How long the first connection notice shows in full before it quiets to one slim row. */
+export const TRUST_QUIET_MS = 4000
 
 function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, string> = {}, ...kids: (Node | string)[]): HTMLElementTagNameMap[K] {
   const el = document.createElement(tag)
@@ -77,6 +79,7 @@ export class LinkBadge {
   private stopMoment = () => {}
   private closeShares = () => {}
   private first: HTMLElement | null = null
+  private quietTimer: ReturnType<typeof setTimeout> | undefined
   private firstDismiss: HTMLButtonElement | null = null
   /** The notice is up among the notices (over the controls' work area), not in the gate card. */
   private railed = false
@@ -165,7 +168,9 @@ export class LinkBadge {
     this.clearFirst()
     const domain = h('span', { class: 'trust-domain', 'aria-label': `Encrypted connection; ${location.hostname}` }, LOCK(), location.hostname)
     const words = h('span', {}, 'Connected to the screen showing this seal')
-    const compare = h('button', { type: 'button', class: 'trust-compare', 'aria-label': 'Compare connection seal' }, sealElement(s.seal, true), words)
+    // Its quiet row's short label (the sentence, announced as the notice appeared, stays in it, folded).
+    const short = h('span', { class: 'trust-short', 'aria-hidden': 'true' }, 'Compare seal')
+    const compare = h('button', { type: 'button', class: 'trust-compare', 'aria-label': 'Compare connection seal' }, sealElement(s.seal, true), words, short)
     compare.onclick = () => this.open()
     const shares = h('button', { type: 'button', class: 'trust-shares' }, INFO(), h('span', { class: 'trust-lbl' }, 'What this shares'))
     shares.onclick = () => { this.closeShares(); this.closeShares = showShares(this.disconnect) }
@@ -173,9 +178,15 @@ export class LinkBadge {
     this.firstDismiss.onclick = () => this.clearFirst()
     this.first = h('div', { class: 'trust-first glass', role: 'status' }, domain, compare, shares, this.firstDismiss)
     // The first time this session that this phone page is opened on this site (the key is the page's host, not a screen's), the notice stays a little longer.
-    let first = true
-    try { first = sessionStorage.getItem(SEEN + location.host) !== '1'; sessionStorage.setItem(SEEN + location.host, '1') } catch { /* private mode */ }
-    this.firstMs = first ? SETTLE_FIRST_MS : SETTLE_MS
+    let fresh = true
+    try { fresh = sessionStorage.getItem(SEEN + location.host) !== '1'; sessionStorage.setItem(SEEN + location.host, '1') } catch { /* private mode */ }
+    this.firstMs = fresh ? SETTLE_FIRST_MS : SETTLE_MS
+    // A confirmation, then out of the way: after a few seconds it quiets to one slim row (the domain and Compare seal),
+    // its sentence folded away; the badge holds the seal from then on. The first press on the controller's face (the
+    // person has started to play) takes it away at any point, quiet or not, before its own time is up.
+    const first = this.first
+    this.quietTimer = setTimeout(() => { if (this.first === first) first.dataset.quiet = '' }, TRUST_QUIET_MS)
+    document.addEventListener('pointerdown', this.played, true)
     this.firstObserver = new MutationObserver(() => this.placeFirst())
     this.firstObserver.observe(document.getElementById('app') ?? document.body, { childList: true, subtree: true })
     this.placeFirst()
@@ -210,7 +221,10 @@ export class LinkBadge {
         id: TRUST, tier: 'ceremony', node, ms, icon: false, announce: false, passive: true, closeLabel: 'Dismiss connection notice', closeClass: 'trust-dismiss',
         onClose: () => {
           node.querySelectorAll<HTMLElement>('.connection-seal').forEach(destroySeal)
-          if (this.first === node) { this.first = null; this.railed = false }
+          if (this.first !== node) return
+          this.first = null; this.railed = false
+          clearTimeout(this.quietTimer)
+          document.removeEventListener('pointerdown', this.played, true)
         },
       })
     } else if (gate) {
@@ -218,7 +232,20 @@ export class LinkBadge {
       this.firstObserver?.disconnect()
     }
   }
+  /**
+   * A press on the face's play surfaces (not the bar, the notice, a sheet or the gamepad's own menus and tools), quiet or
+   * not: once someone plays, the badge carries the seal and the notice is out of the way. (The notice now outlives a change
+   * of face among the notices, so any press on the gamepad's play area counts.)
+   */
+  private played = (e: Event) => {
+    if (!this.first) return
+    const path = e.composedPath().filter((n): n is Element => n instanceof Element)
+    if (path.some(n => n.matches('.gp-top, .gp-meta, .gp-motion, .gp-scope, .gp-cue'))) return
+    if (path.some(n => n.matches('.pad, .wii, .mouse, .music-face, .kbd, .gp'))) this.clearFirst()
+  }
   private clearFirst() {
+    clearTimeout(this.quietTimer)
+    document.removeEventListener('pointerdown', this.played, true)
     this.firstObserver?.disconnect(); this.firstObserver = null
     const node = this.first
     const railed = this.railed
@@ -228,9 +255,9 @@ export class LinkBadge {
     node?.querySelectorAll<HTMLElement>('.connection-seal').forEach(destroySeal)
     node?.remove()
   }
-  /** Gamepad uses its own chrome; keep the same connection status beside its motion controls. */
+  /** Gamepad uses its own chrome: the connection status lives under its More, with who is here. */
   private placeStatus() {
-    const target = document.querySelector('.surface.gp-on .gp-motion') ?? this.slot
+    const target = document.querySelector('.surface.gp-on .gp-meta-list') ?? document.querySelector('.surface.gp-on .gp-motion') ?? this.slot
     if (target?.isConnected && this.el.parentElement !== target) target.append(this.el)
   }
   private clearSeal() { this.sheet?.body.querySelectorAll<HTMLElement>('.connection-seal').forEach(destroySeal) }

@@ -4,13 +4,17 @@
  * moves the view and goes round to first person, one press away on a phone, fullscreen asks for the full screen, sound
  * switches, the theme opens the picker, reset puts the sim back). It keeps clear of the dock rail, the sidebar, the
  * pairing chip and a sim's windows, and an open pairing card folds for it on a phone on its side; the keyboard, a click
- * outside and a swipe back close it; the phone controller and the embed don't have it. Run by scripts/e2e-pages.mjs.
+ * outside and a swipe back close it; the phone controller and the embed don't have it. A sim's tray keeps its system
+ * actions and the camera (the others keep their keys and homes on the page), and adds Minimise UI. Run by
+ * scripts/e2e-pages.mjs.
  */
 import { checkFrost } from './lib/frost.mjs'
 
 const assert = (ok, message) => { if (!ok) throw new Error(message) }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-const ORDER = ['scan', 'pair', 'open', 'switch', 'reset', 'camera', 'stop', 'body', 'next1', 'next2', 'next3', 'fullscreen', 'sound', 'theme']
+const ORDER = ['scan', 'pair', 'open', 'switch', 'reset', 'camera', 'stop', 'body', 'next1', 'next2', 'next3', 'fullscreen', 'minimise', 'sound', 'theme']
+/** A sim's tray keeps its system actions; pairing, reset, stop, the body camera and sound have homes on the page. */
+const SIM_TRAY = 'switch,camera,fullscreen,minimise,theme'
 
 /** A page at a size; its fullscreen requests counted, since a headless screen may not grant them. */
 async function open(browser, origin, path, { width = 1440, height = 900, phone = false } = {}) {
@@ -252,17 +256,20 @@ export async function runQuick(browser, origin, checkIt) {
     } finally { await context.close() }
   })
 
-  await check('quick actions: a sim offers its actions, each does its job, and the tray keeps clear of the dock, the windows and the chip', async () => {
+  await check('quick actions: a sim’s tray keeps its system actions, each does its job, the others answer their keys, and the tray keeps clear of the dock, the windows and the chip', async () => {
     const { page, context, errors } = await open(browser, origin, '/sim/drone/')
     try {
-      await page.waitForFunction(() => window.__device && document.querySelector('.quick-tray [data-quick="camera"]') && document.querySelector('.quick-tray [data-quick="sound"]'), null, { timeout: 20000 })
+      await page.waitForFunction(() => window.__device && window.__simAudio && document.querySelector('.quick-tray [data-quick="camera"]'), null, { timeout: 20000 })
       const windows = await boxes(page, '.sim-window:not([hidden])')
       const pairing = await chip(page)
       clear('tab', await box(page, '.quick-tab'), { 'the dock': await box(page, '.panel-dock'), 'a window': windows, 'the pairing pill': pairing.pill, 'the pairing card': pairing.card })
       await openTray(page)
       const ids = await offered(page)
-      assert(ids.join() === 'pair,switch,reset,camera,body,fullscreen,sound,theme', `the sim offers ${ids}`)
-      clear('open tray', await box(page, '.quick-panel'), { 'the dock': await box(page, '.panel-dock'), 'a window': windows, 'the pairing pill': pairing.pill, 'the pairing card': pairing.card })
+      assert(ids.join() === SIM_TRAY, `the sim offers ${ids}`)
+      // Opening the tray is a press outside the pairing card, which folds it (light dismiss): measured again now.
+      const folded = await chip(page)
+      assert(!folded.card, 'the pairing card stayed open under the tray’s press')
+      clear('open tray', await box(page, '.quick-panel'), { 'the dock': await box(page, '.panel-dock'), 'a window': windows, 'the pairing pill': folded.pill })
       at('camera')
       const camera = () => page.evaluate(() => window.__device.stage.camera.position.toArray().map((v) => +v.toFixed(3)).join())
       const was = await camera()
@@ -280,15 +287,23 @@ export async function runQuick(browser, origin, checkIt) {
       await openTray(page); await action(page, 'camera').click(); await sleep(200)
       assert(!(await riding()), 'the view after first person kept it')
       at('sound')
-      // A press anywhere may already have started it: the switch turns it the other way, and back.
+      // Sound lives in the sim's own window now; its key still switches it, the other way and back.
       const playing = () => page.evaluate(() => window.__simAudio.running && !window.__simAudio.muted)
       const before = await playing()
-      await action(page, 'sound').click()
+      await page.locator('#stage').focus().catch(() => {})
+      await page.keyboard.press('m')
       await page.waitForFunction((b) => (window.__simAudio.running && !window.__simAudio.muted) !== b, before, { timeout: 8000 })
-      assert(await action(page, 'sound').getAttribute('aria-pressed') === String(!before), 'the sound switch does not show its state')
-      await action(page, 'sound').click()
+      await page.keyboard.press('m')
       await page.waitForFunction((b) => (window.__simAudio.running && !window.__simAudio.muted) === b, before, { timeout: 8000 })
-      assert(await playing() === before, 'the sound switch did not turn it back')
+      assert(await playing() === before, 'the sound key did not turn it back')
+      at('minimise')
+      await openTray(page)
+      await action(page, 'minimise').click()
+      const hidden = await page.evaluate(() => ({ min: document.documentElement.classList.contains('ui-min'), windows: [...document.querySelectorAll('.sim-window:not([hidden])')].some(w => w.checkVisibility()), dock: document.querySelector('.panel-dock').checkVisibility() }))
+      assert(hidden.min && !hidden.windows && !hidden.dock, `minimise left the chrome: ${JSON.stringify(hidden)}`)
+      assert(await page.locator('.quick-tab').isVisible() && !!(await chip(page)).pill, 'minimise hid the way back or the pairing pill')
+      await page.keyboard.press('\\')
+      assert(!(await page.evaluate(() => document.documentElement.classList.contains('ui-min'))), 'the \\ key did not bring the controls back')
       at('theme')
       await action(page, 'theme').click(); await sleep(200)
       const picker = await box(page, '.quick-themes')
@@ -299,40 +314,40 @@ export async function runQuick(browser, origin, checkIt) {
       await action(page, 'fullscreen').click()
       assert(await page.evaluate(() => window.__fullscreenCalls) === 1, 'fullscreen was not asked for')
       at('reset')
+      // Reset's home is the sim's window (Home all); its key still sends every unit home.
+      await page.keyboard.press('Escape')
       await page.evaluate(() => { const logic = window.__device.logic, home = logic.home.bind(logic); window.__homed = []; logic.home = (n) => { window.__homed.push(n); home(n) } })
-      await action(page, 'reset').click(); await sleep(100)
+      await page.keyboard.press('r'); await sleep(100)
       const units = await page.evaluate(() => window.__device.units.length)
-      assert((await page.evaluate(() => window.__homed.length)) >= units, 'reset did not send every unit home')
+      assert((await page.evaluate(() => window.__homed.length)) >= units, 'the reset key did not send every unit home')
       at('pair')
-      await openTray(page)
-      await page.evaluate(() => { const pill = document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.pill'); if (pill?.getAttribute('aria-expanded') === 'true') pill.click() })
-      await action(page, 'pair').click()
+      // Pairing's home is the chip: open from its pill, the tab stays clear of the card.
+      await page.evaluate(() => { const pill = document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.pill'); if (pill?.getAttribute('aria-expanded') !== 'true') pill.click() })
       await page.waitForFunction(() => document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.wrap')?.hasAttribute('data-open'), null, { timeout: 5000 })
-      assert(!(await isOpen(page)), 'the tray stayed open over the pairing card')
-      // Clear of the card it opened, too.
       await sleep(500)
       clear('tab', await box(page, '.quick-tab'), { 'the pairing card': (await chip(page)).card })
       assert(!errors.length, errors.join(' | '))
-      return `${ids.join(', ')}; first person at the camera's press ${presses}; ${units} units home`
+      return `${ids.join(', ')}; first person at the camera's press ${presses}; ${units} units home by R; sound by M; minimise and \\`
     } finally { await context.close() }
   })
 
-  await check('quick actions: the arena’s camera rides a player and back, and its reset clears the scores', async () => {
+  await check('quick actions: the arena’s camera rides a player and back, and its reset key clears the scores', async () => {
     const { page, context, errors } = await open(browser, origin, '/sim/arena/')
     try {
-      await page.waitForFunction(() => window.__arena && document.querySelector('.quick-tray [data-quick="reset"]'), null, { timeout: 20000 })
+      await page.waitForFunction(() => window.__arena && document.querySelector('.quick-tray [data-quick="camera"]'), null, { timeout: 20000 })
       await openTray(page)
       const ids = await offered(page)
-      assert(ids.join() === 'pair,switch,reset,camera,body,fullscreen,sound,theme', `the arena offers ${ids}`)
+      assert(ids.join() === SIM_TRAY, `the arena offers ${ids}`)
       await action(page, 'camera').click()
       await page.waitForFunction(() => document.body.classList.contains('presence-active'), null, { timeout: 5000 })
       await openTray(page)
       await action(page, 'camera').click()
       await page.waitForFunction(() => !document.body.classList.contains('presence-active'), null, { timeout: 5000 })
       await page.evaluate(() => { for (const s of window.__arena.slots) s.points = 3 })
-      await openTray(page)
-      await action(page, 'reset').click()
-      assert(await page.evaluate(() => window.__arena.slots.every((s) => s.points === 0)), 'reset did not clear the scores')
+      await page.keyboard.press('Escape')
+      await page.keyboard.press('r')
+      assert(await page.evaluate(() => window.__arena.slots.every((s) => s.points === 0)), 'the reset key did not clear the scores')
+      assert(await page.locator('#reset-scores').isVisible(), 'Reset scores lost its home in the window')
       assert(!errors.length, errors.join(' | '))
       return ids.join(', ')
     } finally { await context.close() }
@@ -403,31 +418,35 @@ export async function runQuick(browser, origin, checkIt) {
     } finally { await context.close() }
   })
 
-  await check('quick actions: on a phone on its side the tab keeps clear of the open pairing card, and the open tray never lies under it: it fits beside the card, or the card folds for it and comes back', async () => {
+  await check('quick actions: on a phone on its side the pairing card starts folded, the tab keeps clear of it shown, and opening the tray folds it for good (light dismiss) with the tray all on the screen', async () => {
     const out = []
     for (const [width, height] of [[844, 390], [863, 360]]) {
       const { page, context, errors } = await open(browser, origin, '/sim/drone/', { width, height, phone: true })
       try {
         const size = `${width}x${height}`
         const card = () => page.evaluate(() => !!document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.wrap')?.hasAttribute('data-open'))
-        await page.waitForFunction(() => document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.wrap')?.hasAttribute('data-open'), null, { timeout: 20000 })
+        await page.waitForFunction(() => window.__sim?.chip && document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.pill'), null, { timeout: 20000 })
+        await sleep(600)
+        assert(!(await card()), 'the pairing card started open on a phone')
+        await page.evaluate(() => window.__sim.chip.expand())
+        await page.waitForFunction(() => document.querySelector('.obpal-chip')?.shadowRoot?.querySelector('.wrap')?.hasAttribute('data-open'), null, { timeout: 5000 })
         await sleep(600)
         const pairing = await chip(page)
         at(`${size} tab`)
         clear('tab', await box(page, '.quick-tab'), { 'the pairing pill': pairing.pill, 'the pairing card': pairing.card })
         at(`${size} open`)
         await page.locator('.quick-tab').tap()
-        // Placed once the card has folded, if it had to: clear of what's showing, all of it on the screen.
         await sleep(1200)
-        const panel = await box(page, '.quick-panel'), now = await chip(page), folded = !now.card
-        clear('open tray', panel, { 'the pairing pill': now.pill, 'the pairing card': now.card })
+        const panel = await box(page, '.quick-panel'), now = await chip(page)
+        assert(!now.card, 'the pairing card stayed open under a press outside it')
+        clear('open tray', panel, { 'the pairing pill': now.pill })
         assert(panel.top >= 0 && panel.bottom <= height && panel.left >= 0, `the open tray runs off the screen: ${JSON.stringify(panel)}`)
         at(`${size} close`)
         await action(page, 'camera').focus(); await page.keyboard.press('Escape')
-        if (folded) await page.waitForFunction(() => document.querySelector('.obpal-chip').shadowRoot.querySelector('.wrap').hasAttribute('data-open'), null, { timeout: 3000 })
-        assert(await card(), 'the pairing card did not come back')
+        await sleep(500)
+        assert(!(await card()), 'the dismissed pairing card came back by itself')
         assert(!errors.length, errors.join(' | '))
-        out.push(`${size}: ${folded ? 'the card folded while it was open and came back' : 'beside the card'}, ${Math.round(panel.right - panel.left)}×${Math.round(panel.bottom - panel.top)} px`)
+        out.push(`${size}: folded at load; the tray's press folded the shown card; ${Math.round(panel.right - panel.left)}×${Math.round(panel.bottom - panel.top)} px tray clear of the pill`)
       } finally { await context.close() }
     }
     return out.join('; ')

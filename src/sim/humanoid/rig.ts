@@ -9,7 +9,7 @@ import { HUMANOID } from './profile'
 import { presetPose } from './controls'
 import { loadPrototype, finishPrototype, retirePrototype } from '../kit/prototype'
 import { holdRig } from '../kit/reveal'
-import { modelName, modelPivots, retainSkin } from './models'
+import { bindSuit, modelName, modelPivots, retainSkin, suitMeshes } from './models'
 import { FaceLight } from './face'
 import { softPhone } from './soft-materials'
 import type { RigHold } from '../kit/reveal'
@@ -122,6 +122,20 @@ export class Rig {
       groups[i].visible = level === this.level
       this.pivots.get(joint.id)!.add(groups[i])
     })
+    // A soft model's knit suit hangs from the rig root, skinned to the live pivots; it
+    // follows the joint groups after them, so their joint indices stay as they are.
+    const suits = suitMeshes(scene)
+    if (suits.length) {
+      const group = new THREE.Group()
+      group.userData.suit = true
+      group.visible = level === this.level
+      for (const suit of suits) {
+        bindSuit(suit, this.pivots)
+        group.add(suit)
+      }
+      this.root.add(group)
+      groups.push(group)
+    }
     this.skins[level] = groups
     for (const side of ['left', 'right'] as const) {
       const group = groups[this.profile.joints.findIndex((j) => j.id === `${side}.arm.wrist.yaw`)]
@@ -140,6 +154,8 @@ export class Rig {
     if (this.disposed) return
     this.disposed = true
     this.hold?.cancel()
+    // Each suit's skeleton is this rig's own, bound to its pivots; its bone texture goes with it.
+    for (const suit of suitMeshes(this.root)) suit.skeleton.dispose()
     retirePrototype(this.root)
     this.release?.()
     this.faceLight?.dispose()

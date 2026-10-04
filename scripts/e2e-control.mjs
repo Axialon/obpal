@@ -103,7 +103,8 @@ export async function runControl(local, check) {
     }
     const position = async () => {
       if (armed) await touch(false)
-      await page.locator('[data-id="control.position"]').click()
+      // Set position has one home at a time: the dock's own button while motion shows it, else the tray's.
+      await page.locator('.dock > #center:not([hidden]), .tray [data-id="control.position"]').filter({ visible: true }).first().click()
       await motion(); await sleep(60)
     }
     const record = async () => screen.evaluate(() => {

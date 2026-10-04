@@ -84,6 +84,13 @@ dots are mapped to underscores by [pivotName/modelPivots](../src/sim/humanoid/mo
 than an ad hoc normalisation. Avoid duplicate names and implicit Blender numeric suffixes. Both LODs contain the
 same complete moving frame graph, even when some geometry is simplified.
 
+A continuous soft covering may instead be one skinned mesh at the asset root whose glTF skin joints are the
+existing pivot nodes themselves. No bone, renamed node or extra transform enters the frame graph. The inverse bind
+matrices are the pivots' rest translations, each vertex keeps at most four weights on the pivots it rides, and the
+runtime rebinds the skin to the live pivots ([bindSuit](../src/sim/humanoid/models.ts)). The clearance audit blends
+it at every audited pose as the GPU does, so it is not a merge across joints. The soft humanoids' knit suit (D2) is
+the first; their heads, hands and shoes stay rigid on their pivots.
+
 For a new model, give structural links stable IDs such as `forearm_shell` under the existing pivot. Do not rename
 an existing consumer contract to match this example. Model schema version, profile ID, authoring source and unit
 scale belong in a small reproducible manifest/metadata record added by the model wave. Keep transforms finite;
@@ -128,7 +135,8 @@ load failure and disposal. Preserve the landed hold/reveal behaviour while asset
 Use the existing headless Blender commands from the authoring README (its pinned Blender version is a repository
 requirement, not independently installed here). Start with an empty scene and deterministic construction. Reuse
 `common.py` rather than adding a second kit. Name every object before material merging, merge only within one
-rigid frame and finish, and preserve moving empty objects. Do not merge across joints to reduce draw calls.
+rigid frame and finish, and preserve moving empty objects. Do not merge across joints to reduce draw calls; a
+skinned covering (section 4) is weighted to its joints, not merged across them.
 
 Write intermediate exports/caches into ignored artifacts; compress with the existing `compress.mjs`, then decode
 and run the actual asset tests. The current scripts use meshoptimizer and preserve more position precision for

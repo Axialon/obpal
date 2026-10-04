@@ -418,6 +418,8 @@ try {
     await shot(phone, 'what-this-shares')
     await phone.getByRole('dialog', { name: 'What this shares' }).getByRole('button', { name: 'Close', exact: true }).click()
     await phone.locator('.ctl-tab[data-tab="gamepad"]').click()
+    // The gamepad keeps the connection under More.
+    await phone.locator('.gp [data-act="more"]').click()
     await phone.locator('.gp .link-badge .seal-compact').waitFor({ state: 'visible', timeout: 3000 })
     await phone.locator('.gp [data-act="settings"]').click()
     await phone.locator('#connection-details').click()

@@ -1,5 +1,12 @@
 """Authoring clearance audit. BVH intersections outside a joint's nested bearing
 are reported, never silently counted as an acceptable overlap. Run headlessly.
+
+A soft model's skinned suit is deformed by its own linear blend at every audited
+pose, exactly as the browser skins it. Each triangle belongs to the pivot that
+carries most of its weight, so the suit's region on the moving pivot is checked
+against its region on the stationary one (and both against the rigid covers),
+as adjacent rigid covers are. Triangles that share a vertex across the region
+boundary are the suit's own continuous surface, not a crossing.
 """
 import sys
 import json
@@ -11,6 +18,7 @@ from humanoids_soft import build_soft, FORMS
 from common import *
 from mathutils.bvhtree import BVHTree
 from mathutils.geometry import intersect_ray_tri
+import numpy as np
 
 OUT = Path(tempfile.mkdtemp(prefix='obpal-humanoid-clearance-'))
 
@@ -42,6 +50,44 @@ def intersections(a, b):
     return result
 
 
+class Suit:
+    """The suit's rest vertices, weights and triangle owners; posed() blends it like the GPU."""
+
+    def __init__(self, nodes):
+        suit = bpy.data.objects['Suit']
+        data = suit.data
+        self.names = [g.name for g in suit.vertex_groups]
+        self.bones = [nodes[name.replace('_', '.')] for name in self.names]
+        self.weights = np.zeros((len(data.vertices), len(self.names)))
+        for v in data.vertices:
+            for g in v.groups:
+                self.weights[v.index, g.group] = g.weight
+        self.rest = np.array([(*(suit.matrix_world @ v.co), 1) for v in data.vertices])
+        self.inverse = [bone.matrix_world.inverted() for bone in self.bones]
+        data.calc_loop_triangles()
+        self.triangles = np.array([tuple(t.vertices) for t in data.loop_triangles])
+        self.owner = np.argmax(self.weights[self.triangles].sum(axis=1), axis=1)
+
+    def posed(self):
+        out = np.zeros((len(self.rest), 3))
+        for b, bone in enumerate(self.bones):
+            matrix = np.array(bone.matrix_world @ self.inverse[b])
+            out += self.weights[:, b, None]*(self.rest @ matrix.T)[:, :3]
+        return [Vector(p) for p in out]
+
+    def region(self, node, points):
+        name = node.name
+        if name not in self.names:
+            return None
+        faces = [tuple(int(i) for i in t) for t in self.triangles[self.owner == self.names.index(name)]]
+        return ('Suit:'+name, BVHTree.FromPolygons(points, faces, all_triangles=True), points, faces, True)
+
+
+def rigid(obj):
+    tree, vertices, faces = shell_tree(obj)
+    return (obj.name, tree, vertices, faces, False)
+
+
 report = []
 poses = 0
 soft = '--soft' in sys.argv
@@ -55,6 +101,7 @@ for name, low in [(name, low) for name in (FORMS if soft else ['keel', 'morrow']
         nodes = build_soft(name, low) if soft else build_robot(name, low)
     scale = (1.73/1.8 if name.endswith('-i') else 1) if soft else (1.65/1.8 if name == 'morrow' else 1)
     material = name.split('-')[0]+'Cover' if soft else 'obsidian'
+    suit = Suit(nodes) if soft and bpy.data.objects.get('Suit') else None
     # Adjacent outer armour; spheres, drums and nested bearing collars are the
     # intended overlap inside the envelopes below, not an external collision.
     pairs = []
@@ -99,22 +146,26 @@ for name, low in [(name, low) for name in (FORMS if soft else ['keel', 'morrow']
             bpy.context.view_layer.update()
             centre = moving.matrix_world.translation
             # Exterior covers only: a soft form's cover-coloured lining is the under-suit, audited as before (not at all).
-            children = [o for o in leaf.children if o.type == 'MESH' and o.data.materials[0].name == material and 'under-suit' not in o.name]
-            parents = [o for o in stationary.children if o.type == 'MESH' and o.data.materials[0].name == material and 'under-suit' not in o.name]
-            for a in children:
-                tree_a, va, fa = shell_tree(a)
-                for b in parents:
-                    tree_b, vb, fb = shell_tree(b)
+            children = [rigid(o) for o in leaf.children if o.type == 'MESH' and o.data.materials[0].name == material and 'under-suit' not in o.name]
+            parents = [rigid(o) for o in stationary.children if o.type == 'MESH' and o.data.materials[0].name == material and 'under-suit' not in o.name]
+            if suit:
+                points = suit.posed()
+                children += [r for r in [suit.region(leaf, points)] if r]
+                parents += [r for r in [suit.region(stationary, points)] if r]
+            for a_name, tree_a, va, fa, a_suit in children:
+                for b_name, tree_b, vb, fb, b_suit in parents:
                     overlap = tree_a.overlap(tree_b)
                     exterior = []
                     for ia, ib in overlap:
+                        if a_suit and b_suit and set(fa[ia]) & set(fb[ib]):
+                            continue
                         crossings = intersections([va[i] for i in fa[ia]], [vb[i] for i in fb[ib]])
                         exterior += [(point-centre).length for point in crossings if (point-centre).length > radius*scale]
                     if exterior:
                         report.append({'robot': name, 'lod': int(low), 'joint': moving.name, 'angle': angle,
-                                       'parts': [a.name, b.name], 'triangles': len(exterior), 'radius': max(exterior)})
+                                       'parts': [a_name, b_name], 'triangles': len(exterior), 'radius': max(exterior)})
         moving.rotation_euler[axis] = 0
-result = {'poses': poses, 'scope': f'Adjacent exterior {"soft covers" if soft else "obsidian shells"}, independent axes, 65 positions including limits, both LODs. Nested bearings and internal structure are intentional overlaps. Arbitrary simultaneous whole-body self-collision is outside this visual audit.', 'crossings': report}
+result = {'poses': poses, 'scope': f'Adjacent exterior {"soft covers and skinned suit regions, blended at each pose" if soft else "obsidian shells"}, independent axes, 65 positions including limits, both LODs. Nested bearings and internal structure are intentional overlaps. Arbitrary simultaneous whole-body self-collision is outside this visual audit.', 'crossings': report}
 print(json.dumps(result, indent=2))
 OUT.mkdir(parents=True, exist_ok=True)
 (OUT/'clearance.json').write_text(json.dumps(result, indent=2))

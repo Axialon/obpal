@@ -5,10 +5,10 @@
  * whether or not the page mounts the tray.
  */
 
-export type QuickId = 'scan' | 'pair' | 'open' | 'switch' | 'stop' | 'next1' | 'next2' | 'next3' | 'camera' | 'body' | 'fullscreen' | 'sound' | 'theme' | 'reset'
+export type QuickId = 'scan' | 'pair' | 'open' | 'switch' | 'stop' | 'next1' | 'next2' | 'next3' | 'camera' | 'body' | 'fullscreen' | 'minimise' | 'sound' | 'theme' | 'reset'
 /** The tray's order, whatever order a page offers them in. */
-export const QUICK_ORDER: readonly QuickId[] = ['scan', 'pair', 'open', 'switch', 'reset', 'camera', 'stop', 'body', 'next1', 'next2', 'next3', 'fullscreen', 'sound', 'theme']
-const KEYS: Partial<Record<QuickId, string>> = { pair: 'P', open: 'O', switch: 'K', reset: 'R', camera: 'C', stop: 'Space', next1: '1', next2: '2', next3: '3', fullscreen: 'F', sound: 'M', theme: 'T' }
+export const QUICK_ORDER: readonly QuickId[] = ['scan', 'pair', 'open', 'switch', 'reset', 'camera', 'stop', 'body', 'next1', 'next2', 'next3', 'fullscreen', 'minimise', 'sound', 'theme']
+const KEYS: Partial<Record<QuickId, string>> = { pair: 'P', open: 'O', switch: 'K', reset: 'R', camera: 'C', stop: 'Space', next1: '1', next2: '2', next3: '3', fullscreen: 'F', minimise: '\\', sound: 'M', theme: 'T' }
 
 export interface QuickAction {
   id: QuickId
@@ -52,14 +52,24 @@ export function quickChanged() { tell('states') }
 
 /** The actions offered now. */
 export const quickActions = (): ReadonlyMap<QuickId, QuickAction> => actions
-/** One primary, at most four page actions, then the three system controls. */
-export function orderedQuickActions(offered: ReadonlyMap<QuickId, QuickAction> = actions): QuickAction[] {
-  const sorted = QUICK_ORDER.map(id => offered.get(id)).filter((a): a is QuickAction => !!a)
+/**
+ * What the tray shows: one primary, at most four page actions, then the three system controls. A page may narrow it
+ * (`shows`: a sim keeps only its system actions there, since each of the others has a home of its own on the page).
+ */
+export function orderedQuickActions(offered: ReadonlyMap<QuickId, QuickAction> = actions, shows: (id: QuickId) => boolean = trayFilter): QuickAction[] {
+  const sorted = QUICK_ORDER.map(id => offered.get(id)).filter((a): a is QuickAction => !!a && shows(a.id))
   return [...sorted.filter(a => a.group === 'primary').slice(0, 1), ...sorted.filter(a => a.group === 'page').slice(0, 4), ...sorted.filter(a => a.group === 'system').slice(0, 3)]
+}
+let trayFilter: (id: QuickId) => boolean = () => true
+/** Narrow what the tray shows on this page. Everything offered keeps its key, shown or not. */
+export function quickTrayShows(shows: (id: QuickId) => boolean) { trayFilter = shows; tell('actions') }
+/** Every action offered, in the tray's order, for the keys: an action the tray doesn't show still answers its key. */
+export function keyedQuickActions(offered: ReadonlyMap<QuickId, QuickAction> = actions): QuickAction[] {
+  return QUICK_ORDER.map(id => offered.get(id)).filter((a): a is QuickAction => !!a)
 }
 
 /** Page keys never take a keystroke being edited, modified, repeated, or already handled. */
-export function quickKey(event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'repeat' | 'defaultPrevented' | 'target'>, offered = orderedQuickActions()): QuickId | 'shortcuts' | null {
+export function quickKey(event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'repeat' | 'defaultPrevented' | 'target'>, offered = keyedQuickActions()): QuickId | 'shortcuts' | null {
   const target = event.target as HTMLElement | null
   if (event.defaultPrevented || event.repeat || event.ctrlKey || event.metaKey || event.altKey || target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')) return null
   if (event.key === '?') return 'shortcuts'

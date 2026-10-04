@@ -921,3 +921,76 @@ body.resting .rest { display: grid; }
 .trust-dismiss{position:absolute;right:0;top:0;width:44px;height:44px;display:grid;place-items:center;background:none;border:0;color:var(--muted);padding:0}.trust-dismiss .ic{width:18px;height:18px}
 .link-seal{text-align:center;padding:12px;border:1px solid var(--line);border-radius:20px;background:var(--glass)}.link-seal>small{color:var(--secondary)}
 .shares-sheet p{display:grid;gap:4px;margin:0;color:var(--secondary);font-size:14px;line-height:1.5}.shares-sheet b{color:var(--ink)}.shares-sheet a{color:var(--accent-text);padding:8px 0}
+
+/* ---- fit and one home (ui-declutter) ---- */
+/* The screen's name shortens with an ellipsis in its own slot and never runs under the connection badge (the ink fit
+   marks it flex: none; here it shrinks). */
+.bar .host-name { overflow: hidden; }
+.bar .host-name > .host-t { flex: 0 1 auto; min-width: 0; }
+/* On a narrow phone the unit you hold is its colour dot alone in the tray (its name is the chip's label to the ear and
+   heads the scene list, which a tap opens), so the tray never clips it. */
+@media (max-width: 399px) {
+  .tray-btn.scene-btn { padding: 0 8px; gap: 4px; }
+  .tray-btn.scene-btn :is(.sel-v, .sel-v ~ .ic) { display: none; }
+}
+/* Set position has one home at a time: the dock's own button where it shows, else the tray's. */
+.surface:has(.dock > #center:not([hidden])) .tray > .tray-btn[data-id='control.position'] { display: none; }
+/* Who is here is the bar's subtitle for a player: the unit and the watching count, a quiet line under the screen's name
+   inside the bar's own glass, not a pill of its own (src/controller/main.ts placeParticipation). */
+.bar:has(> .participant-phone:not([hidden])) { flex-wrap: wrap; row-gap: 0; padding-bottom: 6px; }
+.bar > .participant-phone { order: 9; flex: 1 0 100%; width: auto; max-width: none; margin: 2px 0 0; padding: 0 0 0 calc(36px + var(--sp-1) + var(--sp-2) + var(--sp-1)); border: 0; border-radius: 0; background: none; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; font-size: 11.5px; color: var(--muted); }
+.bar > .participant-phone .participant-row { justify-content: flex-start; flex-wrap: nowrap; max-height: 20px; overflow: hidden; }
+.bar > .participant-phone :is(.participant-actions, .participant-requests, .audience-overlay) { justify-content: flex-start; }
+/* The first connection notice: a confirmation, then (after a few seconds, src/controller/linkbadge.ts) one slim row of
+   the domain and Compare seal (and, in the gate card, What this shares and its close); its sentence stays in it, folded. */
+.trust-first[data-quiet] { display: flex; align-items: center; flex-wrap: wrap; gap: 0 14px; padding: 0 44px 0 14px; font-size: 12px; }
+.trust-first[data-quiet] .trust-domain { flex: 0 1 auto; min-width: 0; min-height: 40px; padding-right: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.trust-first[data-quiet] :is(.trust-compare, .trust-shares) { min-height: 40px; }
+.trust-short { display: none; }
+.trust-first[data-quiet] .trust-compare > span:not(.trust-short) { display: none; }
+.trust-first[data-quiet] .trust-compare > .trust-short { display: inline; font-weight: 650; white-space: nowrap; }
+.trust-first[data-quiet] .trust-dismiss { top: 50%; transform: translateY(-50%); }
+/* The badge leaves the screen's name more room in the bar: the seal reads at 104 px. */
+.surface .bar .link-badge { width: clamp(78px, calc(100cqw - 220px), 104px); }
+/* A narrow phone's tray: slimmer buttons, so STOP, the tools and the unit you hold all show without scrolling. */
+@media (max-width: 399px) {
+  .tray { gap: 6px; }
+  .tray-btn { min-width: 52px; padding: 0 8px; }
+  .tray-btn.stop { min-width: 68px; }
+}
+/* Settings on a phone on its side: a full-height sheet on the right edge, not a short window in the middle, so the
+   first section shows without scrolling and the face stays in view beside it. */
+:root.land .sheet-wrap:has(> .sheet.settings) { place-items: stretch end; padding: var(--inset-t) var(--inset-r) var(--inset-b) var(--inset-l); }
+:root.land .sheet.settings { width: min(440px, 56%); height: 100%; max-height: none; align-self: stretch; }
+/* A phone on its side: the face is the content. It takes the full height of the wider column; the bar, the first
+   connection notice, the controller rail, the tray and the dock stack in a slim column at the thumb's edge (the left
+   edge for the left-handed). */
+:root.land .surface { grid-template-columns: minmax(0, 1fr) minmax(280px, 34%); grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
+:root.land .bar { grid-column: 2; grid-row: 1; }
+:root.land .trust-first { grid-column: 2; grid-row: 2; }
+:root.land .modes { grid-column: 2; grid-row: 3; }
+:root.land .tray { grid-column: 2; grid-row: 4; }
+:root.land .dock { grid-column: 2; grid-row: 5; }
+:root.land :is(.pad, .wii, .mouse), :root.land .surface.music-on .music-face { grid-column: 1; grid-row: 1 / -1; }
+:root.land .surface.left { grid-template-columns: minmax(280px, 34%) minmax(0, 1fr); }
+:root.land .surface.left :is(.bar, .trust-first, .modes, .tray, .dock) { grid-column: 1; }
+:root.land .surface.left :is(.pad, .wii, .mouse, .music-face) { grid-column: 2; }
+/* The slim column's bar keeps the mark, the badge, the lock and settings; the screen's name shortens first. */
+:root.land .bar { min-height: 52px; padding: 4px 6px 4px 8px; }
+:root.land .bar .host-ic { width: 30px; height: 30px; }
+:root.land .bar .host-ic .mark { width: 28px; height: 28px; }
+:root.land .surface .bar .link-badge { width: 78px; }
+:root.land .trust-first[data-quiet] { padding-left: 10px; gap: 0 10px; }
+/* The face never stretches the slim column's rows (its own content scrolls or scales inside it). */
+:root.land :is(.pad, .wii, .mouse, .music-face) { min-height: 0; }
+:root.land .surface { align-content: stretch; }
+/* In the slim column the quiet notice is one row: the domain, Compare seal and What this shares as an ⓘ (its words kept). */
+:root.land .trust-first[data-quiet] { flex-wrap: nowrap; }
+:root.land .trust-first[data-quiet] .trust-shares { flex: none; width: 32px; font-size: 0; text-decoration: none; }
+:root.land .trust-first[data-quiet] .trust-shares::before { content: 'ⓘ'; font-size: 17px; }
+/* (music.css loads with its face, after this sheet: the face's place in the slim layout outranks its own.) */
+:root.land body .surface.music-on .music-face { grid-column: 1; grid-row: 1 / -1; min-height: 0; }
+:root.land body .surface.left.music-on .music-face { grid-column: 2; }
+/* Among the phone's notices (src/ui/kit/notice.ts) the first connection notice is a passive line with no x: its quiet
+   row needs no room for a close, and stays one row in either orientation. */
+:root .nt-item .trust-first[data-quiet] { display: flex; align-items: center; flex-wrap: nowrap; gap: 0 10px; padding: 0; }

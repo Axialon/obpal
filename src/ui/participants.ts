@@ -59,6 +59,12 @@ export class ParticipantStrip {
     document.body.append(this.root); fitControlInk(this.root)
     this.timer = setInterval(() => { if (this.voting && this.canVote() && !document.hidden) callbacks.audience({ x: this.direction[0], y: this.direction[1] }) }, 50)
     addEventListener('blur', this.release); document.addEventListener('visibilitychange', this.hidden)
+    document.addEventListener('pointerdown', this.outside, true); document.addEventListener('keydown', this.escape)
+    // The screen's cluster width, for the people chip that sits beside it in a sim's bar (styles/sim.css).
+    if (host && typeof ResizeObserver === 'function') new ResizeObserver(() => {
+      const w = this.root.hidden ? 0 : Math.round(this.root.getBoundingClientRect().width)
+      document.documentElement.style.setProperty('--presence-w', `${w}px`)
+    }).observe(this.root)
     addEventListener('pagehide', () => this.destroy(), { once: true })
   }
   private button(label: string, action: () => void, glyph?: string) {
@@ -67,6 +73,20 @@ export class ParticipantStrip {
   private canVote() { const s = this.state, person = s?.people.find(p => p.id === s.you); return !!s && person?.role === 'watch' && (s.audience.mode === 'crowd' || s.audience.mode === 'queue' && s.audience.turn === s.you) }
   private release = () => { this.voting = false; this.direction = [0, 0]; if (this.canVote()) this.callbacks.audience({ x: 0, y: 0 }) }
   private hidden = () => { if (document.hidden) this.release() }
+  /** Light dismiss: the settings close on a press outside them (their own glass lists count as inside) or on Escape. */
+  private outside = (e: Event) => {
+    if (!this.menu.open) return
+    const path = e.composedPath()
+    if (path.includes(this.menu) || path.some(n => n instanceof Element && n.hasAttribute('data-kit-popover'))) return
+    this.menu.open = false
+  }
+  private escape = (e: KeyboardEvent) => {
+    // An open glass list in the settings takes this Escape for itself.
+    if (e.key !== 'Escape' || !this.menu.open || this.menu.querySelector('[aria-haspopup="listbox"][aria-expanded="true"]')) return
+    const inside = this.menu.contains(document.activeElement)
+    this.menu.open = false
+    if (inside) this.menu.querySelector<HTMLElement>('summary')?.focus()
+  }
   update(state: RoomState) {
     this.root.hidden = false
     const couldVote = this.canVote(); this.state = state; if (couldVote && !this.canVote()) { this.voting = false; this.direction = [0, 0] }
@@ -134,5 +154,8 @@ export class ParticipantStrip {
     }
     for (const select of this.root.querySelectorAll('select')) { const glass = enhanceSelect(select); if (glass) glass.list.style.setProperty('--bb-z-menu', '100') }
   }
-  destroy() { clearInterval(this.timer); removeEventListener('blur', this.release); document.removeEventListener('visibilitychange', this.hidden); this.root.remove() }
+  destroy() {
+    clearInterval(this.timer); removeEventListener('blur', this.release); document.removeEventListener('visibilitychange', this.hidden)
+    document.removeEventListener('pointerdown', this.outside, true); document.removeEventListener('keydown', this.escape); this.root.remove()
+  }
 }

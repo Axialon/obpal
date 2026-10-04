@@ -135,6 +135,10 @@ export async function shareP1({ browser, origin, check, shots }) {
         await page.setViewportSize({ width: 390, height: 844 })
         await page.goto(await host.evaluate(() => window.__obpal.pairingUrl))
         const toggle = page.getByRole('button', { name: 'Drop-ins', exact: true })
+        // On the gamepad a shared scene's drop-ins live under More (src/controller/gamepad.ts).
+        const more = page.locator('.gp:not([hidden]) [data-act="more"]')
+        await page.locator('button[aria-label="Drop-ins"]:visible, .gp:not([hidden]) [data-act="more"]').first().waitFor()
+        if (await more.isVisible() && (await more.getAttribute('aria-expanded')) !== 'true') await more.click()
         await toggle.waitFor(); await page.getByRole('button', { name: 'Open scene', exact: true }).waitFor()
         await page.getByRole('button', { name: 'Undo drop', exact: true }).click()
         await page.getByRole('button', { name: 'Clear drops', exact: true }).click()

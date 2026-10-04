@@ -301,6 +301,9 @@ function takeLocal(source = localSource) {
   localSeat = selected
   return true
 }
+// The seat's tools as icons beside each other (their names are their tooltips), not a row of worded buttons.
+iconAction($('local-body') as HTMLButtonElement, 'body', 'Body camera')
+iconAction($('range-calibrate') as HTMLButtonElement, 'reach', 'Calibrate reach')
 $('local-body').onclick = () => toggleBodyCapture()
 $('range-calibrate').onclick = () => {
   const actor = actors[selected]

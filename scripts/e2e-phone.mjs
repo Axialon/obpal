@@ -43,6 +43,7 @@ import { phonePointing } from './phone-pointing.mjs'
 import { runUniversalFaces } from './e2e-local-control.mjs'
 import { visitPhoneButtons, assertButtonInk } from './lib/surface-buttons.mjs'
 import { runIndependentGroups } from './lib/e2e-groups.mjs'
+import { phoneDeclutter } from './phone-declutter.mjs'
 
 const temps = tempScope()
 try {
@@ -92,6 +93,7 @@ try {
     { name: 'phone universal faces', run: () => runUniversalFaces(sb, local.origin, check, process.env.OBPAL_E2E_EVIDENCE_ROOT) },
     { name: 'phone packs', run: () => runPhonePacks({ browser: sb, origin: local.origin, check }) },
     { name: 'phone CSP', run: () => check('no Content Security Policy violations on any page', cspCheck) },
+    { name: 'phone declutter', run: () => phoneDeclutter({ browser: sb, origin: local.origin, check }) },
   ], check)
   if (process.env.OBPAL_E2E_PHONE_ONLY === 'connections') {
     await phoneConnections({ browser: sb, origin: local.origin, check, shots: SHOTS })

@@ -45,6 +45,31 @@ export function finishHumanoid(scene: THREE.Group, signal?: THREE.Material) {
   finishPrototype(scene, { ...(mobile ? mobileFinishes : {}), ...soft, softSignal: signal ?? soft.softAccent })
 }
 
+/** A soft model's knit suit: skinned meshes at the scene root, weighted to the named pivots. */
+export function suitMeshes(scene: THREE.Object3D) {
+  const suits: THREE.SkinnedMesh[] = []
+  scene.traverse((node) => {
+    if ((node as THREE.SkinnedMesh).isSkinnedMesh) suits.push(node as THREE.SkinnedMesh)
+  })
+  return suits
+}
+
+/**
+ * Bind a suit to the given pivots (the live rig's), keeping the asset's own rest inverses. The rig root is the asset's
+ * scene root, so the bind frame is the identity; attached binding then follows the rig wherever it is placed. The suit
+ * is never culled, since a raised limb leaves its rest bounds.
+ */
+export function bindSuit(suit: THREE.SkinnedMesh, pivots: ReadonlyMap<string, THREE.Object3D>) {
+  const byName = new Map([...pivots].map(([id, node]) => [pivotName(id), node]))
+  const bones = suit.skeleton.bones.map((bone) => {
+    const node = byName.get(bone.name)
+    if (!node) throw new Error(`Invalid humanoid suit joint: ${bone.name}`)
+    return node as THREE.Bone
+  })
+  suit.bind(new THREE.Skeleton(bones, suit.skeleton.boneInverses.map((m) => m.clone())), new THREE.Matrix4())
+  suit.frustumCulled = false
+}
+
 /** Reject a whole asset before touching a live rig, including rotated or scaled frames. */
 export function modelPivots(scene: THREE.Group, profile: RigProfile, signal?: THREE.Material) {
   const nodes = new Map<string, THREE.Object3D>()
@@ -76,6 +101,10 @@ export function modelPivots(scene: THREE.Group, profile: RigProfile, signal?: TH
     const first = validate(`${chain.id}.fingers`, [0, -0.08 * scale, -0.022 * scale], nodes.get(chain.end))
     const second = validate(`${chain.id}.tips`, [0, -0.035 * scale, 0], first)
     validate(`${chain.id}.distal`, [0, -0.029 * scale, 0], second)
+  }
+  for (const suit of suitMeshes(scene)) {
+    if (suit.parent !== scene || !suit.matrix.equals(new THREE.Matrix4())) throw new Error('Invalid humanoid suit frame')
+    bindSuit(suit, nodes)
   }
   finishHumanoid(scene, signal)
   return nodes

@@ -85,6 +85,8 @@ export class Switcher {
   private current: ControllerId = 'face.trackpad'
   private typing = false
   private universal = false
+  /** The catalogue's extra cards: tilt and the cameras on a universal screen, else the camera tabs the bar offers. */
+  private extras: ('tilt' | 'hand' | 'body')[] = []
   private host = 'This screen'
   private sheet: HTMLElement | null = null
   /** What the open catalogue's cards were drawn from: they're drawn again only when it changes, never under a finger. */
@@ -117,6 +119,7 @@ export class Switcher {
    */
   render(sorted: Rating[], current: ControllerId, host: string, typing: boolean, camera = false, handActive = false, body = false, bodyActive = false, universal = false) {
     this.universal = universal
+    this.extras = universal ? ['tilt', 'hand', 'body'] : [...(camera ? ['hand' as const] : []), ...(body ? ['body' as const] : [])]
     this.sorted = sorted
     this.current = current
     this.host = host
@@ -137,7 +140,7 @@ export class Switcher {
         const button = document.createElement('button')
         button.type = 'button'; button.className = 'ctl-tab'; button.dataset.tab = 'camera-hand'
         button.setAttribute('role', 'tab'); button.setAttribute('aria-label', 'Hand camera')
-        setMarkup(button, html`<span class="ctl-tab-ic">${ICONS.hand}</span><span class="ctl-tab-t">Hand</span>`)
+        setMarkup(button, html`<span class="ctl-tab-ic">${ICONS['hand-cam']}</span><span class="ctl-tab-t">Hand</span>`)
         button.onclick = () => { this.deps.feel(); this.deps.hand?.() }
         this.tabs.append(button)
       }
@@ -145,7 +148,7 @@ export class Switcher {
         const button = document.createElement('button')
         button.type = 'button'; button.className = 'ctl-tab'; button.dataset.tab = 'camera-body'
         button.setAttribute('role', 'tab'); button.setAttribute('aria-label', 'Body camera')
-        setMarkup(button, html`<span class="ctl-tab-ic">${ICONS.camera}</span><span class="ctl-tab-t">Body</span>`)
+        setMarkup(button, html`<span class="ctl-tab-ic">${ICONS.body}</span><span class="ctl-tab-t">Body</span>`)
         button.onclick = () => { this.deps.feel(); this.deps.body?.() }
         this.tabs.append(button)
       }
@@ -157,7 +160,7 @@ export class Switcher {
 
   /** The cards' inputs, as one string: the ratings, the one in use, the keyboard, the screen's name. */
   private get drawnFrom() {
-    return `${this.sorted.map((r) => `${r.id}${r.fit}${r.best ? '*' : ''}${r.needsMotion ? 'm' : ''}`).join()}|${this.current}|${this.typing}|${this.host}|${this.universal}`
+    return `${this.sorted.map((r) => `${r.id}${r.fit}${r.best ? '*' : ''}${r.needsMotion ? 'm' : ''}`).join()}|${this.current}|${this.typing}|${this.host}|${this.extras.join()}`
   }
 
   /** Open the catalogue. */
@@ -216,7 +219,7 @@ export class Switcher {
     const card = (r: Rating) => html`<button type="button" class="ctl-card" role="radio" data-c="${r.id}" data-fit="${r.fit}" aria-checked="false" aria-disabled="${r.fit === 0}">${gauge(r)}<span class="ctl-name">${CONTROLLERS[r.id].name}</span></button>`
     setMarkup(list, [
       html`<p class="ctl-k"><b>01</b>Ready here</p>`,
-      html`<div class="ctl-grid">${ready.map(card)}${this.universal ? ['tilt', 'hand', 'body'].map(id => html`<button type="button" class="ctl-card" data-extra="${id}" data-fit="1" aria-label="${id === 'tilt' ? 'Tilt' : id === 'hand' ? 'Hand camera' : 'Body camera'}. Works on ${this.host}"><span class="ctl-gauge" aria-hidden="true">${fitRing(1, 76, 24, 5.4)}<span class="ctl-disc">${ICONS[id === 'tilt' ? 'tilt' : id === 'hand' ? 'hand' : 'camera']}</span></span><span class="ctl-name">${id === 'tilt' ? 'Tilt' : id === 'hand' ? 'Hand' : 'Body'}</span></button>`) : ''}</div>`,
+      html`<div class="ctl-grid">${ready.map(card)}${this.extras.length ? this.extras.map(id => html`<button type="button" class="ctl-card" data-extra="${id}" data-fit="1" aria-label="${id === 'tilt' ? 'Tilt' : id === 'hand' ? 'Hand camera' : 'Body camera'}. Works on ${this.host}"><span class="ctl-gauge" aria-hidden="true">${fitRing(1, 76, 24, 5.4)}<span class="ctl-disc">${ICONS[id === 'tilt' ? 'tilt' : id === 'hand' ? 'hand-cam' : 'body']}</span></span><span class="ctl-name">${id === 'tilt' ? 'Tilt' : id === 'hand' ? 'Hand' : 'Body'}</span></button>`) : ''}</div>`,
       out.length ? html`<p class="ctl-k"><b>02</b>Not on this screen</p>` : '',
       out.length ? html`<div class="ctl-grid">${out.map(card)}</div>` : '',
     ])

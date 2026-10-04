@@ -18,6 +18,7 @@ from common import *
 from humanoids import joint_tree
 from humanoid_surfaces import anatomy2
 from humanoid_forms import S, SPEC, PIVOTS, TORSO, PELVIS, UPPER_ARM, FOREARM, THIGH, SHIN, SHOE, SOLE
+import humanoid_skin
 from mathutils import Matrix
 from mathutils.bvhtree import BVHTree
 
@@ -35,7 +36,13 @@ FINISHES = {
     'softGlass': ((.010, .021, .024), .18, .30),
     'softSignal': ((.56, 1, .035), 0, .65),
     'softAccent': ((.56, 1, .035), 0, .65),
+    # The v3 knit suits: white bases tinted by the suit's vertex colours.
+    'cairnSuit': ((1, 1, 1), .02, .86),
+    'rillSuit': ((1, 1, 1), .01, .94),
+    'hushSuit': ((1, 1, 1), .01, .94),
 }
+# v3: one skinned knit suit replaces the rigid trunk and limb covers; --rigid builds H2a.
+SKINNED = '--rigid' not in sys.argv
 # Samples per audited axis, as in audit_humanoids.py: the covers are cleared at
 # exactly the poses the independent audit then checks.
 SAMPLES = 65
@@ -52,10 +59,10 @@ def soft_finishes():
         shader.inputs['Metallic'].default_value = metal
         shader.inputs['Roughness'].default_value = rough
         shader.inputs['Coat Weight'].default_value = 0
-        if name.endswith('Cover'):
-            shader.inputs['Sheen Weight'].default_value = .06 if name == 'cairnCover' else .18
+        if name.endswith(('Cover', 'Suit')):
+            shader.inputs['Sheen Weight'].default_value = .06 if name.startswith('cairn') else .18
             shader.inputs['Sheen Roughness'].default_value = .85
-            shader.inputs['Sheen Tint'].default_value = (*colour, 1)
+            shader.inputs['Sheen Tint'].default_value = (*FINISHES[name.replace('Suit', 'Cover')][0], 1)
         if name in ['softSignal', 'softAccent']:
             shader.inputs['Emission Color'].default_value = (*colour, 1)
             shader.inputs['Emission Strength'].default_value = 1.6
@@ -628,7 +635,7 @@ def anchor_for(node):
     return ANCHORS[key]
 
 
-def clear_sweeps(nodes, cover, margin=.009):
+def clear_sweeps(nodes, cover, margin=.009, pairs=None):
     """Recess fixed covers out of the union of every audited moving-cover pose.
 
     For each stationary part, the moving covers are sampled at the audit's own
@@ -638,7 +645,7 @@ def clear_sweeps(nodes, cover, margin=.009):
     unlike pushing to the nearest surface, cannot oscillate between poses.
     """
     groups = {}
-    for pair in audited_pairs(nodes):
+    for pair in pairs if pairs is not None else audited_pairs(nodes):
         groups.setdefault(pair[2].name, []).append(pair)
     report = {}
     for pairs in groups.values():
@@ -849,9 +856,21 @@ def build_soft(name, low=False, clear=True):
     {'cairn': head_cairn, 'rill': head_rill, 'hush': head_hush}[family](nodes, low, face['surface'], face['eyes'])
     neck(nodes, family, low)
     body(nodes, family, form, low)
+    if SKINNED:
+        def clear(pairs):
+            clear_sweeps(nodes, family+'Cover', pairs=pairs)
+        clear.pairs = audited_pairs(nodes)
+        humanoid_skin.skin_body(nodes, family, form, low, loft, S, clear)
     flatten_hinges(nodes)
+    if SKINNED:
+        humanoid_skin.cores(nodes, family, form, low, loft, S)
     cover = family+'Cover'
-    if '--no-relief' not in sys.argv:
+    if SKINNED and '--no-relief' not in sys.argv:
+        suit = bpy.data.objects['Suit']
+        moved = humanoid_skin.relieve(suit, nodes, audited_pairs(nodes),
+                                      lambda o: o.data.materials[0].name == cover and 'under-suit' not in o.name)
+        print('suit relief', moved)
+    if '--no-relief' not in sys.argv and not SKINNED:
         recessed = clear_sweeps(nodes, cover)
         print('recessed', {k: v for k, v in recessed.items() if v})
     lining(nodes, family)
@@ -881,4 +900,5 @@ if __name__ == '__main__':
                 directory.mkdir(parents=True, exist_ok=True)
                 bpy.ops.wm.save_as_mainfile(filepath=str(directory/f'{name}{"-lod" if low else ""}.blend'))
             if '--no-export' not in sys.argv:
+                humanoid_skin.sidecar(name+('-lod' if low else ''))
                 export(name+('-lod' if low else ''), repair_normals=True, position_bits=24)

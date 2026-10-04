@@ -1,13 +1,13 @@
 {
-  "sourceSha256": "eee65cb6a29c48574a37f490691782eeeb2edcf9b4c3e2dea0f257444cddfb6c",
+  "sourceSha256": "396b5db658d362142d8db5fee8c609e8733de4e12b79270f7af3a0ae8961642a",
   "images": {
     "icon-128.png": "24957523bd3ea11be184a2b051668ba290508fdc20ed49de1dd20f5e17f0af4f",
-    "screenshot-1.png": "6e048dc1f572cae78413de8fd2c51fa6365af6eaaa601ad701e17f3e7ac3d5b5",
-    "screenshot-2.png": "190ce3f9f2c193f46003564e86ffde6b23fd1921eb07e7b4b065951e666e4a81",
-    "screenshot-3.png": "15a6f12c005dd2a165042d88fc4a8774c2438188e3289922cb4886a1c25a6160",
-    "screenshot-4.png": "d9de18cad55572d9cfb83eb412e2dcaa59a329bd4552bc276b9550736038c274",
-    "screenshot-5.png": "2eef50589f4876fe73aa22454ac3545ab57a5eb76f4084a50c9c535e28a296c7",
-    "tile-440x280.png": "8ce11852a4c1a615e91423d5be15ad62d5b1bd4e6fb9867b0525f82ca0e1abfa",
-    "marquee-1400x560.png": "2d6de513bd7c60ad012d5527e8ce55d0755cbb7b24f6de789a61ba317f696f77"
+    "screenshot-1.png": "11e6cb5cbc5f84d082017d2414829ef828f12850ca70472d5cdaee87e5526097",
+    "screenshot-2.png": "06067918e9cef9b37d7269d438c5c13bb8ff3e6930a5846fda99f1573c729c92",
+    "screenshot-3.png": "7231e980ba6cd8493baa6cffd1db0ed9012a507995411232cddabf869e316fe8",
+    "screenshot-4.png": "ff34d9db841655197dfcba6a3986bbab009f799a58b50a1434db54ce9fc675d4",
+    "screenshot-5.png": "ac609bd40f02484089f4e2e1bcd3415a3f67eb22f8c083e27fd819dc2f80e0cf",
+    "tile-440x280.png": "1fcc7b440c924b75e4339e532d2a7337bdfb3ac845e824f36f2792cc0879cffe",
+    "marquee-1400x560.png": "97d16e054dff1b129eeaef143c7251390d4e8f3f7e845f7c43215577ce505e6d"
   }
 }

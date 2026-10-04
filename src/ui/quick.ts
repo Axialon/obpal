@@ -10,6 +10,8 @@
  * its card, and anything else fixed on that edge; sim windows keep clear of it (styles/panels.css), as does the chip
  * on a phone on its side (styles/quick.css), whose card folds while the open column is over it. Esc, a click outside
  * or a swipe back to the edge closes it; it's a toolbar for the keyboard; reduced motion shows it without the slide.
+ * On a sim it shows only the system actions and the camera (../sim/ui/chrome.ts), plus Minimise UI; the actions it
+ * doesn't show still answer their keys.
  */
 import '../styles/kit.css'
 import '../styles/quick.css'
@@ -18,8 +20,9 @@ import { ICONS } from './icons'
 import { html, setMarkup } from './markup'
 import { edgeSpot, freeSpans, placeTrayCard, type Box } from './kit/place'
 import { mountPairCameraActions, openPairCamera, phoneCamera } from './camera'
-import { onQuickChange, orderedQuickActions, quickKey, quickActions, quickDefault, type QuickId } from './quick-actions'
+import { onQuickChange, orderedQuickActions, quickKey, quickActions, quickDefault, quickTrayShows, type QuickId } from './quick-actions'
 import { hint, dismissHint } from './hints'
+import { trayShows } from '../sim/ui/chrome'
 
 export { dropQuickAction, quickAction, quickChanged, quickViews, type QuickAction, type QuickId, type QuickView } from './quick-actions'
 
@@ -54,12 +57,45 @@ export function mountQuick(opts: { scroll?: boolean; defer?: (fn: () => void) =>
     id: 'theme', group: 'system', label: 'Theme', hint: 'Surface and accent', icon: 'palette', stay: true,
     run: () => {}, // The family picker owns its button's click and keyboard handling.
   })
-  if (!location.pathname.startsWith('/view') && (!location.pathname.startsWith('/sim/') || location.pathname === '/sim/')) {
+  const sim = location.pathname.startsWith('/sim/') && location.pathname !== '/sim/'
+  if (!location.pathname.startsWith('/view') && !sim) {
     const next = [['Viewer', '/view/', 'cube'], ['Sims', '/sim/', 'gamepad'], ['Link', '/link/', 'link']]
     next.forEach(([label, href, icon], i) => quickDefault({ id: `next${i + 1}` as QuickId, group: 'page', label, icon, hint: `Open ${label}`, run: () => { location.href = href } }))
   }
+  if (sim) {
+    // A sim's tray keeps its system actions; pairing, reset, stop, the body camera and sound live on the page.
+    const phone = phoneCamera()
+    quickTrayShows((id) => trayShows(id, true, phone))
+    quickDefault({
+      id: 'minimise', group: 'system', label: minimised() ? 'Show the controls' : 'Minimise controls', stay: true,
+      hint: 'Only the stage, Stop and pairing', icon: 'ui-min', pressed: minimised, run: () => minimise(!minimised()),
+    })
+  }
   tray = new QuickTray(opts)
   return tray
+}
+
+/** Minimise UI (a sim's): only the stage, the sim's instruments, Stop, the pairing pill and the tray stay. */
+const minimised = () => document.documentElement.classList.contains('ui-min')
+function minimise(on: boolean) {
+  document.documentElement.classList.toggle('ui-min', on)
+  let stop = document.querySelector<HTMLButtonElement>('.ui-min-stop')
+  const action = actions.get('stop')
+  if (on && action && !stop) {
+    // The sim's Stop lives in its controls window: while that's hidden, a Stop of its own on the stage.
+    stop = document.createElement('button')
+    stop.type = 'button'
+    stop.className = 'estop ui-min-stop'
+    stop.textContent = 'STOP'
+    stop.setAttribute('aria-label', 'Stop')
+    stop.addEventListener('click', () => actions.get('stop')?.run())
+    document.body.append(stop)
+  }
+  if (stop) stop.hidden = !on
+  const a = actions.get('minimise')
+  if (a) a.label = on ? 'Show the controls' : 'Minimise controls'
+  dispatchEvent(new Event('obpal:panels'))
+  tray?.sync()
 }
 
 /** The tab, the column it slides out, the tooltip, and the surface picker the column can open. */
@@ -111,7 +147,11 @@ class QuickTray {
         if (!this.open) this.toggle(false)
         const first = orderedQuickActions()[0]?.id
         if (first) { this.roving(first); this.buttons.get(first)?.focus() }
-      } else this.buttons.get(id)?.click()
+      } else {
+        // An action the tray doesn't show (a sim's reset or sound, say) still answers its key.
+        const b = this.buttons.get(id)
+        if (b) b.click(); else this.run(id)
+      }
     })
     this.el.addEventListener('keydown', (e) => { if (e.key === 'Escape' && this.open) { e.stopPropagation(); this.close(true) } })
     // Leaving it (a click elsewhere, or focus moving on) closes it; its own surface picker is part of it.
@@ -170,7 +210,8 @@ class QuickTray {
     const ordered = orderedQuickActions()
     const shown = ordered.map(a => a.id)
     const primary = ordered.find(a => a.group === 'primary')
-    const glyph = primary && (typeof primary.icon === 'function' ? primary.icon() : primary.icon)
+    // The tab wears the primary's icon; a tray of system actions alone (a sim's) wears the menu glyph.
+    const glyph = primary ? (typeof primary.icon === 'function' ? primary.icon() : primary.icon) : shown.length ? 'menu' : undefined
     if (glyph && this.tab.dataset.glyph !== glyph) {
       this.tab.dataset.glyph = glyph
       setMarkup(this.tab, ICONS[glyph] ?? ICONS.phone)

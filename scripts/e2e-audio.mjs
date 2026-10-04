@@ -250,6 +250,9 @@ export async function runAudio(local, check) {
       await page.locator('#sim-sound').click()
       assert.equal(await page.evaluate(() => window.__simAudio.muted), true)
       assert.equal(await page.evaluate(() => window.__simAudio.budget.active), 0)
+      // The level folds with its section (the mute stays on the head): its chevron opens it.
+      const unfold = page.getByRole('button', { name: 'Show Sound', exact: true })
+      if (await unfold.count()) await unfold.click()
       const level = page.getByRole('slider', { name: 'Sound level', exact: true })
       assert.equal(await level.getAttribute('aria-valuetext'), 'Off')
       await level.press('ArrowRight')

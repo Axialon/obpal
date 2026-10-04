@@ -648,14 +648,27 @@ async function boot(code?: Join) {
     status: onStatus, message: onHost, stats: (s) => linkBadge.update(s), seal: (s) => linkBadge.reveal(s), notice: (text) => toast(text), attempt: showAttempt })
   let participation: ParticipantStrip | null = null, grantedPlay: PhonePlay | null = null, seatGrant = '', roomSeq = -1, roomSend = 0, watching = false
   const sendRoom = (kind: 'handover' | 'audience' | 'seat', data: import('@obpal/core').SimValue) => link.sendCtl({ t: 'sim', v: 1, kind, seq: ++roomSend, data })
+  /**
+   * Who is here, where it belongs: for a player, the bar's subtitle (the unit and the watching count under the screen's
+   * name), or a quiet line in the gamepad's middle; for a watcher, a card of its own under the bar, since asking to play
+   * lives there.
+   */
+  function placeParticipation() {
+    if (!participation || !surface) return
+    const bar = surface.querySelector('.bar'), root = participation.root
+    if (!watching && surface.classList.contains('gp-on')) {
+      const home = surface.querySelector('.gp-mid')
+      if (home && root.parentElement !== home) home.append(root)
+    } else if (!watching && bar) { if (root.parentElement !== bar) bar.append(root) }
+    else if (root.parentElement !== surface) bar?.after(root)
+  }
   function roomState(room: RoomState & { grant?: string }) {
     participation ??= new ParticipantStrip({ handover: (op, to) => sendRoom('handover', { op, ...(to ? { to } : {}) }), audience: data => sendRoom('audience', data) }, false, true)
     participation.root.hidden = false; participation.update(room)
     const grant = room.grant ?? '', observer = room.people.find(p => p.id === room.you)?.role === 'watch'
     if (grant !== seatGrant || observer) { grantedPlay?.close(false); grantedPlay = null; releaseControls() }
     seatGrant = grant; watching = observer || !!grant
-    if (!watching && surface?.classList.contains('gp-on')) { const middle = surface.querySelector('.gp-mid'); if (middle && participation.root.parentElement !== middle) middle.append(participation.root) }
-    else if (surface && participation.root.parentElement !== surface) surface.querySelector('.bar')?.after(participation.root)
+    placeParticipation()
     if (surface) for (const el of surface.children) if (el instanceof HTMLElement && el !== participation.root && !el.classList.contains('bar')) el.inert = watching
     if (grant && !grantedPlay) grantedPlay = new PhonePlay({ id: room.you,
       pad: b => { const p = decodePad(b); if (p) sendRoom('seat', { x: p.axes[0], y: p.axes[1], rx: p.axes[2], ry: p.axes[3] }) }, state: () => {},
@@ -1291,7 +1304,7 @@ async function boot(code?: Join) {
       <div class="toast" id="toast" aria-hidden="true"></div>
       <div class="rest" id="rest" aria-hidden="true"><span>Resting to keep your phone cool · touch to wake</span></div>`)
     surface = document.getElementById('surface')!
-    if (participation) { surface.querySelector('.bar')?.after(participation.root); for (const el of surface.children) if (el instanceof HTMLElement && el !== participation.root && !el.classList.contains('bar')) el.inert = watching }
+    if (participation) { placeParticipation(); for (const el of surface.children) if (el instanceof HTMLElement && el !== participation.root && !el.classList.contains('bar')) el.inert = watching }
     switcher.mount(surface)
     strip.mount(surface)
     linkBadge.mount(document.getElementById('link-badge')!)
@@ -1455,6 +1468,7 @@ async function boot(code?: Join) {
     surface.classList.toggle('no-motion', tier === Tier.touch)
     surface.classList.toggle('gyro-on', gyroOn)
     surface.querySelector('.host-t')!.textContent = screenName()
+    placeParticipation()
     if (styleSeg) {
       styleSeg.el.hidden = tab !== 'rotate' || !(styleAvailable('game') && styleAvailable('match'))
       styleSeg.value = settings.style
@@ -1574,9 +1588,9 @@ async function boot(code?: Join) {
     setMarkup(document.getElementById('gestures')!, moves.length
       ? moves.map((m) => g(m.gesture, m.name))
       : live
-      ? [g('drag', 'value'), g('tilt', 'sweep'), g('tap', '2? reset')]
+      ? [g('drag', 'value'), g('tilt', 'sweep'), g('tap', '2× reset')]
       : part
-      ? [g('drag', 'move'), g('pinch', 'scale'), g('twist', 'turn'), g('tap', '2? reset')]
+      ? [g('drag', 'move'), g('pinch', 'scale'), g('twist', 'turn'), g('tap', '2× reset')]
       : mode === Mode.point
       ? [gyroOn ? g('point', 'aim') : g('drag', 'move'), g('tap', 'focus'), g('pan', 'pan'), g('pinch', 'zoom')]
       : mode === Mode.track
@@ -1769,7 +1783,8 @@ async function boot(code?: Join) {
       tray.appendChild(b)
     }
     tray.hidden = !control.sim && layout.tray.length === 0 && !(scene && scene.nodes.length)
-    const middle = surface?.querySelector('.gp-mid')
+    // The gamepad's shared-scene actions live under its More, with the connection and who is here.
+    const middle = surface?.querySelector('.gp-meta-list') ?? surface?.querySelector('.gp-mid')
     if (middle) {
       let actions = middle.querySelector<HTMLElement>('.gp-share-actions')
       if (!actions) { actions = document.createElement('div'); actions.className = 'gp-share-actions'; actions.setAttribute('role', 'toolbar'); actions.setAttribute('aria-label', 'Shared scene'); middle.append(actions); fitControlInk(actions) }
@@ -1942,8 +1957,8 @@ async function boot(code?: Join) {
       <div class="sheet settings glass" role="dialog" aria-label="Settings">
         <div class="sheet-head"><div class="grip" aria-hidden="true"></div><button class="icon-btn glass sheet-x" id="set-close" aria-label="Close">${ICONS.close}</button></div>
         <button class="set-row set-cam glass" id="scan-open">${ICONS.camera}<span>Scan a code<small>Connect another screen</small></span>${ICONS.right}</button>
-        ${layout.utilities?.includes('camera.hand') ? html`<button class="set-row glass" id="hand-settings">${ICONS.hand}<span>Hand camera<small>Control with your other hand</small></span>${ICONS.right}</button>` : ''}
-        ${layout.utilities?.includes('camera.body') ? html`<button class="set-row glass" id="body-settings">${ICONS.camera}<span>Body camera<small>Prop the phone facing you</small></span>${ICONS.right}</button>` : ''}
+        ${layout.utilities?.includes('camera.hand') ? html`<button class="set-row glass" id="hand-settings">${ICONS['hand-cam']}<span>Hand camera<small>Control with your other hand</small></span>${ICONS.right}</button>` : ''}
+        ${layout.utilities?.includes('camera.body') ? html`<button class="set-row glass" id="body-settings">${ICONS.body}<span>Body camera<small>Prop the phone facing you</small></span>${ICONS.right}</button>` : ''}
         <p class="sheet-k"><b>01</b>Feel</p>
         <label class="bb-field"><span>Sensitivity</span><output id="gv"></output><input class="bb-range" type="range" id="gain" min="0.5" max="3" step="0.1"></label>
         <label class="bb-field"><span>Steadiness</span><output id="sv"></output><input class="bb-range" type="range" id="smooth" min="0" max="1" step="0.05"></label>

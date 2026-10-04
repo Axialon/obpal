@@ -193,8 +193,9 @@ function layerHtml(): Content {
       <div class="gp-top">
         <div class="gp-sys l"><button class="gp-mini" data-act="exit" aria-label="Back">${ICONS.left}</button><button class="gp-mini" data-act="controllers" aria-haspopup="dialog" aria-label="All controllers">${ICONS.models}</button></div>
         ${round('gp-guide', B.Guide, 'Guide', ICONS.guide)}
-        <div class="gp-sys r"><button class="gp-mini" data-act="settings" aria-label="Settings">${ICONS.settings}</button></div>
+        <div class="gp-sys r"><button class="gp-mini" data-act="settings" aria-label="Settings">${ICONS.settings}</button><button class="gp-mini gp-more" data-act="more" aria-expanded="false" aria-controls="gp-meta" aria-label="More: the connection and the shared scene">${ICONS.more}</button></div>
       </div>
+      <div class="gp-meta glass" id="gp-meta" role="group" aria-label="More" hidden><div class="gp-meta-list"></div></div>
       <div class="gp-sh r">${bump(B.RB, 'Right')}${trig(1)}</div>
       <div class="gp-cue" role="img" aria-label="Turn your phone sideways for the full controller">${ICONS.phone}</div>
       <div class="gp-side l">
@@ -507,11 +508,38 @@ export class GamepadMode {
       else { this.recentre(); this.deps.toast('Centred') }
     }
     el.querySelector<HTMLElement>('[data-act="scope"]')!.onclick = () => { tick(); this.deps.scope?.() }
+    this.bindMore(el)
     this.renderChips()
     el.hidden = !this.active
     surface.classList.toggle('gp-on', this.active)
     document.documentElement.classList.toggle('gp-mode', this.active)
   }
+
+  /**
+   * The face keeps the controller and its own controls; what isn't play (the connection and its seal, a shared scene's
+   * drop-ins) is one tap away under More, a card over the middle. It closes on a press outside it, on
+   * Escape, or on More again.
+   */
+  private bindMore(el: HTMLElement) {
+    const more = el.querySelector<HTMLButtonElement>('[data-act="more"]')!, card = el.querySelector<HTMLElement>('.gp-meta')!
+    const show = (open: boolean) => {
+      card.hidden = !open
+      more.setAttribute('aria-expanded', String(open))
+      if (!open) return
+      // Under the top row, over the middle: clear of the shoulders and the sticks.
+      const top = more.getBoundingClientRect().bottom - el.getBoundingClientRect().top + 8
+      card.style.top = `${Math.round(top)}px`
+    }
+    more.onclick = () => { tick(); show(!!card.hidden) }
+    const outside = (e: Event) => { if (!card.hidden && !e.composedPath().some(n => n === card || n === more || (n instanceof Element && n.hasAttribute('data-kit-popover')))) show(false) }
+    const escape = (e: KeyboardEvent) => { if (e.key === 'Escape' && !card.hidden) { show(false); more.focus() } }
+    // A surface drawn again mounts a fresh layer: the last one's listeners go with it.
+    this.unbindMore()
+    document.addEventListener('pointerdown', outside, true)
+    document.addEventListener('keydown', escape)
+    this.unbindMore = () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', escape) }
+  }
+  private unbindMore = () => {}
 
   /** Called on every surface render: show or hide the layer. */
   sync(o: { active: boolean }) {

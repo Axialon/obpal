@@ -1,0 +1,23 @@
+/* The Controls window's folding sections and the sim's ⓘ (src/sim/ui/sections.ts). Layout only; ink and interaction
+   states come from the family kit. */
+.kit-card-fold { flex: none; display: grid; place-items: center; width: 32px; height: 32px; margin: -7px -6px -7px 0; padding: 0; border: 0; border-radius: 10px; background: none; color: var(--bb-ink-3, var(--muted)); cursor: pointer; }
+.kit-card-fold:hover { color: var(--bb-ink); background: rgb(var(--hl-rgb, 255 255 255) / 0.06); }
+.kit-card-fold .ic { width: 16px; height: 16px; transition: transform 0.2s var(--ease, ease); }
+[data-folded] > .kit-card-head .kit-card-fold .ic { transform: rotate(-90deg); }
+.kit-card-head:has(.kit-card-fold) .kit-card-title { cursor: pointer; }
+/* Folded: the head alone (its aside's actions stay). In first person the sound card joins the viewpoint row whole. */
+:is(.sim-sec, .sim-sound)[data-folded]:not(.presence-controls > .sim-sound) > :not(.kit-card-head) { display: none; }
+.presence-controls .kit-card-fold { display: none; }
+@media (prefers-reduced-motion: reduce) { .kit-card-fold .ic { transition: none; } }
+
+/* The sim's description is an ⓘ away from its name. */
+.sim-id:has(> .sim-about) { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.sim-id:has(> .sim-about) > :not(h1, .sim-about) { grid-column: 1 / -1; }
+.sim-id:not([data-about]) > .sim-lede { display: none; }
+.sim-about { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--bb-ink-3, var(--muted)); cursor: pointer; }
+.sim-about .ic { width: 19px; height: 19px; }
+.sim-about:hover, .sim-about[aria-expanded='true'] { color: var(--bb-ink); background: rgb(var(--hl-rgb, 255 255 255) / 0.06); }
+
+/* Stop stays in reach: the window's last row holds to its bottom edge while the rest scrolls. */
+.panel-body .safety:has(> .estop) { position: sticky; bottom: -14px; z-index: 3; margin: 0 -14px -14px; padding: 10px 14px 14px; background: linear-gradient(to bottom, transparent, var(--frost-solid, rgb(var(--surface-rgb, 20 22 26) / 0.94)) 26%); }
+.presence-controls > button[hidden] { display: none !important; }

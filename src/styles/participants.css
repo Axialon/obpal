@@ -73,3 +73,20 @@
   .surface > .participant-phone { margin: 0; width: 100%; padding-block: 4px; }
   .participant-phone button, .participant-phone select, .participant-phone summary { min-height: 44px; }
 }
+
+/* On a sim's screen the strip is the bar's presence cluster, top right: who is here as dots and a watching count, Share
+   and the audience settings. It never sits over the stage's top-centre, which is the sim's HUD lane. Requests to play
+   and the audience readout extend the cluster downward while there are any; the settings open as a card beneath it and
+   close on a press outside or Escape (src/ui/participants.ts). Stream view keeps the large broadcast strip. */
+body.sim:not(.stream-view) .participant-host { top: max(14px, calc(env(safe-area-inset-top) + 14px)); left: auto; right: max(16px, env(safe-area-inset-right)); transform: none; z-index: 6; grid-template-columns: minmax(0, auto) auto auto; align-items: center; gap: 4px 6px; min-height: 44px; max-width: min(360px, calc(100vw - 32px)); padding: 3px 4px 3px 12px; border-radius: 22px; }
+body.sim:not(.stream-view) .participant-host .participant-row { grid-column: 1; flex-wrap: nowrap; justify-content: flex-start; max-height: 36px; overflow: hidden; }
+body.sim:not(.stream-view) .participant-host .participant > span { display: none; }
+body.sim:not(.stream-view) .participant-host :is(.participant-requests, .audience-overlay) { grid-column: 1 / -1; margin-top: 2px; }
+body.sim:not(.stream-view) .participant-host details[open] { grid-column: auto; }
+body.sim:not(.stream-view) .participant-host details[open] > .participant-settings { position: absolute; top: calc(100% + 8px); right: 0; width: max-content; max-width: min(320px, calc(100vw - 32px)); margin: 0; padding: 10px; border: 1px solid var(--frost-edge); border-radius: 16px; background: var(--frost); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); box-shadow: var(--frost-shadow); }
+body.sim:not(.stream-view) .participant-host :is(.participant-action, summary) { min-width: 36px; min-height: 36px; padding: 6px; border-radius: 50%; }
+body.sim:not(.stream-view) .participant-host .participant-settings .participant-action { border-radius: 10px; padding: 6px 10px; }
+@media (max-width: 600px) {
+  body.sim:not(.stream-view) .participant-host { top: max(12px, calc(env(safe-area-inset-top) + 10px)); right: max(12px, env(safe-area-inset-right)); max-width: calc(100vw - 190px); padding-left: 10px; }
+  body.sim:not(.stream-view) .participant-host .participant { display: none; }
+}
