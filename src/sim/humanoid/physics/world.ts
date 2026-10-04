@@ -7,14 +7,15 @@ import { restIntent } from '../controls'
 import { ActuationGate, type ActuationFrame } from './contract'
 import { buildHumanoid, framesFromBodies, type PhysicalHumanoid } from './model'
 import { observe, type Observation } from './observation'
-import { Supervisor, type BehaviourRegistry } from './supervisor'
+import { Supervisor, type BehaviourRegistry, type BehaviourMode, type Behaviour } from './supervisor'
 import { BalanceController } from './balance'
+import { GaitController } from './gait'
 import type { Intent } from './intent'
 
 export type ActorId = 'seat1' | 'seat2'
 export interface Spawn { x: number; z: number; yaw: number; posture?: 'upright' | 'prone' | 'supine' }
 export interface ActorSpec { actorId: ActorId; profileId: string; spawn?: Spawn }
-export interface WorldOptions { actors?: readonly ActorSpec[]; factory?: BackendFactory; journalCapacity?: number }
+export interface WorldOptions { actors?: readonly ActorSpec[]; factory?: BackendFactory; journalCapacity?: number; gaitMode?: 'walk' | 'in-place' }
 export interface Disturbance { kind: 'push'; forceN: Vec3 }
 export interface WorldTickRecord { observation: Observation; intent: Intent; action: ActuationFrame; disturbances: Disturbance[] }
 export type WorldJournal = Partial<Record<ActorId, readonly WorldTickRecord[]>>
@@ -30,9 +31,9 @@ interface Actor {
   model: PhysicalHumanoid; generation: number; gate: ActuationGate; validationGate: ActuationGate; supervisor: Supervisor; intent: Intent
   hold: ActuationFrame['targets'] | null; journal: WorldTickRecord[]; pushes: { forceN: Vec3; ticks: number }[]
 }
-function supervisor(model: PhysicalHumanoid, generation: number): Supervisor {
+function supervisor(model: PhysicalHumanoid, generation: number, gaitMode: 'walk' | 'in-place'): Supervisor {
   const nominal = buildHumanoid(model.profileId, model.actorId), balance = new BalanceController(nominal, generation)
-  return new Supervisor(nominal, generation, new Map([['balance', {
+  return new Supervisor(nominal, generation, new Map<BehaviourMode, Behaviour>([['walk', new GaitController(nominal, generation, { mode: gaitMode })], ['balance', {
     mode: 'balance', canEnter: () => true, done: () => true, step: o => balance.step(o).frame,
   }]]))
 }
@@ -64,14 +65,15 @@ export class HumanoidWorld {
   private advancing = false
   private resetting = false
   private disposed = false
-  private constructor(private readonly simulation: Simulation, models: PhysicalHumanoid[], private readonly capacity: number) {
+  private constructor(private readonly simulation: Simulation, models: PhysicalHumanoid[], private readonly capacity: number, private readonly gaitMode: 'walk' | 'in-place') {
     for (const model of models) this.actors.set(model.actorId as ActorId, {
-      model, generation: 1, gate: new ActuationGate(model, 1), validationGate: new ActuationGate(model, 1), supervisor: supervisor(model, 1),
+      model, generation: 1, gate: new ActuationGate(model, 1), validationGate: new ActuationGate(model, 1), supervisor: supervisor(model, 1, gaitMode),
       intent: restIntent(), hold: null, journal: [], pushes: [],
     })
     this.actorBodies = new Set(models.flatMap(m => m.scene.bodies.filter(b => !b.fixed).map(b => b.id)))
   }
   static async create(options: WorldOptions = {}): Promise<HumanoidWorld> {
+    if (options.gaitMode !== undefined && !['walk', 'in-place'].includes(options.gaitMode)) throw new RangeError('Invalid world gait mode')
     const specs = options.actors ?? [
       { actorId: 'seat1', profileId: 'keel-v1', spawn: { x: -1, z: 0, yaw: 0 } },
       { actorId: 'seat2', profileId: 'keel-v1', spawn: { x: 1, z: 0, yaw: 0 } },
@@ -88,7 +90,7 @@ export class HumanoidWorld {
     const simulation = new Simulation(scene, options.factory ?? await PHYSICS_SELECTION.load())
     try {
       await simulation.init()
-      const world = new HumanoidWorld(simulation, models, capacity)
+      const world = new HumanoidWorld(simulation, models, capacity, options.gaitMode ?? 'walk')
       world.observations()
       return world
     } catch (error) { simulation.dispose(); throw error }
@@ -195,7 +197,7 @@ export class HumanoidWorld {
     a.generation++; const previous = a.gate.targets()
     a.gate = new ActuationGate(a.model, a.generation, observation.stateTick, previous)
     a.validationGate = new ActuationGate(a.model, a.generation, observation.stateTick, previous)
-    a.supervisor = supervisor(a.model, a.generation)
+    a.supervisor = supervisor(a.model, a.generation, this.gaitMode)
     a.hold = quiet ? Object.fromEntries(observation.joints.map(j => [j.id, { ...j.rotation }])) : null
     return a.generation
   }
@@ -206,7 +208,7 @@ export class HumanoidWorld {
     try {
       await this.simulation.reset()
       for (const a of this.actors.values()) { a.generation++; a.gate = new ActuationGate(a.model, a.generation); a.validationGate = new ActuationGate(a.model, a.generation);
-        a.supervisor = supervisor(a.model, a.generation); a.intent = restIntent(); a.hold = null; a.journal = []; a.pushes = [] }
+        a.supervisor = supervisor(a.model, a.generation, this.gaitMode); a.intent = restIntent(); a.hold = null; a.journal = []; a.pushes = [] }
     } finally { this.resetting = false }
   }
   dispose(): void { this.mutable(); this.simulation.dispose(); this.disposed = true; for (const a of this.actors.values()) { a.journal = []; a.pushes = [] } }

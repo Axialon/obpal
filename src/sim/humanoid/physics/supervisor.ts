@@ -3,6 +3,7 @@ import type { ActuationFrame } from './contract'
 import type { Intent } from './intent'
 import type { Observation } from './observation'
 import type { PhysicalHumanoid } from './model'
+import type { GaitDiagnostics } from './gait'
 import { StanceController } from './stance'
 import { STEP } from '../../physics/schema'
 import { conjugate, fromRotationVector, multiply, quaternion, rotationVector, scale, type Quat } from '../../physics/math'
@@ -15,6 +16,7 @@ export interface Behaviour {
   /** Returns a complete request for the actor's single ActuationGate. */
   step(observation: Observation, intent: Intent): ActuationFrame
   done(observation: Observation, intent: Intent): boolean
+  gaitDiagnostics?(): GaitDiagnostics
 }
 export type BehaviourRegistry = ReadonlyMap<BehaviourMode, Behaviour>
 
@@ -33,6 +35,7 @@ export interface UpperBodyAdapter {
 export interface SupervisorDiagnostics {
   mode: BehaviourMode; previousMode: BehaviourMode | null; transitioned: boolean
   upperBodyWeight: number; source: ActuationFrame['source']; tick: number
+  gait: GaitDiagnostics | null
 }
 /** Shortest-arc slerp expressed in the joint frame. The gate still owns cones and slew. */
 function blend(a: Quat, b: Quat, weight: number): Quat {
@@ -61,7 +64,7 @@ export class Supervisor {
     }
   }
   get mode(): BehaviourMode { return this.active?.mode ?? 'stance' }
-  diagnostics(): SupervisorDiagnostics | null { return this.lastDiagnostics ? { ...this.lastDiagnostics } : null }
+  diagnostics(): SupervisorDiagnostics | null { return this.lastDiagnostics ? structuredClone(this.lastDiagnostics) : null }
   /** Registry is owned by this supervisor; changing the caller's map cannot alter arbitration. */
   register(behaviour: Behaviour): void {
     if (!BEHAVIOUR_PRIORITY.includes(behaviour.mode) || typeof behaviour.canEnter !== 'function' || typeof behaviour.step !== 'function' || typeof behaviour.done !== 'function')
@@ -104,7 +107,7 @@ export class Supervisor {
     }
     this.active = selected
     this.lastDiagnostics = { mode: selected.mode, previousMode: previous?.mode ?? null, transitioned: selected !== previous,
-      upperBodyWeight: weight, source: frame.source, tick: observation.stateTick }
+      upperBodyWeight: weight, source: frame.source, tick: observation.stateTick, gait: this.registry.get('walk')?.gaitDiagnostics?.() ?? null }
     return frame
   }
 }

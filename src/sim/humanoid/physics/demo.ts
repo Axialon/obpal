@@ -3,7 +3,7 @@ import '../../../styles/base.css'
 import '../../../styles/sim.css'
 import '../../../styles/humanoid.css'
 import { BodyInput, type Layout } from '@obpal/host'
-import { Controller, encodeBody, type BodyState } from '@obpal/core'
+import { Controller, encodeBody, emptyPad, type BodyState } from '@obpal/core'
 import { family } from '../../../family'
 import { applyTheme, initialTheme, themeById } from '../../../ui/themes'
 import { mountMarks } from '../../../ui/icons'
@@ -13,15 +13,17 @@ import { mountBodyCapture, toggleBodyCapture } from '../../../ui/body-capture'
 import { cameraWorker } from '../../../ui/camera-worker'
 import { createStage } from '../../devices/stage'
 import { Seats } from '../../devices/seats'
+import { restInput } from '../../devices/types'
 import { startSimScene, type SimScene } from '../../scene'
 import { LocalControls } from '../../local-controls'
 import { mountSimPanels, numberSections } from '../../ui/panels'
 import { mountSound } from '../../audio/session'
 import { startScene } from '../../kit/recovery'
-import { KEEL } from '../profile'
+import { KEEL, MORROW } from '../profile'
 import { Rig, arena } from '../rig'
 import { Retargeter } from '../retarget'
-import { PRESETS, presetPose, type Preset } from '../controls'
+import { PRESETS, presetPose, restIntent, type Preset } from '../controls'
+import { walkingIntent, type Intent } from './intent'
 import { CALIBRATION_KEY, parseCalibration } from '../calibration'
 import { lightArena, quietHorizon, soleShadow } from '../lighting'
 import type { ActorId, PushClass, PushDirection } from './world'
@@ -33,6 +35,8 @@ startScene(async () => {
   applyTheme(initialTheme()); mountMarks(); mountTopBar(); mountQuick(); family.watchTheme()
   mountSimPanels('humanoid-physics', 'Controls'); numberSections()
   let ready = false, failed = false, count: 1 | 2 = 1, selected = 0, captureSeat = 0, captureActive = false
+  let failureMessage: string | null = null, resettable = false
+  let pilotProfile = KEEL
   const stage = createStage($<HTMLCanvasElement>('stage'), initialTheme(), { maxDpr: 1, portraitFraming: true, ready: () => ready || failed })
   stage.renderer.shadowMap.enabled = false
   lightArena(stage); stage.scene.add(arena())
@@ -47,7 +51,7 @@ startScene(async () => {
     const shadows = KEEL.chains.filter(c => c.group === 'legs').map(c => {
       const mesh = soleShadow(); stage.scene.add(mesh); mesh.visible = false; return { joint: c.end, mesh }
     })
-    return { id: `seat${i + 1}` as ActorId, name: `Keel ${i + 1}`, rig, retarget, shadows, owner: '', feed: '',
+    return { id: `seat${i + 1}` as ActorId, name: `Keel ${i + 1}`, rig, retarget, shadows, owner: '', feed: '', walkEnabled: false, intent: restIntent() as Intent,
       body: null as ReturnType<Retargeter['step']> | null, preset: null as Preset | null, presetAt: 0, loadedFeet: new Set<string>() }
   })
   const worker = cameraWorker('humanoidPhysics')
@@ -57,20 +61,22 @@ startScene(async () => {
   const budgetWorkTimesMs: number[] = [], budgetWorker: { workMs: number; seconds: number }[] = []
   let workerWorkMs = 0, workerAdvancedSeconds = 0, workBegin = 0, pendingEventWorkMs = 0, droppedSeconds = 0, droppedStart = 0, sampleOrigin = performance.now(), degraded = false, measure = false
   const retain = (list: number[], values: readonly number[]) => { list.push(...values); if (list.length > 100000) list.splice(0, list.length - 100000) }
-  function fail(message: string) {
-    if (failed) return
+  function fail(message: string, recoverable = false) {
+    if (failed && failureMessage === message) return
+    failureMessage = message; resettable = recoverable
     failed = true; ready = false; busy = false
-    $('physics-status').textContent = 'Physics unavailable'
-    $('physics-budget').textContent = `Rapier could not continue: ${message}. Open Humanoid practice to continue.`
-    for (const id of ['physics-push', 'physics-stance', 'physics-reset', 'physics-two', 'physics-body']) $<HTMLButtonElement>(id).disabled = true
+    $('physics-status').textContent = recoverable ? 'Physics paused · Reset to recover' : 'Physics unavailable'
+    $('physics-budget').textContent = `Rapier could not continue: ${message}. ${recoverable ? 'Reset rebuilds the arena.' : 'Open Humanoid practice to continue.'}`
+    for (const id of ['physics-push', 'physics-stance', 'physics-two', 'physics-body', 'physics-walk']) $<HTMLButtonElement>(id).disabled = true
+    $<HTMLButtonElement>('physics-reset').disabled = !recoverable
     for (const p of pending.values()) p.reject(new Error(message))
-    pending.clear(); worker.terminate()
+    pending.clear(); if (!recoverable) worker.terminate()
   }
   worker.onerror = event => fail(event.message || 'Worker failed')
-  worker.onmessage = (event: MessageEvent<PhysicsState | { kind: 'error'; request: number; message: string }>) => {
+  worker.onmessage = (event: MessageEvent<PhysicsState | { kind: 'error'; request: number; message: string; recoverable: boolean }>) => {
     const eventBegin = performance.now()
     const s = event.data
-    if (s.kind === 'error') { fail(s.message); return }
+    if (s.kind === 'error') { fail(s.message, s.recoverable); return }
     current = s
     if (s.request === advanceRequest) busy = false
     if (s.advancedSeconds > 0) { budgetWorker.push({ workMs: s.workerWorkMs, seconds: s.advancedSeconds }); if (budgetWorker.length > 120) budgetWorker.shift() }
@@ -83,22 +89,34 @@ startScene(async () => {
     const p = pending.get(s.request)
     if (p) { pending.delete(s.request); p.resolve(s) }
     pendingEventWorkMs += performance.now() - eventBegin
+    dispatchAdvance(performance.now())
   }
   type CommandInput = PhysicsCommand extends infer C ? C extends PhysicsCommand ? Omit<C, 'request'> : never : never
   function send(command: CommandInput): Promise<PhysicsState> {
-    if (failed) return Promise.reject(new Error('Physics unavailable'))
+    if (failed && !(resettable && command.kind === 'reset')) return Promise.reject(new Error('Physics unavailable'))
     const request = ++sequence
     const promise = new Promise<PhysicsState>((resolve, reject) => pending.set(request, { resolve, reject }))
     worker.postMessage({ ...command, request })
     return promise
+  }
+  function dispatchAdvance(now: number) {
+    if (!ready || failed || busy || pendingSeconds <= 0) return
+    // Simulation default: 50 ms per worker message. Retain the backlog; never discard admitted elapsed time.
+    const seconds = Math.min(pendingSeconds, .05)
+    busy = true; advanceRequest = ++sequence
+    worker.postMessage({ kind: 'advance', request: advanceRequest, seconds,
+      inputs: Object.fromEntries(actors.slice(0, count).map(a => [a.id, { body: a.body, intent: a.intent, walkEnabled: a.walkEnabled,
+        preset: a.preset ? presetPose(pilotProfile, a.preset, (now - a.presetAt) / 1200) : null }])) })
+    pendingSeconds -= seconds
   }
   let sim: SimScene | null = null, seats: Seats | null = null
   const sound = mountSound('dog', (strong, weak, ms, who) => sim?.remote.rumble(strong, weak, ms, who))
   numberSections()
   const nodes = () => actors.slice(0, count).map(a => ({ id: a.id, name: a.name, kind: 'slot' as const, group: 'Actors' }))
   const tray = [...PRESETS.map(id => ({ id, label: id[0].toUpperCase() + id.slice(1), type: 'button' as const })),
-    { id: 'push', label: 'Push', type: 'button' as const }, { id: 'reset', label: 'Reset', type: 'button' as const }, { id: 'stand', label: 'Stance', type: 'button' as const }]
-  const layout: Layout = { v: 1, controllers: [Controller.trackpad], utilities: ['touch.trackpad', 'camera.body'], tray }
+    { id: 'push', label: 'Push', type: 'button' as const }, { id: 'reset', label: 'Reset', type: 'button' as const }, { id: 'stand', label: 'Stance', type: 'button' as const },
+    { id: 'walk', label: 'Walk (experimental)', type: 'button' as const }]
+  const layout: Layout = { v: 1, controllers: [Controller.gamepad, Controller.trackpad], utilities: ['touch.trackpad', 'camera.body'], tray }
   const capture = mountBodyCapture({ timeOrigin: performance.now(), beforeOpen: () => {
     captureSeat = selected; captureActive = true; sim?.take(actors[captureSeat].id, 'host', true); return true
   }, closed: () => { captureActive = false; sim?.release('host') } })
@@ -106,21 +124,34 @@ startScene(async () => {
     phone: () => $('chip-invite').click(), controllerWindow: () => { if (sim?.remote.pairingUrl) window.open(sim.remote.pairingUrl, '_blank', 'noopener') },
     orbit: enabled => { stage.controls.enabled = enabled } })
   void startSimScene({ appName: 'ob.Pal humanoid physics', layout, nodes: nodes(), approval: false,
-    howTo: () => 'Push tests balance · Reset rebuilds the arena · BODY follows with arms and head',
+    howTo: () => 'Walk (experimental) is limited to stepping and turning in place · Release to balance · Reset rebuilds the arena',
     joined: participant => { if (participant.capability !== 'watch') { const a = actors.slice(0, count).find(a => !sim?.claims.holder(a.id)); if (a) sim?.take(a.id, participant.id) } },
   }).then(s => { sim = s; seats = new Seats(s.remote, layout); if (captureActive) s.take(actors[captureSeat].id, 'host') }).catch(error => {
     $('seat-owner').textContent = `Phone pairing unavailable: ${error instanceof Error ? error.message : 'connection failed'}. Local controls remain available.`
   })
   const injected = new Map<number, BodyInput>()
+  const sticks = new Map<number, Intent>()
   const testing = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) && new URLSearchParams(location.search).get('test') === 'humanoid-physics'
   function choose(index: number) {
     selected = Math.min(count - 1, index)
+    $<HTMLInputElement>('physics-walk').checked = actors[selected].walkEnabled
     document.querySelectorAll<HTMLButtonElement>('[data-seat]').forEach(button => { button.hidden = Number(button.dataset.seat) >= count; button.setAttribute('aria-pressed', String(Number(button.dataset.seat) === selected)) })
   }
-  function clearCapture() { for (const a of actors) { a.retarget.reset(); a.body = null; a.preset = null; a.feed = ''; a.loadedFeet.clear() }; injected.clear() }
+  function clearCapture() { for (const a of actors) { a.retarget.reset(); a.body = null; a.preset = null; a.feed = ''; a.loadedFeet.clear(); a.walkEnabled = false; a.intent = restIntent() }; injected.clear(); sticks.clear(); choose(selected) }
+  async function setWalk(index: number, enabled: boolean) {
+    const a = actors[index]
+    a.walkEnabled = enabled; if (!enabled) a.intent = restIntent()
+    if (index === selected) $<HTMLInputElement>('physics-walk').checked = enabled
+    sim?.log(`${a.name}: experimental walk ${enabled ? 'enabled' : 'stopping'}`)
+  }
   async function reset() {
     ready = false; pendingSeconds = 0; droppedSeconds = 0; clearCapture()
-    try { await send({ kind: 'reset' }); ready = true; lastNow = 0; sim?.log('Arena reset') }
+    try {
+      await send({ kind: 'reset' }); failed = false; failureMessage = null; resettable = false; ready = true; lastNow = 0
+      for (const id of ['physics-push', 'physics-stance', 'physics-reset', 'physics-body', 'physics-walk']) $<HTMLButtonElement>(id).disabled = false
+      $<HTMLInputElement>('physics-two').disabled = degraded
+      sim?.log('Arena reset')
+    }
     catch (error) { fail(error instanceof Error ? error.message : 'Reset failed') }
   }
   async function actorCount(next: 1 | 2) {
@@ -128,7 +159,7 @@ startScene(async () => {
     ready = false; count = next; pendingSeconds = 0; droppedSeconds = 0; clearCapture(); choose(selected)
     $<HTMLInputElement>('physics-two').checked = next === 2; $('physics-actor2').hidden = next !== 2
     sim?.setNodes(nodes())
-    try { await send({ kind: 'init', count }); ready = true; lastNow = 0; sim?.log(`${count} actor arena started`) }
+    try { await send({ kind: 'init', count, profileId: pilotProfile === MORROW ? 'morrow-v1' : 'keel-v1' }); ready = true; lastNow = 0; sim?.log(`${count} actor arena started`) }
     catch (error) { fail(error instanceof Error ? error.message : 'Arena failed') }
   }
   async function push(actorId: ActorId = actors[selected].id, magnitude: PushClass = 'A', direction: PushDirection = 'toe') {
@@ -136,15 +167,18 @@ startScene(async () => {
     await send({ kind: 'push', actorId, magnitude, direction }); sim?.log(`${actorId}: class ${magnitude} ${direction} push`)
   }
   async function stance(actorId: ActorId = actors[selected].id) {
+    if (!ready) return
     const a = actors.find(a => a.id === actorId)!
+    await setWalk(actors.indexOf(a), false)
     a.preset = null; a.body = null; a.retarget.reset(); injected.delete(actors.indexOf(a))
     if (captureSeat === actors.indexOf(a)) captureActive = false
     await send({ kind: 'stance', actorId }); sim?.log(`${actorId}: stance`)
   }
   const action = (id: string, actor: typeof actors[number]) => {
-    if (id === 'push') void push(actor.id).catch(error => fail(String(error)))
+    if (id === 'push') void push(actor.id).catch(error => { if (!failed) fail(String(error)) })
     else if (id === 'reset' || id === 'home') void reset()
-    else if (id === 'stand') void stance(actor.id).catch(error => fail(String(error)))
+    else if (id === 'stand') void stance(actor.id).catch(error => { if (!failed) fail(String(error)) })
+    else if (id === 'walk') void setWalk(actors.indexOf(actor), !actor.walkEnabled)
     else if (PRESETS.includes(id as Preset)) { actor.preset = id as Preset; actor.presetAt = performance.now() }
   }
   document.querySelectorAll<HTMLButtonElement>('[data-seat]').forEach(button => { button.onclick = () => choose(Number(button.dataset.seat)) })
@@ -152,6 +186,7 @@ startScene(async () => {
   $('physics-reset').onclick = () => void reset()
   $('physics-stance').onclick = () => action('stand', actors[selected])
   $('physics-body').onclick = () => toggleBodyCapture()
+  $<HTMLInputElement>('physics-walk').onchange = event => { void setWalk(selected, (event.target as HTMLInputElement).checked) }
   $<HTMLInputElement>('physics-two').onchange = event => { void actorCount((event.target as HTMLInputElement).checked ? 2 : 1) }
   addEventListener('keydown', event => {
     if (event.repeat || event.ctrlKey || event.metaKey || event.altKey || (event.target as Element)?.closest('input,select,textarea,button,a,[contenteditable]')) return
@@ -159,7 +194,17 @@ startScene(async () => {
     else if (event.code === 'KeyR') void reset()
     else if (event.code === 'Space') { event.preventDefault(); action('stand', actors[selected]) }
   })
-  document.addEventListener('visibilitychange', () => { lastNow = 0; pendingSeconds = 0 })
+  document.addEventListener('visibilitychange', () => {
+    lastNow = 0
+    if (document.hidden) {
+      sticks.clear()
+      for (const a of actors.slice(0, count)) {
+        a.walkEnabled = false; a.intent = restIntent(); a.body = null; a.preset = null
+        if (!failed) void send({ kind: 'loss', actorId: a.id }).catch(error => { if (!failed) fail(String(error)) })
+      }
+      choose(selected)
+    }
+  })
   let uiAt = 0, budgetAt = 0
   stage.onFrame = (t, dt) => {
     workBegin = performance.now()
@@ -173,11 +218,12 @@ startScene(async () => {
       const owner = sim?.claims.holder(a.id) ?? (localFrames.has(i) || captureActive && captureSeat === i ? 'host' : '')
       if (owner !== a.owner) {
         const previous = a.owner; a.owner = owner; a.retarget.reset(); a.preset = null
-        if (previous) void send({ kind: 'loss', actorId: a.id }).catch(error => fail(String(error)))
+        if (previous) { void setWalk(i, false); sticks.delete(i); void send({ kind: 'loss', actorId: a.id }).catch(error => { if (!failed) fail(String(error)) }) }
         const participant = sim?.remote.participants.find(p => p.id === owner), key = `${CALIBRATION_KEY}${owner === 'host' ? 'local' : participant?.fp ?? participant?.pair ?? owner}`
-        try { a.retarget.data = parseCalibration(localStorage.getItem(key), KEEL) } catch { a.retarget.data = parseCalibration(null, KEEL) }
+        try { a.retarget.data = parseCalibration(localStorage.getItem(key), pilotProfile) } catch { a.retarget.data = parseCalibration(null, pilotProfile) }
       }
       const input = owner && owner !== 'host' ? inputs?.get(owner) : localFrames.get(i)
+      a.intent = a.walkEnabled ? (testing ? sticks.get(i) : undefined) ?? walkingIntent(input) : restIntent()
       for (const id of input?.presses ?? []) action(id, a)
       for (const [bit, item] of tray.entries()) if ((input?.padPressed ?? 0) & 1 << bit) action(item.id, a)
       const seam = testing ? injected.get(i)?.read(now) ?? null : null,
@@ -200,19 +246,12 @@ startScene(async () => {
       }
     }
     sound.tick(t)
-    if (!busy && pendingSeconds > 0) {
-      // Simulation default: 0.25 s maximum queued elapsed time; expose any discard without changing the fixed-tick rate.
-      if (pendingSeconds > .25) { droppedSeconds += pendingSeconds - .25; pendingSeconds = .25 }
-      busy = true; advanceRequest = ++sequence
-      worker.postMessage({ kind: 'advance', request: advanceRequest, seconds: pendingSeconds,
-        inputs: Object.fromEntries(actors.slice(0, count).map(a => [a.id, { body: a.body, preset: a.preset ? presetPose(KEEL, a.preset, (now - a.presetAt) / 1200) : null }])) })
-      pendingSeconds = 0
-    }
+    dispatchAdvance(now)
     if (now - uiAt > 150 && current) {
       uiAt = now
-      for (const [i, a] of current.actors.entries()) $('physics-actor' + (i + 1)).textContent = `Keel ${i + 1} · ${a.mode} / ${a.source} · up-Y ${a.upY.toFixed(3)} · ${a.support} support · effort ${(a.effortRatio * 100).toFixed(0)}%`
+      for (const [i, a] of current.actors.entries()) $('physics-actor' + (i + 1)).textContent = `${actors[i].name} · ${a.gaitState} / ${a.source} · up-Y ${a.upY.toFixed(3)} · ${a.support} support · effort ${(a.effortRatio * 100).toFixed(0)}% · peak foot penetration ${(a.peakFootPenetrationM * 1000).toFixed(1)} mm`
       const s = current.actors[selected]
-      $('physics-status').textContent = s ? `up-Y ${s.upY.toFixed(3)} · ${s.support} support · effort ${(s.effortRatio * 100).toFixed(0)}%` : 'Preparing actor'
+      $('physics-status').textContent = s ? `${s.gaitState} · step/turn only · peak foot penetration ${(s.peakFootPenetrationM * 1000).toFixed(1)} mm${s.arenaBlocked ? ' · stopped near arena wall' : ''}${s.bodySuspended ? ' · BODY paused during gait' : ''}` : 'Preparing actor'
       $('physics-fall').hidden = !current.actors.some(a => a.fallen)
       $('seat-owner').textContent = actors[selected].owner ? `${actors[selected].name} · ${sim?.nameOf(actors[selected].owner) ?? actors[selected].owner}` : 'Pair a phone to control your actor.'
     }
@@ -239,12 +278,29 @@ startScene(async () => {
     droppedStart = droppedSeconds + (current?.droppedSeconds ?? 0); pendingEventWorkMs = 0; sampleOrigin = performance.now(); measure = true }
   if (testing) Object.assign(window, { __humanoidControl: {
     actors, stage, fixtureProfile: KEEL, ready: () => ready,
-    snapshot: () => ({ ready, host: 'worker', actorCount: count, tick: current?.tick ?? 0, droppedSeconds: droppedSeconds + (current?.droppedSeconds ?? 0), degraded,
+    snapshot: () => ({ ready, failureMessage, resettable, host: 'worker', actorCount: count, tick: current?.tick ?? 0, queuedSeconds: pendingSeconds, droppedSeconds: droppedSeconds + (current?.droppedSeconds ?? 0), degraded,
       disturbances: current?.actors.reduce((sum, actor) => sum + actor.disturbances, 0) ?? 0,
       actors: current?.actors.map((s, i) => ({ ...s, owner: actors[i].owner, feed: actors[i].feed, tracked: actors[i].body?.tracked ?? false, q: actors[i].body?.q ?? {} })) ?? [] }),
     metrics: () => ({ workTimesMs: [...workTimesMs], tickTimesMs: [...tickTimesMs], workerTimesMs: [...workerTimesMs], frameIntervalsMs: [...frameIntervalsMs],
       workerUtilisation: workerAdvancedSeconds ? workerWorkMs / (workerAdvancedSeconds * 1000) : 0, droppedSeconds: Math.max(0, droppedSeconds + (current?.droppedSeconds ?? 0) - droppedStart), gfx: stage.view.gfx() }),
-    reset, actorCount, push, stance, startMeasure: resetMetrics, resetMetrics,
+    reset, actorCount, push, stance, setWalk, startMeasure: resetMetrics, resetMetrics,
+    rejectAdvance: () => send({ kind: 'advance', seconds: -1, inputs: {} }),
+    stick: (lx: number, ly: number, index = selected) => {
+      const input = restInput()
+      input.pad = { ...emptyPad(), axes: [lx, ly, 0, 0] }
+      sticks.set(index, walkingIntent(input))
+    },
+    profile: async (id: 'keel-v1' | 'morrow-v1') => {
+      ready = false; pilotProfile = id === 'morrow-v1' ? MORROW : KEEL
+      for (const [i, a] of actors.entries()) {
+        stage.scene.remove(a.rig.root); a.rig.dispose()
+        a.rig = new Rig(pilotProfile, i); a.retarget = new Retargeter(pilotProfile); a.name = `${pilotProfile === MORROW ? 'Morrow' : 'Keel'} ${i + 1}`
+        stage.scene.add(a.rig.root); a.rig.root.visible = false
+        await a.rig.load()
+      }
+      document.querySelectorAll<HTMLButtonElement>('[data-seat]').forEach(button => { button.textContent = actors[Number(button.dataset.seat)].name })
+      await actorCount(1)
+    },
     endMeasure: () => { measure = false; return { workTimesMs: [...workTimesMs], tickTimesMs: [...tickTimesMs], workerUtilisation: workerAdvancedSeconds ? workerWorkMs / (workerAdvancedSeconds * 1000) : 0,
       droppedSeconds: Math.max(0, droppedSeconds + (current?.droppedSeconds ?? 0) - droppedStart), gfx: stage.view.gfx() } },
     inject: (index: number, state: BodyState) => { if (!injected.has(index)) injected.set(index, new BodyInput()); injected.get(index)!.receive(encodeBody(state)) },

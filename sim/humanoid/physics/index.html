@@ -43,7 +43,8 @@
         <p id="seat-owner" class="sim-lede">Pair a phone to control your actor.</p>
         <label class="sim-auto"><input id="physics-two" type="checkbox" /> Two actors</label>
         <div class="sim-actions"><button class="kit-action" id="physics-body" type="button">Body camera</button></div>
-        <p class="sim-lede">BODY follows with the arms and head while the legs balance. Walking is not available in this preview.</p>
+        <label class="sim-auto"><input id="physics-walk" type="checkbox" /> Walk (experimental)</label>
+        <p class="sim-lede">Step and turn in place only. Left stick forward/back steps; sideways turns. Release to balance. BODY pauses during gait.</p>
       </section>
       <section class="sim-sec">
         <header class="kit-card-head"><span class="kit-card-n">02</span><h2 class="kit-card-title">Try the balance</h2></header>
@@ -56,6 +57,7 @@
         <p id="physics-actor1" class="sim-lede">Keel 1 · waiting</p><p id="physics-actor2" class="sim-lede" hidden>Keel 2 · waiting</p>
         <p id="physics-budget" class="sim-lede">Physics runs in a worker.</p>
         <p class="sim-lede physics-open-gates">24 anatomy gates remain open. This preview is not a complete anatomy or recovery model.</p>
+        <p class="sim-lede physics-open-gates">Travel is disabled after unstable walking trials. Stepping still exceeds the 5 mm foot penetration gate; peak is measured live above.</p>
         <a class="kit-action" href="/sim/humanoid/">Humanoid practice</a>
       </section>
       <div data-sound-home></div>

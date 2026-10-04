@@ -203,6 +203,8 @@ Merges go in order A, B, C, D at T+4 and T+9.5 h. Round 3 (T+10 to T+12 h) fixes
 
 It drops `ActorControl`, `FootBalance` and tendons. The status strip shows each actor's mode, source and gates, with anatomy shown red.
 
+The presentation page keeps balance as its default. Its opt-in **Walk (experimental)** toggle is limited to stepping and turning in place: forward walking was sensitive to the settled starting pose and could fall before turning. The left stick requests stepping and yaw through `intent.ts`; release finishes the step before returning to balance. BODY is paused while gait owns the legs. The HUD reports the live gait state and peak measured foot penetration, and the 5 mm gait gates remain red. Reset rebuilds the arena after a fall or a recoverable worker error.
+
 Fallbacks, in order:
 
 1. Rapier or WASM failure: the page says so and links to practice, with no substitution.

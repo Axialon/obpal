@@ -3,6 +3,7 @@ import { build } from 'vite'
 import { chromium, devices } from 'playwright'
 import sharp from 'sharp'
 import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { mkdir, writeFile, readFile } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -203,26 +204,42 @@ const standing = actor => Number.isFinite(actor.upY) && actor.upY >= .98 &&
 const actorSummary = actor => ({ actorId: actor.actorId, generation: actor.generation, upY: actor.upY,
   pelvisHeight: actor.pelvisHeight, nominalPelvisHeight: actor.nominalPelvisHeight, support: actor.support,
   effortRatio: actor.effortRatio, bodyWeight: actor.bodyWeight, upperBodyMovementRad: actor.upperBodyMovementRad,
-  mode: actor.mode, source: actor.source })
+  mode: actor.mode, source: actor.source, gaitState: actor.gaitState, fallen: actor.fallen,
+  peakFootPenetrationM: actor.peakFootPenetrationM, position: actor.position, headingRad: actor.headingRad, walkingMode: actor.walkingMode })
 
 /** Actual experimental page. The older, full F1a proof remains separately callable. */
 export async function runHumanoidPhysics(local, check) {
   if (process.env.OBPAL_E2E_HUMANOID_PILOT_PROOF === '1') await runHumanoidPilotProof(local, check)
+  const baseline = process.env.OBPAL_E2E_HUMANOID_WALK_BASELINE === '1'
+  const walkOnly = process.env.OBPAL_E2E_HUMANOID_WALK_ONLY === '1' && !baseline
+  const expectedScenarios = baseline ? 2 : walkOnly ? 3 : 10, expectedFrames = baseline ? 6 : walkOnly ? 18 : 36
   const evidence = join(process.env.OBPAL_E2E_EVIDENCE_ROOT || join(ROOT, 'artifacts'), 'humanoid-control')
   const report = { schema_version: 1, kind: 'humanoid-control-browser', pass: false,
     environment: { node: process.version, platform: process.platform, gpuMode: process.env.OBPAL_E2E_GPU || '0',
-      viewport: { width: 1280, height: 800 }, dpr: 1, browser: null, renderer: null },
-    acceptanceStatus: 'Experimental physics; native anatomy failures remain explicit; gait is outside this presentation scope',
+      viewport: { width: 1280, height: 800 }, dpr: 1, browser: null, renderer: null,
+      sourceSha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(),
+      workingTreeModified: !!execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: ROOT, encoding: 'utf8' }).trim(),
+      camera: 'unchanged page default; fixed during each strip', device: 'desktop browser; phone layout is viewport emulation',
+      motionPreference: 'no-preference', walkBaselineOnly: baseline, walkDebugOnly: walkOnly },
+    acceptanceStatus: 'Walk (experimental), opt in, limited to step-and-turn-in-place; forward walking is not claimed; native penetration gates remain unchanged',
     overrides: ['Actual demo group replaces optional older F1a browser proof for this scoped run',
-      'Default one standing actor with synthetic BODY input; walking is not claimed',
+      'Authorised fallback: per-pilot 10 s forward intent and 20 s turn in place, then release and 6 s settle; Keel must stay upright and within 0.30 m; Morrow instability and Reset recovery are recorded',
       'Default actor: 60 s warm-up / 120 s sample; optional two-actor attempt: 15 s warm-up / 30 s sample; five-minute and full two-actor acceptance are deferred'],
     bodyProof: 'Synthetic landmarks through BodyInput and Retargeter; this does not measure a physical phone camera',
-    results: [], errors: [], consoleMessages: [], requestFailures: [], strips: [], measurements: [], frameBudget: null }
+    results: [], errors: [], consoleMessages: [], requestFailures: [], strips: [], measurements: [], frameBudget: null, walking: [] }
   const frames = [], contexts = []
   let browser, raw, page
   const record = async (name, work) => {
     try { report.results.push({ name, pass: true, detail: await work() }) }
-    catch (error) { report.results.push({ name, pass: false, error: String(error?.message ?? error) }) }
+    catch (error) {
+      const row = { name, pass: false, error: String(error?.message ?? error) }
+      if (page && !page.isClosed()) {
+        try { row.failureState = await page.evaluate(() => ({ status: document.getElementById('physics-status')?.textContent ?? '',
+          budget: document.getElementById('physics-budget')?.textContent ?? '', snapshot: window.__humanoidControl?.snapshot() ?? null })) }
+        catch (diagnosticError) { row.diagnosticError = String(diagnosticError?.message ?? diagnosticError) }
+      }
+      report.results.push(row)
+    }
   }
   try {
     raw = rawRun(evidence)
@@ -259,10 +276,13 @@ export async function runHumanoidPhysics(local, check) {
         const actualMs = Date.now() - begin
         await writeFile(join(raw, path), png)
         states.push({ requestedMs: at, actualMs, state })
-        frames.push({ path, timeMs: actualMs, note: `${scenario}; fixed desktop camera, experimental physics page` })
+        frames.push({ path, timeMs: actualMs, failed: !state.ready || state.actors.some(actor => actor.fallen),
+          note: `${scenario}; fixed desktop camera, experimental physics page` })
         tiles.push({ input: await sharp(png).resize(400, 250, { fit: 'contain', background: '#10151d' }).png().toBuffer(), left: index * 400, top: 34 })
-        const label = `${scenario}: ${(actualMs / 1000).toFixed(2)} s; up ${state.actors[0]?.upY?.toFixed(4) ?? 'missing'}`
-        tiles.push({ input: Buffer.from(`<svg width="400" height="34"><text x="8" y="22" fill="white" font-family="sans-serif" font-size="14">${label}</text></svg>`), left: index * 400, top: 0 })
+        const actor = state.actors[0], phase = actor?.gaitState ?? 'standing'
+        const penetration = Number.isFinite(actor?.peakFootPenetrationM) ? `; peak ${(actor.peakFootPenetrationM * 1000).toFixed(1)} mm` : ''
+        const label = `${scenario}: ${(actualMs / 1000).toFixed(2)} s; ${phase}${penetration}`
+        tiles.push({ input: Buffer.from(`<svg width="400" height="34"><text x="8" y="22" fill="white" font-family="sans-serif" font-size="12">${label}</text></svg>`), left: index * 400, top: 0 })
       }
       const png = await sharp({ create: { width: times.length * 400, height: 284, channels: 4, background: '#10151d' } }).composite(tiles).png().toBuffer()
       const name = `${scenario}-strip.png`
@@ -276,6 +296,10 @@ export async function runHumanoidPhysics(local, check) {
       const state = await read()
       requireMeasurement(state.actors.length === 1, 'Page did not start with exactly one actor')
       requireMeasurement(await page.getByText('Experimental physics', { exact: true }).count() > 0, 'Experimental label missing')
+      if (!baseline) {
+        requireMeasurement(await page.getByText('Walk (experimental)', { exact: true }).count() > 0, 'Walk experimental label missing')
+        requireMeasurement(!await page.locator('#physics-walk').isChecked(), 'Walk must start off by default')
+      }
       requireMeasurement(await page.locator('a[href="/sim/humanoid/"]').count() > 0, 'Kinematic practice link missing')
       const renderer = await page.evaluate(() => {
         const canvas = document.querySelector('canvas'), gl = canvas?.getContext('webgl2'), info = gl?.getExtension('WEBGL_debug_renderer_info')
@@ -284,6 +308,26 @@ export async function runHumanoidPhysics(local, check) {
       report.environment.renderer = renderer
       return { actorCount: state.actors.length, host: state.host, renderer }
     })
+    if (baseline) {
+      await record('before walking: comparable desktop and phone-width standing captures', async () => {
+        const states = await capture('standing', [0, 500, 1000, 2000, 4000])
+        requireMeasurement(states.every(sample => standing(sample.state.actors[0])), 'Baseline standing left the stance envelope')
+        await page.setViewportSize({ width: 412, height: 915 })
+        await page.waitForTimeout(500)
+        if (!await controls.isVisible()) await page.locator('[data-panel-toggle="controls"]').click()
+        await page.locator('[data-physics-push]').scrollIntoViewIfNeeded()
+        await capture('phone-width-standing', [0])
+        await writeFile(join(evidence, 'phone-width.png'), await page.screenshot())
+        return { desktopSamples: states.length, phoneWidth: 412, baselineOnly: true }
+      })
+      await check('humanoid physics: before walking baseline captures', () => {
+        requireMeasurement(report.results.length === 2 && report.results.every(row => row.pass) && frames.length === 6,
+          report.results.filter(row => !row.pass).map(row => row.error).join('; ') || 'Incomplete baseline capture')
+        return 'desktop standing strip and phone-width standing capture; no walking claim'
+      })
+      return
+    }
+    if (!walkOnly) {
     await record('standing strip holds the sampled stance envelope', async () => {
       const states = await capture('standing', [0, 500, 1000, 2000, 4000])
       requireMeasurement(states.every(sample => standing(sample.state.actors[0])), 'Standing left the sampled stance envelope')
@@ -333,6 +377,22 @@ export async function runHumanoidPhysics(local, check) {
       const hint = page.locator('#physics-fall')
       await hint.waitFor({ state: 'visible', timeout: 2000 })
       requireMeasurement(/down.*reset/i.test(await hint.textContent() ?? ''), 'Fallen actor has no visible Down / Reset hint')
+      const paused = await page.evaluate(async () => {
+        try { await window.__humanoidControl.rejectAdvance() } catch { /* Deliberate invalid elapsed time tests recoverable worker failure. */ }
+        return window.__humanoidControl.snapshot()
+      })
+      requireMeasurement(!paused.ready && paused.resettable && /elapsed time/i.test(paused.failureMessage), 'Worker rejection did not leave a recoverable Reset path')
+      await page.keyboard.press('Space')
+      await page.evaluate(() => {
+        Object.defineProperty(document, 'hidden', { configurable: true, value: true })
+        document.dispatchEvent(new Event('visibilitychange'))
+        delete document.hidden
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+      const cancelled = await read()
+      requireMeasurement(!cancelled.ready && cancelled.resettable && cancelled.failureMessage === paused.failureMessage,
+        'Background cancellation or Stance destroyed the recoverable worker fault')
+      requireMeasurement(await page.locator('[data-physics-reset]').isEnabled(), 'Recoverable worker rejection disabled Reset')
       await page.locator('[data-physics-reset]').click()
       await page.waitForFunction(generation => {
         const state = window.__humanoidControl.snapshot(), actor = state.actors[0]
@@ -344,37 +404,194 @@ export async function runHumanoidPhysics(local, check) {
       report.measurements.push({ scenario: 'fall-reset', samples: [{ phase: 'before', state: before }, { phase: 'fallen', state: fallen },
         { phase: 'reset', state: restored }] })
       return { disturbance: 'class D toe-ward, 150 N s over 0.1 s', before: actorSummary(before.actors[0]),
-        fallen: actorSummary(fallen.actors[0]), restored: actorSummary(restored.actors[0]), fallback: 'explicit arena rebuild; no get-up claim' }
+        fallen: actorSummary(fallen.actors[0]), restored: actorSummary(restored.actors[0]), recoverableWorkerReset: true, fallback: 'explicit arena rebuild; no get-up claim' }
     })
-    await record('phone Push, Stance and Reset reach the claimed actor', async () => {
+    await record('phone Push, Stance, Reset and left stick reach the claimed actor', async () => {
       await reset()
       const invite = await page.evaluate(() => window.__obpal?.pairingUrl)
       requireMeasurement(typeof invite === 'string' && invite.length > 0, 'Phone pairing URL missing')
       const phoneContext = await browser.newContext({ ...devices['Pixel 7'], ignoreHTTPSErrors: true, serviceWorkers: 'block' })
       contexts.push(phoneContext)
-      await phoneContext.addInitScript(() => sessionStorage.setItem('obpal.hint.gyro', '1'))
-      const phone = await phoneContext.newPage()
-      phone.on('pageerror', error => report.errors.push(`phone: ${error.message}`))
-      await phone.goto(invite, { timeout: 30_000 })
-      await phone.locator('.gp:not([hidden]), .modes:visible').first().waitFor({ timeout: 25_000 })
-      await page.waitForFunction(() => !!window.__humanoidControl.snapshot().actors[0]?.owner, undefined, { timeout: 15_000 })
-      const initial = await read()
-      const tray = label => phone.locator(`.tray-btn[aria-label="${label}"]`)
-      await tray('Push').click()
-      await page.waitForFunction(before => {
-        const s = window.__humanoidControl.snapshot()
-        return (s.disturbances ?? s.pushes ?? 0) > before
-      }, initial.disturbances ?? initial.pushes ?? 0, { timeout: 8000 })
-      await tray('Stance').click()
-      await tray('Reset').click()
-      await page.waitForFunction(gen => window.__humanoidControl.snapshot().actors[0].generation > gen,
-        initial.actors[0].generation, { timeout: 8000 })
-      const final = await read()
-      await phoneContext.close()
-      await page.bringToFront()
-      return { beforeGeneration: initial.actors[0].generation, afterGeneration: final.actors[0].generation,
-        actorCount: final.actors.length, physicalPhoneClaimed: false, phoneViewportEmulation: true }
+      try {
+        await phoneContext.addInitScript(() => sessionStorage.setItem('obpal.hint.gyro', '1'))
+        const phone = await phoneContext.newPage()
+        phone.on('pageerror', error => report.errors.push(`phone: ${error.message}`))
+        await phone.goto(invite, { timeout: 30_000 })
+        await phone.locator('.gp:not([hidden]), .modes:visible').first().waitFor({ timeout: 25_000 })
+        await page.waitForFunction(() => !!window.__humanoidControl.snapshot().actors[0]?.owner, undefined, { timeout: 15_000 })
+        const initial = await read()
+        if (await phone.locator('.gp').isVisible()) await phone.locator('.gp [data-act="exit"]').click()
+        const tray = label => phone.locator(`.tray-btn[aria-label="${label}"]`)
+        await tray('Push').click()
+        await page.waitForFunction(before => {
+          const s = window.__humanoidControl.snapshot()
+          return (s.disturbances ?? s.pushes ?? 0) > before
+        }, initial.disturbances ?? initial.pushes ?? 0, { timeout: 8000 })
+        await tray('Stance').click()
+        await tray('Reset').click()
+        await page.waitForFunction(gen => window.__humanoidControl.snapshot().actors[0].generation > gen,
+          initial.actors[0].generation, { timeout: 8000 })
+        const final = await read()
+        await phone.locator('.ctl-tab[data-c="face.gamepad"]').click()
+        await page.locator('#physics-walk').check()
+        const stick = phone.locator('.gp-stick[data-stick="0"]')
+        await stick.waitFor({ state: 'visible' })
+        // Synthetic touch events traverse the controller's actual Stick and pairing transport.
+        // This proves the emulated phone input path, not physical touch latency.
+        await stick.evaluate(zone => {
+          const box = zone.getBoundingClientRect(), radius = zone.querySelector('.gp-base').offsetWidth / 2
+          const x = box.left + box.width / 2, y = box.top + box.height / 2
+          window.__humanoidStick = { x, y, travel: Math.max(20, radius - 8) }
+          zone.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 51, pointerType: 'touch', clientX: x, clientY: y }))
+          zone.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 51, pointerType: 'touch', clientX: x, clientY: y - window.__humanoidStick.travel }))
+        })
+        let phoneWalk
+        try {
+          await page.waitForFunction(() => ['stepping', 'walking'].includes(window.__humanoidControl.snapshot().actors[0]?.gaitState),
+            undefined, { timeout: 8000 })
+          phoneWalk = await read()
+          await stick.evaluate(zone => {
+            const { x, y, travel } = window.__humanoidStick
+            zone.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 51, pointerType: 'touch', clientX: x + travel, clientY: y }))
+          })
+          await page.waitForTimeout(750)
+        } finally {
+          await stick.evaluate(zone => {
+            const { x, y } = window.__humanoidStick
+            zone.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 51, pointerType: 'touch', clientX: x, clientY: y }))
+          })
+        }
+        await page.waitForFunction(() => window.__humanoidControl.snapshot().actors[0]?.gaitState === 'standing',
+          undefined, { timeout: 8000 })
+        const released = await read()
+        requireMeasurement(!released.actors[0].fallen, 'Emulated phone stick release did not return safely to standing')
+        await page.locator('#physics-walk').uncheck()
+        return { beforeGeneration: initial.actors[0].generation, afterGeneration: final.actors[0].generation,
+          actorCount: final.actors.length, walking: actorSummary(phoneWalk.actors[0]), released: actorSummary(released.actors[0]),
+          inputPath: 'phone left Stick touch events -> paired PadState -> intent.ts -> gait',
+          physicalPhoneClaimed: false, phoneViewportEmulation: true }
+      } finally {
+        try { await phoneContext.close() }
+        catch (error) { report.errors.push(`Phone context cleanup: ${error.message}`) }
+        await page.bringToFront()
+      }
     })
+    }
+    for (const profileId of ['keel-v1', 'morrow-v1']) await record(`${profileId}: scripted stick stepping, turn, release and work budget`, async () => {
+      let observed
+      try {
+        await page.evaluate(async profileId => {
+          if (window.fixture) window.fixture.enabled = false
+          clearInterval(window.fixtureTimer)
+          window.__humanoidControl.clear(0)
+          await window.__humanoidControl.profile(profileId)
+        }, profileId)
+        await page.waitForFunction(() => window.__humanoidControl.snapshot().ready, undefined, { timeout: 30_000 })
+        await page.waitForTimeout(1500)
+        const inPlace = (await read()).actors[0]?.walkingMode === 'in-place', releaseMs = inPlace ? 30000 : 12000
+        await page.evaluate(async releaseMs => {
+          await window.__humanoidControl.setWalk(0, true)
+          window.__humanoidControl.startMeasure()
+          window.__humanoidWalkTrace = []
+          window.__humanoidWalkStart = performance.now()
+          window.__humanoidWalkTimer = setInterval(() => window.__humanoidWalkTrace.push({
+            timeMs: performance.now() - window.__humanoidWalkStart,
+            state: window.__humanoidControl.snapshot() }), 50)
+          window.__humanoidControl.stick(0, -.65)
+          window.__humanoidTurnTimer = setTimeout(() => window.__humanoidControl.stick(.65, 0), 10_000)
+          window.__humanoidStopTimer = setTimeout(() => window.__humanoidControl.stick(0, 0), releaseMs)
+        }, releaseMs)
+        await capture(`${profileId}-walk-stop`, inPlace ? [0, 1000, 5000, 7500, 10000, 13500, 25500, 32000, 36000]
+          : [0, 250, 1000, 5000, 9750, 11000, 12250, 14000, 18000])
+        observed = await page.evaluate(() => {
+          clearInterval(window.__humanoidWalkTimer)
+          return { metrics: window.__humanoidControl.endMeasure(), trace: window.__humanoidWalkTrace,
+            final: window.__humanoidControl.snapshot(), sampleMs: performance.now() - window.__humanoidWalkStart }
+        })
+        const work = timingSummary(observed.metrics.workTimesMs ?? []), ticks = timingSummary(observed.metrics.tickTimesMs ?? [])
+        const actors = observed.trace.map(sample => sample.state.actors[0]), final = observed.final.actors[0]
+        const minPelvisHeightFraction = Math.min(...actors.map(actor => actor.pelvisHeight / actor.nominalPelvisHeight)),
+          minUpY = Math.min(...actors.map(actor => actor.upY)),
+          fallen = actors.some(actor => actor?.fallen || actor?.gaitState === 'fallen') || final.fallen || minPelvisHeightFraction < .8 || minUpY < .8
+        const peakFootPenetrationM = Math.max(...actors.map(actor => actor.peakFootPenetrationM))
+        const startActor = actors[0], forwardActor = observed.trace.find(sample => sample.timeMs >= 9750)?.state.actors[0],
+          forwardTravelM = forwardActor ? Math.hypot(forwardActor.position.x - startActor.position.x, forwardActor.position.z - startActor.position.z) : null,
+          maxTranslationM = Math.max(...actors.map(actor => Math.hypot(actor.position.x - startActor.position.x, actor.position.z - startActor.position.z))),
+          turnTrace = observed.trace.filter(sample => sample.timeMs >= 10000 && sample.timeMs <= releaseMs),
+          turnRad = turnTrace.slice(1).reduce((sum, sample, i) => {
+            const delta = sample.state.actors[0].headingRad - turnTrace[i].state.actors[0].headingRad
+            return sum + Math.atan2(Math.sin(delta), Math.cos(delta))
+          }, 0)
+        const summary = { profileId, walkingMode: inPlace ? 'in-place' : 'walk',
+          claim: inPlace ? 'Step-and-turn-in-place only; no forward walking claim' : 'Experimental forward walking',
+          command: { forwardIntentMs: 10000, turnMs: releaseMs - 10000, activeMs: releaseMs, settleMs: 6000, forwardStick: -.65, turnStick: .65 },
+          warmupMs: 1500, sampleMs: observed.sampleMs, work, ticks, discardedSeconds: observed.metrics.droppedSeconds,
+          workerUtilisation: observed.metrics.workerUtilisation, traceSamples: observed.trace.length,
+          states: [...new Set(actors.map(actor => actor.gaitState))], fallen, minPelvisHeightFraction, minUpY, final: actorSummary(final), peakFootPenetrationM,
+          forwardTravelM, maxTranslationM, turnRad, simulatedSeconds: (observed.final.tick - observed.trace[0].state.tick) / 240,
+          queuedSeconds: observed.final.queuedSeconds,
+          nativePenetrationGate: peakFootPenetrationM <= .005 ? 'passed 5 mm observed gate only' : 'red: exceeds 5 mm; official gait gates remain unchanged',
+          status: fallen ? 'fell; Reset required' : final.gaitState === 'standing' ? 'returned to standing' : 'did not settle to standing',
+          noFallRequired: profileId === 'keel-v1', failureMessage: observed.final.failureMessage,
+          timingScope: observed.final.failureMessage ? 'Work and discarded-time measurements end at the worker fault; no complete Morrow frame-budget claim' : 'Complete gait and stop sample',
+          bodyDuringWalk: 'No synthetic BODY in this gait sample',
+          inputPath: 'test bridge left-stick mapping shared with phone PadState -> intent.ts -> gait' }
+        report.walking.push(summary)
+        report.measurements.push({ scenario: `${profileId}-walk-trace`, samples: observed.trace })
+        await writeFile(join(evidence, `${profileId}-walk-work.json`), JSON.stringify({ ...summary, metrics: observed.metrics, trace: observed.trace }, null, 2))
+        const fault = observed.trace.find(sample => !sample.state.ready || sample.state.failureMessage)
+        if (profileId === 'keel-v1') requireMeasurement(!fault && observed.final.ready && !observed.final.failureMessage,
+          `Gait worker fault: ${fault?.state.failureMessage || observed.final.failureMessage || 'not ready during sample'}`)
+        requireMeasurement(observed.trace.length >= 200 && actors.every(actor => actor &&
+          [actor.upY, actor.pelvisHeight, actor.peakFootPenetrationM, actor.position?.x, actor.position?.z].every(Number.isFinite)),
+        'Walking trace is incomplete or contains nonfinite state/penetration/position')
+        requireMeasurement(actors.every(actor => ['standing', 'stepping', 'walking', 'stopping', 'fallen'].includes(actor.gaitState)), 'Unknown live gait state')
+        requireMeasurement(summary.states.some(state => state === 'walking' || state === 'stepping'), 'Stick never activated gait')
+        requireMeasurement(actors.every(actor => Math.abs(actor.position.x) <= 3.6 && Math.abs(actor.position.z) <= 3.6), 'Actor left the soft-wall arena')
+        requireMeasurement(work.samples >= 250 && Number.isFinite(work.p95Ms) && work.p95Ms <= 16.7,
+          `Walking frame budget exceeded or missing: p95 ${work.p95Ms} ms; ${work.samples} samples`)
+        requireMeasurement(observed.metrics.droppedSeconds === 0, `Walking worker discarded ${observed.metrics.droppedSeconds} s`)
+        requireMeasurement(Number.isFinite(observed.metrics.workerUtilisation) && observed.metrics.workerUtilisation <= .8,
+          `Walking worker utilisation exceeded 80% or missing: ${observed.metrics.workerUtilisation}`)
+        if (!fault) requireMeasurement(summary.simulatedSeconds >= observed.sampleMs / 1000 * .9 && summary.queuedSeconds <= .1,
+          `Walking simulation fell behind: ${summary.simulatedSeconds} s simulated; ${summary.queuedSeconds} s queued`)
+        if (profileId === 'keel-v1') {
+          requireMeasurement(!fallen, `${profileId} fell during scripted gait/turn/stop`)
+          if (inPlace) {
+            requireMeasurement(maxTranslationM <= .30, `${profileId} in-place gait travelled ${maxTranslationM} m; exceeds 0.30 m`)
+            requireMeasurement(Number.isFinite(turnRad) && turnRad > .05, `${profileId} did not turn in place: ${turnRad} rad`)
+          } else requireMeasurement(forwardTravelM >= .2, `Keel stick did not translate: ${forwardTravelM} m`)
+          requireMeasurement(final.gaitState === 'standing' && !final.fallen && final.support !== 'none', `${profileId} release did not return safely into balance`)
+        }
+        if (profileId === 'morrow-v1' && (fallen || fault)) {
+          if (fault) requireMeasurement(observed.final.resettable, 'Morrow worker fault disabled Reset')
+          await reset()
+          await page.waitForFunction(() => {
+            const state = window.__humanoidControl.snapshot()
+            return state.ready && !state.failureMessage && state.actors[0]?.gaitState === 'standing' && !state.actors[0]?.fallen
+          }, undefined, { timeout: 30_000 })
+          await page.waitForTimeout(1000)
+          const recovered = await read()
+          requireMeasurement(recovered.ready && !recovered.failureMessage && recovered.actors[0].gaitState === 'standing' &&
+            !recovered.actors[0].fallen, 'Morrow Reset did not restore standing')
+          summary.recovery = actorSummary(recovered.actors[0])
+          summary.status = 'fell; Reset restored standing'
+          await writeFile(join(evidence, `${profileId}-walk-work.json`), JSON.stringify({ ...summary, metrics: observed.metrics, trace: observed.trace }, null, 2))
+        }
+        return summary
+      } finally {
+        await page.evaluate(async () => {
+          clearInterval(window.__humanoidWalkTimer)
+          clearTimeout(window.__humanoidTurnTimer)
+          clearTimeout(window.__humanoidStopTimer)
+          window.__humanoidControl.stick(0, 0)
+          await window.__humanoidControl.setWalk(0, false)
+          await window.__humanoidControl.reset()
+        })
+      }
+    })
+    if (!walkOnly) {
+    await page.evaluate(() => window.__humanoidControl.profile('keel-v1'))
     await record('default one-actor work budget and honest two-actor attempt or fallback', async () => {
       await page.bringToFront()
       await page.evaluate(() => { clearInterval(window.fixtureTimer); delete window.__humanoid })
@@ -451,7 +668,7 @@ export async function runHumanoidPhysics(local, check) {
       const state = await read()
       await writeFile(join(evidence, 'phone-width.png'), await page.screenshot())
       const bounds = {}
-      for (const selector of ['[data-physics-push]', '[data-physics-reset]', '[data-physics-stance]', '[data-physics-status]']) {
+      for (const selector of ['#physics-walk', '[data-physics-push]', '[data-physics-reset]', '[data-physics-stance]', '[data-physics-status]']) {
         const box = await page.locator(selector).boundingBox()
         bounds[selector] = box
         requireMeasurement(box && box.width > 0 && box.height > 0 && box.x >= 0 && box.x + box.width <= 413 && box.y >= 0 && box.y + box.height <= 916,
@@ -459,6 +676,7 @@ export async function runHumanoidPhysics(local, check) {
       }
       return { viewport: { width: 412, height: 915 }, actorCount: state.actors.length, controlsOpen: true, bounds, emulationOnly: true }
     })
+    }
   } catch (error) {
     report.errors.push(String(error?.stack ?? error))
     if (page && !page.isClosed()) {
@@ -480,11 +698,11 @@ export async function runHumanoidPhysics(local, check) {
   finally {
     for (const context of contexts) { try { await context.close() } catch (error) { report.errors.push(`Context cleanup: ${error.message}`) } }
     try { await browser?.close() } catch (error) { report.errors.push(`Browser cleanup: ${error.message}`) }
-    report.pass = report.results.length === 8 && report.results.every(row => row.pass) && report.errors.length === 0
+    report.pass = report.results.length === expectedScenarios && report.results.every(row => row.pass) && report.errors.length === 0
     if (raw) {
       try {
         await writeFile(join(evidence, 'report.json'), JSON.stringify(report, null, 2))
-        await writeFile(join(evidence, 'evidence-frames.json'), JSON.stringify({ expectedCount: 18, frames }, null, 2))
+        await writeFile(join(evidence, 'evidence-frames.json'), JSON.stringify({ expectedCount: expectedFrames, frames }, null, 2))
       } catch (error) { report.pass = false; report.errors.push(`Evidence write: ${error.message}`) }
     }
     console.log(`Humanoid control review evidence: ${evidence}; raw frames in TEMP for automatic distillation`)
@@ -495,9 +713,9 @@ export async function runHumanoidPhysics(local, check) {
     if (!row.pass) throw new Error(row.error)
     return JSON.stringify(row.detail)
   })
-  await check('humanoid physics: complete eight-scenario harness, no browser errors', () => {
-    requireMeasurement(report.results.length === 8 && report.errors.length === 0 && frames.length === 18,
-      report.errors.join('; ') || 'Incomplete eight-scenario harness or missing captured frames')
-    return `${report.results.filter(row => row.pass).length}/8 scenarios; ${frames.length}/18 captured frames`
+  await check(`humanoid physics: complete ${walkOnly ? 'walking debug' : 'ten-scenario'} harness, no browser errors`, () => {
+    requireMeasurement(report.results.length === expectedScenarios && report.errors.length === 0 && frames.length === expectedFrames,
+      report.errors.join('; ') || 'Incomplete scenario harness or missing captured frames')
+    return `${report.results.filter(row => row.pass).length}/${expectedScenarios} scenarios; ${frames.length}/${expectedFrames} captured frames${walkOnly ? '; walking debug only; full page acceptance unmeasured' : ''}`
   })
 }
