@@ -4,6 +4,8 @@
  * ticker advances fixed-step physics and interpolates drawing.
  * Pointer events never capture, cancel navigation or prevent text selection. Reduced motion skips the opening;
  * marbles rest until explicitly played with. The saved field switch stops drawing and restores the text headline.
+ * On a phone the field plays only in the hero while PHONE_FIELD_SCOPE is 'hero' (./scope.ts): the canvas scrolls away
+ * with the hero and the field sleeps once the hero is out of view.
  */
 import { addActor, addRead, wake } from './ticker'
 import { onTilt, onToss, recentre, startTilt, tiltOn } from './tilt'
@@ -15,6 +17,7 @@ import type { ScreenPointer } from '../viewer/pointer'
 import type { Field, FieldOrb, Gfx, Hit, PadRect } from './field'
 import { family } from '../family'
 import { html, setMarkup } from '../ui/markup'
+import { fieldScope, heroInView, stageTop } from './scope'
 
 const LIME = '#c6ff34'
 /** A hand that stops moving keeps steering its marble this long; then the marble rolls to a stop. */
@@ -114,11 +117,19 @@ export interface Hero {
   sim(): { t: number; busy: boolean }
 }
 
-export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HTMLElement, opts: { still: boolean; onInput?: () => void; meter?: boolean }): Hero {
+export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HTMLElement, opts: { still: boolean; onInput?: () => void; meter?: boolean; phone?: boolean }): Hero {
   const still = opts.still
   const coarse = matchMedia('(pointer: coarse)').matches
+  /**
+   * On a phone showing only the hero's field: the canvas is laid at the top of the page (home.css) and scrolls away
+   * with it, so the page's scroll never reaches the field (no ride, lift, land or dock), the lower sections' cards
+   * and headings aren't colliders, and the field sleeps while the hero is out of view.
+   */
+  const scoped = fieldScope(!!opts.phone, location.search) === 'hero'
+  document.documentElement.classList.toggle('field-hero', scoped)
   let field: Field | null = null
-  let visible = true
+  /** Whether the field plays: always, but while a scoped field's hero is scrolled out of view. */
+  let visible = !scoped || scrollY < innerHeight
   let enabled = true
   try { enabled = localStorage.getItem('obpal-home-field') !== 'off' } catch { /* Storage can be unavailable. */ }
   let draws = 0, layouts = 0, dirty = true
@@ -180,8 +191,9 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
 
   /** The headline as the page wraps it: its lines of text, and the box its letters fill (hero px). */
   function measure() {
-    // The fixed canvas starts at the viewport origin. Its measured CSS box is the shared frame for DOM rects,
-    // physics and projection; innerWidth includes a classic scrollbar that the canvas's 100% width excludes.
+    // The fixed canvas starts at the viewport origin (a scoped one, at the page's). Its measured CSS box is the shared
+    // frame for DOM rects, physics and projection; innerWidth includes a classic scrollbar that the canvas's 100% width
+    // excludes.
     // Keep fractional CSS pixels here. Only the renderer rounds when choosing its DPR-scaled backing buffer.
     const viewport = stage.getBoundingClientRect()
     const range = document.createRange()
@@ -212,8 +224,11 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     return { lines: lines.length ? lines : [title.textContent ?? ''], box, W: viewport.width, H: viewport.height }
   }
 
+  /** A scoped field's layout was due while the hero was out of view: made when it returns. */
+  let layoutDue = false
   function layout(includePage = true) {
     if (!field) return
+    if (scoped && !visible) { layoutDue = true; return }
     layouts++
     viewportTop = document.querySelector<HTMLElement>('header.top')?.offsetHeight ?? 0
     const m = measure()
@@ -225,10 +240,11 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     field.play(play.top, play.bottom)
     field.pads(measurePads(includePage))
     const peg = fieldToggle.getBoundingClientRect()
-    field.dock({ x: peg.left + peg.width / 2, y: peg.top + peg.height / 2 })
+    field.dock({ x: peg.left + peg.width / 2, y: (scoped ? stageTop(peg.top, scrollY, H) : peg.top) + peg.height / 2 })
     drawSides(field)
-    field.scroll(pendingScroll, false)
-    appliedScroll = pendingScroll
+    // A scoped field never scrolls: its canvas does.
+    if (!scoped) { field.scroll(pendingScroll, false); appliedScroll = pendingScroll }
+    scope()
     if (repelledCard) repelDemo(repelledCard)
     dirty = true
     wake()
@@ -267,7 +283,8 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
 
   // ---- your own hand: the mouse, a tap, the phone's tilt and tosses ----
 
-  const heroAt = (e: PointerEvent) => ({ x: e.clientX, y: e.clientY })
+  /** Where a pointer is on the field: its canvas scrolls with the page when scoped, so the page's scroll is added. */
+  const heroAt = (e: PointerEvent) => ({ x: e.clientX, y: e.clientY + (scoped ? scrollY : 0) })
   /** Pressing a button or a link is that, not playing. */
   const onControl = (e: Event) => !!(e.target as Element | null)?.closest?.('a, button, input, textarea, select, [contenteditable], .scene-art')
   // The mouse rolls the marble after it; a click (or a tap) hops it onto the spot. Touching to scroll leaves it be.
@@ -287,6 +304,8 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   const hop = (e: PointerEvent) => {
     if (!field || !enabled) return
     const p = heroAt(e)
+    // Only the canvas plays when scoped: a tap on the sections below it is a tap on them.
+    if (scoped && (!visible || p.y > H)) return
     takeOver()
     // Onto the letter clicked (or right by), at its landing spot; it stays there until the mouse moves on.
     const spot = field.spotAt(p.x, p.y)
@@ -430,14 +449,37 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   let ping: { el: HTMLElement; timer: number } | null = null
   /** Each raised thing's side as last drawn (px, to the half pixel): where its foot is on screen from its top. */
   const padSide = padEls.map(() => '')
-  /** The border box after transforms, in CSS pixels. Shadows and focus outlines are light, not solid edges. */
+  /** Where each fixed control's top is on the screen (px), while the field is scoped: it rides the canvas as it scrolls. */
+  const screenTop = new WeakMap<HTMLElement, number>()
+  /**
+   * The border box after transforms, in CSS pixels. Shadows and focus outlines are light, not solid edges. A control
+   * fixed to the screen is placed on the field's own coordinates: the screen's, or (scoped, where the canvas scrolls
+   * with the page) the canvas's, which the control leaves as the page scrolls (./scope.ts stageTop()).
+   */
   function borderBox(el: HTMLElement): PadRect {
     const r = el.getBoundingClientRect(), css = getComputedStyle(el)
     const fixed = el.closest('.field-controls') !== null
     const value = css.borderTopLeftRadius
     const radius = value.endsWith('%') ? parseFloat(value) / 100 * Math.min(r.width, r.height)
       : (parseFloat(value) || 0) * (el.offsetWidth ? r.width / el.offsetWidth : 1)
-    return { x: r.left, y: r.top + (fixed ? 0 : scrollY), w: r.width, h: r.height, r: Math.min(radius, r.width / 2, r.height / 2), fixed }
+    if (fixed && scoped) screenTop.set(el, r.top)
+    const y = fixed ? (scoped ? stageTop(r.top, scrollY, H) : r.top) : r.top + scrollY
+    return { x: r.left, y, w: r.width, h: r.height, r: Math.min(radius, r.width / 2, r.height / 2), fixed }
+  }
+  /** A scoped field's fixed controls follow the page's scroll down its canvas (and out of the play area). */
+  function followScroll() {
+    if (!field || !scoped) return
+    const updates: { index: number; rect: PadRect }[] = []
+    padEls.forEach((el, index) => {
+      const top = screenTop.get(el), base = padRects[index]
+      if (top === undefined || !base || base.w <= 0) return
+      const y = stageTop(top, scrollY, H)
+      if (y !== base.y) updates.push({ index, rect: { ...base, y } })
+    })
+    if (!updates.length) return
+    for (const { index, rect } of updates) padRects[index] = rect
+    field.movePads(updates, 1 / 60)
+    dirty = true; wake()
   }
   function measurePads(includePage = true): PadRect[] {
     padOwners = [...padEls]
@@ -449,7 +491,8 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     if (!pageGeometry || !includePage) return padRects
     // Card titles share their solid card's border; the hero retains its drawn, colliding letters.
     for (const el of document.querySelectorAll<HTMLElement>('main .pair, main .scene, main .build-card, main a, main button, main .live-dot')) {
-      if ((hero.contains(el) && !el.matches('.pair, .live-dot')) || !el.getClientRects().length) continue
+      // A scoped field plays on the hero alone: nothing below it is built as an obstacle.
+      if ((scoped && !hero.contains(el)) || (hero.contains(el) && !el.matches('.pair, .live-dot')) || !el.getClientRects().length) continue
       // Content inside a solid card shares its collider; nested controls never make trapping seams.
       if (!el.matches('.pair, .scene, .build-card') && el.closest('.pair, .scene, .build-card')) continue
       const kind = el.matches('.pair, .scene, .build-card') ? 'rail' : el.matches('.live-dot') ? 'peg' : 'block'
@@ -457,7 +500,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       padRects.push(pageGeometry.obstacleRect(borderBox(el), kind))
     }
     headings = [...document.querySelectorAll<HTMLElement>('main h2, main .eyebrow, main .sec-head > p')]
-      .filter(el => !el.closest('.pair, .scene, .build-card') && el.getClientRects().length)
+      .filter(el => !el.closest('.pair, .scene, .build-card') && el.getClientRects().length && (!scoped || hero.contains(el)))
       .map(el => ({ el, box: borderBox(el), lines: null }))
     prepareHeadingPads(false)
     return padRects
@@ -581,11 +624,28 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   addEventListener('resize', scheduleLayout, { passive: true })
   visualViewport?.addEventListener('resize', scheduleLayout, { passive: true })
   document.fonts?.addEventListener('loadingdone', scheduleLayout)
+  /**
+   * A scoped field sleeps while its hero is out of view (no physics, no drawing, nothing heard) and carries on, from
+   * where it was, when the hero returns: the marble is a part of the hero, which scrolls with the page.
+   */
+  function scope() {
+    if (!scoped) return
+    const now = heroInView(scrollY, H > 1 ? H : innerHeight, viewportTop)
+    if (now === visible) return
+    visible = now
+    if (!now) { tiltPush = null; looping = false; glass.foresee([], 0); return }
+    if (!field) { if (enabled) void load(); return }
+    // Whatever changed on the page meanwhile (a resize, a font, a card loading) is laid out before the first frame.
+    if (layoutDue) { layoutDue = false; layout() }
+    dirty = true; wake()
+  }
   addEventListener('scroll', () => {
     pendingScroll = scrollY
     // A jump can bypass the observer's margin. Prepare newly visible text before the ticker draws this scroll.
     prepareHeadingPads()
-    sceneUnderPointer = false; lastInteraction = scrollAt = performance.now(); dirty = true; wake()
+    sceneUnderPointer = false
+    if (scoped) { scope(); followScroll(); return }
+    lastInteraction = scrollAt = performance.now(); dirty = true; wake()
   }, { passive: true })
 
   // ---- what a hit sounds like, and the knock felt in the hand ----
@@ -693,7 +753,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
       motionMs += performance.now() - at
       dirty = true
     }
-    if (pendingScroll !== appliedScroll) {
+    if (!scoped && pendingScroll !== appliedScroll) {
       tour = false; anchor = null; local.at = -1e9
       field.scroll(pendingScroll, !still)
       appliedScroll = pendingScroll
@@ -748,7 +808,8 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   // The viewport stays active even after the headline has left it.
   let loading = false
   new IntersectionObserver(([e]) => {
-    if (e.isIntersecting && enabled) { void load(); wake() }
+    // (A scoped field loads once its hero is really in view: the bar covers the last of it first.)
+    if (e.isIntersecting && enabled && visible) { void load(); wake() }
   }).observe(hero)
 
   async function load() {

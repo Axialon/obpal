@@ -18,6 +18,7 @@ const SHARED_SIMS_GROUPS = [
 // Home selectors are substrings of check names, rather than named groups.
 const EXCLUSIVE_HOME_CHECKS = [
   ...[1280, 390].map(width => `viewport field ${width}px: full-page scroll, first clicks, cached obstacles and CLS`),
+  'viewport field 390px: hero-only scroll, first clicks, cached obstacles and CLS',
   'viewport field: native GPU pacing under 4x CPU throttle',
   'viewport field contact audit: seeded ledges, visibility and every section',
   'viewport field moving contact audit: solid cards sweep, wake and stay visible',

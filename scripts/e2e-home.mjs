@@ -60,6 +60,7 @@ import { runHomeMatrix } from './e2e-home-matrix.mjs'
 import { runHomeHeadings } from './e2e-home-headings.mjs'
 import { runHomeScrollProof } from './e2e-home-scroll-proof.mjs'
 import { runHomeDesktopProof } from './e2e-home-desktop-proof.mjs'
+import { runHomePhoneScope } from './e2e-home-phone-scope.mjs'
 import { rawRun } from './lib/distill.mjs'
 import { startupProbe, startupPath, startupText, watchStartup } from './lib/home-startup.mjs'
 
@@ -182,7 +183,10 @@ async function rimAt(page, wall, at, a) {
   return best
 }
 async function check(name, fn) {
-  if (ONLY === 'remote') {
+  if (ONLY === 'phone field scope') {
+    // The whole group (scripts/e2e-home-phone-scope.mjs), one check after another.
+    if (!name.startsWith('phone field scope')) return
+  } else if (ONLY === 'remote') {
     if (!/with nobody steering|a computer shows a code|a phone that opens the code|the phone's marble follows|the phone flicked upward|the phone held as a tray|a phone that leaves|no page errors on the computer|no Content Security Policy/.test(name)) return
   } else if (SURFACE_PROFILE) {
     if (!/surface audit|native GPU pacing under 4x CPU throttle/.test(name)) return
@@ -195,7 +199,7 @@ async function check(name, fn) {
     results.push({ name, ok: false })
     console.log(`  ✗ ${name}: ${e?.message ?? e}`)
   }
-  if (ONLY && ONLY !== 'remote' && !FIELD_PROFILE && !SURFACE_PROFILE) throw ONLY_DONE
+  if (ONLY && ONLY !== 'remote' && ONLY !== 'phone field scope' && !FIELD_PROFILE && !SURFACE_PROFILE) throw ONLY_DONE
 }
 
 // OBPAL_E2E_PORT runs the stand-in elsewhere than its usual 5176, beside another run.
@@ -220,6 +224,7 @@ try {
   await runHomeHeadings(browser, local, check)
   await runHomeField(browser, local, check)
   if (FIELD_PROFILE || SURFACE_PROFILE) throw ONLY_DONE
+  await runHomePhoneScope(browser, local, check)
 
   await check('no sideways scroll on phone widths', async () => {
     const seen = []

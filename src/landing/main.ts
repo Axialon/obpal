@@ -50,7 +50,7 @@ const settleHint = () => {
 }
 /** ?debug=audio,gfx,colliders: sound, drawing and cached border outlines for checking a real device. */
 const debug = new Set((new URLSearchParams(location.search).get('debug') ?? '').split(',').filter(Boolean))
-const hero = mountHero(heroEl, $<HTMLCanvasElement>('.hero-stage'), $('#hero-h'), { still, onInput: settleHint, meter: debug.has('audio') })
+const hero = mountHero(heroEl, $<HTMLCanvasElement>('.hero-stage'), $('#hero-h'), { still, onInput: settleHint, meter: debug.has('audio'), phone: phoneLike })
 // The marbles' sound: a button in the corner says whether it's on, off, or waiting for a click (browsers start sound
 // only from one), and switches it.
 const soundBtn = $<HTMLButtonElement>('[data-sound]')

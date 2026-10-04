@@ -16,18 +16,24 @@ export async function runHomeField(functionalBrowser, local, check) {
     await mkdir(dir, { recursive: true })
     await writeFile(join(dir, name), JSON.stringify(data, null, 2))
   }
-  for (const width of [1280, 390]) {
-    await check(`viewport field ${width}px: full-page scroll, first clicks, cached obstacles and CLS`, async () => {
+  // A phone's field plays only in the hero for now (src/landing/scope.ts); its whole-page proof asks for the page scope.
+  const cases = [
+    { width: 1280, query: '', name: 'full-page scroll, first clicks, cached obstacles and CLS', file: 'scroll-1280.json' },
+    { width: 390, query: '?fieldscope=page', name: 'full-page scroll, first clicks, cached obstacles and CLS', file: 'scroll-390.json' },
+    { width: 390, query: '', name: 'hero-only scroll, first clicks, cached obstacles and CLS', file: 'scroll-390-hero.json' },
+  ]
+  for (const { width, query, name, file } of cases) {
+    await check(`viewport field ${width}px: ${name}`, async () => {
       const context = await browser.newContext({ viewport: { width, height: 844 }, deviceScaleFactor: 1, isMobile: width === 390, hasTouch: width === 390, ignoreHTTPSErrors: true })
       await prepareHomeSmoothness(context)
       const page = await context.newPage()
       try {
-        await page.goto(local.origin)
+        await page.goto(`${local.origin}/${query}`)
         await page.waitForFunction(() => window.__home?.tips().length)
         await page.mouse.move(5, 300)
         await page.waitForTimeout(6000)
         const result = await measureHomeSmoothness(page)
-        await save(`scroll-${width}.json`, { ...result, gpu: 'default ANGLE', cpuRate: 1, viewport: [width, 844], dpr: 1, seconds: 10 })
+        await save(file, { ...result, gpu: 'default ANGLE', cpuRate: 1, viewport: [width, 844], dpr: 1, seconds: 10 })
         if (result.escapes.length) throw new Error(`marble left the viewport: ${JSON.stringify(result.escapes[0])}`)
         if (result.frames.some(f => !f.tips.length)) throw new Error('marble disappeared during scroll')
         if (result.layoutReads || result.layoutsDuringScroll) throw new Error(`${result.layoutReads} frame layout reads, ${result.layoutsDuringScroll} scroll layouts`)

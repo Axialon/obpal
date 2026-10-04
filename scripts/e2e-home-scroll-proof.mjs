@@ -7,6 +7,11 @@ import { rawRun } from './lib/distill.mjs'
 import { prepareHomeSmoothness, measureHomeSmoothness } from './lib/smoothness-home.mjs'
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+/**
+ * This proof is the whole-page field's scroll choreography (ride, lift, land, dock). A phone plays only in the hero for
+ * now (src/landing/scope.ts), so a phone-width page asks for the page scope; computers have it always.
+ */
+const homeUrl = (local, width) => width < 600 ? `${local.origin}/?fieldscope=page` : local.origin
 
 async function measurePacing(browser, local, width, height) {
   const native = await browser.browserType().launch({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined, headless: true, args: ['--ignore-certificate-errors'] })
@@ -14,7 +19,7 @@ async function measurePacing(browser, local, width, height) {
     const context = await native.newContext({ viewport: { width, height }, deviceScaleFactor: 1, isMobile: width < 600, hasTouch: width < 600, ignoreHTTPSErrors: true })
     await prepareHomeSmoothness(context)
     const page = await context.newPage()
-    await page.goto(local.origin)
+    await page.goto(homeUrl(local, width))
     await page.waitForFunction(() => window.__home?.tips().length)
     await page.evaluate(() => {
       const tips = window.__home.tips
@@ -88,7 +93,7 @@ export async function runHomeScrollProof(browser, local, check) {
       const page = await context.newPage(), cdp = await context.newCDPSession(page)
       const shots = [], touchGestures = []
       try {
-        await page.goto(local.origin)
+        await page.goto(homeUrl(local, width))
         await page.waitForFunction(() => window.__home?.tips().length && window.__home.contacts().rects.length > 20)
         await page.mouse.move(3, 300)
         await sleep(5000)
@@ -306,7 +311,7 @@ export async function runHomeScrollProof(browser, local, check) {
     let reduced
     try {
       const page = await reducedContext.newPage()
-      await page.goto(local.origin)
+      await page.goto(homeUrl(local, 390))
       await page.waitForFunction(() => window.__home?.tips().length)
       await sleep(4000)
       reduced = await page.evaluate(async () => {

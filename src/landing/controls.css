@@ -1,5 +1,8 @@
 /* The viewport field draws above the reading surface; content cards exclude marbles physically. */
 .home .hero-stage { z-index: 10; }
+/* On a phone the field plays only in the hero (./scope.ts): its canvas is laid at the top of the page and scrolls away
+   with the hero, instead of staying over the whole page. */
+html.field-hero .hero-stage { position: absolute; }
 /* Text answers a contact with light without moving its measured lines. */
 .home .eyebrow.field-hit { text-shadow: 0 0 12px rgb(var(--accent-rgb) / 0.2); }
 /* Share the volume button's glass and icon styling, in a stack clear of the right-edge phone tab. */
