@@ -92,6 +92,15 @@ export function poseFrom(k: Kin, values: readonly number[]): Pose {
 /** A joint's home, for each of the pose's joints. */
 export const homeOf = (k: Kin): Pose => poseFrom(k, k.joints.map((j) => j.home))
 
+/** The pose that puts the gripper `height` over the spot `reach` out at heading `yaw`, tool straight down or tipped as far as the kind tips it (the first that's within its joint limits); null where there's none. */
+export function poseAt(k: Kin, yaw: number, reach: number, height: number, roll: number, held: GripBox | null | undefined, near: Pose): Pose | null {
+  for (const pitch of k.pitches) {
+    const { pose, reached } = k.inverse({ yaw, reach, height, pitch, roll }, held, near)
+    if (reached && within(k, pose)) return pose
+  }
+  return null
+}
+
 /**
  * Point and go (CATALOGUE §7): a pose that puts the gripper `height` over a spot on the floor, `reach` out at heading
  * `want`, from pose `near`. It tries the tool straight down first, then tipped toward the spot as far as the kind tips
@@ -101,13 +110,7 @@ export const homeOf = (k: Kin): Pose => poseFrom(k, k.joints.map((j) => j.home))
  */
 export function reachDown(k: Kin, want: number, reach: number, height: number, roll: number, held: GripBox | null | undefined, near: Pose): { pose: Pose; exact: boolean } | null {
   const yaw = k.heading(want, near)
-  const solve = (r: number) => {
-    for (const pitch of k.pitches) {
-      const { pose, reached } = k.inverse({ yaw, reach: r, height, pitch, roll }, held, near)
-      if (reached && within(k, pose)) return pose
-    }
-    return null
-  }
+  const solve = (r: number) => poseAt(k, yaw, r, height, roll, held, near)
   const exact = solve(reach)
   if (exact) return { pose: exact, exact: turnBetween(yaw, want) < 1e-6 }
   // Out of reach: the nearest spot it reaches, in or out, 2 cm at a time.

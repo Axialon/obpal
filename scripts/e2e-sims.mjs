@@ -17,6 +17,7 @@
  * --only=buttons (or OBPAL_E2E_SIMS_ONLY=buttons) checks rendered control ink and accessible icon names at three sizes.
  * --only=humanoid-physics runs the F1a acceptance proof separately; the verifier runs it before the remaining sims.
  * OBPAL_E2E_SIMS_ONLY=octopus runs the octopus's load, paired-phone, timing, showcase and reduced-motion checks.
+ * OBPAL_E2E_SIMS_ONLY=arm-point runs the arm's Point face: the gripper goes to, and grabs at, the mark drawn on the floor (./e2e-arm-point.mjs).
  */
 import { tempScope, keepTemp } from './lib/temp.mjs'
 import { rm } from 'node:fs/promises'
@@ -45,6 +46,7 @@ import { simsStrip } from './sims-strip.mjs'
 import { runPanels } from './e2e-panels.mjs'
 import { runSimButtons } from './e2e-sim-buttons.mjs'
 import { runArmLive } from './e2e-arm-live.mjs'
+import { runArmPoint } from './e2e-arm-point.mjs'
 import { runHumanoid } from './e2e-humanoid.mjs'
 import { runHumanoidLive } from './e2e-humanoid-live.mjs'
 import { runOctopus } from './e2e-octopus.mjs'
@@ -190,7 +192,7 @@ try {
       smoothness: (local, check) => runSmoothness(local, check, { ids: ['pendulum'] }),
       temporal: runTemporal, 'warm-up': runWarmup, 'graphics-recovery': runGraphicsRecovery,
       load: runLoad, control: runControl, music: runMusic, vr: runVR, 'control-views': runControlViews,
-      audio: runAudio, panels: runPanels, 'arm-live': runArmLive, humanoid: runHumanoid,
+      audio: runAudio, panels: runPanels, 'arm-live': runArmLive, 'arm-point': runArmPoint, humanoid: runHumanoid,
       'humanoid-live': runHumanoidLive, buttons: runSimButtons, 'local-control': runLocalControl, octopus: runOctopus,
     }
     for (const group of GROUPS) await runners[group](local, check)
@@ -227,6 +229,7 @@ try {
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'humanoid-live') await runHumanoidLive(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'humanoid') await runHumanoid(local, check)
   else if (process.env.OBPAL_E2E_SIMS_ONLY === 'octopus') await runOctopus(local, check)
+  else if (process.env.OBPAL_E2E_SIMS_ONLY === 'arm-point') await runArmPoint(local, check)
   else if (ONLY_PANELS) await runPanels(local, check)
   else {
   console.log('ob.Pal sims e2e')
@@ -718,6 +721,7 @@ try {
   await runAudio(local, check)
   await runPanels(local, check)
   await runArmLive(local, check)
+  await runArmPoint(local, check)
   await runHumanoid(local, check)
   await runHumanoidLive(local, check)
   await runSimButtons(local, check)

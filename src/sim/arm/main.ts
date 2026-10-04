@@ -48,6 +48,7 @@ import type { ToolTarget } from './kinematics'
 import { kindFrom } from './kind'
 import { ARM_KINDS, type ArmKindId } from './kinds'
 import { placement, turnBetween } from './layout'
+import { reachableSpot } from './point'
 import type { ArmModel, JointSpec } from './model'
 import { GlowFollower, handMove, handTurn, headingOf } from '@obpal/host'
 import { ScreenPointer } from '../../viewer/pointer'
@@ -224,9 +225,9 @@ interface Arm {
 
 interface Track3 { gen: number; p0: [number, number, number]; q0: [number, number, number, number]; heading: number; tool: THREE.Vector3; delta: THREE.Vector3; forward: number; pitch: number; roll: number; space: { origin: { yaw: number; reach: number; height: number }; tool: ToolTarget } | null }
 
-/** A claw move (A in Point): down to the floor, close or open, back up to the hover height. */
+/** A claw move (A in Point): over its spot if it isn't there yet, down to the floor, close or open, back up to the hover height. */
 interface Claw {
-  phase: 'down' | 'grip' | 'up'
+  phase: 'over' | 'down' | 'grip' | 'up'
   pick: boolean
   yaw: number
   reach: number
@@ -747,7 +748,7 @@ if (!shared.guest) void startSimScene({
     const node = s.claims.held(who.id)
     const f = node ? findNode(node) : null
     if (!f || stopped) return
-    if (!f.joint && id === 'wii-a') { startClaw(f.arm); return }
+    if (!f.joint && id === 'wii-a') { startClaw(f.arm, who.id); return }
     if (!f.joint && (id === 'wii-plus' || id === 'wii-minus')) {
       f.arm.hover = clamp(Math.round((f.arm.hover + (id === 'wii-plus' ? 0.05 : -0.05)) * 100) / 100, KIND.drive.hover[1], KIND.drive.hover[2])
       s.remote.feedback({ haptic: 'tick', toast: `Hovering ${Math.round(f.arm.hover * 100)} cm up` }, who.id)
@@ -995,7 +996,8 @@ function driveWhole(a: Arm, who: string, now: number, dt: number): string {
 
 // ---- Point and go: each participant's aim lands on the floor, Wii-style ----
 
-interface Aim { pointer: ScreenPointer; on: boolean; b: boolean; hit: THREE.Vector3 | null; dot: THREE.Group }
+/** A participant's aim: `hit` is the spot the mark is drawn at, which B sends the gripper over and A grabs at; `want` is where the phone points. */
+interface Aim { pointer: ScreenPointer; on: boolean; b: boolean; hit: THREE.Vector3 | null; want: { x: number; z: number } | null; dot: THREE.Group }
 const aims = new Map<string, Aim>()
 /** This frame's input from each participant: read once, used by whatever they drive. */
 const frames = new Map<string, Frame>()
@@ -1016,7 +1018,7 @@ function aimOf(id: string): Aim {
   dot.visible = false
   dot.renderOrder = 2
   scene.add(dot)
-  a = { pointer: new ScreenPointer(), on: false, b: false, hit: null, dot }
+  a = { pointer: new ScreenPointer(), on: false, b: false, hit: null, want: null, dot }
   aims.set(id, a)
   return a
 }
@@ -1027,6 +1029,21 @@ function dropAim(id: string) {
   a.dot.removeFromParent()
   a.dot.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.geometry.dispose(); (m.material as THREE.Material).dispose() } })
   aims.delete(id)
+}
+
+/**
+ * Bring a spot on the floor (in the world) to the nearest one `a`'s gripper goes over at its hover and comes straight
+ * down on (./point.ts), as Point and its claw will, with what it holds now. Left as it is where the arm reaches none.
+ */
+const spotWorld = new THREE.Vector3()
+function reachable(a: Arm, hit: THREE.Vector3) {
+  const pose = poseOf(a)
+  const local = a.model.root.worldToLocal(spotWorld.copy(hit))
+  const r = reachableSpot(KIN, { x: local.x, z: local.z }, [a.hover, (a.hover + CLAW_LOW) / 2, CLAW_LOW], KIN.forward(pose).roll, heldBox(a), pose, KIND.drive.reach)
+  if (!r) return
+  a.model.root.localToWorld(spotWorld.set(r.spot.x, 0, r.spot.z))
+  hit.x = spotWorld.x
+  hit.z = spotWorld.z
 }
 
 /** Once a frame: take every participant's input, and move the pointers of those in Point. */
@@ -1094,6 +1111,9 @@ function readInputs(now: number, dt: number) {
       }
       if (best) { hit.x += (best.mesh.position.x - hit.x) * 0.7; hit.z += (best.mesh.position.z - hit.z) * 0.7 }
     }
+    aim.want = hit ? { x: hit.x, z: hit.z } : null
+    // The arm can't go everywhere the phone points. The mark is drawn where the gripper really goes, and that one spot is where B sends it and A grabs.
+    if (hit && heldArm && s.control.scope(p.id) !== 'scene') reachable(heldArm, hit)
     aim.hit = hit
     aim.dot.visible = !!hit
     if (!hit) continue
@@ -1150,7 +1170,9 @@ function drivePoint(a: Arm, who: string, now: number): string {
   const pose = poseOf(a)
   const r = reachDown(KIN, Math.atan2(local.z, -local.x) * R2D, Math.hypot(local.x, local.z), a.hover, KIN.forward(pose).roll, heldBox(a), pose)
   if (r) setPose(a, r.pose)
-  const ok = !!r?.exact
+  // The mark is where the gripper goes (readInputs); that the phone points past it is the arm's limit.
+  const pulled = !!aim.want && Math.hypot(aim.want.x - aim.hit.x, aim.want.z - aim.hit.z) > 0.005
+  const ok = !!r?.exact && !pulled
   if (!ok && !a.edge) sim?.remote.feedback({ haptic: 'bump' }, who)
   a.edge = !ok
   return ok ? '' : 'edge'
@@ -1285,16 +1307,29 @@ function clawTo(a: Arm, c: Claw, height: number) {
   if (a.hw) clawAt(a, c, height)
 }
 
-/** A (Point): pick up what's under the gripper, or put down what it holds. */
-function startClaw(a: Arm) {
+/**
+ * A (Point): pick up what's under the gripper, or put down what it holds. With B held, it's the spot of the mark that
+ * the claw goes to: A pressed while the gripper is still on its way there goes over the mark first, rather than
+ * coming down wherever the gripper happens to be.
+ */
+function startClaw(a: Arm, who?: string) {
   if (a.claw || stopped || (a.hw && !a.hw.live)) return
   const t = KIN.forward(poseOf(a))
   a.homing = false
+  const aim = who ? aims.get(who) : undefined
+  let { yaw, reach } = t
+  if (aim?.b && aim.hit) {
+    const local = a.model.root.worldToLocal(tv.copy(aim.hit))
+    yaw = KIN.heading(Math.atan2(local.z, -local.x) * R2D, poseOf(a))
+    reach = Math.hypot(local.x, local.z)
+  }
+  // Over the spot already (to a centimetre), it comes straight down.
+  const over = Math.hypot(reach * Math.cos(yaw * D2R) - t.reach * Math.cos(t.yaw * D2R), reach * Math.sin(yaw * D2R) - t.reach * Math.sin(t.yaw * D2R)) > 0.01
   // Holding a block, it puts it down; else it picks one up, opening on the way down.
   const pick = !blocks.some((b) => b.by === a)
   if (pick) a.joints[GRIP].target = 1
-  a.claw = { phase: 'down', pick, yaw: t.yaw, reach: t.reach, roll: t.roll, since: performance.now(), goal: CLAW_LOW, h: t.height, at: performance.now() }
-  clawTo(a, a.claw, CLAW_LOW)
+  a.claw = { phase: over ? 'over' : 'down', pick, yaw, reach, roll: t.roll, since: performance.now(), goal: over ? t.height : CLAW_LOW, h: t.height, at: performance.now() }
+  if (over) { clawTo(a, a.claw, t.height); clawAt(a, a.claw, t.height) } else clawTo(a, a.claw, CLAW_LOW)
 }
 
 function clawStep(a: Arm, now: number): string {
@@ -1308,8 +1343,10 @@ function clawStep(a: Arm, now: number): string {
   const still = c.h === c.goal && a.joints.slice(0, GRIP).every((j) => j.target === null && Math.abs(j.vel) < 2)
   const g = a.joints[GRIP]
   if (now - c.since > 8000) { a.claw = null; return '' }
+  // Over the mark: come down.
+  if (c.phase === 'over') { if (still) { c.phase = 'down'; clawTo(a, c, CLAW_LOW) } }
   // Down (or down on a block that stops it): close or open.
-  if (c.phase === 'down' && (still || a.blocked)) { c.phase = 'grip'; g.target = c.pick ? 0 : 1 } else if (c.phase === 'grip' && g.target === null) {
+  else if (c.phase === 'down' && (still || a.blocked)) { c.phase = 'grip'; g.target = c.pick ? 0 : 1 } else if (c.phase === 'grip' && g.target === null) {
     c.phase = 'up'
     clawTo(a, c, a.hover)
   } else if (c.phase === 'up' && still) a.claw = null
@@ -1991,7 +2028,8 @@ Object.assign(window, {
     placeBlock: (i: number, x: number, z: number, yaw = 0) => { const b = blocks[i]; if (b.by) drop(b); b.mesh.position.set(x, b.half[1], z); b.mesh.quaternion.setFromAxisAngle(UP, yaw * D2R); b.vy = 0 },
     /** Look from `at` toward `to` (metres; tests and screenshots). The camera keeps its limits. */
     view: (at: [number, number, number], to: [number, number, number]) => { camera.position.set(...at); controls.target.set(...to); controls.update() },
-    aims: () => [...aims.entries()].map(([id, a]) => ({ id, on: a.on, b: a.b, hit: a.hit ? { x: a.hit.x, z: a.hit.z } : null })),
+    /** Each pointer: whether it's on, B held, where the phone points, where the gripper goes for it, and where its mark is drawn (tests). */
+    aims: () => [...aims.entries()].map(([id, a]) => ({ id, on: a.on, b: a.b, hit: a.hit ? { x: a.hit.x, z: a.hit.z } : null, want: a.want, dot: { x: a.dot.position.x, z: a.dot.position.z, visible: a.dot.visible } })),
     stopped: () => stopped,
     /** What the holder of an arm drives on its own from the phone's strip (tests): the choice, its joints, those locked. */
     focus: (id: string) => { const who = sim?.claims.holder(id); if (!who || !sim) return null; const f = sim.focus.of(who); return { part: f.part, parts: [...f.parts], locks: [...f.locks] } },
