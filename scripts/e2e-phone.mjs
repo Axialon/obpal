@@ -20,6 +20,7 @@
  *   - Recovery (./phone-recovery.mjs): motion refused leaves a touch-only phone whose trackpad still moves the screen, and
  *     Disconnect, then Reconnect, brings the phone back with its input flowing.
  * phone-connections, phone-camera, phone-controllers and phone-recovery run inside this suite, so `e2e:all -- phone` covers them.
+ * OBPAL_E2E_PHONE_ONLY=tail runs camera, recovery, controllers, universal faces, packs and their CSP check independently.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch. OBPAL_SHOTS=<dir> saves screens.
  */
 import { tempScope, keepTemp } from './lib/temp.mjs'
@@ -41,6 +42,7 @@ import { phoneRecovery } from './phone-recovery.mjs'
 import { phonePointing } from './phone-pointing.mjs'
 import { runUniversalFaces } from './e2e-local-control.mjs'
 import { visitPhoneButtons, assertButtonInk } from './lib/surface-buttons.mjs'
+import { runIndependentGroups } from './lib/e2e-groups.mjs'
 
 const temps = tempScope()
 try {
@@ -81,6 +83,14 @@ try {
   console.log('ob.Pal phone lock and hardware buttons e2e')
   const sb = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED, args: RTC_ARGS }))
   closers.push(sb)
+  const runTail = () => runIndependentGroups([
+    { name: 'phone camera', run: () => phoneCamera({ browser: sb, origin: local.origin, check, shots: SHOTS }) },
+    { name: 'phone recovery', run: () => phoneRecovery({ browser: sb, origin: local.origin, check, shots: SHOTS }) },
+    { name: 'phone controllers', run: () => phoneControllers({ browser: sb, origin: local.origin, check, shots: SHOTS }) },
+    { name: 'phone universal faces', run: () => runUniversalFaces(sb, local.origin, check, process.env.OBPAL_E2E_EVIDENCE_ROOT) },
+    { name: 'phone packs', run: () => runPhonePacks({ browser: sb, origin: local.origin, check }) },
+    { name: 'phone CSP', run: () => check('no Content Security Policy violations on any page', cspCheck) },
+  ], check)
   if (process.env.OBPAL_E2E_PHONE_ONLY === 'connections') {
     await phoneConnections({ browser: sb, origin: local.origin, check, shots: SHOTS })
     await check('connection sheets and controller controls retain centred ink', async () => {
@@ -88,6 +98,8 @@ try {
       await visitPhoneButtons(sb, local.origin, (_page, size, state, measured) => rows.push(...measured.map(r => ({ size, state, ...r }))))
       return assertButtonInk(rows)
     })
+  } else if (process.env.OBPAL_E2E_PHONE_ONLY === 'tail') {
+    await runTail()
   } else {
   await phonePointing({ browser: sb, origin: local.origin, check, shots: SHOTS, baseline: process.env.OBPAL_POINTING_BASELINE === '1' })
   if (process.env.OBPAL_POINTING_ONLY !== '1') {
@@ -347,12 +359,7 @@ try {
     return `Done at ${fit.bottom.toFixed(0)} of ${fit.vh}px; swipe, Back and × close it; Disconnect asks, then says so`
   })
   await phoneConnections({ browser: sb, origin: local.origin, check, shots: SHOTS })
-  await phoneCamera({ browser: sb, origin: local.origin, check, shots: SHOTS })
-  await phoneRecovery({ browser: sb, origin: local.origin, check, shots: SHOTS })
-  await phoneControllers({ browser: sb, origin: local.origin, check, shots: SHOTS })
-  await runUniversalFaces(sb, local.origin, check, process.env.OBPAL_E2E_EVIDENCE_ROOT)
-  await runPhonePacks({ browser: sb, origin: local.origin, check })
-  await check('no Content Security Policy violations on any page', cspCheck)
+  await runTail()
   }
   }
 } catch (e) {

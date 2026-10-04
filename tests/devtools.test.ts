@@ -153,8 +153,12 @@ describe('e2e runner: suites, ports, results, the ob.Pal Desktop guard', () => {
     const suite = readText('scripts/e2e-phone.mjs')
     for (const run of ['phoneConnections', 'phoneCamera', 'phoneControllers', 'phoneRecovery']) {
       expect(suite, `${run} is imported`).toMatch(new RegExp(`^import \\{ ${run} \\} from './phone-[a-z]+\\.mjs'`, 'm'))
-      expect(suite, `${run} is run`).toMatch(new RegExp(`^\\s*await ${run}\\(`, 'm'))
     }
+    const tail = suite.slice(suite.indexOf('const runTail ='), suite.indexOf("if (process.env.OBPAL_E2E_PHONE_ONLY"))
+    for (const run of ['phoneCamera', 'phoneControllers', 'phoneRecovery']) {
+      expect(tail, `${run} runs inside the shared tail`).toMatch(new RegExp(`run: \\(\\) => ${run}\\(`))
+    }
+    expect(suite, 'the full phone run includes connections and the shared tail').toMatch(/await phoneConnections\([^\n]+\)\r?\n\s*await runTail\(\)/)
     expect(knownSuites(JSON.parse(readText('package.json')).scripts)).toContain('phone')
   })
 

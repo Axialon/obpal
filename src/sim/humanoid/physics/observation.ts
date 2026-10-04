@@ -1,12 +1,20 @@
 /** Contact-driven observations. Sole geometry describes error; it never manufactures support or changes a body. */
 import { STEP, type BodyState, type ContactSample } from '../../physics/schema'
-import { add, scale, sub, norm, dot, localPoint, multiply, conjugate, quaternion, rotate, angleBetween, type Vec3 } from '../../physics/math'
+import { add, scale, sub, norm, dot, localPoint, multiply, conjugate, quaternion, rotate, angleBetween, cross, type Vec3 } from '../../physics/math'
 import { soleCorners, type PhysicalHumanoid } from './model'
-export interface Observation {
+/** Additive world contact fields. Absent on pilot observations means unavailable, not zero contact. */
+export interface ObservationContacts {
+  /** Raw floor manifolds for all this actor's links, including hands and non-foot fall contacts. */
+  floorContacts: ContactSample[]
+  /** Raw manifolds between this actor and another actor; excludes this actor's self-contact. */
+  actorContacts: ContactSample[]
+}
+export interface Observation extends Partial<ObservationContacts> {
   schema_version: 1; modelVersion: string; profileId: string; actorId: string; generation: number; stateTick: number; timeS: number
-  bodies: BodyState[]; com: Vec3
+  bodies: BodyState[]; com: Vec3; comVelocity: Vec3
   joints: { id: string; rotation: BodyState['rotation']; angularVelocity: Vec3; anchorErrorM: number }[]
-  feet: { id: string; minSoleY: number; maxSoleY: number; centre: Vec3; speedMps: number }[]
+  feet: { id: string; minSoleY: number; maxSoleY: number; centre: Vec3; speedMps: number; normalImpulseNs: number; centreOfPressure: Vec3 | null;
+    contactPoints: Vec3[]; tangentialSpeedMps: number | null }[]
   support: { points: Vec3[]; polygon: Vec3[]; marginM: number | null; normalImpulseNs: number }
 }
 const cross2 = (a: Vec3, b: Vec3, c: Vec3) => (b.x - a.x) * (c.z - a.z) - (b.z - a.z) * (c.x - a.x)
@@ -19,11 +27,12 @@ function hull(points: Vec3[]) {
 }
 export function observe(model: PhysicalHumanoid, input: readonly BodyState[], contacts: readonly ContactSample[], generation: number, tick: number): Observation {
   const states = new Map(input.map(s => [s.id, s])), get = (id: string) => { const b = states.get(id); if (!b) throw new Error(`Missing observed body ${id}`); return b }
-  let mass = 0, com = { x: 0, y: 0, z: 0 }
-  for (const b of model.scene.bodies) if (!b.fixed) { mass += b.mass; com = add(com, scale(get(b.id).position, b.mass)) }
-  com = scale(com, 1 / mass)
+  let mass = 0, com = { x: 0, y: 0, z: 0 }, comVelocity = { x: 0, y: 0, z: 0 }
+  for (const b of model.scene.bodies) if (!b.fixed) { mass += b.mass; com = add(com, scale(get(b.id).position, b.mass)); comVelocity = add(comVelocity, scale(get(b.id).velocity, b.mass)) }
+  com = scale(com, 1 / mass); comVelocity = scale(comVelocity, 1 / mass)
   const points: Vec3[] = []; let normalImpulseNs = 0
   const loaded = new Set<string>()
+  const perFoot = new Map(model.feet.map(id => [id, { impulse: 0, weightedPoint: { x: 0, y: 0, z: 0 }, weightedSpeed: 0, points: [] as Vec3[] }]))
   for (const c of contacts) {
     if (c.distance > (model.scene.contact?.predictionDistance ?? .001) || c.impulse <= 0) continue
     if (c.a === 'floor' && model.feet.includes(c.b) && c.normalOnB.y >= .5) loaded.add(c.b)
@@ -36,14 +45,20 @@ export function observe(model: PhysicalHumanoid, input: readonly BodyState[], co
     // 60 deg upward-normal envelope is an observation default, not a recovery controller or floor-height test.
     if (!loaded.has(footA ? c.a : c.b) || normal.y < .5 || c.distance > (model.scene.contact?.predictionDistance ?? .001)) continue
     // Zero-pressure manifold points still bound the measured footprint of a foot with positive net load.
-    points.push({ ...(footA ? c.pointA : c.pointB) }); normalImpulseNs += c.impulse * normal.y
+    const id = footA ? c.a : c.b, point = footA ? c.pointA : c.pointB, weight = c.impulse * normal.y
+    const foot = perFoot.get(id)!, body = get(id)
+    points.push({ ...point }); normalImpulseNs += weight; foot.points.push({ ...point }); foot.impulse += weight
+    foot.weightedPoint = add(foot.weightedPoint, scale(point, weight))
+    // Velocity of the actual material point in the manifold, NOT the foot origin or a geometric corner.
+    const velocity = add(body.velocity, cross(body.angularVelocity, sub(point, body.position)))
+    foot.weightedSpeed += weight * norm(sub(velocity, scale(normal, dot(velocity, normal))))
   }
   const polygon = hull(points)
   const marginM = polygon.length < 3 ? null : Math.min(...polygon.map((a, i) => {
     const b = polygon[(i + 1) % polygon.length]; return cross2(a, b, com) / Math.hypot(b.x - a.x, b.z - a.z)
   }))
   return { schema_version: 1, modelVersion: model.version, profileId: model.profileId, actorId: model.actorId, generation, stateTick: tick, timeS: tick * STEP,
-    bodies: structuredClone(input.filter(b => b.id !== 'floor' && model.scene.bodies.some(spec => spec.id === b.id))), com, support: { points, polygon, marginM, normalImpulseNs },
+    bodies: structuredClone(input.filter(b => b.id !== 'floor' && model.scene.bodies.some(spec => spec.id === b.id))), com, comVelocity, support: { points, polygon, marginM, normalImpulseNs },
     joints: model.scene.joints.map(j => {
       const a = get(j.parent), b = get(j.child), frame = multiply(a.rotation, j.frameParent)
       return { id: j.id, rotation: quaternion(multiply(conjugate(frame), multiply(b.rotation, j.frameChild))),
@@ -51,9 +66,12 @@ export function observe(model: PhysicalHumanoid, input: readonly BodyState[], co
         anchorErrorM: norm(sub(localPoint(a.position, a.rotation, j.anchorParent), localPoint(b.position, b.rotation, j.anchorChild))) }
     }),
     feet: model.feet.map(id => {
+      const foot = perFoot.get(id)!
       const b = get(id), spec = model.scene.bodies.find(b => b.id === id)!, corners = soleCorners({ ...spec, ...b })
       return { id, minSoleY: Math.min(...corners.map(p => p.y)), maxSoleY: Math.max(...corners.map(p => p.y)),
-        centre: { ...b.position }, speedMps: Math.sqrt(dot(b.velocity, b.velocity)) }
+        centre: { ...b.position }, speedMps: Math.sqrt(dot(b.velocity, b.velocity)), normalImpulseNs: foot.impulse,
+        centreOfPressure: foot.impulse > 0 ? scale(foot.weightedPoint, 1 / foot.impulse) : null,
+        contactPoints: foot.points, tangentialSpeedMps: foot.impulse > 0 ? foot.weightedSpeed / foot.impulse : null }
     }) }
 }
 

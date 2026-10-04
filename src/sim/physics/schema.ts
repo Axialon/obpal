@@ -11,7 +11,7 @@ export interface Body extends BodyInput {
   rotation: Quat; fixed: boolean; mass: number; velocity: Vec3; angularVelocity: Vec3
   friction: number; restitution: number; linearDamping: number; angularDamping: number
 }
-export interface Motor { integration?: 'inertia-damped'; target: Quat; stiffness: number; damping: number; maxTorque: number }
+export interface Motor { integration?: 'inertia-damped' | 'constraint-damped'; target: Quat; stiffness: number; damping: number; maxTorque: number }
 export interface JointInput { id: string; parent: string; child: string; anchorParent: Vec3; anchorChild: Vec3; frameParent?: Quat; frameChild?: Quat; cone: Cone; motor: Motor }
 export interface Joint extends JointInput { frameParent: Quat; frameChild: Quat }
 export interface Wheel {
@@ -100,7 +100,7 @@ export function validateScene(input: SceneInput, budget: Partial<Limits> = {}): 
     identifier(j.id, used)
     if (!byId.has(j.parent) || !byId.has(j.child) || j.parent === j.child || byId.get(j.child)!.fixed || parents.has(j.child)) throw new RangeError('Invalid articulation tree')
     parents.set(j.child, j.parent)
-    if (j.motor.integration !== undefined && j.motor.integration !== 'inertia-damped') throw new RangeError('Invalid motor integration')
+    if (j.motor.integration !== undefined && j.motor.integration !== 'inertia-damped' && j.motor.integration !== 'constraint-damped') throw new RangeError('Invalid motor integration')
     const c = j.cone
     numberIn(c.swingY, .001, Math.PI - .01, 'swing Y'); numberIn(c.swingZ, .001, Math.PI - .01, 'swing Z')
     if (c.swingYMin !== undefined) numberIn(c.swingYMin, -Math.PI + .01, -.001, 'negative swing Y')
@@ -112,6 +112,11 @@ export function validateScene(input: SceneInput, budget: Partial<Limits> = {}): 
       motor: { ...(j.motor.integration ? { integration: j.motor.integration } : {}), target: clampCone(quaternion(j.motor.target), c), stiffness: numberIn(j.motor.stiffness, 0, 2000, 'motor stiffness'),
         damping: numberIn(j.motor.damping, 0, 200, 'motor damping'), maxTorque: numberIn(j.motor.maxTorque, 0, limits.maxTorque, 'motor torque') } }
   })
+  if (joints.some(j => j.motor.integration === 'constraint-damped')) {
+    if (joints.some(j => j.motor.integration !== 'constraint-damped')) throw new RangeError('Mixed coupled motor integration')
+    if (joints.length > 32 || bodies.filter(b => !b.fixed).length > 32) throw new RangeError('Coupled response workspace exceeded')
+    if (joints.some(j => j.motor.stiffness === 0 && j.motor.damping === 0)) throw new RangeError('Coupled servo requires positive impedance')
+  }
   for (const id of parents.keys()) {
     const seen = new Set<string>(); let p: string | undefined = id
     while (p !== undefined) { if (seen.has(p)) throw new RangeError('Articulation cycle'); seen.add(p); p = parents.get(p) }

@@ -3,7 +3,7 @@ import { Vector3 } from 'three'
 import { emptyPad, type PadState } from '@obpal/core'
 import { BALL_RADIUS, ELONGATION, OCTOPUS_LIMITS, OctopusLogic } from '../src/sim/devices/octopus'
 import { ARM_POINTS, OCTOPUS_PROFILE } from '../src/sim/devices/octopus-types'
-import { ArmRod, FLOOR, ROD_SEGMENTS, surfaceRadius } from '../src/sim/continuum/rod'
+import { ArmRod, FLOOR, ROD_SEGMENTS, SOFT_ARM, surfaceRadius } from '../src/sim/continuum/rod'
 import { restInput, type DeviceInput } from '../src/sim/devices/types'
 
 type Rod = ArmRod
@@ -40,7 +40,39 @@ describe('the soft arm rod', () => {
       expect(rod.speed()).toBeLessThan(0.03)
     }
   })
+
+  it('curves into a hold it is dragged from instead of creasing over it', () => {
+    // A rod held along its middle on the floor, its root then carried sideways: the pull swings round the hold.
+    const run = (settings: typeof SOFT_ARM) => {
+      const rod = new ArmRod(arm, settings), root = new Vector3(0, 0.15, 0), direction = new Vector3(0, -0.2, 1).normalize(), up = new Vector3(0, 1, 0)
+      rod.place(root, direction, up)
+      for (let i = 0; i < 240; i++) rod.step(1 / 120, root, direction, up, 0)
+      for (const i of [9, 10, 11]) rod.hold(i, FLOOR)
+      let sharpest = 0
+      for (let i = 0; i < 240; i++) {
+        root.x = Math.min(0.25, i / 480)
+        rod.step(1 / 120, root, direction, up, 0)
+        sharpest = Math.max(sharpest, sharpestBend(rod))
+      }
+      return sharpest
+    }
+    const limited = run(SOFT_ARM), unlimited = run({ ...SOFT_ARM, maxBend: 0 })
+    expect(unlimited).toBeGreaterThan(0.9)
+    expect(limited).toBeLessThan(0.75)
+  })
 })
+
+/** The sharpest joint bend along a rod, radians, leaving out the very tip (which curls tightly by design). */
+function sharpestBend(rod: ArmRod) {
+  const p = rod.position, a = new Vector3(), b = new Vector3()
+  let most = 0
+  for (let j = 1; j < ROD_SEGMENTS - 1; j++) {
+    a.set(p[j * 3] - p[j * 3 - 3], p[j * 3 + 1] - p[j * 3 - 2], p[j * 3 + 2] - p[j * 3 - 1])
+    b.set(p[j * 3 + 3] - p[j * 3], p[j * 3 + 4] - p[j * 3 + 1], p[j * 3 + 5] - p[j * 3 + 2])
+    most = Math.max(most, a.angleTo(b))
+  }
+  return most
+}
 
 describe('the octopus crawl', () => {
   it('replays alike at 30, 60 and 120 Hz', () => {
@@ -100,6 +132,28 @@ describe('the octopus crawl', () => {
     expect(Math.hypot(u.x, u.z - 0.9)).toBeGreaterThan(1.2)
     // Several arms at different phases at once.
     expect([...roles].filter((r) => ['plant', 'peel', 'recover', 'reach'].includes(r)).length).toBe(4)
+  })
+
+  it('never creases an arm: dragged to the end of its range and peeling, it curves into its hold', () => {
+    // Crawl, turn, crawl sideways and back: holding arms are dragged until they peel, again and again.
+    const logic = new OctopusLogic(), run = runOf(logic)
+    const history = run.arms.map(() => [] as { role: string; sharpest: number }[])
+    let sharpest = 0
+    for (let f = 0; f < 1500; f++) {
+      const input = f < 400 ? gamepad(0, -1) : f < 600 ? gamepad(0.8, -0.6) : f < 900 ? gamepad(0, 0, [], 1) : f < 1200 ? gamepad(-0.9, -1) : gamepad(0, 1)
+      logic.step([input], 1 / 60)
+      run.arms.forEach((arm, i) => { const s = sharpestBend(arm.rod); history[i].push({ role: arm.role, sharpest: s }); sharpest = Math.max(sharpest, s) })
+    }
+    // From half a second before each peel to its end.
+    let peels = 0, peeling = 0
+    for (const h of history) for (let k = 1; k < h.length; k++) if (h[k].role === 'peel' && h[k - 1].role === 'plant') {
+      peels++
+      for (let m = Math.max(0, k - 30); m < h.length && (m < k || h[m].role === 'peel'); m++) peeling = Math.max(peeling, h[m].sharpest)
+    }
+    // Before the bend limit and the pivoting hold, both reached 2.39 radians on this script.
+    expect(peels).toBeGreaterThan(50)
+    expect(peeling).toBeLessThan(0.95)
+    expect(sharpest).toBeLessThan(1)
   })
 
   it('has no fixed rhythm: arms let go at irregular intervals, each when its own hold runs out', () => {

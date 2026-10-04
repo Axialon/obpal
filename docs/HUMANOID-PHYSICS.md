@@ -1,10 +1,14 @@
 # F1a humanoid dynamics: implementation and acceptance contract
 
-Status: measured F1a candidate, **not accepted**; isolated from production practice/seats.
-The 2026-10-02 measurements below retain failing stance, anatomy and rendering gates.
+Status: measured F1a2 candidate, **not accepted**; isolated from production practice/seats.
+The 2026-10-03 F1a2 stance gates pass; anatomy and authored-rendering gates remain red.
+Section 5 retains the historical 2026-10-02 F1a failures; section 7 records F1a2.
 F1b/F1c are continuation work, not completed features. The 2026-10-01 F1 TASK releases Rapier development after the coordinator's
 F0-R selection; older gated/provisional paragraphs elsewhere are historical records.
 No existing engine-selection measurement is claimed as this pilot's acceptance.
+Sections 1-6 describe the original F1a implementation and its recorded follow-ups.
+Section 7 supersedes their motor-prediction, stance-control and acceptance status
+for the current F1a2 candidate; geometry, frames, effort caps and gates are retained.
 
 ## 1. Geometry, mass and collision model
 
@@ -630,3 +634,164 @@ pixel/LOD dwell evidence, preserving the independent-axis audit. Keep software-h
 wording and permission/local-processing boundaries intact. Existing classical
 controls must remain usable. Learning, storage UI, leagues and new meshes remain
 out of scope. Repack a fresh pinned request after coordinator integration.
+
+## 7. F1a2 candidate after the recorded follow-up
+
+The `f1bc-humanoid-balance` return proposes `humanoid-f1a2-v2`: opt-in constrained
+motor/stop response, explicit bounded stance targets from native load/COM, and
+separate loaded sliding and all-state displacement. See
+[HUMANOID-F1A2.md](HUMANOID-F1A2.md) for equations, units, limitations and verifier
+outputs. Sections 5-6 above remain historical evidence and the continuation scope.
+
+The held return and reconciliation execute all eight forms on native Rapier 0.21.0.
+Each stance completes 7,200 ticks; each anatomy set completes 97 trials of 480 ticks
+(46,560 anatomy ticks per form), without errors or missing rows. The anatomy
+assertions take 0-3 ms because `beforeAll` has already collected the native report;
+those timings are not simulation durations. All 90 isolated joint endpoint trials
+pass on every form. The simultaneous poses produce the real failures below.
+
+| Form | Penetration / hover mm | Fall displacement / loaded slip mm | Stance cone rad / surface mm | Anatomy pass / 97 | Anatomy cone rad / surface mm | Final target error rad |
+| --- | --- | --- | --- | ---: | --- | ---: |
+| keel-v1 | 3.102 / 1.910 | 1.173 / 0.634 | 0.001152 / 0.415 | 93 | 0.119307 / 27.436 | 0.102778 |
+| morrow-v1 | 3.127 / 1.910 | 1.429 / 0.719 | 0.001463 / 0.541 | 93 | 0.179426 / 44.379 | 0.369275 |
+| cairn-i-v1 | 3.112 / 1.910 | 1.221 / 0.664 | 0.001108 / 0.430 | 92 | 0.156251 / 40.520 | 0.301034 |
+| cairn-ii-v1 | 3.102 / 1.910 | 1.173 / 0.634 | 0.001152 / 0.415 | 93 | 0.119307 / 27.436 | 0.102778 |
+| rill-i-v1 | 3.112 / 1.910 | 1.221 / 0.664 | 0.001108 / 0.430 | 92 | 0.156251 / 40.520 | 0.301034 |
+| rill-ii-v1 | 3.102 / 1.910 | 1.173 / 0.634 | 0.001152 / 0.415 | 93 | 0.119307 / 27.436 | 0.102778 |
+| hush-i-v1 | 3.112 / 1.910 | 1.221 / 0.664 | 0.001108 / 0.430 | 92 | 0.156251 / 40.520 | 0.301034 |
+| hush-ii-v1 | 3.102 / 1.910 | 1.173 / 0.634 | 0.001152 / 0.415 | 93 | 0.119307 / 27.436 | 0.102778 |
+
+All eight stance reports pass the unchanged penetration/hover <=5 mm, cone <=0.01 rad,
+surface/anchor <=5 mm, pelvis >=90% initial height, up Y >=0.98, declared effort
+caps, zero dropped time and zero invalid frames. All 6,720 settled samples have
+native support. Minimum pelvis heights for II/Keel, I and Morrow are respectively
+0.917418, 0.881637 and 0.840745 m; minimum up Y is at least 0.999992. Maximum stance
+anchor error is 0.058674 mm and effort ratio is 0.197699. Replay passes at
+60/30/120 Hz, including negative quaternion signs. Displacement and loaded sliding
+remain diagnostics without an invented slip threshold.
+
+The stance tests are ordinary passing assertions (already promoted in the candidate).
+Only the three anatomy gates per form remain `it.fails`, with their unchanged
+0.01 rad cone, 5 mm surface and 0.08 rad final-target thresholds. The ordinary
+completion test still fails missing/error/nonfinite rows; expected failures cannot
+substitute for executing the trials. `physicalAcceptance` remains false on all eight
+forms even when the test runner is green. Squat, lunge, high kick and twist fail on
+every form; I-height forms also miss the T-pose cone gate (0.010173 rad). Only squat
+misses final target tracking. Full per-trial values and signed extrema are emitted
+before assertions, with completed and failing trials in the compact table.
+
+Contact diagnostics reproduce the held per-pose maxima. Squat retains positive
+forearm/thigh and hand/thigh native impulses through tick 480; its worst cone is
+forearm swing and final target miss is a hand, without saturation. Dynamic/dynamic
+contacts remain active in Rapier but are deliberately absent from the local torque
+predictor. Lunge's worst cone occurs at ticks 20-31 during floor impulses and
+actuator saturation (23/22/13 saturated joint-ticks for Keel/I/Morrow). Twist and
+I-height T-pose errors are floor-contact transients; Keel/II high kick includes
+thigh/lumbar self-contact. The compliant stops do not guarantee hard cone bounds
+under collision impulses omitted from the predictor or after torque saturation.
+Diagnostic floor removal lowers the floor-related cone errors below 0.01 rad,
+while squat and Keel high kick remain red. This supports the contact-transition
+cause; the acceptance fixture and its floor remain unchanged. F1b must investigate
+contact-aware feasible trajectories, unilateral contact response and saturation
+coupling rather than treating independent endpoints as whole-pose clearance.
+
+The guarded `humanoid-physics` group runs separately in the verifier, with its own
+acceptance log. Master's full sims dispatcher also includes it in the first timing
+partition. Both retain unchanged clocks, thresholds and physical gates. The previous
+coordinator-authorized SwiftShader runs remain historical evidence: sims reached its
+45- and 90-minute limits before focused completion, and software clock/frame-time
+results did not grant GPU acceptance. The hardware integration below supersedes
+those browser results without changing the native measurements above.
+
+### Hardware integration after master 9ea1cab
+
+The integration preserves master's shared GPU slots and exclusive timing
+reservations. Validation uses `OBPAL_E2E_GPU=1`, pinned Playwright Chromium build
+1237, and the measured ANGLE NVIDIA GeForce RTX 4090 Direct3D11 renderer. All ten
+full-sims partitions finish within their unchanged 45-minute budgets: 50.8 minutes
+of suite work, plus 8.1 minutes of queue waits. The explicit integration brief selects
+sims, phone, shared, camera, catalogue, code and pages, plus isolated humanoid
+physics, rather than the twelve suites printed by the changed-path selector.
+An initial shared wait expired into SwiftShader and was canceled without acceptance.
+The replacement extends only the shared queue wait to 60 minutes to retain hardware
+validation; assertion thresholds and default suite execution budgets are unchanged.
+
+The fresh required check passes all four TypeScript configurations and 3,599 ordinary
+Vitest tests, with 24 measured anatomy expected failures and 14 skips (3,637 total).
+Each of the eight native physical reports exactly matches the recorded F1a2 values.
+No anatomy threshold or expected-failure assertion changes during integration.
+
+| Hardware browser validation | Ordinary checks passed / total |
+| --- | ---: |
+| isolated humanoid physics | 4 / 5 |
+| full sims, all ten partitions | 517 / 518 |
+| phone | 189 / 189 |
+| shared | 32 / 32 |
+| camera | 20 / 20 |
+| catalogue | 134 / 134 |
+| code | 19 / 19 |
+| pages | 140 / 140 |
+
+The six non-sims suites complete all 534 checks on hardware, including each final
+CSP gate. Their suite work takes 49.4 minutes, with 30.9 minutes of GPU queue waits.
+Code's brand timing and pages' policy checks pass with the inherited master fixes;
+the Cloudflare automatic-beacon note is not a failed assertion. Camera processing
+uses the PC fixture; phone layouts use browser emulation, not physical-phone proof.
+
+Isolated humanoid physics passes 4/5 ordinary checks; full sims passes 517/518.
+Every partition uses the hardware renderer and the guard reports `no new sessions`.
+All 18 humanoid browser rows, 112 pose captures and three 7,200-tick stance strips
+complete. Keel browser penetration/displacement/loaded slip are 3.099/0.869/0.630 mm;
+Morrow and Cairn-I match the rounded native table above. These browser measurements
+remain separate from the eight-form native table. Authored lumbar submissions stay
+an explicit pending diagnostic, not a newly failing ordinary assertion.
+
+The sole ordinary sims failure is the unchanged zero-dropped-time gate. All ten
+desktop motion rows lose zero time. The eight narrow rows under 4x CPU throttling
+lose 4.0731-6.3839 s in the isolated run and 3.3299-4.7353 s in the full-sims prefix.
+Each loss equals the sum of update intervals beyond the unchanged 50 ms clock cap;
+the full-sims mean physics advance costs 5.956-7.485 ms per 240 Hz tick. These
+measurements describe the clock mechanism; paired master measurements distinguish
+pre-existing loss from the added candidate cost.
+
+Pinned master 9ea1cab reproduces the aggregate clock failure (3/4 ordinary checks),
+using the same RTX 4090 exclusive reservation, 18 selectors, viewports, CPU throttle,
+scene and clock detector. Its audited source archive is distinguished from the
+parent repository SHA reported by the runner. All 18 motion windows complete, and
+all ten desktop keys lose exactly zero time in master and both candidate captures.
+
+| Narrow form, 4x CPU | Master loss s | Candidate isolated s | Candidate full sims s | Full candidate extra s |
+| --- | ---: | ---: | ---: | ---: |
+| keel-v1 | 0.1733 | 6.0366 | 3.3784 | 3.2051 |
+| morrow-v1 | 0.0000 | 6.2888 | 3.3699 | 3.3699 |
+| cairn-i-v1 | 0.0000 | 5.7258 | 3.3753 | 3.3753 |
+| cairn-ii-v1 | 0.0000 | 4.0731 | 3.3299 | 3.3299 |
+| rill-i-v1 | 0.0000 | 5.7458 | 3.5543 | 3.5543 |
+| rill-ii-v1 | 0.0099 | 5.7359 | 3.8962 | 3.8863 |
+| hush-i-v1 | 0.2242 | 6.3839 | 4.7353 | 4.5111 |
+| hush-ii-v1 | 0.0000 | 6.0619 | 4.4012 | 4.4012 |
+
+Only Keel, Rill II and Hush I are red in this master witness. The other five forms
+are newly red in both candidate captures, and all eight lose substantially more
+time. Extra loss is 3.2051-4.5111 s in full sims and 4.0731-6.2888 s in isolation.
+Master narrow p95 physics tick cost is 3.100-4.075 ms, versus 6.650-12.917 ms in
+full candidate sims. This is a measured CPU timing regression relative to the paired
+master capture. The pre-existing aggregate failure does not waive the unchanged
+zero-drop gate or make the extra loss unrelated. Timing remains unaccepted.
+
+All 137 button gates and 68 local-control checks pass, with every expected button
+name attempted exactly once. All eleven logged full-sims CSP checks pass in their
+fresh partition page sets. The five-minute two-hero PC sample passes: 17,691 frames,
+logic p95 0.600 ms, submission p95 0.700 ms and GPU p95 4.617216 ms, totaling
+5.917216 ms against the unchanged 16.7 ms work gate. Scheduling interval p95 is
+16.9 ms and is a separate measurement. Draw calls are 102, triangles 55,597 and DPR
+1, within the unchanged 120/65,000/1.5 bounds. The existing harness deletes its TEMP
+arrays before retention; the passing log retains these exact component summaries.
+This synthetic PC landmark sample does not establish physical-phone performance,
+camera contention or the shared-native-world two-actor F1b requirements.
+
+Production practice and seats remain unchanged. F1b must still reconcile simultaneous
+pose stops/contact interference, shared-world two-actor motion, pushes, gait,
+recovery and contact-supported get-up, with physics advance fitting the clock budget.
+F1c retains authored lumbar, BODY routing,
+latency, clock/frame timing, mesh-crossing and LOD transition acceptance.

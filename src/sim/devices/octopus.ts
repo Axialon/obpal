@@ -15,7 +15,8 @@
  *
  * Grab wraps two arms round the ball and carries it; Pulse squeezes the mantle through the jet cycle and, on this dry
  * floor, pushes off by elongating the holding arms; Curl coils the arms and the body settles on them; Stop holds
- * everything. This is a reduced, kinematically stable soft-body model: rod stiffness, damping, ranges and timings
+ * everything. By the phone's Hand camera (./octopus-hand.ts), finger curls lift and curl mirrored arm pairs and a
+ * pinch grabs. This is a reduced, kinematically stable soft-body model: rod stiffness, damping, ranges and timings
  * are design values, not measured animal or hardware parameters. Logic is pure (three.js maths only) and advances in
  * fixed 120 Hz ticks, so 30, 60 and 120 Hz screens replay alike.
  */
@@ -23,6 +24,7 @@ import { Controller, PadButton } from '@obpal/core'
 import { Vector3 } from 'three'
 import { BendDynamics, JetMantle, REFERENCE_BEND, REFERENCE_JET, type JetSettings } from '../continuum/primitives'
 import { ArmRod, FLOOR, FREE, OBJECT, ROD_SEGMENTS, surfaceRadius } from '../continuum/rod'
+import { HAND, HandControl } from './octopus-hand'
 import { ContinuumClock } from '../continuum/tendons'
 import { action, drive, Machine, timestep } from './common'
 import { approach, axis, clamp, DragStick, wrapPi } from './input'
@@ -53,6 +55,8 @@ export const OCTOPUS_SPEC: DeviceSpec = {
     { id: 'stop', label: 'Stop', type: 'button', tone: 'stop' },
   ],
   buttons: { 'media:playpause': 'tray:grab', 'key:Space': 'tray:grab', 'key:KeyC': 'tray:curl', 'key:KeyP': 'tray:pulse' },
+  // Every motion utility, as a layout that names none offers, and the Hand camera (./octopus-hand.ts).
+  utilities: ['pad', 'motion.aim', 'motion.steer', 'motion.point', 'motion.track', 'touch.trackpad', 'motion.hold', 'motion.tilt', 'camera.hand'],
 }
 
 /** Body choices (metres, seconds). Design values for this studio, not hardware measurements. */
@@ -64,6 +68,13 @@ export const OCTOPUS_LIMITS = { x: 3.1, z: 2.1, crawlHeight: 0.15, restHeight: 0
 export const ELONGATION = { shortest: 0.62, longest: 1.32, slip: 1.42 }
 /** Where an arm first holds the floor, as a fraction along it: the proximal part stays free to push. */
 export const HOLD_FROM = 0.44
+/**
+ * A hold pivots on its first sucker: past `release` radians between the pull and the held stretch, the outer suckers
+ * let go one every `every` seconds (a peel's pace); under `regrip` they take hold again. Design values.
+ */
+export const PIVOT = { release: 0.6, regrip: 0.45, every: 0.025 }
+/** The most slack a holding arm's muscle keeps between its root and its first hold, metres (a design value). */
+const SLACK = 0.012
 /** Reach targets: distance from the body's centre at rest and how far travel moves them ahead. */
 const REACH = { radius: 0.68, lead: 0.5 }
 export const BALL_RADIUS = 0.09
@@ -98,6 +109,8 @@ interface Arm {
   rod: ArmRod
   role: ArmRole
   time: number
+  /** Seconds since a pivoting hold last let an outer sucker go. */
+  pivot: number
   /** Seal at each particle, 0…1. */
   seal: Float64Array
   /** Where a held object particle sits relative to the ball's centre. */
@@ -105,6 +118,9 @@ interface Arm {
   /** The bend the controller wants at each joint; the rod's own targets ease toward it, so no change is a snap. */
   oral: Float64Array
   lateral: Float64Array
+  /** Which mirrored pair it belongs to, front (0) to back (3): the Hand camera's finger for it. Lifted by that finger. */
+  pair: number
+  lifted: boolean
   /** The travelling bend of a reach, its target and its own wave phase. */
   bend: BendDynamics
   target: Vector3
@@ -138,6 +154,9 @@ interface Runtime {
   route: number
   slips: number
   pending: { grab: boolean; curl: boolean; pulse: boolean; stop: boolean }
+  /** The Hand camera, and whether the grab under way was started by its pinch (so opening the pinch lets go). */
+  hand: HandControl
+  pinchGrab: boolean
 }
 
 const scratch = { a: new Vector3(), b: new Vector3(), c: new Vector3(), root: new Vector3(), out: new Vector3(), dorsal: new Vector3() }
@@ -170,21 +189,25 @@ export class OctopusLogic extends Machine {
       side: Math.sign(profile.position.x) || 1,
       neighbours: [0, 0],
       rod: new ArmRod(profile),
-      role: 'plant', time: 0,
+      role: 'plant', time: 0, pivot: 0,
       seal: new Float64Array(ARM_POINTS),
       oral: new Float64Array(ARM_POINTS), lateral: new Float64Array(ARM_POINTS),
       offset: new Float64Array(ARM_POINTS * 3),
       bend: new BendDynamics(REACHING),
       target: new Vector3(),
       phase: hash(index * 3.1) * Math.PI * 2,
+      pair: 0, lifted: false,
     }))
     const ring = [...arms].sort((a, b) => a.angle - b.angle)
     ring.forEach((arm, i) => { arm.neighbours = [ring[(i + ring.length - 1) % ring.length].index, ring[(i + 1) % ring.length].index] })
+    // Mirrored pairs, front to back: arms the same angle either side of the heading share a finger.
+    const spreads = [...new Set(arms.map((a) => Math.round(Math.abs(a.angle) * 1e3)))].sort((a, b) => a - b)
+    for (const arm of arms) arm.pair = Math.min(3, spreads.indexOf(Math.round(Math.abs(arm.angle) * 1e3)))
     return {
       arms, clock: new ContinuumClock(), mantle: new JetMantle(COVE_JET), drag: new DragStick(), time: 0, ticks: 0,
       velocity: new Vector3(), vy: 0, forward: 0, right: 0, steer: 0, grab: 'none', grabTime: 0, grabbers: [],
       idle: 0, explore: 0, explored: 0, rearm: false, nobody: 0, show: { phase: 'seek', time: 0 }, ballVy: 0, route: 0,
-      slips: 0, pending: { grab: false, curl: false, pulse: false, stop: false },
+      slips: 0, pending: { grab: false, curl: false, pulse: false, stop: false }, hand: new HandControl(), pinchGrab: false,
     }
   }
 
@@ -214,6 +237,15 @@ export class OctopusLogic extends Machine {
       for (let i = particle(HOLD_FROM); i < particle(0.72); i++) if (arm.rod.contact[i]) { arm.rod.hold(i); arm.seal[i] = 1 }
       arm.role = 'plant'
     }
+    // Then let the holding arms take up their muscle and slack, so the first frame shows them settled, not settling.
+    // They settle with the life a still octopus starts with (arms()), so the first tick changes nothing.
+    for (let i = 0; i < 120; i++) for (const arm of run.arms) {
+      this.relax(arm, 0, 0.6)
+      this.plant(u, run, arm, 1 / 120)
+      this.shape(arm, 1)
+      armRoot(u, arm.index, scratch.root, scratch.out, scratch.dorsal)
+      arm.rod.step(1 / 120, scratch.root, scratch.out, scratch.dorsal, 0)
+    }
     this.publish(u, run)
   }
 
@@ -242,6 +274,9 @@ export class OctopusLogic extends Machine {
       u.showing = showing
       if (showing) run.show = { phase: 'seek', time: 0 }
     }
+    // The Hand camera, read every frame so that losing it is seen whatever else happens.
+    const hand = run.hand.step(live?.hand, dt)
+    if (hand.lost) this.handLost(u, run)
     if (showing) { this.showcase(u, run, dt); return }
     const pressed = live?.padPressed ?? 0
     const grab = !!live && action(live, 'grab')
@@ -268,6 +303,42 @@ export class OctopusLogic extends Machine {
     run.pending.grab ||= grab
     run.pending.curl ||= curl
     run.pending.pulse ||= pulse
+    // A pinch grabs, and opening it lets go of what it took; a pinch also lets go of what a tap took. While stopped,
+    // the hand's gestures are ignored: only a fresh stick or button starts it again.
+    if (hand.pinch) {
+      if (run.grab === 'none') { run.pending.grab = true; run.pinchGrab = true }
+      else if (!run.pinchGrab) run.pending.grab = true
+    }
+    if (hand.unpinch && run.pinchGrab) {
+      run.pinchGrab = false
+      if (run.grab === 'reach' || run.grab === 'hold') run.pending.grab = true
+    }
+  }
+
+  /**
+   * The hand was lost (untracked, unsure, stale or closed): its curls are now zero, so lifted arms come back down to
+   * the floor, and a reach its pinch started is cancelled. A ball already held stays held rather than dropped.
+   */
+  private handLost(u: Octopus, run: Runtime) {
+    if (run.pinchGrab && run.grab === 'reach') this.release(u, run, false)
+    run.pinchGrab = false
+    this.emit({ unit: 0, kind: 'tick', text: 'Hand lost · arms down' }, u)
+  }
+
+  /** The Hand camera's finger curls: a pair lifts past HAND.lift and comes back down below HAND.lower. */
+  private handArms(u: Octopus, run: Runtime) {
+    for (const arm of run.arms) {
+      if (run.grabbers.includes(arm.index)) continue
+      const curl = run.hand.curls[arm.pair]
+      if (!arm.lifted && curl > HAND.lift && (arm.role === 'plant' || arm.role === 'recover' || arm.role === 'reach')) {
+        arm.lifted = true
+        arm.time = 0
+        if (arm.rod.held.some((h) => h !== FREE)) { arm.role = 'peel'; arm.rod.sync() } else arm.role = 'lift'
+      } else if (arm.lifted && curl < HAND.lower) {
+        arm.lifted = false
+        if (arm.role === 'lift') this.beginReach(u, run, arm)
+      }
+    }
   }
 
   /**
@@ -368,7 +439,7 @@ export class OctopusLogic extends Machine {
     }
     if (u.ball.held || run.grab !== 'none') this.release(u, run, false)
     u.mode = 'curl'
-    for (const arm of run.arms) { arm.role = 'free'; arm.time = 0 }
+    for (const arm of run.arms) { arm.role = 'free'; arm.time = 0; arm.lifted = false }
     this.emit({ unit: 0, kind: 'tick', text: 'Curled' }, u)
   }
 
@@ -396,6 +467,7 @@ export class OctopusLogic extends Machine {
     for (const index of run.grabbers) {
       const arm = run.arms[index]
       this.peelAll(arm)
+      arm.lifted = false
       if (reachable) arm.target.set(u.ball.x, u.ball.y, u.ball.z)
       else arm.target.set(u.x - Math.sin(u.h) * 0.95, 0.3, u.z - Math.cos(u.h) * 0.95)
       this.beginReach(u, run, arm, 0, reachable ? 'wrap' : 'reach')
@@ -562,7 +634,7 @@ export class OctopusLogic extends Machine {
         if (arm.role === 'plant' && !run.grabbers.includes(arm.index)) { arm.role = 'peel'; arm.time = 0; arm.rod.sync() }
       }
     } else run.explore = 0
-    if (u.mode === 'crawl') this.recruit(u, run)
+    if (u.mode === 'crawl') { this.recruit(u, run); this.handArms(u, run) }
     const life = idle ? 1 : 0.6 + 0.4 * clamp(run.velocity.length() / OCTOPUS_LIMITS.speed, 0, 1)
     for (const arm of run.arms) {
       arm.time += dt
@@ -577,6 +649,7 @@ export class OctopusLogic extends Machine {
         case 'reach': case 'wrap': this.reach(u, run, arm, dt); break
         case 'hold': this.hold(u, run, arm, dt); break
         case 'free': this.coil(arm, run.time, dt); break
+        case 'lift': this.lift(run, arm, dt); break
       }
       this.shape(arm, dt)
       // Object holds ride on the ball.
@@ -656,15 +729,38 @@ export class OctopusLogic extends Machine {
       need = ELONGATION.slip
     }
     // The muscle always spans what it holds with a little slack, so the rod is never stretched between two fixed ends
-    // and curves into its hold rather than meeting it at an angle.
-    const target = clamp(need * 1.06, ELONGATION.shortest, 1.6)
+    // and curves into its hold rather than meeting it at an angle. The slack is a few percent of a short span but at
+    // most SLACK metres of a long one: more than the soft joints near the hold can take up would crease there.
+    const span = need * (hold - 1) * rod.rest
+    const target = clamp(need * (1 + Math.min(0.06, SLACK / Math.max(span, 1e-3))), ELONGATION.shortest, 1.6)
     for (let s = 1; s < ROD_SEGMENTS; s++) {
       const value = s < hold ? target : 1
       rod.stretch[s] = s < hold && value > rod.stretch[s] ? value : rod.stretch[s] + (value - rod.stretch[s]) * (1 - Math.exp(-dt / 0.06))
     }
-    // The held stretch keeps still; the free end beyond it curls and drifts.
-    // A few suckers past the first take hold too; the last third of the arm stays free to curl and drift.
-    for (let i = hold; i < Math.min(hold + 4, particle(0.72)); i++) if (!rod.held[i] && rod.contact[i]) rod.hold(i)
+    // The held stretch keeps still; the free end beyond it curls and drifts. While the pull runs along the held stretch,
+    // a few suckers past the first take hold too (the last third of the arm stays free to curl and drift). When the
+    // body's travel swings the pull away from it, the outer suckers let go one at a time, as a peel does, until the
+    // first sucker alone holds and the arm pivots round it, curving into its hold rather than creasing over it.
+    const swung = this.touchdown(arm, hold)
+    arm.pivot += dt
+    if (swung > PIVOT.release) {
+      let last = hold
+      for (let i = hold + 1; i < ARM_POINTS && rod.held[i] === FLOOR; i++) last = i
+      if (last > hold && arm.pivot >= PIVOT.every) { rod.held[last] = FREE; arm.pivot = 0 }
+    } else if (swung < PIVOT.regrip)
+      for (let i = hold; i < Math.min(hold + 4, particle(0.72)); i++) if (!rod.held[i] && rod.contact[i]) rod.hold(i)
+  }
+
+  /**
+   * How sharply a holding arm turns at its first hold: between the pull from the root and the arm beyond the hold
+   * (held or, once it pivots, free), so a pivoting hold grips again only when the arm has swung into line.
+   */
+  private touchdown(arm: Arm, hold: number) {
+    if (hold < 1 || hold + 1 >= ARM_POINTS) return 0
+    const p = arm.rod.position, k = hold * 3
+    scratch.a.set(p[k] - p[k - 3], p[k + 1] - p[k - 2], p[k + 2] - p[k - 1])
+    scratch.b.set(p[k + 3] - p[k], p[k + 4] - p[k + 1], p[k + 5] - p[k + 2])
+    return scratch.a.angleTo(scratch.b)
   }
 
   /** Letting go: suckers release from the tip back toward the base, and the freed end curls back as it lifts. */
@@ -676,7 +772,7 @@ export class OctopusLogic extends Machine {
     for (let j = 1; j < ROD_SEGMENTS; j++) if (j >= last) arm.oral[j] -= 0.12
     // Behind the remaining holds the muscle keeps the length it has, so nothing is left in tension to snap free.
     rod.sync()
-    if (last < 0) { arm.role = 'recover'; arm.time = 0 }
+    if (last < 0) { arm.role = arm.lifted ? 'lift' : 'recover'; arm.time = 0 }
   }
 
   /** Recovering: shortened and thickened, drawn in toward the body, then reaching out again. */
@@ -748,6 +844,19 @@ export class OctopusLogic extends Machine {
     rod.wrapCentre.set(u.ball.x, u.ball.y, u.ball.z)
     rod.wrapRadius = BALL_RADIUS + 0.02
     rod.wrapFrom = particle(0.5)
+  }
+
+  /** Lifted by the Hand camera: off the floor, shortened, and curled as far as its finger is. */
+  private lift(run: Runtime, arm: Arm, dt: number) {
+    const rod = arm.rod, curl = clamp(run.hand.curls[arm.pair], 0, 1)
+    for (let i = 0; i < ARM_POINTS; i++) rod.held[i] = FREE
+    this.ease(rod, 0.85, dt)
+    const sway = 0.04 * Math.sin(1.1 * run.time + arm.phase)
+    for (let j = 1; j < ROD_SEGMENTS; j++) {
+      const f = j / ROD_SEGMENTS
+      arm.oral[j] = -(0.06 + 0.44 * curl * smooth((f - 0.1) / 0.5)) + sway * (1 - f)
+      arm.lateral[j] = 0.05 * arm.side * f
+    }
   }
 
   /** Curl: shortened and coiled back over itself, swaying a little. */

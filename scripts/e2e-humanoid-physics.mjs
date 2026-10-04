@@ -16,8 +16,8 @@ const VIEWS = [{ id: 'desktop', width: 1280, height: 800, mobile: false, rate: 1
 export async function runHumanoidPhysics(local, check) {
   const report = { schema_version: 1, kind: 'humanoid-f1a-browser', pass: false, node: process.version, platform: process.platform, arch: process.arch,
     browser: null, gpuMode: process.env.OBPAL_E2E_GPU || '0', rows: [], errors: [], sheets: [], stanceSheets: [], evidenceVerified: false,
-    acceptanceStatus: 'recorded pending; physical pass is independent of harness success',
-    notImplemented: ['F1b balance/gait/two-actor contact/recovery', 'F1c BODY source routing/phone camera/receive-to-visible latency', 'F1c per-part pixel/mesh-crossing and transition release acceptance'] }
+    acceptanceStatus: 'F1a2 candidate; ordinary 30 s/5 mm stance gate, authored lumbar and F1b/F1c still pending',
+    notImplemented: ['F1b shared-world two-actor balance/gait/contact/recovery (stance target candidate only)', 'F1c BODY source routing/phone camera/receive-to-visible latency', 'F1c per-part pixel/mesh-crossing and transition release acceptance'] }
   let browser
   let folder
   const evidence = join(process.env.OBPAL_E2E_EVIDENCE_ROOT || join(ROOT, 'artifacts'), 'humanoid-physics')
@@ -100,7 +100,7 @@ export async function runHumanoidPhysics(local, check) {
                 await page.evaluate(sample => window.__humanoidPhysics.stanceFrame(sample), sample)
                 const png = await page.locator('#humanoid-proof').screenshot(), path = `${profileId}/stance/${sample.tick}.png`
                 await writeFile(join(folder, path), png)
-                frames.push({ path, timeMs: sample.timeS * 1000, note: 'Measured 30 s gravity stance including collapse; fixed world camera, floor grid, cyan/yellow lower-face corner guides.' })
+                frames.push({ path, timeMs: sample.timeS * 1000, note: 'Measured 30 s gravity stance, including any collapse; fixed world camera, floor grid, cyan/yellow lower-face corner guides.' })
                 tiles.push({ input: await sharp(png).resize(240, 180).png().toBuffer(), left: i * 240, top: 60 })
                 const label = `${sample.timeS.toFixed(4)} s; pelvis ${(sample.rootHeightM * 1000).toFixed(1)} mm`
                 const feet = sample.feet.map((f, n) => `<text x="5" y="${32 + n * 16}" fill="white" font-family="sans-serif" font-size="12">${f.id.includes('left') ? 'L' : 'R'} sole corners: ${(f.minSoleY * 1000).toFixed(1)}..${(f.maxSoleY * 1000).toFixed(1)} mm</text>`).join('')
@@ -113,7 +113,8 @@ export async function runHumanoidPhysics(local, check) {
             }
           }
           row.legacyReset = await page.evaluate(() => window.__humanoidPhysics.legacyReset())
-          row.pass = !!row.motion.pass && !row.browserErrors.length && row.legacyReset.rootRotationErrorRad < 1e-8 && row.legacyReset.pelvisHeightErrorM < 1e-8 &&
+          row.candidateStancePass = row.stance ? row.stance.pass === true : null
+          row.pass = (!row.stance || row.stance.pass === true) && !!row.motion.pass && !row.browserErrors.length && row.legacyReset.rootRotationErrorRad < 1e-8 && row.legacyReset.pelvisHeightErrorM < 1e-8 &&
             row.poses.every(p => p.prototype === 'blender' && p.pixels.coveredPixels > 0 && p.completedTicks === 480)
           await page.evaluate(() => window.__humanoidPhysics.dispose())
         })()
@@ -165,7 +166,12 @@ export async function runHumanoidPhysics(local, check) {
       (!r.stance || !r.stance.error && r.stance.completedTicks === 7200 && r.stance.trace.at(-1).tick === 7200))
   await check('F1a recorded measurement harness: 18 rows, 112 poses, three stance strips and verified JSON', () => {
     if (!harness) throw new Error('F1a measurement harness incomplete or failed; inspect humanoid-f1a-browser JSON')
-    return 'physical gates remain pending; harness success is not F1a acceptance'
+    return 'harness only; ordinary stance gates and deferred authored/interactive gates are separate'
+  })
+  await check('F1a2 candidate: three browser stance rows pass unchanged 30 s / 5 mm / support gates', () => {
+    const rows=report.rows.filter(r=>r.stance)
+    if(!harness||rows.length!==3||rows.some(r=>r.stance.pass!==true)) throw new Error('F1a2 browser stance incomplete or failed; inspect measured JSON, not harness status')
+    return 'three measured 7200-tick stance rows passed their unchanged physical gates'
   })
   const pending = async (name, passed, measured) => check(name, () => {
     if (!harness) throw new Error('F1a measurement harness incomplete or failed')

@@ -9,6 +9,10 @@ export function namedSuites(text: string): string[]
 export function verifyStage(options: { root: string; returned: string; request: string; pinned?: boolean }): Stage
 export function applyStage(root: string, stage: Stage): string
 export type Runner = (root: string, argv: string[], env: Record<string, string | undefined>) => { exit_code: number; log: string } | Promise<{ exit_code: number; log: string }>
+export function browserVerificationRuns(suites: string[], env: Record<string, string | undefined>): {
+  step: string; suites: string[]; env: Record<string, string | undefined>
+}[]
+export function browserVerificationLogs(logs: string, suites: string[]): string[]
 export interface Report {
   path: string; result: string; steps: { step: string; status: string; exit_code?: number; reason?: string }[];
   head: string | null; branch: string | null; deviations: string[]; receivedPath?: string

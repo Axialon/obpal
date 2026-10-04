@@ -40,9 +40,13 @@ function section() {
 /** Ring positions along the arm, denser toward the tip where it curls tightest. */
 const fractions = Array.from({ length: RINGS }, (_, k) => ROOT + (1 - ROOT) * (1 - (1 - k / (RINGS - 1)) ** 1.25))
 
-/** The Cove skin: graphite above, darkest at the root and lifting toward the tip, with a paler oral side round the cups. */
-const SKIN = { root: '#1b1f23', tip: '#353b40', oral: '#626b72' }
+/**
+ * The Cove skin: obsidian at the root where the arm leaves the mantle, graphite along the arm, lifting to a cool slate
+ * at the tip, with a pale pearl oral side round the cups so the undersides read when an arm curls or lifts.
+ */
+const SKIN = { root: '#101316', middle: '#2a3136', tip: '#5d6870', oral: '#aab3b8' }
 
+const smooth = (x: number) => { const t = Math.min(1, Math.max(0, x)); return t * t * (3 - 2 * t) }
 const catmull = (a: number, b: number, c: number, d: number, t: number) =>
   0.5 * (2 * b + (c - a) * t + (2 * a - 5 * b + 4 * c - d) * t * t + (3 * b - a - 3 * c + d) * t * t * t)
 
@@ -89,13 +93,23 @@ export class ArmSweep {
     this.geometry.setIndex(index)
     this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3).setUsage(THREE.DynamicDrawUsage))
     this.geometry.setAttribute('normal', new THREE.BufferAttribute(this.normals, 3).setUsage(THREE.DynamicDrawUsage))
-    const colors = new Float32Array(count * 3), root = new THREE.Color(SKIN.root), tip = new THREE.Color(SKIN.tip), oral = new THREE.Color(SKIN.oral), c = new THREE.Color()
+    const colors = new Float32Array(count * 3), skin = new Float32Array(count * 4), c = new THREE.Color()
+    const root = new THREE.Color(SKIN.root), middle = new THREE.Color(SKIN.middle), tip = new THREE.Color(SKIN.tip), oral = new THREE.Color(SKIN.oral)
     for (let a = 0; a < profile.arms.length; a++) for (let r = 0; r <= rings; r++) for (let i = 0; i < (r === rings ? 1 : AROUND); i++) {
-      const f = Math.max(0, fractions[Math.min(r, RINGS - 1)]), underside = r === rings ? 0 : Math.max(0, -this.cross.normals[i][1])
-      c.copy(root).lerp(tip, f ** 0.8).lerp(oral, 0.75 * underside ** 1.5)
-      c.toArray(colors, (a * this.perArm + r * AROUND + i) * 3)
+      // The cap's rings continue past the last fraction, so the tip's colour and coordinates run on to its apex.
+      const f = r < RINGS ? Math.max(0, fractions[r]) : 1 + (r - RINGS + 1) * 0.012, apex = r === rings
+      const underside = apex ? 0 : Math.max(0, -this.cross.normals[i][1]), v = a * this.perArm + r * AROUND + i
+      if (f < 0.3) c.copy(root).lerp(middle, smooth(f / 0.3))
+      else c.copy(middle).lerp(tip, smooth((f - 0.3) / 0.7) ** 1.2)
+      c.lerp(oral, 0.82 * underside ** 1.3)
+      c.toArray(colors, v * 3)
+      // The skin's own coordinates for the shader (octopus.view.ts): along the arm, round it mirrored about the dorsal
+      // line so the pattern has no seam, how dorsal this side is, and the arm.
+      const theta = (i / AROUND) * Math.PI * 2
+      skin.set([f, apex ? 0.5 : Math.abs(Math.cos(theta / 2)), apex ? 0 : this.cross.normals[i][1], a / profile.arms.length], v * 4)
     }
     this.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+    this.geometry.setAttribute('skin', new THREE.BufferAttribute(skin, 4))
     this.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e4)
   }
 
@@ -178,7 +192,7 @@ function cupGeometry() {
   const geometry = new THREE.LatheGeometry(profile.map(([r, y]) => new THREE.Vector2(r, y)), 10)
   const p = geometry.attributes.position, colors = new Float32Array(p.count * 3)
   for (let i = 0; i < p.count; i++) {
-    const r = Math.hypot(p.getX(i), p.getZ(i)), rim = r > 0.7 ? 1 : 0.12
+    const r = Math.hypot(p.getX(i), p.getZ(i)), rim = r > 0.7 ? 1 : 0.16
     colors.set([rim, rim, rim], i * 3)
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
@@ -234,7 +248,7 @@ export class CupSweep {
         this.scale.set(size, size * (1 - 0.45 * seal), size)
         this.matrix.compose(this.offset, this.orientation, this.scale)
         this.mesh.setMatrixAt(n, this.matrix)
-        this.color.setScalar(1 - 0.35 * seal)
+        this.color.setScalar(1 - 0.3 * seal)
         this.mesh.setColorAt(n, this.color)
         n++
       }

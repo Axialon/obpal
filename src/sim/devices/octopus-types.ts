@@ -18,9 +18,10 @@ export const ARM_POINTS = ROD_SEGMENTS + 1
 export type OctopusMode = 'crawl' | 'curl'
 /**
  * What one arm is doing: holding the floor (and pushing as the body moves away), peeling its suckers tip first,
- * recovering (shortened, drawn in), reaching by a travelling bend, wrapping or holding the ball, or coiled free.
+ * recovering (shortened, drawn in), reaching by a travelling bend, wrapping or holding the ball, coiled free, or lifted
+ * and curled by a finger of the Hand camera.
  */
-export type ArmRole = 'plant' | 'peel' | 'recover' | 'reach' | 'wrap' | 'hold' | 'free'
+export type ArmRole = 'plant' | 'peel' | 'recover' | 'reach' | 'wrap' | 'hold' | 'free' | 'lift'
 
 export interface OctopusBall { x: number; y: number; z: number; held: boolean }
 

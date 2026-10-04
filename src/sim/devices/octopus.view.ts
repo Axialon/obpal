@@ -3,6 +3,8 @@
  * smoked-glass sensor belt over a lime core, on a soft collar; eight graphite arms swept along the logic's continuum
  * frames, their cups instanced on the oral side, and a web between the arms near the root. All procedural: no meshes
  * or textures are downloaded. Only the ball casts a shadow map; soft blob shadows sit under the body and the ball.
+ * The arms' skin shades by shader terms alone (chromatophores, a pulse's lime band, a rim light), and the mantle's
+ * breath is one rhythm with the jet cycle's pulse, so the look adds no draws.
  */
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
@@ -23,35 +25,96 @@ const LIME = '#c6ff34'
 
 const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
 
-/** The Cove finishes: satin, low-gloss obsidian; graphite elastomer; pale metal cup rims over dark bowls. */
-function finishes() {
-  return {
-    mantle: new THREE.MeshPhysicalMaterial({ color: '#15191c', metalness: 0.4, roughness: 0.34, clearcoat: 0.4, clearcoatRoughness: 0.32 }),
-    seam: new THREE.MeshStandardMaterial({ color: '#07090a', metalness: 0.2, roughness: 0.6 }),
+/** The soft rim light's colour: a cool steel that lifts every silhouette off the dark floor. */
+const RIM = '#9ec3d6'
+
+/**
+ * The Cove palette (judged against the owner's cove.png): glossy obsidian mantle with a lime seam and eyes; arms from
+ * obsidian at the root through graphite to a cool slate tip, their oral side pale pearl; pale pewter cup rims over
+ * dark bowls; all on a near-black, softly glossy Carbon floor. Each surface reflects the room at its own strength.
+ */
+function finishes(environment: THREE.Texture | null) {
+  const m = {
+    mantle: rim(new THREE.MeshPhysicalMaterial({ color: '#0d1013', metalness: 0.35, roughness: 0.24, clearcoat: 0.8, clearcoatRoughness: 0.16 }), 0.3),
+    seam: new THREE.MeshStandardMaterial({ color: '#050607', metalness: 0.2, roughness: 0.6 }),
     belt: new THREE.MeshPhysicalMaterial({ color: '#0d1a1d', metalness: 0.3, roughness: 0.1, clearcoat: 1, clearcoatRoughness: 0.12, transparent: true, opacity: 0.82 }),
     core: new THREE.MeshStandardMaterial({ color: '#0b0f14', emissive: LIME, emissiveIntensity: 1.8, roughness: 0.3 }),
     signal: new THREE.MeshStandardMaterial({ color: '#a4ce35', emissive: LIME, emissiveIntensity: 0.7, roughness: 0.3 }),
-    skin: new THREE.MeshStandardMaterial({ color: '#1d2125', metalness: 0.02, roughness: 0.66, envMapIntensity: 0.3 }),
-    arms: rim(new THREE.MeshStandardMaterial({ color: '#ffffff', vertexColors: true, metalness: 0.02, roughness: 0.58, envMapIntensity: 0.28 }), '#9fb2be', 0.14),
-    web: new THREE.MeshStandardMaterial({ color: '#1a1e21', metalness: 0.02, roughness: 0.7, envMapIntensity: 0.28, side: THREE.DoubleSide }),
-    cups: new THREE.MeshStandardMaterial({ color: '#c3cbd1', metalness: 0.7, roughness: 0.3, vertexColors: true }),
+    skin: rim(new THREE.MeshStandardMaterial({ color: '#121518', metalness: 0.08, roughness: 0.5 }), 0.22),
+    arms: skinMaterial(),
+    web: rim(new THREE.MeshStandardMaterial({ color: '#14181b', metalness: 0.04, roughness: 0.55, side: THREE.DoubleSide }), 0.16),
+    cups: rim(new THREE.MeshStandardMaterial({ color: '#e2e8eb', metalness: 0.5, roughness: 0.3, vertexColors: true }), 0.2),
   }
+  // The stage's room light: a material with no map of its own takes the scene's strength, so each finish gets its own.
+  if (environment) for (const [material, strength] of [[m.mantle, 1], [m.belt, 1], [m.skin, 0.4], [m.arms.material, 0.45], [m.web, 0.35], [m.cups, 0.7]] as const) {
+    material.envMap = environment
+    material.envMapIntensity = strength
+  }
+  return m
 }
 
+/** The rim term: brighter where the surface turns away from the camera. GLSL, after the emissive map. */
+const RIM_TERM = 'totalEmissiveRadiance += rimTint * pow(1.0 - saturate(dot(normal, normalize(vViewPosition))), 3.0);'
+
 /**
- * A soft rim light: the surface brightens where it turns away from the camera, so dark arms separate from a dark floor.
+ * A soft rim light: the surface brightens where it turns away from the camera, so dark parts separate from a dark floor.
  * Added as emission in the shader; it costs no light or draw.
  */
-function rim<T extends THREE.MeshStandardMaterial>(material: T, color: string, strength: number): T {
-  const tint = new THREE.Color(color).multiplyScalar(strength)
+function rim<T extends THREE.MeshStandardMaterial>(material: T, strength: number): T {
+  const tint = new THREE.Color(RIM).multiplyScalar(strength)
   material.onBeforeCompile = (shader) => {
     shader.uniforms.rimTint = { value: tint }
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', '#include <common>\nuniform vec3 rimTint;')
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += rimTint * pow(1.0 - saturate(dot(normal, normalize(vViewPosition))), 4.0);')
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${RIM_TERM}`)
   }
-  material.customProgramCacheKey = () => `octopus-rim-${color}-${strength}`
+  material.customProgramCacheKey = () => `octopus-rim-${strength}`
   return material
+}
+
+/**
+ * The arms' skin: the swept vertex colours (octopus-sweep.ts) with three cheap shader terms and no extra draw.
+ *   - Chromatophores: small pigment cells on the dorsal side in the skin's own coordinates, so they ride with the arm,
+ *     slowly opening and closing, a little wider on each breath.
+ *   - A pulse sends a band of lime iridescence from the root to the tip (`wave` is its place along the arm, 0…1).
+ *   - The rim light.
+ * The uniforms are shared objects, so the view sets them each frame without recompiling.
+ */
+function skinMaterial() {
+  const uniforms = {
+    skinTime: { value: 0 }, skinBreath: { value: 0 }, skinWave: { value: -1 }, skinGlow: { value: 0 },
+    rimTint: { value: new THREE.Color(RIM).multiplyScalar(0.34) }, skinShimmer: { value: new THREE.Color(LIME).multiplyScalar(0.42) },
+  }
+  const material = new THREE.MeshStandardMaterial({ color: '#ffffff', vertexColors: true, metalness: 0.06, roughness: 0.46 })
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms)
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec4 skin;\nvarying vec4 vSkin;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSkin = skin;')
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+uniform float skinTime, skinBreath, skinWave, skinGlow;
+uniform vec3 rimTint, skinShimmer;
+varying vec4 vSkin;
+float skinHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float skinNoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(skinHash(i), skinHash(i + vec2(1.0, 0.0)), f.x), mix(skinHash(i + vec2(0.0, 1.0)), skinHash(i + vec2(1.0, 1.0)), f.x), f.y);
+}`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+float dorsal = smoothstep(-0.2, 0.8, vSkin.z);
+vec2 cell = vec2(vSkin.x * 60.0, vSkin.y * 6.0 + vSkin.w * 37.0);
+float cells = 0.62 * skinNoise(cell + vec2(0.0, skinTime * 0.3)) + 0.38 * skinNoise(cell * 2.6 + vec2(skinTime * 0.2, 3.1));
+float pigment = smoothstep(0.54 - 0.05 * skinBreath, 0.86, cells) * dorsal;
+diffuseColor.rgb *= 1.0 - 0.45 * pigment;`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+float band = skinGlow * exp(-pow((vSkin.x - skinWave) / 0.07, 2.0));
+totalEmissiveRadiance += skinShimmer * band * (0.3 + 0.7 * dorsal) * (1.0 - 0.5 * pigment);
+${RIM_TERM}`)
+  }
+  material.customProgramCacheKey = () => 'octopus-skin'
+  return { material, uniforms }
 }
 
 /** A point on the mantle's egg, in its own frame: t from 0 at the base to π at the crown, phi round from the front. */
@@ -127,8 +190,11 @@ function collar(m: ReturnType<typeof finishes>) {
   return mesh
 }
 
-function robot(logic: OctopusLogic) {
-  const m = finishes()
+/** Seconds per breath at rest; crawling quickens it by up to half. A design value, not a measured rate. */
+const BREATH = { period: 3.4, depth: 0.014 }
+
+function robot(environment: THREE.Texture | null) {
+  const m = finishes(environment), skinUniforms = m.arms.uniforms
   const root = new THREE.Group(), body = new THREE.Group(), lean = new THREE.Group()
   root.name = 'octopus-1'
   body.name = 'body'
@@ -141,7 +207,7 @@ function robot(logic: OctopusLogic) {
   lean.add(shell)
   body.add(collar(m))
   const arms = new ArmSweep(OCTOPUS_PROFILE), cups = new CupSweep(OCTOPUS_PROFILE, m.cups, arms), web = new WebSweep(OCTOPUS_PROFILE)
-  const skin = new THREE.Mesh(arms.geometry, m.arms)
+  const skin = new THREE.Mesh(arms.geometry, m.arms.material)
   skin.name = 'arms'
   skin.frustumCulled = false
   contactPart(skin, 'arms', { mode: 'free' })
@@ -158,27 +224,46 @@ function robot(logic: OctopusLogic) {
   const shadow = blobShadow(0.62, 0.42)
   root.add(shadow)
   let leanPitch = 0, leanRoll = 0
+  // The breath, the skin's own clock and the pulse's wave along the arms.
+  let phase = 0, breathing = 1, wave = -1, lastMantle = 1
   const step = (u: Octopus, t: number, dt: number, color: string | null) => {
     root.position.set(u.x, 0, u.z)
     body.position.y = u.y
     body.rotation.y = profileYaw(u.h)
     shadow.position.set(0, 0.003, 0)
     ;(shadow.material as THREE.MeshBasicMaterial).opacity = 0.42 * Math.exp(-Math.max(0, u.y - 0.2) * 4)
-    // The mantle lags the travel a little and squeezes with the jet cycle; it breathes at rest unless motion is reduced.
-    const k = 1 - Math.exp(-Math.max(0, dt) * 5)
+    // The mantle lags the travel a little and squeezes with the jet cycle.
+    const span = Math.max(0, dt), k = 1 - Math.exp(-span * 5)
     leanPitch += (-0.35 * u.v - leanPitch) * k
     leanRoll += (0.25 * u.turn - leanRoll) * k
     lean.rotation.set(leanPitch, 0, leanRoll)
-    const breath = reduced() || u.stopped ? 0 : 0.012 * Math.sin(t * 1.3)
+    // Breathing and pulsing are one rhythm: a pulse's squeeze takes the breath over, the breath fades as the mantle
+    // contracts, and the next breath starts from the refill. Stopped or with reduced motion, the mantle keeps still.
+    const still = reduced() || u.stopped, jetting = u.mantle < 0.995
+    if (jetting && lastMantle >= 0.995 && !still) wave = -0.12
+    lastMantle = u.mantle
+    if (jetting) { phase = 0; breathing += (0 - breathing) * (1 - Math.exp(-span * 10)) }
+    else if (!still) {
+      breathing += (1 - breathing) * (1 - Math.exp(-span * 1.2))
+      phase += span * ((2 * Math.PI) / BREATH.period) * (1 + 0.5 * Math.min(1, Math.abs(u.v) / OCTOPUS_LIMITS.speed))
+    }
+    const inhale = still ? 0 : breathing * Math.sin(phase), breath = BREATH.depth * inhale
     const squeeze = Math.cbrt(Math.max(0.3, u.mantle))
     shell.scale.set(squeeze * (1 + breath), 1 / Math.sqrt(squeeze) - breath * 0.5, squeeze * (1 + breath))
     arms.update(u)
     cups.update(u, arms)
     web.update(arms)
-    // The lime seam brightens as a pulse squeezes the mantle.
-    m.signal.emissiveIntensity = u.stopped ? 0.25 : 0.7 + 4 * Math.max(0, 1 - u.mantle)
+    // The skin: chromatophores drift on their own clock (held still when stopped) and open a little on each breath; a
+    // pulse's lime band runs from root to tip in about seven tenths of a second, fading as it reaches the tip.
+    if (!still) skinUniforms.skinTime.value += span
+    skinUniforms.skinBreath.value = inhale
+    if (wave > -1) wave = still || wave > 1.3 ? -1 : wave + span * 1.6
+    skinUniforms.skinWave.value = wave
+    skinUniforms.skinGlow.value = wave > -1 ? Math.min(1, Math.max(0, 1.3 - wave)) : 0
+    // The lime seam brightens as a pulse squeezes the mantle and glows a little with each breath.
+    m.signal.emissiveIntensity = u.stopped ? 0.25 : 0.8 + 0.25 * inhale + 4 * Math.max(0, 1 - u.mantle)
     m.core.emissive.set(color ?? LIME)
-    m.core.emissiveIntensity = u.stopped ? 0.4 : color ? 2.2 : 1.6
+    m.core.emissiveIntensity = u.stopped ? 0.4 : (color ? 2.2 : 1.6) + 0.2 * inhale
   }
   return { root, soft, step }
 }
@@ -188,16 +273,18 @@ function studio(scene: THREE.Scene, logic: OctopusLogic) {
   floor.name = 'studio-floor'
   scene.add(floor)
   const deck = tiledDeck(OCTOPUS_LIMITS.x * 2 + 1.4, OCTOPUS_LIMITS.z * 2 + 1.4, 0, 1)
-  // A Carbon floor for this studio: its own tile finish, darker than the shared deck's, so the lime ring and the
-  // graphite arms read against it. The shared material itself is left alone.
+  // A Carbon floor for this studio: its own near-black, softly glossy tile finish, so the slate arms, the pearl
+  // undersides and the lime ring read against it. It reflects the room at a quarter of the stage's strength (which a
+  // material without its own map would otherwise take). The shared material itself is left alone.
   deck.traverse((node) => {
     const mesh = node as THREE.Mesh
     if (!mesh.isMesh || !(mesh.material instanceof THREE.MeshStandardMaterial)) return
     const finish = mesh.material = mesh.material.clone()
-    finish.color.set('#15191c')
-    finish.metalness = 0.25
-    finish.roughness = 0.46
-    finish.envMapIntensity = 0.35
+    finish.color.set('#0a0c0e')
+    finish.metalness = 0.3
+    finish.roughness = 0.32
+    if (scene.environment) finish.envMap = scene.environment
+    finish.envMapIntensity = 0.24
   })
   floor.add(deck)
   const u = logic.units[0]
@@ -221,7 +308,7 @@ function studio(scene: THREE.Scene, logic: OctopusLogic) {
   const ballShadow = blobShadow(0.09, 0.5)
   scene.add(ball, ballShadow)
   contactSurface(floor)
-  const model = robot(logic)
+  const model = robot(scene.environment)
   scene.add(model.root, model.soft)
   return {
     step(t: number, dt: number, color: string | null = null) {

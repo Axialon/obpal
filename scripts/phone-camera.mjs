@@ -49,16 +49,22 @@ export async function phoneCamera({ browser, origin, check, shots }) {
   const phones = []
   const join = async (init) => {
     const screen = await screens.newPage()
-    await screen.goto(`${origin}/view/`)
-    const invite = await until('invite', () => screen.evaluate(() => window.__obpal?.pairingUrl), 20000)
-    const ctx = await browser.newContext({ ...devices['Pixel 7'], viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, ignoreHTTPSErrors: true })
-    phones.push(ctx)
-    await ctx.addInitScript(fakeCamera)
-    if (init) await ctx.addInitScript(init)
-    const phone = await ctx.newPage()
-    await phone.goto(invite)
-    await phone.locator('.modes').waitFor({ timeout: 25000 })
-    return phone
+    let ctx
+    try {
+      await screen.goto(`${origin}/view/`)
+      const invite = await until('invite', () => screen.evaluate(() => window.__obpal?.pairingUrl), 20000)
+      ctx = await browser.newContext({ ...devices['Pixel 7'], viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, ignoreHTTPSErrors: true })
+      phones.push(ctx)
+      await ctx.addInitScript(fakeCamera)
+      if (init) await ctx.addInitScript(init)
+      const phone = await ctx.newPage()
+      await phone.goto(invite)
+      await phone.locator('.modes').waitFor({ timeout: 25000 })
+      return phone
+    } catch (error) {
+      await Promise.allSettled([screen.close(), ...(ctx ? [ctx.close()] : [])])
+      throw error
+    }
   }
   const settings = async (phone) => {
     await phone.evaluate(() => document.querySelectorAll('.hint').forEach((h) => h.remove()))
@@ -134,8 +140,8 @@ export async function phoneCamera({ browser, origin, check, shots }) {
       return `Motion stays chosen; Camera says "${way.said.trim().slice(0, 60)}"`
     })
 
-    const ar = await join(brokenXr)
     await check('a 3D camera start that fails ends its session and can be tried again', async () => {
+      const ar = await join(brokenXr)
       await settings(ar)
       await ar.locator('.track3d [data-way="xr"]').click()
       await until('Camera chosen', () => ar.evaluate(() => document.querySelector('.track3d [aria-checked="true"]')?.getAttribute('data-way') === 'xr'))

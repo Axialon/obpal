@@ -4,7 +4,7 @@
  * its tray and the phone's buttons do) and pure logic (DeviceLogic: how each controller's input moves it, and its
  * physics within its limits), with its look in a separate three.js view. Pure: no three.js, no DOM, so node tests it.
  */
-import { Mode, type ControllerId, type Layout, type ModeId, type PadState, type Quat, type TrayControl, type Vec3 } from '@obpal/core'
+import { Mode, type ControllerId, type Layout, type ModeId, type PadState, type Quat, type TrayControl, type UtilityId, type Vec3 } from '@obpal/core'
 import type { CategoryId } from '../catalogue'
 import type { ControlAim, ControlScope } from '../../control-space'
 
@@ -34,6 +34,11 @@ export interface DeviceSpec {
   tray: TrayControl[]
   /** What physical inputs press here (`layout.buttons`, CATALOGUE §3): on top of each controller's defaults. */
   buttons?: Record<string, string>
+  /**
+   * The utilities it takes (`layout.utilities`, CATALOGUE §1), where it needs to name them: the phone opens its Hand
+   * or Body camera only for a layout that lists it. Left out, the phone offers every motion utility and no camera.
+   */
+  utilities?: readonly UtilityId[]
   /**
    * Its parts (PROTOCOL §3a): the pieces of a unit the phone's node strip picks one at a time, first to last as the
    * strip shows them, and named sets of them. The unit's own icon heads the strip, for the whole of it.
@@ -69,6 +74,7 @@ export function layoutOf(spec: DeviceSpec): Layout {
     tray: [...spec.tray, HOME],
     ...(spec.profile ? { profile: spec.profile } : {}),
     ...(spec.buttons ? { buttons: { ...spec.buttons } } : {}),
+    ...(spec.utilities ? { utilities: [...spec.utilities] } : {}),
   }
 }
 

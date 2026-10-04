@@ -3,6 +3,9 @@ import { STEP, validateScene } from '../../physics/schema'
 import { createSelectedSimulation } from '../../physics/selection'
 import { angleBetween, clampCone, norm, sub, rotate, fromRotationVector, swingTwist } from '../../physics/math'
 import { HumanoidPilot } from './pilot'
+import { StanceController, STANCE_CONTROL } from './stance'
+import { LoadedSlipMeter } from './slip'
+import { CONSTRAINT_DEFAULTS } from '../../physics/constraint-response'
 import { observe, type Observation } from './observation'
 import { ActuationGate, type ActuationFrame } from './contract'
 import { buildHumanoid, canonicalPoses, targetsFromAngles, soleCorners, type PhysicalHumanoid } from './model'
@@ -12,7 +15,7 @@ const message = (e: unknown) => e instanceof Error ? e.message : String(e)
 export function stanceSample(model: PhysicalHumanoid, observation: Observation) {
   const root = observation.bodies.find(b => b.id === model.root)!
   return { tick: observation.stateTick, timeS: observation.timeS, bodies: observation.bodies,
-    rootHeightM: root.position.y, rootUpY: rotate(root.rotation, { x: 0, y: 1, z: 0 }).y, support: observation.support,
+    com: observation.com, comVelocity: observation.comVelocity, rootHeightM: root.position.y, rootUpY: rotate(root.rotation, { x: 0, y: 1, z: 0 }).y, support: observation.support,
     feet: observation.feet.map(f => {
       const spec = model.scene.bodies.find(b => b.id === f.id)!, body = observation.bodies.find(b => b.id === f.id)!
       if (spec.shape.kind !== 'box') throw new Error('Sole witness requires the actual foot box')
@@ -37,6 +40,9 @@ export async function measureStance(profileId: string) {
     minPelvisHeightM: Infinity, standingHeightM: model.scene.bodies.find(b => b.id === model.root)!.position.y, minUp: 1,
     supportedSamples: 0, settledSamples: 0, maxAnchorErrorMm: 0, maxLimitSurfaceErrorMm: 0, maxConeErrorRad: 0, maxEffortRatio: 0,
     p95TickWallMs: NaN, p99TickWallMs: NaN, droppedSeconds: 0, invalidFrames: 0, error: null }
+  const controller = new StanceController(model, pilot.generation), sliding = new LoadedSlipMeter(model, pilot.generation)
+  const control = { version: STANCE_CONTROL.version, supportedTicks: 0, noSupportTicks: 0, outsideEnvelopeTicks: 0, maxAnkleBiasRad: 0, maxHipBiasRad: 0 }
+  const coupled = { sampledTicks: 0, minRank: Infinity, maxRank: 0, maxContactRows: 0, saturatedJointTicks: 0, maxRelativeResidual: 0, maxAppliedRelativeResidual: 0 }
   const timings: number[] = [], planted = new Map<string, { x: number; z: number }>()
   const supportMarginsM: (number | null)[] = []
   let previous = pilot.observation(), maxQuaternionStepRad = 0
@@ -48,7 +54,23 @@ export async function measureStance(profileId: string) {
   const metadata = pilot.metadata(), coldInitMs = performance.now() - start
   try {
     for (let tick = 0; tick < row.expectedTicks; tick++) {
-      const before = performance.now(); pilot.advance(STEP); timings.push(performance.now() - before)
+      const before = performance.now()
+      pilot.advance(STEP, observation => {
+        const request = controller.step(observation), d = request.diagnostics
+        if(d.phase === 'supported') control.supportedTicks++
+        else if(d.phase === 'no-support') control.noSupportTicks++
+        else control.outsideEnvelopeTicks++
+        control.maxAnkleBiasRad = Math.max(control.maxAnkleBiasRad, d.maxAnkleBiasRad)
+        control.maxHipBiasRad = Math.max(control.maxHipBiasRad, d.maxHipBiasRad)
+        return request.frame
+      })
+      timings.push(performance.now() - before)
+      const solve = pilot.diagnostics().forces.coupled
+      if(!solve) throw new Error('Missing coupled servo diagnostics')
+      coupled.sampledTicks++; coupled.minRank = Math.min(coupled.minRank, solve.constraintRank); coupled.maxRank = Math.max(coupled.maxRank, solve.constraintRank)
+      coupled.maxContactRows = Math.max(coupled.maxContactRows, solve.contactRows); coupled.saturatedJointTicks += solve.saturatedJoints
+      coupled.maxRelativeResidual = Math.max(coupled.maxRelativeResidual, solve.relativeResidual)
+      coupled.maxAppliedRelativeResidual = Math.max(coupled.maxAppliedRelativeResidual, solve.appliedRelativeResidual)
       const observation = pilot.observation(), root = observation.bodies.find(b => b.id === model.root)!, metrics = constraintMetrics(model, observation)
       for (let i = 0; i < observation.bodies.length; i++) maxQuaternionStepRad = Math.max(maxQuaternionStepRad,
         angleBetween(observation.bodies[i].rotation, previous.bodies[i].rotation))
@@ -73,6 +95,7 @@ export async function measureStance(profileId: string) {
         }
       }
       if (tick >= SETTLE_SECONDS / STEP) {
+        sliding.sample(observation)
         row.settledSamples++; supportMarginsM.push(observation.support.marginM)
         if (observation.support.normalImpulseNs > 0 && observation.support.marginM !== null && observation.support.marginM >= 0) row.supportedSamples++
       }
@@ -82,10 +105,13 @@ export async function measureStance(profileId: string) {
     const d = pilot.diagnostics(); row.droppedSeconds = d.droppedSeconds; row.invalidFrames = d.invalidFrames
     row.p95TickWallMs = percentile(timings, .95); row.p99TickWallMs = percentile(timings, .99); pilot.dispose()
   }
-  return { ...row, pass: stancePass(row), metadata, coldInitMs, maxQuaternionStepRad, supportMarginsM, trace, witnesses,
+  const loadedSliding = sliding.report()
+  const loadedSlipMm = loadedSliding.samples ? Math.max(0, ...Object.values(loadedSliding.feet).map(f => f.totalPathMm)) : null
+  return { ...row, pass: stancePass(row), loadedSlipMm, fallDisplacementMm: loadedSliding.samples ? row.slipMm : null, loadedSliding, control, coupled, metadata, coldInitMs, maxQuaternionStepRad, supportMarginsM, trace, witnesses,
     measurement: { floorWorldY: 0, sole: 'Four collider corners on local y=-half.y, transformed by foot-body rotation/translation into world space; both feet, all 7200 ticks including a fall.',
       hover: 'Maximum corner height, not a flat-foot air gap or a selected swing-foot measurement.',
-      slip: 'Maximum foot-body origin XZ displacement from tick 481 (2.004167 s), irrespective of contact; includes tipping/falling and is not contact-only sliding.',
+      slip: 'Deprecated slipMm and slip witness are the unchanged all-state foot-origin displacement, now also named fallDisplacementMm. Neither is loaded sliding or a fall classifier.',
+      loadedSlip: 'loadedSlipMm is the largest per-foot cumulative material-point tangential path after tick 481, trapezoid sampled only across consecutive positive-load ticks. Per-foot episodes reset on load loss; airborne paths, initial touchdown and zero-pressure-only manifolds add no distance. Weighted by upward native normal impulse; rolling is not origin sliding. No new slip threshold is invented.',
       slipReferenceTick: 481, slipReferenceTimeS: 481 * STEP, slipReferences: Object.fromEntries(planted) },
     timingNote: 'Wall time of a fixed tick including input validation, contact observations and bounded journaling; not process CPU time.' }
 }
@@ -170,7 +196,7 @@ export async function measureReplay(profileId: string) {
 export async function measureProfile(profileId: string) {
   const report: { schema_version: number; kind: string; profileId: string; pass: boolean; stance?: Awaited<ReturnType<typeof measureStance>>;
     anatomy?: Awaited<ReturnType<typeof measureAnatomy>>; replay?: Awaited<ReturnType<typeof measureReplay>>; errors: string[] } =
-    { schema_version: 1, kind: 'humanoid-f1a-native', profileId, pass: false, errors: [] }
+    { schema_version: 1, kind: 'humanoid-f1a2-native', profileId, pass: false, errors: [] }
   try { report.stance = await measureStance(profileId) } catch (e) { report.errors.push(`stance: ${message(e)}`) }
   try { report.anatomy = await measureAnatomy(profileId) } catch (e) { report.errors.push(`anatomy: ${message(e)}`) }
   try { report.replay = await measureReplay(profileId) } catch (e) { report.errors.push(`replay: ${message(e)}`) }
@@ -178,6 +204,7 @@ export async function measureProfile(profileId: string) {
   const model = buildHumanoid(profileId)
   return { ...report, modelVersion: model.version, parameters: {
     provenance: 'Original uncalibrated simulation defaults; existing ob.Pal primitive dimensions and independent axis limits, not hardware specifications.',
+    controller: STANCE_CONTROL, constraintResponse: CONSTRAINT_DEFAULTS,
     units: { mass: 'kg', localInertia: 'kg m^2', positions: 'm', rotations: 'quaternion x/y/z/w', limits: 'rad',
       maxTorque: 'N m', stiffness: 'N m/rad', damping: 'N m s/rad', timestep: 's' },
     timestep: STEP, root: model.root, parts: model.parts, scene: model.scene,

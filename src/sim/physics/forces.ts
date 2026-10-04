@@ -1,10 +1,11 @@
 /** Identical finite suspension, buoyancy and bounded torque controls for the comparison fixtures. */
 import { add, sub, scale, dot, cross, norm, unit, capped, rotate, conjugate, multiply, localPoint, rotationVector, clampCone, clamp, ZERO, type Vec3, type Quat } from './math'
 import { dampedServo } from './servo'
+import { coupledServo, type CoupledDiagnostics } from './coupled-servo'
 import { STEP } from './schema'
-import type { Backend, Body, BodyState, Scene, Limits } from './schema'
+import type { Backend, Body, BodyState, Scene, Limits, ContactSample } from './schema'
 export interface Wrench { force: Vec3; torque: Vec3 }
-export interface ForceDiagnostics { wheelLoads: Record<string, number>; displacedVolumes: Record<string, number>; motorTorques: Record<string, number> }
+export interface ForceDiagnostics { wheelLoads: Record<string, number>; displacedVolumes: Record<string, number>; motorTorques: Record<string, number>; coupled?: CoupledDiagnostics }
 export function accumulate(out: Map<string, Wrench>, id: string, force: Vec3, torque: Vec3 = ZERO): void {
   const before = out.get(id) ?? { force: { ...ZERO }, torque: { ...ZERO } }
   out.set(id, { force: add(before.force, force), torque: add(before.torque, torque) })
@@ -39,9 +40,20 @@ export function rayStatic(bodies: readonly Body[], origin: Vec3, direction: Vec3
   }
   return nearest
 }
-export function actuatorForces(scene: Scene, backend: Backend, targets: ReadonlyMap<string, Quat>, limits: Readonly<Limits>, out: Map<string, Wrench>): ForceDiagnostics {
+export function actuatorForces(scene: Scene, backend: Backend, targets: ReadonlyMap<string, Quat>, limits: Readonly<Limits>, out: Map<string, Wrench>, contacts?: readonly ContactSample[]): ForceDiagnostics {
   const report: ForceDiagnostics = { wheelLoads: {}, displacedVolumes: {}, motorTorques: {} }
+  const coupledMode = scene.joints.some(j => j.motor.integration === 'constraint-damped')
+  if (coupledMode && (contacts === undefined || backend.capabilities.motor !== 'bounded-torque'))
+    throw new Error('Constraint-damped motors require bounded torques and actual contact observations')
+  const coupled = coupledMode ? coupledServo(scene, scene.bodies.map(b => backend.read(b.id)), targets, contacts!, STEP) : null
+  if (coupled) report.coupled = { ...coupled.diagnostics }
   for (const j of scene.joints) {
+    if (coupled) {
+      const torque = coupled.torques.get(j.id)!
+      report.motorTorques[j.id] = norm(torque)
+      accumulate(out, j.child, ZERO, torque); accumulate(out, j.parent, ZERO, scale(torque, -1))
+      continue // Motor + stop were solved once, together; never add a second explicit stop.
+    }
     const parent = backend.read(j.parent), child = backend.read(j.child)
     const frame = multiply(parent.rotation, j.frameParent), relative = multiply(conjugate(frame), multiply(child.rotation, j.frameChild))
     const target = targets.get(j.id) ?? j.motor.target, velocity = sub(child.angularVelocity, parent.angularVelocity)

@@ -16,7 +16,7 @@ export const ROD_SEGMENTS = 16
  * The most one pass corrects a length, a bend or an aim, in metres. Soft tissue changes shape over several steps, so
  * no change of target or release of a hold can snap the rod.
  */
-const MOST = 0.01, BEND_MOST = 0.005, AIM_MOST = 0.004, SMOOTH = 0.12
+const MOST = 0.01, BEND_MOST = 0.005, LIMIT_MOST = 0.01, AIM_MOST = 0.004, SMOOTH = 0.12
 
 /** Surface radius along the arm: a linear taper between the first and last sections, narrowing over the last eighth. */
 export function surfaceRadius(arm: ContinuumArm, fraction: number, stretch = 1) {
@@ -38,11 +38,16 @@ export interface RodSettings {
   gravity: number
   /** The fastest a particle may move, metres a second. */
   fastest: number
+  /**
+   * The sharpest any joint may bend, radians. Soft tissue curves into a hold or a fold; it does not crease. Every
+   * shape the controller asks for (curls, wraps, waves) stays within it, so it only ever removes kinks.
+   */
+  maxBend: number
   iterations: number
 }
 
 /** Water-like damping and a stiffness that falls toward the tip. Design values, chosen for a slow, heavy, soft look. */
-export const SOFT_ARM: RodSettings = { rootStiffness: 0.55, tipStiffness: 0.12, damping: 5, friction: 0.45, gravity: 6, fastest: 1.6, iterations: 4 }
+export const SOFT_ARM: RodSettings = { rootStiffness: 0.55, tipStiffness: 0.12, damping: 5, friction: 0.45, gravity: 6, fastest: 1.6, maxBend: 0.6, iterations: 4 }
 
 const t = new Vector3(), n = new Vector3(), b = new Vector3(), d = new Vector3(), v = new Vector3(), w = new Vector3()
 
@@ -159,9 +164,11 @@ export class ArmRod {
       this.lengths()
       this.bend(up)
       this.smooth()
+      this.limit()
       this.lengths()
       this.floor(floor)
       this.anchors()
+      this.limit()
     }
     this.pinRoot(root, direction)
     // However the constraints pull, a free particle travels at most `sweep` a step; what is left resolves next step.
@@ -263,6 +270,35 @@ export class ArmRod {
       p[k] += ((p[a] + p[c]) / 2 - p[k]) * SMOOTH
       p[k + 1] += ((p[a + 1] + p[c + 1]) / 2 - p[k + 1]) * SMOOTH
       p[k + 2] += ((p[a + 2] + p[c + 2]) / 2 - p[k + 2]) * SMOOTH
+    }
+  }
+
+  /**
+   * The bend limit. Where a joint bends more sharply than `maxBend`, a free joint moves toward the midpoint of its
+   * neighbours, sharing its turn with theirs; at a held (or root) particle, which cannot move, the free neighbour swings
+   * toward the line of the other segment. So an arm dragged from its hold curves down into it instead of meeting it at
+   * an angle. Each pass moves a particle at most BEND_MOST, so the limit eases a kink out over a few steps.
+   */
+  private limit() {
+    const p = this.position, most = this.settings.maxBend, fixed = (i: number) => i < 2 || this.held[i] !== FREE
+    if (!(most > 0)) return
+    for (let i = 1; i < ROD_SEGMENTS; i++) {
+      const a = (i - 1) * 3, c = i * 3, e = c + 3
+      t.set(p[c] - p[a], p[c + 1] - p[a + 1], p[c + 2] - p[a + 2])
+      d.set(p[e] - p[c], p[e + 1] - p[c + 1], p[e + 2] - p[c + 2])
+      const before = t.length(), after = d.length()
+      if (before < 1e-9 || after < 1e-9) continue
+      const angle = Math.acos(clamp(t.dot(d) / (before * after), -1, 1))
+      if (angle <= most) continue
+      const excess = (angle - most) / angle
+      if (!fixed(i)) {
+        w.set((p[a] + p[e]) / 2, (p[a + 1] + p[e + 1]) / 2, (p[a + 2] + p[e + 2]) / 2)
+        this.nudge(c, w, excess, LIMIT_MOST)
+        continue
+      }
+      v.set(p[c], p[c + 1], p[c + 2])
+      if (!fixed(i - 1)) this.nudge(a, w.copy(d).multiplyScalar(-before / after).add(v), excess, LIMIT_MOST)
+      if (!fixed(i + 1)) this.nudge(e, w.copy(t).multiplyScalar(after / before).add(v), excess, LIMIT_MOST)
     }
   }
 

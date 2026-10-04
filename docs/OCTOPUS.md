@@ -318,7 +318,8 @@ for their respective lanes.
 `/sim/octopus/` is a row in `src/sim/devices/registry.ts`, so the catalogue
 card, tray, seats, every phone face (through the shared face mapping), sound,
 VR ride and control space come from the existing device framework. It has one
-seat. Water, climbing, a second seat, hand/body capture mappings, the Blender
+seat. The Hand camera mapping followed on 2026-10-04 (Controls, below). Water,
+climbing, a second seat, the body capture mapping, the Blender
 skinned arms and phase 6.4 are deferred.
 
 **Motion (reworked 2026-10-04 after the owner's test).** The first build
@@ -328,9 +329,9 @@ mechanics, adapted to a small real-time model:
 
 | Behaviour | Source | How the sim adapts it |
 | --- | --- | --- |
-| Soft, damped arm with constant volume | Muscular hydrostats elongate, shorten, bend and twist with no skeleton, at constant volume ([Kier & Smith 1985](https://doi.org/10.1111/j.1096-3642.1985.tb01178.x)); the octopus arm modelled as constant-volume segments with muscle, drag and buoyancy forces ([Yekutieli et al. 2005](https://doi.org/10.1152/jn.00684.2004)). | `src/sim/continuum/rod.ts`: a 16-segment position-based rod ([Müller et al. 2007](https://doi.org/10.1016/j.jvcir.2007.01.005)) whose segment lengths are a longitudinal muscle, whose joints relax toward a target bend with stiffness falling from root to tip, with viscous damping, reduced gravity and a floor. The section is radius / sqrt(elongation). Every target eases and every correction is bounded, so nothing snaps. It is not a Cosserat rod solver (as in [Gazzola et al. 2018](https://doi.org/10.1098/rsos.171628)); stiffness, damping and limits are design values. |
+| Soft, damped arm with constant volume | Muscular hydrostats elongate, shorten, bend and twist with no skeleton, at constant volume ([Kier & Smith 1985](https://doi.org/10.1111/j.1096-3642.1985.tb01178.x)); the octopus arm modelled as constant-volume segments with muscle, drag and buoyancy forces ([Yekutieli et al. 2005](https://doi.org/10.1152/jn.00684.2004)). | `src/sim/continuum/rod.ts`: a 16-segment position-based rod ([Müller et al. 2007](https://doi.org/10.1016/j.jvcir.2007.01.005)) whose segment lengths are a longitudinal muscle, whose joints relax toward a target bend with stiffness falling from root to tip, with viscous damping, reduced gravity and a floor. The section is radius / sqrt(elongation). Every target eases and every correction is bounded, so nothing snaps, and no joint may bend more sharply than 0.6 rad: a sharper joint moves toward the line of its neighbours (at a held particle, its free neighbour swings into line), so soft tissue curves rather than creases. It is not a Cosserat rod solver (as in [Gazzola et al. 2018](https://doi.org/10.1098/rsos.171628)); stiffness, damping and limits are design values. |
 | Crawling by pushing-by-elongation | Crawling has no apparent rhythm, the body's orientation and crawl direction are controlled separately, and arms push the body by elongating; the brain chooses moment to moment which arms push ([Levy, Flash & Hochner 2015](https://doi.org/10.1016/j.cub.2015.02.064)). | A holding arm's muscle spans from its root to its hold, so as the body glides away the arm lengthens and pushes, thinning as it does. At the end of its range (0.62 to 1.32 of rest) it peels, shortens and is drawn in, then reaches out again in its own sector. The body's speed is set by how many holding arms behind its course can still push, so there is no gait, phases differ arm to arm, and the right stick or a two-finger pan crawls sideways with the heading unchanged. |
-| Suckers attach and release | Rim seal, pressure differential and muscular release ([Tramacere et al. 2013](https://pmc.ncbi.nlm.nih.gov/articles/PMC3672162/)). | Holds form where the unrolled arm touches down near its target, seal over the profile's 120 ms and release from the tip back toward the base, one sucker every 25 ms. A hold dragged past the longest elongation slips (counted) rather than tearing. |
+| Suckers attach and release | Rim seal, pressure differential and muscular release ([Tramacere et al. 2013](https://pmc.ncbi.nlm.nih.gov/articles/PMC3672162/)). | Holds form where the unrolled arm touches down near its target, seal over the profile's 120 ms and release from the tip back toward the base, one sucker every 25 ms. A hold dragged past the longest elongation slips (counted) rather than tearing. When the body's travel swings the pull more than 0.6 rad away from the held stretch, the outer suckers let go one every 25 ms until the first alone holds and the arm pivots round it; they grip again once the arm is back within 0.45 rad. A holding arm keeps at most 1.2 cm of slack between root and hold. |
 | Reaching by bend propagation | A bend forms near the base and travels toward the tip ([Gutfreund et al. 1996](https://pmc.ncbi.nlm.nih.gov/articles/PMC6578955/)), driven by a peripheral motor program ([Sumbre et al. 2001](https://doi.org/10.1126/science.1060976)); a stiffening wave pushes the bend forward ([Yekutieli et al. 2005](https://doi.org/10.1152/jn.00684.2004)). | The bend's place comes from the foundation's force-driven bend model (Gutfreund 1998 parameters, at 1.8 times the reference effort), so its speed rises and falls. Behind the bend the arm straightens toward the target; ahead of it the arm stays rolled. Grab uses the same reach, then wraps the arm round the ball with the ball's curvature. |
 | Life | Not a measured behaviour. | Slow waves travel root to tip on free parts with a bend that tapers toward the tip; tips curl; the last third of a holding arm stays free; at rest an arm now and then lets go and reaches nearby; the mantle breathes and squeezes with each pulse. |
 
@@ -348,15 +349,48 @@ Nobody holding it for four seconds starts a showcase that seeks the ball,
 wraps it, carries it into the ring, curls and pulses, without scoring or
 events.
 
+**Hand camera (O4, 2026-10-04).** The layout lists `camera.hand` beside every
+motion utility it offered before, so the phone's Hand camera opens here
+(`src/sim/devices/octopus-hand.ts`). Index, middle, ring and little fingers
+drive the four mirrored arm pairs, front to back: a finger curled past 0.55
+(its three joint bends as a fraction of 2.6 rad, smoothed over 0.12 s) peels
+its pair, lifts it and curls it as far as the finger is; below 0.35 the pair
+reaches back down and holds. A fist lifts every pair and the body settles. A
+pinch grabs the ball and opening it for a quarter second lets go (a pinch also
+lets go of a ball a tap took); the index curl holds while the pinch is on, so a
+grab does not lift the front pair. Moving the palm while holding the phone's pad
+crawls, through the shared hand mapping. A lost hand (untracked, confidence
+under 0.6, stale or closed) lowers every lifted arm, cancels a reach its pinch
+started and says "Hand lost · arms down"; a ball already held is kept rather
+than dropped. While stopped the hand's gestures are ignored, so Stop holds until
+a fresh stick or button, as before. Synthetic hand frames
+(`tests/octopus-hand.test.ts`) check the curls, the pinch's debounce, the
+pairing, lifting and lowering, grab and release, loss and Stop. Thresholds are
+design values; real camera tracking on a phone remains to be tried by hand.
+
 **Model.** Procedural three.js, original: a satin obsidian egg mantle (0.38 m
 along its axis, 0.30 m across) leaning back on a soft collar, with panel seams,
 one lime seam, a smoked-glass belt over a lime core, and eight graphite arms
 swept as tapered superellipse tubes with two dorsal sheaths through a smooth
 curve of each rod's particles, the oral side carried by parallel transport.
-128 cups are one instanced mesh; a membrane joins the proximal arms. The arm
-skin darkens toward the root with a paler oral side and a soft rim term, on a
-Carbon floor. No meshes or textures are downloaded, only the ball casts a shadow
-map, and the page caps its pixel ratio at 1.5.
+128 cups are one instanced mesh; a membrane joins the proximal arms.
+
+**Palette (2026-10-04, judged against the owner's `cove.png`).** The arm skin
+runs from obsidian at the root through graphite to a cool slate tip, with a pale
+pearl oral side so the undersides read when an arm curls or lifts, and pale
+pewter cup rims over dark bowls. The floor is a near-black, softly glossy
+Carbon. Each finish sets its own reflection of the stage's room light (a
+material without its own map otherwise takes the stage's strength, which had
+turned the floor and arms the same grey). Three shader terms shade the arms and
+add no draw: chromatophores, small pigment cells in the skin's own coordinates
+that ride with the arm and open a little on each breath; a lime band that a
+pulse sends from root to tip in about 0.7 s; and a soft steel rim light, also on
+the mantle, collar, web and cups. The mantle breathes slowly (3.4 s at rest,
+quicker while crawling); a pulse's squeeze takes the breath over and the next
+breath starts from the refill, and the lime seam and eyes glow with it. Stopped
+or with reduced motion, the mantle and skin keep still. The scene stays at 19
+draws. No meshes or textures are downloaded, only the ball casts a shadow map,
+and the page caps its pixel ratio at 1.5.
 
 **Measured (desktop, `tests/octopus.test.ts`).** Over a scripted crawl and
 turn the body's velocity changes by at most its acceleration limit, no rod
@@ -366,7 +400,11 @@ and a holding arm elongates by more than 0.15 of rest as it pushes. Arms let
 go at irregular intervals (coefficient of variation above 0.2). A reach's bend
 front only advances, its speed peaking mid-reach, and the hold nearest each
 reach target lands within 5 cm at the median (under 12 cm at worst). 30, 60
-and 120 Hz replays agree within 1e-6. These are logic measurements on a
+and 120 Hz replays agree within 1e-6. Over a crawl, turn, sideways crawl and
+back, no joint short of the tip bends more than 1 rad (0.81 measured), including
+the half second before each of about a hundred peels (0.78); before the bend
+limit and the pivoting hold, the same script reached 2.39 rad as dragged arms
+creased over their holds. These are logic measurements on a
 shared desktop, not device frame rates; frames, strips and timings from the
 browser are retained under `artifacts/octopus/`. Physical-phone performance
 remains unverified.

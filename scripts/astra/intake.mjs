@@ -226,6 +226,25 @@ async function portsFree(ports) {
 export const intake = (options) => exchange({ ...options, mode: 'intake' })
 export const verification = (options) => exchange({ ...options, mode: 'verify' })
 
+/** Keep the expensive F1a acceptance proof and the remaining sims within separate guarded runner budgets. */
+export function browserVerificationRuns(suites, env) {
+  const fullEnv = { ...env }
+  // A verifier must run the declared full suites, even when its caller has an isolated group selected.
+  delete fullEnv.OBPAL_E2E_SIMS_ONLY
+  delete fullEnv.OBPAL_E2E_SIMS_GROUPS
+  const runs = [{ step: 'e2e', suites, env: fullEnv }]
+  if (suites.includes('sims')) runs.unshift({ step: 'e2e-humanoid-physics', suites: ['sims'],
+    env: { ...fullEnv, OBPAL_E2E_SIMS_ONLY: 'humanoid-physics' } })
+  return runs
+}
+
+/** Capture only declared suite logs, including the guarded runner's numbered sims partitions. */
+export function browserVerificationLogs(logs, suites) {
+  const files = readdirSync(logs, { withFileTypes: true }).filter(file => file.isFile()).map(file => file.name)
+  return suites.flatMap(suite => files.filter(name => name === `${suite}.log`
+    || suite === 'sims' && /^sims-(?:timing|shared)-[1-9]\d*\.log$/.test(name)).sort())
+}
+
 async function exchange({ root, returned, request, stage: requestedStage, mode, outbox, port, workerPort, pinned = false, run = localRun }) {
   const temps = tempScope()
   try {
@@ -343,13 +362,15 @@ async function exchange({ root, returned, request, stage: requestedStage, mode, 
         record('check', check, 'pnpm run check'); ready = check.exit_code !== -1
       }
       if (ready && verified.suites.length) {
-        await portsFree([Number(port), Number(workerPort)])
-        const logs = temps.makeSync(join(tmpdir(), 'obpal-astra-e2e-'))
-        record('e2e', await run(lane, ['run', 'e2e:all', '--', ...verified.suites, '--out', logs], env), `pnpm run e2e:all -- ${verified.suites.join(' ')}`)
-        for (const suite of verified.suites) {
-          const log = join(logs, `${suite}.log`)
-          if (existsSync(log)) {
-            const name = `acceptance/e2e-${suite}.log`
+        for (const job of browserVerificationRuns(verified.suites, env)) {
+          await portsFree([Number(port), Number(workerPort)])
+          const logs = temps.makeSync(join(tmpdir(), 'obpal-astra-e2e-'))
+          const group = job.env.OBPAL_E2E_SIMS_ONLY
+          record(job.step, await run(lane, ['run', 'e2e:all', '--', ...job.suites, '--out', logs], job.env),
+            `${group ? `OBPAL_E2E_SIMS_ONLY=${group} ` : ''}pnpm run e2e:all -- ${job.suites.join(' ')}`)
+          for (const file of browserVerificationLogs(logs, job.suites)) {
+            const log = join(logs, file)
+            const name = `acceptance/e2e-${file.slice(0, -4)}${group ? `-${group}` : ''}.log`
             const size = statSync(log).size
             capture(name, size > logBudget ? '' : readFileSync(log, 'utf8'), size)
           }

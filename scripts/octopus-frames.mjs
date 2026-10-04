@@ -35,6 +35,22 @@ export const CRAWL = [{ at: 1.5, axes: [0, -1], label: 'crawl begins' },
 export const GRAB = Array.from({ length: 12 }, (_, i) => ({ at: 7.5 + i * 0.6, label: `reach, grab, carry ${(7.5 + i * 0.6).toFixed(1)} s` }))
 /** Motion study: a held phone and a still stick, so only idle life moves. */
 export const IDLE = Array.from({ length: 12 }, (_, i) => ({ at: 1.5 + i * 0.7, label: `idle ${(1.5 + i * 0.7).toFixed(1)} s` }))
+/**
+ * The Hand camera, by synthetic hand frames (curls index to little; gestures 1 pinches), each frame taken `settle`
+ * seconds after its hand is given: fingers lift their arm pairs, a fist lifts them all, opening or losing the hand
+ * lets them down, and a pinch grabs the ball set down beside the octopus.
+ */
+export const HAND = [
+  { at: 1.0, hand: { curls: [0, 0, 0, 0] }, settle: 0.5, label: 'hand open' },
+  { at: 2.0, hand: { curls: [0.95, 0, 0, 0] }, settle: 1.0, label: 'index curled: front pair lifts' },
+  { at: 3.5, hand: { curls: [0.95, 0.95, 0, 0] }, settle: 1.0, label: 'middle too: two pairs' },
+  { at: 5.0, hand: { curls: [1, 1, 1, 1] }, settle: 1.0, label: 'fist: every pair' },
+  { at: 6.5, hand: { curls: [0, 0, 0, 0] }, settle: 1.2, label: 'opened: arms back down' },
+  { at: 8.2, hand: { curls: [0, 0, 0.95, 0.95] }, settle: 1.0, label: 'ring and little: back pairs' },
+  { at: 9.7, hand: null, settle: 1.4, label: 'hand lost: arms down' },
+  { at: 11.6, hand: { curls: [0.3, 0, 0, 0], gestures: 1 }, ball: true, settle: 2.4, label: 'pinched: ball held' },
+  { at: 14.5, hand: { curls: [0.3, 0, 0, 0] }, settle: 0.8, label: 'pinch opened: let go' },
+]
 
 /** One sheet: a row of six frames from each motion study, labelled, at identical cell sizes. */
 export async function motionSheet(rows, path) {
@@ -46,10 +62,32 @@ export async function motionSheet(rows, path) {
 async function script(page) {
   await page.evaluate(() => {
     const device = window.__device, step = device.logic.step.bind(device.logic)
-    window.__octopusScript = { axes: [0, 0], presses: [] }
+    window.__octopusScript = { axes: [0, 0], presses: [], hand: undefined }
+    // A synthetic camera hand: each finger bent evenly at its three joints so its measured curl is the one given.
+    const turn = (v, k, angle) => {
+      const c = Math.cos(angle), s = Math.sin(angle), d = k[0] * v[0] + k[1] * v[1] + k[2] * v[2]
+      const x = [k[1] * v[2] - k[2] * v[1], k[2] * v[0] - k[0] * v[2], k[0] * v[1] - k[1] * v[0]]
+      return v.map((vi, i) => vi * c + x[i] * s + k[i] * d * (1 - c))
+    }
+    const handFrame = ({ curls, gestures = 0 }) => {
+      const points = Array.from({ length: 21 }, (_, i) => (i >= 1 && i <= 4 ? [-0.03 * i, 0.02 * i, 0.005 * i] : [0, 0, 0]))
+      ;[5, 9, 13, 17].forEach((base, i) => {
+        const knuckle = [0.03 - i * 0.02, 0.09, 0], length = Math.hypot(...knuckle), along = knuckle.map((v) => v / length)
+        const across = Math.hypot(along[1], along[0]), axis = [along[1] / across, -along[0] / across, 0]
+        let at = knuckle
+        points[base] = at
+        ;[0.04, 0.025, 0.02].forEach((bone, k) => {
+          const dir = turn(along, axis, (-curls[i] * 2.6 * (k + 1)) / 3)
+          at = at.map((v, j) => v + dir[j] * bone)
+          points[base + k + 1] = at
+        })
+      })
+      return { tracked: true, gen: 1, t: 0, handedness: 'right', confidence: 0.95, gestures, p: [0, 0, -0.45], landmarks: points }
+    }
     device.logic.step = (inputs, dt) => {
       const s = window.__octopusScript
       const input = {
+        ...(s.hand !== undefined ? { hand: s.hand && handFrame(s.hand) } : {}),
         face: 'face.gamepad', mode: 1, pad: { axes: [s.axes[0], s.axes[1], 0, 0], triggers: [0, 0], buttons: 0, flags: 0, seq: 0, t: 0 },
         padPressed: 0, touching: false, drag: [0, 0], pan: [0, 0], pinch: 0, twist: 0, tilt: [0, 0], hold: null, point: null,
         spot: null, pose: null, held: new Set(), presses: s.presses.splice(0), wheel: 0, text: '', del: 0, values: [], recentred: false,
@@ -87,11 +125,16 @@ export async function captureOctopus(page, origin, out, { scenario = DRIVEN, nam
     const now = await page.evaluate(() => performance.now())
     const wait = step.at * 1000 - (now - start)
     if (wait > 0) await page.waitForTimeout(wait)
-    if (driven) await page.evaluate(({ axes, presses }) => {
+    if (driven) await page.evaluate(({ axes, presses, hand, ball }) => {
       const s = window.__octopusScript
       if (axes) s.axes = axes
       if (presses) s.presses.push(...presses)
-    }, { axes: step.axes, presses: step.presses })
+      if (hand !== undefined) s.hand = hand
+      // Set the ball down beside the octopus, within its reach.
+      if (ball) { const u = window.__device.logic.units[0]; Object.assign(u.ball, { x: u.x + 0.6, z: u.z, y: 0.09 }) }
+    }, { axes: step.axes, presses: step.presses, hand: step.hand, ball: step.ball })
+    // A step may wait for what it started before its frame is taken.
+    if (step.settle) await page.waitForTimeout(step.settle * 1000)
     await follow(page)
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
     const path = join(out, `${name}-frames`, `${String(i).padStart(2, '0')}.png`)
@@ -154,6 +197,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (!only || only === 'driven') await captureOctopus(page, local.origin, out)
     if (!only || only === 'showcase') await captureOctopus(page, local.origin, out, { scenario: SHOWCASE, name: 'showcase', driven: false })
     if (!only || only === 'phone') await captureOctopus(page, local.origin, out, { scenario: DRIVEN.slice(0, 6), name: 'phone', width: 390, height: 844 })
+    if (!only || only === 'hand') await captureOctopus(page, local.origin, out, { scenario: HAND, name: 'hand' })
     if (!only || only === 'motion') {
       const crawl = await captureOctopus(page, local.origin, out, { scenario: CRAWL, name: 'crawl' })
       const grab = await captureOctopus(page, local.origin, out, { scenario: GRAB, name: 'grab', driven: false })

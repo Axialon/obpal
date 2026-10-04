@@ -4,7 +4,7 @@ import { validateScene, type Scene, type Body, type BodyState, type JointInput }
 import { IDENTITY, ZERO, add, sub, scale, localPoint, multiply, conjugate, quaternion, rotate, fromRotationVector, rotationVector, clampCone,
   type Vec3, type Quat, type Cone } from '../../physics/math'
 import { uniformInertia } from '../../physics/servo'
-export const MODEL_VERSION = 'humanoid-f1a-v1'
+export const MODEL_VERSION = 'humanoid-f1a2-v2'
 export const ALL_PHYSICAL_PROFILES = Object.freeze(robotRoster(true).flatMap(r => r.forms.map(p => p.id)))
 export interface WorldFrame { position: Vec3; rotation: Quat }
 export interface Part { bodyId: string; massKg: number; inertia: Vec3 }
@@ -58,7 +58,7 @@ export function buildHumanoid(profileId: string, actorId = 'seat1'): PhysicalHum
   function link(part: string, parent: string, at: Vec3, axes: string[], basis: Quat, cone: Cone, effort: number, stiffness: number, damping: number, fraction = 1) {
     const jointId = `${actorId}_joint_${part}`
     joints.push({ id: jointId, parent: id(parent), child: id(part), anchorParent: sub(at, byPart.get(parent)!.position), anchorChild: sub(at, byPart.get(part)!.position),
-      frameParent: basis, frameChild: basis, cone, motor: { target: IDENTITY, maxTorque: effort, stiffness, damping, integration: 'inertia-damped' } })
+      frameParent: basis, frameChild: basis, cone, motor: { target: IDENTITY, maxTorque: effort, stiffness, damping, integration: 'constraint-damped' } })
     drives.push({ id: jointId, axes, fraction })
   }
   const limits = (name: string) => p.joints.find(j => j.id === name)!.limits

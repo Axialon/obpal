@@ -99,7 +99,8 @@ export class Simulation {
   diagnostics() {
     return { ...(this.clock?.diagnostics() ?? { backend: 'uninitialised', bodies: this.definition.bodies.length, sleeping: 0, tick: 0, steps: 0, alpha: 0, droppedSeconds: 0, invalidFrames: 0 }),
       sleeping: this.lastGood.filter(s => s.sleeping).length, status: this.status, fault: this.fault, generation: this.epoch,
-      forces: { wheelLoads: { ...this.forces.wheelLoads }, displacedVolumes: { ...this.forces.displacedVolumes }, motorTorques: { ...this.forces.motorTorques } } }
+      forces: { wheelLoads: { ...this.forces.wheelLoads }, displacedVolumes: { ...this.forces.displacedVolumes }, motorTorques: { ...this.forces.motorTorques },
+        ...(this.forces.coupled ? { coupled: { ...this.forces.coupled } } : {}) } }
   }
   metadata() { this.ready(); return { id: this.backend!.id, version: this.backend!.version, capabilities: { ...this.backend!.capabilities, unsupported: [...this.backend!.capabilities.unsupported] }, memoryBytes: this.backend!.memoryBytes() } }
   applyForce(id: string, force: Vec3, at?: Vec3): void {
@@ -160,7 +161,8 @@ export class Simulation {
       const out = new Map<string, Wrench>(), backend = this.backend!
       for (const c of this.commands) { backend.sleep(c.id, false); accumulate(out, c.id, c.force, c.torque) }
       this.commands = []
-      this.forces = actuatorForces(this.definition, backend, this.targets, this.limits, out)
+      this.forces = actuatorForces(this.definition, backend, this.targets, this.limits, out,
+        this.definition.joints.some(j => j.motor.integration === 'constraint-damped') ? this.contacts() : undefined)
       for (const [id, w] of out) {
         const b = this.definition.bodies.find(b => b.id === id)!
         if (b.fixed) continue

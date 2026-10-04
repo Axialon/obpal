@@ -3,7 +3,8 @@
  *   - it loads at 1440 and 390 wide without a page error, within its draw budget, at a pixel ratio of at most 1.5;
  *   - a paired emulated phone holds it and its gamepad face curls, uncurls and stops it;
  *   - scripted gamepad input crawls it on planted arms and its frame and logic timings stay within budget;
- *   - nobody holding it, the showcase grabs the ball and carries it; reduced motion keeps it drawing without errors.
+ *   - nobody holding it, the showcase grabs the ball and carries it; reduced motion keeps it drawing without errors;
+ *   - synthetic Hand camera frames lift arm pairs by finger, let them down when the hand is lost, and pinch to grab.
  * Labelled frame strips (./octopus-frames.mjs) go to OBPAL_E2E_EVIDENCE_ROOT, else a kept temporary folder.
  */
 import { mkdir } from 'node:fs/promises'
@@ -12,7 +13,7 @@ import { join } from 'node:path'
 import { chromium, devices } from 'playwright'
 import { e2eBrowserOptions } from './lib/browser.mjs'
 import { tempScope } from './lib/temp.mjs'
-import { captureOctopus, openOctopus, DRIVEN, SHOWCASE } from './octopus-frames.mjs'
+import { captureOctopus, openOctopus, DRIVEN, HAND, SHOWCASE } from './octopus-frames.mjs'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const quantile = (values, q) => [...values].sort((a, b) => a - b)[Math.min(values.length - 1, Math.floor(values.length * q))] ?? 0
@@ -26,8 +27,8 @@ async function until(what, fn, timeout = 15000) {
   }
 }
 
-/** Budgets for this sim (docs/OCTOPUS.md, the coordinator's Stage A): draws for the whole scene, frame and logic work. */
-const BUDGET = { calls: 36, framesP95: 25, logicP95: 2, pixelRatio: 1.5 }
+/** Budgets for this sim (docs/OCTOPUS.md; the stage polish holds the scene to 24 draws): draws, frame and logic work. */
+const BUDGET = { calls: 24, framesP95: 25, logicP95: 2, pixelRatio: 1.5 }
 
 export async function runOctopus(local, check) {
   const temps = tempScope({ keep: true })
@@ -142,6 +143,23 @@ export async function runOctopus(local, check) {
         if (!frames.some((f) => f.state.showing)) throw new Error('never started the showcase')
         if (!frames.some((f) => f.state.held)) throw new Error('never held the ball')
         return `held the ball from ${frames.find((f) => f.state.held).at} s`
+      } finally { await context.close() }
+    })
+
+    await check('octopus: by the Hand camera, fingers lift their arm pairs, a lost hand lets them down, a pinch grabs', async () => {
+      const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, ignoreHTTPSErrors: true })
+      try {
+        const page = await context.newPage(), errors = []
+        page.on('pageerror', (e) => errors.push(e.message))
+        // Synthetic hand frames (./octopus-frames.mjs): each frame shows what the previous step's hand did.
+        const frames = await captureOctopus(page, local.origin, out, { scenario: HAND, name: 'hand' })
+        const lifted = (i) => frames[i].state.roles.split(',').flatMap((role, k) => (role === 'lift' ? [k] : [])).join(',')
+        for (const [i, want, what] of [[1, '0,4', 'index'], [2, '0,1,4,5', 'index and middle'], [3, '0,1,2,3,4,5,6,7', 'fist'], [4, '', 'opened'], [5, '2,3,6,7', 'ring and little'], [6, '', 'lost']])
+          if (lifted(i) !== want) throw new Error(`${what}: lifted ${lifted(i) || 'none'}, wanted ${want || 'none'}`)
+        if (!frames[7].state.held) throw new Error('the pinch never held the ball')
+        if (frames[8].state.held) throw new Error('opening the pinch did not let go')
+        if (errors.length) throw new Error(errors.join('; '))
+        return 'each finger lifts its pair, a fist every pair, a lost hand none; a pinch holds the ball and opening it lets go'
       } finally { await context.close() }
     })
 

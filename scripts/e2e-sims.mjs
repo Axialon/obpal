@@ -1,5 +1,5 @@
 /**
- * The public sims end to end (CATALOGUE §7), served from this checkout's build by the local stand-in
+ * The public sims end to end (CATALOGUE Â§7), served from this checkout's build by the local stand-in
  * (extension/e2e/local.mjs), with emulated phones joining by invite:
  *   Robot arm: approval before a first claim, a joint moved by dragging on the phone's pad (the deadman), stopping when
  *   the finger lifts, an e-stop from a phone that only the screen resumes. Each kind of arm (?kind=) opens with its own
@@ -15,6 +15,7 @@
  * --only=tracking (or OBPAL_E2E_SIMS_ONLY=tracking) runs the arm's tracking checks and their pairing/claim setup.
  * --only=panels (or OBPAL_E2E_SIMS_ONLY=panels) runs just the window checks, also through e2e:all's guard.
  * --only=buttons (or OBPAL_E2E_SIMS_ONLY=buttons) checks rendered control ink and accessible icon names at three sizes.
+ * --only=humanoid-physics runs the F1a acceptance proof separately; the verifier runs it before the remaining sims.
  * OBPAL_E2E_SIMS_ONLY=octopus runs the octopus's load, paired-phone, timing, showcase and reduced-motion checks.
  */
 import { tempScope, keepTemp } from './lib/temp.mjs'
@@ -80,10 +81,10 @@ async function check(name, fn) {
   try {
     const detail = await fn()
     results.push({ ok: true })
-    console.log(`  ✓ ${name}${detail ? ` (${detail})` : ''}`)
+    console.log(`  âœ“ ${name}${detail ? ` (${detail})` : ''}`)
   } catch (e) {
     results.push({ ok: false })
-    console.log(`  ✗ ${name}: ${e?.message ?? e}`)
+    console.log(`  âœ— ${name}: ${e?.message ?? e}`)
   }
 }
 
@@ -231,7 +232,6 @@ try {
   console.log('ob.Pal sims e2e')
   if (!CORE_ONLY) {
     await runPhysicsBench(local, check)
-    await runHumanoidPhysics(local, check)
   }
   // ---- robot arm ----
   // The screen's camera: a picture the test paints, with a phone glowing in it (window.__fakeCam).
@@ -298,13 +298,13 @@ try {
     await a.drag(260)
     await sleep(300)
     const moved = await angle('a1.shoulder')
-    if (Math.abs(moved - before) < 2) throw new Error(`shoulder ${before.toFixed(1)}° → ${moved.toFixed(1)}°`)
+    if (Math.abs(moved - before) < 2) throw new Error(`shoulder ${before.toFixed(1)}Â° â†’ ${moved.toFixed(1)}Â°`)
     await sleep(600)
     const rest = await angle('a1.shoulder')
     await sleep(500)
     const still = await angle('a1.shoulder')
-    if (Math.abs(still - rest) > 0.5) throw new Error(`kept moving without the deadman: ${rest.toFixed(1)}° → ${still.toFixed(1)}°`)
-    return `${before.toFixed(1)}° → ${moved.toFixed(1)}°, then held at ${still.toFixed(1)}°`
+    if (Math.abs(still - rest) > 0.5) throw new Error(`kept moving without the deadman: ${rest.toFixed(1)}Â° â†’ ${still.toFixed(1)}Â°`)
+    return `${before.toFixed(1)}Â° â†’ ${moved.toFixed(1)}Â°, then held at ${still.toFixed(1)}Â°`
   })
   let b
   await check('robot arm: a second phone takes a whole arm, and dragging swings it (a held joint blocks its arm)', async () => {
@@ -320,12 +320,12 @@ try {
     await b.drag(260)
     await sleep(400)
     const moved = await angle('a2.base')
-    if (Math.abs(moved - before) < 5) throw new Error(`Arm 2's base ${before.toFixed(1)}° → ${moved.toFixed(1)}°`)
+    if (Math.abs(moved - before) < 5) throw new Error(`Arm 2's base ${before.toFixed(1)}Â° â†’ ${moved.toFixed(1)}Â°`)
     await sleep(700)
     const rest = await angle('a2.base')
     await sleep(400)
     if (Math.abs((await angle('a2.base')) - rest) > 0.5) throw new Error('kept moving without the deadman')
-    return `"${refused}"; Arm 2 swung ${before.toFixed(1)}° → ${moved.toFixed(1)}°`
+    return `"${refused}"; Arm 2 swung ${before.toFixed(1)}Â° â†’ ${moved.toFixed(1)}Â°`
   })
   await check('robot arm, Point: holding B sends the whole arm over the spot the phone points at; A picks up like a claw', async () => {
     await b.page.locator('.modes [data-tab=point]').click()
@@ -344,7 +344,7 @@ try {
     await b.page.locator('#wii-a').click()
     await until('claw closed', async () => (await angle('a2.gripper')) < 0.1, 8000)
     await until('claw back up', async () => (await tool()).height > 0.15 && !(await arm.page.evaluate(() => window.__arm.arms().find((x) => x.id === 'a2').claw)), 8000)
-    return `tool ${before.reach.toFixed(2)} m → ${after.reach.toFixed(2)} m out, ${after.height.toFixed(2)} m up over (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)}); claw closed from ${grip0.toFixed(2)}`
+    return `tool ${before.reach.toFixed(2)} m â†’ ${after.reach.toFixed(2)} m out, ${after.height.toFixed(2)} m up over (${spot.x.toFixed(2)}, ${spot.z.toFixed(2)}); claw closed from ${grip0.toFixed(2)}`
   })
   await check('robot arm, 3D: with a thumb on the pad, the gripper moves as the tracked phone moves', async () => {
     await b.page.locator('.modes [data-tab=track]').click()
@@ -369,9 +369,9 @@ try {
     await sleep(600)
     const held = await tool()
     const rise = up.height - before.height
-    if (Math.abs(rise - 0.15) > 0.02) throw new Error(`gripper rose ${rise.toFixed(3)} m for a 10 cm hand move (×1.5 expected): ${JSON.stringify({ before, up })}`)
-    if (Math.abs(held.height - up.height) > 0.01) throw new Error(`moved without the thumb: ${up.height.toFixed(3)} → ${held.height.toFixed(3)}`)
-    return `hand +10 cm → gripper +${(rise * 100).toFixed(1)} cm, then held`
+    if (Math.abs(rise - 0.15) > 0.02) throw new Error(`gripper rose ${rise.toFixed(3)} m for a 10 cm hand move (Ã—1.5 expected): ${JSON.stringify({ before, up })}`)
+    if (Math.abs(held.height - up.height) > 0.01) throw new Error(`moved without the thumb: ${up.height.toFixed(3)} â†’ ${held.height.toFixed(3)}`)
+    return `hand +10 cm â†’ gripper +${(rise * 100).toFixed(1)} cm, then held`
   })
   await check('robot arm, camera: re-grabbing after moving the released phone jumps less than 1 cm', async () => {
     return holdsStill('a2', () => thumb(b, true))
@@ -396,14 +396,14 @@ try {
     await sleep(300)
     return `lost: ${lost}; returned: ${returned}; following resumed`
   })
-  await check('robot arm, 3D from the phone’s own motion (no camera): swinging the phone swings the gripper', async () => {
+  await check('robot arm, 3D from the phoneâ€™s own motion (no camera): swinging the phone swings the gripper', async () => {
     // B switches 3D to its own motion in settings.
     await b.page.evaluate(() => document.querySelectorAll('.hint').forEach((h) => h.remove()))
     await b.page.locator('#gear').click()
     await b.page.locator('.track3d [data-way=motion]').click()
     await b.page.locator('#done').click()
     await b.page.locator('.modes [data-tab=track]').click()
-    if (await b.page.locator('#track-start').isVisible()) throw new Error('motion 3D shouldn’t need a start')
+    if (await b.page.locator('#track-start').isVisible()) throw new Error('motion 3D shouldnâ€™t need a start')
     const tool = () => arm.page.evaluate(() => window.__arm.arms().find((x) => x.id === 'a2').tool)
     const before = await tool()
     const box = await b.page.locator('#pad').boundingBox()
@@ -411,7 +411,7 @@ try {
     await sleep(300)
     const pose = await poseOf('a2')
     if (pose?.source !== 'model' || !pose.tracked) throw new Error(`expected a usable model pose: ${JSON.stringify(pose)}`)
-    // Swing the phone 30° to the left (its heading), in steps.
+    // Swing the phone 30Â° to the left (its heading), in steps.
     for (let i = 1; i <= 10; i++) { await b.cdp.send('DeviceOrientation.setDeviceOrientationOverride', { alpha: 10 + 3 * i, beta: 70, gamma: 0 }); await sleep(50) }
     await sleep(900)
     const after = await tool()
@@ -421,7 +421,7 @@ try {
     if (swung < 5) {
       const arm2 = await arm.page.evaluate(() => { const x = window.__arm.arms().find((y) => y.id === 'a2'); return { state: x.state, goal: x.goal } })
       const ph = await b.page.evaluate(() => ({ tab: document.querySelector('.modes [aria-selected=true]')?.dataset.tab, mode: document.getElementById('surface')?.dataset.mode, way: localStorage.getItem('obpal.track3d') }))
-      throw new Error(`the gripper didn’t follow: yaw ${before.yaw.toFixed(1)} → ${after.yaw.toFixed(1)}; arm ${JSON.stringify(arm2)}; phone ${JSON.stringify(ph)}`)
+      throw new Error(`the gripper didnâ€™t follow: yaw ${before.yaw.toFixed(1)} â†’ ${after.yaw.toFixed(1)}; arm ${JSON.stringify(arm2)}; phone ${JSON.stringify(ph)}`)
     }
     await sleep(400)
     const regrab = await holdsStill('a2', () => thumb(b, true))
@@ -429,9 +429,9 @@ try {
     if (next?.source !== 'model' || next.gen <= pose.gen) throw new Error(`motion re-grab reused its origin: ${JSON.stringify(next)}`)
     await thumb(b, false)
     await b.page.locator('.modes [data-tab=rotate]').click()
-    return `source model; phone swung 30° → arm swung ${swung.toFixed(1)}°; re-grab: ${regrab}`
+    return `source model; phone swung 30Â° â†’ arm swung ${swung.toFixed(1)}Â°; re-grab: ${regrab}`
   })
-  await check('robot arm, camera: a phone without WebXR glows, and the screen’s camera moves the gripper as it moves', async () => {
+  await check('robot arm, camera: a phone without WebXR glows, and the screenâ€™s camera moves the gripper as it moves', async () => {
     await a.claim('Whole arm', 0)
     await until('arm 1 held', () => arm.page.evaluate(() => !!window.__sim.claims.holder('a1')), 5000)
     await a.page.locator('.modes [data-tab=track]').click()
@@ -457,7 +457,7 @@ try {
     if (rise < 0.05) throw new Error(`gripper rose ${rise.toFixed(3)} m: ${JSON.stringify({ before, after })}`)
     if (!(await a.page.locator('#glow-stop').isVisible())) throw new Error('no Stop on the glowing screen')
     await a.page.locator('#glow-end').click()
-    return `glow rose 20 px in the picture → gripper +${(rise * 100).toFixed(1)} cm; Stop stays on the glowing screen`
+    return `glow rose 20 px in the picture â†’ gripper +${(rise * 100).toFixed(1)} cm; Stop stays on the glowing screen`
   })
   if (!ONLY_TRACKING) {
   await check('robot arm: a phone e-stops every joint, and only the screen resumes', async () => {
@@ -562,7 +562,7 @@ try {
         const root = document.querySelector('.obpal-chip').shadowRoot
         return { card: r(root.querySelector('.card')), pill: r(root.querySelector('.pill')), open: document.querySelectorAll('.sim-window:not([hidden])').length, bar: r(document.querySelector('.sim-top')).bottom }
       })
-      const at = `${w}×${h}`
+      const at = `${w}Ã—${h}`
       if (g.card.top < g.bar) throw new Error(`${at}: the card reaches ${Math.round(g.card.top)}px, under the top bar (to ${Math.round(g.bar)}px)`)
       if (g.card.bottom > g.pill.top || g.pill.bottom > h || g.open) throw new Error(`${at}: pairing or docked defaults do not fit: ${JSON.stringify(g)}`)
       await page.evaluate(() => { document.getElementById('people').hidden = false })
@@ -580,7 +580,7 @@ try {
       await page.locator('[data-panel="controls"]').getByRole('button', { name: /^Minimise / }).click()
       await until(`${at}: pairing returns after minimising`, open, 3000)
       if (SHOTS) await page.screenshot({ path: joinPath(SHOTS, `sim-arm-chip-${w}x${h}.png`) })
-      out.push(`${at}: card ${Math.round(g.card.top)}–${Math.round(g.card.bottom)}, windows docked`)
+      out.push(`${at}: card ${Math.round(g.card.top)}â€“${Math.round(g.card.bottom)}, windows docked`)
       await ctx.close()
     }
     return out.join('; ')

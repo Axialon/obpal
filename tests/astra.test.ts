@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanupFixtures, moveFixtureFile, mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, unlinkSync, symlinkSync, realpathSync, join, tmpdir, env, bytes, centralOffset } from './astra-node.mjs'
 import { archive, git, json, loadArchive, sha256 } from '../scripts/astra/common.mjs'
 import { buildPack } from '../scripts/astra/pack.mjs'
-import { applyStage, intake, namedSuites, STAGE_LIMITS, verifyStage } from '../scripts/astra/intake.mjs'
+import { applyStage, browserVerificationLogs, browserVerificationRuns, intake, namedSuites, STAGE_LIMITS, verifyStage } from '../scripts/astra/intake.mjs'
 import { verify } from '../scripts/astra/verify.mjs'
 import { reuseDependencies } from '../scripts/astra/dependencies.mjs'
 import { LIMITS, readZip, safePath, writeZip } from '../scripts/astra/zip.mjs'
@@ -10,6 +10,39 @@ import { LIMITS, readZip, safePath, writeZip } from '../scripts/astra/zip.mjs'
 const TASK = '# Sample\n\nAdd one test.\n\n## Acceptance\nA passing test.\n\n## Out of scope\nEverything else.\n'
 const MIRROR = 'a'.repeat(40)
 afterEach(cleanupFixtures)
+
+describe('Astra browser verification coverage', () => {
+  it('runs humanoid acceptance separately before every declared suite without narrowing the full sims run', () => {
+    const supplied = { OBPAL_E2E_SIMS_ONLY: 'buttons', OBPAL_E2E_SIMS_GROUPS: 'core', OBPAL_E2E_GPU: '1', OBPAL_E2E_PORT: 'assigned' }
+    const runs = browserVerificationRuns(['pages', 'sims', 'home'], supplied)
+    expect(runs.map(({ step, suites, env }) => ({ step, suites, group: env.OBPAL_E2E_SIMS_ONLY ?? null }))).toEqual([
+      { step: 'e2e-humanoid-physics', suites: ['sims'], group: 'humanoid-physics' },
+      { step: 'e2e', suites: ['pages', 'sims', 'home'], group: null },
+    ])
+    for (const run of runs) {
+      expect(run.env).toMatchObject({ OBPAL_E2E_GPU: '1', OBPAL_E2E_PORT: 'assigned' })
+      expect(run.env).not.toHaveProperty('OBPAL_E2E_SIMS_GROUPS')
+    }
+    expect(supplied.OBPAL_E2E_SIMS_ONLY).toBe('buttons')
+    expect(supplied.OBPAL_E2E_SIMS_GROUPS).toBe('core')
+  })
+
+  it('does not add humanoid acceptance when sims was not selected', () => {
+    expect(browserVerificationRuns(['home', 'pages'], {})).toEqual([{ step: 'e2e', suites: ['home', 'pages'], env: {} }])
+  })
+
+  it('retains guarded sims partition logs without importing unrelated files or directories', () => {
+    const logs = mkdtempSync(join(tmpdir(), 'astra-browser-logs-'))
+    const expected = ['home.log', 'sims-shared-2.log', 'sims-timing-1.log', 'sims.log']
+    for (const name of [...expected, 'pages.log', 'sims-timing-0.log', 'sims-shared-01.log', 'sims-timing-1.json', 'sims-private.log']) {
+      writeFileSync(join(logs, name), 'Synthetic guarded runner output.\n')
+    }
+    mkdirSync(join(logs, 'sims-shared-3.log'))
+    expect(browserVerificationLogs(logs, ['home', 'sims'])).toEqual(expected)
+    expect(browserVerificationLogs(logs, ['home'])).toEqual(['home.log'])
+  })
+})
+
 function commit(root: string, subject: string) {
   git(root, ['add', '-A'])
   // Fixture identities are synthetic and never change the checkout's Git configuration.

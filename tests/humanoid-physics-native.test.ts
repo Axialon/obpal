@@ -1,4 +1,4 @@
-/** Real Rapier measurements with explicit pending gates. Harness faults still fail normally; an unexpected gate pass needs conversion. */
+/** Measured F1a2 gates: stance passes; only the three measured anatomy gates remain expected failures. */
 import { it, expect, describe, beforeAll } from 'vitest'
 import { mkdtempSync, writeFileSync, readFileSync, tmpdir, join, emitMeasurement } from './humanoid-physics-node.mjs'
 import { ALL_PHYSICAL_PROFILES } from '../src/sim/humanoid/physics/model'
@@ -11,12 +11,12 @@ const reports = new Map<string, Promise<Awaited<ReturnType<typeof measureProfile
 function measured(profile: string) {
   if (!reports.has(profile)) reports.set(profile, measureProfile(profile).then(report => {
     writeFileSync(join(folder, `${profile}.json`), JSON.stringify(report))
-    emitMeasurement(report) // Physical acceptance remains false in the recorded result.
+    emitMeasurement(report) // Emit measured success/failure before assertions; never infer acceptance from runner completion.
     return report
   }))
   return reports.get(profile)!
 }
-for (const profile of ALL_PHYSICAL_PROFILES) describe(`humanoid F1a recorded pending acceptance: ${profile}`, () => {
+for (const profile of ALL_PHYSICAL_PROFILES) describe(`humanoid F1a2 candidate acceptance: ${profile}`, () => {
   let report: Awaited<ReturnType<typeof measureProfile>>
   beforeAll(async () => { report = await measured(profile) }, 600_000)
   it('measurement harness completes 7200 stance ticks, 97 anatomy trials and all replay partitions, and writes JSON', () => {
@@ -40,26 +40,26 @@ for (const profile of ALL_PHYSICAL_PROFILES) describe(`humanoid F1a recorded pen
     }
     expect(report.replay?.completedTicks).toEqual([480, 480, 480])
   })
-  // <=5 mm penetration; current Keel/II 5.852, I 5.834, Morrow 5.585 mm (per-form JSON table).
-  it.fails('pending stance gate: sole penetration <=5 mm throughout 30 s', () => expect(report.stance!.maxPenetrationMm).toBeLessThanOrEqual(CONTACT_MM))
-  // <=5 mm corner height; current Keel/II 335.465, I 322.925, Morrow 306.691 mm includes tipped feet during a fall.
-  it.fails('pending stance gate: sole hover <=5 mm throughout 30 s', () => expect(report.stance!.maxHoverMm).toBeLessThanOrEqual(CONTACT_MM))
-  // >=90% initial height; current minima Keel/II 0.104, I 0.101, Morrow 0.096 m vs initial about 0.922/0.886/0.845 m.
-  it.fails('pending stance gate: pelvis remains >=90% standing height for 30 s', () => expect(report.stance!.minPelvisHeightM).toBeGreaterThanOrEqual(.9 * report.stance!.standingHeightM))
-  // Up Y >=0.98; current minima Keel/II -0.001, I -0.011, Morrow -0.001 after collapse.
-  it.fails('pending stance gate: pelvis up Y >=0.98 for 30 s', () => expect(report.stance!.minUp).toBeGreaterThanOrEqual(.98))
-  // All 6720 post-settle samples supported; current 0/6720 for every form.
-  it.fails('pending stance gate: supported on all 6720 settled ticks', () => expect(report.stance!.supportedSamples).toBe(6720))
-  // <=0.01 rad; current stance maxima Keel/II 1.01871, I 1.01559, Morrow 1.01371 rad.
-  it.fails('pending stance gate: cone error <=0.01 rad', () => expect(report.stance!.maxConeErrorRad).toBeLessThanOrEqual(CONE_RAD))
-  // <=5 mm; current stance surface maxima Keel/II 316.594, I 284.922, Morrow 254.754 mm, a collider lever-arm proxy.
-  it.fails('pending stance gate: limit surface error <=5 mm', () => expect(report.stance!.maxLimitSurfaceErrorMm).toBeLessThanOrEqual(CONTACT_MM))
-  // <=0.01 rad in every trial; current anatomy maxima Keel/II 0.30035, I 0.29427, Morrow 0.29756 rad.
-  it.fails('pending anatomy gate: swing/twist cone error <=0.01 rad in all 97 trials', () => expect(Math.max(...report.anatomy!.rows.map(r => r.maxConeErrorRad))).toBeLessThanOrEqual(CONE_RAD))
-  // <=5 mm in every trial; current anatomy surface maxima Keel/II 86.660, I 81.603, Morrow 78.699 mm.
-  it.fails('pending anatomy gate: limit surface error <=5 mm in all 97 trials', () => expect(Math.max(...report.anatomy!.rows.map(r => r.maxLimitSurfaceErrorMm))).toBeLessThanOrEqual(CONTACT_MM))
-  // <=0.08 rad final tracking error; current maxima Keel/II 0.18617, I 0.19298, Morrow 0.21785 rad.
-  it.fails('pending anatomy gate: final target error <=0.08 rad in all 97 trials', () => expect(Math.max(...report.anatomy!.rows.map(r => r.finalTargetErrorRad))).toBeLessThanOrEqual(.08))
+  // <=5 mm penetration; measured F1a2 Keel/II 3.102, I 3.112, Morrow 3.127 mm.
+  it('candidate stance gate: sole penetration <=5 mm throughout 30 s', () => expect(report.stance!.maxPenetrationMm).toBeLessThanOrEqual(CONTACT_MM))
+  // <=5 mm corner height; measured F1a2 maximum 1.910 mm on every form.
+  it('candidate stance gate: sole hover <=5 mm throughout 30 s', () => expect(report.stance!.maxHoverMm).toBeLessThanOrEqual(CONTACT_MM))
+  // >=90% initial height; measured F1a2 minima Keel/II 0.917, I 0.882, Morrow 0.841 m.
+  it('candidate stance gate: pelvis remains >=90% standing height for 30 s', () => expect(report.stance!.minPelvisHeightM).toBeGreaterThanOrEqual(.9 * report.stance!.standingHeightM))
+  // Up Y >=0.98; measured F1a2 minimum >=0.999992 on every form.
+  it('candidate stance gate: pelvis up Y >=0.98 for 30 s', () => expect(report.stance!.minUp).toBeGreaterThanOrEqual(.98))
+  // All 6720 post-settle samples supported; measured F1a2 6720/6720 on every form.
+  it('candidate stance gate: supported on all 6720 settled ticks', () => expect(report.stance!.supportedSamples).toBe(6720))
+  // <=0.01 rad; measured F1a2 stance maxima Keel/II 0.001152, I 0.001108, Morrow 0.001463 rad.
+  it('candidate stance gate: cone error <=0.01 rad', () => expect(report.stance!.maxConeErrorRad).toBeLessThanOrEqual(CONE_RAD))
+  // <=5 mm; measured F1a2 stance surface maxima Keel/II 0.415, I 0.430, Morrow 0.541 mm.
+  it('candidate stance gate: limit surface error <=5 mm', () => expect(report.stance!.maxLimitSurfaceErrorMm).toBeLessThanOrEqual(CONTACT_MM))
+  // <=0.01 rad in every trial; measured F1a2 maxima Keel/II 0.119307, I 0.156251, Morrow 0.179426 rad.
+  it.fails('candidate anatomy gate: swing/twist cone error <=0.01 rad in all 97 trials', () => expect(Math.max(...report.anatomy!.rows.map(r => r.maxConeErrorRad))).toBeLessThanOrEqual(CONE_RAD))
+  // <=5 mm in every trial; measured F1a2 maxima Keel/II 27.436, I 40.520, Morrow 44.379 mm.
+  it.fails('candidate anatomy gate: limit surface error <=5 mm in all 97 trials', () => expect(Math.max(...report.anatomy!.rows.map(r => r.maxLimitSurfaceErrorMm))).toBeLessThanOrEqual(CONTACT_MM))
+  // <=0.08 rad final tracking error; measured F1a2 maxima Keel/II 0.102778, I 0.301034, Morrow 0.369275 rad.
+  it.fails('candidate anatomy gate: final target error <=0.08 rad in all 97 trials', () => expect(Math.max(...report.anatomy!.rows.map(r => r.finalTargetErrorRad))).toBeLessThanOrEqual(.08))
   it('stance and anatomy anchor <=5 mm, effort <=1+1e-8, finite timing and nonnegative slip gates', () => {
     for (const row of [report.stance!, ...report.anatomy!.rows]) {
       expect(row.maxAnchorErrorMm).toBeGreaterThanOrEqual(0); expect(row.maxAnchorErrorMm).toBeLessThanOrEqual(CONTACT_MM)
@@ -70,6 +70,20 @@ for (const profile of ALL_PHYSICAL_PROFILES) describe(`humanoid F1a recorded pen
     expect(report.stance!.p99TickWallMs).toBeGreaterThanOrEqual(report.stance!.p95TickWallMs)
     expect(report.stance!.droppedSeconds).toBe(0); expect(report.stance!.invalidFrames).toBe(0)
   })
+  it('loaded sliding, legacy fall displacement and coupled solve diagnostics are separate and complete', () => {
+    const s = report.stance!
+    expect(s.loadedSliding.samples).toBe(6720); expect(s.loadedSliding.firstTick).toBe(481); expect(s.loadedSliding.lastTick).toBe(7200)
+    expect(s.loadedSliding.fallDisplacementMm).toBe(s.slipMm); expect(s.fallDisplacementMm).toBe(s.slipMm); expect(Number.isFinite(s.loadedSlipMm)).toBe(true); expect(s.loadedSlipMm).toBeGreaterThanOrEqual(0)
+    expect(Object.keys(s.loadedSliding.feet)).toHaveLength(2)
+    for(const f of Object.values(s.loadedSliding.feet)) {
+      expect(f.loadedSamples).toBeGreaterThanOrEqual(0); expect(f.loadedSamples).toBeLessThanOrEqual(6720)
+      expect(f.totalPathMm).toBeGreaterThanOrEqual(f.maxEpisodePathMm)
+    }
+    expect(s.control.supportedTicks+s.control.noSupportTicks+s.control.outsideEnvelopeTicks).toBe(7200)
+    expect(s.coupled.sampledTicks).toBe(7200); expect(Number.isFinite(s.coupled.minRank)).toBe(true)
+    expect(Number.isFinite(s.coupled.maxAppliedRelativeResidual)).toBe(true)
+    expect(s.coupled.maxRelativeResidual).toBeLessThan(1e-8) // numerical solve residual, NOT a physical accuracy claim.
+  })
   it('quaternion continuity is finite and replay errors <=1e-6 at 60/30/120 Hz including q/-q', () => {
     expect(Number.isFinite(report.stance!.maxQuaternionStepRad)).toBe(true)
     expect(report.replay?.negativeQuaternionSignsHz).toBe(120); expect(report.replay?.pass).toBe(true)
@@ -77,18 +91,22 @@ for (const profile of ALL_PHYSICAL_PROFILES) describe(`humanoid F1a recorded pen
 })
 it('F1a measurement harness writes the complete eight-form JSON table independently of physical acceptance', async () => {
   const rows = await Promise.all(ALL_PHYSICAL_PROFILES.map(measured))
-  const table = rows.map(r => ({ profileId: r.profileId, physicalAcceptance: r.pass, stance: {
-    ticks: r.stance!.completedTicks, penetrationMm: r.stance!.maxPenetrationMm, hoverMm: r.stance!.maxHoverMm, slipMm: r.stance!.slipMm,
-    witnesses: Object.fromEntries(Object.entries(r.stance!.witnesses).map(([kind, w]) => [kind, { footId: w.footId, tick: w.sample.tick, timeS: w.sample.timeS, valueMm: w.valueMm }])) },
-    stanceGates: { minimumPelvisM: r.stance!.minPelvisHeightM, minimumUpY: r.stance!.minUp, supportedSamples: r.stance!.supportedSamples,
-      coneRad: r.stance!.maxConeErrorRad, surfaceMm: r.stance!.maxLimitSurfaceErrorMm, anchorMm: r.stance!.maxAnchorErrorMm, effortRatio: r.stance!.maxEffortRatio },
-    anatomy: { passingTrials: r.anatomy!.rows.filter(row => row.maxConeErrorRad <= CONE_RAD && row.maxLimitSurfaceErrorMm <= CONTACT_MM && row.finalTargetErrorRad <= .08).length,
-      coneRad: Math.max(...r.anatomy!.rows.map(row => row.maxConeErrorRad)), surfaceMm: Math.max(...r.anatomy!.rows.map(row => row.maxLimitSurfaceErrorMm)),
-      finalErrorRad: Math.max(...r.anatomy!.rows.map(row => row.finalTargetErrorRad)) },
-    replayPass: r.replay!.pass }))
+  const table = rows.map(r => ({ profileId: r.profileId, modelVersion: r.modelVersion, physicalAcceptance: r.pass, errors: r.errors,
+    stance: r.stance ? { ticks: r.stance.completedTicks, penetrationMm: r.stance.maxPenetrationMm, hoverMm: r.stance.maxHoverMm,
+      legacySlipMm: r.stance.slipMm, fallDisplacementMm: r.stance.fallDisplacementMm, loadedSlipMm: r.stance.loadedSlipMm,
+      loadedSliding: r.stance.loadedSliding, controller: r.stance.control, coupled: r.stance.coupled,
+      witnesses: Object.fromEntries(Object.entries(r.stance.witnesses).map(([kind,w]) => [kind,{footId:w.footId,tick:w.sample.tick,timeS:w.sample.timeS,valueMm:w.valueMm}])) } : null,
+    stanceGates: r.stance ? { minimumPelvisM:r.stance.minPelvisHeightM,minimumUpY:r.stance.minUp,supportedSamples:r.stance.supportedSamples,
+      coneRad:r.stance.maxConeErrorRad,surfaceMm:r.stance.maxLimitSurfaceErrorMm,anchorMm:r.stance.maxAnchorErrorMm,effortRatio:r.stance.maxEffortRatio } : null,
+    anatomy: r.anatomy ? { completedTrials:r.anatomy.rows.filter(row=>row.completedTicks===480&&!row.error).length,
+      passingTrials:r.anatomy.rows.filter(row=>row.maxConeErrorRad<=CONE_RAD&&row.maxLimitSurfaceErrorMm<=CONTACT_MM&&row.finalTargetErrorRad<=.08).length,
+      failingTrials:r.anatomy.rows.filter(row=>row.error||row.maxConeErrorRad>CONE_RAD||row.maxLimitSurfaceErrorMm>CONTACT_MM||row.finalTargetErrorRad>.08)
+        .map(({name,completedTicks,error,maxConeErrorRad,maxLimitSurfaceErrorMm,finalTargetErrorRad})=>({name,completedTicks,error,maxConeErrorRad,maxLimitSurfaceErrorMm,finalTargetErrorRad})),
+      coneRad:Math.max(...r.anatomy.rows.map(row=>row.maxConeErrorRad)),surfaceMm:Math.max(...r.anatomy.rows.map(row=>row.maxLimitSurfaceErrorMm)),
+      finalErrorRad:Math.max(...r.anatomy.rows.map(row=>row.finalTargetErrorRad)) } : null,replayPass:r.replay?.pass??null }))
+  emitMeasurement({kind:'humanoid-f1a2-candidate-table',acceptanceStatus:'stance gates pass; three anatomy gates remain measured expected failures; missing/error rows fail the ordinary harness',table})
   const path = join(folder, 'table.json'); writeFileSync(path, JSON.stringify(table, null, 2))
   expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(table); expect(table).toHaveLength(8)
-  emitMeasurement({ kind: 'humanoid-f1a-recorded-table', acceptanceStatus: 'pending; physical gates unchanged', table })
 }, 600_000)
 it('Rapier contact samples are oriented, owned, on the actual floor and cleaned up on disposal', async () => {
   const s = await createSelectedSimulation({ bodies: [
