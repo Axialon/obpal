@@ -743,8 +743,8 @@ try {
   const thisPhone = () => until('the phone, as Link knows it', () => sessionOf(popup, 'phone'))
   const armings = () => stubLog().filter((e) => e.in?.t === 'enable' && e.in.on === true).length
   const helperFrames = () => stubLog().filter((e) => e.in?.t === 'f').length
-  /** The line the phone shows over its controls (the screen's notice, or the link's own), or ''. */
-  const phoneLine = () => phone.evaluate(() => { const b = document.getElementById('banner'); return b && !b.hidden ? b.textContent : '' })
+  /** The line the phone shows over its controls (the screen's notice, or the link's own), or ''. Its words only: the banner's own buttons (Scan again, x) add their labels to its text. */
+  const phoneLine = () => phone.evaluate(() => { const b = document.getElementById('banner'); return b && !b.hidden ? b.querySelector('.bn-t')?.textContent ?? '' : '' })
   const notified = () => popup.evaluate(async () => Object.keys(await chrome.notifications.getAll()))
   /** The popup as Chrome shows it (its own width, not a tab's), on `theme`, saved as <name>; then the surface it had. */
   async function popupShot(name, theme) {

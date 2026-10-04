@@ -140,6 +140,7 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
   let sceneDrawAt = -1e9
   let lastInteraction = performance.now()
   let scrollAt = -1e9
+  let scrollSettle: ReturnType<typeof setTimeout> | undefined
   stage.parentElement?.removeChild(stage)
   document.body.appendChild(stage)
   const fieldToggle = document.createElement('button')
@@ -644,8 +645,13 @@ export function mountHero(hero: HTMLElement, stage: HTMLCanvasElement, title: HT
     // A jump can bypass the observer's margin. Prepare newly visible text before the ticker draws this scroll.
     prepareHeadingPads()
     sceneUnderPointer = false
-    if (scoped) { scope(); followScroll(); return }
+    // Scrolling is someone at the page: the field doesn't drop to its idle step (plain glass, a flat inside) under it.
+    if (scoped) { lastInteraction = performance.now(); scope(); followScroll(); return }
     lastInteraction = scrollAt = performance.now(); dirty = true; wake()
+    // The glass is plain while the page scrolls; once it stops, one more frame at full glass, so a marble at rest
+    // isn't left drawn plain.
+    clearTimeout(scrollSettle)
+    scrollSettle = setTimeout(() => { dirty = true; wake() }, 200)
   }, { passive: true })
 
   // ---- what a hit sounds like, and the knock felt in the hand ----

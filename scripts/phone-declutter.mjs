@@ -82,7 +82,8 @@ export async function phoneDeclutter({ browser, origin, check }) {
     })
 
     await check('declutter: once play starts (the stick pressed above), the quiet notice goes and the badge keeps the seal', async () => {
-      if (await phone.locator('.trust-first').count()) throw new Error('the notice stayed after play started')
+      // The press took it away at once; the notice itself folds out over its own short exit.
+      await until('the notice gone after play started', async () => !(await phone.locator('.trust-first').count()), 3000, 50).catch(() => { throw new Error('the notice stayed after play started') })
       if (!(await phone.locator('.bar .link-badge').isVisible())) throw new Error('the badge went with the notice')
       return 'notice gone; badge in the bar'
     })

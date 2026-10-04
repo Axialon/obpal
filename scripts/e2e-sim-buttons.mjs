@@ -84,7 +84,7 @@ export async function runSimButtons(local, check) {
             const hiddenActions = seen.filter(r => r.state === 'first-person' && /(?:^| )(presence-enter|presence-secondary)(?: |$)/.test(r.classes))
             if (hiddenActions.length) throw new Error(`Collapsed viewpoint actions are visible: ${hiddenActions.map(r => r.name).join(', ')}`)
             const bad = seen.filter(r => inkError(r) > .5).sort((a, b) => inkError(b) - inkError(a))
-            if (bad.length) throw new Error(`${bad.length} off-centre: ${bad.slice(0, 5).map(r => `${r.name} ${JSON.stringify(r.groupOffset)}`).join('; ')}`)
+            if (bad.length) throw new Error(`${bad.length} off-centre: ${bad.slice(0, 5).map(r => `${r.name} [${r.state}] ${JSON.stringify(r.groupOffset)} in ${JSON.stringify(r.button)}, ink ${JSON.stringify(r.groupInk)}, parts ${r.decorations.length}`).join('; ')}`)
             const summary = inkSummary(seen)
             return `${summary.measured} controls; worst ${summary.worst.toFixed(3)}px, p95 ${summary.p95.toFixed(3)}px`
           })
