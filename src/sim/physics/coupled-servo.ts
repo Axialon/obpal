@@ -1,5 +1,5 @@
 /** Original opt-in coupled backward-Euler torque prediction. No root force, state write or native constraint replacement. */
-import { constraintResponse } from './constraint-response'
+import { constraintResponse, constraintIslands } from './constraint-response'
 import { add, sub, scale, dot, norm, unit, capped, multiply, conjugate, rotate, rotationVector, clampCone, type Vec3, type Quat } from './math'
 import type { Scene, BodyState, ContactSample } from './schema'
 export interface CoupledDiagnostics { constraintRank: number; contactRows: number; dimensions: number; saturatedJoints: number; relativeResidual: number; appliedRelativeResidual: number }
@@ -20,8 +20,7 @@ function solveSPD(a: number[][], rhs: number[]): number[] {
  * C includes motor and outward-only stop damping ONCE. Per-joint torque balls are capped after solving.
  * Coriolis, native friction transitions, future contact impulses and saturation are not solved by this local model.
  */
-export function coupledServo(scene: Scene, states: readonly BodyState[], targets: ReadonlyMap<string,Quat>, contacts: readonly ContactSample[], dt: number) {
-  if(!Number.isFinite(dt)||dt<=0||dt>.05) throw new RangeError('Invalid coupled servo timestep')
+function solveIsland(scene: Scene, states: readonly BodyState[], targets: ReadonlyMap<string,Quat>, contacts: readonly ContactSample[], dt: number) {
   const response=constraintResponse(scene,states,contacts),current=new Map(states.map(s=>[s.id,s])),n=scene.joints.length*3
   const a=response.matrix.map(row=>[...row]),rhs=Array<number>(n).fill(0)
   for(let i=0;i<scene.joints.length;i++) {
@@ -53,6 +52,20 @@ export function coupledServo(scene: Scene, states: readonly BodyState[], targets
   const applied=scene.joints.flatMap(j=>{const v=torques.get(j.id)!;return [v.x,v.y,v.z]})
   let appliedResidual=0
   for(let i=0;i<n;i++) {let value=-rhs[i];for(let j=0;j<n;j++) value+=a[i][j]*applied[j];appliedResidual=Math.max(appliedResidual,Math.abs(value))}
-  return {torques,diagnostics:{constraintRank:response.constraintRank,contactRows:response.contactRows,dimensions:response.dimensions,
-    saturatedJoints,relativeResidual:residual/scaleRhs,appliedRelativeResidual:appliedResidual/scaleRhs} satisfies CoupledDiagnostics}
+  return {torques,residual,appliedResidual,scaleRhs,constraintRank:response.constraintRank,contactRows:response.contactRows,
+    dimensions:response.dimensions,saturatedJoints}
+}
+/** Solve disconnected articulation blocks independently, retaining the dense response's global residual scaling. */
+export function coupledServo(scene: Scene, states: readonly BodyState[], targets: ReadonlyMap<string,Quat>, contacts: readonly ContactSample[], dt: number) {
+  if(!Number.isFinite(dt)||dt<=0||dt>.05) throw new RangeError('Invalid coupled servo timestep')
+  const torques=new Map<string,Vec3>()
+  let constraintRank=0,contactRows=0,dimensions=0,saturatedJoints=0,residual=0,appliedResidual=0,scaleRhs=1
+  for(const island of constraintIslands(scene,states,contacts)) {
+    const r=solveIsland(island.scene,island.states,targets,island.contacts,dt)
+    for(const [id,torque] of r.torques) torques.set(id,torque)
+    constraintRank+=r.constraintRank;contactRows+=r.contactRows;dimensions+=r.dimensions;saturatedJoints+=r.saturatedJoints
+    residual=Math.max(residual,r.residual);appliedResidual=Math.max(appliedResidual,r.appliedResidual);scaleRhs=Math.max(scaleRhs,r.scaleRhs)
+  }
+  return {torques,diagnostics:{constraintRank,contactRows,dimensions,saturatedJoints,
+    relativeResidual:residual/scaleRhs,appliedRelativeResidual:appliedResidual/scaleRhs} satisfies CoupledDiagnostics}
 }

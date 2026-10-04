@@ -16,8 +16,7 @@ const finiteVector = (v: Vec3) => v && [v.x,v.y,v.z].every(Number.isFinite)
 export interface ConstraintResponse {
   matrix: number[][]; gravityAcceleration: number[]; constraintRank: number; contactRows: number; dimensions: number
 }
-/** Complete owned states and actual native manifold samples only. Does not retain or mutate its arguments. */
-export function constraintResponse(scene: Scene, states: readonly BodyState[], contacts: readonly ContactSample[]): ConstraintResponse {
+function checkedInputs(scene: Scene, states: readonly BodyState[], contacts: readonly ContactSample[]) {
   const dynamic = scene.bodies.filter(b=>!b.fixed), d=dynamic.length*6, n=scene.joints.length*3
   if(dynamic.length>CONSTRAINT_DEFAULTS.maxDynamicBodies || scene.joints.length>CONSTRAINT_DEFAULTS.maxJoints) throw new RangeError('Coupled response workspace exceeded')
   if(contacts.length>CONSTRAINT_DEFAULTS.maxContacts) throw new RangeError('Coupled response contact budget exceeded')
@@ -29,6 +28,39 @@ export function constraintResponse(scene: Scene, states: readonly BodyState[], c
     if(!byId.has(s.id)||![s.position,s.velocity,s.angularVelocity].every(finiteVector)||!Number.isFinite(qn)||Math.abs(qn-1)>1e-4)
       throw new RangeError('Invalid coupled body state')
   }
+  return { dynamic, d, n, byId, current }
+}
+function checkedContact(c: ContactSample, byId: ReadonlyMap<string, Scene['bodies'][number]>) {
+  if(!byId.has(c.a)||!byId.has(c.b)||c.a===c.b||![c.pointA,c.pointB,c.normalOnB].every(finiteVector)||
+    !Number.isFinite(c.distance)||!Number.isFinite(c.impulse)||c.impulse<0||Math.abs(norm(c.normalOnB)-1)>1e-4)
+    throw new RangeError('Invalid coupled contact sample')
+}
+export interface ConstraintIsland { scene: Scene; states: readonly BodyState[]; contacts: readonly ContactSample[] }
+const articulationCache = new WeakMap<Scene, { scene: Scene; ids: Set<string> }[]>()
+/** Fixed supports cannot couple articulations. Dynamic impacts remain native unilateral contacts, as in the dense prediction. */
+export function constraintIslands(scene: Scene, states: readonly BodyState[], contacts: readonly ContactSample[]): ConstraintIsland[] {
+  let islands=articulationCache.get(scene)
+  if(!islands) {
+    const roots=new Map(scene.bodies.filter(b=>!b.fixed).map(b=>[b.id,b.id]))
+    const root=(id:string):string=> { let r=id;while(roots.get(r)!==r) r=roots.get(r)!;return r }
+    for(const j of scene.joints) if(roots.has(j.parent)&&roots.has(j.child)) roots.set(root(j.child),root(j.parent))
+    const groups=new Map<string,Set<string>>()
+    for(const id of roots.keys()) {const r=root(id),ids=groups.get(r)??new Set<string>();ids.add(id);groups.set(r,ids)}
+    islands=[...groups.values()].map(ids=>({ids,scene:{...scene,
+      bodies:scene.bodies.filter(b=>b.fixed||ids.has(b.id)),joints:scene.joints.filter(j=>ids.has(j.child)),wheels:[],buoys:[]}}))
+    articulationCache.set(scene,islands)
+  }
+  // Keep the one-articulation path unchanged, including its state order and floating-point operations.
+  if(islands.length<=1) return [{scene,states,contacts}]
+  const {byId}=checkedInputs(scene,states,contacts)
+  for(const c of contacts) checkedContact(c,byId)
+  return islands.map(island=>({scene:island.scene,
+    states:states.filter(s=>byId.get(s.id)!.fixed||island.ids.has(s.id)),
+    contacts:contacts.filter(c=>(byId.get(c.a)!.fixed||island.ids.has(c.a))&&(byId.get(c.b)!.fixed||island.ids.has(c.b)))}))
+}
+/** Complete owned states and actual native manifold samples only. Does not retain or mutate its arguments. */
+export function constraintResponse(scene: Scene, states: readonly BodyState[], contacts: readonly ContactSample[]): ConstraintResponse {
+  const {dynamic,d,n,byId,current}=checkedInputs(scene,states,contacts)
   const slots = new Map(dynamic.map((b,i)=>{
     const inertia=uniformInertia(b), state=current.get(b.id)!
     return [b.id,{offset:i*6,linear:1/Math.sqrt(b.mass),angular:AXES.map((axis,k)=>
@@ -60,9 +92,7 @@ export function constraintResponse(scene: Scene, states: readonly BodyState[], c
     for(const axis of AXES) { const row=new Float64Array(d);pointRow(row,j.parent,pa,axis,-1);pointRow(row,j.child,pb,axis,1);insert(row) }
   }
   const sample = (c: ContactSample) => {
-    if(!byId.has(c.a)||!byId.has(c.b)||c.a===c.b||![c.pointA,c.pointB,c.normalOnB].every(finiteVector)||
-      !Number.isFinite(c.distance)||!Number.isFinite(c.impulse)||c.impulse<0||Math.abs(norm(c.normalOnB)-1)>1e-4)
-      throw new RangeError('Invalid coupled contact sample')
+    checkedContact(c,byId)
     const a=byId.get(c.a)!,b=byId.get(c.b)!
     if(a.fixed===b.fixed) return null // Dynamic-dynamic impacts are not bilateral supports in this prediction.
     return a.fixed ? {id:b.id,ground:a.id,point:c.pointB,normal:c.normalOnB} : {id:a.id,ground:b.id,point:c.pointA,normal:scale(c.normalOnB,-1)}

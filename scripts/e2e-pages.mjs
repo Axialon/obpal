@@ -39,7 +39,7 @@ const SHOTS = process.env.OBPAL_SHOTS || ''
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
 const ONLY = process.env.OBPAL_E2E_PAGES_ONLY || ''
 if (ONLY && !['try', 'viewer', 'store', 'interactions'].includes(ONLY)) throw new Error(`unknown pages selector: ${ONLY}`)
-const PAGES = ['/', '/p/', '/view/', '/sim/', '/sim/arm/', '/sim/arena/', '/sim/humanoid/', '/sim/octopus/', '/sim/device/', '/embed/', '/link/', '/link/desktop/', '/link/try/', '/catalogue/', '/buttons/', '/sponsor/', '/donate/', '/privacy/', '/trust/']
+const PAGES = ['/', '/p/', '/view/', '/sim/', '/sim/arm/', '/sim/arena/', '/sim/humanoid/', '/sim/humanoid/physics/', '/sim/octopus/', '/sim/device/', '/embed/', '/link/', '/link/desktop/', '/link/try/', '/catalogue/', '/buttons/', '/sponsor/', '/donate/', '/privacy/', '/trust/']
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const results = []
 async function check(name, fn) {
@@ -505,6 +505,7 @@ try {
     ['/sim/arm/', ['.sim-top', '.sim-window[data-panel="controls"]', '.panel-dock']],
     ['/sim/arena/', ['.sim-top', '.sim-window[data-panel="controls"]', '.panel-dock']],
     ['/sim/humanoid/', ['.sim-top', '.sim-window[data-panel="controls"]', '.panel-dock']],
+    ['/sim/humanoid/physics/', ['.sim-top', '.sim-window[data-panel="controls"]', '.panel-dock']],
     ['/embed/', ['.sim-top', '.sim-panel']],
     ['/view/', ['.topbar', '.catalog', '.presence-floating', '.obpal-chip .pill', '.obpal-chip .card']],
     ['/p/', ['.msg-card']],

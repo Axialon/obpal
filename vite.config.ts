@@ -48,6 +48,7 @@ const CSP_EXTRA: Record<string, Record<string, string[]>> = {
   // the arm, device and humanoid sims load them, so only these pages allow it.
   '/sim/device/index.html': { 'script-src': ["'wasm-unsafe-eval'"] },
   '/sim/humanoid/index.html': { 'script-src': ["'wasm-unsafe-eval'"] },
+  '/sim/humanoid/physics/index.html': { 'script-src': ["'wasm-unsafe-eval'"] },
 }
 function contentSecurityPolicy(page: string): string {
   const d: Record<string, string[]> = {
@@ -105,7 +106,7 @@ function deployRecovery(): Plugin {
  * arriving. A page's own scripts are one module graph that runs only when all of it has come, so this one is an entry
  * of its own (simEarly), named in the page just before them; its few imports are preloaded beside it.
  */
-const EARLY_PAGES = ['/sim/device/index.html', '/sim/arm/index.html', '/sim/humanoid/index.html', '/sim/arena/index.html']
+const EARLY_PAGES = ['/sim/device/index.html', '/sim/arm/index.html', '/sim/humanoid/index.html', '/sim/humanoid/physics/index.html', '/sim/arena/index.html']
 function simEarly(): Plugin {
   return {
     name: 'obpal-sim-early',
@@ -412,7 +413,7 @@ export default defineConfig({
         // Controller floor from PLAN.md: Safari 15, Chromium 95, Firefox 115.
         target: ['safari15', 'chrome95', 'firefox115', 'edge95'],
         rollupOptions: {
-          input: { index: 'index.html', controller: 'p/index.html', viewer: 'view/index.html', sponsor: 'sponsor/index.html', donate: 'donate/index.html', link: 'link/index.html', linkDesktop: 'link/desktop/index.html', linkTry: 'link/try/index.html', privacy: 'privacy/index.html', trust: 'trust/index.html', sims: 'sim/index.html', simArm: 'sim/arm/index.html', simArena: 'sim/arena/index.html', simHumanoid: 'sim/humanoid/index.html', simDevice: 'sim/device/index.html', simEarly: 'src/sim/kit/early.ts', catalogue: 'catalogue/index.html', embed: 'embed/index.html', buttons: 'buttons/index.html' },
+          input: { index: 'index.html', controller: 'p/index.html', viewer: 'view/index.html', sponsor: 'sponsor/index.html', donate: 'donate/index.html', link: 'link/index.html', linkDesktop: 'link/desktop/index.html', linkTry: 'link/try/index.html', privacy: 'privacy/index.html', trust: 'trust/index.html', sims: 'sim/index.html', simArm: 'sim/arm/index.html', simArena: 'sim/arena/index.html', simHumanoid: 'sim/humanoid/index.html', simHumanoidPhysics: 'sim/humanoid/physics/index.html', simDevice: 'sim/device/index.html', simEarly: 'src/sim/kit/early.ts', catalogue: 'catalogue/index.html', embed: 'embed/index.html', buttons: 'buttons/index.html' },
         },
       },
     },

@@ -25,7 +25,7 @@ function hull(points: Vec3[]) {
   const half = (xs: Vec3[]) => { const out: Vec3[] = []; for (const p of xs) { while (out.length >= 2 && cross2(out[out.length - 2], out[out.length - 1], p) <= 0) out.pop(); out.push(p) }; return out }
   return [...half(sorted).slice(0, -1), ...half([...sorted].reverse()).slice(0, -1)]
 }
-export function observe(model: PhysicalHumanoid, input: readonly BodyState[], contacts: readonly ContactSample[], generation: number, tick: number): Observation {
+export function observe(model: PhysicalHumanoid, input: readonly BodyState[], contacts: readonly ContactSample[], generation: number, tick: number, actorBodies?: ReadonlySet<string>): Observation {
   const states = new Map(input.map(s => [s.id, s])), get = (id: string) => { const b = states.get(id); if (!b) throw new Error(`Missing observed body ${id}`); return b }
   let mass = 0, com = { x: 0, y: 0, z: 0 }, comVelocity = { x: 0, y: 0, z: 0 }
   for (const b of model.scene.bodies) if (!b.fixed) { mass += b.mass; com = add(com, scale(get(b.id).position, b.mass)); comVelocity = add(comVelocity, scale(get(b.id).velocity, b.mass)) }
@@ -57,8 +57,13 @@ export function observe(model: PhysicalHumanoid, input: readonly BodyState[], co
   const marginM = polygon.length < 3 ? null : Math.min(...polygon.map((a, i) => {
     const b = polygon[(i + 1) % polygon.length]; return cross2(a, b, com) / Math.hypot(b.x - a.x, b.z - a.z)
   }))
+  const own = new Set(model.scene.bodies.filter(b => !b.fixed).map(b => b.id))
   return { schema_version: 1, modelVersion: model.version, profileId: model.profileId, actorId: model.actorId, generation, stateTick: tick, timeS: tick * STEP,
-    bodies: structuredClone(input.filter(b => b.id !== 'floor' && model.scene.bodies.some(spec => spec.id === b.id))), com, comVelocity, support: { points, polygon, marginM, normalImpulseNs },
+    ...(actorBodies ? {
+      floorContacts: structuredClone(contacts.filter(c => c.a === 'floor' && own.has(c.b) || c.b === 'floor' && own.has(c.a))),
+      actorContacts: structuredClone(contacts.filter(c => own.has(c.a) && !own.has(c.b) && actorBodies.has(c.b) || own.has(c.b) && !own.has(c.a) && actorBodies.has(c.a))),
+    } : {}),
+    bodies: structuredClone(input.filter(b => own.has(b.id))), com, comVelocity, support: { points, polygon, marginM, normalImpulseNs },
     joints: model.scene.joints.map(j => {
       const a = get(j.parent), b = get(j.child), frame = multiply(a.rotation, j.frameParent)
       return { id: j.id, rotation: quaternion(multiply(conjugate(frame), multiply(b.rotation, j.frameChild))),

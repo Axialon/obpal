@@ -1,6 +1,6 @@
 /** Fail-closed lifecycle around one engine instance. Physics faults never trigger a hidden backend substitution. */
 import { FixedWorld, type PhysicsAdapter } from './world'
-import { validateScene, validateLimits, vector, STEP, type Backend, type BackendFactory, type BodyState, type Limits, type Scene, type SceneInput, type Quat, type Vec3 } from './schema'
+import { validateScene, validateLimits, vector, STEP, type Backend, type BackendFactory, type BodyState, type ContactSample, type Limits, type Scene, type SceneInput, type Quat, type Vec3 } from './schema'
 import { ZERO, add, sub, scale, cross, norm, quaternion, clampCone } from './math'
 import { accumulate, actuatorForces, type Wrench, type ForceDiagnostics } from './forces'
 export type PhysicsStatus = 'idle' | 'loading' | 'ready' | 'faulted' | 'disposed'
@@ -22,6 +22,7 @@ export class Simulation {
   private targets = new Map<string, Quat>()
   private beforeTick: ((tick: number) => void) | undefined
   private advancing = false
+  private contactCache: readonly ContactSample[] | null = null
   private forces: ForceDiagnostics = { wheelLoads: {}, displacedVolumes: {}, motorTorques: {} }
 
   constructor(scene: SceneInput, factory: BackendFactory, limits: Partial<Limits> = {}) {
@@ -78,20 +79,26 @@ export class Simulation {
     try { this.clock!.advance(seconds) } finally { this.advancing = false; this.beforeTick = undefined }
   }
   contacts() {
+    return structuredClone(this.contactsCached()) as ContactSample[]
+  }
+  /** Shared immutable native samples for a state tick. Public contacts() still returns an owned mutable copy. */
+  contactsCached(): readonly ContactSample[] {
     this.ready()
+    if (this.contactCache) return this.contactCache
     if (!this.backend!.contacts) throw new Error('This backend does not support contact sampling')
     try {
       const samples = this.backend!.contacts!()
       if (samples.length > 256) throw new RangeError('Contact sample budget exceeded')
-      return samples.map(c => {
+      this.contactCache = Object.freeze(samples.map(c => {
         this.body(c.a); this.body(c.b)
         if (c.a === c.b || !Number.isFinite(c.distance) || !Number.isFinite(c.impulse) || c.impulse < 0)
           throw new RangeError('Invalid backend contact')
         const normalOnB = vector(c.normalOnB, 1.0001, 'contact normal')
         if (norm(normalOnB) < .9999) throw new RangeError('Invalid contact normal length')
-        return { a: c.a, b: c.b, distance: c.distance, impulse: c.impulse, normalOnB,
-          pointA: vector(c.pointA, this.limits.maxPosition, 'contact point'), pointB: vector(c.pointB, this.limits.maxPosition, 'contact point') }
-      })
+        return Object.freeze({ a: c.a, b: c.b, distance: c.distance, impulse: c.impulse, normalOnB: Object.freeze(normalOnB),
+          pointA: Object.freeze(vector(c.pointA, this.limits.maxPosition, 'contact point')), pointB: Object.freeze(vector(c.pointB, this.limits.maxPosition, 'contact point')) })
+      }))
+      return this.contactCache
     } catch (error) { this.fail(error); throw error }
   }
   snapshot(): BodyState[] { return this.lastGood.map(copyState) }
@@ -162,7 +169,7 @@ export class Simulation {
       for (const c of this.commands) { backend.sleep(c.id, false); accumulate(out, c.id, c.force, c.torque) }
       this.commands = []
       this.forces = actuatorForces(this.definition, backend, this.targets, this.limits, out,
-        this.definition.joints.some(j => j.motor.integration === 'constraint-damped') ? this.contacts() : undefined)
+        this.definition.joints.some(j => j.motor.integration === 'constraint-damped') ? this.contactsCached() : undefined)
       for (const [id, w] of out) {
         const b = this.definition.bodies.find(b => b.id === id)!
         if (b.fixed) continue
@@ -172,6 +179,7 @@ export class Simulation {
         backend.force(id, force, backend.read(id).position); backend.torque(id, torque)
       }
       backend.step(dt)
+      this.contactCache = null
       this.lastGood = this.readChecked()
     } catch (error) { this.fail(error); throw error }
   }
@@ -185,6 +193,7 @@ export class Simulation {
   }
   private fail(error: unknown) { this.status = 'faulted'; this.fault = error instanceof Error ? error.message : String(error); this.commands = [] }
   private releaseBackend() {
+    this.contactCache = null
     this.clock?.dispose(); this.clock = null
     const backend = this.backend; this.backend = null
     backend?.dispose()

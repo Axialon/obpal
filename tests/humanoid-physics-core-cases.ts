@@ -91,7 +91,8 @@ export function humanoidPhysicsCoreCases(test: (name: string, run: () => unknown
   test('evidence: build, temporary-folder and report-write failures still emit JSON before assertion', async () => {
     // Execute only the reporter's failure paths with injected I/O. This does NOT run a browser or Vite.
     const text = readFileSync(new URL('../scripts/e2e-humanoid-physics.mjs', import.meta.url), 'utf8')
-    const body = text.slice(text.indexOf('export async function')).replace('export ', '') + '\nreturn runHumanoidPhysics'
+    const body = text.slice(text.indexOf('export async function'), text.indexOf('\nconst percentile'))
+      .replace('export ', '') + '\nreturn runHumanoidPilotProof'
     const make = new Function('rawRun', 'join', 'build', 'resolve', 'ROOT', 'PREFIX', 'writeFile', 'console', 'markupBuild', body)
     for (const directoryFails of [false, true]) {
       const logs: string[] = []

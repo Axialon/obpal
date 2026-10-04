@@ -7,7 +7,7 @@
 /** Every page of the site, loaded at a desktop and a phone width. */
 export const PAGES = [
   '/', '/p/', '/view/', '/buttons/', '/embed/', '/catalogue/', '/link/', '/link/desktop/', '/link/try/', '/sponsor/', '/donate/', '/privacy/', '/trust/',
-  '/sim/', '/sim/arm/', '/sim/arena/', '/sim/humanoid/', '/sim/device/', '/sim/octopus/',
+  '/sim/', '/sim/arm/', '/sim/arena/', '/sim/humanoid/', '/sim/humanoid/physics/', '/sim/device/', '/sim/octopus/',
 ]
 export const VIEWPORTS = [[1440, 900], [390, 844]]
 

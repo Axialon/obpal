@@ -1,6 +1,6 @@
-/** F1a one-actor browser proof, using the guarded stand-in only. Full F1b/F1c remain explicitly unimplemented. */
+/** Humanoid physics browser measurements, using the guarded stand-in only. */
 import { build } from 'vite'
-import { chromium } from 'playwright'
+import { chromium, devices } from 'playwright'
 import sharp from 'sharp'
 import { createHash } from 'node:crypto'
 import { mkdir, writeFile, readFile } from 'node:fs/promises'
@@ -9,11 +9,12 @@ import { fileURLToPath } from 'node:url'
 import { markupBuild } from './markup-build.mjs'
 import { rawRun } from './lib/distill.mjs'
 import { e2eBrowserOptions } from './lib/browser.mjs'
+import { installFixture } from './e2e-humanoid.mjs'
 const ROOT = fileURLToPath(new URL('../', import.meta.url)), PREFIX = '/__humanoid-physics/'
 const FORMS = ['keel-v1', 'morrow-v1', 'cairn-i-v1', 'cairn-ii-v1', 'rill-i-v1', 'rill-ii-v1', 'hush-i-v1', 'hush-ii-v1']
 const POSES = ['t', 'squat', 'lunge', 'overhead', 'highKick', 'twist', 'crouchGuard']
 const VIEWS = [{ id: 'desktop', width: 1280, height: 800, mobile: false, rate: 1 }, { id: 'narrow-4x', width: 412, height: 915, mobile: true, rate: 4 }]
-export async function runHumanoidPhysics(local, check) {
+export async function runHumanoidPilotProof(local, check) {
   const report = { schema_version: 1, kind: 'humanoid-f1a-browser', pass: false, node: process.version, platform: process.platform, arch: process.arch,
     browser: null, gpuMode: process.env.OBPAL_E2E_GPU || '0', rows: [], errors: [], sheets: [], stanceSheets: [], evidenceVerified: false,
     acceptanceStatus: 'F1a2 candidate; ordinary 30 s/5 mm stance gate, authored lumbar and F1b/F1c still pending',
@@ -186,5 +187,317 @@ export async function runHumanoidPhysics(local, check) {
     if (!harness) throw new Error('F1a measurement harness incomplete or failed')
     if (!report.rows.every(r => r.motion.droppedSeconds === 0)) throw new Error('F1a clock lost time; inspect recorded measurements')
     return '18/18 rows: exactly zero dropped seconds'
+  })
+}
+
+const percentile = (values, p) => {
+  const sorted = [...values].sort((a, b) => a - b)
+  return sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] : null
+}
+const timingSummary = values => ({ samples: values.length, medianMs: percentile(values, .5), p95Ms: percentile(values, .95),
+  p99Ms: percentile(values, .99), maximumMs: values.length ? Math.max(...values) : null })
+const requireMeasurement = (condition, message) => { if (!condition) throw new Error(message) }
+const standing = actor => Number.isFinite(actor.upY) && actor.upY >= .98 &&
+  Number.isFinite(actor.pelvisHeight) && actor.pelvisHeight >= .9 * actor.nominalPelvisHeight &&
+  Number.isFinite(actor.effortRatio) && actor.effortRatio <= 1 + 1e-6
+const actorSummary = actor => ({ actorId: actor.actorId, generation: actor.generation, upY: actor.upY,
+  pelvisHeight: actor.pelvisHeight, nominalPelvisHeight: actor.nominalPelvisHeight, support: actor.support,
+  effortRatio: actor.effortRatio, bodyWeight: actor.bodyWeight, upperBodyMovementRad: actor.upperBodyMovementRad,
+  mode: actor.mode, source: actor.source })
+
+/** Actual experimental page. The older, full F1a proof remains separately callable. */
+export async function runHumanoidPhysics(local, check) {
+  if (process.env.OBPAL_E2E_HUMANOID_PILOT_PROOF === '1') await runHumanoidPilotProof(local, check)
+  const evidence = join(process.env.OBPAL_E2E_EVIDENCE_ROOT || join(ROOT, 'artifacts'), 'humanoid-control')
+  const report = { schema_version: 1, kind: 'humanoid-control-browser', pass: false,
+    environment: { node: process.version, platform: process.platform, gpuMode: process.env.OBPAL_E2E_GPU || '0',
+      viewport: { width: 1280, height: 800 }, dpr: 1, browser: null, renderer: null },
+    acceptanceStatus: 'Experimental physics; native anatomy failures remain explicit; gait is outside this presentation scope',
+    overrides: ['Actual demo group replaces optional older F1a browser proof for this scoped run',
+      'Default one standing actor with synthetic BODY input; walking is not claimed',
+      'Default actor: 60 s warm-up / 120 s sample; optional two-actor attempt: 15 s warm-up / 30 s sample; five-minute and full two-actor acceptance are deferred'],
+    bodyProof: 'Synthetic landmarks through BodyInput and Retargeter; this does not measure a physical phone camera',
+    results: [], errors: [], consoleMessages: [], requestFailures: [], strips: [], measurements: [], frameBudget: null }
+  const frames = [], contexts = []
+  let browser, raw, page
+  const record = async (name, work) => {
+    try { report.results.push({ name, pass: true, detail: await work() }) }
+    catch (error) { report.results.push({ name, pass: false, error: String(error?.message ?? error) }) }
+  }
+  try {
+    raw = rawRun(evidence)
+    browser = await chromium.launch(e2eBrowserOptions({ executablePath: process.env.OBPAL_E2E_CHROMIUM || undefined,
+      headless: !process.argv.includes('--headed'), args: ['--ignore-certificate-errors', '--disable-features=WebRtcHideLocalIpsWithMdns',
+        '--disable-background-timer-throttling', '--disable-renderer-backgrounding'] }))
+    report.environment.browser = browser.version()
+    const context = await browser.newContext({ viewport: report.environment.viewport, deviceScaleFactor: 1,
+      ignoreHTTPSErrors: true, serviceWorkers: 'block' })
+    contexts.push(context)
+    page = await context.newPage()
+    page.on('pageerror', error => report.errors.push(error.message))
+    page.on('console', message => {
+      if (['error', 'warning'].includes(message.type()) && report.consoleMessages.length < 40)
+        report.consoleMessages.push({ type: message.type(), text: message.text().slice(0, 2000) })
+    })
+    page.on('requestfailed', request => {
+      if (report.requestFailures.length < 40) report.requestFailures.push({ path: new URL(request.url()).pathname, error: request.failure()?.errorText ?? '' })
+    })
+    await page.goto(`${local.origin}/sim/humanoid/physics/?test=humanoid-physics`, { waitUntil: 'load', timeout: 60_000 })
+    await page.waitForFunction(() => window.__humanoidControl?.snapshot().ready, undefined, { timeout: 60_000 })
+    await page.waitForFunction(() => window.__humanoidControl.actors[0].rig.root.userData.prototype === 'blender', undefined, { timeout: 60_000 })
+    const controls = page.locator('.sim-window[data-panel="controls"]')
+    if (await controls.count() && !await controls.isVisible()) await page.locator('[data-panel-toggle="controls"]').click()
+    const read = () => page.evaluate(() => window.__humanoidControl.snapshot())
+    const reset = () => page.evaluate(() => window.__humanoidControl.reset())
+    const capture = async (scenario, times) => {
+      await mkdir(join(raw, scenario), { recursive: true })
+      const tiles = [], states = [], begin = Date.now()
+      for (const [index, at] of times.entries()) {
+        const delay = at - (Date.now() - begin)
+        if (delay > 0) await page.waitForTimeout(delay)
+        const state = await read(), png = await page.screenshot(), path = `${scenario}/${index}.png`
+        const actualMs = Date.now() - begin
+        await writeFile(join(raw, path), png)
+        states.push({ requestedMs: at, actualMs, state })
+        frames.push({ path, timeMs: actualMs, note: `${scenario}; fixed desktop camera, experimental physics page` })
+        tiles.push({ input: await sharp(png).resize(400, 250, { fit: 'contain', background: '#10151d' }).png().toBuffer(), left: index * 400, top: 34 })
+        const label = `${scenario}: ${(actualMs / 1000).toFixed(2)} s; up ${state.actors[0]?.upY?.toFixed(4) ?? 'missing'}`
+        tiles.push({ input: Buffer.from(`<svg width="400" height="34"><text x="8" y="22" fill="white" font-family="sans-serif" font-size="14">${label}</text></svg>`), left: index * 400, top: 0 })
+      }
+      const png = await sharp({ create: { width: times.length * 400, height: 284, channels: 4, background: '#10151d' } }).composite(tiles).png().toBuffer()
+      const name = `${scenario}-strip.png`
+      await writeFile(join(evidence, name), png)
+      report.strips.push({ name, scenario, count: states.length, requestedTimesMs: times,
+        actualTimesMs: states.map(sample => sample.actualMs), sha256: createHash('sha256').update(png).digest('hex') })
+      report.measurements.push({ scenario, samples: states })
+      return states
+    }
+    await record('one actor by default, explicit experimental label and practice link', async () => {
+      const state = await read()
+      requireMeasurement(state.actors.length === 1, 'Page did not start with exactly one actor')
+      requireMeasurement(await page.getByText('Experimental physics', { exact: true }).count() > 0, 'Experimental label missing')
+      requireMeasurement(await page.locator('a[href="/sim/humanoid/"]').count() > 0, 'Kinematic practice link missing')
+      const renderer = await page.evaluate(() => {
+        const canvas = document.querySelector('canvas'), gl = canvas?.getContext('webgl2'), info = gl?.getExtension('WEBGL_debug_renderer_info')
+        return info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : null
+      })
+      report.environment.renderer = renderer
+      return { actorCount: state.actors.length, host: state.host, renderer }
+    })
+    await record('standing strip holds the sampled stance envelope', async () => {
+      const states = await capture('standing', [0, 500, 1000, 2000, 4000])
+      requireMeasurement(states.every(sample => standing(sample.state.actors[0])), 'Standing left the sampled stance envelope')
+      return { samples: states.length, last: actorSummary(states.at(-1).state.actors[0]) }
+    })
+    await record('class A push and recovery through the page Push button', async () => {
+      await reset()
+      await page.waitForTimeout(1500)
+      const before = await read()
+      await page.locator('[data-physics-push]').click()
+      const states = await capture('push-recovery', [0, 100, 300, 600, 1000, 2000, 4000])
+      const final = states.at(-1).state
+      requireMeasurement(states.every(sample => standing(sample.state.actors[0])), 'Class A push left the sampled stance envelope')
+      requireMeasurement(final.actors[0].support !== 'none', 'Push did not recover support')
+      requireMeasurement((final.disturbances ?? final.pushes ?? 0) > (before.disturbances ?? before.pushes ?? 0), 'Push disturbance was not journalled')
+      return { samples: states.length, last: actorSummary(final.actors[0]), journalled: true }
+    })
+    await record('BODY arms follow synthetic landmarks while the legs balance', async () => {
+      await reset()
+      await page.evaluate(() => { window.__humanoid = { actors: window.__humanoidControl.actors, inject: (index, body) => window.__humanoidControl.inject(index, body) } })
+      await page.evaluate(installFixture)
+      await page.waitForTimeout(1000)
+      await page.evaluate(() => { window.fixture.angles = { 'left.arm.pitch': .65, 'left.arm.elbow': .55, 'right.arm.pitch': .35, 'right.arm.elbow': .35 } })
+      const states = await capture('body-arms', [0, 150, 400, 800, 1500, 3000])
+      requireMeasurement(states.every(sample => standing(sample.state.actors[0])), 'BODY left the sampled stance envelope')
+      requireMeasurement(states.some(sample => sample.state.actors[0].bodyWeight >= .5), 'BODY acquisition did not reach weight 0.5')
+      const body = states.at(-1).state.actors[0]
+      requireMeasurement(Number.isFinite(body.upperBodyMovementRad) && body.upperBodyMovementRad > .15,
+        'BODY did not move the measured upper body by 0.15 rad')
+      await page.evaluate(() => { window.fixture.enabled = false; window.__humanoidControl.clear(0) })
+      await page.waitForTimeout(300)
+      const lost = await read()
+      requireMeasurement(lost.actors[0].bodyWeight <= 1e-6, 'BODY weight did not release to zero after 300 ms')
+      return { acquired: actorSummary(body), released: actorSummary(lost.actors[0]), inputPath: 'landmarks -> BodyInput -> Retargeter -> upper-body -> ActuationGate' }
+    })
+    await record('class D fall shows Reset and rebuilding restores double support', async () => {
+      await page.evaluate(() => { if (window.fixture) window.fixture.enabled = false; window.__humanoidControl.clear(0) })
+      await reset()
+      await page.waitForTimeout(1500)
+      const before = await read()
+      await page.evaluate(() => window.__humanoidControl.push('seat1', 'D', 'toe'))
+      await page.waitForFunction(() => window.__humanoidControl.snapshot().actors[0]?.fallen === true,
+        undefined, { timeout: 8000 })
+      const fallen = await read()
+      requireMeasurement(fallen.actors[0].fallen === true && [fallen.actors[0].upY, fallen.actors[0].pelvisHeight,
+        fallen.actors[0].effortRatio].every(Number.isFinite), 'Class D did not produce a finite measured fall')
+      const hint = page.locator('#physics-fall')
+      await hint.waitFor({ state: 'visible', timeout: 2000 })
+      requireMeasurement(/down.*reset/i.test(await hint.textContent() ?? ''), 'Fallen actor has no visible Down / Reset hint')
+      await page.locator('[data-physics-reset]').click()
+      await page.waitForFunction(generation => {
+        const state = window.__humanoidControl.snapshot(), actor = state.actors[0]
+        return state.ready && actor?.generation > generation && actor.upY >= .98 &&
+          actor.pelvisHeight >= .9 * actor.nominalPelvisHeight && actor.support === 'double' && actor.effortRatio <= 1 + 1e-6
+      }, before.actors[0].generation, { timeout: 8000 })
+      const restored = await read()
+      requireMeasurement(standing(restored.actors[0]) && restored.actors[0].support === 'double', 'Reset did not restore the measured stance envelope')
+      report.measurements.push({ scenario: 'fall-reset', samples: [{ phase: 'before', state: before }, { phase: 'fallen', state: fallen },
+        { phase: 'reset', state: restored }] })
+      return { disturbance: 'class D toe-ward, 150 N s over 0.1 s', before: actorSummary(before.actors[0]),
+        fallen: actorSummary(fallen.actors[0]), restored: actorSummary(restored.actors[0]), fallback: 'explicit arena rebuild; no get-up claim' }
+    })
+    await record('phone Push, Stance and Reset reach the claimed actor', async () => {
+      await reset()
+      const invite = await page.evaluate(() => window.__obpal?.pairingUrl)
+      requireMeasurement(typeof invite === 'string' && invite.length > 0, 'Phone pairing URL missing')
+      const phoneContext = await browser.newContext({ ...devices['Pixel 7'], ignoreHTTPSErrors: true, serviceWorkers: 'block' })
+      contexts.push(phoneContext)
+      await phoneContext.addInitScript(() => sessionStorage.setItem('obpal.hint.gyro', '1'))
+      const phone = await phoneContext.newPage()
+      phone.on('pageerror', error => report.errors.push(`phone: ${error.message}`))
+      await phone.goto(invite, { timeout: 30_000 })
+      await phone.locator('.gp:not([hidden]), .modes:visible').first().waitFor({ timeout: 25_000 })
+      await page.waitForFunction(() => !!window.__humanoidControl.snapshot().actors[0]?.owner, undefined, { timeout: 15_000 })
+      const initial = await read()
+      const tray = label => phone.locator(`.tray-btn[aria-label="${label}"]`)
+      await tray('Push').click()
+      await page.waitForFunction(before => {
+        const s = window.__humanoidControl.snapshot()
+        return (s.disturbances ?? s.pushes ?? 0) > before
+      }, initial.disturbances ?? initial.pushes ?? 0, { timeout: 8000 })
+      await tray('Stance').click()
+      await tray('Reset').click()
+      await page.waitForFunction(gen => window.__humanoidControl.snapshot().actors[0].generation > gen,
+        initial.actors[0].generation, { timeout: 8000 })
+      const final = await read()
+      await phoneContext.close()
+      await page.bringToFront()
+      return { beforeGeneration: initial.actors[0].generation, afterGeneration: final.actors[0].generation,
+        actorCount: final.actors.length, physicalPhoneClaimed: false, phoneViewportEmulation: true }
+    })
+    await record('default one-actor work budget and honest two-actor attempt or fallback', async () => {
+      await page.bringToFront()
+      await page.evaluate(() => { clearInterval(window.fixtureTimer); delete window.__humanoid })
+      await page.evaluate(() => window.__humanoidControl.actorCount(1))
+      await page.waitForFunction(() => window.__humanoidControl.snapshot().actors.length === 1, undefined, { timeout: 30_000 })
+      await page.evaluate(() => { window.__humanoid = { actors: window.__humanoidControl.actors, inject: (index, body) => window.__humanoidControl.inject(index, body) } })
+      await page.evaluate(installFixture)
+      await page.evaluate(() => { window.fixture.animate = true })
+      const warmStart = Date.now()
+      await page.waitForTimeout(60_000)
+      await page.evaluate(() => window.__humanoidControl.startMeasure())
+      const sampleStart = Date.now()
+      await page.waitForTimeout(120_000)
+      const metrics = await page.evaluate(() => window.__humanoidControl.endMeasure())
+      const final = await read(), durationMs = Date.now() - sampleStart
+      requireMeasurement(Array.isArray(metrics.workTimesMs) && metrics.workTimesMs.length > 0, 'Per-frame work samples missing')
+      requireMeasurement(metrics.workTimesMs.every(value => Number.isFinite(value) && value >= 0), 'Invalid work sample')
+      const work = timingSummary(metrics.workTimesMs), ticks = timingSummary(metrics.tickTimesMs ?? [])
+      report.frameBudget = { warmupMs: sampleStart - warmStart, sampleMs: durationMs, work, ticks,
+        droppedSeconds: metrics.droppedSeconds, workerUtilisation: metrics.workerUtilisation, host: final.host,
+        gfx: metrics.gfx, requestedActors: 1, actualActors: final.actors.length,
+        scenario: 'default one standing actor; synthetic BODY seat1; no gait claim' }
+      await writeFile(join(evidence, 'frame-work.json'), JSON.stringify(metrics, null, 2))
+      requireMeasurement(work.samples >= 3000, 'Fewer than 3000 rendered samples in 120 s')
+      requireMeasurement(work.p95Ms <= 16.7 && work.p99Ms <= 25, `Work budget exceeded: p95 ${work.p95Ms}; p99 ${work.p99Ms} ms`)
+      requireMeasurement(metrics.droppedSeconds === 0, `Clock dropped ${metrics.droppedSeconds} s`)
+      requireMeasurement(final.actors.length === 1 && final.actors.every(standing), 'Default actor sample ended outside the stance envelope')
+      if (final.host === 'worker') requireMeasurement(Number.isFinite(metrics.workerUtilisation) && metrics.workerUtilisation <= .8,
+        `Worker utilisation exceeded 80% or missing: ${metrics.workerUtilisation}`)
+      await page.evaluate(() => { clearInterval(window.fixtureTimer); window.__humanoidControl.clear(0) })
+      await page.evaluate(() => window.__humanoidControl.actorCount(2))
+      await page.waitForFunction(() => window.__humanoidControl.snapshot().actors.length === 2, undefined, { timeout: 30_000 })
+      await page.evaluate(installFixture)
+      await page.evaluate(() => { window.fixture.animate = true })
+      const twoWarmStart = Date.now()
+      await page.waitForTimeout(15_000)
+      await page.evaluate(() => {
+        window.__humanoidControl.startMeasure()
+        window.__humanoidActorCounts = [window.__humanoidControl.snapshot().actors.length]
+        window.__humanoidCountTimer = setInterval(() => window.__humanoidActorCounts.push(window.__humanoidControl.snapshot().actors.length), 200)
+      })
+      const twoStart = Date.now()
+      await page.waitForTimeout(30_000)
+      const attempted = await page.evaluate(() => {
+        clearInterval(window.__humanoidCountTimer)
+        return { metrics: window.__humanoidControl.endMeasure(), actorCounts: window.__humanoidActorCounts,
+          state: window.__humanoidControl.snapshot(), notice: document.getElementById('physics-budget')?.textContent ?? '' }
+      })
+      const twoWork = timingSummary(attempted.metrics.workTimesMs ?? [])
+      const actualTwo = attempted.actorCounts.every(count => count === 2) && attempted.state.actors.length === 2
+      const shortBudgetPass = actualTwo && twoWork.samples >= 750 && twoWork.p95Ms <= 16.7 && twoWork.p99Ms <= 25 &&
+        attempted.metrics.droppedSeconds === 0 && attempted.metrics.workerUtilisation <= .8 && attempted.state.actors.every(standing)
+      report.twoActorAttempt = { requestedActors: 2, actualActors: attempted.state.actors.length, observedActorCounts: [...new Set(attempted.actorCounts)],
+        observationIntervalMs: 200, warmupMs: twoStart - twoWarmStart, sampleMs: Date.now() - twoStart,
+        work: twoWork, ticks: timingSummary(attempted.metrics.tickTimesMs ?? []), workerUtilisation: attempted.metrics.workerUtilisation,
+        droppedSeconds: attempted.metrics.droppedSeconds, degraded: attempted.state.degraded, notice: attempted.notice,
+        shortBudgetPass, fullAcceptance: 'deferred: short standing/BODY attempt only; full two-actor walking acceptance is unmeasured',
+        status: shortBudgetPass ? 'short attempt passed' : 'two-actor budget red/deferred' }
+      await writeFile(join(evidence, 'two-actor-work.json'), JSON.stringify(attempted, null, 2))
+      if (!shortBudgetPass) requireMeasurement(attempted.state.actors.length === 1 && attempted.state.degraded &&
+        /two-actor preview disabled|restarted with one actor/i.test(attempted.notice),
+        'Two-actor attempt exceeded budget without the visible one-actor fallback')
+      return { default: report.frameBudget, twoActorAttempt: report.twoActorAttempt }
+    })
+    await record('phone-width layout keeps controls and status visible', async () => {
+      await page.evaluate(() => { clearInterval(window.fixtureTimer); window.__humanoidControl.clear(0) })
+      await page.evaluate(() => window.__humanoidControl.actorCount(1))
+      await page.setViewportSize({ width: 412, height: 915 })
+      await page.waitForTimeout(500)
+      if (!await controls.isVisible()) await page.locator('[data-panel-toggle="controls"]').click()
+      await controls.waitFor({ state: 'visible' })
+      await page.locator('[data-physics-push]').scrollIntoViewIfNeeded()
+      await page.waitForTimeout(250)
+      const state = await read()
+      await writeFile(join(evidence, 'phone-width.png'), await page.screenshot())
+      const bounds = {}
+      for (const selector of ['[data-physics-push]', '[data-physics-reset]', '[data-physics-stance]', '[data-physics-status]']) {
+        const box = await page.locator(selector).boundingBox()
+        bounds[selector] = box
+        requireMeasurement(box && box.width > 0 && box.height > 0 && box.x >= 0 && box.x + box.width <= 413 && box.y >= 0 && box.y + box.height <= 916,
+          `Control outside phone viewport: ${selector}`)
+      }
+      return { viewport: { width: 412, height: 915 }, actorCount: state.actors.length, controlsOpen: true, bounds, emulationOnly: true }
+    })
+  } catch (error) {
+    report.errors.push(String(error?.stack ?? error))
+    if (page && !page.isClosed()) {
+      try {
+        report.failureState = await page.evaluate(() => ({ title: document.title,
+          status: document.getElementById('physics-status')?.textContent ?? null,
+          budget: document.getElementById('physics-budget')?.textContent ?? null,
+          note: document.getElementById('note')?.textContent ?? null,
+          bridgePresent: !!window.__humanoidControl, snapshot: window.__humanoidControl?.snapshot() ?? null }))
+        if (raw) {
+          await mkdir(join(raw, 'startup-failure'), { recursive: true })
+          const path = 'startup-failure/0.png'
+          await writeFile(join(raw, path), await page.screenshot())
+          frames.push({ path, timeMs: 0, note: 'Page startup or readiness failure; not a standing proof', failed: true })
+        }
+      } catch (captureError) { report.errors.push(`Failure diagnostics: ${captureError.message}`) }
+    }
+  }
+  finally {
+    for (const context of contexts) { try { await context.close() } catch (error) { report.errors.push(`Context cleanup: ${error.message}`) } }
+    try { await browser?.close() } catch (error) { report.errors.push(`Browser cleanup: ${error.message}`) }
+    report.pass = report.results.length === 8 && report.results.every(row => row.pass) && report.errors.length === 0
+    if (raw) {
+      try {
+        await writeFile(join(evidence, 'report.json'), JSON.stringify(report, null, 2))
+        await writeFile(join(evidence, 'evidence-frames.json'), JSON.stringify({ expectedCount: 18, frames }, null, 2))
+      } catch (error) { report.pass = false; report.errors.push(`Evidence write: ${error.message}`) }
+    }
+    console.log(`Humanoid control review evidence: ${evidence}; raw frames in TEMP for automatic distillation`)
+    console.log(JSON.stringify({ ...report,
+      measurements: report.measurements.map(({ scenario, samples }) => ({ scenario, capturedSamples: samples.length })) }))
+  }
+  for (const row of report.results) await check(`humanoid physics: ${row.name}`, () => {
+    if (!row.pass) throw new Error(row.error)
+    return JSON.stringify(row.detail)
+  })
+  await check('humanoid physics: complete eight-scenario harness, no browser errors', () => {
+    requireMeasurement(report.results.length === 8 && report.errors.length === 0 && frames.length === 18,
+      report.errors.join('; ') || 'Incomplete eight-scenario harness or missing captured frames')
+    return `${report.results.filter(row => row.pass).length}/8 scenarios; ${frames.length}/18 captured frames`
   })
 }
