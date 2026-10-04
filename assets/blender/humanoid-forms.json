@@ -1,0 +1,33 @@
+{
+  "note": "Soft humanoid form targets in metres at each profile's own scale. Ranges come from the approved concepts, bounded by the fixed joint frames (decision D1); shoulder span and hip breadth cannot reach the concepts' adult values while the pivots keep their current spread.",
+  "forms": {
+    "i": {
+      "height": 1.73,
+      "pivots": { "arm": 0.225, "leg": 0.18 },
+      "headsTall": [7.6, 8.4],
+      "headBreadth": [0.14, 0.172],
+      "headDepthRatio": 1.15,
+      "shoulderSpan": [0.48, 0.54],
+      "upperArmWidth": [0.08, 0.1],
+      "hipBreadth": [0.35, 0.41],
+      "waistToHip": [0.6, 0.75]
+    },
+    "ii": {
+      "height": 1.8,
+      "pivots": { "arm": 0.26, "leg": 0.15 },
+      "headsTall": [7.5, 8.3],
+      "headBreadth": [0.145, 0.18],
+      "headDepthRatio": 1.15,
+      "shoulderSpan": [0.58, 0.66],
+      "upperArmWidth": [0.09, 0.12],
+      "hipBreadth": [0.34, 0.4],
+      "waistToHip": [0.6, 0.88]
+    }
+  },
+  "faces": {
+    "cairn": { "surface": [0.16, -0.018, 0.068, 0.102, 0.082], "eyes": 0.165 },
+    "rill": { "surface": [0.176, -0.006, 0.083, 0.06, 0.094], "eyes": 0.176 },
+    "hush": { "surface": [0.172, -0.045, 0.062, 0.045, 0.052], "eyes": 0.172 }
+  },
+  "shoe": { "lengthCoverage": 0.85, "soleTolerance": 0.001, "toeSpring": 0.005 }
+}

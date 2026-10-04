@@ -64,6 +64,8 @@ async function until(what, fn, timeout = 10000, every = 100) {
 }
 const results = []
 async function check(name, fn) {
+  // OBPAL_E2E_PHONE_CHECKS=<regex> runs only the checks whose names match (the setup around them still runs).
+  if (process.env.OBPAL_E2E_PHONE_CHECKS && !new RegExp(process.env.OBPAL_E2E_PHONE_CHECKS).test(name)) return
   try {
     const detail = await fn()
     results.push({ ok: true })
@@ -219,6 +221,62 @@ try {
     const btns = await until('buttons at the screen', async () => { const b = await screen.evaluate(() => window.__btns); return b.includes('wii-b:up') ? b : null }, 5000)
     for (const want of ['wii-a:tap', 'wii-b:down', 'wii-b:up']) if (!btns.includes(want)) throw new Error(`screen saw ${JSON.stringify(btns)}`)
     return btns.join(', ')
+  })
+
+  await check('notices: a long message stays long enough to read, the newest feedback replaces the last, the same words show once, the x and a drag dismiss, a hover holds, and reduced motion keeps them still', async () => {
+    await clear()
+    const id = await screen.evaluate(() => window.__obpal.participants[0].id)
+    const say = (text) => screen.evaluate(([who, t]) => window.__obpal.feedback({ toast: t }, who), [id, text])
+    const items = () => phone.evaluate(() => [...document.querySelectorAll('.nt-item[data-tier=toast]:not(.out)')].map((n) => n.textContent.trim()))
+    const gone = (what) => until(what, async () => (await items()).length === 0, 16000, 100)
+    await gone('the earlier notices gone')
+    const long = '3D tracking didn’t start: it needs Android with Google Play Services for AR'
+    await say(long); await say(long)
+    await until('the long notice', async () => (await items()).length === 1)
+    if ((await items()).length !== 1) throw new Error('the same words showed twice')
+    await sleep(4000)
+    const still = await items()
+    if (still.length !== 1 || !still[0].includes('3D tracking')) throw new Error(`the long notice went inside 4 s: ${JSON.stringify(still)}`)
+    // The screen's feedback is one notice: the newest takes the place of the last, and nothing queues up stale behind it.
+    await say('Second message'); await say('Third message')
+    await until('the newest message in the place of the long one', async () => { const n = await items(); return n.length === 1 && n[0].includes('Third message') ? n : null }, 3000)
+    // On a phone a notice takes no touch (it would cover a control): what is under it gets the touch, and its x is for the keyboard.
+    const under = await phone.evaluate(() => {
+      const item = document.querySelector('.nt-item[data-tier=toast]:not(.out)'), r = item.getBoundingClientRect()
+      const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+      return { inside: !!hit?.closest('.nt-item'), hasX: !!item.querySelector('.nt-x') }
+    })
+    if (under.inside || under.hasX) throw new Error(`a notice takes the touch: ${JSON.stringify(under)}`)
+    await phone.keyboard.press('Escape')
+    await gone('Escape dismissed it')
+    // A drag of 50 px from the notice dismisses it, and the same words are not shown again within 4 s.
+    await say('Swipe me away')
+    const box = await (await phone.locator('.nt-item[data-tier=toast]:not(.out)').first().elementHandle()).boundingBox()
+    await phone.mouse.move(box.x + 70, box.y + box.height / 2)
+    await phone.mouse.down()
+    await phone.mouse.move(box.x + 190, box.y + box.height / 2, { steps: 6 })
+    await phone.mouse.up()
+    await gone('the swipe dismissed it')
+    await say('Swipe me away')
+    await sleep(900)
+    if ((await items()).length) throw new Error('the same words showed again at once')
+    // A pointer resting on it holds its time.
+    await say('Hold me')
+    await until('the held notice', async () => (await items()).length === 1)
+    const held = await (await phone.locator('.nt-item[data-tier=toast]:not(.out)').first().elementHandle()).boundingBox()
+    await phone.mouse.move(held.x + 60, held.y + held.height / 2)
+    await sleep(4500)
+    if (!(await items()).length) throw new Error('a notice with a pointer on it ran out')
+    await phone.mouse.move(2, 2)
+    await gone('it ran out once the pointer left')
+    // Reduced motion: it fades and does not move.
+    await phone.emulateMedia({ reducedMotion: 'reduce' })
+    await say('Calm now')
+    await until('the calm notice', async () => (await items()).length === 1)
+    const motion = await phone.locator('.nt-item[data-tier=toast]:not(.out)').first().evaluate((el) => { const c = getComputedStyle(el); return { property: c.transitionProperty, transform: c.transform } })
+    await phone.emulateMedia({ reducedMotion: null })
+    if (/transform|all/.test(motion.property) || motion.transform !== 'none') throw new Error(`reduced motion still moves it: ${JSON.stringify(motion)}`)
+    return 'read for 4 s+, newest replaces the last, de-duplicated, x and drag dismiss, hover holds, still under reduced motion'
   })
 
   /** The screen's button events since the last call. */

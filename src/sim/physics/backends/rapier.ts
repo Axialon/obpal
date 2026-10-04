@@ -17,7 +17,9 @@ export const createRapierBackend: BackendFactory = async (scene, _limits): Promi
   try {
     world.numSolverIterations = scene.contact?.solverIterations ?? 8
     if (scene.contact) {
+      // In 0.21 this is geometric slop, not a contact-bias deadzone; the fixed-floor sink fixture is unchanged.
       world.integrationParameters.normalizedAllowedLinearError = scene.contact.allowedLinearError
+      // Native prediction changes prospective contact generation; observers also use this as their loaded-contact threshold.
       world.integrationParameters.normalizedPredictionDistance = scene.contact.predictionDistance
     }
     for (const b of scene.bodies) {
@@ -31,7 +33,10 @@ export const createRapierBackend: BackendFactory = async (scene, _limits): Promi
       // Encode sqrt(mu) with Multiply to match the common geometric-mean pair law.
       collider.setFriction(Math.sqrt(b.friction)).setFrictionCombineRule(R.CoefficientCombineRule.Multiply)
         .setRestitution(b.restitution).setRestitutionCombineRule(R.CoefficientCombineRule.Min)
-      if (!b.fixed) collider.setMass(b.mass)
+      if (!b.fixed) {
+        if (b.inertia) collider.setMassProperties(b.mass, { x: 0, y: 0, z: 0 }, b.inertia, { x: 0, y: 0, z: 0, w: 1 })
+        else collider.setMass(b.mass)
+      }
       const created = world.createCollider(collider, native)
       colliders.set(b.id, created); owners.set(created.handle, b.id)
     }

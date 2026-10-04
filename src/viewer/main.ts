@@ -32,6 +32,7 @@ import { dismissHint, hint } from '../ui/hints'
 import { initTips } from '../ui/tips'
 import { holdForPhone } from '../ui/recover'
 import { enhanceSelects } from '../ui/kit/select'
+import { mountNotices, notify, type NoticeTone } from '../ui/kit/notice'
 import { mountQuick, quickAction, quickViews } from '../ui/quick'
 import { HandCursor } from '../ui/hand-cursor'
 import { applyTheme, initialTheme, THEMES, themeById, type Theme } from '../ui/themes'
@@ -42,6 +43,7 @@ import { ControlSession } from '../sim/control-space'
 
 CameraControls.install({ THREE })
 mountBodyCapture()
+mountNotices()
 
 const D2R = Math.PI / 180
 const GROUND_Y = -1.62
@@ -499,7 +501,7 @@ async function selectItem(item: CatalogItem, add = false, fromHost = false) {
   } catch (e) {
     if (token !== loadToken) return
     console.error(e)
-    note(`Couldn't load ${item.name}`)
+    note(`Couldn't load ${item.name}`, 'bad')
   } finally {
     clearTimeout(loading)
     if (token === loadToken) { dotLoading($('loading'), false); $('loading').hidden = true }
@@ -668,7 +670,7 @@ async function loadFile(file: File, add = false) {
       const { OBJLoader } = await import('three/addons/loaders/OBJLoader.js')
       obj = new OBJLoader().parse(await file.text())
     } else {
-      return note(`Can't open .${ext ?? '?'} files yet. Try GLB, STL or OBJ.`)
+      return note(`Can't open .${ext ?? '?'} files yet. Try GLB, STL or OBJ.`, 'bad')
     }
     if (token !== loadToken) { releaseModel(obj); return }
     if (add && sceneObjects.length) addAlongside(obj, clips, null, file.name, null)
@@ -677,7 +679,7 @@ async function loadFile(file: File, add = false) {
   } catch (e) {
     if (token !== loadToken) return
     console.error(e)
-    note(`Couldn't open ${file.name}`)
+    note(`Couldn't open ${file.name}`, 'bad')
   } finally {
     clearTimeout(loading)
     if (token === loadToken) { dotLoading($('loading'), false); $('loading').hidden = true }
@@ -706,13 +708,10 @@ const fileInput = $<HTMLInputElement>('file')
 $('open').onclick = () => fileInput.click()
 fileInput.onchange = () => { void openFiles([...(fileInput.files ?? [])]); fileInput.value = '' }
 
-let noteTimer: ReturnType<typeof setTimeout> | undefined
-function note(text: string) {
-  const n = $('note')
-  n.textContent = text
-  n.classList.add('show')
-  clearTimeout(noteTimer)
-  noteTimer = setTimeout(() => n.classList.remove('show'), 2400)
+/** A short message (src/ui/kit/notice.ts). The page's #note stays as its quiet live region and holds the last words. */
+function note(text: string, tone?: NoticeTone) {
+  $('note').textContent = text
+  notify({ text, tone, announce: false })
 }
 
 // ---- live trade-off models: engine pillars re-solve as they move --------------------------------
@@ -1061,11 +1060,12 @@ async function startRemote() {
   }
   remote.setHostPerson({ name: 'Screen', color: family.accentColor() })
   Object.assign(window, { __obpal: remote, __viewer: { holder, camera, controls, view, seats, parts } })
-  // Open while nobody is here; it closes by itself as a phone comes in, and the + in the people chip opens it again.
+  // Open while nobody is here. As a phone comes in it shows the seal, then folds by itself a few seconds after the seal
+  // settles (or by its own x, Escape, or a press outside it); the + in the people chip opens it and closes it again.
   // It folds while a panel is where it opens, and on narrow screens the caption makes way for it.
   pairChip = new PairingChip({
-    remote, open: true, testLink: true, avoid: '#lighting, #themes, #more, #switcher, #people, #catalog, .presence-controls, .quick-panel, .quick-themes, .obpal-camera',
-    onToggle: (open) => { $('chip-invite').setAttribute('aria-pressed', String(open)); $('caption').classList.toggle('pair-open', open) },
+    remote, open: true, testLink: true, avoid: '#chip, #lighting, #themes, #more, #switcher, #people, #catalog, .presence-controls, .participant-strip, .quick-panel, .quick-themes, .obpal-camera',
+    onToggle: (open) => { $('chip-invite').setAttribute('aria-pressed', String(open)); $('caption').classList.toggle('pair-open', open); document.documentElement.toggleAttribute('data-pair-open', open) },
   })
   remote.on('connect', () => {
     $('chip').hidden = false
@@ -1456,11 +1456,11 @@ const follower = new GlowFollower()
 const glowView = $('glow-view') as HTMLCanvasElement
 const glowCtx = glowView.getContext('2d')!
 follower.onUnseen = (id) => remote?.feedback({ haptic: 'bump', toast: 'The camera can’t see your glow: turn the screen toward it' }, id)
-follower.onCameraOff = () => note('A phone is glowing: turn on “Follow glowing phones with this camera” in People')
+follower.onCameraOff = () => note('A phone is glowing: turn on “Follow glowing phones with this camera” in People', 'warn')
 $('glow-cam').onclick = async () => {
   if (follower.cam.on) follower.cam.stop()
   else {
-    try { await follower.cam.start(); note('Hold glowing phones toward the camera') } catch { note('The camera didn’t start: allow it for this page') }
+    try { await follower.cam.start(); note('Hold glowing phones toward the camera') } catch { note('The camera didn’t start: allow it for this page', 'bad') }
   }
   $('glow-cam').setAttribute('aria-pressed', String(follower.cam.on))
   glowView.hidden = !follower.cam.on
@@ -1729,5 +1729,5 @@ if (!guestScene) hint('catalog', () => $('catalog'), 'Choose a model, or drop in
 hint('tools', () => $('tools'), 'Grid, glow, spin, frame and reset', { place: 'bottom', delay: 7000 })
 if (!sharedPresence.guest) startRemote().catch((e) => {
   console.error(e)
-  note('Could not start pairing. Check your connection and reload.')
+  note('Could not start pairing. Check your connection and reload.', 'bad')
 })

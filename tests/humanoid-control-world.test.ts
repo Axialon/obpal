@@ -102,7 +102,7 @@ for (const profileId of ALL_PHYSICAL_PROFILES) describe(`humanoid world: ${profi
         recorded.advance(STEP)
       }
       const journals = { seat1: recorded.journal('seat1'), seat2: recorded.journal('seat2') }, snapshot = recorded.snapshot()
-      const rows: { hz: number; ticks: number; journalTicks: number[]; maximumComponentErrorSI: number; disturbanceTicks: number[] }[] = []
+      const rows: { hz: number; ticks: number; journalTicks: number[]; maximumComponentErrorSI: number; disturbanceTicks: number[]; nativeStateIdentical: boolean }[] = []
       for (const hz of [60, 30, 120]) {
         const replay = await HumanoidWorld.create({ actors: specs(profileId), journalCapacity: 480 })
         try {
@@ -118,7 +118,8 @@ for (const profileId of ALL_PHYSICAL_PROFILES) describe(`humanoid world: ${profi
                 error(expected[tick].action.targets, actual[tick].action.targets), error(expected[tick].disturbances, actual[tick].disturbances))
             }
           }
-          rows.push({ hz, ticks: replay.diagnostics().tick, journalTicks, maximumComponentErrorSI: maximum, disturbanceTicks })
+          rows.push({ hz, ticks: replay.diagnostics().tick, journalTicks, maximumComponentErrorSI: maximum, disturbanceTicks,
+            nativeStateIdentical: JSON.stringify(snapshot) === JSON.stringify(replay.snapshot()) })
         } finally { replay.dispose() }
       }
       report(`R1-${profileId}`, { kind: 'R1', profileId, expectedTicks: 480, rows })
@@ -126,6 +127,7 @@ for (const profileId of ALL_PHYSICAL_PROFILES) describe(`humanoid world: ${profi
       for (const row of rows) {
         expect(row.ticks).toBe(480); expect(row.journalTicks).toEqual([480, 480]); expect(row.disturbanceTicks).toEqual([24, 24])
         expect(row.maximumComponentErrorSI).toBeLessThanOrEqual(1e-6)
+        expect(row.nativeStateIdentical).toBe(true)
       }
     } finally { recorded.dispose() }
   }, 180_000)

@@ -136,6 +136,7 @@ for (const profileId of ALL_PHYSICAL_PROFILES) describe(`humanoid balance quiet 
   })
   it('retains all 30 s F1a2 stance gates without a root force or body write', () => {
     expect(stancePass(report.stance), JSON.stringify(report.stance)).toBe(true)
+    expect(report.stance.maxPenetrationMm).toBeLessThanOrEqual(2) // Simulation default, mm: contact-inertia stance gate.
   })
   it('matches StanceController on any quiet-selected tick (phase counts report coverage)', () => {
     expect(report.control.quietFrameMismatches).toBe(0)

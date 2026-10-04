@@ -1,15 +1,16 @@
-/** Original uniform-link inertia for torque servos; not a coupled articulation/contact solver. */
+/** Body-frame inertia for torque servos; not a coupled articulation/contact solver. */
 import { rotate, capped, norm, unit, dot, add, sub, scale, type Vec3 } from './math'
 import type { Body, BodyState } from './schema'
-export function uniformInertia(b: Body): Vec3 {
+export function bodyInertia(b: Body): Vec3 {
   if (b.fixed || b.shape.kind === 'plane') return { x: 0, y: 0, z: 0 }
+  if (b.inertia) return { ...b.inertia }
   if (b.shape.kind === 'sphere') { const i = .4 * b.mass * b.shape.radius ** 2; return { x: i, y: i, z: i } }
   const h = b.shape.half, k = b.mass / 3
   return { x: k * (h.y ** 2 + h.z ** 2), y: k * (h.x ** 2 + h.z ** 2), z: k * (h.x ** 2 + h.y ** 2) }
 }
 function inverseTensor(b: Body, s: BodyState) {
   if (b.fixed) return { xx: 0, xy: 0, xz: 0, yy: 0, yz: 0, zz: 0 }
-  const i = uniformInertia(b), x = rotate(s.rotation, { x: 1, y: 0, z: 0 }),
+  const i = bodyInertia(b), x = rotate(s.rotation, { x: 1, y: 0, z: 0 }),
     y = rotate(s.rotation, { x: 0, y: 1, z: 0 }), z = rotate(s.rotation, { x: 0, y: 0, z: 1 })
   return { xx: x.x * x.x / i.x + y.x * y.x / i.y + z.x * z.x / i.z,
     xy: x.x * x.y / i.x + y.x * y.y / i.y + z.x * z.y / i.z,

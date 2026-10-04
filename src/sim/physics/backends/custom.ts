@@ -6,6 +6,7 @@ interface Contact { a: Particle; b: Particle; normal: Vec3; ra: Vec3; rb: Vec3; 
 const AXES: Vec3[] = [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }]
 const inertia = (b: Body): Vec3 => {
   if (b.fixed) return { ...ZERO }
+  if (b.inertia) return { x: 1 / b.inertia.x, y: 1 / b.inertia.y, z: 1 / b.inertia.z }
   if (b.shape.kind === 'sphere') { const k = 1 / (.4 * b.mass * b.shape.radius ** 2); return { x: k, y: k, z: k } }
   if (b.shape.kind === 'box') { const h = b.shape.half; return { x: 3 / (b.mass * (h.y ** 2 + h.z ** 2)), y: 3 / (b.mass * (h.x ** 2 + h.z ** 2)), z: 3 / (b.mass * (h.x ** 2 + h.y ** 2)) } }
   return { ...ZERO }

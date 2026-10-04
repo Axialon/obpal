@@ -98,8 +98,9 @@ for name, low in [(name, low) for name in (FORMS if soft else ['keel', 'morrow']
             moving.rotation_euler[axis] = math.radians(angle)
             bpy.context.view_layer.update()
             centre = moving.matrix_world.translation
-            children = [o for o in leaf.children if o.type == 'MESH' and o.data.materials[0].name == material]
-            parents = [o for o in stationary.children if o.type == 'MESH' and o.data.materials[0].name == material]
+            # Exterior covers only: a soft form's cover-coloured lining is the under-suit, audited as before (not at all).
+            children = [o for o in leaf.children if o.type == 'MESH' and o.data.materials[0].name == material and 'under-suit' not in o.name]
+            parents = [o for o in stationary.children if o.type == 'MESH' and o.data.materials[0].name == material and 'under-suit' not in o.name]
             for a in children:
                 tree_a, va, fa = shell_tree(a)
                 for b in parents:

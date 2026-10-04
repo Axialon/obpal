@@ -22,7 +22,7 @@ All forms weigh 59.5 kg. The eight forms are three physical geometries:
 
 Toe-ward is −Z at spawn yaw 0; a unit test pins it.
 
-The limits shape get-up: hip flexion is at most 100°, knee 130°, ankle dorsiflexion 25°. A flat-foot deep squat leaves the hip about 0.24 m behind the ankle, so the COM falls behind the heel. Rising must therefore start from a crouched pike: knee about 1.1 rad, hip at its limit, trunk at least 60° forward. That puts the COM about 0.11 m ahead of the ankle.
+The limits shape get-up: hip flexion is at most 100°, knee 130°, ankle dorsiflexion 25°. A flat-foot deep squat leaves the hip about 0.24 m behind the ankle, so the COM falls behind the heel. The contact lane replaces the unsuccessful toes-to-pike path with a tucked bridge, tall kneel and supported half kneel. Static force feasibility of these postures does not establish a feasible transition between them; native recovery remains unproven.
 
 ## 3. Modules (`src/sim/humanoid/physics/`)
 
@@ -46,8 +46,15 @@ The limits shape get-up: hip flexion is at most 100°, knee 130°, ankle dorsifl
 **balance.ts.** It uses `h = com.y - cop.y`, `ξ = com_xz + v_xz/ω` and the support polygon `P`.
 
 - **Quiet stance** applies inside `P` shrunk by 0.02 m, with `|v| < 0.05 m/s` and `ξ` within 0.03 m of the centroid: `StanceController` acts.
-- **Ankle.** From `ξ' = ω(ξ - r_cmp)`, set `r_cmp = ξ + k_ξ(ξ - ξ_ref)` toward the polygon centroid. Clip to `r_cop` inside `P` shrunk 0.01 m. Apply `F = m ω²(com - r_cop)` by Jacobian transpose per stance leg, weighted by load share. A foot with fewer than three hull points, or turning faster than 1 rad/s, gets no ankle torque (GBWC).
+- **Ankle.** From `ξ' = ω(ξ - r_cmp)`, set `r_cmp = ξ + k_ξ(ξ - ξ_ref)` toward the polygon centroid. Clip to the hull of the loaded feet's sink-safe diamonds. Apply `F = m ω²(com - r_cop)` by Jacobian transpose per stance leg, weighted by load share. Clip each foot's implied COP to its own diamond too. A foot with fewer than three hull points, or turning faster than 1 rad/s, receives a zero-moment target with damping compensation (GBWC).
 - **Hip.** The residual `e = r_cmp - r_cop` sets a trunk moment `m g e`, at most 60 N m, while trunk pitch is within 0.35 rad. Stance hips realise it SIMBICON-style; a torso PD returns upright. Sign test: a toe-ward excess pitches the trunk forward.
+
+On first entry or after an observation gap, Balance retains the measured leg
+posture if both feet are loaded and their heading-local separation or stagger
+differs from the authored stance by more than 30 mm. Static support moments and
+3 s⁻¹ virtual COM damping then act around that posture. These are simulation
+defaults; unchanged initial standing geometry follows the original path.
+This prevents a walking stop from straightening staggered legs abruptly.
 
 **stepping.ts**
 
@@ -55,19 +62,176 @@ The limits shape get-up: hip flexion is at most 100°, knee 130°, ankle dorsifl
 - **Swing:** the less-loaded foot. On a lateral exit, the exit-side foot once its load share is ≤ 0.6 (balance unloads it by ankle roll). Never a crossing step.
 - **Landing:** `ξ_T = r_cop + (ξ - r_cop)e^(ω T_s)`, `T_s = 0.32 s`, plus 0.03 m along the exit. Length is capped at 0.6 L (GBWC); lateral width from the stance ankle is at least 0.20 m. A capped step recomputes at touchdown, giving N-step recovery.
 
-**gait.ts** runs SIMBICON's four states (lift and strike, each side):
+The contact model predicts centred sink `δ = F_n/(4 m_eff ω_c²)`, with
+`ω_c² = 1.425e5 s⁻²`, calibrated on the native loaded-foot fixture. The foot-frame
+diamond is `|x|/b + |z|/a ≤ ρ`, where `ρ = min(0.85, 4 mm/δ − 1)` bounded below
+by zero. Measured depth above 3.5 mm trims the region at up to 4 s⁻¹; it restores
+at 0.05 s⁻¹. These are simulation defaults, not changes to the 5 mm acceptance
+gate. First loaded contact requests zero ankle moment until flat, then blends
+over 60 ms into measured-COP damping with gain 0.5. An unflat foot remains in
+conform after the nominal 80 ms window.
 
-| State | Exit | Swing hip θ₀ (world) | Swing knee | Swing ankle | Stance knee |
-| --- | --- | ---: | ---: | ---: | ---: |
-| Lift | t ≥ 0.30 s | 0.40 | 1.10 | 0.20 | 0.05 |
-| Strike | swing foot loaded 2 ticks, or t ≥ 0.40 s | 0.00 | 0.05 | 0.00 | 0.10 |
+**gait.ts** retains alternating lift and strike, with ALIP landing placement [10]
+and SIMBICON swing feedback. Angular momentum about the measured stance COP
+includes orbital momentum and each body's rotated declared inertia. Its
+equivalent velocity is `(-L_z, L_x)/(m h)`. Hyperbolic pendulum prediction over
+the measured remaining swing time selects the next support position to reach
+the requested terminal velocity; the existing reach and non-crossing limits
+still apply. This assumes fixed COP and constant COM height during prediction.
 
-- Lift values are SIMBICON's walk row, flexion-positive. The knee's 1.10 rad at 4 rad/s takes 0.275 s, inside the lift.
-- **Swing hip** (world frame): `θ = θ₀ + c_d d + c_v(v - v_d)` in both planes, where `d` and `v` are the COM relative to the stance ankle. Raibert's `(v - v_d)` replaces SIMBICON's `v`. Lateral θ₀ is 0.05 rad abduction. Convert with `worldTarget`.
-- **Torso and stance hip.** The pelvis follows `yaw(ψ_d)` under a PD, `tau_t = 300·err - 30·w`. The stance hip gets `tau_A = -tau_t - tau_B` in torque mode, split by load in double support.
-- **Stance ankle:** GBWC velocity tuning `F_V = k_V(v_d - v)` sagittally plus a lateral PD (30 s⁻², 11 s⁻¹), by Jacobian transpose. Gravity compensation on the swing leg.
-- **Turning, start and stop.** Stance-hip twist error is capped at ±0.3 rad. Start shifts the COM 40% toward the future stance foot (GBWC). Stop needs `v_d = 0` and `|v| < 0.1 m/s` at strike.
-- **Recovery steps** reuse the machine with `v_d = 0`, aiming the swing hip at the landing target.
+Horizontal swing and both vertical halves use quintic interpolation. The
+landing plan freezes at 75% of its 0.60 s reference horizon or below 15 mm sole
+clearance in strike; it ends 3 mm below the undeformed sole plane. Requested
+unloaded hip, knee and ankle targets are limited to 3 rad/s before the unchanged
+4 rad/s gate. While turning, the ankle anticipates the planned shin direction.
+Loaded ankles use conform and sink-safe clipping before coupled hip prediction.
+There is no toe segment: propulsion uses the hip and knee with a flat sole.
+
+Walking defaults interpolate by measured hip-to-ankle chain length, bounded by
+the calibrated 0.77–0.84 m interval. No profile identifier selects the values;
+the remaining forms receive the same rule without individual tuning.
+
+| Chain length | Lift / strike | Lateral reference | Terminal sagittal velocity factor |
+| --- | --- | --- | --- |
+| 0.84 m | 0.27 / 0.36 s | 0.20 m | 1.00 |
+| 0.77 m | 0.30 / 0.40 s | 0.15 m | 1.30 |
+
+Compact-leg turns blend separate simulation defaults by
+`min(1, abs(yaw rate)/(1 rad/s))` and the same clamped chain-length fraction
+`(0.84 m - L)/(0.84 m - 0.77 m)`. Zero yaw and the 0.84 m endpoint retain the
+straight branch exactly. The full compact-turn defaults are:
+
+| Quantity | Simulation default |
+| --- | --- |
+| Lift / strike | 0.2777240484976537 / 0.39321100291349714 s |
+| Clearance / capture horizon | 0.0323046330044233 m / 0.5077943432166341 s |
+| Lateral reference / periodic momentum width | 0.15134754691180272 / 0.19112127827846948 m |
+| ALIP momentum retention / velocity-force gain | 0.05206005451921607 / 70.38883424635598 N s/m |
+
+The periodic width specifies terminal angular momentum; the physical landing
+minimum remains 0.20 m. These values came from deterministic CMA-ES [11] with seed
+2026100420, population 10 and initial normalized sigma 0.15. The search stopped
+after four complete turn generations and six candidates of the next, following
+seven earlier walking generations. The retained candidate passed the nominal
+Morrow turn and all five prescribed perturbed starts, with 3.944–4.038 rad in
+10 s and 3.577–3.590 mm peak penetration. Straight walking and Keel use their
+previous defaults; the fixed-tick regression hashes protect those branches.
+
+These are measured simulation defaults, not a claim of universal dynamic
+similarity. Start shifts the COM toward support. Within 5% foot-load imbalance,
+a turn chooses the outer swing foot. Pelvis-heading lead remains limited to
+0.05 rad. Release retains the ALIP landing instead of replacing it with adjacent
+standing spacing. A stopped swing must unload and then show two flat supported
+observations, or 40 ms loaded, before Balance takes over. The handoff still
+requires speed below 0.1 m/s. Recovery uses a 0.25–0.45 s bounded swing.
+
+If the geometry's midline gravitational hip-roll demand exceeds 80% of its hip
+effort cap, release first recenters over the measured ankle supports for two
+seconds. The target pelvis height stays within both authored leg chains' reach
+with a 0.4 rad minimum knee bend. Two distinct loaded observations and both feet
+flat within 0.5 degrees qualify the handoff. These are simulation defaults; the
+three-second stop deadline and ten-second stance hold remain unchanged. Balance
+preserves the measured hip/knee support. Only when a newly retained ankle lies
+more than 0.01 rad outside its unchanged cone does it gradually correct the ankle
+references toward world-flat, at 1 rad/s after conform. This correction advances
+once per observed tick and resets when a new support posture is retained.
+
+Walking still has its timed strike exit; the proposed explicit double-support
+transfer has not passed native regression. Horizontal interpolation also retains
+the lift/strike change in phase-normalized clock rate: a continuous elapsed-time
+probe missed the 0.3 m/s speed floor on three of five Morrow starts. The 86 N m stance-hip roll request
+budget is also unresolved: unchanged motor caps bound actuation, but requested
+moments can exceed that design margin. The optimizer penalizes the raw outer-loop
+roll request, which is distinct from both the quasistatic non-stance gravity
+moment about the hip and the applied capped motor torque. Its value proves
+neither physical quantity meets 86 N m. These limitations are not relaxed gates.
+
+The world registers standing `recover` ahead of walking and balance. Its ankle
+capacity is `m omega max(0, margin - 0.02 m)` along the measured escape direction
+inside the sink-safe hull. After a 50 ms hip response, or an estimated capture
+moment above 86 N m, it requests a bounded 0.25–0.45 s capture step through the
+same gate and swing controller. A 100 ms supported interval returns to balance.
+These timing and reserve values are simulation defaults. Effective walking
+intent does not initiate standing recovery; stick deadzones and `stand` use the
+same mapping as walking. Recovery also waits for a retained walk to finish its
+release before it can enter.
+
+Native thorax pushes through `world.push` pass class A on both pilots (8/8,
+maximum penetration 2.626/2.635 mm), class B 6/8 and class C 1/8. Both class B
+lateral rows fall, at 1.521/1.350 s and 5.077/3.753 mm. The passing nominal class C
+Morrow diagonal row reaches 3.366 mm and uses no step; two of its five perturbed
+starts fall at 1.963-1.979 s with peaks of 4.875-4.894 mm. The final native push
+suite has 39 ordinary passing assertions and 10 expected failures. This is
+evidence for bounded standing response, not demonstrated stepping recovery.
+
+Ordinary active Balance still retains its original nominal-posture ankle law
+after sink-safe moment clipping. Extending full conform/COP feedback to that
+path made both walking stops fall. A narrower zero-moment override preserved
+walking stops and class A but regressed the nominal Morrow class-C diagonal
+push. Advancing its contact history through quiet ticks restored that nominal
+pass, while one previously passing 5 mm perturbed start still fell at 1.517 s
+and 4.730 mm penetration. Those extensions were rejected. Retained support
+postures and gait use the conform/feedback path; ordinary Balance remains a
+documented gap.
+
+The in-place fallback retains every `IN_PLACE_CONTROL` literal. Its shared
+contact response holds a loaded landing in zero-moment ankle conform after
+40 ms; three non-collinear support points and at most 0.5° tilt permit transfer.
+The coupled hip-reaction estimate includes those conform ankle targets. During
+transfer, the receiving-foot reference moves from 50% toward 85% load. Measured
+load-share error adjusts only the pelvis IK reference: 0.6 m per unit share,
+bounded to 40 mm and 20 mm/s. These are simulation defaults, not body writes.
+Release resets that reference correction and reanchors both ankle IK goals to
+their measured joint-frame positions before recentering.
+
+Changing from stepping to turning first completes this recenter, then applies
+ordinary Balance over the existing two-second preparation interval before a
+fresh turn. It retains the original standing-height reference. Release cancels
+the pending turn; a changed yaw sign uses the latest command. Initial pure turns
+keep their original timing. This pauses the mixed sequence without changing any
+`IN_PLACE_CONTROL` literal or writing body state.
+
+When midline gravitational hip-roll demand exceeds 80% of the hip effort cap,
+transfer also leans the trunk toward the receiving foot. The simulation default
+is 0.12 rad total world roll, split equally across the two spine joints. It
+follows the existing cosine transfer clock and fades to zero over the existing
+release clock. This geometry rule leaves Keel's targets unchanged. It lowers
+Morrow's measured receiving-hip gravity moment, but the loaded p95 remains
+107.294/107.813 N m in place/turning, above the unresolved 86 N m design target.
+
+On the v3 contact candidate, Keel completes both 30 s fallback rows and both
+release stops at 3.670/3.776 mm peak penetration. Each foot completes two genuine
+unload/clear/reload cycles, and release reaches stance in 2.008 s, held for 10 s.
+Morrow now completes both fallback rows at 3.518/3.077 mm, turns 0.343 rad,
+and reaches stance after release in 2.008/2.350 s. Five perturbed starts for
+each release trial also pass the full motion and hold protocol, with peaks
+3.071–3.236 mm and stance by 2.355 s. These are fallback measurements, not
+W1–W3 walking acceptance.
+
+The retained world sequence uses 10 s forward stick, 20 s yaw and 6 s released.
+Before the settled turn transition, five Morrow starts fell at 30.933–32.442 s,
+with 6.118–6.545 mm penetration before falling. Keel also fell at 26.558 s when
+starting after 359 settle ticks, with 6.559 mm over the run; starting one tick
+later passed. That failure reproduced the browser trace exactly.
+
+With the settled transition, five Keel timing starts complete at 3.617–3.727 mm
+and five Morrow timing starts complete at 3.735–3.745 mm. All remain finite,
+without falls or guard faults, and finish in Balance with both feet loaded.
+The independent nominal Morrow repeat has an identical native-state hash.
+Signed turning is only 0.052–0.095 rad over this mixed interval: above
+the page's 0.05 rad gate, below the separate pure-turn target of 0.3 rad. The
+native regression covers the failing Keel start and nominal Morrow start.
+These timing starts do not establish arbitrary command or spawn robustness.
+The final-source hardware browser retry passes all 12 checks. Both mixed traces
+remain finite without falls or worker faults, then finish in Balance with both
+feet loaded: Keel peaks at 3.646 mm and Morrow at 3.735 mm. Their signed turns
+are 0.063 and 0.052 rad; neither discards simulation time or leaves queued time.
+On the RTX 4090, single-actor standing with synthetic BODY records 1.2/1.3 ms
+work at p95/p99 over 120 s after 60 s warm-up. A short two-actor standing/BODY
+attempt also passes, with no
+actor reduction and 1.5/1.6 ms work over 30 s after 15 s warm-up. This is not
+the full two-actor walking frame-budget proof. The isolated runner's helper
+guard records 19 lines before and after, with no new sessions.
 
 **getup.ts**
 
@@ -79,14 +243,23 @@ The limits shape get-up: hip flexion is at most 100°, knee 130°, ankle dorsifl
 
 | Phase | Key targets (rad) | Post-condition | Timeout |
 | --- | --- | --- | ---: |
-| P1 Hands under | shoulder pitch 1.4, roll 0.3; elbow 1.9 | both hands loaded | 1.0 s |
-| P2 All fours | elbow 0.15; hip 1.5; knee 1.6 | hands and shins loaded; pelvis ≥ 0.35 m | 1.5 s |
-| P3 Toes tucked | ankle 0.43; knee 1.1; shoulders 0.9 | both feet loaded; COM in hull(hands ∪ feet) | 1.5 s |
-| P4 Crouched pike | hip 1.74; trunk ≥ 60° forward; hip offset `k_c(com - feetCentroid)` | COM in feet-only polygon | 1.5 s |
+| P1 Hands under | shoulder pitch −1.2 then −0.95; elbow 1.9; hip 0.2 and knee 2.15 tuck | knees tucked and both folded hands planted | 1.0 s |
+| P2 Tucked bridge | shoulders 1.17/1.16, elbows 0, hips 1.39/1.40, knees 2.15/2.20, head 0.5 (Keel/Morrow) | hands and shins loaded; pelvis ≥ 0.35 m; root up Y ≥ 0.2 | 1.5 s |
+| P3 Tall kneel | hips 0/0.15, knees 1.85/1.90, ankles −0.6 (Keel/Morrow) | shins loaded; hand load ≤ 30% of weight; up Y ≥ 0.95; COM inside shin/foot hull | 2.0 s |
+| P4 Half kneel | front foot flat; rear knee supports | front foot and rear shin loaded; COM in the front foot's sink-safe region; up Y ≥ 0.9 | 2.0 s |
 | P5 Rise | knee/hip → 0.05/0 over 1.2 s; ankle law on | `up.y ≥ 0.95`; pelvis ≥ 0.85 h₀ | 2.0 s |
 | P6 Settle | nominal; `StanceController` | 0.98 / 90% held 1 s | 2.0 s |
 
 Keyframes are SD starting points; post-conditions are the contract. After two failures the actor is `down` (limp hold, not quiet).
+
+The v3 contact candidate checks support postures offline with nonnegative contact
+forces, friction cones and the unchanged effort caps. Tall-kneel static effort
+ratios are 0.069/0.063 for Keel/Morrow; half-kneel ratios are 0.229/0.256. Predicted
+deepest support sink is 1.66/1.79 mm and 3.37/2.27 mm respectively. These are
+feasibility estimates. Native lean-fall recovery still measures 0/16 recoveries,
+with all 16 finite-state and effort safety rows passing. World prone/supine
+fixtures also remain explicit expected failures; get-up is not registered as a
+successful automatic world behaviour.
 
 **upper-body.ts** maps `Retargeted.q` to arm, head and spine-yaw targets through `targetsFromAngles`. BODY spine pitch and roll, clamped to ±0.15 rad, are added to the torso target, so the stance hips carry them. Presets use the same path. Legs ignore BODY.
 
@@ -104,17 +277,19 @@ Keyframes are SD starting points; post-conditions are the contract. After two fa
 | Quantity | Value | Source |
 | --- | --- | --- |
 | Joint K, D, caps; slew; 240 Hz | unchanged | F1a SD |
-| Support shrink | 0.02 m | HUMANOID.md 2 cm |
+| Quiet-stance support margin | 0.02 m | HUMANOID.md 2 cm |
+| Active COP region; depth budget; trim start | diamond ρ ≤ 0.85; 4.0 mm; 3.5 mm | SD, native contact calibration |
+| Retained support posture; damping | 30 mm geometry departure; 3 s⁻¹ | SD, walking-stop measurements |
 | `k_ξ`; hip cap; trunk limit | 1.0; 60 N m; 0.35 rad | SD |
 | Step trigger; `T_s`; overshoot; min width | 0.03 m or 0.35 m/s; 0.32 s; 0.03 m; 0.20 m | SD (GBWC form) |
 | Maximum step | 0.6 L | GBWC |
-| Lift 0.30 s; knee 1.10; hip 0.40; ankle 0.20; stance knee 0.05 | rad | SIMBICON walk |
+| Walking lift / strike; clearance; target rate | 0.27–0.30 / 0.36–0.40 s; 0.035 m; 3 rad/s | SD, geometry-derived; gate unchanged |
 | `c_d`, `c_v` | 0.5 rad/m, 0.2 rad s/m | SIMBICON 3D walk |
 | Torso K/D | 300 N m/rad, 30 N m s/rad | SIMBICON |
 | `k_V` | 60 N s/m | SD |
 | Speeds fwd/back/side; yaw rate | 0.5/0.25/0.25 m/s; 1.0 rad/s | SD (GBWC −0.6…1.7 m/s, 2 rad/s) |
 | BODY ramps; spine clamp | 0.15/0.25 s; 0.15 rad | HUMANOID.md; SD |
-| Get-up `k_c` | 1.0 rad/m | SD |
+| Get-up kneel easing; support hold | 1.2 s; 0.1 s | SD |
 | Push duration | 0.1 s | SIMBICON protocol |
 
 ## 5. Phone controls
@@ -144,6 +319,29 @@ BODY never commands the root, so the F1c heading-spin fault cannot reach this ac
 ## 7. Acceptance tests
 
 Node native suites (`tests/humanoid-control-*.test.ts`) run all eight forms, print JSON before asserting and fail on missing trials. Pure unit tests cover signs, the state machine, capture maths and weights.
+
+The contact-v3 native checkpoint passes the unchanged W1, W2 and W3 gates on
+both pilots. Penetration below is the maximum over every dynamic collider and
+every measured tick, including settle. Each row also passes five perturbed
+starts; the figures in this table describe the nominal start.
+
+| Pilot | W1: distance / time / last-3-m speed / penetration | W2: return / penetration | W3: turn / penetration |
+| --- | --- | --- | --- |
+| Keel | 5.000 m / 16.529 s / 0.369 m/s / 3.517 mm | 1.071 s / 3.624 mm | 4.272 rad / 3.566 mm |
+| Morrow | 5.001 m / 17.988 s / 0.327 m/s / 3.562 mm | 2.883 s / 4.172 mm | 4.006 rad / 3.586 mm |
+
+Both W2 rows hold stance for ten seconds; W3 lasts ten seconds. These results
+do not establish sustained walking after an interrupted stop. Keel's 30-second
+in-place and turn-in-place fallbacks pass at 3.670 and 3.776 mm. Morrow's same
+30-second rows pass at 3.518 and 3.077 mm after the compact-geometry spine
+transfer change. Both pilots also pass both release stops. Get-up recovery
+remains 0/16. Its finite-state, effort and completion checks do not imply a
+penetration pass: the Keel world-prone fixture reaches 7.151 mm including its
+initial hold. The native push checkpoint passes A 8/8, B 6/8 and nominal C 1/8; the C
+success fails two of five perturbed starts. A shared friction-based yaw request
+cap was rejected because it broke a previously passing perturbed Morrow stop.
+The relative tick-time gate and final integrated validation remain separate
+requirements; these physical results alone do not establish lane acceptance.
 
 **Push table** (N s, 0.1 s at the thorax, relative to facing). Class C exceeds the ankle-only capacity `m ω(margin - 0.02)` toe- and heel-ward:
 
@@ -203,7 +401,7 @@ Merges go in order A, B, C, D at T+4 and T+9.5 h. Round 3 (T+10 to T+12 h) fixes
 
 It drops `ActorControl`, `FootBalance` and tendons. The status strip shows each actor's mode, source and gates, with anatomy shown red.
 
-The presentation page keeps balance as its default. Its opt-in **Walk (experimental)** toggle is limited to stepping and turning in place: forward walking was sensitive to the settled starting pose and could fall before turning. The left stick requests stepping and yaw through `intent.ts`; release finishes the step before returning to balance. BODY is paused while gait owns the legs. The HUD reports the live gait state and peak measured foot penetration, and the 5 mm gait gates remain red. Reset rebuilds the arena after a fall or a recoverable worker error.
+The presentation page keeps balance as its default. Its opt-in **Walk (experimental)** toggle is limited to stepping and turning in place. The left stick requests stepping and yaw through `intent.ts`; release finishes the step before returning to balance. BODY is paused while gait owns the legs. The HUD reports the live gait state and peak measured foot penetration. The v3 native walking and separate fallback acceptance rows pass; the retained mixed command sequence has narrower measured coverage described above. Reset rebuilds the arena after a fall or a recoverable worker error.
 
 Fallbacks, in order:
 
@@ -248,5 +446,7 @@ Never cut: gate invariants, the free pelvis, the push table, I1/I2 and honest re
 7. Faloutsos, van de Panne, Terzopoulos, "Composable Controllers", SIGGRAPH 2001. [PDF](https://www.cs.ubc.ca/~van/papers/2001-siggraph-composable.pdf)
 8. Zordan, Hodgins, "Motion Capture-Driven Simulations that Hit and React", SCA 2002. [Record](https://www.ri.cmu.edu/publications/motion-capture-driven-simulations-that-hit-and-react)
 9. Peng et al., "DeepMimic", SIGGRAPH 2018 (actions as PD targets). [arXiv](https://arxiv.org/abs/1804.02717)
+10. Gong and Grizzle, "Zero Dynamics, Pendulum Models, and Angular Momentum in Feedback Control of Bipedal Locomotion" (ALIP prediction and terminal-velocity placement; concepts only). [arXiv](https://arxiv.org/abs/2105.08170)
+11. Hansen, "The CMA Evolution Strategy: A Tutorial" (deterministic native parameter search; concepts only). [arXiv](https://arxiv.org/abs/1604.00772)
 
 Only algorithms are adapted; no third-party code, parameters or assets are copied. Any implementation a lane reads must be MIT, Apache-2.0 or BSD and credited in `src/support/open-source.json`.

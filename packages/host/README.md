@@ -145,7 +145,7 @@ requestAnimationFrame(function frame(now) {
 
 ## The pairing chip
 
-`PairingChip` is the pairing UI: a small chip in a corner of the page (the ob.Pal mark, "Scan to control" and a status dot). It opens to show the QR code and the short code, and closes by itself once a phone is in, so it never covers the page. It takes on the page's look.
+`PairingChip` is the pairing UI: a small chip in a corner of the page (the ob.Pal mark, "Scan to control" and a status dot). It opens to show the QR code and the short code. When a phone comes in it shows the connection seal, and folds by itself about nine seconds after the seal appears, eight after it settles (it holds while a pointer or focus is on it, the comparison is open, or another phone is being added), so it never stays over the page. A connected card also has its own close, closes on Escape from anywhere on the page, and on a press outside it. It takes on the page's look.
 
 ```ts
 const chip = new PairingChip({
@@ -188,7 +188,7 @@ chip.destroy()   // remove it, and stop asking for a short code
 | Light or dark | `color-scheme`, else the page background's brightness |
 | Corner radius | `--obpal-radius`, else `--radius` or `--border-radius` (clamped to 6–28 px) |
 
-**Keyboard and screen readers.** The chip is a button (`aria-expanded`); Enter or Space opens and closes it, Escape closes it and keeps the focus on it. The QR is an image with a label, the code is read digit by digit, and the status is a polite live region. It opens on hover only with a mouse, and moves without animation under `prefers-reduced-motion`.
+**Keyboard and screen readers.** The chip is a button (`aria-expanded`); Enter or Space opens and closes it, Escape closes it and keeps the focus on it (once a phone is connected, Escape closes it from anywhere on the page, unless something else took the key). The QR is an image with a label, the code is read digit by digit, and the status is a polite live region. It opens on hover only with a mouse, and moves without animation under `prefers-reduced-motion`.
 
 **Strict pages.** The chip builds everything from elements (no `innerHTML`, `insertAdjacentHTML` or `DOMParser`) and styles itself with one constructed stylesheet, so it works under a Content Security Policy without `'unsafe-inline'` and where the page enforces Trusted Types (`require-trusted-types-for 'script'`).
 

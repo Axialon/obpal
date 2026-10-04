@@ -1,13 +1,13 @@
 {
-  "sourceSha256": "775948dea46a4a2c6c546ebfb4ff00c3a900276a1d7fcf710d66f435572e2962",
+  "sourceSha256": "eee65cb6a29c48574a37f490691782eeeb2edcf9b4c3e2dea0f257444cddfb6c",
   "images": {
     "icon-128.png": "24957523bd3ea11be184a2b051668ba290508fdc20ed49de1dd20f5e17f0af4f",
-    "screenshot-1.png": "05091a9e77345e4fed20a1dd6c968de0d1708dbd4770f31efcc1c2603d7dec28",
-    "screenshot-2.png": "bf53d8cf5a9a72aae85187d54ffccbce6c642466b99f500419b3fdce6165e8bb",
-    "screenshot-3.png": "7c65443dd4dbf5c5ba20a557cff2ae0b72945cfdf1c2c91001537009e48ebe98",
-    "screenshot-4.png": "b230f33ada5447ee8fe2a59aa8098a48f2259ffe4d3a2eda118b19a6ce7e1da2",
-    "screenshot-5.png": "5e71611f2f3a97a256aed9eb73352bb34199bee1547c1e4000981fe8c9b6c364",
-    "tile-440x280.png": "3e6684e612076726222c52e9012b1c89efbb305cbc8a6e4a93cd5d868508fca5",
-    "marquee-1400x560.png": "b57f40adec3478caaca472ce67f570b08e8d1be2a9c5a1c5bb3b1cf166e23513"
+    "screenshot-1.png": "6e048dc1f572cae78413de8fd2c51fa6365af6eaaa601ad701e17f3e7ac3d5b5",
+    "screenshot-2.png": "190ce3f9f2c193f46003564e86ffde6b23fd1921eb07e7b4b065951e666e4a81",
+    "screenshot-3.png": "15a6f12c005dd2a165042d88fc4a8774c2438188e3289922cb4886a1c25a6160",
+    "screenshot-4.png": "d9de18cad55572d9cfb83eb412e2dcaa59a329bd4552bc276b9550736038c274",
+    "screenshot-5.png": "2eef50589f4876fe73aa22454ac3545ab57a5eb76f4084a50c9c535e28a296c7",
+    "tile-440x280.png": "8ce11852a4c1a615e91423d5be15ad62d5b1bd4e6fb9867b0525f82ca0e1abfa",
+    "marquee-1400x560.png": "2d6de513bd7c60ad012d5527e8ce55d0755cbb7b24f6de789a61ba317f696f77"
   }
 }

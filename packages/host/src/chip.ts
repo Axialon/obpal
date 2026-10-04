@@ -95,9 +95,23 @@ function adoptStyle(root: ShadowRoot) {
 const icon = (...kids: SvgNode[]) => svgElement(['svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true', focusable: 'false', class: 'i' }, kids])
 const LOCK: SvgNode[] = [['rect', { x: 5.5, y: 10.5, width: 13, height: 9.5, rx: 2.6 }], ['path', { d: 'M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5' }]]
 const SHIELD: SvgNode[] = [['path', { d: 'M12 3.5 5.5 6v5.2c0 4 2.7 7.4 6.5 8.8 3.8-1.4 6.5-4.8 6.5-8.8V6L12 3.5Z' }], ['path', { d: 'm9 12 2.2 2.2L15.5 10' }]]
+const CLOSE: SvgNode[] = [['path', { d: 'M7 7l10 10M17 7 7 17' }]]
 const PATH: SvgNode[] = [['circle', { cx: 6, cy: 17.5, r: 2.2 }], ['circle', { cx: 18, cy: 6.5, r: 2.2 }], ['path', { d: 'M8 16.2c3-1 2.3-4.4 5-5.6 1.4-.6 2.6-1.2 3.2-2.4' }]]
 /** How often the connections' facts are read again while anyone is connected (Remote.links: their own statistics). */
 const LINK_POLL_MS = 2000
+/**
+ * A card a phone's arrival opened folds by itself this long after its seal has settled (the seal's flight takes
+ * SEAL_FLIGHT_MS). It holds, and looks again after SETTLE_HOLD_MS, while anyone is using it: a pointer on it, focus in it,
+ * the comparison view, or another phone being added.
+ */
+const SETTLE_MS = 8000
+const SETTLE_HOLD_MS = 3000
+/** The seal's own moment: it starts a beat after the phone says it is ready, and flies for this long. */
+const SEAL_FLIGHT_MS = 1200
+/** A phone's join comes before its seal; the seal normally lands within this. */
+const JOIN_GRACE_MS = 3000
+/** A click this soon after a press that closed the card by light dismiss belongs to that press (it must not open it again). */
+const DISMISS_GRACE_MS = 700
 
 const VERIFIED: Record<DeviceLinkInfo['verified'], [short: string, long: string]> = {
   qr: ['QR', 'Verified by the QR code'], code: ['Code', 'Verified by the code typed'], lan: ['Paired', 'Verified by a remembered pairing'],
@@ -163,6 +177,10 @@ export class PairingChip {
   private pressed: { was: 'closed' | 'peek' | 'pinned'; at: number } | null = null
   private room: { mo: MutationObserver; ro: ResizeObserver | null; seen: WeakSet<Element> } | null = null
   private roomQueued = false
+  /** The fold a phone's arrival schedules (see SETTLE_MS), and when the last light dismiss closed the card. */
+  private settleTimer = 0
+  private dismissedAt = -Infinity
+  private closeX = h('button', { class: 'card-x', type: 'button', 'aria-label': 'Close pairing card' }, icon(...CLOSE))
 
   constructor(opts: PairingChipOptions) {
     this.opts = opts
@@ -199,7 +217,7 @@ export class PairingChip {
       cues.append(h('span', { role: 'img', 'aria-label': label, title: label }, icon(...glyph)))
     }
     side.append(cues, details, this.compare)
-    const card = h('div', { class: 'card', id, role: 'group', 'aria-label': 'Pair a phone' }, $.qr, side, this.seals)
+    const card = h('div', { class: 'card', id, role: 'group', 'aria-label': 'Pair a phone' }, $.qr, side, this.seals, this.closeX)
     this.compare.onclick = () => { card.setAttribute('data-seal-view', ''); this.back.focus() }
     this.back.onclick = () => { card.removeAttribute('data-seal-view'); this.$.qr.querySelector<HTMLButtonElement>('.seal-peer')?.focus() }
     this.surface = new SealSurface({ add: () => { void this.remote.inviteAnotherPhone(); card.removeAttribute('data-seal-view') }, compare: () => this.compare.click() })
@@ -232,8 +250,25 @@ export class PairingChip {
   /** Open the card; while a page panel is where it opens (avoid), as soon as that's gone. */
   expand() { if (this.blocked) this.unfold = true; else this.setOpen(true, true) }
   collapse() { this.unfold = false; this.setOpen(false) }
-  /** As a click on the chip. */
-  toggle() { this.unfold = false; if (this.remote.seals.length) { this.expand(); this.surface.add() } else this.setOpen(!this.isOpen, true) }
+  /**
+   * As a click on the + of a page's people chip. A connected card that is open folds again; a folded one opens on a fresh
+   * code to add another phone. (A press that just closed the card by light dismiss was this click: it stays closed.)
+   */
+  toggle() {
+    this.unfold = false
+    clearTimeout(this.settleTimer)
+    if (performance.now() - this.dismissedAt < DISMISS_GRACE_MS) return
+    if (!this.remote.seals.length) { this.setOpen(!this.isOpen, true); return }
+    if (this.isOpen) { this.fold(); return }
+    this.expand()
+    this.surface.add()
+  }
+
+  /** Close the card by the person's own act: a fresh code being shown to add a phone ends with it, and the seal comes back. */
+  private fold() {
+    this.surface.cancelAdding()
+    this.setOpen(false)
+  }
 
   /**
    * Read the page's look again: its accent (--obpal-accent, else --accent, --primary, --color-primary or --brand),
@@ -291,6 +326,9 @@ export class PairingChip {
     clearTimeout(this.codeTimer)
     clearTimeout(this.linkTimer)
     this.linkTimer = 0
+    clearTimeout(this.settleTimer)
+    document.removeEventListener('keydown', this.onDocKey)
+    document.removeEventListener('pointerdown', this.onDocPress, true)
     this.releaseCode?.()
     this.releaseCode = null
     this.el.remove()
@@ -309,9 +347,11 @@ export class PairingChip {
       const was = p && performance.now() - p.at < 1500 ? p.was : now()
       this.pressed = null
       this.unfold = false
+      clearTimeout(this.settleTimer)
       // A click on a card the pointer only peeked at keeps it open; otherwise it opens or closes.
-      if (was === 'peek' && this.isOpen) this.pinned = true
-      else this.setOpen(was !== 'pinned', true)
+      if (was === 'peek' && this.isOpen) { this.pinned = true; this.labelPill() }
+      else if (was === 'pinned') this.fold()
+      else this.setOpen(true, true)
       if (this.isOpen && this.remote.seals.length) this.$.card.setAttribute('data-seal-view', '')
     })
     // With a mouse, resting on the chip peeks at the card (not while the page has a panel there); leaving closes a peek.
@@ -334,9 +374,14 @@ export class PairingChip {
     wrap.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape' || !this.isOpen) return
       e.stopPropagation()
-      this.setOpen(false)
+      this.fold()
       pill.focus()
     })
+    // The card's own close (a connected card has one), and the page's two ways to dismiss it: Escape anywhere, and a press
+    // outside it. Both leave the comparison and a phone being added alone (they are in use), and neither moves focus.
+    this.closeX.addEventListener('click', () => { this.fold(); pill.focus() })
+    document.addEventListener('keydown', this.onDocKey)
+    document.addEventListener('pointerdown', this.onDocPress, true)
     const on = <K extends 'status' | 'connect' | 'join' | 'leave' | 'disconnect' | 'code' | 'invite' | 'attention'>(ev: K, fn: () => void) => {
       this.remote.on(ev, fn)
       this.listeners.push([ev, fn])
@@ -345,12 +390,15 @@ export class PairingChip {
       this.surface.sync(this.remote.seals)
       this.surface.reveal(s.id, s.delayMs)
       this.expand()
+      this.settle(s.delayMs + SEAL_FLIGHT_MS + SETTLE_MS)
     }
     this.remote.on('seal', reveal)
     this.listeners.push(['seal', reveal as (...a: never[]) => void])
     on('status', () => { this.render(); this.syncCode() })
-    on('connect', () => this.expand())
-    on('join', () => { this.expand(); this.render() })
+    // A phone's arrival opens the card to show its seal, and the card folds again once the seal has settled (a phone that
+    // sends no seal gets the same time from its join).
+    on('connect', () => { this.expand(); this.settle(JOIN_GRACE_MS + SETTLE_MS) })
+    on('join', () => { this.expand(); this.render(); this.settle(JOIN_GRACE_MS + SETTLE_MS) })
     on('leave', () => this.render())
     on('attention', () => this.render())
     on('disconnect', () => { this.render(); this.syncCode() })
@@ -370,12 +418,49 @@ export class PairingChip {
     this.pinned = open && (pinned || this.pinned)
     if (open === this.isOpen) return
     this.isOpen = open
-    if (!open) this.$.card.removeAttribute('data-seal-view')
+    if (!open) {
+      clearTimeout(this.settleTimer)
+      this.$.card.removeAttribute('data-seal-view')
+    }
     this.$.wrap.toggleAttribute('data-open', open)
     this.$.pill.setAttribute('aria-expanded', String(open))
     this.syncCode()
     this.render()
     this.opts.onToggle?.(open)
+  }
+
+  /** Fold the card after `ms`, unless it is in use then (see SETTLE_MS). */
+  private settle(ms: number) {
+    if (this.opts.variant === 'panel') return
+    clearTimeout(this.settleTimer)
+    this.settleTimer = window.setTimeout(() => this.settled(), ms)
+  }
+
+  private settled() {
+    if (!this.isOpen || !this.el.isConnected) return
+    // (Focus counts only when it is showing, a keyboard's: a click leaves the pill focused, and that must not hold the card open.)
+    const inUse = this.$.wrap.matches(':hover') || !!this.root.querySelector(':focus-visible') || this.$.card.hasAttribute('data-seal-view') || this.surface.isAdding
+    if (inUse) { this.settleTimer = window.setTimeout(() => this.settled(), SETTLE_HOLD_MS); return }
+    this.setOpen(false)
+  }
+
+  /** Escape closes a connected card from anywhere on the page (unless something else already took the key). */
+  private onDocKey = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape' || e.defaultPrevented || !this.isOpen || this.opts.variant === 'panel' || !this.remote.participants.length) return
+    const t = e.target instanceof Element ? e.target : null
+    if (t && t !== document.body && t.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], dialog, [role=dialog]') && !this.el.contains(t)) return
+    // The key is spent here: a layer beneath (the page's own Escape) does not also act on it.
+    e.preventDefault()
+    this.fold()
+  }
+
+  /** A press outside a connected card in its resting view lets it go. (The comparison and a phone being added stay.) */
+  private onDocPress = (e: PointerEvent) => {
+    if (!this.isOpen || !this.pinned || this.opts.variant === 'panel' || !this.remote.participants.length) return
+    if (this.$.card.hasAttribute('data-seal-view') || this.surface.isAdding) return
+    if (e.composedPath().includes(this.el)) return
+    this.dismissedAt = performance.now()
+    this.setOpen(false)
   }
 
   /** A short code is kept live while the card is open, or while nobody is connected (so it's ready to open). */
@@ -445,7 +530,8 @@ export class PairingChip {
     const n = r.participants.length
     const who = n && r.participants.every((p) => p.paused) ? 'Phone paused' : n > 1 ? `${n} connected` : `Connected${r.deviceName ? ` to ${r.deviceName}` : ''}`
     const how = this.links.length ? `: ${this.factSentence()}` : ''
-    this.$.pill.setAttribute('aria-label', n ? `${who}${how}. Compare connection seal or pair another phone` : this.opts.label ?? 'Scan to control')
+    const act = this.isOpen && this.pinned ? 'Close the pairing card' : 'Compare connection seal or pair another phone'
+    this.$.pill.setAttribute('aria-label', n ? `${who}${how}. ${act}` : this.opts.label ?? 'Scan to control')
   }
 
   /** The facts as words to hear: "encrypted end to end, verified by the QR code, direct, 12 ms round trip". */
@@ -626,10 +712,13 @@ export class PairingChip {
     const meets = (left: number, top: number) => panels.some(r => Math.min(r.right, left + card.width) - Math.max(r.left, left) > 1 && Math.min(r.bottom, top + card.height) - Math.max(r.top, top) > 1)
     let blocked = meets(card.left, card.top)
     // A connected seal stays visible without covering approval, stop or camera controls. Move the same card to
-    // a clear corner; if the screen has no room, the compact chip remains available until a panel closes.
+    // a clear bottom corner; if the screen has no room, the compact chip remains available until a panel closes.
     if (blocked && this.remote.participants.length) {
       const margin = 16
-      const candidates = [[innerWidth - card.width - margin, margin], [margin, margin], [margin, innerHeight - card.height - 72], [(innerWidth - card.width) / 2, margin]]
+      // Only the bottom corners: the top of a page holds its people chip and bars (the card must never sit on those), and
+      // a card with no clear corner folds to the chip, whose compact seal stays in view.
+      const bottom = innerHeight - card.height - 72
+      const candidates = [[innerWidth - card.width - margin, bottom], [margin, bottom]]
       const clear = candidates.find(([left, top]) => left >= margin && top >= margin && top + card.height <= innerHeight - margin && !meets(left, top))
       if (clear) { element.style.position = 'fixed'; element.style.left = `${clear[0]}px`; element.style.top = `${clear[1]}px`; blocked = false }
     }
@@ -693,6 +782,11 @@ const STYLE = `
 .pair-icons{display:flex;gap:4px;color:var(--ink);align-items:center}.pair-icons .i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6}.scan-cues summary{cursor:pointer;min-width:44px;min-height:44px;display:flex;align-items:center;font-size:20px}
 .wrap[data-live] .pill>.conn,.wrap[data-live] .pill>.dot{display:none}.wrap[data-live] .side>.status{display:none}
 .wrap[data-live] .label{display:none}
+.card-x{display:none;position:absolute;top:-10px;right:-10px;width:44px;height:44px;margin:0;padding:0;border:0;background:none;color:var(--ink);cursor:pointer;place-items:center;touch-action:manipulation}
+.card-x::before{content:'';grid-area:1/1;width:28px;height:28px;border-radius:50%;background:var(--glass);border:1px solid var(--line);box-shadow:var(--shadow)}
+.card-x .i{grid-area:1/1;position:relative;width:14px;height:14px}
+.card-x:hover::before{border-color:rgb(var(--a-rgb) / .55)}
+.wrap[data-live]:not([data-variant=panel]) .card-x{display:grid}
 .wrap[data-live] .side>.code-box,.wrap[data-live] .side>.here{display:none}
 .card:not([data-seal-view]){flex-direction:column;align-items:center;gap:8px;width:220px}
 .side{align-items:center;gap:4px;width:100%;min-height:48px}

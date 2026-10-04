@@ -73,24 +73,39 @@ the actual three.js desktop/phone views and per-joint sweep sheets to the guarde
 humanoid e2e run, again writing only to the test's temporary directory.
 
 `humanoids_soft.py` authors Cairn, Rill and Hush in forms I (1.73 m) and II (1.80 m),
-without changing Keel or Morrow. Mineral elastomer and technical knit use original,
-texture-free matte materials; satin graphite joints and curved smoked face panels
-have no clearcoat. Rounded heads and five-finger, three-phalange tendon frames
-remain protected through simplification. Closed internal sleeves bridge every
-folding limb. The extended cuts sample 33 positions with a 10 mm margin, including
-spine, wrist and ankle axes. The independent audit keeps the original envelope
-radii and samples 65 positions per axis, across all six forms and both LODs.
+without changing Keel or Morrow. Version 2 (H2a) follows the approved concepts:
+`humanoid_forms.py` holds every cover section and asserts the pivot spread against
+`humanoid-forms.json`, which also carries the landmark targets, face-glass ellipsoids
+and shoe-fit tolerances that `tests/humanoid-soft.test.ts` checks on the compressed
+assets. `anatomy2` in `humanoid_surfaces.py` lofts four-quadrant superellipse rings
+with centre offsets and front or rear lobes, so medial thigh, bust, pectoral and
+gluteal mass sit where the concepts put them, within the unchanged joint frames.
+
+Covers end in rolled lips short of each joint over a slim, closed elastomer
+under-suit; the suit shows dark only at the designed seams (waist, armpits, neck,
+elbows, knees, wrists and ankles). `lining` gives the pelvis and thigh under-suit
+the cover's colour, so the crotch reads as one leotard line; the audit still skips
+every under-suit by name. Elbows and knees fold against a fixed bisector plane:
+each cover flattens from its lip, and the gaskets and under-suit taper or stop short
+beneath it, with any vertex beyond the lip seated 3 mm under the plane. No sampled Boolean cuts remain: `clear_sweeps` samples each audited
+pair at the audit's own 65 angles per axis and eases fixed cover vertices toward
+their own body until clear of the union of moving-cover poses, then eases the moving
+cover's lip back from the result; `settle` then smooths each rim only to positions
+that stay clear. Each face window
+is one clean Boolean with a dense designed cutter, filled by a glass lens on the
+profile's face ellipsoid and finished with a rolled lip. Cairn's panel seams are
+left out until a texture or vertex-attribute path exists. Shoes stand on the physics
+foot box's bottom plane and span at least 85% of its length. The independent audit
+keeps the original envelope radii and samples 65 positions per axis, across all six
+forms and both LODs. `node scripts/humanoid-proportions.mjs` prints the measured
+landmarks and writes them to a temporary folder.
 
 The optional `--cache` saves the unmerged authored scenes under ignored artifacts.
-It lets the audit and renderer use the same geometry without repeating Boolean
-authoring. Run `audit_humanoids.py -- --soft --cache` and
-`render_soft_humanoids.py -- --cache` after the build. The renderer writes four
-3840 x 2160 body views, two head studies and front/side silhouettes for each form
-under `artifacts/humanoid-third/renders/`. `--finish-cache --cache` refreshes small
-hand/foot geometry, Hush's raised knit lip and the final cover-normal treatment.
-Planar dissolution keeps socket boundaries while freeing detail for the hands;
-an upper-waist trim stays inside the unchanged spine audit envelope. Tests validate the
-compressed assets, rather than relying on these authoring caches.
+It lets the audit and renderer use the same geometry without rebuilding. Run
+`audit_humanoids.py -- --soft --cache` and `render_soft_humanoids.py -- --cache`
+after the build. The renderer writes four 3840 x 2160 body views, two head studies
+and front/side silhouettes for each form under `artifacts/humanoid-third/renders/`.
+Tests validate the compressed assets, rather than relying on these authoring caches.
 
 `scripts/humanoid-soft-comparisons.mjs` assembles the concept/model and head boards,
 silhouette sheet and review index after the renders. It records compressed asset

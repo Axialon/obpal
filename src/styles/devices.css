@@ -82,7 +82,4 @@ body.sim.dev { background: radial-gradient(120% 95% at 50% 36%, var(--stage-a, #
 .lamp-typing::after { content: ''; display: inline-block; width: 2px; height: 1em; margin-left: 2px; vertical-align: -2px; background: var(--c); animation: lamp-caret 1s steps(2) infinite; }
 @keyframes lamp-caret { 50% { opacity: 0; } }
 
-/* The page's notes on one line where they fit (the shared note is otherwise as wide as half the screen). */
-body.dev .note { width: max-content; max-width: calc(100vw - 32px); text-align: center; }
-
 @media (prefers-reduced-motion: reduce) { .dev-cursor { transition: none; } }

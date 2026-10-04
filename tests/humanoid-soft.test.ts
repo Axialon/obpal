@@ -3,7 +3,9 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
 import { readModel } from '../assets/blender/read-model.mjs'
-import { SOFT_PROFILES, KEEL, MORROW, robotRoster, neutral } from '../src/sim/humanoid/profile'
+import { measure, shoe } from '../assets/blender/proportions.mjs'
+import forms from '../assets/blender/humanoid-forms.json'
+import { SOFT_PROFILES, SOFT_FACES, KEEL, MORROW, robotRoster, neutral } from '../src/sim/humanoid/profile'
 import { softPreview } from '../src/sim/humanoid/preview'
 import { modelPivots, modelName } from '../src/sim/humanoid/models'
 import { forward, v } from '../src/sim/humanoid/ik'
@@ -135,6 +137,29 @@ describe('original soft humanoids', () => {
         surface.dispose()
       })
     }
+    it(`${profile.model} meets its form's proportion targets at rest`, async () => {
+      const spec = forms.forms[profile.model!.endsWith('-ii') ? 'ii' : 'i']
+      const m = measure(await load(profile.model!), profile)
+      for (const key of ['headsTall', 'headBreadth', 'shoulderSpan', 'upperArmWidth', 'hipBreadth', 'waistToHip'] as const) {
+        expect(m[key], key).toBeGreaterThanOrEqual(spec[key][0])
+        expect(m[key], key).toBeLessThanOrEqual(spec[key][1])
+      }
+      expect(m.headDepthRatio).toBeGreaterThanOrEqual(spec.headDepthRatio)
+    })
+    for (const suffix of ['', '-lod']) {
+      it(`${profile.model}${suffix} stands its shoe flat on the physics foot box`, async () => {
+        const fit = shoe(await load(profile.model! + suffix), profile)
+        // The sole is the box's bottom plane; the shoe stays inside the box and
+        // spans most of its heel-to-toe length, so heel and toe rolls stay grounded.
+        expect(Math.abs(fit.min[1] - fit.box.min[1])).toBeLessThanOrEqual(forms.shoe.soleTolerance)
+        expect(fit.lengthCoverage).toBeGreaterThanOrEqual(forms.shoe.lengthCoverage)
+        expect(fit.toeSpring).toBeLessThanOrEqual(forms.shoe.toeSpring)
+        for (const axis of [0, 2]) {
+          expect(fit.min[axis]).toBeGreaterThanOrEqual(fit.box.min[axis] - .001)
+          expect(fit.max[axis]).toBeLessThanOrEqual(fit.box.max[axis] + .001)
+        }
+      })
+    }
     it(`${profile.model} retains height and silhouette in its LOD`, async () => {
       const high = new THREE.Box3().setFromObject(await load(profile.model!))
       const low = new THREE.Box3().setFromObject(await load(profile.model! + '-lod'))
@@ -144,6 +169,18 @@ describe('original soft humanoids', () => {
       expect(high.max.distanceTo(low.max)).toBeLessThan(.018)
     })
   }
+  it('authors every soft form around the live pivots and face glass', () => {
+    for (const [name, face] of Object.entries(forms.faces)) {
+      expect(SOFT_FACES[name as keyof typeof SOFT_FACES].surface).toEqual(face.surface)
+      expect(SOFT_FACES[name as keyof typeof SOFT_FACES].eyes).toBe(face.eyes)
+    }
+    for (const pair of Object.values(SOFT_PROFILES)) for (const profile of pair) {
+      const spec = forms.forms[profile.model!.endsWith('-ii') ? 'ii' : 'i'], scale = profile.height / 1.8
+      expect(profile.height).toBeCloseTo(spec.height, 9)
+      expect(profile.joints.find(j => j.id === 'right.arm.roll')!.offset[0]).toBeCloseTo(spec.pivots.arm * scale, 9)
+      expect(profile.joints.find(j => j.id === 'right.leg.roll')!.offset[0]).toBeCloseTo(spec.pivots.leg * scale, 9)
+    }
+  })
   it('retains low gloss on phones without sheen or clearcoat', () => {
     for (const tiers of [softDesktop, softPhone]) for (const material of Object.values(tiers)) {
       expect((material as THREE.MeshStandardMaterial).roughness).toBeGreaterThanOrEqual(.30)

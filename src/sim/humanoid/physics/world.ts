@@ -9,7 +9,7 @@ import { buildHumanoid, framesFromBodies, type PhysicalHumanoid } from './model'
 import { observe, type Observation } from './observation'
 import { Supervisor, type BehaviourRegistry, type BehaviourMode, type Behaviour } from './supervisor'
 import { BalanceController } from './balance'
-import { GaitController } from './gait'
+import { GaitController, RecoveryController } from './gait'
 import type { Intent } from './intent'
 
 export type ActorId = 'seat1' | 'seat2'
@@ -33,7 +33,9 @@ interface Actor {
 }
 function supervisor(model: PhysicalHumanoid, generation: number, gaitMode: 'walk' | 'in-place'): Supervisor {
   const nominal = buildHumanoid(model.profileId, model.actorId), balance = new BalanceController(nominal, generation)
-  return new Supervisor(nominal, generation, new Map<BehaviourMode, Behaviour>([['walk', new GaitController(nominal, generation, { mode: gaitMode })], ['balance', {
+  return new Supervisor(nominal, generation, new Map<BehaviourMode, Behaviour>([
+    ['recover', new RecoveryController(nominal, generation)],
+    ['walk', new GaitController(nominal, generation, { mode: gaitMode })], ['balance', {
     mode: 'balance', canEnter: () => true, done: () => true, step: o => balance.step(o).frame,
   }]]))
 }

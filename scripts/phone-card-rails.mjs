@@ -125,7 +125,9 @@ export async function phoneCardRails({ browser, origin, check }) {
       await screen.setViewportSize({ width: 1280, height: 800 })
       await page.bringToFront()
       await test('phone live')
-      await page.locator('.trust-shares').evaluate(el => el.click())
+      // The trust notice folds by itself after a few seconds: the disclosure is always one tap from the connection sheet.
+      await page.locator('.link-badge').evaluate(el => el.click())
+      await page.locator('.link-sheet .btn', { hasText: 'What this shares' }).evaluate(el => el.click())
       await page.locator('.shares-sheet p span').first().evaluate(el => { el.textContent = 'LongToken'.repeat(40) })
       await test('What this shares'); await close()
       await page.getByRole('button', { name: 'Connections', exact: true }).click()

@@ -5,7 +5,7 @@ import { buildHumanoid } from '../src/sim/humanoid/physics/model'
 import { HumanoidPilot } from '../src/sim/humanoid/physics/pilot'
 import { StanceController } from '../src/sim/humanoid/physics/stance'
 import { ActuationGate, MAX_TARGET_RATE } from '../src/sim/humanoid/physics/contract'
-import { gaitTargetEstimate, predictGaitCoupled } from '../src/sim/humanoid/physics/gait'
+import { gaitTargetEstimate, predictGaitCoupled, withGaitPredictions } from '../src/sim/humanoid/physics/gait'
 import { observe } from '../src/sim/humanoid/physics/observation'
 import { coupledServo } from '../src/sim/physics/coupled-servo'
 import { PHYSICS_SELECTION } from '../src/sim/physics/selection'
@@ -33,7 +33,7 @@ async function measure(profileId: string) {
   const fixed: BodyState[] = model.scene.bodies.filter(body => body.fixed).map(body => ({ ...body, sleeping: true }))
   const hipCapNm = model.scene.joints.find(joint => joint.child === model.parts.left_thigh.bodyId)!.motor.maxTorque
   const report = { profileId, backend: pilot.metadata().id, samples: 0, rawContactSamples: 0, supportedSamples: 0,
-    nativeContactSources: 0, reconstructedContactSources: 0, matchingContactRows: 0, immutableSamples: 0,
+    nativeContactSources: 0, reconstructedContactSources: 0, matchingContactRows: 0, immutableSamples: 0, memoExactSamples: 0,
     maxNativeContactErrorNm: 0, maxReconstructedErrorNm: 0, maxReconstructedHipCapFraction: 0,
     maxSameOrderErrorNm: 0, maxNativeAppliedErrorNm: 0, hipCapNm,
     maxGateErrorRad: 0, maxGateStepRad: 0, slewLimitedSamples: 0, minUp: 1 }
@@ -55,6 +55,15 @@ async function measure(profileId: string) {
         const reference = coupledServo(model.scene, [...fixed, ...observation.bodies], targets, raw, STEP)
         const predicted = predictGaitCoupled(model, withContacts, targets)
         const reconstructed = predictGaitCoupled(model, observation, targets)
+        // The second request changes torque targets while preserving the measured constraint state.
+        const alternate = new Map(targets), hip = model.scene.joints.find(joint => joint.child === model.parts.left_thigh.bodyId)!
+        alternate.set(hip.id, multiply(fromRotationVector({ x: .02, y: 0, z: 0 }), alternate.get(hip.id)!))
+        for (const input of [withContacts, observation]) {
+          const expected = [predictGaitCoupled(model, input, targets), predictGaitCoupled(model, input, alternate)]
+          const actual = withGaitPredictions(model, input, predict => [predict(targets), predict(alternate)])
+          expect(actual).toEqual(expected)
+        }
+        report.memoExactSamples++
         // This reconstruction groups foot points; support.points separately preserves native inter-foot order.
         const footOrder = (contact: ContactSample) => model.feet.indexOf(contact.a === 'floor' ? contact.b : contact.a)
         const sameOrder = coupledServo(model.scene, [...fixed, ...observation.bodies], targets,
@@ -99,6 +108,7 @@ for (const profile of ['keel-v1', 'morrow-v1']) describe(`native gait prediction
     expect(report.samples).toBe(sampleTicks)
     expect(report.rawContactSamples).toBe(sampleTicks)
     expect(report.nativeContactSources).toBe(sampleTicks)
+    expect(report.memoExactSamples).toBe(sampleTicks)
     expect(report.maxNativeContactErrorNm).toBeLessThan(1e-10)
     expect(report.maxNativeAppliedErrorNm).toBeLessThan(1e-9)
   })

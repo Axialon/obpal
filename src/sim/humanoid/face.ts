@@ -17,23 +17,28 @@ export class FaceLight {
   readonly material = new THREE.MeshBasicMaterial({ color: '#c6ff34', toneMapped: false })
   readonly uniforms = { blink: { value: 1 }, glance: { value: new THREE.Vector2() }, glow: { value: .85 }, centre: { value: this.profile.face!.centre } }
   constructor(private profile: RigProfile) {
+    // The lights stay on the face glass while they blink and glance: each vertex
+    // is re-projected onto the profile's glass ellipsoid, 1.2 mm proud of it.
+    const [cy, cz, rx, ry, rz] = this.profile.face!.surface
     this.material.onBeforeCompile = (shader) => {
       shader.uniforms.softBlink = this.uniforms.blink
       shader.uniforms.softGlance = this.uniforms.glance
       shader.uniforms.softGlow = this.uniforms.glow
       shader.uniforms.softCentre = this.uniforms.centre
       shader.uniforms.softScale = { value: this.profile.height / 1.8 }
-      shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nuniform float softBlink; uniform float softCentre; uniform float softScale; uniform vec2 softGlance;')
+      shader.uniforms.softGlass = { value: new THREE.Vector4(cy, cz, rx, ry) }
+      shader.uniforms.softDepth = { value: rz }
+      shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nuniform float softBlink; uniform float softCentre; uniform float softScale; uniform vec2 softGlance; uniform vec4 softGlass; uniform float softDepth;')
         .replace('#include <begin_vertex>', `#include <begin_vertex>
           transformed.y = softCentre + (transformed.y - softCentre) * softBlink + softGlance.y;
           transformed.x += softGlance.x;
-          float sx = transformed.x / (0.094 * softScale);
-          float sy = (transformed.y - 0.165 * softScale) / (0.125 * softScale);
-          transformed.z = (0.008 - 0.093 * sqrt(max(0.01, 1.0 - sx*sx - sy*sy)) - 0.0023) * softScale;`)
+          float sx = transformed.x / (softGlass.z * softScale);
+          float sy = (transformed.y - softGlass.x * softScale) / (softGlass.w * softScale);
+          transformed.z = (softGlass.y - softDepth * sqrt(max(0.01, 1.0 - sx*sx - sy*sy)) - 0.0012) * softScale;`)
       shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\nuniform float softGlow;')
         .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= softGlow;')
     }
-    this.material.customProgramCacheKey = () => 'soft-face-v1'
+    this.material.customProgramCacheKey = () => 'soft-face-v2'
   }
   step(seconds: number, tracking: boolean, reduced: boolean) {
     const state = faceState(seconds, tracking, reduced, this.profile.face!.horizon)

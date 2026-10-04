@@ -30,7 +30,12 @@ export interface RigProfile {
   height: number
   calibrationId?: string
   model?: 'cairn-i' | 'cairn-ii' | 'rill-i' | 'rill-ii' | 'hush-i' | 'hush-ii'
-  face?: { horizon: boolean; centre: number }
+  /**
+   * Visual-only face signature: the eye line and the face-glass ellipsoid the
+   * lights lie on, [centre y, centre z, radius x, radius y, radius z] in the
+   * 1.8 m authoring frame (humanoid-forms.json carries the same values).
+   */
+  face?: { horizon: boolean; centre: number; surface: readonly [number, number, number, number, number] }
   /** Original sim-only tendon envelopes; driver reference profiles omit these. */
   compliance?: {
     stiffness: number
@@ -211,6 +216,12 @@ export const MORROW: RigProfile = {
     offset: s.offset.map((n) => n * scale) as Vec3,
   })),
 }
+/** Face glass and eye line per soft direction, unscaled; see assets/blender/humanoid-forms.json. */
+export const SOFT_FACES = {
+  cairn: { eyes: 0.165, surface: [0.16, -0.018, 0.068, 0.102, 0.082] },
+  rill: { eyes: 0.176, surface: [0.176, -0.006, 0.083, 0.06, 0.094] },
+  hush: { eyes: 0.172, surface: [0.172, -0.045, 0.062, 0.045, 0.052] },
+} as const
 /** Original soft-cover forms share the calibration and tendon contract, with their own proportions. */
 function softProfile(name: 'cairn' | 'rill' | 'hush', form: 'i' | 'ii'): RigProfile {
   const scale = form === 'i' ? 1.73 / 1.8 : 1
@@ -220,7 +231,7 @@ function softProfile(name: 'cairn' | 'rill' | 'hush', form: 'i' | 'ii'): RigProf
     model: `${name}-${form}`,
     calibrationId: HUMANOID.id,
     height: 1.8 * scale,
-    face: { horizon: name === 'rill', centre: (name === 'hush' ? 0.196 : 0.185) * scale },
+    face: { horizon: name === 'rill', centre: SOFT_FACES[name].eyes * scale, surface: SOFT_FACES[name].surface },
     compliance: { stiffness: 225, damping: 27, wristTravel: 1.3, ankleTravel: 1.45, fingers: [0.70, 1.02, 0.78] },
     joints: joints.map((joint) => ({
       ...joint,

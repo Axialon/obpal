@@ -270,6 +270,7 @@ try {
   const phone = await phoneAt(`${ORIGIN}/p/`)
   let joinedWith = ''
   let typedSeal = ''
+  let railLayout = null
 
   await check('a phone types the code, spaces and all, on the start page and joins; the QR becomes a persistent seal and add offers a new code', async () => {
     const code = await until('a short code', liveCode, 20000)
@@ -287,6 +288,14 @@ try {
     const firstNotice = phone.locator('.trust-first')
     await firstNotice.waitFor({ state: 'visible', timeout: 5000 })
     if (!(await firstNotice.textContent()).includes(new URL(ORIGIN).hostname) || !(await firstNotice.textContent()).includes('Connected to the screen showing this seal')) throw new Error('the phone handshake lost its domain notice')
+    // The notice is an overlay under the bar: it takes no row, so the controls sit where they will sit once it has folded.
+    railLayout = await phone.evaluate(() => {
+      const box = (selector) => { const b = document.querySelector(selector)?.getBoundingClientRect(); return b ? { top: Math.round(b.top), bottom: Math.round(b.bottom) } : null }
+      return { bar: box('.bar'), rail: box('.trust-first'), controls: box('.ctl-bar') }
+    })
+    if (!railLayout.bar || !railLayout.rail || !railLayout.controls) throw new Error(`the phone layout is missing a part: ${JSON.stringify(railLayout)}`)
+    if (railLayout.rail.top < railLayout.bar.bottom - 1 || railLayout.rail.top < railLayout.controls.bottom - 1) throw new Error(`the trust notice covers the bar or the controller bar: ${JSON.stringify(railLayout)}`)
+    await shot(phone, 'phone-trust-notice')
     if (SHOTS) {
       const times = []
       for (const [i, progress] of [0, 0.23, 0.46, 0.73, 0.95].entries()) {
@@ -297,9 +306,18 @@ try {
       await writeFile(joinPath(SHOTS, 'handshake-frames.json'), JSON.stringify(times))
     }
     const people = await until('the phone on the screen', () => screen.evaluate(() => window.__obpal.participants.length), 10000)
-    const s = await until('the connected card stays open', async () => { const v = await chipState(); return v.open && v.status === 'connected' ? v : null }, 5000)
+    // The card opens as the phone comes in and holds through the settle window (the seal's flight, then 8 s) ...
+    const s = await until('the connected card is open', async () => { const v = await chipState(); return v.open && v.status === 'connected' ? v : null }, 5000)
+    const sawOpen = Date.now()
     await sleep(400)
     await shot(screen, 'chip-viewer-connected')
+    // ... and folds by itself once it has been seen, with nobody touching it (the earlier check left the pointer on the chip).
+    await screen.mouse.move(640, 450)
+    await until('the card folds by itself', async () => !(await chipState()).open, 16000, 200)
+    const heldFor = Date.now() - sawOpen
+    if (heldFor < 3000) throw new Error(`the card folded after ${heldFor} ms, inside its settle window`)
+    if (heldFor > 12000) throw new Error(`the card took ${heldFor} ms to fold; it should fold within 12 s of the seal settling`)
+    await shot(screen, 'chip-viewer-folded')
     // Add reverses the resting seal into a fresh QR without disconnecting the phone.
     await screen.locator('#chip-invite').click()
     const opened = await chipState()
@@ -308,7 +326,16 @@ try {
     if (!(await chipState()).open) throw new Error('+ did not open the chip')
     await screen.getByRole('button', { name: 'Cancel adding a phone', exact: true }).click()
     await until('seal returns after cancel', () => screen.locator('.seal-stage .connection-seal').first().isVisible())
-    return `typed "${typed}", field read "${shown}"; ${people} on the screen, the card stayed open (${s.status}); + opens it with ${next}`
+    return `typed "${typed}", field read "${shown}"; ${people} on the screen, the card held ${heldFor} ms then folded (${s.status}); + opens it with ${next}`
+  })
+
+  await check('the phone’s trust notice folds into the badge by itself within 16 s; the seal stays in the badge and the controls never move', async () => {
+    await until('the notice gone', async () => (await phone.locator('.trust-first').count()) === 0, 16000, 200)
+    const after = await phone.evaluate(() => { const b = document.querySelector('.ctl-bar')?.getBoundingClientRect(); return b ? Math.round(b.top) : null })
+    if (after !== railLayout.controls.top) throw new Error(`the controls moved when the notice folded: ${railLayout.controls.top} then ${after}`)
+    if (!(await phone.locator('.link-badge .seal-compact').isVisible())) throw new Error('the seal left the badge with the notice')
+    await shot(phone, 'phone-trust-folded')
+    return `folded; the controls stayed at ${after}px, the seal in the badge`
   })
 
   const phoneSeal = page => page.evaluate(() => document.querySelector('.connection-seal')?.dataset.seal ?? '')
@@ -339,10 +366,31 @@ try {
     if (!(await screen.locator('.obpal-chip .pill .seal-compact').isVisible())) throw new Error('closing comparison hid the status seal')
     return 'hover preview becomes comparison on click; closed chip keeps its compact seal'
   })
+  await check('the connected card closes by +, Escape, its own close and a press outside it, and the + always matches it (aria-pressed)', async () => {
+    const invite = screen.locator('#chip-invite')
+    const agree = (what, open) => until(what, async () => (await chipState()).open === open && (await invite.getAttribute('aria-pressed')) === String(open), 4000, 100)
+    const cancel = () => screen.getByRole('button', { name: 'Cancel adding a phone', exact: true }).click()
+    // Focus on the page itself, outside the chip, so Escape reaches the page-level handler and not the chip's own.
+    const unfocus = () => screen.evaluate(() => { document.getElementById('e2e-focus')?.remove(); const b = document.createElement('button'); b.id = 'e2e-focus'; b.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0'; document.body.append(b); b.focus() })
+    if ((await chipState()).open) await screen.locator('.obpal-chip .pill').evaluate(el => el.click())
+    await agree('closed to start', false)
+    // + opens it on a fresh code; the next + folds it (it used to leave it open on "Add a phone").
+    await invite.click(); await agree('+ opened it', true)
+    await invite.click(); await agree('a second + folded it', false)
+    // Escape, from anywhere on the page.
+    await invite.click(); await agree('opened for Escape', true)
+    await cancel(); await unfocus(); await screen.keyboard.press('Escape'); await agree('Escape closed it', false)
+    // Its own close.
+    await invite.click(); await agree('opened for the close', true)
+    await cancel(); await screen.getByRole('button', { name: 'Close pairing card', exact: true }).click(); await agree('its close closed it', false)
+    // A press anywhere outside it.
+    await invite.click(); await agree('opened for the press', true)
+    await cancel(); await screen.mouse.click(660, 420); await agree('a press outside closed it', false)
+    return '+ twice, Escape, the close and an outside press each closed it; aria-pressed followed every time'
+  })
+
   await check('typed-code peers show the same seal and schedule their pulse together without blocking input', async () => {
-    await until('the first connected frame', () => phone.locator('.trust-first').count())
-    await shot(phone, 'phone-first-frame')
-    await phone.locator('.trust-compare').click()
+    await phone.locator('.link-badge').click()
     typedSeal = await until('the phone seal', () => phoneSeal(phone))
     if (!(await chipState()).open) await screen.locator('.obpal-chip .pill').click()
     if (!(await screen.locator('.seals .connection-seal').first().isVisible())) await screen.locator('.seal-peer').first().click()
@@ -361,14 +409,14 @@ try {
     await shot(phone, 'phone-seal-sheet')
     await phone.getByRole('button', { name: 'Close', exact: true }).click()
     await phone.getByRole('dialog', { name: 'Connection', exact: true }).waitFor({ state: 'hidden' })
-    await phone.locator('.trust-first .trust-shares').click()
+    await phone.locator('.link-badge').click()
+    await phone.getByRole('dialog', { name: 'Connection', exact: true }).getByRole('button', { name: 'What this shares', exact: true }).click()
     await phone.getByRole('dialog', { name: 'What this shares' }).waitFor()
     const shares = await phone.locator('.shares-sheet').textContent()
     for (const line of ['Camera frames stay on this phone', 'Pairings and preferences', 'Disconnect any time', 'its own policy']) if (!shares.includes(line)) throw new Error(`missing disclosure: ${line}`)
     if (await phone.locator('.shares-sheet a[href="/trust/"]').count() !== 1) throw new Error('the trust link is missing')
     await shot(phone, 'what-this-shares')
-    await phone.getByRole('button', { name: 'Close', exact: true }).click()
-    await phone.locator('.trust-dismiss').click()
+    await phone.getByRole('dialog', { name: 'What this shares' }).getByRole('button', { name: 'Close', exact: true }).click()
     await phone.locator('.ctl-tab[data-tab="gamepad"]').click()
     await phone.locator('.gp .link-badge .seal-compact').waitFor({ state: 'visible', timeout: 3000 })
     await phone.locator('.gp [data-act="settings"]').click()
@@ -441,6 +489,20 @@ try {
     return 'matching persistent seals; a callback delayed 180 ms joins the synchronized phase'
   })
 
+  await check('a pointer on the card holds it open past its settle window, and it folds once the pointer leaves', async () => {
+    // The phone rejoins: the card opens again with a fresh window.
+    await phone.reload()
+    await phone.locator('.modes').waitFor({ timeout: 25000 })
+    await until('the card open again', async () => (await chipState()).open, 8000, 100)
+    const card = screen.locator('.obpal-chip .card')
+    await card.hover()
+    await sleep(13000)
+    if (!(await chipState()).open) throw new Error('the card folded under the pointer')
+    await screen.mouse.move(2, 2)
+    await until('the card folds once the pointer is gone', async () => !(await chipState()).open, 9000, 200)
+    return 'held 13 s under the pointer, folded after it left'
+  })
+
   await check('a screen with a phone connected never reloads itself for a gone chunk (src/ui/recover.ts), and one with no phone does', async () => {
     const chunkGone = (page) => page.evaluate(() => window.dispatchEvent(new Event('vite:preloadError')))
     const guard = (page) => page.evaluate(() => sessionStorage.getItem('obpal:deploy-reload'))
@@ -506,7 +568,7 @@ try {
     await qrPhone.emulateMedia({ reducedMotion: 'reduce' })
     await qrPhone.goto(url)
     await qrPhone.locator('.modes').waitFor({ timeout: 25000 })
-    await qrPhone.locator('.trust-compare').click()
+    await qrPhone.locator('.link-badge').click()
     const seal = await until('QR phone seal', () => phoneSeal(qrPhone))
     const hosts = await screen.evaluate(() => window.__obpal.seals.map(s => s.seal.join('-')))
     if (!hosts.includes(seal)) throw new Error('the QR phone differs from its screen')

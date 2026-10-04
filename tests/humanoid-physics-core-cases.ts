@@ -118,14 +118,14 @@ export function humanoidPhysicsCoreCases(test: (name: string, run: () => unknown
 
 export function humanoidServoCases(test: (name: string, run: () => unknown | Promise<unknown>) => unknown) {
   test('inertia damping: small links cannot receive explicit damping sign-flip torques', async () => {
-    const { uniformInertia, dampedServo } = await import('../src/sim/physics/servo')
+    const { bodyInertia, dampedServo } = await import('../src/sim/physics/servo')
     const scene = validateScene({ bodies: [{ id: 'link', position: { x: 0, y: 0, z: 0 }, mass: 2, shape: { kind: 'box', half: { x: .1, y: .2, z: .3 } } }] })
-    const inertia = uniformInertia(scene.bodies[0]); near(inertia.x, 2 / 3 * (.04 + .09))
+    const inertia = bodyInertia(scene.bodies[0]); near(inertia.x, 2 / 3 * (.04 + .09))
     near(inertia.y, 2 / 3 * (.01 + .09)); near(inertia.z, 2 / 3 * (.01 + .04))
     const s = { id: 'link', position: { x: 0, y: 0, z: 0 }, rotation: IDENTITY, velocity: { x: 0, y: 0, z: 0 }, angularVelocity: { x: 0, y: 0, z: 0 }, sleeping: false }
     const tiny = { ...scene.bodies[0], mass: .01 }, fixed = { ...scene.bodies[0], fixed: true }
     const torque = dampedServo(tiny, s, fixed, s, { x: 0, y: 0, z: 0 }, { x: 20, y: 0, z: 0 }, 200, 30, 10, STEP)
-    assert.ok(torque.x < 0); assert.ok(20 + torque.x / uniformInertia(tiny).x * STEP >= -1e-10)
+    assert.ok(torque.x < 0); assert.ok(20 + torque.x / bodyInertia(tiny).x * STEP >= -1e-10)
     assert.ok(Math.hypot(torque.x, torque.y, torque.z) <= 10)
     assert.throws(() => dampedServo(tiny, s, fixed, s, { x: 0, y: 0, z: 0 }, s.velocity, 200, 30, 10, 0), RangeError)
   })
@@ -149,23 +149,23 @@ export function humanoidServoCases(test: (name: string, run: () => unknown | Pro
     near(actual.x, expected.x); near(actual.y, expected.y); near(actual.z, expected.z)
   })
   test('inertia damping: motor and active stop cannot each reverse a tiny link in the same step', async () => {
-    const { dampedServo, uniformInertia } = await import('../src/sim/physics/servo')
+    const { dampedServo, bodyInertia } = await import('../src/sim/physics/servo')
     const b = validateScene({ bodies: [{ id: 'link', position: { x: 0, y: 0, z: 0 }, mass: .01,
       shape: { kind: 'box', half: { x: .01, y: .02, z: .03 } } }] }).bodies[0]
     const state = { ...b, sleeping: false }, fixed = { ...b, fixed: true }, velocity = { x: 20, y: 0, z: 0 }
     const torque = dampedServo(b, state, fixed, state, { x: 0, y: 0, z: 0 }, velocity, 200, 30, 10, STEP, { x: -.00001, y: 0, z: 0 })
-    const next = 20 + torque.x / uniformInertia(b).x * STEP
+    const next = 20 + torque.x / bodyInertia(b).x * STEP
     assert.ok(next >= -.001 && next < 20, `combined damping injected/reversed speed: ${next}`)
   })
   test('inertia damping: a directional stop satisfies the combined implicit free-body force balance', async () => {
-    const { dampedServo, uniformInertia } = await import('../src/sim/physics/servo')
+    const { dampedServo, bodyInertia } = await import('../src/sim/physics/servo')
     const { rotate, conjugate, add, sub, scale, dot, unit, norm } = await import('../src/sim/physics/math')
     const b = validateScene({ bodies: [{ id: 'link', position: { x: 0, y: 0, z: 0 }, mass: .1,
       shape: { kind: 'box', half: { x: .01, y: .2, z: .03 } } }] }).bodies[0]
     const state = { ...b, rotation: fromRotationVector({ x: .8, y: -.5, z: .4 }), sleeping: false }
     const error = { x: .02, y: -.03, z: .01 }, velocity = { x: 2, y: -3, z: 1 }, stop = { x: .01, y: .03, z: -.02 }
     const torque = dampedServo(b, state, { ...b, fixed: true }, state, error, velocity, 200, 30, 10, STEP, stop)
-    const localTorque = rotate(conjugate(state.rotation), torque), i = uniformInertia(b)
+    const localTorque = rotate(conjugate(state.rotation), torque), i = bodyInertia(b)
     const acceleration = rotate(state.rotation, { x: localTorque.x / i.x, y: localTorque.y / i.y, z: localTorque.z / i.z })
     const nextVelocity = add(velocity, scale(acceleration, STEP)), n = unit(stop), damping = dot(velocity, n) < 0 ? 30 : 0
     const motor = sub(scale(sub(error, scale(nextVelocity, STEP)), 200), scale(nextVelocity, 30))

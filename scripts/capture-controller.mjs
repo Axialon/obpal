@@ -118,7 +118,7 @@ try {
     await phone.evaluate(() => document.fonts.ready)
     /** Take away the coach hints and notices, and wear the surface and accent asked for. */
     const clear = () => phone.evaluate((l) => {
-      document.querySelectorAll('.hint, .bt-notice').forEach((h) => h.remove())
+      document.querySelectorAll('.hint, .nt-item').forEach((h) => h.remove())
       if (l.theme) window.BlackboxesFamily.applyTheme(l.theme)
       if (l.accent) window.BlackboxesFamily.applyAccent(l.accent)
     }, look)

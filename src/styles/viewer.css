@@ -40,6 +40,9 @@ body { letter-spacing: -0.005em; }
 /* Shared scenes: who's here, each in the colour of their cursor and halo. */
 .chip-who { display: inline-flex; align-items: center; gap: 9px; height: 36px; padding: 0 6px; border: 0; border-radius: 999px; background: none; color: inherit; font: inherit; cursor: pointer; }
 .chip-who:hover { background: rgb(var(--hl-rgb) / 0.06); }
+/* Phones waiting to be let in: a count on the chip that stays until they are. */
+.chip-who { position: relative; }
+.chip-who[data-asking]::after { content: attr(data-asking); position: absolute; top: -4px; left: -3px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: rgb(var(--accent-rgb)); color: var(--accent-ink); font: 800 11px/18px var(--font); text-align: center; box-shadow: 0 0 0 2px rgb(var(--surface-rgb) / 0.95); }
 .chip-people { display: inline-flex; }
 .person { --c: var(--accent); flex: none; width: 28px; height: 28px; display: inline-grid; place-items: center; border-radius: 50%; background: var(--c); color: #0b0f14; font-size: 11px; font-weight: 800; letter-spacing: 0.02em; box-shadow: 0 0 0 2px rgb(var(--surface-rgb) / 0.95), 0 0 16px color-mix(in srgb, var(--c) 45%, transparent); }
 .chip-people .person + .person { margin-left: -9px; }
@@ -118,14 +121,15 @@ body.multi .pointer .pt-name { display: block; }
 .drop { position: fixed; inset: 16px; border: 2px dashed rgb(var(--accent-rgb) / 0.7); border-radius: 30px; display: grid; place-items: center; background: var(--frost); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); pointer-events: none; z-index: 9; font-size: 20px; font-weight: 750; }
 .drop > div { display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .drop .ic { width: 40px; height: 40px; color: var(--accent-text); }
-.note { position: fixed; top: 88px; left: 50%; transform: translate(-50%, -8px); opacity: 0; padding: 10px 16px; border-radius: 14px; font-weight: 650; font-size: 13.5px; transition: opacity 0.25s var(--ease), transform 0.25s var(--ease); pointer-events: none; z-index: 8; }
-.note.show { opacity: 1; transform: translate(-50%, 0); }
+/* The page's quiet live region: the notice (src/ui/kit/notice.ts) shows the words; this holds the last ones for a screen reader. */
+#note.note { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; background: none; box-shadow: none; }
 
 /* ---- responsive ---- */
 @media (max-width: 1100px) {
   .catalog { width: 340px; }
 }
 @media (max-width: 860px) {
+  :root[data-pair-open] { --notice-bottom: 360px; }
   .topbar { padding: 0 14px; grid-template-columns: auto 1fr; }
   .tools { grid-column: 2; }
   .catalog { left: 14px; top: 82px; width: min(340px, calc(100vw - 28px)); bottom: 14px; }
@@ -145,7 +149,7 @@ body.multi .pointer .pt-name { display: block; }
 .tool[aria-pressed='true'], .tool.accent { color: var(--accent-ink); background: var(--glass-light); box-shadow: 0 8px 22px rgb(var(--accent-rgb) / 0.25), inset 0 1px 0 rgb(255 255 255 / 0.5); }
 @media (hover: hover) { .tool:is([aria-pressed='true'], .accent):hover { box-shadow: 0 8px 22px var(--interaction-hover-glow), var(--interaction-hover-rim); } }
 .tile[aria-current='true'] { border-color: rgb(var(--accent-rgb) / 0.7); background: linear-gradient(160deg, rgb(var(--accent-rgb) / 0.22), rgb(var(--surface-rgb) / 0.3)); }
-.catalog, .tools, .caption, .chip, .loading, .note { background: var(--frost); }
+.catalog, .tools, .caption, .chip, .loading { background: var(--frost); }
 
 /* ---- theme picker ---- */
 .themes { position: fixed; top: 76px; right: 22px; z-index: 12; padding: 6px 10px 10px; border-radius: 22px; width: 320px; animation: rise-in 0.3s var(--ease); }

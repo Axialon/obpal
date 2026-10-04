@@ -3,7 +3,7 @@
  * Native physics alone integrates bodies, solves unilateral/friction contacts and separates colliders.
  */
 import { add, sub, scale, dot, cross, norm, rotate, localPoint, type Vec3 } from './math'
-import { uniformInertia } from './servo'
+import { bodyInertia } from './servo'
 import type { Scene, BodyState, ContactSample } from './schema'
 export const CONSTRAINT_DEFAULTS = Object.freeze({
   rankTolerance: 1e-10, // dimensionless after row normalisation; numerical rank, not a physical stiffness.
@@ -15,6 +15,49 @@ const inner = (a: Float64Array, b: Float64Array) => { let s=0; for(let i=0;i<a.l
 const finiteVector = (v: Vec3) => v && [v.x,v.y,v.z].every(Number.isFinite)
 export interface ConstraintResponse {
   matrix: number[][]; gravityAcceleration: number[]; constraintRank: number; contactRows: number; dimensions: number
+}
+type ResponseInput = string | number | boolean | undefined
+interface ResponseMemo {
+  scene: Scene; states: readonly BodyState[]; contacts: readonly ContactSample[]
+  inputs?: ResponseInput[]; response?: ConstraintResponse
+}
+let activeMemo: ResponseMemo | undefined
+/** Reuse a response only during this synchronous callback. Inputs are borrowed read-only; the
+ * snapshot also invalidates reuse after same-object changes. Nested scopes restore their caller,
+ * and every returned response owns its arrays. Ordinary calls never retain their arguments.
+ */
+export function withConstraintResponseMemo<T>(scene: Scene, states: readonly BodyState[], contacts: readonly ContactSample[], run: () => T): T {
+  const previous = activeMemo
+  activeMemo = { scene, states, contacts }
+  try {
+    const result = run()
+    if (result && typeof (result as { then?: unknown }).then === 'function') throw new TypeError('Constraint response memo must be synchronous')
+    return result
+  } finally { activeMemo = previous }
+}
+/** Only fields used by response assembly or its input validation, in their original order. */
+function responseInputs(scene: Scene, states: readonly BodyState[], contacts: readonly ContactSample[]): ResponseInput[] {
+  const values: ResponseInput[] = [scene.bodies.length, scene.joints.length, states.length, contacts.length,
+    scene.gravity.x, scene.gravity.y, scene.gravity.z, scene.contact?.predictionDistance]
+  const vector = (v: Vec3) => { values.push(v.x, v.y, v.z) }
+  for (const b of scene.bodies) {
+    values.push(b.id, b.fixed, b.mass, b.friction, b.shape.kind, b.inertia !== undefined)
+    if (b.inertia) vector(b.inertia)
+    if (b.shape.kind === 'sphere') values.push(b.shape.radius)
+    else if (b.shape.kind === 'box') vector(b.shape.half)
+  }
+  for (const j of scene.joints) { values.push(j.id, j.parent, j.child); vector(j.anchorParent); vector(j.anchorChild) }
+  for (const s of states) {
+    values.push(s.id); vector(s.position); vector(s.rotation); values.push(s.rotation.w)
+    vector(s.velocity); vector(s.angularVelocity)
+  }
+  for (const c of contacts) {
+    values.push(c.a, c.b, c.distance, c.impulse); vector(c.pointA); vector(c.pointB); vector(c.normalOnB)
+  }
+  return values
+}
+function copyResponse(response: ConstraintResponse): ConstraintResponse {
+  return { ...response, matrix: response.matrix.map(row => [...row]), gravityAcceleration: [...response.gravityAcceleration] }
 }
 function checkedInputs(scene: Scene, states: readonly BodyState[], contacts: readonly ContactSample[]) {
   const dynamic = scene.bodies.filter(b=>!b.fixed), d=dynamic.length*6, n=scene.joints.length*3
@@ -58,11 +101,28 @@ export function constraintIslands(scene: Scene, states: readonly BodyState[], co
     states:states.filter(s=>byId.get(s.id)!.fixed||island.ids.has(s.id)),
     contacts:contacts.filter(c=>(byId.get(c.a)!.fixed||island.ids.has(c.a))&&(byId.get(c.b)!.fixed||island.ids.has(c.b)))}))
 }
-/** Complete owned states and actual native manifold samples only. Does not retain or mutate its arguments. */
+/** Complete owned states and actual native manifold samples only. Does not mutate its arguments;
+ * opt-in reuse is limited to the current synchronous withConstraintResponseMemo callback.
+ */
 export function constraintResponse(scene: Scene, states: readonly BodyState[], contacts: readonly ContactSample[]): ConstraintResponse {
+  const memo = activeMemo
+  if (!memo || memo.scene !== scene || memo.states !== states || memo.contacts !== contacts) return computeResponse(scene, states, contacts)
+  let inputs: ResponseInput[] | undefined
+  if (memo.response) {
+    // Malformed changed inputs still take the normal validation path rather than reading stale data.
+    try { inputs = responseInputs(scene, states, contacts) } catch { /* normal validation below */ }
+    if (inputs && inputs.length === memo.inputs!.length && inputs.every((value, i) => Object.is(value, memo.inputs![i])))
+      return copyResponse(memo.response)
+  }
+  memo.response = undefined; memo.inputs = undefined
+  const response = computeResponse(scene, states, contacts)
+  memo.inputs = inputs ?? responseInputs(scene, states, contacts); memo.response = response
+  return copyResponse(response)
+}
+function computeResponse(scene: Scene, states: readonly BodyState[], contacts: readonly ContactSample[]): ConstraintResponse {
   const {dynamic,d,n,byId,current}=checkedInputs(scene,states,contacts)
   const slots = new Map(dynamic.map((b,i)=>{
-    const inertia=uniformInertia(b), state=current.get(b.id)!
+    const inertia=bodyInertia(b), state=current.get(b.id)!
     return [b.id,{offset:i*6,linear:1/Math.sqrt(b.mass),angular:AXES.map((axis,k)=>
       scale(rotate(state.rotation,axis),1/Math.sqrt([inertia.x,inertia.y,inertia.z][k])))}] as const
   }))
@@ -72,9 +132,10 @@ export function constraintResponse(scene: Scene, states: readonly BodyState[], c
     if(magnitude===0) return
     for(let i=0;i<d;i++) row[i]/=magnitude
     // Reorthogonalisation makes duplicate/coplanar contact rows benign, without arbitrary compliance or pins.
-    for(let pass=0;pass<2;pass++) for(const b of basis) {
-      let a=0;for(const i of b.indices) a+=row[i]*b.values[i]
-      if(a!==0) for(const i of b.indices) row[i]-=a*b.values[i]
+    for(let pass=0;pass<2;pass++) for(let bi=0;bi<basis.length;bi++) {
+      const {indices,values}=basis[bi]
+      let a=0;for(let k=0;k<indices.length;k++) { const i=indices[k];a+=row[i]*values[i] }
+      if(a!==0) for(let k=0;k<indices.length;k++) { const i=indices[k];row[i]-=a*values[i] }
     }
     const residual=Math.sqrt(inner(row,row)); if(residual<=CONSTRAINT_DEFAULTS.rankTolerance) return
     for(let i=0;i<d;i++) row[i]/=residual

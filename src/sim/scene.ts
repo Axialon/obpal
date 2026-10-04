@@ -8,6 +8,7 @@ import { Claims, PairingChip, PartFocus, Remote, type Layout, type Participant }
 import { family } from '../family'
 import { ICONS } from '../ui/icons'
 import { iconAction, SIM_ACTION_ICONS } from '../ui/kit/action'
+import { mountNotices, notify, type NoticeTone } from '../ui/kit/notice'
 import { holdForPhone } from '../ui/recover'
 import { ControlSession } from './control-space'
 import { quickAction } from '../ui/quick-actions'
@@ -35,7 +36,12 @@ export interface SimScene {
   /** Add a line to the record (who held which node, and when). */
   log(text: string, color?: string): void
   /** A short message on the screen. */
-  note(text: string): void
+  note(text: string, tone?: NoticeTone): void
+  /**
+   * A standing line on one phone (the host value `notice`, which the phone shows until it clears): for what a toast would
+   * lose in seconds, such as the arms being stopped. '' clears it. It outranks the line about waiting to be let in.
+   */
+  notice(who: string, text: string): void
   /** Publish who holds what to every device, and redraw the people list. */
   publish(): void
   /** Take a node for someone (the screen can force), with the same feedback as a device's own claim. */
@@ -72,6 +78,7 @@ const clock = () => new Date().toLocaleTimeString('en-GB', { hour12: false })
 
 export async function startSimScene(o: SimOptions): Promise<SimScene> {
   mountBodyCapture()
+  mountNotices()
   o.layout = { ...o.layout, universal: true }
   const remote = await Remote.create({ appName: o.appName, layout: o.layout, seats: 8, session: location.pathname + location.search.replace(/[?&](test|local)=[^&]*/g, '') })
   holdForPhone(remote)
@@ -85,12 +92,13 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   const nodeName = (id: string) => { const n = nodes.find((x) => x.id === id); return n ? o.label?.(n) ?? n.name : id }
   const focus = new PartFocus(remote, (who) => { const id = claims.held(who); return id ? nodes.find((n) => n.id === id) : undefined }, (who) => o.focused?.(who))
   remote.setHostPerson({ name: 'Screen', color: family.accentColor() })
-  // The pairing chip: open while nobody is here, closed by itself as a phone comes in; the people chip's + opens it.
-  // Its card never covers the panel (the e-stop), the people list, the stop banner, the menus, a camera's picture (the
-  // device sims) or the open quick-actions tray: it folds while one is in the way.
+  // The pairing chip: open while nobody is here. As a phone comes in it opens to show the seal, then folds by itself a
+  // few seconds after the seal settles (and by its own x, Escape, or a press outside it); the people chip's + opens it
+  // and closes it again. Its card never covers the panel (the e-stop), the people chip and list, the stop banner, the
+  // menus, a camera's picture (the device sims) or the open quick-actions tray: it folds while one is in the way.
   const chip = new PairingChip({
-    remote, open: true, testLink: true, avoid: '.sim-window, #people, .stopped-banner, #switcher, #themes, .quick-panel, .quick-themes, .obpal-camera',
-    onToggle: (open) => $('chip-invite').setAttribute('aria-pressed', String(open)),
+    remote, open: true, testLink: true, avoid: '.sim-window, #chip, #people, .stopped-banner, #switcher, #themes, .quick-panel, .quick-themes, .obpal-camera, .participant-strip, .presence-controls',
+    onToggle: (open) => { $('chip-invite').setAttribute('aria-pressed', String(open)); document.documentElement.toggleAttribute('data-pair-open', open) },
   })
   addEventListener('obpal:viewmode', e => { if ((e as CustomEvent<string>).detail !== 'overview') chip.collapse() })
   Object.assign(window, { __obpal: remote, __sim: { claims, approved, chip, control, allowed: (id: string) => allowed(id) } })
@@ -113,14 +121,22 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
     }
   }
 
-  let noteTimer: ReturnType<typeof setTimeout> | undefined
-  const note = (text: string) => {
-    const n = $('note')
-    n.textContent = text
-    n.classList.add('in')
-    clearTimeout(noteTimer)
-    noteTimer = setTimeout(() => n.classList.remove('in'), 2600)
+  // The page's own #note stays as its quiet live region (it holds the last words); the notice shows them.
+  const note = (text: string, tone?: NoticeTone) => {
+    $('note').textContent = text
+    notify({ text, tone, announce: false })
   }
+  // What each phone is told in its standing line: the sim's own (a stop) before the screen's (waiting to be let in).
+  const standing = new Map<string, { sim: string; approval: string }>()
+  const WAITING = 'Waiting for the screen to let you in'
+  const standingLine = (who: string, part: 'sim' | 'approval', text: string) => {
+    const now = { sim: '', approval: '', ...standing.get(who), [part]: text }
+    const before = standing.get(who)
+    standing.set(who, now)
+    if ((before ? before.sim || before.approval : '') === (now.sim || now.approval)) return
+    remote.setValues({ notice: now.sim || now.approval }, who)
+  }
+  const notice = (who: string, text: string) => standingLine(who, 'sim', text)
   const controllers = layoutControllers(o.layout)
   if (controllers.length > 1) quickAction({
     id: 'switch', group: 'page', label: 'Switch controller', icon: 'phone',
@@ -217,6 +233,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
         ok.onclick = () => {
           approved.add(p.id)
           pending.delete(p.id)
+          standingLine(p.id, 'approval', '')
           log(`Let ${p.name} in`, p.color)
           remote.feedback({ haptic: 'tick', toast: 'You’re in: pick something from the scene list' }, p.id)
           renderPeople()
@@ -234,6 +251,10 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
       return li
     }))
     $('people').classList.toggle('asking', pending.size > 0)
+    // Who is waiting to be let in shows on the people chip as a count, so the cue outlasts the note that announced it.
+    const who = $('chip-who')
+    if (pending.size) who.dataset.asking = String(pending.size); else delete who.dataset.asking
+    who.setAttribute('aria-label', pending.size ? `People in this scene: ${pending.size} waiting to be let in` : 'People in this scene')
   }
 
   remote.on('connect', () => { $('chip').hidden = false })
@@ -244,9 +265,10 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
     log(`${p.name} joined`, p.color)
     if (!visitor(p.id) && o.approval && !allowed(p.id)) {
       pending.add(p.id)
-      note(`${p.name} wants to take part: let them in from People`)
+      note(`${p.name} wants to take part`)
       $('people').hidden = false
-      remote.feedback({ toast: 'Waiting for the screen to let you in' }, p.id)
+      // The standing line says it and stays until they are let in: a toast would say it twice.
+      standingLine(p.id, 'approval', WAITING)
     }
     publish()
     o.joined?.(p)
@@ -256,12 +278,14 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
     people.delete(p.id)
     pending.delete(p.id)
     approved.delete(p.id)
+    standing.delete(p.id)
     log(`${p.name} left${node ? `, letting go of ${nodeName(node)}` : ''}`, p.color)
     publish()
     o.left?.(p)
   })
   remote.on('role', p => {
     claims.release(p.id); focus.reset(p.id); pending.delete(p.id); approved.delete(p.id); people.set(p.id, p)
+    standingLine(p.id, 'approval', '')
     if (p.simSeat) { approved.add(p.id); claims.take(p.simSeat, p.id) }
     else o.left?.(p)
     remote.setValues({ part: p.simSeat ? nodeName(p.simSeat) : '' }, p.id)
@@ -269,14 +293,14 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   })
   remote.on('claim', ({ node }, who) => {
     if (visitor(who.id)) return
-    if (!allowed(who.id)) { remote.feedback({ haptic: 'bump', toast: 'Waiting for the screen to let you in' }, who.id); return }
+    if (!allowed(who.id)) { remote.feedback({ haptic: 'bump' }, who.id); standingLine(who.id, 'approval', WAITING); return }
     if (node === null) { release(who.id); return }
     if (!nodes.some((n) => n.id === node)) { remote.feedback({ haptic: 'bump', toast: 'That’s not in this scene' }, who.id); return }
     take(node, who.id)
   })
   autoAllow?.addEventListener('change', () => {
     if (approvalHeld) autoAllow.checked = false
-    else if (autoAllow.checked) { for (const id of pending) approved.add(id); pending.clear() }
+    else if (autoAllow.checked) { for (const id of pending) { approved.add(id); standingLine(id, 'approval', '') } pending.clear() }
     renderPeople()
   })
   $('chip-disc').onclick = () => remote.disconnect()
@@ -308,7 +332,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
     publish()
   }
 
-  const result: SimScene = { remote, control, claims, focus, nodes, allowed, waived, holdApproval, nameOf, colorOf, log, note, publish, take, release, setNodes, nodeName }
+  const result: SimScene = { remote, control, claims, focus, nodes, allowed, waived, holdApproval, nameOf, colorOf, log, note, notice, publish, take, release, setNodes, nodeName }
   publish()
   mountLocalPlay(remote, o.layout, nodes.find(n => !n.parent)?.id)
   return result

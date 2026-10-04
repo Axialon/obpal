@@ -591,6 +591,17 @@ const lastInput = new Map<string, number>()
 const lastButtons = new Map<string, number>()
 let stopped: { by: string; why: string } | null = null
 
+/**
+ * What every phone is told while the arms are stopped, as a standing line (a toast is gone in seconds, and the controls
+ * would look live again): it stays until the screen resumes.
+ */
+function stoppedLine(): string {
+  if (!stopped) return ''
+  if (stopped.why) return stopped.why
+  return stopped.by === 'host' ? 'The screen stopped the arms: it resumes them there' : `${sim?.nameOf(stopped.by) ?? 'A phone'} stopped the arms: the screen resumes them`
+}
+function tellStopped(id: string) { sim?.notice(id, stoppedLine()) }
+
 function estop(by: string, why = '') {
   if (stopped) return
   stopped = { by, why }
@@ -601,13 +612,15 @@ function estop(by: string, why = '') {
   $('stop-by').textContent = why || `Stopped by ${who}`
   const live = arms.filter((a) => a.hw?.live).length
   sim?.log(`${why || `Stopped by ${who}`}: every arm halted${live ? ', real arms holding where they are' : ''}`, '#fb7185')
-  sim?.remote.feedback({ haptic: 'bump', toast: 'Stopped: the screen resumes' }, by === 'host' ? undefined : by)
-  for (const p of sim?.remote.participants ?? []) if (p.id !== by) sim?.remote.feedback({ haptic: 'bump', toast: why || `${who} stopped the arms` }, p.id)
+  // The phones feel it; the standing line (tellStopped) says it and stays until the screen resumes, so no toast repeats it.
+  for (const p of sim?.remote.participants ?? []) sim?.remote.feedback({ haptic: 'bump' }, p.id)
+  for (const p of sim?.remote.participants ?? []) tellStopped(p.id)
   renderPanel()
 }
 function resume() {
   if (!stopped) return
   stopped = null
+  for (const p of sim?.remote.participants ?? []) tellStopped(p.id)
   document.body.classList.remove('stopped')
   for (const a of arms) {
     if (!a.hw) continue
@@ -709,6 +722,8 @@ if (!shared.guest) void startSimScene({
   label: (n) => (n.group ? `${n.group} · ${n.name}` : n.name),
   changed: () => renderPanel(),
   focused: () => { renderReadouts(); view.invalidate() },
+  // A phone that comes in while the arms are stopped is told so too.
+  joined: (p) => { if (stopped) tellStopped(p.id) },
 }).then((s) => {
   sim = s
   shared.connect(s.remote)

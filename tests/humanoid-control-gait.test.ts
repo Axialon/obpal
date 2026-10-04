@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { GaitController, GAIT_CONTROL, advanceGaitState, swingHipFeedback, gaitTargetEstimate, gaitFootSupported, type GaitState } from '../src/sim/humanoid/physics/gait'
+import { GaitController, MeasuredSupportStop, GAIT_CONTROL, TURN_CONTROL, advanceGaitState, advanceStoppingGait, walkingGeometry, walkingControl, swingHipFeedback, gaitTargetEstimate, gaitFootSupported, type GaitState } from '../src/sim/humanoid/physics/gait'
+import { StanceController } from '../src/sim/humanoid/physics/stance'
+import { SinkSafeSupport, STEP_MIN_WIDTH_M } from '../src/sim/humanoid/physics/stepping'
 import { restIntent } from '../src/sim/humanoid/controls'
 import { ALL_PHYSICAL_PROFILES, buildHumanoid, soleCorners, type PhysicalHumanoid } from '../src/sim/humanoid/physics/model'
 import { observe, type Observation } from '../src/sim/humanoid/physics/observation'
@@ -7,7 +9,7 @@ import { BalanceController } from '../src/sim/humanoid/physics/balance'
 import { jointFrame, jacobianTransposeTorque } from '../src/sim/humanoid/physics/targets'
 import { ActuationGate, MAX_TARGET_RATE } from '../src/sim/humanoid/physics/contract'
 import { STEP, type BodyState, type ContactSample } from '../src/sim/physics/schema'
-import { ZERO, angleBetween, clampCone, conjugate, fromRotationVector, multiply, rotate, norm, sub, type Vec3, type Quat } from '../src/sim/physics/math'
+import { ZERO, angleBetween, clampCone, fromRotationVector, multiply, rotate, norm, sub, type Vec3, type Quat } from '../src/sim/physics/math'
 
 const forward = { ...restIntent(), z: -1, manual: true }
 const stop = { velocity: { ...ZERO }, yawRateRadps: 0 }
@@ -15,7 +17,8 @@ const lift = (): GaitState => ({ phase: 'lift', swing: 'left', ticks: 0, loadedT
 const startTicks = Math.round(GAIT_CONTROL.startSeconds / STEP)
 const liftTicks = Math.round(GAIT_CONTROL.liftSeconds / STEP), strikeTicks = Math.round(GAIT_CONTROL.strikeSeconds / STEP)
 // The controller qualifies touchdown at 85% of its lift/strike interpolation, after a real unload.
-const qualifiedTouchdownTick = liftTicks + Math.ceil((2 * .85 - 1) * strikeTicks)
+const recoveryHalfSeconds = .16, recoveryHalfTicks = Math.round(recoveryHalfSeconds / STEP)
+const qualifiedTouchdownTick = recoveryHalfTicks + Math.ceil((2 * .85 - 1) * recoveryHalfSeconds / STEP)
 /** Synthetic measured support exercises controller contracts, not native stability or walking acceptance. */
 function fixture(model: PhysicalHumanoid, tick = 0, load: readonly [number, number] = [0, 1], yaw = 0): Observation {
   const rotation = fromRotationVector({ x: 0, y: yaw, z: 0 })
@@ -38,15 +41,40 @@ function vector(actual: Vec3, expected: Vec3) {
 }
 
 describe('SIMBICON phase and feedback laws', () => {
-  it('holds lift for 0.30 s at 240 Hz even when the foot is loaded', () => {
+  it('admits a support recenter only after two seconds, two distinct loaded ticks and flat feet', () => {
+    const model = buildHumanoid('morrow-v1'), observation = fixture(model, 0, [1, 1])
+    const nominal = new StanceController(model, 1).step(observation).frame
+    const helper = new MeasuredSupportStop(model, 0, nominal.targets, observation.bodies.find(b => b.id === model.root)!.position.y)
+    const support = new SinkSafeSupport(model.scene.bodies, model.feet)
+    const step = (o: Observation) => helper.step(o, nominal, ZERO, support.update(o))
+    step(observation); step(observation)
+    expect(helper.canStop(atTick(observation, 500))).toBe(false)
+    step(atTick(observation, 1))
+    expect(helper.canStop(atTick(observation, 480))).toBe(false)
+    expect(helper.canStop(atTick(observation, 481))).toBe(true)
+    const unloaded = atTick(structuredClone(observation), 481); unloaded.feet[0].normalImpulseNs = 0
+    expect(helper.canStop(unloaded)).toBe(false)
+    step(unloaded); step(unloaded); expect(helper.canStop(unloaded)).toBe(false)
+    step(atTick(observation, 482)); step(atTick(observation, 482))
+    expect(helper.canStop(atTick(observation, 482))).toBe(false)
+    step(atTick(observation, 483)); expect(helper.canStop(atTick(observation, 483))).toBe(true)
+    const tilted = atTick(structuredClone(observation), 483)
+    tilted.bodies.find(body => body.id === model.feet[0])!.rotation = fromRotationVector({ x: Math.PI / 180, y: 0, z: 0 })
+    expect(helper.canStop(tilted)).toBe(false)
+    const fast = atTick(structuredClone(observation), 483); fast.comVelocity.x = .100001
+    expect(helper.canStop(fast)).toBe(false)
+    step(atTick(observation, 500)); step(atTick(observation, 500))
+    expect(helper.canStop(atTick(observation, 500))).toBe(false)
+  })
+  it('holds lift for the configured lift duration at 240 Hz even when the foot is loaded', () => {
     let state = lift()
-    for (let tick = 0; tick < 71; tick++) { state = advanceGaitState(state, true, false); expect(state.phase).toBe('lift') }
+    for (let tick = 0; tick < liftTicks - 1; tick++) { state = advanceGaitState(state, true, false); expect(state.phase).toBe('lift') }
     state = advanceGaitState(state, true, false)
     expect(state).toMatchObject({ phase: 'strike', swing: 'left', ticks: 0, loadedTicks: 0, steps: 0 })
   })
-  it('times out an unloaded strike after 0.40 s, switching side exactly once', () => {
+  it('times out an unloaded strike after the configured strike duration, switching side exactly once', () => {
     let state: GaitState = { ...lift(), phase: 'strike' }
-    for (let tick = 0; tick < 95; tick++) { state = advanceGaitState(state, false, false); expect(state.phase).toBe('strike') }
+    for (let tick = 0; tick < strikeTicks - 1; tick++) { state = advanceGaitState(state, false, false); expect(state.phase).toBe('strike') }
     state = advanceGaitState(state, false, false)
     expect(state).toMatchObject({ phase: 'lift', swing: 'right', ticks: 0, loadedTicks: 0, steps: 1 })
   })
@@ -59,11 +87,11 @@ describe('SIMBICON phase and feedback laws', () => {
     state = advanceGaitState(state, true, false); expect(state.phase).toBe('lift'); expect(state.swing).toBe('right')
     expect(state.cleared).toBe(false)
   })
-  it('does not mistake persistent initial contact for landing and retains the 0.40 s strike timeout', () => {
+  it('does not mistake persistent initial contact for landing and retains the the configured strike duration strike timeout', () => {
     let state = lift()
-    for (let tick = 0; tick < 72; tick++) state = advanceGaitState(state, true, false)
+    for (let tick = 0; tick < liftTicks; tick++) state = advanceGaitState(state, true, false)
     expect(state).toMatchObject({ phase: 'strike', cleared: false, loadedTicks: 0 })
-    for (let tick = 0; tick < 95; tick++) {
+    for (let tick = 0; tick < strikeTicks - 1; tick++) {
       state = advanceGaitState(state, true, false)
       expect(state.phase).toBe('strike'); expect(state.loadedTicks).toBe(0)
     }
@@ -72,7 +100,7 @@ describe('SIMBICON phase and feedback laws', () => {
   })
   it('remembers a lift-phase unload but starts a fresh consecutive landing count at strike', () => {
     let state = advanceGaitState(lift(), false, false)
-    for (let tick = 1; tick < 72; tick++) state = advanceGaitState(state, true, false)
+    for (let tick = 1; tick < liftTicks; tick++) state = advanceGaitState(state, true, false)
     expect(state).toMatchObject({ phase: 'strike', cleared: true, loadedTicks: 0 })
     state = advanceGaitState(state, true, false)
     expect(state).toMatchObject({ phase: 'strike', loadedTicks: 1 })
@@ -80,9 +108,9 @@ describe('SIMBICON phase and feedback laws', () => {
     expect(state).toMatchObject({ phase: 'lift', swing: 'right', cleared: false, loadedTicks: 0 })
   })
   it('finishes a lifted foot before stopping and does not mutate the previous state', () => {
-    const original = Object.freeze({ ...lift(), ticks: 71 })
+    const original = Object.freeze({ ...lift(), ticks: liftTicks - 1 })
     const strike = advanceGaitState(original, false, true)
-    expect(strike.phase).toBe('strike'); expect(original.phase).toBe('lift'); expect(original.ticks).toBe(71)
+    expect(strike.phase).toBe('strike'); expect(original.phase).toBe('lift'); expect(original.ticks).toBe(liftTicks - 1)
     const loadedOnce = advanceGaitState(strike, true, true)
     expect(loadedOnce.phase).toBe('strike')
     expect(advanceGaitState(loadedOnce, true, true).phase).toBe('idle')
@@ -165,6 +193,30 @@ describe('gait reaction estimate uses the authoritative gate limits', () => {
 })
 
 describe('gait foot support eligibility', () => {
+  it('keeps a released foot in strike while airborne and hands off after two flat supported observations', () => {
+    const model = buildHumanoid('keel-v1'), o = fixture(model, 0, [0, 1]), foot = o.feet[0], body = o.bodies.find(b => b.id === foot.id)!
+    let state: GaitState = { ...lift(), phase: 'strike' }
+    for (let tick = 0; tick < 3 * strikeTicks; tick++) state = advanceStoppingGait(state, foot, body, GAIT_CONTROL.liftSeconds)
+    expect(state).toMatchObject({ phase: 'strike', cleared: true, steps: 0 })
+    const loaded = fixture(model, 0, [1, 1]).feet[0]
+    state = advanceStoppingGait(state, loaded, body, GAIT_CONTROL.liftSeconds)
+    expect(state.phase).toBe('strike')
+    state = advanceStoppingGait(state, loaded, body, GAIT_CONTROL.liftSeconds)
+    expect(state).toMatchObject({ phase: 'idle', swing: 'right', steps: 1 })
+  })
+  it('hands a persistently loaded tilted landing to conform after 40 ms, but never invents an unload', () => {
+    const model = buildHumanoid('keel-v1'), o = fixture(model, 0, [1, 1]), foot = o.feet[0]
+    const body = { ...o.bodies.find(b => b.id === foot.id)!, rotation: fromRotationVector({ x: .04, y: 0, z: 0 }) }
+    let state: GaitState = { ...lift(), phase: 'strike' }
+    for (let tick = 0; tick < 100; tick++) state = advanceStoppingGait(state, foot, body, GAIT_CONTROL.liftSeconds)
+    expect(state).toMatchObject({ phase: 'strike', cleared: false, steps: 0 })
+    state = advanceStoppingGait(state, { ...foot, normalImpulseNs: 0 }, body, GAIT_CONTROL.liftSeconds)
+    for (let tick = 0; tick < Math.ceil(.04 / STEP) - 1; tick++) {
+      state = advanceStoppingGait(state, foot, body, GAIT_CONTROL.liftSeconds)
+      expect(state.phase).toBe('strike')
+    }
+    expect(advanceStoppingGait(state, foot, body, GAIT_CONTROL.liftSeconds)).toMatchObject({ phase: 'idle', steps: 1 })
+  })
   it('requires a two-dimensional footprint rather than duplicate or collinear manifold points', () => {
     expect(gaitFootSupported([])).toBe(false)
     expect(gaitFootSupported([ZERO, { x: .1, y: 0, z: .2 }])).toBe(false)
@@ -188,7 +240,7 @@ describe('gait foot support eligibility', () => {
       expect(() => gaitFootSupported([ZERO, { x: .1, y: 0, z: .1 }, point])).toThrow('Invalid gait foot manifold')
     }
   })
-  it('withholds ankle correction on line support or foot speed above 1 rad/s', () => {
+  it('uses zero-moment conform on first loaded contact even with a line manifold or a rotating foot', () => {
     const model = buildHumanoid('keel-v1'), ankle = model.scene.joints.find(j => j.child === model.feet[1])!
     const request = (speed: number, points?: Vec3[]) => {
       const controller = new GaitController(model, 1), o = fixture(model)
@@ -197,23 +249,62 @@ describe('gait foot support eligibility', () => {
       if (points) o.feet[1].contactPoints = points
       return controller.stepVelocity(o, stop).targets[ankle.id]
     }
-    expect(angleBetween(request(0), ankle.motor.target)).toBeGreaterThan(1e-5)
-    expect(angleBetween(request(1), ankle.motor.target)).toBeGreaterThan(1e-5)
+    expect(angleBetween(request(0), ankle.motor.target)).toBeLessThan(1e-10)
+    expect(angleBetween(request(1), ankle.motor.target)).toBeLessThan(1e-10)
     expect(angleBetween(request(1 + 1e-6), ankle.motor.target)).toBeLessThan(1e-10)
     expect(angleBetween(request(0, [ZERO, ZERO, { x: .1, y: 0, z: .1 }]), ankle.motor.target)).toBeLessThan(1e-10)
   })
 })
 
 describe('gait target controller', () => {
+  it('derives walking defaults from physical geometry independently of profile names and spawn translation', () => {
+    for (const profile of ALL_PHYSICAL_PROFILES) {
+      const model = buildHumanoid(profile), before = structuredClone(model), defaults = walkingGeometry(model)
+      const translated = structuredClone(model); translated.profileId = 'renamed' as typeof translated.profileId
+      for (const body of translated.scene.bodies) { body.position.x += 12; body.position.z -= 7 }
+      expect(walkingGeometry(translated)).toEqual(defaults)
+      expect(defaults.liftSeconds + defaults.strikeSeconds).toBeGreaterThanOrEqual(.63)
+      expect(defaults.liftSeconds + defaults.strikeSeconds).toBeLessThanOrEqual(.70)
+      expect(model).toEqual(before)
+    }
+    expect(walkingGeometry(buildHumanoid('keel-v1'))).toMatchObject({ liftSeconds: .27, strikeSeconds: .36, terminalVelocityFactor: 1 })
+    expect(walkingGeometry(buildHumanoid('morrow-v1'))).toMatchObject({ liftSeconds: .30, strikeSeconds: .40, terminalVelocityFactor: 1.30 })
+  })
+  it('preserves straight walking and the long-leg endpoint while blending symmetric compact-leg turns', () => {
+    for (const profile of ALL_PHYSICAL_PROFILES) {
+      const geometry = walkingGeometry(buildHumanoid(profile)), straight = walkingControl(geometry, 0), fullTurn = walkingControl(geometry, 1)
+      expect(straight).toEqual({ liftSeconds: geometry.liftSeconds, strikeSeconds: geometry.strikeSeconds,
+        lateralReferenceM: geometry.lateralReferenceM, captureHorizonSeconds: GAIT_CONTROL.captureHorizonSeconds,
+        swingClearanceM: GAIT_CONTROL.swingClearanceM, velocityForceGain: GAIT_CONTROL.velocityForceGain,
+        periodicWidthM: STEP_MIN_WIDTH_M, momentumRetention: 0 })
+      for (const yaw of [.01, .5, 1, 2]) {
+        const turn = walkingControl(geometry, yaw)
+        expect(walkingControl(geometry, -yaw)).toEqual(turn)
+        if (geometry.legLengthM >= .84) expect(turn).toEqual(straight)
+        for (const key of Object.keys(turn) as (keyof typeof turn)[]) {
+          expect(turn[key]).toBeGreaterThanOrEqual(Math.min(straight[key], fullTurn[key]) - 1e-12)
+          expect(turn[key]).toBeLessThanOrEqual(Math.max(straight[key], fullTurn[key]) + 1e-12)
+        }
+      }
+    }
+    const compact = walkingGeometry(buildHumanoid('morrow-v1'))
+    expect(walkingControl(compact, 1)).toEqual(TURN_CONTROL)
+    expect(walkingControl(compact, 2)).toEqual(TURN_CONTROL)
+    // Periodic width controls angular momentum, not the physical non-crossing landing constraint.
+    expect(TURN_CONTROL.periodicWidthM).toBeLessThan(STEP_MIN_WIDTH_M)
+    expect(STEP_MIN_WIDTH_M).toBe(.20)
+  })
   it.each(ALL_PHYSICAL_PROFILES)('%s emits complete finite gate frames through starts, both swings and stops', profile => {
     const model = buildHumanoid(profile), controller = new GaitController(model, 1), gate = new ActuationGate(model, 1)
     const nominal = Object.fromEntries(model.scene.joints.map(j => [j.id, j.motor.target]))
     const upper = model.scene.joints.filter(j => !/_(thigh|shin|foot)$/.test(j.child)), phases = new Set<string>(), swings = new Set<string>()
-    const walkTicks = startTicks + liftTicks + strikeTicks, totalTicks = walkTicks + liftTicks + strikeTicks + 2
+    const walkTicks = startTicks + liftTicks + strikeTicks
+    const totalTicks = walkTicks + liftTicks + strikeTicks + Math.ceil(2 / STEP) + 4
     for (let tick = 0; tick < totalTicks; tick++) {
       const swing = controller.diagnostics().swing
       const strike = controller.diagnostics().phase === 'strike'
-      const support: [number, number] = strike ? [1, 1] : swing === 'left' ? [0, 1] : [1, 0]
+      const stopped = tick >= walkTicks && controller.diagnostics().phase === 'idle'
+      const support: [number, number] = strike || stopped ? [1, 1] : swing === 'left' ? [0, 1] : [1, 0]
       const measured = fixture(model, tick, support), o = tick ? transfer(measured) : measured
       const request = controller.step(o, tick < walkTicks ? forward : restIntent())
       const previous = gate.targets(), accepted = gate.accept(request), diagnostics = controller.diagnostics()
@@ -329,20 +420,20 @@ describe('gait target controller', () => {
     }
     vector(controller.diagnostics().desiredVelocity, ZERO)
   })
-  it('reconstructs the unloaded thigh world orientation with a rotated parent and authored joint bases', () => {
+  it('keeps unloaded thigh requests heading-equivariant and below 3 rad/s with authored joint bases', () => {
     const model = buildHumanoid('keel-v1')
-    const controller = new GaitController(model, 1), yaw = .8
+    const controller = new GaitController(model, 1), straight = new GaitController(model, 1), yaw = .8
     controller.beginRecovery(rotate(fromRotationVector({ x: 0, y: yaw, z: 0 }), { x: -.2, y: 0, z: -.35 }), 'left')
-    let frame = controller.stepVelocity(fixture(model, 0, [0, 1], yaw), stop)
-    for (let tick = 1; tick <= liftTicks / 2; tick++) frame = controller.stepVelocity(fixture(model, tick, [0, 1], yaw), stop)
+    straight.beginRecovery({ x: -.2, y: 0, z: -.35 }, 'left')
     const joint = model.scene.joints.find(j => j.child === model.parts.left_thigh.bodyId)!
-    const parent = fixture(model, liftTicks / 2, [0, 1], yaw).bodies.find(b => b.id === joint.parent)!
-    const world = multiply(multiply(multiply(parent.rotation, joint.frameParent), frame.targets[joint.id]), conjugate(joint.frameChild))
-    const hip = controller.diagnostics().swingHipRad
-    const localDown = rotate(conjugate(fromRotationVector({ x: 0, y: yaw, z: 0 })), rotate(world, { x: 0, y: -1, z: 0 }))
-    expect(Math.asin(-localDown.z)).toBeCloseTo(hip.sagittal, 10)
-    expect(Math.atan2(localDown.x, -localDown.y)).toBeCloseTo(hip.lateral, 10)
-    expect(localDown.z).toBeLessThan(0)
+    let previous = fixture(model).joints.find(j => j.id === joint.id)!.rotation
+    for (let tick = 0; tick < recoveryHalfTicks; tick++) {
+      const frame = controller.stepVelocity(fixture(model, tick, [0, 1], yaw), stop)
+      const reference = straight.stepVelocity(fixture(model, tick, [0, 1]), stop)
+      expect(angleBetween(frame.targets[joint.id], reference.targets[joint.id])).toBeLessThan(1e-7)
+      expect(angleBetween(previous, frame.targets[joint.id])).toBeLessThanOrEqual(.75 * MAX_TARGET_RATE * STEP + 1e-10)
+      previous = frame.targets[joint.id]
+    }
   })
   it('bounds the torso heading error and counteracts its requested yaw moment through the hips', () => {
     const model = buildHumanoid('keel-v1'), controller = new GaitController(model, 1)
@@ -450,12 +541,52 @@ describe('gait target controller', () => {
     expect(Object.keys(frame.targets).sort()).toEqual(model.scene.joints.map(j => j.id).sort())
     expect(() => controller.beginRecovery({ x: NaN, y: 0, z: 0 }, 'left')).toThrow('Invalid recovery landing')
   })
+
+  it('cancels a measured support recenter before admitting fresh walking intent', () => {
+    const model = buildHumanoid('morrow-v1'), controller = new GaitController(model, 1)
+    const releaseTick = startTicks + liftTicks + strikeTicks
+    let restartTick = -1
+    for (let tick = 0; tick < releaseTick + 240; tick++) {
+      const phase = controller.diagnostics().phase, swing = controller.diagnostics().swing
+      const loads: [number, number] = phase === 'strike' || (tick >= releaseTick && phase === 'idle') ? [1, 1] : swing === 'left' ? [0, 1] : [1, 0]
+      const measured = fixture(model, tick, loads), o = tick ? transfer(measured) : measured
+      controller.step(o, tick < releaseTick ? forward : restIntent())
+      if (tick >= releaseTick && controller.diagnostics().phase === 'idle' && !controller.done(o, restIntent())) {
+        restartTick = tick + 1; break
+      }
+    }
+    expect(restartTick).toBeGreaterThan(releaseTick)
+    const restart = transfer(fixture(model, restartTick, [1, 1]))
+    controller.step(restart, forward)
+    expect(controller.diagnostics().phase).toBe('start')
+    expect(controller.done(restart, forward)).toBe(false)
+    const transferred = structuredClone(restart), stance = restart.feet[controller.diagnostics().swing === 'left' ? 1 : 0]
+    transferred.com.x += GAIT_CONTROL.startShiftFraction * (stance.centre.x - transferred.com.x)
+    for (let tick = restartTick + 1; tick <= restartTick + startTicks; tick++)
+      controller.step(atTick(transferred, tick), forward)
+    expect(controller.diagnostics().phase).toBe('lift')
+  })
+  it('starts a recovery after a completed walking stop instead of retaining the stop balance frame', () => {
+    const model = buildHumanoid('keel-v1'), controller = new GaitController(model, 1)
+    let tick = 0
+    for (; tick < startTicks + 2; tick++) controller.step(tick ? transfer(fixture(model, tick)) : fixture(model, tick), forward)
+    expect(controller.diagnostics().phase).toBe('lift')
+    controller.stepVelocity(fixture(model, tick++, [0, 1]), stop)
+    for (let contact = 0; contact < 3; contact++) controller.stepVelocity(fixture(model, tick++, [1, 1]), stop)
+    expect(controller.diagnostics()).toMatchObject({ phase: 'idle', steps: 1 })
+
+    controller.beginRecovery({ x: .25, y: 0, z: -.35 }, 'right')
+    const observation = fixture(model, tick, [1, 0])
+    controller.stepVelocity(observation, stop)
+    expect(controller.diagnostics()).toMatchObject({ phase: 'lift', swing: 'right', steps: 1, recoveryExit: null })
+    expect(controller.done(observation, restIntent())).toBe(false)
+  })
   it.each(['touchdown', 'timeout'] as const)('returns a single recovery attempt at qualified %s for the step planner to reassess', exit => {
     const model = buildHumanoid('keel-v1'), controller = new GaitController(model, 1), balance = new BalanceController(model, 1)
     controller.beginRecovery({ x: -.2, y: 0, z: -.35 }, 'left')
-    const count = exit === 'touchdown' ? qualifiedTouchdownTick + 2 : liftTicks + strikeTicks
+    const count = exit === 'touchdown' ? qualifiedTouchdownTick + 2 : 2 * recoveryHalfTicks
     const measured = (tick: number): Observation => {
-      const o = fixture(model, tick, exit === 'touchdown' && tick >= liftTicks ? [1, 1] : [0, 1])
+      const o = fixture(model, tick, exit === 'touchdown' && tick >= recoveryHalfTicks ? [1, 1] : [0, 1])
       o.comVelocity = { x: .4, y: 0, z: -.5 }; return o
     }
     for (let tick = 0; tick < count; tick++) {
@@ -479,7 +610,7 @@ describe('gait target controller', () => {
   it('does not turn continuously loaded recovery contact into an early touchdown', () => {
     const model = buildHumanoid('keel-v1'), controller = new GaitController(model, 1)
     controller.beginRecovery({ x: -.2, y: 0, z: -.35 }, 'left')
-    const totalTicks = liftTicks + strikeTicks
+    const totalTicks = 2 * recoveryHalfTicks
     for (let tick = 0; tick < totalTicks; tick++) {
       const o = fixture(model, tick, [1, 1])
       controller.stepVelocity(o, stop)

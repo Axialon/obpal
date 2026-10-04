@@ -10,7 +10,7 @@
   touch-action: pan-y; overscroll-behavior: contain;
   overflow-wrap: anywhere;
 }
-:root :is(.rail[data-rail='x'], .ctl-bar .ctl-tabs, .surface .tray, .bt-notice .bt-n-picks, .scene-strip) {
+:root :is(.rail[data-rail='x'], .ctl-bar .ctl-tabs, .surface .tray, .bt-n-card .bt-n-picks, .scene-strip) {
   min-width: 0; overflow-x: auto; overflow-y: hidden;
   touch-action: pan-x; overscroll-behavior: contain;
   scroll-snap-type: x mandatory;

@@ -120,7 +120,15 @@ body.live .aurora i { animation-play-state: paused; }
 .link-foot { margin: 0 2px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .icon-btn { width: var(--tap); height: var(--tap); display: grid; place-items: center; border-radius: 14px; color: var(--secondary); touch-action: manipulation; transition: transform 0.12s var(--ease), background 0.15s; }
 .icon-btn:active { transform: scale(0.94); }
-.banner { flex: none; padding: 10px 16px; border-radius: 16px; color: #f6dfae; font-size: 13px; font-weight: 650; border-color: rgba(252, 211, 77, 0.35) !important; animation: rise 0.3s var(--ease); }
+.banner { flex: none; display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 16px; color: #f6dfae; font-size: 13px; font-weight: 650; border-color: rgba(252, 211, 77, 0.35) !important; animation: rise 0.3s var(--ease); }
+.banner[hidden] { display: none; }
+.banner .dot-loader { order: -1; }
+.bn-t { flex: 1; min-width: 0; }
+.bn-act, .bn-x { flex: none; min-width: 44px; min-height: 44px; margin: -10px 0; display: grid; place-items: center; border: 0; border-radius: 14px; background: none; color: inherit; font: inherit; touch-action: manipulation; }
+.bn-act { padding: 0 12px; color: var(--accent-text); font-weight: 750; }
+.bn-x { margin-right: -8px; color: var(--muted); }
+.bn-x .ic { width: 16px; height: 16px; }
+.bn-act[hidden], .bn-x[hidden] { display: none; }
 
 /* ---- the controller bar (./switcher.ts): one slot per face the screen takes, and the catalogue ----
    Icons, and the name only on the one in use (or on every slot, where each has the room). Switching slides the lit
@@ -302,10 +310,9 @@ body.live .aurora i { animation-play-state: paused; }
 :root.land .surface.left .bar, :root.land .surface.left .pad, :root.land .surface.left .wii, :root.land .surface.left .mouse { grid-column: 2; }
 :root.land .surface.left .modes, :root.land .surface.left .tray, :root.land .surface.left .dock { grid-column: 1; }
 
-/* ---- toast ---- */
-/* Above the keyboard dock while it is open (--kbd-lift: from the bottom to the dock's top). */
-.toast { position: fixed; left: 50%; bottom: max(calc(112px + var(--safe-b)), var(--kbd-lift, 0px)); transform: translate(-50%, 10px); opacity: 0; padding: 12px 18px; border-radius: 18px; font-weight: 650; font-size: 14px; line-height: 1.4; pointer-events: none; transition: opacity 0.2s var(--ease), transform 0.25s var(--ease); width: max-content; max-width: min(360px, calc(100% - 2 * var(--edge))); text-align: center; text-wrap: balance; z-index: 40; }
-.toast.show { opacity: 1; transform: translate(-50%, 0); }
+/* ---- toast ----
+   Short feedback is a notice (src/ui/kit/notice.ts), under the top bar. #toast only keeps the last words, out of sight. */
+.toast { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; pointer-events: none; }
 
 /* ---- sheets (settings, buttons, picker, the gamepad's) ---- */
 /* A sheet fits the screen that's actually visible (dvh: never under the browser's own bars), leaves a strip above it
@@ -477,7 +484,7 @@ body:has(.sheet-wrap) .hint { visibility: hidden; }
 .pad-part .pp-tag:empty { display: none; }
 .pad-part .pp-x { position: relative; display: none; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 50%; background: rgb(0 0 0 / 0.12); color: inherit; }
 /* Small drawn, large to a finger: the release reaches past its disc to a full touch target. */
-.pad-part .pp-x::before, .pick-add::before, .bt-n-x::before, .hint-x::before { content: ''; position: absolute; inset: -8px; }
+.pad-part .pp-x::before, .pick-add::before, .hint-x::before { content: ''; position: absolute; inset: -8px; }
 .hint-x { position: relative; }
 .pad-part .pp-x .ic { width: 14px; height: 14px; }
 .pad-part.sel { background: var(--glass-light) !important; color: var(--accent-ink); border-color: rgb(255 255 255 / 0.3) !important; }
@@ -820,13 +827,9 @@ body.resting .rest { display: grid; }
 [data-src='pad'] { --src: 245 176 38; }
 [data-src='back'] { --src: 244 63 94; }
 
-/* A device recognised, or an input nothing uses: over the bar for a few seconds, never over the controls below it. */
-.bt-notice { position: fixed; z-index: 26; top: calc(6px + env(safe-area-inset-top)); left: 50%; width: min(470px, calc(100% - 16px)); transform: translateX(-50%);
-  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 7px 6px 7px 8px; border-radius: 20px; animation: bt-drop 0.34s var(--ease); }
-/* Near-solid, like the sheets: the bar it covers must not read through it. */
-.bt-notice.glass { background: linear-gradient(160deg, rgb(var(--surface-rgb)), var(--sheet)); box-shadow: var(--glass-shadow), 0 14px 34px rgb(0 0 0 / 0.28); }
-.bt-notice.out { animation: fade-out 0.2s var(--ease) forwards; }
-@keyframes bt-drop { from { transform: translate(-50%, -16px); opacity: 0; } }
+/* A device recognised, or an input nothing uses: a notice (src/ui/kit/notice.ts) just under the bar for a few seconds. Its card
+   wraps: the input and what it does, one button, and for a bind offer the choices on a row of their own. */
+.bt-n-card { width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 1px 0; }
 .bt-n-ic { flex: none; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 12px; background: rgb(var(--src) / 0.22); color: var(--ink); box-shadow: inset 0 0 0 1px rgb(var(--src) / 0.5); }
 .bt-n-ic .ic { width: 19px; height: 19px; }
 .bt-n-txt { flex: 1; min-width: 0; display: grid; line-height: 1.25; }
@@ -837,11 +840,9 @@ body.resting .rest { display: grid; }
 .bt-n-pick { min-width: 40px; padding: 0 10px; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.08); color: var(--ink); }
 .bt-n-go:active, .bt-n-pick:active { transform: scale(0.96); }
 /* A bind offer: the choices get a row of their own under the input. */
-.bt-n-picks { order: 5; flex: 1 1 100%; display: flex; gap: 6px; padding: 0 0 1px 46px; overflow-x: auto; scrollbar-width: none; }
+.bt-n-picks { order: 5; flex: 1 1 100%; display: flex; gap: 6px; padding: 0 0 1px 46px; overflow-x: auto; scrollbar-width: none; pointer-events: auto; }
 .bt-n-picks::-webkit-scrollbar { display: none; }
 .bt-n-picks .bt-n-go { margin-left: auto; }
-.bt-n-x { position: relative; order: 4; flex: none; width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 10px; background: transparent; color: var(--muted); }
-.bt-n-x .ic { width: 16px; height: 16px; }
 
 /* Settings → Buttons: the sources that have worked here, and the way in. */
 .set-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 58px; padding: 0 12px 0 14px; border-radius: 18px; color: var(--ink); text-align: left; touch-action: manipulation; }

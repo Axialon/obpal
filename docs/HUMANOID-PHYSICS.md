@@ -795,3 +795,101 @@ pose stops/contact interference, shared-world two-actor motion, pushes, gait,
 recovery and contact-supported get-up, with physics advance fitting the clock budget.
 F1c retains authored lumbar, BODY routing,
 latency, clock/frame timing, mesh-crossing and LOD transition acceptance.
+
+## 8. Contact-inertia candidate (humanoid-f1a2-v3)
+
+The feet retain their box dimensions, friction, 1.3 kg mass and joint contracts.
+Their declared principal moments are three times those of a uniform box: the
+physical upper bound obtained by putting that mass at the eight corners. The
+same rule applies to all eight forms, scenes and tests. Rapier, the custom
+backend and the coupled torque predictor use the declared moments. Bodies
+without an override retain their existing mass-property construction.
+
+Declared inertia overrides are supported only by the custom and Rapier
+backends. The PhysX adapter still uses uniform-shape inertia; do not pass an
+override to a generic PhysX scene. Humanoid scenes already fail its unsupported
+contact-settings and torque-integration checks.
+
+**Replay:** v2 journals do not replay against v3. Record and replay with the same
+model version, backend and fixed tick. No committed journal pins a v2 hash.
+
+The native fixture carries a 59.5 kg total load with its payload 0.8 m above the
+sole. At COP 0.8 times the half-length, the selected inertia gives peak deepest
+corner sink of 4.146 mm (Keel) and 4.155 mm (Morrow), without toppling. The unchanged
+inertia topples there. A 2 by 2 tiling preserves the outer sole, mass and inertia
+but both tiled candidates topple at that offset on both sizes; it was rejected.
+These fixture measurements establish the plant choice, not walking acceptance.
+`physics-contact-sink.test.ts` pins the mass/inertia/COP grid to 0.25 mm and checks
+the spring law only at three times uniform inertia.
+
+The npm binding 0.21.0 wraps Rust Rapier 0.36.0. Its exposed
+`contact_natural_frequency` updates dynamic-contact softness; contacts against a
+fixed floor use separate 60 Hz static-contact softness with no exposed setter.
+Allowed error, prediction distance and length unit are genuine native setters,
+but leave the measured loaded-floor fixture trajectories identical. This is not
+a claim that they are globally inert. The application's `predictionDistance`
+remains the distance threshold for loaded-contact observations and prediction.
+See the [binding implementation](https://github.com/dimforge/rapier/blob/v0.36.0/bindings/typescript/src/dynamics/integration_parameters.rs)
+and [integration defaults](https://github.com/dimforge/rapier/blob/v0.36.0/src/dynamics/integration_parameters.rs).
+
+The prior native contact research rejected 32 solver iterations, two internal
+PGS iterations and 480 Hz stepping: less than 1% sink improvement, at up to twice
+the work. Its multibody spherical ankle still sank 3.8 mm and would require an
+adapter and coupled-servo rewrite. CCD did not improve these slow-foot contacts.
+Contact skin only offsets the floor: the research measured 4.66 to 1.65 mm with
+3 mm skin. Skin, foot/shin mass changes and hand mass-property changes are
+report-only alternatives; none is applied by this candidate.
+
+Walking's two reaction corrections reuse the target-independent constraint
+response within one synchronous scope. Each target map still runs the coupled
+servo solve. Input snapshots invalidate reuse after scene, state or contact
+changes, and returned matrices own their arrays. The native Keel and Morrow
+W1, W2 and W3 trials retain identical per-tick state hashes; this optimization
+does not change contact parameters or integration order.
+
+The final native comparison at `d10e4f6` against master `70a5bdbd` passes the
+unchanged 10% p95 regression gate in all seven scenarios. Four repetitions
+alternate master/lane order; each table entry is the median of the four
+per-repetition p95 values, measured on the same Node 22.23.1 / i9-13900KF machine
+with no concurrent lane native workers or agents. Other lanes' browser jobs
+remained on the shared machine. Independent warmups and a fresh
+two-second settle precede timing. Stance and in-place windows are 10 s; walking
+uses the common pre-fall windows of 6 s for Keel and 3 s for Morrow. Master
+Morrow falls at 3.508333 active seconds and reaches its guard fault at 3.904167 s,
+so later falling work is excluded from this walking comparison.
+
+| Native scenario | Master p95, ms | Candidate p95, ms | Change |
+| --- | ---: | ---: | ---: |
+| Keel stance | 3.43670 | 3.42890 | -0.23% |
+| Morrow stance | 3.46980 | 3.25475 | -6.20% |
+| Cairn I stance | 3.42025 | 3.38850 | -0.93% |
+| Keel in place | 4.58895 | 3.67325 | -19.95% |
+| Morrow in place | 4.32770 | 4.03690 | -6.72% |
+| Keel walking | 6.41365 | 5.14435 | -19.79% |
+| Morrow walking | 5.78690 | 5.21210 | -9.93% |
+
+An earlier run failed Morrow stance at +11.648%. Indexed traversal of the
+constraint projection basis resolved that measured failure while preserving
+arithmetic order and all 10 protected native snapshot hashes. Its first passing
+comparison peaked at +3.102846%, for Cairn I stance. After the mixed step-to-turn
+fix, the fresh seven-scenario comparison above has a largest ratio of 0.997730,
+for Keel stance. These native wall-time measurements
+do not establish browser frame pacing or a real-time guarantee.
+
+The final source check passes all four TypeScript configurations and 4,337
+ordinary tests, with 54 expected failures and 14 skips (4,405 total). The 24
+anatomy expected failures remain. All 14 nominal gait rows, 32 BODY rows, 25
+balance assertions and 45 contact-sink assertions pass; all 24 R1 native-state
+clock comparisons match across eight forms. Native get-up safety passes 16/16
+and world safety 4/4, but neither set recovers: these safety checks establish
+finite state and bounded effort, not the penetration or no-fall gates.
+
+Six additional final-source journal replays reproduce every native snapshot
+and the concatenated stream hash exactly: both pilots at 720 push ticks, 1,920
+walking ticks and 8,999/9,000 mixed step-turn-release ticks. These one-actor runs
+use the world's default first-seat spawn at x = -1 m. The mixed runs export a
+capacity-one journal each tick; the production 7,200-record limit is unchanged.
+All 23,279 recorded ticks match their replay. Action-target representations
+first differ at tick 6 through quaternion rounding, so the exact-hash claim is
+for native state, not byte-identical journal actions. These replay cases do not
+replace the separately measured physical acceptance trials at the origin.

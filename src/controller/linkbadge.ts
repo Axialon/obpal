@@ -8,6 +8,7 @@
 import type { ConnectionSeal, LinkStats, VerifiedBy } from '@obpal/core'
 import { destroySeal, sealElement, landSeal, SEAL_STYLE, tiltSeal, DotLoader, DOT_LOADER_STYLE } from '@obpal/host'
 import { showShares } from '../ui/shares'
+import { dismiss as dismissNotice, notify } from '../ui/kit/notice'
 import { sheetExits } from './sheet'
 
 const NS = 'http://www.w3.org/2000/svg'
@@ -30,6 +31,7 @@ const SHIELD = () => icon(['path', { d: 'M12 3.5 5.5 6v5.2c0 4 2.7 7.4 6.5 8.8 3
 const PATH = () => icon(['circle', { cx: '6', cy: '17.5', r: '2.2' }], ['circle', { cx: '18', cy: '6.5', r: '2.2' }], ['path', { d: 'M8 16.2c3-1 2.3-4.4 5-5.6 1.4-.6 2.6-1.2 3.2-2.4' }])
 const CLOCK = () => icon(['circle', { cx: '12', cy: '13', r: '7' }], ['path', { d: 'M12 9.5V13l2.3 1.8M10 3.5h4' }])
 const CLOSE = () => icon(['path', { d: 'M6.5 6.5l11 11M17.5 6.5l-11 11' }])
+const INFO = () => icon(['circle', { cx: '12', cy: '12', r: '8.5' }], ['path', { d: 'M12 11v5M12 8h.01' }])
 
 function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, string> = {}, ...kids: (Node | string)[]): HTMLElementTagNameMap[K] {
   const el = document.createElement(tag)
@@ -56,14 +58,29 @@ function pathWords(s: LinkStats): [title: string, detail: string] {
   }
 }
 
+/** The id of the trust notice among the notices (src/ui/kit/notice.ts). */
+const TRUST = 'trust'
+/**
+ * The trust notice stays this long after the seal's moment ends (SETTLE_FIRST_MS the first time this session that a screen
+ * is connected to), then folds into the badge in the bar, which already carries the seal and opens its comparison. A touch
+ * on it holds it still. Left in the gate card (before the controls are up) it stays until they are.
+ */
+const SETTLE_MS = 8000
+const SETTLE_FIRST_MS = 12000
+const SEEN = 'obpal.trust.seen.'
+
 export class LinkBadge {
   readonly el: HTMLButtonElement
   private readonly ms: HTMLElement
   private stats: LinkStats | null = null
-  private sheet: { body: HTMLElement; close: () => void } | null = null
+  private sheet: { body: HTMLElement; close: (handOver?: boolean) => void } | null = null
   private stopMoment = () => {}
   private closeShares = () => {}
   private first: HTMLElement | null = null
+  private firstDismiss: HTMLButtonElement | null = null
+  /** The notice is up among the notices (over the controls' work area), not in the gate card. */
+  private railed = false
+  private firstMs = SETTLE_MS
   private firstObserver: MutationObserver | null = null
   private seal: ConnectionSeal | null = null
   private compact: HTMLElement | null = null
@@ -97,6 +114,13 @@ export class LinkBadge {
 .trust-first .trust-compare>span{flex:0 1 auto;min-width:0;white-space:normal;text-align:center}
 .gate-card .trust-first .seal-compact{display:inline-grid}
 .gate-card .trust-first .trust-compare{display:grid;grid-column:1/-1;justify-items:center;gap:6px}
+.trust-shares .ic{display:none}
+.nt-item .trust-first{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto;column-gap:4px;align-items:center;width:100%;min-width:0;padding:0;font-size:12px;line-height:1.3}
+.nt-item .trust-domain{grid-column:1;grid-row:1;min-height:0;padding:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.nt-item .trust-compare{grid-column:1;grid-row:2;position:relative;min-height:0;padding:0 0 2px;color:var(--secondary);font-size:11.5px;font-weight:600;line-height:1.3}
+.nt-item .trust-compare>span{text-align:left}
+.nt-item .trust-shares{display:none}
+.nt-item .trust-dismiss{position:relative;right:auto;top:auto}
 `
     document.head.append(style)
     this.layoutObserver = new MutationObserver(() => this.placeStatus())
@@ -143,11 +167,15 @@ export class LinkBadge {
     const words = h('span', {}, 'Connected to the screen showing this seal')
     const compare = h('button', { type: 'button', class: 'trust-compare', 'aria-label': 'Compare connection seal' }, sealElement(s.seal, true), words)
     compare.onclick = () => this.open()
-    const shares = h('button', { type: 'button', class: 'trust-shares' }, 'What this shares')
+    const shares = h('button', { type: 'button', class: 'trust-shares' }, INFO(), h('span', { class: 'trust-lbl' }, 'What this shares'))
     shares.onclick = () => { this.closeShares(); this.closeShares = showShares(this.disconnect) }
-    const dismiss = h('button', { type: 'button', class: 'trust-dismiss', 'aria-label': 'Dismiss connection notice' }, CLOSE())
-    dismiss.onclick = () => this.clearFirst()
-    this.first = h('div', { class: 'trust-first glass', role: 'status' }, domain, compare, shares, dismiss)
+    this.firstDismiss = h('button', { type: 'button', class: 'trust-dismiss', 'aria-label': 'Dismiss connection notice' }, CLOSE())
+    this.firstDismiss.onclick = () => this.clearFirst()
+    this.first = h('div', { class: 'trust-first glass', role: 'status' }, domain, compare, shares, this.firstDismiss)
+    // The first time this session that this phone page is opened on this site (the key is the page's host, not a screen's), the notice stays a little longer.
+    let first = true
+    try { first = sessionStorage.getItem(SEEN + location.host) !== '1'; sessionStorage.setItem(SEEN + location.host, '1') } catch { /* private mode */ }
+    this.firstMs = first ? SETTLE_FIRST_MS : SETTLE_MS
     this.firstObserver = new MutationObserver(() => this.placeFirst())
     this.firstObserver.observe(document.getElementById('app') ?? document.body, { childList: true, subtree: true })
     this.placeFirst()
@@ -159,13 +187,32 @@ export class LinkBadge {
     if (this.compact && performance.now() >= this.momentUntil) tiltSeal(this.compact, x, y)
     this.sheet?.body.querySelectorAll<HTMLElement>('.connection-seal').forEach(row => tiltSeal(row, x, y))
   }
+  /**
+   * In the controls (the bar is up): a notice just under the bar, over the work area, that folds by itself once the seal's
+   * moment has passed and has been seen for a while. Before that (a gate card is up): in the card, where it stays.
+   */
   private placeFirst() {
     if (!this.first) return
     const bar = this.el.closest('.bar')
     const gate = document.querySelector('.gate-card')
     if (bar?.isConnected) {
-      if (this.first.previousElementSibling !== bar) bar.after(this.first)
       this.firstObserver?.disconnect()
+      if (this.railed) return
+      this.railed = true
+      const node = this.first
+      node.classList.remove('glass')
+      this.firstDismiss?.remove()
+      // Over the work area the notice is a line to read, not a button: a touch on it reaches what is under it.
+      const compare = node.querySelector<HTMLElement>('.trust-compare')
+      if (compare) compare.replaceWith(h('span', { class: 'trust-compare' }, ...compare.childNodes))
+      const ms = Math.max(0, this.momentUntil - performance.now()) + this.firstMs
+      notify({
+        id: TRUST, tier: 'ceremony', node, ms, icon: false, announce: false, passive: true, closeLabel: 'Dismiss connection notice', closeClass: 'trust-dismiss',
+        onClose: () => {
+          node.querySelectorAll<HTMLElement>('.connection-seal').forEach(destroySeal)
+          if (this.first === node) { this.first = null; this.railed = false }
+        },
+      })
     } else if (gate) {
       if (this.first.parentElement !== gate) gate.prepend(this.first)
       this.firstObserver?.disconnect()
@@ -173,8 +220,13 @@ export class LinkBadge {
   }
   private clearFirst() {
     this.firstObserver?.disconnect(); this.firstObserver = null
-    this.first?.querySelectorAll<HTMLElement>('.connection-seal').forEach(destroySeal)
-    this.first?.remove(); this.first = null
+    const node = this.first
+    const railed = this.railed
+    this.first = null
+    this.railed = false
+    if (railed) { dismissNotice(TRUST); return }
+    node?.querySelectorAll<HTMLElement>('.connection-seal').forEach(destroySeal)
+    node?.remove()
   }
   /** Gamepad uses its own chrome; keep the same connection status beside its motion controls. */
   private placeStatus() {
@@ -203,6 +255,13 @@ export class LinkBadge {
     if (this.sheet) this.fill(this.sheet.body)
   }
 
+  /** What this shares, from the connection sheet: the sheet hands its Back step over, so closing it does not close this too. */
+  private openShares() {
+    this.sheet?.close(true)
+    this.closeShares()
+    this.closeShares = showShares(this.disconnect)
+  }
+
   /** The details: a line each on encryption, verification, the path and the round trip. */
   private open() {
     if (this.sheet) return
@@ -213,9 +272,10 @@ export class LinkBadge {
       h('h2', {}, 'Connection'), body,
       h('p', { class: 'link-foot' }, 'The room service only passes the handshake along. It never sees the code’s secret, or anything you send.'))
     const wrap = h('div', { class: 'sheet-wrap' }, card)
-    let exits = () => {}
-    const close = () => { exits(); this.clearSeal(); this.sheet = null; wrap.classList.add('out'); setTimeout(() => wrap.remove(), 200) }
-    x.addEventListener('click', close)
+    let exits = (_handOver?: boolean) => {}
+    // `handOver`: another layer opens in the same tap (What this shares), so it takes over this sheet's Back step.
+    const close = (handOver?: boolean) => { exits(handOver === true); this.clearSeal(); this.sheet = null; wrap.classList.add('out'); setTimeout(() => wrap.remove(), 200) }
+    x.addEventListener('click', () => close())
     this.sheet = { body, close }
     this.fill(body)
     document.body.appendChild(wrap)
@@ -232,7 +292,7 @@ export class LinkBadge {
       h('div', { class: 'link-row', ...(tone ? { 'data-tone': tone } : {}) }, h('span', { class: 'lr-ic' }, ic), h('span', {}, h('b', {}, title), h('small', {}, detail)))
     if (seal && !s) {
       const shares = h('button', { type: 'button', class: 'btn' }, 'What this shares')
-      shares.onclick = () => { this.sheet?.close(); this.closeShares(); this.closeShares = showShares(this.disconnect) }
+      shares.onclick = () => this.openShares()
       body.replaceChildren(h('div', { class: 'link-seal' }, h('b', {}, 'Connection seal'), same ? previous! : sealElement(seal), h('small', {}, 'Check both screens show the same seal')), row(PATH(), 'Finding the path', 'Connection statistics appear when the link reports them.'), shares)
       return
     }
@@ -250,7 +310,7 @@ export class LinkBadge {
     ]
     if (seal) rows.unshift(h('div', { class: 'link-seal' }, h('b', {}, 'Connection seal'), same ? previous! : sealElement(seal), h('small', {}, 'Check both screens show the same seal')))
     const shares = h('button', { type: 'button', class: 'btn' }, 'What this shares')
-    shares.onclick = () => { this.sheet?.close(); this.closeShares(); this.closeShares = showShares(this.disconnect) }
+    shares.onclick = () => this.openShares()
     body.replaceChildren(...rows, shares)
   }
 }

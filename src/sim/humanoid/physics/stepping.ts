@@ -1,5 +1,7 @@
 /** Pure capture and recovery-step geometry. Requests still leave the controller through ActuationGate. */
-import type { Vec3 } from '../../physics/math'
+import { add, sub, scale, cross, rotate, conjugate, clamp, type Vec3, type Quat } from '../../physics/math'
+import { STEP, type Body } from '../../physics/schema'
+import { bodyInertia } from '../../physics/servo'
 import type { Observation } from './observation'
 
 export const SUPPORT_SHRINK_M = .02 // Simulation default, m: inward support margin.
@@ -12,6 +14,94 @@ export const STEP_MAX_LOAD_SHARE = .6 // Simulation default, dimensionless: exit
 const EPS = 1e-10 // Numerical tolerance for horizontal geometry, not a control threshold.
 const cross2 = (a: Vec3, b: Vec3, c: Vec3) => (b.x - a.x) * (c.z - a.z) - (b.z - a.z) * (c.x - a.x)
 const finite = (p: Vec3) => [p.x, p.y, p.z].every(Number.isFinite)
+
+export const CONTACT_CONTROL = Object.freeze({
+  cornerFrequencySquared: 142500, // Simulation default, s^-2, fitted to native box-floor contacts.
+  sinkBudgetM: .004, rhoCap: .85, // Simulation defaults, m and dimensionless COP radius.
+  trimStartM: .0035, trimRatePerS: 4, restoreRatePerS: .05, // Simulation defaults, m and s^-1.
+  flatTiltRad: .5 * Math.PI / 180, conformSeconds: .08, blendSeconds: .06, copGain: .5, // Simulation defaults, rad, s and dimensionless.
+})
+/** Four loaded sole corners. The fitted spring law is validated at the corner-mass inertia bound. */
+export function contactSink(foot: Body, normalForceN: number) {
+  if (foot.fixed || foot.shape.kind !== 'box' || !Number.isFinite(normalForceN) || normalForceN < 0)
+    throw new RangeError('Invalid sole sink input')
+  const h = foot.shape.half, inertia = bodyInertia(foot)
+  const effectiveMassKg = 1 / (1 / foot.mass + h.z ** 2 / inertia.x + h.x ** 2 / inertia.z)
+  const stiffnessNpm = effectiveMassKg * CONTACT_CONTROL.cornerFrequencySquared
+  return { effectiveMassKg, stiffnessNpm, centredSinkM: normalForceN / (4 * stiffnessNpm) }
+}
+/** Load-dependent COP diamond in world XZ, centred on the sole rather than the ankle anchor. */
+export function sinkSafeDiamond(foot: Body, normalForceN: number, trim = 1, rhoCap: number = CONTACT_CONTROL.rhoCap) {
+  if (!Number.isFinite(trim) || trim < 0 || trim > 1) throw new RangeError('Invalid sink trim')
+  if (!Number.isFinite(rhoCap) || rhoCap < 0 || rhoCap > .95) throw new RangeError('Invalid sink radius')
+  const sink = contactSink(foot, normalForceN), h = (foot.shape as { kind: 'box'; half: Vec3 }).half
+  const rho = clamp(CONTACT_CONTROL.sinkBudgetM / Math.max(sink.centredSinkM, 1e-30) - 1, 0, rhoCap) * trim
+  const centre = add(foot.position, rotate(foot.rotation, { x: 0, y: -h.y, z: 0 }))
+  const points = [{ x: -h.x * rho, y: 0, z: 0 }, { x: 0, y: 0, z: -h.z * rho },
+    { x: h.x * rho, y: 0, z: 0 }, { x: 0, y: 0, z: h.z * rho }]
+    .map(p => ({ ...add(centre, rotate(foot.rotation, p)), y: centre.y }))
+  return { ...sink, rho, centre, points: supportHull(points) }
+}
+export interface SinkSupportFoot extends ReturnType<typeof sinkSafeDiamond> {
+  id: string; normalForceN: number; trim: number; deepestM: number
+  tiltRad: number; contactSeconds: number; contactBlend: number; lateConform: boolean; measuredCop: Vec3
+}
+/** Observation-only depth trim. Repeated reads cannot advance its clock; missed ticks reset its history. */
+export class SinkSafeSupport {
+  private readonly feet: Body[]
+  private lastTick = -1
+  private trims = new Map<string, number>()
+  private contacts = new Map<string, { first: number; flat: number | null }>()
+  private current: SinkSupportFoot[] = []
+  constructor(bodies: readonly Body[], footIds: readonly string[]) {
+    this.feet = footIds.map(id => {
+      const foot = bodies.find(b => b.id === id)
+      if (!foot || foot.fixed || foot.shape.kind !== 'box') throw new RangeError('Missing sink-safe sole')
+      return structuredClone(foot)
+    })
+  }
+  update(o: Observation): SinkSupportFoot[] {
+    const advance = o.stateTick !== this.lastTick
+    if (advance && o.stateTick !== this.lastTick + 1) { this.trims.clear(); this.contacts.clear() }
+    this.current = this.feet.flatMap(spec => {
+      const measured = o.feet.find(f => f.id === spec.id), body = o.bodies.find(b => b.id === spec.id)
+      if (!measured || !body || !Number.isFinite(measured.minSoleY) || !Number.isFinite(measured.normalImpulseNs) || measured.normalImpulseNs < 0)
+        throw new RangeError('Invalid sink-safe observation')
+      const deepestM = Math.max(0, -measured.minSoleY), previous = this.trims.get(spec.id) ?? 1
+      const trim = clamp(previous + (advance ? STEP * (deepestM > CONTACT_CONTROL.trimStartM ? -CONTACT_CONTROL.trimRatePerS : CONTACT_CONTROL.restoreRatePerS) : 0), 0, 1)
+      this.trims.set(spec.id, trim)
+      if (measured.normalImpulseNs <= 0) { this.contacts.delete(spec.id); return [] }
+      const normalForceN = measured.normalImpulseNs / STEP
+      const tiltRad = Math.acos(clamp(rotate(body.rotation, { x: 0, y: 1, z: 0 }).y, -1, 1))
+      const contact = this.contacts.get(spec.id) ?? { first: o.stateTick, flat: null }
+      if (contact.flat === null && tiltRad <= CONTACT_CONTROL.flatTiltRad && supportHull(measured.contactPoints).length >= 3) contact.flat = o.stateTick
+      this.contacts.set(spec.id, contact)
+      const contactSeconds = (o.stateTick - contact.first) * STEP
+      const contactBlend = contact.flat === null ? 0 : clamp((o.stateTick - contact.flat) * STEP / CONTACT_CONTROL.blendSeconds, 0, 1)
+      return [{ ...sinkSafeDiamond({ ...spec, ...body }, normalForceN, trim), id: spec.id, normalForceN, trim, deepestM,
+        tiltRad, contactSeconds, contactBlend, lateConform: contact.flat === null && contactSeconds >= CONTACT_CONTROL.conformSeconds,
+        measuredCop: measured.centreOfPressure ? { ...measured.centreOfPressure } : { ...measured.centre } }]
+    })
+    this.lastTick = o.stateTick
+    return this.current
+  }
+}
+/** Zero-moment landing conform, followed by measured COP feedback. The caller inverts only a target offset. */
+export function conformAnkleMoment(foot: SinkSupportFoot, anchor: Vec3, desired: Vec3): Vec3 {
+  const measured = scale(cross(sub(foot.measuredCop, anchor), { x: 0, y: foot.normalForceN, z: 0 }), -1)
+  return scale(add(desired, scale(sub(desired, measured), CONTACT_CONTROL.copGain)), foot.contactBlend)
+}
+/** Clip a foot moment through its implied COP, retaining only the bounded ankle share. */
+export function sinkSafeAnkleMoment(foot: SinkSupportFoot, anchor: Vec3, force: Vec3, moment: Vec3): { moment: Vec3; residual: Vec3; cop: Vec3 } {
+  if (![anchor, force, moment].every(finite) || force.y <= 0) throw new RangeError('Invalid ankle support moment')
+  const height = foot.centre.y - anchor.y
+  const implied = { x: anchor.x + (-moment.z + height * force.x) / force.y, y: foot.centre.y,
+    z: anchor.z + (moment.x + height * force.z) / force.y }
+  const cop = projectToPolygon(foot.points, implied) ?? foot.centre
+  const bounded = scale(cross(sub(cop, anchor), force), -1)
+  bounded.y = moment.y
+  return { moment: bounded, residual: sub(moment, bounded), cop }
+}
 
 /** Counterclockwise hull in world XZ. Contact heights are carried through, never used to invent support. */
 export function supportHull(points: readonly Vec3[]): Vec3[] {
@@ -90,6 +180,77 @@ export function projectToPolygon(points: readonly Vec3[], point: Vec3): Vec3 | n
 }
 
 export interface CapturePoint { heightM: number; omega: number; point: Vec3 }
+export interface AngularMomentumState {
+  /** World angular momentum about the fixed contact pivot, kg m^2/s, including each body's spin. */
+  angularMomentum: Vec3
+  massKg: number; heightM: number
+  /** Horizontal velocity with the same contact angular momentum in the constant-height pendulum, m/s. */
+  equivalentVelocity: Vec3
+}
+/** ALIP state about a stationary pivot. The y-up signs are vx=-Lz/(mH), vz=Lx/(mH). */
+export function angularMomentumState(bodies: readonly Body[], o: Pick<Observation, 'bodies' | 'com'>, pivot: Vec3): AngularMomentumState {
+  if (![o.com, pivot].every(finite)) throw new RangeError('Invalid angular momentum pivot')
+  let angularMomentum: Vec3 = { x: 0, y: 0, z: 0 }, massKg = 0
+  for (const spec of bodies) {
+    if (spec.fixed) continue
+    const body = o.bodies.find(b => b.id === spec.id)
+    if (!body || ![body.position, body.velocity, body.angularVelocity, body.rotation].every(finite) ||
+      !Number.isFinite(body.rotation.w) || !Number.isFinite(spec.mass) || spec.mass <= 0)
+      throw new RangeError('Invalid angular momentum body')
+    const inertia = bodyInertia(spec), localVelocity = rotate(conjugate(body.rotation), body.angularVelocity)
+    const spin = rotate(body.rotation, { x: inertia.x * localVelocity.x, y: inertia.y * localVelocity.y, z: inertia.z * localVelocity.z })
+    angularMomentum = add(angularMomentum, add(cross(sub(body.position, pivot), scale(body.velocity, spec.mass)), spin))
+    massKg += spec.mass
+  }
+  const heightM = o.com.y - pivot.y
+  if (!(heightM > 0) || !Number.isFinite(heightM) || !(massKg > 0) || !Number.isFinite(massKg) || !finite(angularMomentum))
+    throw new RangeError('Invalid angular momentum state')
+  const equivalentVelocity = { x: -angularMomentum.z / (massKg * heightM), y: 0, z: angularMomentum.x / (massKg * heightM) }
+  if (!finite(equivalentVelocity)) throw new RangeError('Invalid angular momentum velocity')
+  return { angularMomentum, massKg, heightM, equivalentVelocity }
+}
+
+/** Invert one constant-height pendulum step after a fixed-pivot touchdown; no impact impulse is assumed. */
+export function alipStepPlacement(positionM: number, velocityMps: number, omegaPerS: number, remainingSeconds: number,
+  stepSeconds: number, targetVelocityMps: number, momentumRetention = 0) {
+  if (![positionM, velocityMps, omegaPerS, remainingSeconds, stepSeconds, targetVelocityMps, momentumRetention].every(Number.isFinite) ||
+    omegaPerS <= 0 || remainingSeconds < 0 || stepSeconds <= 0 || momentumRetention < 0 || momentumRetention > 1)
+    throw new RangeError('Invalid ALIP step')
+  const c = Math.cosh(omegaPerS * remainingSeconds), s = Math.sinh(omegaPerS * remainingSeconds)
+  const cT = Math.cosh(omegaPerS * stepSeconds), sT = Math.sinh(omegaPerS * stepSeconds)
+  const touchdownPositionM = c * positionM + s * velocityMps / omegaPerS
+  const touchdownVelocityMps = omegaPerS * s * positionM + c * velocityMps
+  const nextRelativePositionM = ((1 - momentumRetention) * targetVelocityMps + (momentumRetention - cT) * touchdownVelocityMps) / (omegaPerS * sT)
+  const footOffsetM = touchdownPositionM - nextRelativePositionM
+  const terminalVelocityMps = omegaPerS * sT * nextRelativePositionM + cT * touchdownVelocityMps
+  if (![footOffsetM, touchdownPositionM, touchdownVelocityMps, nextRelativePositionM, terminalVelocityMps].every(Number.isFinite))
+    throw new RangeError('Invalid ALIP prediction')
+  return { footOffsetM, touchdownPositionM, touchdownVelocityMps, nextRelativePositionM, terminalVelocityMps }
+}
+
+/** Sole-centre landing under fixed height, a stationary COP and a yaw-only heading. The caller applies reach and gate limits.
+ * Gong and Grizzle's ALIP concepts; original implementation. Gravity remains the 9.81 m/s^2 simulation default.
+ */
+export function alipLandingCentre(bodies: readonly Body[], o: Observation, stanceFootId: string, fallbackCop: Vec3,
+  heading: Quat, commandVelocity: Vec3, swingSide: -1 | 1, elapsed: number, stepSeconds: number, width: number,
+  sagittalTerminalFactor: number, momentumRetention = 0): Vec3 {
+  const foot = o.feet.find(f => f.id === stanceFootId)
+  if (!foot || ![fallbackCop, heading, commandVelocity].every(finite) || !Number.isFinite(heading.w) ||
+    ![elapsed, stepSeconds, width, sagittalTerminalFactor].every(Number.isFinite) || elapsed < 0 || stepSeconds <= 0 || width < 0 ||
+    sagittalTerminalFactor < 0 || (swingSide !== -1 && swingSide !== 1)) throw new RangeError('Invalid ALIP landing')
+  const contact = foot.centreOfPressure ?? fallbackCop, state = angularMomentumState(bodies, o, contact), inverse = conjugate(heading)
+  const r = rotate(inverse, sub(o.com, contact)), v = rotate(inverse, state.equivalentVelocity), desired = rotate(inverse, commandVelocity)
+  const omega = Math.sqrt(9.81 / state.heightM), remaining = Math.max(0, stepSeconds - elapsed)
+  desired.z *= sagittalTerminalFactor
+  // A new right stance ends with leftward momentum; a new left stance ends with rightward momentum.
+  desired.x -= swingSide * .5 * width * omega * Math.tanh(omega * stepSeconds / 2)
+  return add(contact, rotate(heading, {
+    x: alipStepPlacement(r.x, v.x, omega, remaining, stepSeconds, desired.x, momentumRetention).footOffsetM,
+    y: 0,
+    z: alipStepPlacement(r.z, v.z, omega, remaining, stepSeconds, desired.z, momentumRetention).footOffsetM,
+  }))
+}
+
 /** Linear inverted-pendulum capture point; vertical velocity is not part of this horizontal model. */
 export function capturePoint(com: Vec3, velocity: Vec3, cop: Vec3, gravityMps2 = 9.81): CapturePoint | null {
   if (![com, velocity, cop].every(finite) || !Number.isFinite(gravityMps2) || gravityMps2 <= 0) return null
@@ -158,16 +319,19 @@ export function chooseSwingFoot(loads: Record<FootSide, number>, exitDirection: 
 export interface LandingInput {
   capturePoint: Vec3; cop: Vec3; omega: number; stanceAnkle: Vec3; swing: FootSide
   yawRad: number; hipHeightM: number; exitDirection: Vec3
+  /** Simulation default, s: measured or planned remaining time until contact. */
+  stepTimeS?: number
 }
 export interface LandingTarget { point: Vec3; predicted: Vec3; capped: boolean }
 /** Capture evolution plus overshoot, constrained to the swing side and the 0.6 L reach disc about the stance ankle. */
 export function landingTarget(input: LandingInput): LandingTarget {
   const { capturePoint: capture, cop, omega, stanceAnkle: stance, swing, yawRad: yaw, hipHeightM, exitDirection: exit } = input
-  if (![capture, cop, stance, exit].every(finite) || ![omega, yaw, hipHeightM].every(Number.isFinite) || omega <= 0 ||
+  const stepTimeS = input.stepTimeS ?? STEP_TIME_S
+  if (![capture, cop, stance, exit].every(finite) || ![omega, yaw, hipHeightM, stepTimeS].every(Number.isFinite) || omega <= 0 || stepTimeS <= 0 ||
     hipHeightM <= 0 || !['left', 'right'].includes(swing)) throw new RangeError('Invalid landing input')
   const reach = .6 * hipHeightM // GBWC maximum step length, m.
   if (reach < STEP_MIN_WIDTH_M) throw new RangeError('Step reach cannot satisfy minimum width')
-  const evolution = Math.exp(omega * STEP_TIME_S), exitLength = Math.hypot(exit.x, exit.z)
+  const evolution = Math.exp(omega * stepTimeS), exitLength = Math.hypot(exit.x, exit.z)
   const overshoot = exitLength > EPS ? STEP_OVERSHOOT_M / exitLength : 0
   const predicted = { x: cop.x + (capture.x - cop.x) * evolution + exit.x * overshoot, y: cop.y,
     z: cop.z + (capture.z - cop.z) * evolution + exit.z * overshoot }

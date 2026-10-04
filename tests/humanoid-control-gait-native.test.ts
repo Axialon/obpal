@@ -66,18 +66,18 @@ function measured(profileId: string, trial: GaitTrial) {
   }))
   return reports.get(key)!
 }
-/** Round 2 measured failures, retained as expected failures at the coordinator's requested cut.
- * All depths below exceed the unchanged 5 mm gate. Runtime/finite/protocol checks remain ordinary tests.
- * Keel W1: 5.001 m in 19.675 s, last-3-m speed 0.313 m/s, no fall; 12.584 mm penetration.
- * Keel W2: safe balance in 2.713 s, held 10 s, no fall; 12.609 mm over the whole walking/stopping trial.
- * Keel W3: 4.084 rad in 10 s, no fall; 11.696 mm penetration.
- * Morrow W1: 0.217 m before falling at 4.875 s; 12.994 mm penetration.
- * Morrow W2: falls at 6.458 s, with no completed stop/hold; 12.896 mm penetration.
- * Morrow W3: 1.719 rad before falling at 5.346 s; 14.355 mm penetration.
- * In-place, Keel/Morrow: 30 s, two real cycles per foot, no falls; 5.933/7.392 mm penetration.
- * Turn-in-place, Keel/Morrow: 30 s, two cycles per foot, 0.341/0.341 rad, no falls; 6.001/8.353 mm.
- * In-place release, Keel/Morrow: safe balance in 2.008/2.750 s, held 10 s; whole-trial depth 6.304/7.392 mm.
- * Turning release, Keel/Morrow: safe balance in 2.008/2.008 s, held 10 s; whole-trial depth 6.817/8.353 mm.
+/** Contact v3 walking: only complete unchanged physical gates become ordinary passing tests.
+ * Runtime/finite/protocol checks remain ordinary tests.
+ * Keel W1: 5.000 m in 16.529 s, last-3-m speed 0.369 m/s, no fall; 3.517 mm penetration.
+ * Keel W2: stance in 1.071 s, held 10 s, no fall; 3.624 mm over the walking/stopping trial.
+ * Keel W3: 4.272 rad in 10 s, no fall; 3.566 mm penetration.
+ * Morrow W1: 5.001 m in 17.988 s, last-3-m speed 0.327 m/s, no fall; 3.562 mm penetration.
+ * Morrow W2: support recenter reaches stance in 2.883 s, holds 10 s; 4.172 mm penetration, six starts pass.
+ * Morrow W3: 4.006 rad in 10 s, no fall; 3.586 mm penetration, six starts pass.
+ * Contact v3 Keel fallback: 30 s, two real cycles per foot, no falls; 3.670/3.776 mm in-place/turn.
+ * Actual Keel turn is 0.327 rad; both release rows return to balance in 2.008 s and hold 10 s.
+ * Contact v3 Morrow fallback: 30 s, two real cycles per foot, no falls; 3.518/3.077 mm in-place/turn.
+ * Actual Morrow turn is 0.343 rad; release rows reach stance in 2.008/2.350 s and hold 10 s, six starts pass.
  * Expected failures must become ordinary passing assertions when their complete physical gates are met.
  */
 for (const profile of GAIT_ROUND_ONE_PROFILES) for (const trial of [...GAIT_TRIALS, ...GAIT_FALLBACK_TRIALS, ...GAIT_FALLBACK_RELEASE_TRIALS]) describe(`humanoid gait pilot ${profile} ${trial}`, () => {
@@ -133,7 +133,7 @@ for (const profile of GAIT_ROUND_ONE_PROFILES) for (const trial of [...GAIT_TRIA
     }
     expect(report.wallMs).toBeGreaterThan(0); expect(report.p99TickWallMs).toBeGreaterThanOrEqual(report.p95TickWallMs)
   })
-  it.fails(`${trial} measured physical acceptance with native non-foot floor impulses`, () => {
+  it(`${trial} measured physical acceptance with native non-foot floor impulses`, () => {
     expect(report.pass, JSON.stringify({ profile, trial, preFallForwardDistanceM: report.preFallForwardDistanceM,
       speedMps: report.last3mMeanSpeedMps, preFallUnwrappedYawRad: report.preFallUnwrappedYawRad, stopS: report.returnedToStanceAtS,
       releaseMotionQualified: report.releaseMotionQualified, balanceStartedAtS: report.balanceStartedAtS,

@@ -312,7 +312,7 @@ const counted = (page) => page.evaluate(() => window.__pf)
 
 /** Clears what floats over a phone's controls (first-use hints, notices) and keeps its toast from catching a touch. */
 const quiet = (page) => page.evaluate(() => {
-  document.querySelectorAll('.hint, .bt-notice').forEach((h) => h.remove())
+  document.querySelectorAll('.hint, .nt-item').forEach((h) => h.remove())
   document.querySelectorAll('#toast').forEach((t) => { t.style.pointerEvents = 'none' })
 }).catch(() => {})
 

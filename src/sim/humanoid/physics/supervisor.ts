@@ -12,7 +12,8 @@ import { conjugate, fromRotationVector, multiply, quaternion, rotationVector, sc
 export type BehaviourMode = 'getup' | 'fall' | 'recover' | 'walk' | 'balance' | 'stance'
 export interface Behaviour {
   readonly mode: BehaviourMode
-  canEnter(observation: Observation, intent: Intent): boolean
+  /** The active mode is supplied only while its current behaviour has not finished. */
+  canEnter(observation: Observation, intent: Intent, retainedMode?: BehaviourMode): boolean
   /** Returns a complete request for the actor's single ActuationGate. */
   step(observation: Observation, intent: Intent): ActuationFrame
   done(observation: Observation, intent: Intent): boolean
@@ -84,7 +85,7 @@ export class Supervisor {
     let selected: Behaviour | null = null
     for (const mode of BEHAVIOUR_PRIORITY.slice(0, limit)) {
       const candidate = this.registry.get(mode)
-      if (candidate?.canEnter(observation, intent)) { selected = candidate; break }
+      if (candidate?.canEnter(observation, intent, retained ? previous.mode : undefined)) { selected = candidate; break }
     }
     selected ??= retained ? previous : this.fallback
     const requested = selected.step(observation, intent)

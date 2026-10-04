@@ -10,11 +10,12 @@ import type { Intent } from './intent'
 import type { Behaviour } from './supervisor'
 import { StanceController } from './stance'
 import { jointTorque, torqueTarget, worldTarget, jointFrame } from './targets'
+import { sinkSafeDiamond, polygonMargin } from './stepping'
 
 /** Original simulation defaults. Distances m, angles rad, speeds m/s and rad/s, durations s. */
 export const GETUP = Object.freeze({ fallUpY: .8, fallHeightFraction: .65, settledSpeedMps: .05,
   settledAngularSpeedRadS: .3, settledHoldS: .5, automaticDelayS: 1.5, settleTimeoutS: 3,
-  classifyForwardY: .5, rollS: 2, handsS: 1, allFoursS: 1.5, toesS: 1.5, pikeS: 1.5,
+  classifyForwardY: .5, rollS: 2, handsS: 1, allFoursS: 1.5, kneelS: 2, halfKneelS: 2,
   riseS: 2, riseBlendS: 1.2, stanceS: 2, stanceHoldS: 1, minimumPelvisM: .35,
   protectiveEaseS: .3, keyframeEaseS: .5, // simulation defaults, s; reserve contact-response time before timeout.
   rollEaseS: .4, // simulation default, s; reach a supporting arm before requesting the cross-body roll.
@@ -25,14 +26,12 @@ export const GETUP = Object.freeze({ fallUpY: .8, fallHeightFraction: .65, settl
   foldedElbowRad: 1.9, foldedForearmErrorRad: .35, // simulation defaults, rad; measured fold before floor loading.
   handFoldShoulderPitchRad: -1.2, handPlantShoulderPitchRad: -.95, handShoulderRollRad: .1,
   pressShoulderPitchRad: .25, // simulation defaults, rad; clear hands, then press without extending the elbow lever.
-  pikePitchRad: 1.74, pikeTrunkRad: Math.PI / 3, comHipGainRadM: 1, // simulation defaults, rad, rad and rad/m.
-  pikeTiltStiffnessNmRad: 300, pikeTiltDampingNmsRad: 30, // simulation defaults, N m/rad and N m s/rad.
-  pikeTiltMinimumUpY: 0, supportHoldS: .1, // simulation defaults, dimensionless and s; non-inverted feedback, sustained support.
-  toesShoulderPitchRad: 1.4, toesShoulderRollRad: .3, // simulation defaults, rad: retain the supporting arm placement.
-  supportingElbowRad: .8, toesElbowRad: 1.3, // simulation defaults, rad: plant first, then retain a bent supporting forearm.
+  rollFinishHipRad: 1.74, supportHoldS: .1, // simulation defaults, rad and s.
+  kneelEaseS: 1.2, bridgeUpY: .2, kneelUpY: .95, halfKneelUpY: .9, // simulation defaults, s and dimensionless.
+  maximumHandLoadFraction: .3, tuckedHipRad: .2, tuckedKneeRad: 2.15, // simulation defaults, dimensionless and rad.
   riseUpY: .95, riseHeightFraction: .85, stanceUpY: .98, stanceHeightFraction: .9,
 })
-export type GetupPhase = 'idle' | 'protect' | 'settle' | 'roll' | 'hands' | 'all-fours' | 'toes' | 'pike' | 'rise' | 'stance' | 'complete' | 'down'
+export type GetupPhase = 'idle' | 'protect' | 'settle' | 'roll' | 'hands' | 'all-fours' | 'kneel' | 'half-kneel' | 'rise' | 'stance' | 'complete' | 'down'
 export type GetupRollStage = 'load' | 'push' | 'finish'
 export type GetupHandStage = 'fold' | 'plant'
 export type GetupAllFoursStage = 'press' | 'extend'
@@ -48,6 +47,23 @@ export interface GetupOptions {
 const forward = { x: 0, y: 0, z: -1 }, up = { x: 0, y: 1, z: 0 }
 const finite = (v: Vec3) => [v.x, v.y, v.z].every(Number.isFinite)
 const nominalAngles = { 'left.arm.roll': 20 * Math.PI / 180, 'right.arm.roll': 20 * Math.PI / 180 }
+/** Simulation defaults, rad. Static contact-force feasibility was checked on both pilot geometries. */
+export function getupSupportAngles(model: PhysicalHumanoid, phase: 'all-fours' | 'kneel' | 'half-kneel'): Angles {
+  const left = model.scene.joints.find(j => j.child === model.parts.left_thigh.bodyId)!, right = model.scene.joints.find(j => j.child === model.parts.right_thigh.bodyId)!
+  // Simulation defaults, m: 0.30 and 0.36 hip spacing interpolate the two vetted geometries.
+  const width = Math.abs(right.anchorParent.x - left.anchorParent.x), wide = Math.max(0, Math.min(1, (width - .3) / .06))
+  const q: Angles = {}, set = (axis: string, n: number) => { q[`left.${axis}`] = n; q[`right.${axis}`] = n }
+  set('arm.roll', .35); set('leg.pitch', .15 * wide); set('leg.knee', 1.85 + .05 * wide); set('leg.ankle.pitch', -.6)
+  if (phase === 'all-fours') {
+    set('arm.roll', 0); set('arm.pitch', 1.17 - .01 * wide); set('arm.elbow', 0); set('arm.wrist.pitch', 0)
+    set('leg.pitch', 1.39 + .01 * wide); set('leg.knee', 2.15 + .05 * wide); q['head.pitch'] = .5
+  }
+  if (phase === 'half-kneel') {
+    const pitch = .04 - .1 * wide, hip = 1.44 + .165 * wide, ankle = .38 - .26 * wide
+    q['left.leg.pitch'] = hip; q['left.leg.knee'] = pitch + hip + ankle; q['left.leg.ankle.pitch'] = ankle
+  }
+  return q
+}
 /** World-up x lateral axis preserves yaw through a forward somersault; projected forward flips past 90 degrees. */
 export function getupFacing(rotation: Quat, fallback: Vec3 = forward): Vec3 {
   const lateral = rotate(quaternion(rotation), { x: 1, y: 0, z: 0 }), heading = { x: lateral.z, y: 0, z: -lateral.x }, length = norm(heading)
@@ -138,7 +154,6 @@ export class GetupController implements Behaviour {
   private allFoursStageStarted = 0
   private readonly foldedTargets: ActuationFrame['targets']
   private readonly pressTargets: ActuationFrame['targets']
-  private heldLegTargets: ActuationFrame['targets'] = {}
   private started = 0
   private fallenAt = 0
   private stableSince: number | null = null
@@ -201,8 +216,6 @@ export class GetupController implements Behaviour {
     this.handStage = phase === 'hands' ? 'fold' : null; this.handStageStarted = o.timeS
     this.allFoursStage = phase === 'all-fours' ? 'press' : null; this.allFoursStageStarted = o.timeS
     this.entryTargets = Object.fromEntries(o.joints.map(j => [j.id, { ...j.rotation }]))
-    this.heldLegTargets = Object.fromEntries(this.model.drives.filter(d => d.axes.some(axis => axis.includes('.leg.')))
-      .map(d => [d.id, { ...this.entryTargets[d.id] }]))
   }
   private enterRollStage(stage: GetupRollStage, o: Observation) {
     this.rollStage = stage; this.rollStageStarted = o.timeS
@@ -228,6 +241,28 @@ export class GetupController implements Behaviour {
       // Reuse the simulation default measured joint-pose tolerance, rad, before lengthening either arm.
       return angleBetween(o.joints.find(j => j.id === id)!.rotation, this.pressTargets[id]) <= GETUP.foldedForearmErrorRad
     })
+  }
+  private kneesTucked(o: Observation): boolean {
+    const targets = targetsFromAngles(this.model, { 'left.leg.knee': GETUP.tuckedKneeRad, 'right.leg.knee': GETUP.tuckedKneeRad })
+    return ['left', 'right'].every(side => {
+      const id = this.model.scene.joints.find(j => j.child === this.model.parts[`${side}_shin`].bodyId)!.id
+      return angleBetween(o.joints.find(j => j.id === id)!.rotation, targets[id]) <= GETUP.foldedForearmErrorRad
+    })
+  }
+  private handsLight(o: Observation): boolean {
+    const ids = ['left_hand', 'right_hand'].map(part => this.model.parts[part].bodyId)
+    const impulse = (o.floorContacts ?? []).reduce((sum, c) => {
+      const hand = c.a === 'floor' ? c.b : c.b === 'floor' ? c.a : null, normalY = c.a === 'floor' ? c.normalOnB.y : -c.normalOnB.y
+      return sum + (hand && ids.includes(hand) && normalY >= .5 && c.distance <= (this.model.scene.contact?.predictionDistance ?? .001) ? c.impulse * normalY : 0)
+    }, 0)
+    const weight = this.model.scene.bodies.reduce((sum, b) => sum + (b.fixed ? 0 : b.mass), 0) * -this.model.scene.gravity.y
+    return impulse <= GETUP.maximumHandLoadFraction * weight * STEP
+  }
+  private frontFootSupports(o: Observation, contacts: Map<string, Vec3[]>): boolean {
+    const id = this.model.parts.left_foot.bodyId, foot = o.feet.find(f => f.id === id)!, state = o.bodies.find(b => b.id === id)!
+    if (foot.normalImpulseNs <= 0 || !supportedBy(contacts.get(id) ?? [], o.com)) return false
+    const spec = this.model.scene.bodies.find(b => b.id === id)!, region = sinkSafeDiamond({ ...spec, ...state }, foot.normalImpulseNs / STEP)
+    return (polygonMargin(region.points, o.com) ?? -Infinity) >= 0 && foot.minSoleY >= -.005
   }
   private beginFall(o: Observation) {
     const root = o.bodies.find(b => b.id === this.model.root)!, tilt = rotate(root.rotation, up)
@@ -289,14 +324,14 @@ export class GetupController implements Behaviour {
         else if (this.rollStage === 'push' && (rotate(root.rotation, forward).y <= 0 || rootUp >= GETUP.rollFinishUpY) &&
           [this.model.root, this.model.parts.thorax.bodyId].some(id => contacts.has(id))) this.enterRollStage('finish', o)
       }
-    } else if (['hands', 'all-fours', 'toes', 'pike', 'rise', 'stance'].includes(this.phase)) {
+    } else if (['hands', 'all-fours', 'kneel', 'half-kneel', 'rise', 'stance'].includes(this.phase)) {
       let passed = false, next: GetupPhase = 'down', timeout = 0
       if (this.phase === 'hands') {
         const folded = this.forearmsFolded(o)
         if (this.handStage === 'fold' && o.timeS - this.handStageStarted + 1e-10 >= GETUP.keyframeEaseS && folded &&
           contacts !== null && ['left', 'right'].every(side => !contacts.has(this.model.parts[`${side}_hand`].bodyId))) this.enterHandStage('plant', o)
         passed = this.handStage === 'plant' && o.timeS - this.handStageStarted + 1e-10 >= GETUP.handPlantEaseS &&
-          folded && contacts !== null && both(this.model, contacts, 'hand')
+          folded && this.kneesTucked(o) && contacts !== null && both(this.model, contacts, 'hand')
         next = 'all-fours'; timeout = GETUP.handsS
       }
       if (this.phase === 'all-fours') {
@@ -304,15 +339,19 @@ export class GetupController implements Behaviour {
           this.upperArmsPressed(o) && contacts !== null && both(this.model, contacts, 'hand') &&
           ['head', 'thorax'].every(part => !contacts.has(this.model.parts[part].bodyId))) this.enterAllFoursStage('extend', o)
         passed = this.allFoursStage === 'extend' && o.timeS - this.allFoursStageStarted + 1e-10 >= GETUP.keyframeEaseS &&
-          contacts !== null && both(this.model, contacts, 'hand') && both(this.model, contacts, 'shin') && root.position.y >= GETUP.minimumPelvisM
-        next = 'toes'; timeout = GETUP.allFoursS
+          contacts !== null && both(this.model, contacts, 'hand') && both(this.model, contacts, 'shin') && root.position.y >= GETUP.minimumPelvisM && rootUp >= GETUP.bridgeUpY
+        next = 'kneel'; timeout = GETUP.allFoursS
       }
-      if (this.phase === 'toes') { passed = contacts !== null && both(this.model, contacts, 'foot') && supportedBy(pointsOf(this.model, contacts, ['hand', 'foot']), o.com); next = 'pike'; timeout = GETUP.toesS }
-      if (this.phase === 'pike') {
-        passed = contacts !== null && both(this.model, contacts, 'foot') && supportedBy(pointsOf(this.model, contacts, ['foot']), o.com)
-        next = 'rise'; timeout = GETUP.pikeS
+      if (this.phase === 'kneel') {
+        passed = contacts !== null && both(this.model, contacts, 'shin') && rootUp >= GETUP.kneelUpY && this.handsLight(o) &&
+          supportedBy(pointsOf(this.model, contacts, ['shin', 'foot']), o.com)
+        next = 'half-kneel'; timeout = GETUP.kneelS
       }
-      if (['toes', 'pike'].includes(this.phase)) {
+      if (this.phase === 'half-kneel') {
+        passed = contacts !== null && contacts.has(this.model.parts.right_shin.bodyId) && rootUp >= GETUP.halfKneelUpY && this.frontFootSupports(o, contacts)
+        next = 'rise'; timeout = GETUP.halfKneelS
+      }
+      if (['kneel', 'half-kneel'].includes(this.phase)) {
         if (passed) this.supportSince ??= o.timeS; else this.supportSince = null
         passed = this.supportSince !== null && o.timeS - this.supportSince + 1e-10 >= GETUP.supportHoldS
       }
@@ -325,7 +364,8 @@ export class GetupController implements Behaviour {
         next = 'complete'; timeout = GETUP.stanceS
       }
       // Complete the cosine request before allowing a pre-existing load to skip the keyframe.
-      if (passed && (['rise', 'stance'].includes(this.phase) || elapsed + 1e-10 >= GETUP.keyframeEaseS)) this.enter(next, o)
+      const easeS = ['kneel', 'half-kneel'].includes(this.phase) ? GETUP.kneelEaseS : GETUP.keyframeEaseS
+      if (passed && (['rise', 'stance'].includes(this.phase) || elapsed + 1e-10 >= easeS)) this.enter(next, o)
       else if (elapsed >= timeout) this.fail(o, `${this.phase} post-condition timed out${contacts === null ? ': floor contacts unavailable' : ''}`)
     }
     let targets: ActuationFrame['targets']
@@ -335,7 +375,8 @@ export class GetupController implements Behaviour {
     else if (this.phase === 'settle') targets = structuredClone(this.entryTargets)
     else if (['idle', 'stance', 'complete'].includes(this.phase)) targets = balanceTargets
     else {
-      const desired = this.keyframe(o), duration = this.phase === 'rise' ? GETUP.riseBlendS : this.phase === 'roll' ? GETUP.rollEaseS :
+      const desired = this.keyframe(), duration = this.phase === 'rise' ? GETUP.riseBlendS : this.phase === 'roll' ? GETUP.rollEaseS :
+        ['kneel', 'half-kneel'].includes(this.phase) ? GETUP.kneelEaseS :
         this.phase === 'hands' && this.handStage === 'plant' ? GETUP.handPlantEaseS :
         this.phase === 'all-fours' && this.allFoursStage === 'press' ? GETUP.allFoursPressEaseS :
         this.phase === 'protect' ? GETUP.protectiveEaseS : GETUP.keyframeEaseS
@@ -369,31 +410,15 @@ export class GetupController implements Behaviour {
           targets[shoulder.id] = ease(targets[shoulder.id], feedback, t)
         }
       }
-      if (this.phase === 'hands') Object.assign(targets, this.heldLegTargets)
       if (this.phase === 'rise') {
         for (const j of this.model.scene.joints) if (this.model.feet.includes(j.child)) targets[j.id] = balanceTargets[j.id]
       }
-      if (this.phase === 'pike' && rootUp >= GETUP.pikeTiltMinimumUpY && contacts !== null && both(this.model, contacts, 'foot')) {
-        // Ease foot-supported tilt feedback over the keyframe hand-off. Inverted pelvises retain
-        // contact keyframes; switching their hips to torque mode can unload the supporting feet.
-        const desiredUp = { x: this.facing.x * Math.sin(GETUP.pikeTrunkRad), y: Math.cos(GETUP.pikeTrunkRad), z: this.facing.z * Math.sin(GETUP.pikeTrunkRad) }
-        const actualUp = rotate(root.rotation, up), axis = cross(actualUp, desiredUp), sine = norm(axis)
-        const tilt = sine > 1e-12 ? scale(axis, Math.atan2(sine, dot(actualUp, desiredUp)) / sine) : { x: 0, y: 0, z: 0 }
-        const moment = sub(scale(tilt, GETUP.pikeTiltStiffnessNmRad), scale(root.angularVelocity, GETUP.pikeTiltDampingNmsRad))
-        const load = o.feet.reduce((n, f) => n + f.normalImpulseNs, 0)
-        for (const foot of load > 0 ? o.feet : []) {
-          const hip = this.model.scene.joints.find(j => j.child === foot.id.replace(/_foot$/, '_thigh'))!
-          const measured = o.joints.find(j => j.id === hip.id)!
-          const feedback = torqueTarget(hip, measured.rotation, measured.angularVelocity,
-            jointTorque(hip, root, scale(moment, -foot.normalImpulseNs / load)))
-          targets[hip.id] = ease(targets[hip.id], feedback, (o.timeS - this.started) / GETUP.keyframeEaseS)
-        }
-      }
+
     }
     return { schema_version: 1, profileId: this.model.profileId, actorId: this.model.actorId, generation: this.generation,
       tick: o.stateTick, source: 'classical', targets }
   }
-  private keyframe(o: Observation): Angles {
+  private keyframe(): Angles {
     const q: Angles = { ...nominalAngles }, set = (part: string, angle: string, n: number) => {
       for (const side of ['left', 'right']) q[`${side}.${part}.${angle}`] = n
     }
@@ -417,34 +442,20 @@ export class GetupController implements Behaviour {
       }
       if (this.rollStage === 'finish') {
         q[`${push}.arm.pitch`] = 1.2; q[`${push}.arm.roll`] = -.2
-        set('leg', 'pitch', GETUP.pikePitchRad); set('leg', 'knee', 1.1); set('leg', 'ankle.pitch', .43)
+        set('leg', 'pitch', GETUP.rollFinishHipRad); set('leg', 'knee', 1.1); set('leg', 'ankle.pitch', .43)
       }
-    } else {
-      set('arm', 'pitch', 1.4); set('arm', 'roll', .3); set('arm', 'elbow', 1.9)
-      if (this.phase === 'hands') {
-        set('arm', 'pitch', this.handStage === 'fold' ? GETUP.handFoldShoulderPitchRad : GETUP.handPlantShoulderPitchRad)
-        set('arm', 'roll', GETUP.handShoulderRollRad); set('arm', 'elbow', GETUP.foldedElbowRad)
-      }
-      if (this.phase !== 'hands') {
-        set('arm', 'elbow', GETUP.supportingElbowRad); set('arm', 'wrist.pitch', -.65); set('leg', 'pitch', 1.5); set('leg', 'knee', 1.6)
-      }
+    } else if (this.phase === 'hands') {
+      set('arm', 'pitch', this.handStage === 'fold' ? GETUP.handFoldShoulderPitchRad : GETUP.handPlantShoulderPitchRad)
+      set('arm', 'roll', GETUP.handShoulderRollRad); set('arm', 'elbow', GETUP.foldedElbowRad)
+      set('leg', 'pitch', GETUP.tuckedHipRad); set('leg', 'knee', GETUP.tuckedKneeRad); set('leg', 'ankle.pitch', -.6)
+    } else if (['all-fours', 'kneel', 'half-kneel'].includes(this.phase)) {
+      Object.assign(q, getupSupportAngles(this.model, this.phase as 'all-fours' | 'kneel' | 'half-kneel'))
       if (this.phase === 'all-fours' && this.allFoursStage === 'press') {
         set('arm', 'pitch', GETUP.pressShoulderPitchRad); set('arm', 'roll', GETUP.handShoulderRollRad); set('arm', 'elbow', GETUP.foldedElbowRad)
       }
-      if (['toes', 'pike', 'rise'].includes(this.phase)) {
-        set('leg', 'ankle.pitch', .43); set('leg', 'knee', 1.1)
-        set('leg', 'pitch', GETUP.pikePitchRad)
-        set('arm', 'elbow', ['toes', 'pike'].includes(this.phase) ? GETUP.toesElbowRad : GETUP.supportingElbowRad)
-        set('arm', 'pitch', GETUP.toesShoulderPitchRad); set('arm', 'roll', GETUP.toesShoulderRollRad)
-      }
-      if (this.phase === 'pike') {
-        const feet = o.feet.map(f => f.centre), centre = scale(feet.reduce((v, p) => ({ x: v.x + p.x, y: v.y + p.y, z: v.z + p.z }), { x: 0, y: 0, z: 0 }), .5)
-        const error = sub(o.com, centre), behindM = -(error.x * this.facing.x + error.z * this.facing.z)
-        // Flat-foot kinematics: trunk pitch = knee - hip - ankle. Preserve the 60 degree pike request
-        // while shifting COM; native reachability still requires the contact and foot-support gates.
-        set('leg', 'pitch', Math.max(1.1 - .43 + GETUP.pikeTrunkRad, GETUP.pikePitchRad + GETUP.comHipGainRadM * behindM))
-      }
-      if (this.phase === 'rise') { set('leg', 'pitch', 0); set('leg', 'knee', .05); set('leg', 'ankle.pitch', 0); set('arm', 'pitch', 0); set('arm', 'elbow', 0); set('arm', 'wrist.pitch', 0) }
+    } else if (this.phase === 'rise') {
+      set('leg', 'pitch', 0); set('leg', 'knee', .05); set('leg', 'ankle.pitch', 0)
+      set('arm', 'pitch', 0); set('arm', 'elbow', 0); set('arm', 'wrist.pitch', 0)
     }
     return q
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { GaitController, IN_PLACE_CONTROL, type GaitVelocity } from '../src/sim/humanoid/physics/gait'
+import { GaitController, IN_PLACE_CONTROL, IN_PLACE_SPINE_LEAN_RAD, type GaitVelocity } from '../src/sim/humanoid/physics/gait'
 import { restIntent } from '../src/sim/humanoid/controls'
 import { ALL_PHYSICAL_PROFILES, buildHumanoid, soleCorners, type PhysicalHumanoid } from '../src/sim/humanoid/physics/model'
 import { observe, type Observation } from '../src/sim/humanoid/physics/observation'
@@ -35,6 +35,13 @@ function fixture(model: PhysicalHumanoid, load: readonly [number, number] = [1, 
   return observe(model, bodies, contacts, 1, 0)
 }
 function atTick(o: Observation, stateTick: number): Observation { return { ...o, stateTick, timeS: stateTick * STEP } }
+function spineWorld(model: PhysicalHumanoid, o: Observation, frame: ActuationFrame) {
+  const lumbar = model.scene.joints.find(joint => joint.child === model.parts.lumbar.bodyId)!
+  const thorax = model.scene.joints.find(joint => joint.child === model.parts.thorax.bodyId)!
+  const world = (joint: typeof lumbar, parent: Quat) => multiply(multiply(multiply(parent, joint.frameParent), frame.targets[joint.id]), conjugate(joint.frameChild))
+  const lumbarWorld = world(lumbar, o.bodies.find(body => body.id === model.root)!.rotation)
+  return { lumbar: lumbarWorld, thorax: world(thorax, lumbarWorld) }
+}
 function sequence(model: PhysicalHumanoid, yaw = 0) {
   const both = fixture(model, [1, 1], yaw), left = fixture(model, [0, 1], yaw), right = fixture(model, [1, 0], yaw)
   return (tick: number) => {
@@ -44,6 +51,12 @@ function sequence(model: PhysicalHumanoid, yaw = 0) {
   }
 }
 function controller(model: PhysicalHumanoid) { return new GaitController(model, 1, { mode: 'in-place' }) }
+/** A restart retains physical contact history; prime the fresh reference with the same already-supported soles. */
+function restartFrame(model: PhysicalHumanoid, o: Observation, command: GaitVelocity): ActuationFrame {
+  const fresh = controller(model)
+  for (let tick = o.stateTick - 16; tick < o.stateTick; tick++) fresh.stepVelocity(atTick(o, tick), stopped)
+  return fresh.stepVelocity(o, command)
+}
 function run(c: GaitController, measured: (tick: number) => Observation, through: number, command: GaitVelocity = walking, from = 0) {
   let frame!: ActuationFrame
   for (let tick = from; tick <= through; tick++) frame = c.stepVelocity(measured(tick), command)
@@ -58,7 +71,11 @@ describe('in-place gait target contracts', () => {
   it.each(ALL_PHYSICAL_PROFILES)('%s keeps complete finite frames inside the unchanged gate through both scheduled swings', profile => {
     const model = buildHumanoid(profile), c = controller(model), gate = new ActuationGate(model, 1), measured = sequence(model)
     const balance = new BalanceController(model, 1), phases = new Set<string>(), swings = new Set<string>()
-    const upper = model.scene.joints.filter(joint => !/_(thigh|shin|foot)$/.test(joint.child))
+    const hip = model.scene.joints.find(joint => joint.child === model.parts.left_thigh.bodyId)!
+    const mass = model.scene.bodies.reduce((sum, body) => sum + (body.fixed ? 0 : body.mass), 0)
+    const leanNeeded = mass * -model.scene.gravity.y * Math.abs(hip.anchorParent.x) > .8 * hip.motor!.maxTorque
+    const spineBodies = [model.parts.lumbar.bodyId, model.parts.thorax.bodyId]
+    const upper = model.scene.joints.filter(joint => !/_(thigh|shin|foot)$/.test(joint.child) && (!leanNeeded || !spineBodies.includes(joint.child)))
     const finalTick = preparationTicks + 2 * cycleTicks
     for (let tick = 0; tick <= finalTick; tick++) {
       const o = measured(tick), previous = gate.targets(), frame = c.stepVelocity(o, walking), accepted = gate.accept(frame)
@@ -92,8 +109,36 @@ describe('in-place gait target contracts', () => {
     expect(c.done(stoppedObservation, restIntent())).toBe(true)
   }, 20_000) // Test wall-time budget, ms: thousands of fixed ticks share CPU with the native suites.
 
-  it('preserves relative requests when the entire measured scene is rotated near either side of pi', () => {
-    const model = buildHumanoid('keel-v1'), headings = [0, Math.PI - .003, -Math.PI + .003]
+  it('leans the two spine joints toward receiving support smoothly and returns upright during release', () => {
+    const model = buildHumanoid('morrow-v1'), c = controller(model), both = fixture(model)
+    const releaseTick = preparationTicks + Math.round(p.transferSeconds / STEP) + 1
+    const lean = (q: Quat) => { const up = rotate(q, { x: 0, y: 1, z: 0 }); return Math.atan2(-up.x, up.y) }
+    let previous = 0
+    for (let tick = 0; tick < releaseTick; tick++) {
+      const o = atTick(both, tick), world = spineWorld(model, o, c.stepVelocity(o, walking)), roll = lean(world.thorax)
+      expect(Math.abs(roll)).toBeLessThanOrEqual(IN_PLACE_SPINE_LEAN_RAD + 1e-10)
+      expect(Math.abs(roll - previous)).toBeLessThanOrEqual(.1 * STEP + 1e-10)
+      expect(lean(world.lumbar)).toBeCloseTo(roll / 2, 10)
+      if (tick <= preparationTicks) expect(roll).toBeCloseTo(0, 10)
+      previous = roll
+    }
+    expect(Math.abs(previous)).toBeCloseTo(IN_PLACE_SPINE_LEAN_RAD, 10)
+    const receivingSide = Math.sign(both.feet[1].centre.x - both.feet[0].centre.x)
+    expect(-Math.sin(previous) * receivingSide).toBeGreaterThan(0)
+    for (let tick = releaseTick; tick < releaseTick + stopTicks; tick++) {
+      const o = atTick(both, tick), roll = lean(spineWorld(model, o, c.stepVelocity(o, stopped)).thorax)
+      expect(Math.abs(roll)).toBeLessThanOrEqual(Math.abs(previous) + 1e-10)
+      expect(Math.abs(roll - previous)).toBeLessThanOrEqual(.1 * STEP + 1e-10)
+      previous = roll
+    }
+    expect(Math.abs(previous)).toBeLessThan(2e-6)
+    const o = atTick(both, releaseTick + stopTicks)
+    expect(c.stepVelocity(o, stopped)).toEqual(new BalanceController(model, 1).step(o).frame)
+    expect(c.done(o, restIntent())).toBe(true)
+  })
+
+  it.each(['keel-v1', 'morrow-v1'] as const)('%s preserves relative requests when the entire measured scene is rotated near either side of pi', profile => {
+    const model = buildHumanoid(profile), headings = [0, Math.PI - .003, -Math.PI + .003]
     const controllers = headings.map(() => controller(model)), observations = headings.map(yaw => sequence(model, yaw))
     for (let tick = 0; tick <= firstSwingTick + swingTicks / 2; tick++) {
       const frames = controllers.map((c, i) => c.stepVelocity(observations[i](tick), walking))
@@ -187,7 +232,7 @@ describe('in-place gait target contracts', () => {
     expect(c.diagnostics().phase).toBe('idle')
     expect(c.done(centered, restIntent())).toBe(true)
     const next = atTick(loaded, tick + 1)
-    expect(c.stepVelocity(next, walking)).toEqual(controller(model).stepVelocity(next, walking))
+    expect(c.stepVelocity(next, walking)).toEqual(restartFrame(model, next, walking))
     expect(c.diagnostics()).toMatchObject({ phase: 'start', steps: 0 })
   })
 
@@ -212,8 +257,42 @@ describe('in-place gait target contracts', () => {
     expect(c.done(supported, restIntent())).toBe(true)
   })
 
-  it('restarts from the current measured pose when movement interrupts recentering', () => {
+  it('stops from the current support anchors after either history of measured foot motion', () => {
+    const model = buildHumanoid('keel-v1'), controllers = [controller(model), controller(model)]
+    const histories = [fixture(model), fixture(model)]
+    // The synthetic second history shifts both shins and soles while preserving the measured pelvis.
+    for (const body of histories[1].bodies) if (/_(shin|foot)$/.test(body.id)) body.position.z += .03
+    const knees = model.scene.joints.filter(joint => /_shin$/.test(joint.child))
+    const previous = controllers.map((c, index) => run(c, tick => atTick(histories[index], tick), 1))
+    expect(knees.some(joint => angleBetween(previous[0].targets[joint.id], previous[1].targets[joint.id]) > 1e-4)).toBe(true)
+    const supported = atTick(fixture(model), 2), frames = controllers.map(c => c.stepVelocity(supported, stopped))
+    for (const joint of knees) expect(angleBetween(frames[0].targets[joint.id], frames[1].targets[joint.id])).toBeLessThan(1e-10)
+    for (const c of controllers) expect(c.diagnostics()).toMatchObject({ phase: 'start', phaseSeconds: 0 })
+  })
+
+  it('conforms a descending foot after 40 ms loaded without treating line contact as completed support', () => {
     const model = buildHumanoid('keel-v1'), c = controller(model), measured = sequence(model)
+    const contactTick = firstSwingTick + Math.floor(swingTicks * .75)
+    run(c, measured, contactTick - 1)
+    const line = fixture(model), swingFoot = line.feet.find(foot => foot.id === model.feet[0])!
+    swingFoot.contactPoints = swingFoot.contactPoints.slice(0, 2)
+    for (let tick = contactTick; tick < contactTick + 9; tick++) {
+      c.stepVelocity(atTick(line, tick), walking)
+      expect(c.diagnostics()).toMatchObject({ phase: 'strike', steps: 0 })
+    }
+    c.stepVelocity(atTick(line, contactTick + 9), walking)
+    expect(c.diagnostics()).toMatchObject({ phase: 'start', steps: 0 })
+    for (let tick = contactTick + 10; tick < contactTick + 30; tick++) {
+      c.stepVelocity(atTick(line, tick), walking)
+      expect(c.diagnostics()).toMatchObject({ phase: 'start', steps: 0 })
+    }
+    c.stepVelocity(atTick(fixture(model), contactTick + 30), walking)
+    c.stepVelocity(atTick(fixture(model), contactTick + 31), walking)
+    expect(c.diagnostics()).toMatchObject({ phase: 'start', steps: 1, swing: 'right' })
+  })
+
+  it.each(['keel-v1', 'morrow-v1'] as const)('%s restarts from the current measured pose when movement interrupts recentering', profile => {
+    const model = buildHumanoid(profile), c = controller(model), measured = sequence(model)
     run(c, measured, firstLandingTick + 1)
     const releaseTick = firstLandingTick + 2
     run(c, measured, releaseTick + Math.floor(stopTicks / 2), stopped, releaseTick)
@@ -221,7 +300,7 @@ describe('in-place gait target contracts', () => {
     expect(c.diagnostics().phaseSeconds).toBeCloseTo(p.stopSeconds / 2, 12)
     const resumeTick = releaseTick + Math.floor(stopTicks / 2) + 1
     const resumed = atTick(fixture(model, [1, 1], -.9), resumeTick)
-    expect(c.stepVelocity(resumed, walking)).toEqual(controller(model).stepVelocity(resumed, walking))
+    expect(c.stepVelocity(resumed, walking)).toEqual(restartFrame(model, resumed, walking))
     expect(c.diagnostics()).toMatchObject({ phase: 'start', phaseSeconds: 0, steps: 0 })
     expect(c.diagnostics().headingRad).toBeCloseTo(-.9, 10)
     for (let tick = resumeTick + 1; tick <= resumeTick + firstSwingTick; tick++)
@@ -241,7 +320,7 @@ describe('in-place gait target contracts', () => {
       const resumeTick = tick
       const initialFrame = c.stepVelocity(atTick(crouched, tick++), walking)
       // Restart begins at the measured height instead of jumping to the saved standing height.
-      expect(initialFrame.targets).toEqual(controller(model).stepVelocity(atTick(crouched, resumeTick), walking).targets)
+      expect(initialFrame.targets).toEqual(restartFrame(model, atTick(crouched, resumeTick), walking).targets)
       let prepared!: ActuationFrame
       for (; tick <= resumeTick + preparationTicks; tick++) prepared = c.stepVelocity(atTick(crouched, tick), walking)
       const reference = controller(model)
@@ -298,8 +377,8 @@ describe('in-place gait target contracts', () => {
     }
   })
 
-  it('restarts from measured heading after a tick gap and does not reset on an invalid gap observation', () => {
-    const model = buildHumanoid('keel-v1'), c = controller(model), measured = sequence(model)
+  it.each(['keel-v1', 'morrow-v1'] as const)('%s restarts from measured heading after a tick gap and does not reset on an invalid gap observation', profile => {
+    const model = buildHumanoid(profile), c = controller(model), measured = sequence(model)
     const lastTick = firstSwingTick + 10
     run(c, measured, lastTick)
     const resumeTick = lastTick + 20, resumed = atTick(fixture(model, [1, 1], -.9), resumeTick)

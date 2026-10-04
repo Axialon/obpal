@@ -3,8 +3,8 @@ import { robotRoster, neutral, rad, type Angles, type RigProfile } from '../prof
 import { validateScene, type Scene, type Body, type BodyState, type JointInput } from '../../physics/schema'
 import { IDENTITY, ZERO, add, sub, scale, localPoint, multiply, conjugate, quaternion, rotate, fromRotationVector, rotationVector, clampCone,
   type Vec3, type Quat, type Cone } from '../../physics/math'
-import { uniformInertia } from '../../physics/servo'
-export const MODEL_VERSION = 'humanoid-f1a2-v2'
+import { bodyInertia } from '../../physics/servo'
+export const MODEL_VERSION = 'humanoid-f1a2-v3'
 export const ALL_PHYSICAL_PROFILES = Object.freeze(robotRoster(true).flatMap(r => r.forms.map(p => p.id)))
 export interface WorldFrame { position: Vec3; rotation: Quat }
 export interface Part { bodyId: string; massKg: number; inertia: Vec3 }
@@ -45,9 +45,12 @@ export function buildHumanoid(profileId: string, actorId = 'seat1'): PhysicalHum
   // Original simulation defaults, SI: kg, m, N m, N m/rad, N m s/rad. Identical masses across forms;
   // only collision dimensions follow existing profiles. No manufacturer's mass, density or servo rating is implied.
   function box(part: string, position: Vec3, half: Vec3, massKg: number) {
+    // Simulation default, kg m^2: sole mass at the eight corners, three times uniform-box inertia.
+    const inertia = part.endsWith('_foot') ? { x: massKg * (half.y ** 2 + half.z ** 2),
+      y: massKg * (half.x ** 2 + half.z ** 2), z: massKg * (half.x ** 2 + half.y ** 2) } : undefined
     const b = validateScene({ bodies: [{ id: id(part), shape: { kind: 'box', half }, position, mass: massKg,
-      restitution: 0, friction: .8, linearDamping: .02, angularDamping: .02 }] }).bodies[0]
-    bodies.push(b); byPart.set(part, b); parts[part] = { bodyId: b.id, massKg, inertia: uniformInertia(b) }; return b
+      ...(inertia ? { inertia } : {}), restitution: 0, friction: .8, linearDamping: .02, angularDamping: .02 }] }).bodies[0]
+    bodies.push(b); byPart.set(part, b); parts[part] = { bodyId: b.id, massKg, inertia: bodyInertia(b) }; return b
   }
   function skin(part: string, joint: string, massKg: number) {
     const s = p.skins.find(s => s.joint === joint && !s.axle && ['shell', 'trim', 'metal'].includes(s.finish))

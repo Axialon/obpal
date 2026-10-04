@@ -285,10 +285,24 @@ try {
     // This one has no WebXR (an iPhone): its 3D glows for the screen's camera.
     a = await phone(arm.invite, { xr: false, way: 'glow' })
     await until('scene list', () => a.page.locator('.scene-btn').count(), 15000)
-    const refused = await a.claim('Shoulder')
-    if (!/let you in/.test(refused)) throw new Error(`expected a wait, saw "${refused}"`)
+    await a.claim('Shoulder')
+    // The wait is a standing line on the phone, said once: no toast repeats it.
+    const refused = await until('the wait on the phone', () => a.page.evaluate(() => { const b = document.getElementById('banner'); const t = b && !b.hidden ? b.querySelector('.bn-t')?.textContent ?? '' : ''; return /let you in/.test(t) ? t : null }), 4000)
+    const echoes = await a.page.evaluate(() => [...document.querySelectorAll('.nt-item[data-tier=toast]:not(.out)')].map((n) => n.textContent.trim()).filter((t) => /let you in/.test(t)))
+    if (echoes.length) throw new Error(`a toast repeats the wait: ${JSON.stringify(echoes)}`)
     if (await arm.page.evaluate(() => Object.keys(window.__sim.claims.snapshot()).length)) throw new Error('claimed before approval')
+    // What a toast would lose in seconds stays on the phone as a standing line, and shows on the people chip as a count.
+    await sleep(2500)
+    const standing = await a.page.evaluate(() => { const b = document.getElementById('banner'); return b && !b.hidden ? b.querySelector('.bn-t')?.textContent ?? '' : '' })
+    if (!/let you in/.test(standing)) throw new Error(`the wait left the phone after the toast: "${standing}"`)
+    const asking = await arm.page.evaluate(() => document.getElementById('chip-who').dataset.asking ?? '')
+    if (asking !== '1') throw new Error(`the people chip counts "${asking}" waiting, not 1`)
     await arm.page.locator('#people .allow').first().click()
+    await until('the standing line cleared', () => a.page.evaluate(() => document.getElementById('banner').hidden), 5000)
+    // Nothing the screen shows after a phone is let in sits on the people chip's own buttons.
+    await sleep(1500)
+    const covered = await arm.page.evaluate(() => ['chip-invite', 'chip-disc'].filter((id) => { const el = document.getElementById(id); const r = el.getBoundingClientRect(); const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !(at === el || el.contains(at)) }))
+    if (covered.length) throw new Error(`covered after Let in: ${covered.join(', ')}`)
     const ok = await a.claim('Shoulder')
     await until('shoulder held', () => arm.page.evaluate(() => !!window.__sim.claims.holder('a1.shoulder')), 5000)
     return `"${refused}", then "${ok}"`
@@ -470,9 +484,17 @@ try {
     await a.drag(260)
     await sleep(400)
     if (Math.abs((await angle('a1.base')) - before) > 0.5) throw new Error('moved while stopped')
+    // The stop stays on the phone until the screen resumes (the toast alone is gone in seconds).
+    await sleep(2500)
+    const held = await a.page.evaluate(() => { const b = document.getElementById('banner'); return b && !b.hidden ? b.querySelector('.bn-t')?.textContent ?? '' : '' })
+    if (!/stopped the arms/.test(held)) throw new Error(`the phone lost the stop: "${held}"`)
+    // The standing line says it once: no toast repeats it.
+    const echoed = await a.page.evaluate(() => [...document.querySelectorAll('.nt-item[data-tier=toast]:not(.out)')].map((n) => n.textContent.trim()).filter((t) => /stop/i.test(t)))
+    if (echoed.length) throw new Error(`a toast repeats the stop line: ${JSON.stringify(echoed)}`)
     if (SHOTS) await arm.page.screenshot({ path: joinPath(SHOTS, 'sim-arm-stopped.png') })
     await arm.page.locator('#resume').click()
     await until('resumed', () => arm.page.evaluate(() => !window.__arm.stopped()), 3000)
+    await until('the stop line cleared on the phone', () => a.page.evaluate(() => document.getElementById('banner').hidden), 5000)
     await a.drag(-260)
     await sleep(300)
     if (Math.abs((await angle('a1.base')) - before) < 2) throw new Error('did not move after resuming')

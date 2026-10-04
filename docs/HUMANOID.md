@@ -493,9 +493,10 @@ synthetic motion tests do not certify hardware clearances or physical balance.
 
 ## Preview models
 
-Cairn, Rill and Hush exist as pipeline previews with two body forms, face lights,
-tendon hands, LODs and on-demand loading. Their current meshes are pending the H2
-model stage. They are hidden from the default roster, catalogue, SEO and sitemap.
+Cairn, Rill and Hush exist as previews with two body forms, face lights, tendon
+hands, LODs and on-demand loading. Their meshes are the H2a rebuild (2026-10-04,
+below); owner review of the boards and the turnaround references remain open, so
+they stay previews. They are hidden from the default roster, catalogue, SEO and sitemap.
 Open `/sim/humanoid/?preview=soft` to opt in for the current browser session only;
 session storage remembers the opt-in, and preview pages carry `noindex`.
 Keel and Morrow remain the unchanged default roster.
@@ -522,19 +523,112 @@ reference profiles remain independent of these practice choices.
 The Blender source is `humanoids_soft.py`. Hero and distant meshes preserve all
 31 axes and the same named five-finger tendon frames. Three linked phalanges curl
 at 0.70/1.02/0.78 radians; a two-frame opposable thumb completes each hand.
-Closed inner sleeves bridge machined articulation clearances. The extended sweep
-adds spine, wrist and ankle axes at 33 cutting samples with 10 mm expansion; the
-independent 65-sample audit retains the existing nested-bearing envelope radii.
-Its scope is adjacent exterior covers through independent axes, not arbitrary
-simultaneous whole-body collision or physical manufacturing clearance.
+The independent 65-sample audit retains the existing nested-bearing envelope
+radii. Its scope is adjacent exterior covers through independent axes, not
+arbitrary simultaneous whole-body collision or physical manufacturing clearance;
+in particular the thorax and a thigh are not an adjacent pair, so the lower
+abdomen and a thigh in deep hip flexion are not audited against each other.
 
-Soft finishes use cover roughness 0.86/0.94, satin graphite 0.54 and smoked glass
-0.30, with zero clearcoat and no image textures. Desktop materials add a small
-procedural normal perturbation, filtered at screen scale, and a cheap sheen lobe.
-Phones use standard materials with the same colour, metalness and roughness.
-The face shader projects its signal onto the curved panel, with deterministic blink, glance and a small
-listening pulse while tracked. Reduced motion holds the signal open, centred and
-steady. Each rig owns its own light uniforms.
+### H2a rebuild (2026-10-04)
+
+The first meshes had sampled Boolean cuts and exposed bearings. The rebuild moves
+the heads, the tones and the limb slimming toward the approved concepts within the
+unchanged joint frames, skins and heights (decision D1 keeps the frames; a narrower
+soft-profile spread is a separate physics ticket).
+
+What it does not change: the three directions still share one body per form. Cairn,
+Rill and Hush have identical body landmarks within Form I (shoulder span 0.536 m,
+upper arm 0.091 m, hips 0.395 m) and within Form II (0.644, 0.108 and 0.388 m);
+they differ in heads, shoes, collars, panels and tones. The bodies remain jointed
+mannequins with wide-set legs and a V-shaped torso, not the concepts' continuous
+hourglass figures. That needs human pivot spacing (D1) and skinned knit covers (D2),
+so the owner's "nowhere near the concept" finding is not resolved by this rebuild.
+Form II differs from Form I only in scale, shoulder spread and section widths.
+
+- **Form data.** `humanoid_forms.py` holds every cover section and asserts the
+  pivot spread against `assets/blender/humanoid-forms.json`, which also carries
+  the landmark targets, face-glass ellipsoids and shoe tolerances. Four-quadrant
+  superellipse sections (`anatomy2`) put medial thigh, bust, pectoral and gluteal
+  mass where the concepts have it. The hip crease slants, so each thigh's medial
+  mass starts at the crotch.
+- **Designed joints.** Covers end in rolled lips over a slim, closed elastomer
+  under-suit that shows dark only at the waist seam, armpits, neck, elbows, knees,
+  wrists and ankles, as the concepts' gaskets. At the crotch and hip crease the
+  under-suit takes the cover's colour, as the concepts show no dark suit there.
+  Elbows and knees fold against a fixed bisector plane: each cover flattens from its
+  lip in one clean bevel, and the gaskets and under-suit taper or stop short beneath
+  it (any vertex beyond the lip sits 3 mm under the plane), so the inner elbow and
+  the back of the knee read as cover-coloured creases rather than dark notches. The
+  wrist gasket is a smooth band seated inside the palm's rolled top. No sampled Boolean cuts remain: each fixed cover eases toward
+  its own body until clear of the union of the audited moving-cover poses (the
+  audit's own 65 samples per axis, 9 mm margin), the moving cover's lip then eases
+  back from it, and a constrained pass smooths each give's rim only where the
+  smoothed position stays clear. Torso bust, pectoral and scapular lobes fade in and
+  out at a fixed position and width, so the torso stays smooth. Cairn's panel seams
+  are dropped until a texture or vertex-attribute path exists (D3); as geometry they
+  read as broken or cracked lines.
+- **Heads.** Cairn has an inverted-egg cover with a full-face smoked shield in one
+  clean designed window, a rolled rim and recessed ear pods on a slender graphite
+  neck. Rill has an ash satin helmet with a wraparound visor under a brow cut, its
+  horizon light following the visor, over a ribbed turtleneck. Hush has a knit
+  balaclava hood with a recessed capsule visor inside a rolled welt, over a knit
+  yoke. The visual-only `face.surface` profile field gives the face light its glass.
+- **Hands and feet.** Tapered palms, a thumb pad, graded fingers (proximal knuckles
+  stepped, distal lengths 23/26/23/19 mm) and tapered phalanges keep the existing
+  frames and 21 mm bands; Hush adds knit glove cuffs. Shoes (Cairn low-vamp loafer,
+  Rill knit slip-on with a sock collar, Hush knit sneaker) sit flat on the physics foot
+  box's bottom plane, inside its footprint, and span 86% of its heel-to-toe length.
+- **Materials.** Albedo is recalibrated toward the concept torso tones under the live
+  ACES stage: warm bone (Cairn), ash knit with graphite side panels and an ash satin
+  helmet (Rill), neutral charcoal (Hush). The mean front torso tone in the live
+  renderer is now within ΔE76 2.2 of each concept's (Cairn, Rill, Hush were 15.2,
+  24.5 and 4.6). Desktop knit adds filtered courses along each part's long axis.
+  No textures, clearcoat or vertex attributes are added.
+
+Measured at rest with the same landmark code (`assets/blender/proportions.mjs`) on the
+master `5c31ffc` assets and the rebuild; the tests hold the ranges in humanoid-forms.json:
+
+| Landmark | Form I before / after | Form II before / after |
+| --- | ---: | ---: |
+| Head breadth (m) | 0.181 / 0.158-0.160 | 0.188 / 0.164-0.167 |
+| Head depth / breadth | 1.00 / 1.18-1.21 | 1.00 / 1.18-1.21 |
+| Shoulder span with deltoids (m) | 0.581 / 0.536 | 0.696 / 0.644 |
+| Upper-arm width (m) | 0.148 / 0.091 | 0.176 / 0.108 |
+| Hip breadth (m) | 0.531 / 0.395 | 0.476 / 0.388 |
+| Waist / hip breadth | 0.44 / 0.62 | 0.60 / 0.70 |
+| Shoe length / foot box | 0.76 / 0.86 | 0.76 / 0.86 |
+
+The rebuilt figures are 7.8 heads tall from the crown to the chin's front.
+
+Shoulder span stays above an adult's because the arm pivots sit 0.43 m (Form I) and
+0.52 m (Form II) apart; only new joint frames can close that gap.
+
+Open H2 decisions for the owner:
+
+1. **Joint frames (D1).** Kept. A soft-profile v2 with roughly human spacing (hips
+   about ±0.09-0.10 m, shoulders about ±0.17-0.19 m) is a separate physics ticket,
+   because every physical profile, the soft forms included, needs re-acceptance.
+2. **Knit covers (D2).** Rill and Hush use rigid overlapping covers with rolled lips.
+   A skinned cover bound to the existing pivots would read more continuous at the
+   joints; it needs a MODEL-STANDARD amendment and a rig binding change.
+3. **Textures (D3).** None added; the knit courses are procedural. Cairn's concept
+   panel seams wait for a texture or `_SEAM` vertex-attribute path.
+4. **References (D4).** Orthographic turnarounds for A, B and C in both forms, and
+   first references for Keel and Morrow, are still to commission. Templates with the
+   profile's pivots, physics boxes and the current silhouette come from
+   `node scripts/humanoid-turnaround-templates.mjs`. A silhouette likeness gate waits
+   for those turnarounds.
+5. **Head box (D5).** The visible heads reach about 0.11 m above the head's physics
+   box; refitting it is a separate physics ticket. The foot box is also wider (0.18 m)
+   than a human shoe, so the shoes cover 86% of its length but not its width.
+
+Soft finishes use cover roughness 0.86/0.94, satin graphite 0.54, ash helmet 0.55
+and smoked glass 0.30, with zero clearcoat and no image textures. Desktop materials
+add a small procedural normal perturbation, filtered at screen scale, and a cheap
+sheen lobe. Phones use standard materials with the same colour, metalness and roughness.
+The face shader projects its signal onto the profile's face glass, with deterministic
+blink, glance and a small listening pulse while tracked. Reduced motion holds the
+signal open, centred and steady. Each rig owns its own light uniforms.
 
 The initial two seats still open as Keel and Morrow. New robots download only
 when selected. Hero and distant geometry are reference counted and disposed when
@@ -545,26 +639,29 @@ hero contracts; the live two-actor stage must stay below 65k triangles and 120 d
 
 | New asset | Hero bytes / triangles / batches | Distant bytes / triangles / batches |
 | --- | ---: | ---: |
-| Cairn I | 327,784 / 24,361 / 46 | 160,968 / 9,836 / 46 |
-| Cairn II | 327,184 / 24,287 / 46 | 157,628 / 9,841 / 46 |
-| Rill I | 321,668 / 23,798 / 45 | 160,528 / 9,836 / 45 |
-| Rill II | 321,012 / 23,742 / 45 | 160,708 / 9,835 / 45 |
-| Hush I | 330,984 / 24,704 / 45 | 160,224 / 9,862 / 45 |
-| Hush II | 330,132 / 24,642 / 45 | 160,900 / 9,877 / 45 |
+| Cairn I | 227,892 / 24,020 / 41 | 118,696 / 8,348 / 41 |
+| Cairn II | 227,748 / 24,020 / 41 | 118,596 / 8,348 / 41 |
+| Rill I | 247,480 / 24,136 / 45 | 132,136 / 8,654 / 45 |
+| Rill II | 247,320 / 24,136 / 45 | 132,096 / 8,654 / 45 |
+| Hush I | 226,764 / 24,142 / 39 | 117,888 / 8,470 / 39 |
+| Hush II | 226,672 / 24,142 / 39 | 117,920 / 8,470 / 39 |
 
 Both forms and LODs pass **24,180 independent clearance poses with zero exterior
-crossings**, without increasing the bearing envelopes. The compressed-mesh tests
-also check **7,200 limb-centre samples** in straight, halfway and folded poses,
-all named pivots, finite outward corner normals and separated finger bands.
-Small phalanges, shoes and the head keep explicit tessellation budgets. Socket
-planes dissolve before cover smoothing; Hush's knit lip stands above the visor.
+crossings**, without increasing the bearing envelopes (H2a rebuild, re-audited
+2026-10-05 after the joint and torso fixes). The compressed-mesh tests also check **7,200 limb-centre samples** in
+straight, halfway and folded poses, all named pivots, finite outward corner normals,
+separated finger bands, the form landmarks and the shoe fit on the foot box. The
+distant level keeps every section with fewer facets rather than decimating.
 
-The final five-minute Cairn II / Rill II hero run collected 17,899 frames over
+The final five-minute Cairn II / Rill II hero run of the 2026-09-30 meshes collected 17,899 frames over
 300,215 ms on Chromium/ANGLE D3D11 and an RTX 4090. P95 logic was 0.70 ms, render
 submission 0.90 ms and GPU work 2.616 ms, with 102 draws, 55,597 triangles and
 DPR 1. The component p95 work sum is 4.216 ms, not a measured combined percentile;
 the p95 browser frame interval was 16.80 ms including refresh scheduling.
-The two-actor PC work and scene budgets pass.
+The two-actor PC work and scene budgets pass. The same five-minute run on the H2a
+meshes (2026-10-04, GPU shared with other lanes' suites) collected 17,999 frames:
+p95 logic 0.70 ms, render submission 0.80 ms and GPU work 4.70 ms, with 103 draws,
+56,244 triangles and DPR 1, again within the budgets.
 
 After merging master `f9f5374`, all four typechecks and 2,338 unit tests pass
 (14 skipped). The first full sims run passed 382/382; the integrated run passed

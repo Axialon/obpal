@@ -249,14 +249,16 @@ for (const profileId of ALL_PHYSICAL_PROFILES) for (const direction of ['toe', '
         expect(row.maxEffortRatio).toBeLessThanOrEqual(1 + 1e-8); expect(row.droppedSeconds).toBe(0)
       }
     })
-    // Expected failure, measured Round 1: every form/direction has firstStanceS=null,
+    // Expected failure, measured v3 with the kneeling path: every form/direction has firstStanceS=null,
     // maxStanceHeldS=0 s and finalPhase=down after 20 s. Thresholds stay unchanged:
     // 2 s continuous stance, root up >= .98, pelvis >= .9 of standing height,
     // both feet loaded, sole penetration <= 5 mm and COM inside foot support.
     // Final root up / pelvis height (m), toe then heel:
-    // Keel, Cairn II, Rill II, Hush II: .01247/.10599; -.00027/.10502.
-    // Cairn I, Rill I, Hush I: .00477/.10264; -.01476/.10198.
-    // Morrow: -.71355/.36664; .00055/.09637.
+    // Keel, Cairn II, Rill II, Hush II: .03032/.10753; -.05513/.11253.
+    // Cairn I, Rill I, Hush I: .02616/.10316; -.00005/.10088.
+    // Morrow: -.00470/.09904; .00050/.09620.
+    // Keel toe genuinely reaches kneel before timeout; Morrow toe reaches hand placement.
+    // Whole-trial peaks (mm), toe / heel: Keel 2.409 / 4.865; Morrow 2.333 / 2.631.
     it.fails('holds the stance envelope for 2 s within 20 s after the lean-induced fall', () => {
       expect(trial.getup.firstStanceS).not.toBeNull()
       expect(trial.getup.firstStanceS!).toBeLessThanOrEqual(20)

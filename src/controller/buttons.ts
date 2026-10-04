@@ -23,8 +23,11 @@ import { phoneProfile, phoneMapping } from './packs'
 import { ICONS } from '../ui/icons'
 import { groupOf, type PhysicalInputs } from './inputs'
 import { sheetExits } from './sheet'
+import { dismiss as dismissNotice, notify } from '../ui/kit/notice'
 
 type Group = 'keys' | 'media' | 'pad'
+/** The id of the one notice a device found or an input offered shows in. */
+const NOTICE = 'buttons'
 /** controller -> input -> target */
 type Nested = Record<string, Record<string, string>>
 /** kind -> controller -> input -> target */
@@ -118,7 +121,6 @@ export class Buttons {
   /** Inputs used this session: their badges fade. */
   private used = new Set<string>()
   private sheet: ButtonsSheet | null = null
-  private noticeTimer: ReturnType<typeof setTimeout> | undefined
   /** Back as a button: the person's choice (kept), armed only while Back is bound here or being bound. */
   backOn = store.get(BACK) === '1'
 
@@ -244,25 +246,20 @@ export class Buttons {
 
   // ---- notices: found a device, or an unbound input ----
 
+  /**
+   * A notice with buttons of its own (src/ui/kit/notice.ts): over the bar for a few seconds, held still while it is touched
+   * or has focus, with an x, and gone on a swipe. It never takes a row of the controls.
+   */
   private notice(content: Content, ms: number): HTMLElement {
-    this.dismiss()
-    const n = document.createElement('div')
-    n.className = 'bt-notice glass'
-    n.setAttribute('role', 'status')
-    setMarkup(n, html`${content}<button class="bt-n-x" aria-label="Dismiss">${ICONS.close}</button>`)
-    n.querySelector<HTMLButtonElement>('.bt-n-x')!.onclick = () => this.dismiss()
-    document.body.appendChild(n)
-    this.noticeTimer = setTimeout(() => this.dismiss(), ms)
-    return n
+    const card = document.createElement('div')
+    card.className = 'bt-n-card'
+    setMarkup(card, content)
+    const say = [...card.querySelectorAll('.bt-n-txt > *')].map((e) => e.textContent?.trim()).filter(Boolean).join('. ')
+    notify({ id: NOTICE, node: card, say, ms, icon: false, urgent: true, className: 'bt-notice', closeClass: 'bt-n-x', closeLabel: 'Dismiss' })
+    return card
   }
 
-  dismiss() {
-    clearTimeout(this.noticeTimer)
-    document.querySelectorAll<HTMLElement>('.bt-notice:not(.out)').forEach((n) => {
-      n.classList.add('out')
-      setTimeout(() => n.remove(), 200)
-    })
-  }
+  dismiss() { dismissNotice(NOTICE) }
 
   /** A device recognised: what it is, and what its buttons do now. Change opens the sheet at the input that told. */
   private found(kind: DeviceKind, id: string, bindings: Record<string, string>) {

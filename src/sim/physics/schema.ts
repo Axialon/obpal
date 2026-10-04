@@ -5,6 +5,8 @@ export type EngineId = 'custom' | 'rapier' | 'physx'
 export type Shape = { kind: 'sphere'; radius: number } | { kind: 'box'; half: Vec3 } | { kind: 'plane' }
 export interface BodyInput {
   id: string; shape: Shape; position: Vec3; rotation?: Quat; fixed?: boolean; mass?: number
+  /** Optional principal moments in the body frame, kg m²; uniform density when omitted. */
+  inertia?: Vec3
   velocity?: Vec3; angularVelocity?: Vec3; friction?: number; restitution?: number; linearDamping?: number; angularDamping?: number
 }
 export interface Body extends BodyInput {
@@ -87,8 +89,30 @@ export function validateScene(input: SceneInput, budget: Partial<Limits> = {}): 
       shape = { kind: 'box', half: h }
     } else if (b.shape?.kind === 'plane' && fixed) shape = { kind: 'plane' }
     else throw new RangeError('Unsupported shape or dynamic plane')
+    const mass = numberIn(b.mass ?? 1, .01, 10000, 'mass')
+    let inertia: Vec3 | undefined
+    if (b.inertia !== undefined) {
+      if (fixed || shape.kind === 'plane') throw new RangeError('Inertia override requires a dynamic body')
+      inertia = vector(b.inertia, Infinity, 'body inertia')
+      const h = shape.kind === 'box' ? shape.half : null, sphereBound = shape.kind === 'sphere' ? mass * shape.radius ** 2 : 0
+      const bound = h ? { x: mass * (h.y ** 2 + h.z ** 2), y: mass * (h.x ** 2 + h.z ** 2), z: mass * (h.x ** 2 + h.y ** 2) } :
+        { x: sphereBound, y: sphereBound, z: sphereBound }
+      const boundTolerance = 16 * Number.EPSILON * Math.max(bound.x, bound.y, bound.z)
+      const triangleTolerance = 16 * Number.EPSILON * Math.max(inertia.x, inertia.y, inertia.z)
+      for (const axis of ['x', 'y', 'z'] as const) {
+        // Rapier stores mass properties in float32; both the moment and its inverse must remain usable.
+        const nativeMoment = Math.fround(inertia[axis]), nativeInverse = Math.fround(1 / nativeMoment)
+        if (!Number.isFinite(nativeMoment) || nativeMoment <= 0 || !Number.isFinite(nativeInverse) || nativeInverse <= 0)
+          throw new RangeError('Invalid body inertia representation')
+        const others = axis === 'x' ? inertia.y + inertia.z : axis === 'y' ? inertia.x + inertia.z : inertia.x + inertia.y
+        if (inertia[axis] > others + triangleTolerance || inertia[axis] > bound[axis] + boundTolerance)
+          throw new RangeError('Invalid body inertia or physical bound')
+      }
+      if (shape.kind === 'sphere' && inertia.x + inertia.y + inertia.z > 2 * sphereBound + boundTolerance)
+        throw new RangeError('Invalid sphere inertia bound')
+    }
     return { id: b.id, fixed, shape, position: vector(b.position, limits.maxPosition, 'position'),
-      rotation: quaternion(b.rotation ?? IDENTITY), mass: numberIn(b.mass ?? 1, .01, 10000, 'mass'),
+      rotation: quaternion(b.rotation ?? IDENTITY), mass, ...(inertia ? { inertia } : {}),
       velocity: vector(b.velocity ?? ZERO, limits.maxSpeed, 'velocity'), angularVelocity: vector(b.angularVelocity ?? ZERO, limits.maxAngularSpeed, 'angular velocity'),
       friction: numberIn(b.friction ?? .45, 0, 2, 'friction'), restitution: numberIn(b.restitution ?? .15, 0, 1, 'restitution'),
       linearDamping: numberIn(b.linearDamping ?? 0, 0, 20, 'linear damping'), angularDamping: numberIn(b.angularDamping ?? 0, 0, 20, 'angular damping') }

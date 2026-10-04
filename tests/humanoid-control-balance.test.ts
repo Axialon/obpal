@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { BALANCE_CONTROL, BalanceController, hipStrategyMoment } from '../src/sim/humanoid/physics/balance'
+import { BALANCE_CONTROL, BalanceController, hipStrategyMoment, supportGeometryDeparture } from '../src/sim/humanoid/physics/balance'
 import { StanceController } from '../src/sim/humanoid/physics/stance'
 import { ActuationGate, MAX_TARGET_RATE } from '../src/sim/humanoid/physics/contract'
 import { jointFrame, jointTorque } from '../src/sim/humanoid/physics/targets'
-import { polygonCentroid } from '../src/sim/humanoid/physics/stepping'
-import { ZERO, add, sub, scale, rotate, multiply, conjugate, fromRotationVector, rotationVector, angleBetween, norm, type Vec3 } from '../src/sim/physics/math'
+import { polygonCentroid, supportHull, sinkSafeDiamond } from '../src/sim/humanoid/physics/stepping'
+import { ZERO, add, sub, scale, rotate, multiply, conjugate, fromRotationVector, rotationVector, angleBetween, clampCone, norm, type Vec3 } from '../src/sim/physics/math'
 import { STEP } from '../src/sim/physics/schema'
 import { supportFixture } from './humanoid-balance-cases'
+import type { Observation } from '../src/sim/humanoid/physics/observation'
 
 async function fixture() {
   const { model, states, contacts, observe } = await supportFixture()
@@ -19,7 +20,123 @@ function vector(actual: Vec3, expected: Vec3) {
   for (const axis of ['x', 'y', 'z'] as const) expect(actual[axis]).toBeCloseTo(expected[axis], 9)
 }
 
+/** Observation-only arrangement fixture; this does not move a native body. */
+function staggered(input: Observation, metres = .12): Observation {
+  const o = structuredClone(input), foot = o.feet[1], body = o.bodies.find(b => b.id === foot.id)!
+  body.position.z -= metres; foot.centre.z -= metres; foot.centreOfPressure!.z -= metres
+  for (const point of foot.contactPoints) point.z -= metres
+  o.support.points = o.feet.flatMap(f => f.contactPoints)
+  o.support.polygon = supportHull(o.support.points)
+  const centre = polygonCentroid(o.support.polygon)!
+  o.com.x = centre.x; o.com.z = centre.z
+  return o
+}
+function atTick(input: Observation, tick: number): Observation {
+  return { ...structuredClone(input), stateTick: tick, timeS: tick * STEP }
+}
+
 describe('capture-point balance requests', () => {
+  it('measures support departure in metres independently of actor heading and translation', async () => {
+    const { model, observation } = await fixture(), changed = staggered(observation)
+    expect(supportGeometryDeparture(model, observation)).toBeCloseTo(0, 12)
+    expect(supportGeometryDeparture(model, changed)).toBeCloseTo(.12, 12)
+    const q = fromRotationVector({ x: 0, y: .8, z: 0 }), shift = { x: 3, y: 0, z: -2 }
+    for (const body of changed.bodies) {
+      body.position = add(rotate(q, body.position), shift); body.rotation = multiply(q, body.rotation)
+    }
+    expect(supportGeometryDeparture(model, changed)).toBeCloseTo(.12, 12)
+  })
+
+  it('keeps authored quiet stance identical on first entry and after an observation gap', async () => {
+    const { model, observation, controller } = await fixture()
+    for (const tick of [0, 1, 100]) {
+      const input = atTick(observation, tick)
+      expect(controller.step(input).frame).toEqual(new StanceController(model, 1).step(input).frame)
+    }
+  })
+
+  it('retains a changed support posture on entry without relatching every continuous gait observation', async () => {
+    const { model, observation } = await fixture(), changed = staggered(observation)
+    const knee = model.scene.joints.find(j => j.child === model.parts.right_shin.bodyId)!
+    changed.joints.find(j => j.id === knee.id)!.rotation = fromRotationVector({ x: .15, y: 0, z: 0 })
+    const before = structuredClone({ model, changed }), continuous = new BalanceController(model, 1)
+    continuous.step(observation)
+    const next = atTick(changed, 1), retained = new BalanceController(model, 1).step(next), unchanged = continuous.step(next)
+    expect(angleBetween(retained.frame.targets[knee.id], unchanged.frame.targets[knee.id])).toBeGreaterThan(.1)
+    expect({ model, changed }).toEqual(before)
+    expect(Object.keys(retained.frame.targets).sort()).toEqual(model.scene.joints.map(j => j.id).sort())
+    expect(retained.frame.targets).not.toHaveProperty(model.root)
+  })
+
+  it('holds its leg reference through contiguous observations and refreshes it after a real gap', async () => {
+    const { model, observation } = await fixture(), changed = staggered(observation), controller = new BalanceController(model, 1)
+    const knee = model.scene.joints.find(j => j.child === model.parts.right_shin.bodyId)!
+    changed.joints.find(j => j.id === knee.id)!.rotation = fromRotationVector({ x: .1, y: 0, z: 0 })
+    const first = controller.step(changed)
+    const next = atTick(changed, 1)
+    next.joints.find(j => j.id === knee.id)!.rotation = fromRotationVector({ x: .2, y: 0, z: 0 })
+    const continuous = controller.step(next)
+    expect(angleBetween(continuous.frame.targets[knee.id], first.frame.targets[knee.id])).toBeLessThan(1e-10)
+    expect(controller.step(next)).toEqual(continuous)
+    const resumed = controller.step(atTick(next, 10))
+    expect(angleBetween(resumed.frame.targets[knee.id], first.frame.targets[knee.id])).toBeCloseTo(.1, 10)
+  })
+
+  it('keeps zero conform moment when an offset ankle lies outside the narrowed COP diamond', async () => {
+    const { model, observation } = await fixture(), changed = staggered(observation)
+    const foot = changed.feet[1], body = changed.bodies.find(b => b.id === foot.id)!
+    body.rotation = fromRotationVector({ x: .04, y: 0, z: 0 })
+    const ankle = model.scene.joints.find(j => j.child === foot.id)!, measured = changed.joints.find(j => j.id === ankle.id)!
+    measured.rotation = fromRotationVector({ x: .05, y: .02, z: 0 })
+    measured.angularVelocity = { x: .2, y: -.1, z: .05 }
+    const diamond = sinkSafeDiamond({ ...model.scene.bodies.find(b => b.id === foot.id)!, ...body }, foot.normalImpulseNs / STEP)
+    const anchor = jointFrame(ankle, changed.bodies.find(b => b.id === ankle.parent)!).position
+    expect(diamond.rho).toBeLessThan(.5)
+    expect(Math.hypot(anchor.x - diamond.centre.x, anchor.z - diamond.centre.z)).toBeGreaterThan(.1)
+
+    const result = new BalanceController(model, 1).step(changed)
+    const spring = scale(rotationVector(multiply(result.frame.targets[ankle.id], conjugate(measured.rotation))), ankle.motor.stiffness)
+    vector(sub(spring, scale(measured.angularVelocity, ankle.motor.damping)), ZERO)
+    vector(result.diagnostics.jointTorquesNm[ankle.id], ZERO)
+    vector(result.diagnostics.ankleResidualNm[foot.id], ZERO)
+  })
+
+  it('repairs an infeasible retained ankle only after conform, at most once per observed tick', async () => {
+    const { model, observation } = await fixture(), changed = staggered(observation), controller = new BalanceController(model, 1)
+    const ankle = model.scene.joints.find(j => j.child === model.feet[1])!, measured = changed.joints.find(j => j.id === ankle.id)!
+    measured.rotation = fromRotationVector({ x: 1, y: 1, z: 1 })
+    expect(angleBetween(measured.rotation, clampCone(measured.rotation, ankle.cone))).toBeGreaterThan(BALANCE_CONTROL.supportFlattenConeErrorRad)
+    let previous: ReturnType<BalanceController['step']> | null = null, moved = false
+    for (let tick = 0; tick < 40; tick++) {
+      const input = atTick(changed, tick), first = controller.step(input)
+      expect(controller.step(input)).toEqual(first)
+      if (tick === 0) vector(first.diagnostics.jointTorquesNm[ankle.id], ZERO)
+      if (previous && tick > 20) {
+        const change = angleBetween(previous.frame.targets[ankle.id], first.frame.targets[ankle.id])
+        expect(change).toBeLessThanOrEqual(BALANCE_CONTROL.supportFlattenRateRadps * STEP + 1e-9)
+        moved ||= change > 1e-6
+      }
+      previous = first
+    }
+    expect(moved).toBe(true)
+    const feasible = structuredClone(changed)
+    feasible.joints.find(j => j.id === ankle.id)!.rotation = clampCone(measured.rotation, ankle.cone)
+    const resumed = atTick(feasible, 100), fresh = new BalanceController(model, 1)
+    expect(controller.step(resumed)).toEqual(fresh.step(resumed))
+    expect(controller.step(atTick(feasible, 101))).toEqual(fresh.step(atTick(feasible, 101)))
+  })
+
+  it('does not latch unloaded geometry and rejects missing or non-finite measured posture joints', async () => {
+    const { model, observation } = await fixture(), knee = model.scene.joints.find(j => j.child === model.parts.right_shin.bodyId)!
+    const changed = staggered(observation); changed.feet[1].normalImpulseNs = 0
+    changed.joints.find(j => j.id === knee.id)!.rotation = fromRotationVector({ x: .2, y: 0, z: 0 })
+    expect(new BalanceController(model, 1).step(changed).frame.targets[knee.id]).toEqual(knee.motor.target)
+    const missing = staggered(observation); missing.joints.pop()
+    expect(() => new BalanceController(model, 1).step(missing)).toThrow('Missing balance joint')
+    const invalid = staggered(observation); invalid.joints[0].rotation.x = NaN
+    expect(() => new BalanceController(model, 1).step(invalid)).toThrow('Invalid balance joint state')
+  })
+
   it('delegates the quiet region exactly to the existing stance controller without mutating inputs', async () => {
     const { model, observation, controller } = await fixture(), before = structuredClone({ model, observation })
     const result = controller.step(observation)
@@ -45,7 +162,9 @@ describe('capture-point balance requests', () => {
     const mass = model.scene.bodies.reduce((sum, b) => sum + (b.fixed ? 0 : b.mass), 0)
     expect(d.phase).toBe('hip')
     expect(d.desiredCMP!.z).toBeCloseTo(2 * c.point.z - c.centroid.z, 10)
-    expect(d.desiredCOP!.z).toBeCloseTo(Math.min(...observation.support.polygon.map(p => p.z)) + .01, 10)
+    const diamonds = observation.feet.flatMap(f => sinkSafeDiamond({ ...model.scene.bodies.find(b => b.id === f.id)!,
+      ...observation.bodies.find(b => b.id === f.id)! }, f.normalImpulseNs / STEP).points)
+    expect(d.desiredCOP!.z).toBeCloseTo(Math.min(...diamonds.map(p => p.z)), 10)
     vector(d.forceN, { x: mass * c.omega ** 2 * (observation.com.x - d.desiredCOP!.x), y: 0,
       z: mass * c.omega ** 2 * (observation.com.z - d.desiredCOP!.z) })
     expect(Object.keys(frame.targets).sort()).toEqual(model.scene.joints.map(j => j.id).sort())

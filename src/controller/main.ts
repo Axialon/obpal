@@ -44,6 +44,7 @@ import { calmMarks, icon, ICONS, logo, logoMark } from '../ui/icons'
 import { dismissHint, hint, repositionHints, setHintFrame } from '../ui/hints'
 import { enhanceSelects } from '../ui/kit/select'
 import { iconAction, SIM_ACTION_ICONS, statefulIconAction } from '../ui/kit/action'
+import { dismiss, mountNotices, notify, placeNotices, setNoticeAnchor, type NoticeTone } from '../ui/kit/notice'
 import { fitControlInk } from '../ui/kit/ink'
 import { Segmented } from '../ui/kit/segmented'
 import { setPopoverFrame } from '../ui/kit/place'
@@ -61,6 +62,7 @@ import { NodeStrip } from './strip'
 import { resolveShortLink } from './short-link'
 
 const app = document.getElementById('app')!
+mountNotices()
 const isApple = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 const store = {
   get: (k: string) => { try { return localStorage.getItem(k) } catch { return null } },
@@ -526,6 +528,11 @@ async function boot(code?: Join) {
   /** The banner's two sources (see banner()): the link's own trouble, and the screen's `notice`. */
   let linkLine: string | null = null
   let hostNotice = ''
+  /** The screen's feedback toasts share this notice id; hostToastText is the words of the last one. */
+  const HOST_TOAST = 'host-feedback'
+  /** 'Controlling <scene>' on connecting: not said while the screen holds this phone up (waiting to be let in, stopped). */
+  const SCENE_TOAST = 'scene-joined'
+  let hostToastText = ''
   let tier: TierId = Tier.touch
   let tab: Tab = 'rotate'
   let lastTab: Exclude<Tab, 'gamepad'> = 'rotate' // where Leave returns from gamepad mode
@@ -888,7 +895,7 @@ async function boot(code?: Join) {
     if (started) showSurface()
     else startControls()
     tick()
-    toast(`Controlling ${next.row.name}`)
+    toast(`Controlling ${next.row.name}`, undefined, SCENE_TOAST)
   }
 
   const permission = motionSupported() ? isApple && motionPermissionRequired() ? 'prompt' : await requestMotionPermission() : 'denied'
@@ -1118,8 +1125,7 @@ async function boot(code?: Join) {
       if ('textField' in m.values) keyboard.setField(m.values.textField)
       // What holds this phone's input up on the screen's side, if anything: shown until it clears.
       if ('notice' in m.values) {
-        hostNotice = typeof m.values.notice === 'string' ? m.values.notice.slice(0, 120) : ''
-        banner(linkLine)
+        setHostNotice(typeof m.values.notice === 'string' ? m.values.notice.slice(0, 120) : '')
       }
       if (typeof m.values.theme === 'string') { applyTheme(themeById(m.values.theme)); syncThemeRows() }
       // A shared scene gives this device a colour of its own: wear it as the accent for this session, not as a preference.
@@ -1134,7 +1140,7 @@ async function boot(code?: Join) {
       scene = { you: m.you, people: m.people.slice(0, 33), nodes: Array.isArray(m.nodes) ? m.nodes.slice(0, 64) : scene?.nodes ?? [], held: m.held }
     }
     else if (m.t === 'feedback') {
-      if (m.toast) toast(m.toast)
+      if (m.toast) toast(m.toast, undefined, HOST_TOAST)
       if (m.haptic && hapticsKind() === 'vibrate') navigator.vibrate(m.haptic === 'bump' ? 20 : 9)
     }
     if (surface && m.t === 'state' && Object.keys(m.values).every(k => k.startsWith('action.'))) {
@@ -1244,7 +1250,7 @@ async function boot(code?: Join) {
           <button class="bar-btn lock-btn" id="lock" aria-label="Lock screen rotation" aria-pressed="false">${ICONS['rotation-free']}</button>
           <button class="bar-btn" id="gear" aria-label="Settings">${ICONS.settings}</button>
         </header>
-        <div class="banner glass" id="banner" hidden></div>
+        <div class="banner glass" id="banner" role="status" hidden></div>
         ${switcher.html()}
         <div class="pad glass" id="pad" aria-label="Trackpad">
           <div class="pad-part glass" id="pad-part" hidden><span class="pp-dot"></span><span class="pp-name"></span><span class="pp-tag"></span><button class="pp-x" aria-label="Release part">${ICONS.close}</button></div>
@@ -1282,13 +1288,19 @@ async function boot(code?: Join) {
         </div>
       </div>
       ${keyboard.html()}
-      <div class="toast glass" id="toast" role="status" aria-live="polite"></div>
+      <div class="toast" id="toast" aria-hidden="true"></div>
       <div class="rest" id="rest" aria-hidden="true"><span>Resting to keep your phone cool · touch to wake</span></div>`)
     surface = document.getElementById('surface')!
     if (participation) { surface.querySelector('.bar')?.after(participation.root); for (const el of surface.children) if (el instanceof HTMLElement && el !== participation.root && !el.classList.contains('bar')) el.inert = watching }
     switcher.mount(surface)
     strip.mount(surface)
     linkBadge.mount(document.getElementById('link-badge')!)
+    // Short notices sit just under the controller bar (beside the work area, on a phone on its side), as wide as it: over the
+    // top of the work area, never over a row of controls and never on a row of their own.
+    const bar = surface.querySelector<HTMLElement>('.bar')!
+    const modes = surface.querySelector<HTMLElement>('.modes')
+    setNoticeAnchor(() => (document.documentElement.classList.contains('land') || !modes?.getClientRects().length ? bar : modes))
+    if (typeof ResizeObserver === 'function') { const watch = new ResizeObserver(() => placeNotices()); watch.observe(bar); if (modes) watch.observe(modes) }
     document.querySelector<HTMLButtonElement>('.connection-title')!.onclick = () => openConnections()
     document.body.classList.add('live')
     calmMarks(surface)
@@ -1353,7 +1365,7 @@ async function boot(code?: Join) {
         await tracker.start(surface!)
         toast('Hold the pad and move your phone')
       } catch {
-        toast('3D tracking didn’t start: it needs Android with Google Play Services for AR')
+        toast('3D tracking didn’t start: it needs Android with Google Play Services for AR', 'warn')
       }
       render()
     })
@@ -1853,28 +1865,74 @@ async function boot(code?: Join) {
 
   /**
    * The line over the controls: the link's own trouble (reconnecting, waiting for the screen), else what the screen says
-   * holds this phone's input up on its side (the host value `notice`: ob.Pal Link waiting for an answer on the PC).
+   * holds this phone's input up on its side (the host value `notice`: ob.Pal Link waiting for an answer on the PC, the
+   * screen waiting to let this phone in, the arms stopped there). It is a state, so it stays while it is true. Link trouble
+   * that lasts offers a way out after BANNER_ACTION_MS (scan again) and a quiet x; the screen's notice never times out (a
+   * stop must not), and offers its x only after HOST_NOTICE_MS, in case the screen forgot it. The x hides it until its
+   * words change.
    */
+  const BANNER_ACTION_MS = 20_000
+  const HOST_NOTICE_MS = 120_000
+  let bannerLine: string | null = null
+  let bannerSince = 0
+  let bannerHidden = false
+  let bannerTimer: ReturnType<typeof setTimeout> | undefined
   function banner(text: string | null) {
     linkLine = text
+    paintBanner()
+  }
+  function paintBanner() {
     const b = document.getElementById('banner')
     if (!b) return
-    const line = text ?? (hostNotice || null)
-    b.hidden = !line
-    b.textContent = line ?? ''
+    const link = linkLine !== null
+    const line = linkLine ?? (hostNotice || null)
+    if (line !== bannerLine) { bannerLine = line; bannerSince = performance.now(); bannerHidden = false }
+    clearTimeout(bannerTimer)
+    const age = performance.now() - bannerSince
+    const after = link ? BANNER_ACTION_MS : HOST_NOTICE_MS
+    if (line && age < after) bannerTimer = setTimeout(paintBanner, after - age + 20)
+    let t = b.querySelector<HTMLElement>('.bn-t')
+    if (!t) {
+      t = document.createElement('span'); t.className = 'bn-t'
+      const act = document.createElement('button'); act.type = 'button'; act.className = 'bn-act'; act.textContent = 'Scan again'
+      act.onclick = () => { tick(); openConnections(true) }
+      const x = document.createElement('button'); x.type = 'button'; x.className = 'bn-x'; x.setAttribute('aria-label', 'Hide this message')
+      setMarkup(x, ICONS.close)
+      x.onclick = () => { tick(); bannerHidden = true; paintBanner() }
+      b.prepend(t, act, x)
+    }
+    const trouble = age >= after
+    b.hidden = !line || bannerHidden
+    t.textContent = line ?? ''
+    b.querySelector<HTMLElement>('.bn-act')!.hidden = !(link && trouble)
+    b.querySelector<HTMLElement>('.bn-x')!.hidden = !trouble
     dotLoading(b, !!line && /[Ww]aiting|[Cc]onnecting|[Rr]econnecting/.test(line) && !document.querySelector('.link-badge[data-state=connecting], .link-badge[data-state=reconnecting]'), line || 'Connected')
   }
 
-  let toastTimer: ReturnType<typeof setTimeout> | undefined
-  function toast(text: string) {
+  /**
+   * Short feedback (src/ui/kit/notice.ts): it stays as long as its words need, waits behind others instead of replacing
+   * them, holds while it is touched, and goes on its x or a swipe. #toast keeps the last words, out of sight.
+   */
+  function toast(text: string, tone?: NoticeTone, id?: string) {
     const t = document.getElementById('toast')
-    if (!t) return
+    if (t) t.textContent = text
     // The screen repeats its notice as a toast for phones from before notices: here the banner says it already.
-    if (text === hostNotice) return
-    t.textContent = text
-    t.classList.add('show')
-    clearTimeout(toastTimer)
-    toastTimer = setTimeout(() => t.classList.remove('show'), 1600)
+    if (text === hostNotice || (id === SCENE_TOAST && hostNotice)) return
+    if (id === HOST_TOAST) hostToastText = text
+    // On a phone every part of the screen is a control: the notice takes no touch (it goes by itself, or on a drag).
+    notify({ id, text, tone, passive: true })
+  }
+  /**
+   * The screen's own feedback shares one notice, so the newest replaces the last (taking parts one after another must not
+   * leave 'You have Base' up after 'You have Wrist'), and a toast saying what the standing line says (or said) goes: it
+   * would repeat the banner, or tell a state that has ended.
+   */
+  function setHostNotice(next: string) {
+    const old = hostNotice
+    hostNotice = next
+    if (next) dismiss(SCENE_TOAST)
+    if (hostToastText && (hostToastText === old || hostToastText === next)) { dismiss(HOST_TOAST); hostToastText = '' }
+    banner(linkLine)
   }
 
   function openSettings() {
@@ -1968,7 +2026,7 @@ async function boot(code?: Join) {
     sheet.querySelectorAll<HTMLButtonElement>('.track3d [data-way]').forEach((b) => {
       b.onclick = () => {
         // The camera way only where the phone can follow itself with its camera: elsewhere it says so, and stays off.
-        if (b.dataset.way === 'xr' && !trackOk) { tick(true); toast(CAMERA_3D_NEEDS); return }
+        if (b.dataset.way === 'xr' && !trackOk) { tick(true); toast(CAMERA_3D_NEEDS, 'warn'); return }
         settings.track3d = b.dataset.way as 'motion' | 'xr' | 'glow'
         store.set('obpal.track3d', settings.track3d)
         sheet.querySelectorAll('.track3d [data-way]').forEach((x) => x.setAttribute('aria-checked', String(x === b)))

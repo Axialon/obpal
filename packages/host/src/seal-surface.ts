@@ -160,6 +160,10 @@ export class SealSurface {
     this.field.setPoints(this.points()); this.field.setSource(this.source)
     this.animate(performance.now(), true, () => this.rest())
   }
+  /** A fresh code is showing to add a phone (the + has become its cancel). */
+  get isAdding() { return this.adding }
+  /** Put the seal back if a fresh code is showing; nothing otherwise. */
+  cancelAdding() { if (this.adding) this.cancel() }
   cancel() {
     this.adding = false; this.showingQr = false
     this.field.setPoints(this.points()); this.field.setSource(this.source)
