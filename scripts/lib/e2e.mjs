@@ -105,6 +105,22 @@ export function parseResult(log) {
   return best && { passed: best.passed, total: best.total, failed: best.total - best.passed }
 }
 
+/**
+ * Whether a suite passed, from its exit code, whether it timed out and its parsed result line (`parseResult`). A suite that
+ * reports no checks passed nothing: one whose selector matched no group (`OBPAL_E2E_PAGES_ONLY=typo`) prints `passed 0/0`
+ * and exits 0, so zero checks, like a log with no result line at all, is a FAIL and never a pass.
+ * @param {{ code: number, timedOut?: boolean, result: { passed: number, total: number, failed: number } | null }} run
+ * @returns {{ ok: boolean, why: string }} `why` is empty when the suite passed
+ */
+export function suiteVerdict({ code, timedOut = false, result }) {
+  if (timedOut) return { ok: false, why: 'timed out' }
+  if (code !== 0) return { ok: false, why: `exit ${code}` }
+  if (!result) return { ok: false, why: 'no result line in its log' }
+  if (result.total === 0) return { ok: false, why: 'reported 0/0 checks, so it ran nothing' }
+  if (result.failed > 0) return { ok: false, why: `${result.failed} of ${result.total} checks failed` }
+  return { ok: true, why: '' }
+}
+
 /** The checks a suite's log reports as failed (`  ✗ name: why`), the first `max` of them, each cut to one short line. */
 export function failures(log, max = 5) {
   return stripAnsi(log).split(/\r?\n/).filter((l) => /^\s*✗ /.test(l)).slice(0, max).map((l) => l.trim().slice(0, 160))

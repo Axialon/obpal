@@ -17,6 +17,7 @@
     "check": "pnpm run typecheck && vitest run",
     "check:live": "node scripts/check-live.mjs",
     "demo:preflight": "node scripts/demo-preflight.mjs",
+    "demo:clips": "node scripts/demo-clips.mjs",
     "indexnow": "node scripts/indexnow.mjs",
     "merge:lane": "node scripts/merge-lane.mjs",
     "lane": "node scripts/lanes/codex.mjs",

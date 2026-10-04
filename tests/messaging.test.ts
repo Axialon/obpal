@@ -1,18 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { pageUrl, pageWords, PREVIEW_IMAGE, previewTags, SITE } from '../scripts/lib/preview.mjs'
 import { readBytes, readText } from './devtools-node.mjs'
+import { PAGES } from './site-pages'
 
 /**
  * The site's words about itself (spec/MESSAGING.md): every page's link preview says what the page says, with the one
  * preview image, and each page's description reads the same to UK and US readers.
  */
-
-/** Every page the site builds (vite.config.ts), as its file in the build. */
-const PAGES = [
-  'index.html', 'p/index.html', 'view/index.html', 'sponsor/index.html', 'donate/index.html', 'link/index.html', 'link/desktop/index.html', 'link/try/index.html', 'privacy/index.html',
-  'sim/index.html', 'sim/arm/index.html', 'sim/arena/index.html', 'sim/device/index.html', 'catalogue/index.html', 'embed/index.html',
-  'buttons/index.html',
-]
 
 /** Words UK and US English spell differently (MESSAGING.md, voice rule 9). "Catalogue" is a name on this site. */
 const VARIANT = /\b(colou?r(?:s|ed|ful)?|cent(?:re|er)(?:s|d|ed)?|gr[ae]y|favou?rites?|analogu?e|behaviou?rs?|travell?(?:ing|ed|er)|licen[cs]e|programmes?|(?:recogni|organi|customi|personali|optimi|visuali|synchroni|authori|summari)[sz](?:e|es|ed|ing|ation))\b/i

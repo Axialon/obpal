@@ -16,22 +16,32 @@ const folder = mkdtempSync(join(tmpdir(), 'obpal-getup-lean-'))
 const WARMUP_TICKS = 480, LEAN_TICKS = 480, RECOVERY_TICKS = 4800
 const intent: Intent = { x: 0, z: 0, yaw: 0, manual: false }
 type Direction = 'toe' | 'heel'
+interface PhaseStats {
+  ticks: number; bothHandsTicks: number; bothShinsTicks: number; bothFeetTicks: number; anyShinOrFootTicks: number
+  bothLegsLoadedTicks: number; handsFeetSupportTicks: number; maxBothFeetHeldTicks: number; maxBothLegsHeldTicks: number; maxHandsFeetSupportHeldTicks: number
+  minUpY: number; maxUpY: number; minPitchRad: number; maxPitchRad: number; maxFootMarginM: number | null
+}
 interface RunRow {
   kind: 'baseline' | 'getup'; profileId: string; direction: Direction
   completedTicks: number; expectedTicks: number; recoveryTicks: number; leanFall: boolean
   minUpY: number; maxUpY: number; minPelvisM: number; maxPelvisM: number; standingPelvisM: number
   maxEffortRatio: number; maxPenetrationMm: number; nonFinite: boolean; fault: string | null
   firstStanceS: number | null; stanceHeldS: number; maxStanceHeldS: number; finalPhase: string
-  phases: { phase: string; timeS: number; rootUpY: number; thoraxUpY: number; handCentreY: number[];
+  maxRecoveryUpY: number; maxRecoveryPelvisM: number; minRollThoraxForwardY: number | null
+  phases: { phase: string; timeS: number; rootUpY: number; rootForwardY: number; rootLateralY: number; thoraxUpY: number; thoraxForwardY: number; thoraxLateralY: number; handCentreY: number[];
     floorImpulseNs: Record<string, number>; motorRotationVectorsRad: Record<string, Vec3>; motorEffortRatios: Record<string, number>;
     comSpeedMps: number; fastestAngularBody: string; maxBodyAngularSpeedRadS: number;
+    rootAngularVelocityRadS: Vec3; thoraxAngularVelocityRadS: Vec3; footUpY: number[];
     com: Vec3; pelvisCentreM: Vec3; comInHandsFeet: boolean; footSupportMarginM: number | null;
     handsFeetBoundsXZ: { minX: number; maxX: number; minZ: number; maxZ: number } | null }[]
   phaseTransitions: Record<string, number>
+  phaseStats: Record<string, PhaseStats>
   contactsObserved: number; droppedSeconds: number
   firstSettledS: number | null; maxSettledHeldS: number; finalUpY: number; finalPelvisM: number
   finalDiagnostics: ReturnType<GetupController['diagnostics']> | null
   nativeTick: number; nativeStatus: string; nativeFault: string | null
+  firstInvalidAngularVelocity: { part: string; angularVelocityRadS: { x: number | null; y: number | null; z: number | null } | null;
+    nonFinite: boolean; magnitudeRadS: number | null; limitRadS: number; lastCompletedTick: number; phase: string } | null
 }
 interface Trial { profileId: string; direction: Direction; baseline: RunRow; getup: RunRow }
 const trials = new Map<string, Promise<Trial>>()
@@ -45,9 +55,10 @@ function emptyRow(profileId: string, direction: Direction, controlled: boolean):
     completedTicks: 0, expectedTicks: WARMUP_TICKS + LEAN_TICKS + RECOVERY_TICKS, recoveryTicks: 0, leanFall: false,
     minUpY: Infinity, maxUpY: -Infinity, minPelvisM: Infinity, maxPelvisM: -Infinity, standingPelvisM: NaN,
     maxEffortRatio: 0, maxPenetrationMm: 0, nonFinite: false, fault: null, firstStanceS: null,
-    stanceHeldS: 0, maxStanceHeldS: 0, finalPhase: controlled ? 'idle' : 'nominal', phases: [], phaseTransitions: {}, contactsObserved: 0, droppedSeconds: 0,
+    stanceHeldS: 0, maxStanceHeldS: 0, finalPhase: controlled ? 'idle' : 'nominal', phases: [], phaseTransitions: {}, phaseStats: {}, contactsObserved: 0, droppedSeconds: 0,
+    maxRecoveryUpY: -1, maxRecoveryPelvisM: 0, minRollThoraxForwardY: null,
     firstSettledS: null, maxSettledHeldS: 0, finalUpY: NaN, finalPelvisM: NaN, finalDiagnostics: null,
-    nativeTick: 0, nativeStatus: 'uninitialised', nativeFault: null }
+    nativeTick: 0, nativeStatus: 'uninitialised', nativeFault: null, firstInvalidAngularVelocity: null }
 }
 async function run(profileId: string, direction: Direction, controlled: boolean): Promise<RunRow> {
   const row = emptyRow(profileId, direction, controlled)
@@ -64,11 +75,25 @@ async function run(profileId: string, direction: Direction, controlled: boolean)
     if (!backend.contacts) { backend.dispose(); throw new Error('Selected backend has no native contacts') }
     const readContacts = backend.contacts.bind(backend)
     backend.contacts = () => { const samples = readContacts(); contacts = structuredClone(samples); return samples }
+    const readBody = backend.read.bind(backend), partByBody = new Map(Object.entries(model.parts).map(([part, spec]) => [spec.bodyId, part]))
+    backend.read = id => {
+      const state = readBody(id), w = state.angularVelocity
+      const nonFinite = !w || ![w.x, w.y, w.z].every(Number.isFinite), magnitude = w ? norm(w) : NaN
+      // Match schema.vector's magnitude limit; never replace, clamp or otherwise change the native state.
+      if (row.firstInvalidAngularVelocity === null && (nonFinite || magnitude > limits.maxAngularSpeed)) row.firstInvalidAngularVelocity = {
+        part: partByBody.get(id) ?? (id === 'floor' ? 'floor' : 'unknown'),
+        angularVelocityRadS: w ? { x: Number.isFinite(w.x) ? w.x : null, y: Number.isFinite(w.y) ? w.y : null, z: Number.isFinite(w.z) ? w.z : null } : null,
+        nonFinite, magnitudeRadS: Number.isFinite(magnitude) ? magnitude : null, limitRadS: limits.maxAngularSpeed,
+        lastCompletedTick: row.completedTicks, phase: row.finalPhase,
+      }
+      return state
+    }
     return backend
   }
   const pilot = ownedPilot = await HumanoidPilot.create(model, { factory: contactFactory, journalCapacity: 1 })
   const stance = new StanceController(model, pilot.generation), getup = new GetupController(model, pilot.generation)
   let settledHeldS = 0
+  let phaseLabel = 'nominal', statsPhase = '', bothFeetHeld = 0, bothLegsHeld = 0, handsFeetSupportHeld = 0
   // Original simulation default, rad: the existing +/-0.43 ankle lean is held for 2 s to induce a physical fall.
   const lean = targetsFromAngles(model, { 'left.arm.roll': Math.PI / 9, 'right.arm.roll': Math.PI / 9,
     'left.leg.ankle.pitch': direction === 'toe' ? .43 : -.43,
@@ -89,7 +114,14 @@ async function run(profileId: string, direction: Direction, controlled: boolean)
     const loaded = loadedFloorContacts(model, o) ?? new Map<string, Vec3[]>()
     const support = ['hand', 'foot'].flatMap(part => ['left', 'right'].flatMap(side => loaded.get(model.parts[`${side}_${part}`].bodyId) ?? []))
     const effort = pilot.diagnostics().forces.motorTorques
+    const thorax = o.bodies.find(b => b.id === model.parts.thorax.bodyId)!
     return { phase, timeS, rootUpY: rootUp(o, model.root), thoraxUpY: rootUp(o, model.parts.thorax.bodyId),
+      rootForwardY: rotate(o.bodies.find(b => b.id === model.root)!.rotation, { x: 0, y: 0, z: -1 }).y,
+      rootLateralY: rotate(o.bodies.find(b => b.id === model.root)!.rotation, { x: 1, y: 0, z: 0 }).y,
+      thoraxForwardY: rotate(thorax.rotation, { x: 0, y: 0, z: -1 }).y,
+      thoraxLateralY: rotate(thorax.rotation, { x: 1, y: 0, z: 0 }).y,
+      rootAngularVelocityRadS: { ...o.bodies.find(b => b.id === model.root)!.angularVelocity },
+      thoraxAngularVelocityRadS: { ...thorax.angularVelocity }, footUpY: model.feet.map(id => rootUp(o, id)),
       com: { ...o.com }, pelvisCentreM: { ...o.bodies.find(b => b.id === model.root)!.position },
       comInHandsFeet: supportedBy(support, o.com), footSupportMarginM: o.support.marginM,
       handsFeetBoundsXZ: support.length ? { minX: Math.min(...support.map(p => p.x)), maxX: Math.max(...support.map(p => p.x)),
@@ -110,11 +142,14 @@ async function run(profileId: string, direction: Direction, controlled: boolean)
         if (tick < WARMUP_TICKS) return stance.step(o).frame
         if (!recovering) return request(o, lean)
         if (!controlled) return stance.step(o).frame
-        const frame = getup.step(o, intent), phase = getup.diagnostics().phase
-        if (phase !== row.finalPhase) {
-          row.finalPhase = phase; row.phaseTransitions[phase] = (row.phaseTransitions[phase] ?? 0) + 1
-          const witness = phaseWitness(o, phase, (tick - WARMUP_TICKS - LEAN_TICKS) * STEP)
-          const same = row.phases.map((p, i) => p.phase === phase ? i : -1).filter(i => i >= 0)
+        const frame = getup.step(o, intent), diagnostics = getup.diagnostics(), phase = diagnostics.phase
+        const label = phase === 'roll' ? `${phase}:${diagnostics.rollSide}:${diagnostics.rollStage}` :
+          phase === 'hands' ? `${phase}:${diagnostics.handStage}` : phase === 'all-fours' ? `${phase}:${diagnostics.allFoursStage}` : phase
+        phaseLabel = label
+        if (phase !== row.finalPhase || row.phases.at(-1)?.phase !== label) {
+          row.finalPhase = phase; row.phaseTransitions[label] = (row.phaseTransitions[label] ?? 0) + 1
+          const witness = phaseWitness(o, label, (tick - WARMUP_TICKS - LEAN_TICKS) * STEP)
+          const same = row.phases.map((p, i) => p.phase === label ? i : -1).filter(i => i >= 0)
           // First and last transition witnesses are enough to diagnose repeated settle jitter; counts retain the total.
           if (same.length < 2) row.phases.push(witness); else row.phases[same[1]] = witness
         }
@@ -141,6 +176,33 @@ async function run(profileId: string, direction: Direction, controlled: boolean)
       for (const f of o.feet) row.maxPenetrationMm = Math.max(row.maxPenetrationMm, -f.minSoleY * 1000)
       if (recovering) {
         row.recoveryTicks++
+        const loaded = loadedFloorContacts(model, o) ?? new Map<string, Vec3[]>()
+        const both = (part: string) => ['left', 'right'].every(side => loaded.has(model.parts[`${side}_${part}`].bodyId))
+        const bothFeet = both('foot'), bothLegs = ['left', 'right'].every(side =>
+          ['shin', 'foot'].some(part => loaded.has(model.parts[`${side}_${part}`].bodyId)))
+        const supportPoints = ['hand', 'foot'].flatMap(part => ['left', 'right'].flatMap(side => loaded.get(model.parts[`${side}_${part}`].bodyId) ?? []))
+        const handsFeetSupport = supportedBy(supportPoints, o.com)
+        const root = o.bodies.find(b => b.id === model.root)!, pitch = Math.atan2(rotate(root.rotation, { x: 0, y: 0, z: -1 }).y, up)
+        const stats = row.phaseStats[phaseLabel] ??= { ticks: 0, bothHandsTicks: 0, bothShinsTicks: 0, bothFeetTicks: 0, anyShinOrFootTicks: 0,
+          bothLegsLoadedTicks: 0, handsFeetSupportTicks: 0, maxBothFeetHeldTicks: 0, maxBothLegsHeldTicks: 0, maxHandsFeetSupportHeldTicks: 0,
+          minUpY: up, maxUpY: up, minPitchRad: pitch, maxPitchRad: pitch, maxFootMarginM: null }
+        if (statsPhase !== phaseLabel) { statsPhase = phaseLabel; bothFeetHeld = 0; bothLegsHeld = 0; handsFeetSupportHeld = 0 }
+        bothFeetHeld = bothFeet ? bothFeetHeld + 1 : 0; bothLegsHeld = bothLegs ? bothLegsHeld + 1 : 0
+        handsFeetSupportHeld = handsFeetSupport ? handsFeetSupportHeld + 1 : 0
+        stats.ticks++; stats.bothHandsTicks += Number(both('hand')); stats.bothShinsTicks += Number(both('shin')); stats.bothFeetTicks += Number(bothFeet)
+        stats.anyShinOrFootTicks += Number(['left', 'right'].some(side => ['shin', 'foot'].some(part => loaded.has(model.parts[`${side}_${part}`].bodyId))))
+        stats.bothLegsLoadedTicks += Number(bothLegs); stats.handsFeetSupportTicks += Number(handsFeetSupport)
+        stats.maxBothFeetHeldTicks = Math.max(stats.maxBothFeetHeldTicks, bothFeetHeld); stats.maxBothLegsHeldTicks = Math.max(stats.maxBothLegsHeldTicks, bothLegsHeld)
+        stats.maxHandsFeetSupportHeldTicks = Math.max(stats.maxHandsFeetSupportHeldTicks, handsFeetSupportHeld)
+        stats.minUpY = Math.min(stats.minUpY, up); stats.maxUpY = Math.max(stats.maxUpY, up)
+        stats.minPitchRad = Math.min(stats.minPitchRad, pitch); stats.maxPitchRad = Math.max(stats.maxPitchRad, pitch)
+        if (o.support.marginM !== null) stats.maxFootMarginM = Math.max(stats.maxFootMarginM ?? o.support.marginM, o.support.marginM)
+        row.maxRecoveryUpY = Math.max(row.maxRecoveryUpY, up); row.maxRecoveryPelvisM = Math.max(row.maxRecoveryPelvisM, pelvis)
+        if (controlled && getup.diagnostics().phase === 'roll') {
+          const thorax = o.bodies.find(b => b.id === model.parts.thorax.bodyId)!
+          const y = rotate(thorax.rotation, { x: 0, y: 0, z: -1 }).y
+          row.minRollThoraxForwardY = Math.min(row.minRollThoraxForwardY ?? 1, y)
+        }
         settledHeldS = settled(o) ? settledHeldS + STEP : 0
         row.maxSettledHeldS = Math.max(row.maxSettledHeldS, settledHeldS)
         if (row.firstSettledS === null && settledHeldS + 1e-10 >= .5) row.firstSettledS = row.recoveryTicks * STEP

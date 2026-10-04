@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { newestInstalled, shortPath } from '../scripts/lib/browser.mjs'
-import { countSessionLines, failures, knownSuites, listeningPids, newSessionLines, parseArgs, parseResult, suitePorts, suiteTimeout } from '../scripts/lib/e2e.mjs'
+import { countSessionLines, failures, knownSuites, listeningPids, newSessionLines, parseArgs, parseResult, suitePorts, suiteTimeout, suiteVerdict } from '../scripts/lib/e2e.mjs'
 import { latestRelease, LINK_STORE, LINK_ZIP, linkInstallChecks, linkVersionLabel, pageHeaderChecks, RELEASE_ASSETS, releaseChecks, securityTxtCheck, shownCode, turnChecks } from '../scripts/lib/live.mjs'
 import { applyAllow, DEFAULT_CO_AUTHOR, parseArgs as mergeArgs, parseVitest, pickCoAuthor, summarizeNumstat } from '../scripts/lib/merge.mjs'
 import { formatDuration, formatTable } from '../scripts/lib/report.mjs'
@@ -111,7 +111,7 @@ describe('scan: what must never be committed or published', () => {
   it('passes its own scan: the dev tools, their docs and these tests hold nothing it refuses', () => {
     const files = [
       'scripts/lib/scan.mjs', 'scripts/lib/e2e.mjs', 'scripts/lib/live.mjs', 'scripts/lib/merge.mjs', 'scripts/lib/report.mjs',
-      'scripts/lib/browser.mjs', 'scripts/lib/live-browser.mjs', 'scripts/lib/preflight.mjs', 'scripts/e2e-all.mjs', 'scripts/check-live.mjs', 'scripts/demo-preflight.mjs', 'scripts/merge-lane.mjs', 'scripts/open-source.mjs', 'docs/PRESENTATION.md',
+      'scripts/lib/browser.mjs', 'scripts/lib/live-browser.mjs', 'scripts/lib/preflight.mjs', 'scripts/e2e-all.mjs', 'scripts/check-live.mjs', 'scripts/demo-preflight.mjs', 'scripts/demo-clips.mjs', 'scripts/lib/clips.mjs', 'scripts/lib/clip-browser.mjs', 'scripts/merge-lane.mjs', 'scripts/open-source.mjs', 'docs/PRESENTATION.md',
       '.claude/hooks/guard.mjs', '.claude/settings.json', '.claude/agents/obpal-lane.md', '.claude/README.md',
       '.claude/skills/spawn-lane/SKILL.md', '.claude/skills/merge-lane/SKILL.md', '.claude/skills/deploy-and-verify/SKILL.md',
       '.claude/skills/release/SKILL.md', '.claude/skills/release/reference.md', '.claude/skills/spawn-lane/prompt-template.md',
@@ -190,6 +190,20 @@ describe('e2e runner: suites, ports, results, the ob.Pal Desktop guard', () => {
     expect(parseResult('  ✓ a check that passed 2/2 steps\n\x1b[31mFAILED 1/4\x1b[0m')).toEqual({ passed: 3, total: 4, failed: 1 })
     expect(parseResult('Error: the build failed')).toBeNull()
     expect(failures('  ✓ fine\n  ✗ locks rotation: timed out\n  ✗ second\n', 1)).toEqual(['✗ locks rotation: timed out'])
+  })
+
+  it('counts a suite that reports no checks as a failure, never a pass', () => {
+    const run = (code: number, log: string, timedOut = false) => suiteVerdict({ code, timedOut, result: parseResult(log) })
+    expect(run(0, 'passed 6/6')).toEqual({ ok: true, why: '' })
+    expect(run(0, 'all 19 passed')).toEqual({ ok: true, why: '' })
+    // A selector that matched nothing prints a clean zero and exits 0 (OBPAL_E2E_PAGES_ONLY=typo).
+    for (const log of ['passed 0/0', '0/0 passed', 'all 0 passed', 'FAILED 0/0']) expect(run(0, log), log).toEqual({ ok: false, why: 'reported 0/0 checks, so it ran nothing' })
+    expect(run(0, 'Error: the build failed').why).toBe('no result line in its log')
+    expect(run(0, '1 of 4 failed')).toEqual({ ok: false, why: '1 of 4 checks failed' })
+    expect(run(1, 'passed 6/6')).toEqual({ ok: false, why: 'exit 1' })
+    expect(run(0, 'passed 6/6', true)).toEqual({ ok: false, why: 'timed out' })
+    // The runner takes its verdict from this function and from nothing else.
+    expect(readText('scripts/e2e-all.mjs')).toContain('suiteVerdict({ code, timedOut, result: res })')
   })
 
   it('finds new ob.Pal Desktop sessions of a test browser, and a log that started afresh', () => {

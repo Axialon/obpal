@@ -31,7 +31,7 @@ import { fileURLToPath } from 'node:url'
 import { detectE2eGpu, resolveChromium, shortPath } from './lib/browser.mjs'
 import { acquireGpuLease, GPU_LEASE_FILE } from './lib/gpu-lease.mjs'
 import { gpuRuns } from './lib/gpu-policy.mjs'
-import { DEFAULT_PORT, DEFAULT_WORKER_PORT, failures, knownSuites, listeningPids, newSessionLines, parseArgs, parseResult, suitePorts, suiteTimeout } from './lib/e2e.mjs'
+import { DEFAULT_PORT, DEFAULT_WORKER_PORT, failures, knownSuites, listeningPids, newSessionLines, parseArgs, parseResult, suitePorts, suiteTimeout, suiteVerdict } from './lib/e2e.mjs'
 import { formatDuration, formatTable } from './lib/report.mjs'
 import { distill } from './lib/distill.mjs'
 import { tempScope } from './lib/temp.mjs'
@@ -244,10 +244,12 @@ for (const run of runs) {
   }
   const tests = res ? `${res.passed}/${res.total}` : '?'
   const failed = failures(log)
-  const ok = code === 0 && !timedOut && (!res || res.failed === 0)
+  // A suite that reports no checks (0/0, or no result line) fails: it ran nothing.
+  const verdict = suiteVerdict({ code, timedOut, result: res })
+  const ok = verdict.ok
   const result = timedOut ? 'TIMEOUT' : ok ? 'pass' : 'FAIL'
   console.log(`${result} ${tests} in ${formatDuration(ms)}`)
-  let note = timedOut ? `stopped after ${timeoutMin} min` : !ok ? failed[0] ?? `exit ${code}; see ${suite}.log` : ''
+  let note = timedOut ? `stopped after ${timeoutMin} min` : !ok ? failed[0] ?? `${verdict.why}; see ${label}.log` : ''
   if (!ok && failed.length) details.push([label, failed])
   if (worker !== null) {
     const leftover = await stopLeftoverWorker(worker)

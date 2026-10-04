@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { readText, packFiles } from './devtools-node.mjs'
+import { PAGES } from './site-pages'
 
 /**
  * The site says only what ships (spec/MESSAGING.md, voice rule 5). These checks read the words the public meets, on the
@@ -22,13 +23,6 @@ import { readText, packFiles } from './devtools-node.mjs'
  */
 const NPM_PUBLISHED = true
 
-/** Every page the site builds (vite.config.ts), as its file in the build. */
-const PAGES = [
-  'index.html', 'p/index.html', 'view/index.html', 'sponsor/index.html', 'donate/index.html', 'link/index.html', 'link/desktop/index.html', 'link/try/index.html', 'privacy/index.html',
-  'sim/index.html', 'sim/arm/index.html', 'sim/arena/index.html', 'sim/device/index.html', 'catalogue/index.html', 'embed/index.html',
-  'buttons/index.html', 'trust/index.html',
-]
-
 /** Store art copy is written in HTML and the screenshot captions in render.mjs. */
 const STORE_ART = [
   'extension/store/src/marquee.html', 'extension/store/src/tile.html', 'extension/store/src/shot.html',
@@ -43,7 +37,7 @@ const COPY = [
   ...PACK_COPY, 'src/catalogue/main.ts', 'src/catalogue/community.ts', 'src/catalogue/packs.ts', 'src/controller/packs.ts', 'packages/core/src/packs.ts',
   ...PAGES, 'public/llms.txt', 'public/llms-full.txt', 'extension/README.md', 'extension/store/listing.md', ...STORE_ART, 'extension/package.json',
   'extension/vite.config.ts', 'extension/src/options/options.ts', 'extension/src/popup/popup.ts', 'src/landing/main.ts',
-  'src/catalogue/data.ts', 'packages/core/src/catalogue.ts', 'src/controller/main.ts', 'src/sim/arm/main.ts',
+  'src/catalogue/data.ts', 'packages/core/src/catalogue.ts', 'src/controller/main.ts', 'src/sim/arm/main.ts', 'src/sim/humanoid/main.ts',
   'packages/host/src/chip.ts', 'packages/host/src/seal.ts', 'packages/host/src/origin.ts', 'packages/host/src/remote.ts', 'src/controller/linkbadge.ts',
   'src/ui/trust-origin.ts', 'src/ui/shares.ts', 'src/trust/main.ts', 'TRADEMARKS.md', 'spec/SECURITY.md',
   'src/controller/connection-sheet.ts', 'src/controller/connections.ts', 'src/controller/pairing-recovery.ts',
