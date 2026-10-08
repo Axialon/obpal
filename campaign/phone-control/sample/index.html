@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en" class="site">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0a0718" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="description" content="A readiness sample preview for one browser task: source-backed SDK hooks, explicit evidence limits and a repeatable trial card." />
+    <title>Browser Input Readiness sample preview · ob.Pal</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/plus-jakarta-sans-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/src/styles/fonts.css" />
+    <link rel="stylesheet" href="/src/family/family.css" />
+    <link rel="stylesheet" href="/src/styles/base.css" />
+    <link rel="stylesheet" href="/src/styles/site.css" />
+    <link rel="stylesheet" href="/src/styles/landing.css" />
+    <script type="module" src="/src/pages/campaign.ts"></script>
+  </head>
+  <body class="campaign">
+    <a class="campaign-skip" href="#main">Skip to content</a>
+    <header class="top"><div class="top-in">
+      <a class="logo" href="/" aria-label="ob.Pal"><span class="mark-slot" data-mark></span><span class="word"><span class="ob">ob</span><span class="pt">.</span><b>Pal</b></span></a>
+      <nav class="campaign-nav" aria-label="Review preview"><a href="/campaign/phone-control/">Review</a><a href="/campaign/phone-control/guide/">Field guide</a><a href="/campaign/phone-control/sample/" aria-current="page">Sample</a></nav>
+    </div></header>
+    <main id="main" class="campaign-main campaign-article">
+      <p class="campaign-draft"><b>Local review preview · sample deliverable.</b> No customer engagement or paid result is claimed. Physical-phone proof remains unverified.</p>
+      <p class="eyebrow">Browser Input Readiness Review</p><h1>One browser task with phone input.</h1>
+      <p class="campaign-lede"><b>Decision: test first.</b> A handheld touch controller is a source-supported candidate for moving one browser-scene object while the participant faces a separate display.</p>
+      <p>The SDK exposes scene ownership, frame deltas and join/leave events. The remaining decision depends on the actual fresh-entry task and comparison with the existing input. Source review does not prove this sample task's physical-phone flow.</p>
+      <section class="campaign-section"><h2>The bounded brief.</h2><ul>
+        <li><b>Experience:</b> an existing browser scene with one selectable object and a marked destination.</li>
+        <li><b>Task:</b> move the object to the destination, then reset it once.</li>
+        <li><b>Benefit hypothesis:</b> controls stay in the participant's hand while the display stays visible to them and others.</li>
+        <li><b>Baseline:</b> the scene's existing keyboard/mouse input. Keep it available; no superiority claim.</li>
+        <li><b>Candidate:</b> one phone, <code>face.trackpad</code>, touch input first. Sensor-based controls and native PC permissions are separate work.</li>
+        <li><b>Finish:</b> the object reaches the agreed target and the participant deliberately resets it.</li>
+      </ul></section>
+      <section class="campaign-section"><h2>Source-backed integration map.</h2>
+        <dl class="campaign-map">
+          <div><dt>Explain, then pair</dt><dd><code>&lt;obpal-remote&gt;</code> and native chip/panel pairing UI.<span class="campaign-evidence">Documented in current source; exact buyer entry untested.</span></dd></div>
+          <div><dt>One participant holds one object</dt><dd><code>setScene({ nodes, held })</code> publishes nodes and their held assignment. <code>holder('cube')</code> reads the participant holding that named node; it needs the node ID.<span class="campaign-evidence">Documented in current source; review ownership in the actual scene.</span></dd></div>
+          <div><dt>Move with touch</dt><dd><code>frame(now, who).pad1</code> supplies one-finger drag deltas for the named participant.<span class="campaign-evidence">Documented in current source; select and test task-specific mapping and sensitivity.</span></dd></div>
+          <div><dt>Reset once</dt><dd>The <code>obpal-button</code> tray event reports the agreed <code>reset</code> ID.<span class="campaign-evidence">Documented event; the scene implements its own reset handler.</span></dd></div>
+          <div><dt>Join and leave</dt><dd><code>obpal-join</code> and <code>obpal-leave</code> identify the participant; what a leaver held becomes free.<span class="campaign-evidence">Documented lifecycle; verify actual disconnect and re-entry behaviour.</span></dd></div>
+          <div><dt>Keep normal controls</dt><dd>Preserve the experience's existing input path.<span class="campaign-evidence">A review requirement; the actual buyer baseline is unknown.</span></dd></div>
+        </dl>
+        <p class="campaign-note">Rechecked against the current host SDK README and element implementation for this preview. SDK size/performance statements are not offer promises. Sources: <a href="https://github.com/Axialon/obpal/blob/main/packages/host/README.md">host SDK README</a>, <a href="https://github.com/Axialon/obpal/blob/main/packages/host/src/element.ts">element implementation</a>, <a href="https://github.com/Axialon/obpal/blob/main/spec/PROTOCOL.md">protocol</a>. The prepared sample also cites a <a href="https://github.com/Axialon/obpal/commit/ed194c8cadcca0428ca770ed40ee6712fa6c286c">historical public snapshot</a>; that is not a physical-device test.</p>
+      </section>
+      <section class="campaign-section"><h2>Integration sketch, not an executed patch.</h2><ol>
+        <li>Explain the destination task beside the scene before exposing pairing.</li>
+        <li>Define the native element once; choose one seat and the documented trackpad face.</li>
+        <li>Publish one named scene node. Assign a joining participant only if <code>holder('cube')</code> says that node is free.</li>
+        <li>In the existing render loop, consume that participant's frame only while they hold the node. Map <code>pad1</code> into the scene's coordinate system and clamp movement to the task area.</li>
+        <li>Keep the existing reset function and normal input route. Connect the tray event to reset without adding unrelated permissions.</li>
+        <li>On leave or rejected/failed entry, keep the existing input usable, explain the state and let the person choose a supported retry.</li>
+        <li>Follow native lifecycle, teardown, brand geometry and CSP guidance.</li>
+      </ol><p>No code is installed or executed by this sketch. This preview creates no room or connection. An implementation contract would separately define the actual scene/API surface and testing.</p></section>
+      <section class="campaign-section"><h2>Verification matrix.</h2><dl class="campaign-map">
+        <div><dt>SDK task hooks</dt><dd>Verified in current local source. This establishes documented capabilities, not a completed integration.</dd></div>
+        <div><dt>Service at the actual trial</dt><dd>Recheck at the trial. Historical HTTP reachability is not a current availability promise.</dd></div>
+        <div><dt>Fresh host + real phone pairing</dt><dd>Unverified. Record host/phone/browser/build and correct-device indications.</dd></div>
+        <div><dt>Touch reaches the finish</dt><dd>Unverified for this task. Observe input, response and finish criteria.</dd></div>
+        <div><dt>Participant understands the benefit</dt><dd>No participant test. Count first-time assistance and failed attempts.</dd></div>
+        <div><dt>Disconnect and denied permission</dt><dd>Unverified for this sample task. Deliberately test supported retry or stop.</dd></div>
+        <div><dt>Better than current input</dt><dd>Unknown. Compare the same task with the baseline and record the reason.</dd></div>
+        <div><dt>Other browsers and timing</dt><dd>Unknown. Name device combinations and measure entry time if useful.</dd></div>
+      </dl></section>
+      <section class="campaign-section"><h2>Trial and stop card.</h2><p>Use the <a href="/campaign/phone-control/guide/">field guide</a>. Begin with a fresh host and real phone page. Explain the task, compare correct-device indications, then ask for one move and one reset. Compare with the baseline. With permission, note build/devices, finish, help, blocked step and recovery. Keep private tabs and personal data out of the record. An entry-time observation is not network latency.</p><p>Stop at a blocked essential step or ambiguous control authority; retain the baseline input. Label a recording as recorded. An illustration is explanatory only. Recommend integration only after the intended task can be repeated and a practical handheld benefit is identified. A negative result is a valid review outcome.</p></section>
+      <section class="campaign-section"><h2>An actionable handoff.</h2><p>Name the one scene, input baseline and candidate device combination. Run the fresh task using the native route. Then choose a separately scoped implementation patch or keep the current input. This sample shows a complete readiness-review structure; it does not certify a device run or promise compatibility.</p><div class="campaign-actions"><a class="btn primary" href="/campaign/phone-control/#enquiry">Prepare an enquiry preview</a><a class="btn" href="/campaign/phone-control/guide/">Read the trial guide</a></div></section>
+      <footer class="campaign-foot"><a href="/campaign/phone-control/">Back to the review preview</a>
+        <label for="campaign-surface">Surface<select id="campaign-surface"><option value="carbon">Carbon</option><option value="navy">Navy</option><option value="violet">Violet</option><option value="wine">Wine</option><option value="onyx">Onyx</option><option value="light">Light</option></select></label>
+      </footer>
+    </main>
+  </body>
+</html>

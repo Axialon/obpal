@@ -8,6 +8,7 @@
 export const PAGES = [
   '/', '/p/', '/view/', '/buttons/', '/embed/', '/catalogue/', '/link/', '/link/desktop/', '/link/try/', '/sponsor/', '/donate/', '/privacy/', '/trust/',
   '/sim/', '/sim/arm/', '/sim/arena/', '/sim/humanoid/', '/sim/humanoid/physics/', '/sim/device/', '/sim/octopus/',
+  '/campaign/',
 ]
 export const VIEWPORTS = [[1440, 900], [390, 844]]
 

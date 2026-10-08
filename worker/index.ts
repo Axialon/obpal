@@ -5,6 +5,7 @@ import { iceAnswer, relayOf, stunServers, type IceEnv } from './ice'
 import { allow, type RateLimit } from './limits'
 import { admission, expiredWatch, ownerVerifier, WATCH_IDLE_MS, type Sharing } from './sharing'
 import { handlePayment, PAYMENT_ROUTES, type PaymentsEnv } from './payments'
+import { filmAsset } from './film-assets'
 
 export interface Env extends PaymentsEnv, IceEnv {
   ROOMS: DurableObjectNamespace<Room>
@@ -14,6 +15,8 @@ export interface Env extends PaymentsEnv, IceEnv {
   RL_SOCKET?: RateLimit
   /** ICE lookups (TURN credentials), per address. */
   RL_ICE?: RateLimit
+  /** Required for campaign films; missing or failed admission closes only those routes. */
+  RL_FILM?: RateLimit
 }
 
 const ROOM = /^\/r\/([A-Za-z0-9_-]{22})$/
@@ -34,8 +37,10 @@ const networkKeys = async (env: Env, ip: string | null) => {
 const clientKey = async (req: Request, env: Env) => (await networkKeys(env, req.headers.get('CF-Connecting-IP'))).addr
 
 export default {
-  async fetch(req, env): Promise<Response> {
+  async fetch(req, env, ctx): Promise<Response> {
     const url = new URL(req.url)
+    const film = await filmAsset(req, env.ASSETS, { limiter: env.RL_FILM, key: () => clientKey(req, env), waitUntil: job => ctx.waitUntil(job) })
+    if (film) return film
     const room = ROOM.exec(url.pathname)
     if (room) {
       if (req.headers.get('Upgrade') !== 'websocket') return new Response('Expected a WebSocket upgrade', { status: 426 })

@@ -6,7 +6,8 @@ import { PAGES } from './site-pages'
 /**
  * The lists of pages the gates load and read must hold every page the build routes. The overclaims and messaging tests
  * (tests/site-pages.ts), the live check (scripts/lib/live.mjs) and the pages suite (scripts/e2e-pages.mjs) each keep their
- * own list; a page added to vite.config.ts and to none of them is a page no gate reads. This reads the build's inputs, so
+ * own list. Retained offer previews stay in source-copy checks, but the native asset exclusion keeps them out of public
+ * lists. This reads the build's inputs, so
  * a page that lands later (the physics humanoid's, say) fails here until each list names it.
  */
 
@@ -19,6 +20,9 @@ function inputPages(): string[] {
 
 /** The address a page is served at: `sim/arm/index.html` is `/sim/arm/`. */
 const route = (file: string) => `/${file.replace(/index\.html$/, '')}`
+
+const excluded = ['campaign/phone-control/index.html', 'campaign/phone-control/guide/index.html', 'campaign/phone-control/sample/index.html']
+const publicPages = () => inputPages().filter(page => !excluded.includes(page))
 
 /** The `const PAGES = [...]` list of the pages suite, which is a script and not a module. */
 function suitePages(): string[] {
@@ -39,11 +43,25 @@ describe('page lists', () => {
   })
 
   it('the live check loads every routed page', () => {
-    expect(inputPages().map(route).filter((path) => !LIVE_PAGES.includes(path))).toEqual([])
+    expect(publicPages().map(route).filter((path) => !LIVE_PAGES.includes(path))).toEqual([])
   })
 
   it('the pages suite loads every routed page', () => {
-    expect(inputPages().map(route).filter((path) => !suitePages().includes(path))).toEqual([])
+    expect(publicPages().map(route).filter((path) => !suitePages().includes(path))).toEqual([])
+  })
+
+  it('retains offer source checks while excluding only their subtree from public assets', () => {
+    expect(readText('public/.assetsignore').trim()).toBe('/campaign/phone-control/')
+    for (const page of excluded) {
+      expect(inputPages()).toContain(page)
+      expect(PAGES).toContain(page)
+      expect(readText(page)).toContain('Local review preview')
+      expect(LIVE_PAGES).not.toContain(route(page))
+      expect(suitePages()).not.toContain(route(page))
+    }
+    expect(publicPages()).toContain('campaign/index.html')
+    expect(LIVE_PAGES).toContain('/campaign/')
+    expect(suitePages()).toContain('/campaign/')
   })
 
   it('names no page the build does not route, apart from the generated sim pages', () => {

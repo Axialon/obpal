@@ -14,7 +14,9 @@
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch.
  */
 import { fileURLToPath } from 'node:url'
-import { mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { chromium, devices } from 'playwright'
 import { cspCheck, cspViolations } from './csp-watch.mjs'
@@ -32,14 +34,15 @@ import { e2eBrowserOptions } from './lib/browser.mjs'
 import { runStoreKit } from './e2e-store-kit.mjs'
 import { siteInteractionStates } from './lib/interaction-states.mjs'
 import { runBrand } from './e2e-brand.mjs'
+import { rawRun } from './lib/distill.mjs'
 
 const PORT = Number(process.env.OBPAL_E2E_WORKER_PORT) || 5179
 const HEADED = process.argv.includes('--headed')
 const SHOTS = process.env.OBPAL_SHOTS || ''
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
 const ONLY = process.env.OBPAL_E2E_PAGES_ONLY || ''
-if (ONLY && !['try', 'viewer', 'store', 'interactions'].includes(ONLY)) throw new Error(`unknown pages selector: ${ONLY}`)
-const PAGES = ['/', '/p/', '/view/', '/sim/', '/sim/arm/', '/sim/arena/', '/sim/humanoid/', '/sim/humanoid/physics/', '/sim/octopus/', '/sim/device/', '/embed/', '/link/', '/link/desktop/', '/link/try/', '/catalogue/', '/buttons/', '/sponsor/', '/donate/', '/privacy/', '/trust/']
+if (ONLY && !['try', 'viewer', 'store', 'interactions', 'campaign', 'partner-films', 'partner-films-accounting', 'partner-films-http', 'partner-films-playback'].includes(ONLY)) throw new Error(`unknown pages selector: ${ONLY}`)
+const PAGES = ['/', '/p/', '/view/', '/sim/', '/sim/arm/', '/sim/arena/', '/sim/humanoid/', '/sim/humanoid/physics/', '/sim/octopus/', '/sim/device/', '/embed/', '/link/', '/link/desktop/', '/link/try/', '/catalogue/', '/buttons/', '/sponsor/', '/donate/', '/privacy/', '/trust/', '/campaign/']
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const results = []
 async function check(name, fn) {
@@ -157,6 +160,727 @@ async function runTry(browser, origin) {
   return '6 scenarios: reduced motion, unavailable/lost WebGL; 1280px and 390px; input, release, disconnect, reset and history'
 }
 
+/** Retained offer sources are excluded by the native asset pipeline, not robots directives. */
+async function runCampaignExclusion(origin) {
+  const root = fileURLToPath(new URL('../dist/client/', import.meta.url))
+  const ignore = readFileSync(join(root, '.assetsignore'), 'utf8')
+  assert(ignore.split(/\r?\n/).includes('/campaign/phone-control/'), 'emitted native exclusion missing')
+  for (const path of ['/campaign/phone-control/', '/campaign/phone-control/guide/', '/campaign/phone-control/sample/']) {
+    assert(readFileSync(join(root, path.slice(1), 'index.html'), 'utf8').includes('Local review preview'), 'retained built source missing')
+    for (const suffix of ['', 'index.html']) {
+      const response = await fetch(origin + path + suffix)
+      assert.equal(response.status, 404, path + suffix)
+      assert(!(await response.text()).includes('Local review preview'), 'excluded draft content served')
+    }
+  }
+  return 'three retained HTML sources; emitted .assetsignore; six public URL forms return 404'
+}
+
+/** Measure completed downloads and the campaign-only transport through the real local Worker. */
+async function runFilmDownloads(browser, origin) {
+  const films = JSON.parse(readFileSync(fileURLToPath(new URL('../public/campaign/films/manifest.json', import.meta.url)), 'utf8')).films
+  const out = process.env.OBPAL_E2E_EVIDENCE_ROOT
+  const measurements = []
+  const protection = { binding: 'RL_FILM enabled at its production 60/60 setting', requests: [], burst: [], capacity: {}, variants: [], pacedMinimumMs: 2000 }
+  const note = (url, method, status) => protection.requests.push({ atMs: Date.now(), path: new URL(url).pathname, method, status })
+  const request = async (url, options = {}) => {
+    await sleep(2000) // Stay below the production bucket; do not change or disable its binding for proof traffic.
+    const response = await fetch(url, options)
+    note(url, options.method || 'GET', response.status)
+    return response
+  }
+  await check('partner films protection: slow response cancellation, required limiter and shared query/path admission', async () => {
+    const url = origin + '/campaign/films/' + films[0].file
+    const initialHead = await fetch(url, { method: 'HEAD' }); note(url, 'HEAD', initialHead.status)
+    protection.initialHead = { status: initialHead.status, length: initialHead.headers.get('content-length') }
+    assert.equal(initialHead.status, 200); assert.equal(Number(initialHead.headers.get('content-length')), films[0].bytes)
+    const aborts = [new AbortController(), new AbortController()]
+    try {
+      const slow = []
+      for (const abort of aborts) { const response = await fetch(url, { signal: abort.signal }); note(url, 'GET', response.status); assert.equal(response.status, 200); slow.push(response) }
+      const busy = await fetch(url, { method: 'HEAD' }); note(url, 'HEAD', busy.status)
+      protection.capacity = { slowResponses: slow.map(r => r.status), busyStatus: busy.status, retry: busy.headers.get('retry-after'), cache: busy.headers.get('cache-control') }
+      assert.equal(busy.status, 503, 'slow consumers must retain the two operation reservations')
+      assert.equal(busy.headers.get('retry-after'), '1'); assert.equal(busy.headers.get('cache-control'), 'no-store')
+    } finally { aborts.forEach(abort => abort.abort()) }
+    await sleep(1000)
+    const recovered = await fetch(url, { method: 'HEAD' }); note(url, 'HEAD', recovered.status)
+    protection.capacity.recoveredStatus = recovered.status
+    assert.equal(recovered.status, 200, 'client cancellation must restore capacity')
+    for (let i = 0; i < 65; i++) {
+      const target = origin + '/campaign/films/' + films[i % 6].file + '?burst=' + i
+      const response = await fetch(target, { method: 'HEAD' }); note(target, 'HEAD', response.status)
+      protection.burst.push({ film: films[i % 6].id, status: response.status })
+      if (response.status === 429) {
+        assert.equal(response.headers.get('retry-after'), '60'); assert.equal(response.headers.get('cache-control'), 'no-store')
+        break
+      }
+      assert.equal(response.status, 200)
+    }
+    assert(protection.burst.some(r => r.status === 429), 'required limiter must actually deny the shared burst')
+    for (const path of [
+      '/campaign/films/' + films[0].file + '?different=1',
+      '/campaign/films/./' + films[0].file,
+      '/campaign/films/%2e/' + films[0].file,
+      '/campaign/films/%6fbpal-original-complete-web.mp4',
+      '/campaign%2ffilms/' + films[0].file,
+    ]) {
+      const response = await fetch(origin + path, { method: 'HEAD' }); note(origin + path, 'HEAD', response.status)
+      const adapter = response.headers.get('accept-ranges') === 'bytes' && response.headers.get('etag') === `"${films[0].sha256}"`
+      protection.variants.push({ path, requestedPath: new URL(origin + path).pathname, status: response.status, adapter })
+      if (new URL(origin + path).pathname === '/campaign/films/' + films[0].file) assert.equal(response.status, 429)
+      else { assert(!adapter, 'noncanonical native spellings must never bypass admission into the expensive adapter'); assert([200, 404, 429].includes(response.status)) }
+    }
+    // A new minute, with the binding still enabled, before the 78 deliberate transport conditions.
+    await sleep(61_000)
+    return 'native slow consumers denied at two operations, cancel recovery; shared six-film/query burst denied; normalized and percent-encoded paths classified'
+  })
+  await check('partner films HTTP: six actual download hashes, content types, lengths and tail-range 206', async () => {
+    const ctx = await browser.newContext({ acceptDownloads: true })
+    ctx.on('response', response => { if (new URL(response.url()).pathname.startsWith('/campaign/films/') && response.url().includes('.mp4')) note(response.url(), response.request().method(), response.status()) })
+    try {
+      const page = await ctx.newPage()
+      await page.goto(origin + '/campaign/')
+      for (const film of films) {
+        const url = origin + '/campaign/films/' + film.file
+        const head = await request(url, { method: 'HEAD' })
+        const range = await request(url, { headers: { Range: `bytes=${film.bytes - 1024}-${film.bytes - 1}` } })
+        const rangeData = new Uint8Array(await range.arrayBuffer())
+        const downloading = page.waitForEvent('download')
+        await page.locator(`#${film.id} a[download]`).click()
+        const download = await downloading
+        assert.equal(await download.failure(), null)
+        const data = readFileSync(await download.path())
+        const sha256 = createHash('sha256').update(data).digest('hex')
+        const measured = { id: film.id, filename: download.suggestedFilename(), bytes: data.length, sha256, head: { status: head.status, contentType: head.headers.get('content-type'), contentLength: head.headers.get('content-length'), acceptRanges: head.headers.get('accept-ranges') }, range: { status: range.status, contentRange: range.headers.get('content-range'), contentLength: range.headers.get('content-length'), measuredBytes: rangeData.byteLength } }
+        measurements.push(measured)
+        assert.equal(measured.filename, film.file)
+        assert.equal(measured.bytes, film.bytes)
+        assert.equal(measured.sha256, film.sha256)
+        assert.equal((await head.arrayBuffer()).byteLength, 0, 'HEAD must suppress response content')
+        assert.equal(head.headers.get('accept-ranges'), 'bytes')
+        assert.equal(Number(range.headers.get('content-length')), 1024)
+        assert.deepEqual(Buffer.from(rangeData), data.subarray(film.bytes - 1024), 'actual tail bytes')
+        const variants = []
+        for (const [value, start, end] of [['bytes=0-511', 0, 511], ['bytes=-512', film.bytes - 512, film.bytes - 1], [`bytes=${film.bytes - 512}-`, film.bytes - 512, film.bytes - 1]]) {
+          const response = await request(url, { headers: { Range: value } })
+          const body = Buffer.from(await response.arrayBuffer())
+          assert.equal(response.status, 206)
+          assert.equal(response.headers.get('content-range'), `bytes ${start}-${end}/${film.bytes}`)
+          assert.equal(Number(response.headers.get('content-length')), end - start + 1)
+          assert.deepEqual(body, data.subarray(start, end + 1), 'actual selected bytes')
+          variants.push({ request: value, status: response.status, bytes: body.length, sha256: createHash('sha256').update(body).digest('hex') })
+        }
+        const etag = head.headers.get('etag')
+        assert.equal(etag, `"${film.sha256}"`)
+        for (const headers of [{ Range: 'bytes=garbage' }, { Range: 'bytes=0-1,4-5' }, { Range: 'bytes=0-1', 'If-Range': '"different"' }, { Range: 'bytes=0-1', 'If-Range': `W/${etag}` }, { Range: 'bytes=0-1', 'If-Range': 'Wed, 01 Oct 2025 00:00:00 GMT' }]) {
+          const response = await request(url, { headers })
+          const body = Buffer.from(await response.arrayBuffer())
+          assert.equal(response.status, 200)
+          assert.equal(response.headers.get('content-range'), null)
+          assert.equal(Number(response.headers.get('content-length')), film.bytes)
+          assert.equal(createHash('sha256').update(body).digest('hex'), film.sha256)
+          variants.push({ request: headers, status: response.status, measuredBytes: body.length })
+        }
+        for (const value of [`bytes=${film.bytes}-`, 'bytes=-0']) {
+          const response = await request(url, { headers: { Range: value } })
+          assert.equal(response.status, 416)
+          assert.equal(response.headers.get('content-range'), `bytes */${film.bytes}`)
+          assert.equal((await response.arrayBuffer()).byteLength, 0)
+          variants.push({ request: value, status: response.status })
+        }
+        for (const [headers, status] of [[{ Range: 'bytes=0-1', 'If-Range': etag }, 206], [{ Range: 'bytes=0-1', 'If-None-Match': `W/${etag}` }, 304], [{ 'If-Match': '"different"' }, 412]]) {
+          const response = await request(url, { headers })
+          const body = Buffer.from(await response.arrayBuffer())
+          assert.equal(response.status, status)
+          assert.deepEqual(body, status === 206 ? data.subarray(0, 2) : Buffer.alloc(0))
+          variants.push({ request: headers, status: response.status, measuredBytes: body.length })
+        }
+        measured.variants = variants
+        await download.delete()
+      }
+      const bad = measurements.filter((m, i) => m.head.status !== 200 || !/^video\/mp4/.test(m.head.contentType ?? '') || Number(m.head.contentLength) !== films[i].bytes || m.range.status !== 206 || m.range.contentRange !== `bytes ${films[i].bytes - 1024}-${films[i].bytes - 1}/${films[i].bytes}` || m.range.measuredBytes !== 1024)
+      assert.equal(bad.length, 0, JSON.stringify(bad))
+      return 'six TEMP downloads hashed before deletion; exact HEAD lengths and byte slices; suffix/open-ended, conditional, invalid/multipart and 416 responses'
+    } finally {
+      writeFileSync(join(out, 'partner-films-http.json'), JSON.stringify({ revision: process.env.OBPAL_PARTNER_REVISION, protection, measurements }, null, 2))
+      await ctx.close()
+    }
+  })
+  if (measurements.length === 6) await sleep(61_000) // Clear artificial transport traffic before an ordinary browser visit.
+}
+
+/** Complete playback remains measurable independently of the native worker's early range-seek limitation. */
+async function runFilmPlayback(browser, origin) {
+  const films = JSON.parse(readFileSync(fileURLToPath(new URL('../public/campaign/films/manifest.json', import.meta.url)), 'utf8')).films
+  const out = join(process.env.OBPAL_E2E_EVIDENCE_ROOT, 'film-playback')
+  mkdirSync(out, { recursive: true })
+  const raw = rawRun(out), frames = [], measurements = []
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  let page
+  const state = video => video.evaluate(el => ({ duration: el.duration, width: el.videoWidth, height: el.videoHeight, readyState: el.readyState, currentTime: el.currentTime, seeking: el.seeking, ended: el.ended, error: el.error?.message, bufferedEnd: el.buffered.length ? el.buffered.end(el.buffered.length - 1) : 0 }))
+  const until = async (video, predicate, deadline) => {
+    let seen
+    do { seen = await state(video); if (predicate(seen)) return seen; await sleep(100) } while (Date.now() < deadline)
+    throw new Error(JSON.stringify(seen))
+  }
+  const shot = async (id, failed = false) => {
+    mkdirSync(join(raw, id), { recursive: true })
+    await page.screenshot({ path: join(raw, id, 'screen.png') })
+    frames.push({ path: `${id}/screen.png`, failed })
+  }
+  try {
+    page = await ctx.newPage()
+    await page.goto(origin + '/campaign/')
+    for (const film of films) await check(`partner film buffered playback: ${film.id} (early HTTP range seeking remains a separate gate)`, async () => {
+      const video = page.locator(`#${film.id} video`)
+      try {
+        await video.scrollIntoViewIfNeeded()
+        await video.evaluate(el => { el.muted = true; return el.play() })
+        const playing = await until(video, s => s.currentTime > .2 && s.readyState >= 2, Date.now() + 30_000)
+        assert(Math.abs(playing.duration - film.duration) < .1)
+        assert.equal(playing.width, film.width); assert.equal(playing.height, film.height)
+        // Buffered completion is separate from the early range-seek proof in the main collection check.
+        const buffered = await until(video, s => s.bufferedEnd >= s.duration - .05, Date.now() + (film.duration + 10) * 1000)
+        await video.evaluate(el => { el.pause(); el.currentTime = el.duration - .3 })
+        await until(video, s => !s.seeking && s.currentTime > s.duration - .5 && s.readyState >= 2, Date.now() + 10_000)
+        await shot(film.id + '-buffered-ending')
+        await video.evaluate(el => el.play())
+        const ended = await until(video, s => s.ended, Date.now() + 10_000)
+        measurements.push({ id: film.id, playing, buffered, ended, seekScope: 'After full buffer; no claim of early byte-range seek support', mutedForAutomation: true })
+        return `${playing.duration}s; ${playing.width}x${playing.height}; advances, full buffer, ending seek and ended`
+      } catch (error) {
+        await shot(film.id + '-failure', true)
+        measurements.push({ id: film.id, failed: true, state: await state(video), error: error.message })
+        throw error
+      } finally { await video.evaluate(el => el.pause()) }
+    })
+  } finally {
+    writeFileSync(join(out, 'film-playback.json'), JSON.stringify({ revision: process.env.OBPAL_PARTNER_REVISION, limitation: 'Native HTTP range support tested separately; this proves buffered playback only.', measurements }, null, 2))
+    writeFileSync(join(out, 'evidence-frames.json'), JSON.stringify({ expectedCount: frames.length, frames }, null, 2))
+    await ctx.close()
+  }
+}
+
+/** Static films, real media playback and explicitly injected sharing outcomes, within the runner's browser lease. */
+async function runPartnerFilms(browser, origin) {
+  const legitimateTraffic = []
+  const downloadActions = []
+  const browserEvents = [], netEvents = []
+  const browserLifecycles = [], cacheSignals = [], cacheCases = []
+  let networkSession, clockOffsetMs
+  const sequence = { startedAtMs: null, completedAtMs: null, phases: [] }
+  const startFilm = (url, method, source, scenario, range = null) => {
+    const attempt = { id: legitimateTraffic.length + 1, atMs: Date.now(), path: new URL(url).pathname, method, source, scenario, range }
+    legitimateTraffic.push(attempt)
+    return attempt
+  }
+  const watchFilms = (ctx, scenario) => {
+    const attempts = new WeakMap()
+    let activeDownload = null
+    ctx.on('request', request => {
+      const path = new URL(request.url()).pathname
+      if (!path.startsWith('/campaign/films/') || !path.endsWith('.mp4')) return
+      // Page events omit download-attribute requests. NetLog supplies the browser start identities.
+      const attempt = { atMs: Date.now(), path, method: request.method(), scenario, range: request.headers().range || null }
+      browserEvents.push(attempt)
+      attempt.navigation = request.isNavigationRequest()
+      attempts.set(request, attempt)
+      if (activeDownload && request.method() === 'GET' && path === activeDownload.path) {
+        attempt.downloadActionId = activeDownload.id
+      }
+    })
+    ctx.on('response', response => {
+      const attempt = attempts.get(response.request())
+      if (attempt) { attempt.status = response.status(); attempt.responseAtMs = Date.now() }
+    })
+    ctx.on('requestfinished', request => { const attempt = attempts.get(request); if (attempt) attempt.finishedAtMs = Date.now() })
+    ctx.on('requestfailed', request => {
+      const attempt = attempts.get(request)
+      if (attempt) { attempt.failure = request.failure()?.errorText || 'Unknown request failure'; attempt.failedAtMs = Date.now() }
+    })
+    return {
+      async attach(page) {
+        if (!networkSession) {
+          networkSession = await browser.newBrowserCDPSession()
+          networkSession.on('Tracing.dataCollected', event => netEvents.push(...event.value.filter(value => value.cat?.includes('netlog'))))
+          await networkSession.send('Tracing.start', { categories: 'netlog', transferMode: 'ReportEvents' })
+        }
+        const session = await ctx.newCDPSession(page)
+        const requests = new Map()
+        session.on('Network.requestWillBeSent', event => {
+          clockOffsetMs ??= event.wallTime * 1000 - event.timestamp * 1000
+          requests.set(event.requestId, { path: new URL(event.request.url).pathname, atMs: event.wallTime * 1000 })
+        })
+        session.on('Network.responseReceived', event => {
+          const request = requests.get(event.requestId)
+          if (request && (event.response.fromDiskCache || event.response.fromPrefetchCache)) cacheSignals.push({ ...request, status: event.response.status, fromDiskCache: !!event.response.fromDiskCache, fromPrefetchCache: !!event.response.fromPrefetchCache })
+        })
+        await session.send('Network.enable')
+      },
+      beginDownload(film) {
+        activeDownload = { id: downloadActions.length + 1, film: film.id, scenario, path: '/campaign/films/' + film.file, startedAtMs: Date.now(), attemptIds: [], lifecycleIds: [] }
+        downloadActions.push(activeDownload)
+        return activeDownload
+      },
+      endDownload() { activeDownload = null },
+    }
+  }
+  const finishBrowserStarts = async () => {
+    const completed = new Promise(resolve => networkSession.once('Tracing.tracingComplete', resolve))
+    await networkSession.send('Tracing.end')
+    await completed
+    assert(Number.isFinite(clockOffsetMs), 'Chromium monotonic/wall clock anchor missing')
+    // Chromium reuses exported async trace tokens after a source dies; its creation time distinguishes lifetimes.
+    const identity = event => `${event.pid}:${JSON.stringify(event.id2 ?? event.id ?? event.tid)}:${event.args?.params?.source_start_time}`
+    const groups = new Map()
+    const starts = netEvents.filter(event => event.name === 'URL_REQUEST_START_JOB' && event.args?.params?.url?.includes('/campaign/films/') && event.args.params.url.endsWith('.mp4'))
+    const sourceTimes = new Set(starts.map(event => event.args.params.source_start_time))
+    writeFileSync(join(out, 'browser-network-starts.json'), JSON.stringify({ clockOffsetMs, starts, events: netEvents.filter(event => sourceTimes.has(event.args?.params?.source_start_time)) }, null, 2))
+    for (const event of netEvents) {
+      const params = event.args?.params
+      if (event.name !== 'URL_REQUEST_START_JOB' || !params?.url || !params.method) continue
+      const path = new URL(params.url).pathname
+      if (!path.startsWith('/campaign/films/') || !path.endsWith('.mp4')) continue
+      const key = identity(event)
+      assert(!groups.has(key), 'repeated browser source/job requires explicit redirect accounting')
+      groups.set(key, { key, path, method: params.method, atMs: event.ts / 1000 + clockOffsetMs, events: [] })
+    }
+    for (const event of netEvents) {
+      const group = groups.get(identity(event))
+      if (group) group.events.push({ name: event.name, phase: event.ph, timeUs: event.ts, params: event.args?.params })
+    }
+    writeFileSync(join(out, 'browser-network-starts.json'), JSON.stringify({ clockOffsetMs, method: 'Read-only NetLog tracing enabled before actions; no cache or interception changes.', sources: [...groups.values()] }, null, 2))
+    for (const group of [...groups.values()].sort((a, b) => a.atMs - b.atMs)) {
+      const headers = group.events.flatMap(event => event.params?.headers || [])
+      const range = headers.find(value => /^range:/i.test(value))?.replace(/^range:\s*/i, '') || null
+      const phase = sequence.phases.find(value => group.atMs >= value.startedAtMs && group.atMs <= value.completedAtMs)
+      const lifecycle = { id: group.key, atMs: group.atMs, path: group.path, method: group.method, range, scenario: phase?.name || 'between measured phases', admissionIds: [] }
+      browserLifecycles.push(lifecycle)
+      const pageEvent = browserEvents.find(value => !value.linked && value.path === group.path && value.method === group.method && Math.abs(value.atMs - group.atMs) < 250 && value.range === range)
+      if (pageEvent) { pageEvent.linked = true; Object.assign(lifecycle, { ...pageEvent, atMs: group.atMs }); delete lifecycle.linked }
+      const action = downloadActions.find(value => value.path === group.path && group.method === 'GET' && !range && group.atMs >= value.startedAtMs && group.atMs <= value.completedAtMs)
+      if (action) { lifecycle.downloadActionId = action.id; action.lifecycleIds.push(lifecycle.id) }
+      let transmission = null, sendIndex = 0
+      for (const event of group.events.sort((a, b) => a.timeUs - b.timeUs)) {
+        if (event.name.includes('SEND_REQUEST_HEADERS')) {
+          assert.equal(event.name, 'HTTP_TRANSACTION_SEND_REQUEST_HEADERS', 'unhandled wire protocol must not be discounted')
+          const request = event.params.line?.match(/^(\S+) (\S+) HTTP\/\S+/)
+          assert(request, 'wire method/path missing')
+          const path = new URL(request[2], origin).pathname
+          assert.equal(path, group.path, 'wire redirect requires explicit film association')
+          const wireRange = event.params.headers.find(value => /^range:/i.test(value))?.replace(/^range:\s*/i, '') || null
+          transmission = startFilm(origin + path, request[1], 'Chromium NetLog HTTP_TRANSACTION_SEND_REQUEST_HEADERS', lifecycle.scenario, wireRange)
+          Object.assign(transmission, { atMs: event.timeUs / 1000 + clockOffsetMs, browserSourceId: group.key, sendIndex: ++sendIndex, sendTimeUs: event.timeUs, responses: [] })
+          lifecycle.admissionIds.push(transmission.id)
+          if (action) { transmission.downloadActionId = action.id; action.attemptIds.push(transmission.id) }
+        } else if (event.name === 'HTTP_TRANSACTION_READ_RESPONSE_HEADERS') {
+          assert(transmission, 'wire response without an observed send')
+          const status = event.params.headers.find(value => /^HTTP\/\S+ \d{3}/.test(value))?.match(/^HTTP\/\S+ (\d{3})/)
+          assert(status, 'wire response status missing')
+          const response = { status: Number(status[1]), atMs: event.timeUs / 1000 + clockOffsetMs }
+          transmission.responses.push(response)
+          if (response.status >= 200) { transmission.status = response.status; transmission.responseAtMs = response.atMs }
+        } else if (transmission && event.params?.net_error < 0) {
+          transmission.networkError = event.params.net_error
+          transmission.failedAtMs = event.timeUs / 1000 + clockOffsetMs
+        }
+      }
+      lifecycle.wireTransmissions = sendIndex
+      if (!sendIndex) {
+        const cache = cacheSignals.find(value => value.path === group.path && Math.abs(value.atMs - group.atMs) < 250)
+        const read = group.events.some(event => /HTTP_CACHE_READ_(?:DATA|SPARSE_DATA)/.test(event.name))
+        assert(cache && read, 'zero-send film source has no established cache serving; unknown admissions must not be discounted')
+        const attempt = startFilm(origin + group.path, group.method, 'conservative possible admission: confirmed zero-send browser cache', lifecycle.scenario, range)
+        Object.assign(attempt, { atMs: group.atMs, browserSourceId: group.key, status: cache.status, cacheEvidence: cache })
+        lifecycle.admissionIds.push(attempt.id)
+        cacheCases.push({ lifecycleId: group.key, admissionId: attempt.id, cacheEvidence: cache, cacheReadObserved: read })
+        if (action) { attempt.downloadActionId = action.id; action.attemptIds.push(attempt.id) }
+      }
+    }
+    assert(browserEvents.every(value => value.linked), 'a page-observed film start is missing from NetLog')
+    await networkSession.detach()
+    networkSession = null
+  }
+  const filmFetch = async (url, options = {}) => {
+    const attempt = startFilm(url, options.method || 'GET', 'standalone fetch start', 'six-film viewing/early seeks/downloads', options.headers?.Range || null)
+    try { const response = await fetch(url, options); attempt.status = response.status; attempt.responseAtMs = Date.now(); return response }
+    catch (error) { attempt.failure = error.message; attempt.failedAtMs = Date.now(); throw error }
+  }
+  const manifest = JSON.parse(readFileSync(fileURLToPath(new URL('../public/campaign/films/manifest.json', import.meta.url)), 'utf8'))
+  const out = join(process.env.OBPAL_E2E_EVIDENCE_ROOT, 'partner-films')
+  mkdirSync(out, { recursive: true })
+  const raw = rawRun(out), frames = [], observations = []
+  const downloadedMedia = async (download, film, action) => {
+    assert.equal(download.suggestedFilename(), film.file)
+    assert.equal(await download.failure(), null)
+    const data = readFileSync(await download.path())
+    const measured = { filename: download.suggestedFilename(), bytes: data.length, sha256: createHash('sha256').update(data).digest('hex') }
+    assert.equal(measured.bytes, film.bytes, 'downloaded file length')
+    assert.equal(measured.sha256, film.sha256, 'downloaded file SHA-256')
+    action.completedAtMs = Date.now()
+    action.receipt = { ...measured, failure: null, url: download.url() }
+    assert.equal(new URL(download.url()).pathname, action.path)
+    await download.delete()
+    return measured
+  }
+  // Node polls synchronous media state even when page scripts or animation-frame callbacks cannot run.
+  const mediaState = video => video.evaluate(el => ({ duration: el.duration, width: el.videoWidth, height: el.videoHeight, readyState: el.readyState, networkState: el.networkState, currentTime: el.currentTime, seeking: el.seeking, paused: el.paused, ended: el.ended, visibility: document.visibilityState, error: el.error && { code: el.error.code, message: el.error.message }, buffered: Array.from({ length: el.buffered.length }, (_, i) => [el.buffered.start(i), el.buffered.end(i)]) }))
+  const mediaUntil = async (video, predicate, step) => {
+    const deadline = Date.now() + 30_000
+    let state
+    do {
+      state = await mediaState(video)
+      if (predicate(state)) return state
+      await sleep(100)
+    } while (Date.now() < deadline)
+    throw new Error(`${step}: ${JSON.stringify(state)}`)
+  }
+  const shot = async (page, state, failed = false) => {
+    mkdirSync(join(raw, state), { recursive: true })
+    await page.screenshot({ path: join(raw, state, 'screen.png') })
+    frames.push({ path: `${state}/screen.png`, failed })
+  }
+  // Observe actual effects; only the separately labelled share cases replace APIs.
+  const observe = () => {
+    window.__filmEffects = []
+    window.__filmDraws = 0
+    const fill = CanvasRenderingContext2D.prototype.fill
+    CanvasRenderingContext2D.prototype.fill = function (...args) {
+      if (this.canvas.id === 'film-dots') window.__filmDraws++
+      return fill.apply(this, args)
+    }
+    const wrap = (object, name, effect) => {
+      const method = object?.[name]
+      if (typeof method === 'function') object[name] = function (...args) {
+        window.__filmEffects.push(effect)
+        return method.apply(this, args)
+      }
+    }
+    for (const name of ['setItem', 'removeItem', 'clear']) wrap(Storage.prototype, name, `storage.${name}`)
+    wrap(window, 'fetch', 'fetch')
+    wrap(XMLHttpRequest.prototype, 'send', 'xhr.send')
+    wrap(navigator, 'sendBeacon', 'beacon')
+    wrap(indexedDB, 'open', 'indexedDB.open')
+    wrap(window.caches, 'open', 'cache.open')
+    wrap(navigator.serviceWorker, 'register', 'serviceWorker.register')
+    wrap(navigator.clipboard, 'writeText', 'clipboard.writeText')
+    wrap(navigator, 'share', 'navigator.share')
+    for (const name of ['WebSocket', 'RTCPeerConnection', 'PaymentRequest']) {
+      if (typeof window[name] === 'function') window[name] = new Proxy(window[name], { construct(target, args) {
+        window.__filmEffects.push(name); return Reflect.construct(target, args)
+      } })
+    }
+    const cookie = Object.getOwnPropertyDescriptor(Document.prototype, 'cookie')
+    if (cookie?.set) Object.defineProperty(Document.prototype, 'cookie', { ...cookie, set(value) {
+      window.__filmEffects.push('cookie.write'); cookie.set.call(this, value)
+    } })
+  }
+  const geometry = page => page.evaluate(async () => {
+    const videos = await Promise.all([...document.querySelectorAll('video')].map(async video => {
+      const box = video.getBoundingClientRect(), image = new Image()
+      image.src = video.poster
+      await image.decode()
+      const w = video.videoWidth || image.naturalWidth, h = video.videoHeight || image.naturalHeight
+      const scale = Math.min(box.width / w, box.height / h)
+      return { id: video.closest('article').id, fit: getComputedStyle(video).objectFit, box: { width: box.width, height: box.height }, frame: { width: w * scale, height: h * scale }, poster: { width: image.naturalWidth, height: image.naturalHeight }, controls: video.controls, playsInline: video.playsInline, preload: video.preload, autoplay: video.autoplay }
+    }))
+    return { width: innerWidth, overflow: document.documentElement.scrollWidth > innerWidth + 1, videos }
+  })
+  const assertGeometry = layout => {
+    assert(!layout.overflow, `overflow at ${layout.width}px`)
+    assert.equal(layout.videos.length, 6)
+    for (const video of layout.videos) {
+      assert.equal(video.fit, 'contain')
+      assert(video.poster.width > 0 && video.poster.height > 0, `poster not decoded: ${video.id}`)
+      assert(video.frame.width <= video.box.width + 1 && video.frame.height <= video.box.height + 1)
+      assert(video.controls && video.playsInline && video.preload === 'none' && !video.autoplay)
+    }
+  }
+  try {
+    for (const width of [360, 390, 430, 1440]) for (const reduced of [false, true]) {
+      const state = `${width}-${reduced ? 'reduced' : 'normal'}`
+      await check(`partner films ${state}: entire posters, native themes, keyboard links and no unsolicited effects`, async () => {
+        const ctx = await browser.newContext({ viewport: { width, height: width === 1440 ? 900 : 844 }, deviceScaleFactor: 1, reducedMotion: reduced ? 'reduce' : 'no-preference' })
+        let page
+        const requests = [], errors = []
+        try {
+          await ctx.addInitScript(observe)
+          page = await ctx.newPage()
+          page.on('pageerror', error => errors.push(error.message))
+          page.on('request', request => requests.push({ url: request.url(), method: request.method() }))
+          await page.goto(origin + '/campaign/')
+          await page.evaluate(() => document.fonts.ready)
+          await page.waitForLoadState('networkidle')
+          const layout = await geometry(page)
+          assertGeometry(layout)
+          assert(await page.locator('.logo svg').count())
+          assert.equal(await page.locator('video').evaluateAll(videos => videos.every(v => v.readyState === 0 && v.networkState === 1)), true)
+          assert(!requests.some(request => /\.mp4(?:\?|$)/.test(request.url)), 'media downloaded before play')
+          assert(!requests.some(request => request.method !== 'GET' || !request.url.startsWith(origin + '/') || /\/api\/|\/r\//.test(request.url)))
+          assert.deepEqual(await page.evaluate(() => window.__filmEffects), [])
+          const storage = await ctx.storageState()
+          assert.deepEqual(storage.cookies, [])
+          assert(storage.origins.every(o => !o.localStorage.length))
+          const urls = [origin + '/campaign/', ...manifest.films.map(film => origin + '/campaign/#' + film.id)]
+          assert.deepEqual(await page.locator('[data-film-share] input').evaluateAll(inputs => inputs.map(input => input.value)), urls)
+          await shot(page, state + '-hero')
+          await page.locator('#original').evaluate(el => el.scrollIntoView({ block: 'start' }))
+          await shot(page, state + '-landscape')
+          await page.locator('#eight-arms').evaluate(el => el.scrollIntoView({ block: 'start' }))
+          await shot(page, state + '-portrait')
+          for (const theme of ['light', 'carbon']) {
+            await page.locator('#film-surface').selectOption(theme)
+            await page.waitForFunction(theme => document.documentElement.dataset.bbTheme === theme, theme)
+            await page.waitForFunction(() => ![...document.documentElement.getAnimations(), ...document.body.getAnimations()].some(animation => animation.playState === 'running'))
+            await page.evaluate(() => scrollTo(0, 0))
+            await shot(page, state + '-' + theme)
+            assertGeometry(await geometry(page))
+          }
+          for (const id of ['original', 'eight-arms']) {
+            const link = page.locator(`#${id} [data-permalink]`)
+            await link.focus()
+            assert(await link.evaluate(el => el === document.activeElement && getComputedStyle(el).outlineStyle !== 'none'))
+            await page.keyboard.press('Enter')
+            assert.equal(page.url(), origin + '/campaign/#' + id)
+            await page.locator(`#${id} [data-film-share]`).evaluate(el => el.scrollIntoView({ block: 'center' }))
+            await shot(page, state + '-' + id + '-links')
+          }
+          await page.evaluate(() => scrollTo(0, 0))
+          await sleep(150)
+          const draws = await page.evaluate(() => window.__filmDraws)
+          assert(draws > 0, 'native dots did not draw')
+          await sleep(150)
+          if (reduced) assert.equal(await page.evaluate(() => window.__filmDraws), draws)
+          assert.deepEqual(await page.evaluate(() => window.__filmEffects), [])
+          assert.deepEqual(await ctx.storageState(), storage)
+          assert.deepEqual(errors, [])
+          observations.push({ state, dpr: 1, layout, urls, requests, effects: [], themes: ['light', 'carbon'], reducedMotion: reduced, initialReadyState: 0 })
+          return 'six posters; no MP4 before play; no third-party, API or storage effects; route-qualified URLs'
+        } catch (error) { if (page) await shot(page, state + '-failure', true); throw error }
+        finally { await ctx.close() }
+      })
+    }
+    await check('partner films: six real players advance, seek to the complete ending and download with range support', async () => {
+      const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true })
+      const accounting = watchFilms(ctx, 'six-film viewing/early seeks/downloads')
+      sequence.startedAtMs = Date.now()
+      sequence.phases.push({ name: 'six-film viewing/early seeks/downloads', startedAtMs: sequence.startedAtMs })
+      let page, currentFilm
+      const media = [], responses = []
+      try {
+        page = await ctx.newPage()
+        page.on('response', response => { if (response.url().endsWith('.mp4')) responses.push({ url: response.url(), status: response.status() }) })
+        await accounting.attach(page)
+        await page.goto(origin + '/campaign/')
+        for (const film of manifest.films) {
+          currentFilm = film.id
+          const video = page.locator(`#${film.id} video`)
+          await video.scrollIntoViewIfNeeded()
+          await video.evaluate(el => { el.muted = true; return el.play() })
+          const playing = await mediaUntil(video, state => state.readyState >= 2 && state.currentTime > .2, film.id + ' advances')
+          assert(Math.abs(playing.duration - film.duration) < .1)
+          assert.equal(playing.width, film.width); assert.equal(playing.height, film.height)
+          if (film.id === 'original') {
+            // This injected click listener exercises the actual Fullscreen API under a trusted gesture.
+            await video.evaluate(el => el.addEventListener('click', () => el.requestFullscreen(), { once: true }))
+            await video.click()
+            await page.waitForFunction(() => document.fullscreenElement?.tagName === 'VIDEO')
+            await shot(page, 'fullscreen-original')
+            await page.evaluate(() => document.exitFullscreen())
+            assert.equal(await page.evaluate(() => document.fullscreenElement), null)
+          }
+          await video.evaluate(el => { el.pause(); el.currentTime = Math.max(0, el.duration - .3) })
+          await video.evaluate(el => el.play())
+          await mediaUntil(video, state => !state.seeking && state.currentTime > state.duration - .5 && state.readyState >= 2, film.id + ' near-end seek')
+          await shot(page, `ending-${film.id}`)
+          const ended = await mediaUntil(video, state => state.ended, film.id + ' ended')
+          const url = origin + '/campaign/films/' + film.file
+          const head = await filmFetch(url, { method: 'HEAD' })
+          assert.equal(head.status, 200)
+          assert.match(head.headers.get('content-type'), /^video\/mp4/)
+          assert.equal(Number(head.headers.get('content-length')), film.bytes)
+          const range = await filmFetch(url, { headers: { Range: `bytes=${film.bytes - 1024}-${film.bytes - 1}` } })
+          assert.equal(range.status, 206)
+          assert.equal(range.headers.get('content-range'), `bytes ${film.bytes - 1024}-${film.bytes - 1}/${film.bytes}`)
+          assert.equal((await range.arrayBuffer()).byteLength, 1024)
+          const downloaded = page.waitForEvent('download')
+          const action = accounting.beginDownload(film)
+          await page.locator(`#${film.id} a[download]`).click()
+          const download = await downloaded
+          const measured = await downloadedMedia(download, film, action)
+          accounting.endDownload()
+          media.push({ id: film.id, playing, ended, download: { ...measured, contentType: head.headers.get('content-type'), range: range.headers.get('content-range'), status: range.status } })
+        }
+        assert(responses.some(response => response.status === 206), 'browser media range request not observed')
+        observations.push({ scenario: 'real playback and downloads', mutedForAutomation: true, media, browserMediaResponses: responses })
+        return '6/6 advance and end; exact dimensions/durations; six downloads; HEAD lengths and tail-range 206'
+      } catch (error) {
+        if (page) await shot(page, 'playback-failure', true)
+        observations.push({ scenario: 'real playback failure', currentFilm, error: error.message, completedMedia: media, browserMediaResponses: responses })
+        throw error
+      } finally { await ctx.close(); sequence.phases.at(-1).completedAtMs = Date.now() }
+    })
+    for (const mode of ['native-resolve', 'native-abort', 'native-denied', 'clipboard-resolve', 'clipboard-denied', 'unsupported']) {
+      await check(`partner films sharing: ${mode} (injected mocks, no actual-device sending)`, async () => {
+        const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } })
+        try {
+          await ctx.addInitScript(mode => {
+            window.__filmShareCalls = []
+            Object.defineProperty(navigator, 'share', { configurable: true, value: mode.startsWith('native') ? async data => {
+              window.__filmShareCalls.push({ kind: 'share', data, active: navigator.userActivation.isActive })
+              if (mode === 'native-abort') throw new DOMException('Injected cancellation or absent targets', 'AbortError')
+              if (mode === 'native-denied') throw new DOMException('Injected denied sharing', 'NotAllowedError')
+            } : undefined })
+            Object.defineProperty(navigator, 'clipboard', { configurable: true, value: mode === 'unsupported' ? undefined : { writeText: async url => {
+              window.__filmShareCalls.push({ kind: 'clipboard', url, active: navigator.userActivation.isActive })
+              if (mode === 'clipboard-denied') throw new DOMException('Injected denied clipboard', 'NotAllowedError')
+            } } })
+          }, mode)
+          const page = await ctx.newPage()
+          await page.goto(origin + '/campaign/')
+          await page.waitForLoadState('networkidle')
+          assert.deepEqual(await page.evaluate(() => window.__filmShareCalls), [])
+          const groups = page.locator('[data-film-share]')
+          const cases = [{ id: 'page', title: 'ob.Pal in motion', url: origin + '/campaign/' }, ...manifest.films.map(film => ({ id: film.id, title: film.title, url: origin + '/campaign/#' + film.id }))]
+          for (const [i, item] of cases.entries()) {
+            const group = groups.nth(i), button = group.locator('[data-action=share]'), manual = group.locator('input')
+            assert.equal(await manual.inputValue(), item.url)
+            await button.click()
+            await page.waitForFunction(id => !document.querySelector(`#url-${id}`).closest('[data-film-share]').querySelector('button').disabled, item.id)
+            const status = await group.locator('[role=status]').innerText()
+            if (mode === 'native-resolve') assert.equal(status, "Link handed to your device's sharing feature.")
+            else if (mode === 'native-abort') assert.match(status, /cancelled or unavailable/)
+            else if (mode === 'clipboard-resolve') assert.equal(status, 'Link copied.')
+            else assert.match(status, /Select and copy/)
+            assert(await button.isEnabled())
+            assert(await manual.isVisible())
+            if (mode.endsWith('denied') || mode === 'native-abort' || mode === 'unsupported') {
+              assert(await manual.evaluate(input => input === document.activeElement && input.selectionStart === 0 && input.selectionEnd === input.value.length))
+            }
+            if (i < 2) await shot(page, `share-${mode}-${item.id}`)
+          }
+          const calls = await page.evaluate(() => window.__filmShareCalls)
+          if (mode === 'unsupported') assert.deepEqual(calls, [])
+          else {
+            assert.equal(calls.length, 7)
+            calls.forEach((call, i) => {
+              assert(call.active, 'sharing API called without active user gesture')
+              if (mode.startsWith('native')) assert.deepEqual(call.data, { title: cases[i].title, url: cases[i].url })
+              else assert.equal(call.url, cases[i].url)
+            })
+          }
+          // Copy is a separate gesture even when native sharing is available or has been cancelled.
+          if (mode !== 'unsupported') {
+            await groups.first().locator('[data-action=copy]').click()
+            await page.waitForFunction(() => !document.querySelector('[data-action=copy]').disabled)
+            const copy = (await page.evaluate(() => window.__filmShareCalls)).at(-1)
+            assert.deepEqual(copy, { kind: 'clipboard', url: cases[0].url, active: true })
+          }
+          observations.push({ scenario: 'injected sharing mocks', mode, actualDeviceSending: 'unverified', calls, expectedUrls: cases.map(item => item.url) })
+          return '7 exact page/film payloads or selectable URLs; gesture-only APIs; buttons re-enabled'
+        } finally { await ctx.close() }
+      })
+    }
+    await check('partner films without JavaScript: native play, downloads and all stable fragment links', async () => {
+      const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, javaScriptEnabled: false, acceptDownloads: true })
+      const accounting = watchFilms(ctx, 'no-JS native viewing/download')
+      sequence.phases.push({ name: 'no-JS native viewing/download', startedAtMs: Date.now() })
+      let page
+      try {
+        page = await ctx.newPage()
+        const requests = []
+        await accounting.attach(page)
+        page.on('request', request => requests.push(request.url()))
+        await page.goto(origin + '/campaign/')
+        await page.waitForLoadState('networkidle')
+        assert.equal(await page.locator('video[controls][playsinline][preload=none]').count(), 6)
+        assert.equal(await page.locator('a[download]').count(), 6)
+        assert.equal(await page.locator('[data-action=share]:visible, [data-action=copy]:visible').count(), 0)
+        assert(!requests.some(url => url.endsWith('.mp4')))
+        for (const film of manifest.films) {
+          await page.locator(`#${film.id} [data-permalink]`).click()
+          assert.equal(page.url(), origin + '/campaign/#' + film.id)
+          assert(await page.locator(`#${film.id} video`).isVisible())
+        }
+        const video = page.locator('#eight-arms video')
+        await video.scrollIntoViewIfNeeded()
+        await video.evaluate(el => { el.muted = true; return el.play() })
+        const playing = await mediaUntil(video, state => state.currentTime > .2 && state.readyState >= 2, 'no-JS native playback advances')
+        await video.evaluate(el => el.pause())
+        const downloading = page.waitForEvent('download')
+        const action = accounting.beginDownload(manifest.films[1])
+        await page.locator('#eight-arms a[download]').click()
+        const download = await downloading
+        const measured = await downloadedMedia(download, manifest.films[1], action)
+        accounting.endDownload()
+        await page.locator('#eight-arms').evaluate(el => el.scrollIntoView({ block: 'start' }))
+        await shot(page, 'no-js-portrait')
+        assertGeometry(await geometry(page))
+        observations.push({ scenario: 'JavaScript disabled', nativePlaybackAdvanced: true, playing, sixPermalinks: true, download: measured, layout: await geometry(page) })
+        return 'six static players/downloads/fragments; native playback advances; download completes'
+      } catch (error) {
+        if (page) await shot(page, 'no-js-failure', true)
+        observations.push({ scenario: 'JavaScript disabled failure', error: error.message })
+        throw error
+      } finally { await ctx.close(); sequence.completedAtMs = Date.now(); sequence.phases.at(-1).completedAtMs = sequence.completedAtMs }
+    })
+    await check('partner films admission accounting: every wire send, seven completed downloads and conservative minute budget', async () => {
+      await finishBrowserStarts()
+      assert.equal(downloadActions.length, 7)
+      assert.equal(new Set(legitimateTraffic.map(attempt => attempt.id)).size, legitimateTraffic.length)
+      for (const action of downloadActions) {
+        assert(action.receipt, `download ${action.id} missing a completed measured receipt`)
+        assert(action.attemptIds.length > 0, `download ${action.id} has no observed request start; cache serving is not established`)
+        assert(action.lifecycleIds.length > 0, `download ${action.id} missing a browser lifecycle`)
+        for (const id of action.lifecycleIds) {
+          const lifecycle = browserLifecycles.find(value => value.id === id)
+          lifecycle.downloadReceipt = action.receipt
+          if (lifecycle.failure?.includes('ERR_ABORTED') && lifecycle.navigation) lifecycle.failureClassification = 'Chromium download-navigation abort with completed measured download; not a failed download'
+        }
+        for (const id of action.attemptIds) {
+          const attempt = legitimateTraffic.find(attempt => attempt.id === id)
+          attempt.downloadReceipt = action.receipt
+          if (attempt.failure?.includes('ERR_ABORTED') && attempt.navigation) attempt.failureClassification = 'Chromium download-navigation abort with completed measured download; not a failed download'
+        }
+      }
+      const peak = Math.max(0, ...legitimateTraffic.map(attempt => legitimateTraffic.filter(other => other.atMs <= attempt.atMs && other.atMs > attempt.atMs - 60_000).length))
+      assert(peak < 60, `ordinary sequence peak ${peak} must stay below 60`)
+      assert(!legitimateTraffic.some(attempt => [429, 503].includes(attempt.status) || attempt.responses?.some(response => [429, 503].includes(response.status))), 'ordinary sequence admission denied')
+      const wireTransmissions = legitimateTraffic.filter(attempt => attempt.sendIndex).length
+      assert.equal(wireTransmissions, browserLifecycles.reduce((count, lifecycle) => count + lifecycle.wireTransmissions, 0))
+      observations.push({ scenario: 'complete wire admission accounting', wireTransmissions, standaloneStarts: legitimateTraffic.filter(attempt => !attempt.browserSourceId).length, confirmedZeroSendCacheCases: cacheCases.length, conservativeAdmissions: legitimateTraffic.length, peakRolling60s: peak, remainingMargin: 60 - peak, completedDownloadActions: 7 })
+      return `${wireTransmissions} browser wire sends; ${legitimateTraffic.length} total conservative admissions; peak ${peak}/60; margin ${60 - peak}; seven measured download receipts; no 429/503`
+    })
+    if (process.env.OBPAL_PARTNER_BASELINE) await check('partner films baseline: supplied index at matching phone and desktop widths (local fixture)', async () => {
+      let html = readFileSync(process.env.OBPAL_PARTNER_BASELINE, 'utf8')
+      const sources = ['obpal-v3-dots-current-logo-16x9.mp4', '01-eight-arms/01-eight-arms.mp4', '02-make-a-mark/02-make-a-mark.mp4', '03-take-the-ring/03-take-the-ring.mp4', '04-screen-to-track/04-screen-to-track.mp4', '05-body-response/05-body-response.mp4']
+      const posters = ['revised-original-logo-check.png', '01-eight-arms/poster.jpg', '02-make-a-mark/poster.jpg', '03-take-the-ring/poster.jpg', '04-screen-to-track/poster.jpg', '05-body-response/poster.jpg']
+      manifest.films.forEach((film, i) => { html = html.replaceAll(sources[i], '/campaign/films/' + film.file).replaceAll(posters[i], '/campaign/films/' + film.poster) })
+      for (const width of [390, 1440]) {
+        const ctx = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 900 }, javaScriptEnabled: false })
+        try {
+          const page = await ctx.newPage()
+          await page.route(origin + '/campaign-source/', route => route.fulfill({ contentType: 'text/html', body: html }))
+          await page.goto(origin + '/campaign-source/')
+          await page.waitForLoadState('networkidle')
+          await shot(page, `baseline-${width}-hero`)
+          await page.locator('article').nth(1).evaluate(el => el.scrollIntoView({ block: 'start' }))
+          await shot(page, `baseline-${width}-portrait`)
+        } finally { await ctx.close() }
+      }
+      return 'supplied read-only HTML; media URLs mapped to equivalent local assets; fixture never public'
+    })
+    cspCheck()
+  } finally {
+    await networkSession?.detach().catch(() => {})
+    const maximumMinuteRequests = Math.max(0, ...legitimateTraffic.map(r => legitimateTraffic.filter(other => other.atMs <= r.atMs && other.atMs > r.atMs - 60_000).length))
+    writeFileSync(join(out, 'partner-films.json'), JSON.stringify({ revision: process.env.OBPAL_PARTNER_REVISION, browser: browser.version(), deviceScope: 'Desktop Chromium and emulated widths; no physical-device or actual share-delivery claim.', observations, admissionMeasurement: { counting: 'One admission identity per actual browser request-header send (including retries) or standalone Fetch start. Source lifecycles/page callbacks never increment admissions. Confirmed zero-send cache sources count one explicitly conservative possible admission; unknown zero-send sources fail.', sequence: { ...sequence, scope: 'Ordinary six-film viewing/early seeks/downloads, intervening sharing mocks with no film requests, then no-JS viewing/download. Protected HTTP stress and buffered playback are separate phases.' }, requests: legitimateTraffic, browserLifecycles, cacheCases, downloadActions, maximumMinuteRequests, configuredMinuteRequests: 60, measuredBurstMargin: 60 - maximumMinuteRequests } }, null, 2))
+    writeFileSync(join(out, 'evidence-frames.json'), JSON.stringify({ expectedCount: frames.length, frames }, null, 2))
+  }
+}
+
+
 let worker = null
 let browser = null
 let exitCode = 0
@@ -164,6 +888,10 @@ try {
   worker = await startWorker({ port: PORT })
   console.log(`ob.Pal pages e2e (${worker.origin})`)
   browser = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED }))
+  if (!ONLY || ONLY === 'partner-films' || ONLY === 'partner-films-http') await runFilmDownloads(browser, worker.origin)
+  if (!ONLY || ONLY === 'partner-films-playback') await runFilmPlayback(browser, worker.origin)
+  if (!ONLY || ONLY === 'campaign' || ONLY === 'partner-films' || ONLY === 'partner-films-accounting') await check('Retained offer previews are excluded from public assets', () => runCampaignExclusion(worker.origin))
+  if (!ONLY || ONLY === 'partner-films' || ONLY === 'partner-films-accounting') await runPartnerFilms(browser, worker.origin)
   if (!ONLY) await check('Logos inherit live surface and accent tokens', () => runBrand(browser, worker.origin))
   if (!ONLY || ONLY === 'store') await runStoreKit(browser, check, SHOTS)
   if (ONLY === 'try') {

@@ -413,7 +413,7 @@ export default defineConfig({
         // Controller floor from PLAN.md: Safari 15, Chromium 95, Firefox 115.
         target: ['safari15', 'chrome95', 'firefox115', 'edge95'],
         rollupOptions: {
-          input: { index: 'index.html', controller: 'p/index.html', viewer: 'view/index.html', sponsor: 'sponsor/index.html', donate: 'donate/index.html', link: 'link/index.html', linkDesktop: 'link/desktop/index.html', linkTry: 'link/try/index.html', privacy: 'privacy/index.html', trust: 'trust/index.html', sims: 'sim/index.html', simArm: 'sim/arm/index.html', simArena: 'sim/arena/index.html', simHumanoid: 'sim/humanoid/index.html', simHumanoidPhysics: 'sim/humanoid/physics/index.html', simDevice: 'sim/device/index.html', simEarly: 'src/sim/kit/early.ts', catalogue: 'catalogue/index.html', embed: 'embed/index.html', buttons: 'buttons/index.html' },
+          input: { partnerFilms: 'campaign/index.html', index: 'index.html', controller: 'p/index.html', viewer: 'view/index.html', sponsor: 'sponsor/index.html', donate: 'donate/index.html', link: 'link/index.html', linkDesktop: 'link/desktop/index.html', linkTry: 'link/try/index.html', privacy: 'privacy/index.html', trust: 'trust/index.html', sims: 'sim/index.html', simArm: 'sim/arm/index.html', simArena: 'sim/arena/index.html', simHumanoid: 'sim/humanoid/index.html', simHumanoidPhysics: 'sim/humanoid/physics/index.html', simDevice: 'sim/device/index.html', simEarly: 'src/sim/kit/early.ts', catalogue: 'catalogue/index.html', embed: 'embed/index.html', buttons: 'buttons/index.html', campaign: 'campaign/phone-control/index.html', campaignGuide: 'campaign/phone-control/guide/index.html', campaignSample: 'campaign/phone-control/sample/index.html' },
         },
       },
     },
