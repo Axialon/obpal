@@ -26,7 +26,22 @@
 .phone-play { position: fixed; z-index: 80; bottom: max(12px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: min(360px, calc(100vw - 24px)); box-sizing: border-box; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; border: 1px solid var(--frost-edge); border-radius: 18px; background: var(--frost); color: var(--ink); backdrop-filter: var(--frost-blur); }
 .phone-stick { touch-action: none; display: flex; justify-content: center; align-items: center; justify-self: center; width: 88px; height: 88px; border: 1px solid var(--line); border-radius: 50%; background: var(--glass-soft, #80808018); }
 .phone-stick i { display: block; width: 32px; height: 32px; border-radius: 50%; background: var(--ink); pointer-events: none; }
+.phone-stick { position: relative; margin-top: 18px; }
+.phone-stick-label { position: absolute; top: -20px; white-space: nowrap; font: 500 12px/1.4 var(--font, system-ui); pointer-events: none; }
+.phone-play-unit { grid-column: 1 / -1; display: flex; gap: 6px; align-items: center; justify-content: center; font: 500 12px/1.4 var(--font, system-ui); }
+.phone-play-unit select { min-height: 40px; max-width: 55%; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--frost); font: inherit; }
+/* The kit portals the unit list to body, above the on-screen toolbar. */
+body:has(.phone-play-unit .kit-select[aria-expanded='true']) > .kit-listbox { z-index: 81; }
+.phone-play-buttons button { min-height: 40px; }
+.phone-play-buttons button:not(.kit-icon-action) { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .phone-play-buttons { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; }
+@media (min-width: 700px) and (max-height: 650px) {
+  .phone-play { width: min(620px, calc(100vw - 24px)); grid-template-columns: 100px 1fr 100px; align-items: center; }
+  .phone-play-unit { grid-column: 1 / -1; }
+  .phone-play > .phone-stick:nth-of-type(1) { grid-column: 1; grid-row: 2; }
+  .phone-play > .phone-stick:nth-of-type(2) { grid-column: 3; grid-row: 2; }
+  .phone-play-buttons { grid-column: 2; grid-row: 2; }
+}
 .phone-playing .sim-window { visibility: hidden; }
 .phone-playing .obpal-chip { display: none; }
 .phone-playing .marble-phone { display: none; }

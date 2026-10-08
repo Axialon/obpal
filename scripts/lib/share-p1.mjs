@@ -218,14 +218,14 @@ export async function shareP1({ browser, origin, check, shots }) {
       return `${samples.revokeMs} ms`
     })
 
-    await check('Share Play here starts the native keyboard source without a phone claim', async () => {
+    await check('Share keyboard choice starts the native source; entry links only open the chooser', async () => {
       const page = await ctx.newPage()
       try {
         await page.goto(`${origin}/sim/drone/?test=vr`)
         await page.waitForFunction(() => window.__device && window.__obpal?.pairingUrl)
         await page.evaluate(() => window.__presence.shared.openShare())
         await page.getByRole('tab', { name: 'Play', exact: true }).click()
-        await page.locator('.share-panel').getByRole('button', { name: 'Play here', exact: true }).click()
+        await page.locator('.share-panel').getByRole('button', { name: 'Keyboard, mouse or gamepad', exact: true }).click()
         await page.waitForFunction(() => document.activeElement === window.__device.stage.renderer.domElement)
         const panel = page.locator('[data-panel="local-control"]')
         await panel.getByRole('button', { name: 'Release local controls', exact: true }).waitFor()
@@ -236,8 +236,12 @@ export async function shareP1({ browser, origin, check, shots }) {
         await panel.getByRole('button', { name: 'Enable local controls', exact: true }).waitFor()
         if (shots) await page.screenshot({ path: join(shots, 'play-here-desktop.png') })
         await page.goto(`${origin}/sim/kart/?local=here`)
-        await page.waitForFunction(() => window.__device && document.activeElement === window.__device.stage.renderer.domElement)
-        await page.locator('[data-panel="local-control"]').getByRole('button', { name: 'Release local controls', exact: true }).waitFor()
+        await page.waitForFunction(() => window.__device && window.__obpal?.pairingUrl)
+        assert.equal(await page.locator('.phone-play').count(), 0)
+        assert.equal(await page.evaluate(() => window.__obpal.participants.length), 0)
+        await page.locator('[data-panel="local-control"] [data-source="keyboard"]').click()
+        await page.locator('[data-panel="local-control"]').getByRole('button', { name: 'Enable local controls', exact: true }).waitFor()
+        assert.equal(await page.locator('.phone-play').count(), 0)
       } finally { await page.close() }
     })
 
@@ -282,6 +286,8 @@ export async function shareP1({ browser, origin, check, shots }) {
       for (const sim of ['drone', 'kart', 'marblerun', 'arm']) {
         const page = await phoneContext.newPage()
         await page.goto(`${origin}/sim/${sim}/?test=vr&local=phone`)
+        await page.waitForFunction(() => window.__obpal?.pairingUrl)
+        await page.locator('[data-panel="local-control"]').getByRole('button', { name: 'On-screen touch controls', exact: true }).click()
         await page.waitForFunction(() => window.__presence && window.__obpal?.participants.some(p => p.caps.platform === 'local-phone'))
         await page.getByRole('toolbar', { name: 'On-screen controls' }).waitFor()
         if (sim === 'marblerun') await page.locator('.phone-play').getByRole('button', { name: 'Run / build', exact: true }).click()

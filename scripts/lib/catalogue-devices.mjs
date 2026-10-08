@@ -3,7 +3,7 @@ export const deviceExercises = [
   { id: 'octopus', face: 'face.gamepad', drag: ['.gp-stick[data-stick="0"]', 0, -55], field: 'z', key: 'Space', button: 'actions', home: [['x', 0], ['z', 0.9], ['v', 0]] },
   { id: 'jib', face: 'face.gamepad', drag: ['.gp-stick[data-stick="0"]', 45, -25], field: 'swing', key: 'Space', button: 'actions', home: [['swing', 0], ['boom', 0.15], ['pan', 0]] },
   { id: 'slider', face: 'face.trackpad', drag: ['#pad', 55, 0], field: 'x', key: 'Space', button: 'actions', home: [['x', 0], ['pan', 0], ['tilt', 0]] },
-  { id: 'trebuchet', face: 'face.trackpad', drag: ['#pad', 45, -25], field: 'weight', key: 'Space', button: 'actions', home: [['weight', 25], ['angle', 45], ['z', -1.8]] },
+  { id: 'trebuchet', face: 'face.trackpad', drag: ['#pad', 45, -25], field: 'weight', key: 'Space', button: 'actions', home: [['weight', 25], ['angle', 45], ['z', -.4 * Math.sin(.65) + 2.12 * Math.cos(.65)]] },
   { id: 'pendulum', face: 'face.trackpad', drag: ['#pad', 50, -15], field: 'length', key: 'Space', button: 'actions', home: [['length', 1.2], ['angle', 0], ['omega', 0]] },
   { id: 'telescope', face: 'face.wii', turn: true, field: 'pan', key: 'Space', button: 'actions', home: [['pan', 0], ['elevation', 0.4], ['zoom', 1]] },
   { id: 'planetary', face: 'face.gamepad', drag: ['.gp-stick[data-stick="0"]', 15, -50], field: 'z', key: 'Space', button: 'actions', home: [['x', -2], ['z', 3], ['v', 0]] },

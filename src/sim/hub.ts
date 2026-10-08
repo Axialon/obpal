@@ -62,7 +62,7 @@ function cardOf(card: SimCard): { el: HTMLElement; slot: PreviewSlot | null } {
   const faces = body.querySelector('ul')!
   if (card.id !== 'viewer') {
     const local = document.createElement('a'); local.className = 'dcard-local kit-action'; local.textContent = 'Play here'
-    const href = new URL(card.href!, location.origin); href.searchParams.set('local', matchMedia('(pointer: coarse)').matches ? 'phone' : 'here')
+    const href = new URL(card.href!, location.origin); href.searchParams.set('local', 'here')
     local.href = href.pathname + href.search; body.querySelector('.dcard-foot')!.append(local)
   }
   card.controllers.forEach((c, i) => faces.appendChild(badge(c, card, i === 0)))

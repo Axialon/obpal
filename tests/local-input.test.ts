@@ -8,6 +8,14 @@ import { DroneLogic } from '../src/sim/devices/drone'
 import { rateControllers } from '../src/controller/ratings'
 
 const pad = (index = 0): PadLike & { buttons: { pressed: boolean; value: number }[] } => ({ index, connected: true, mapping: 'standard', axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })) })
+it('touch preference leaves input to Seats and source or unit changes release local keys', () => {
+  const input = new LocalInput(() => 2)
+  input.armed = true; input.key('KeyW', true); input.selectUnit(1)
+  expect(input.armed).toBe(false); expect(input.keys.size).toBe(0)
+  input.source = 'touch'; input.armed = true; input.key('KeyW', true)
+  expect(input.read([pad()], true).size).toBe(0)
+  input.disarm(); expect(input.armed).toBe(false); expect(input.keys.size).toBe(0)
+})
 /** Compare the state rendered by views, excluding input filters, event queues and physics diagnostics. */
 const state = (logic: DeviceLogic) => JSON.stringify(Object.fromEntries(['units', 'rovers', 'drones', 'claws', 'lamps', 'boards', 'cams', 'cursor', 'counts'].filter(k => k in logic).map(k => [k, (logic as unknown as Record<string, unknown>)[k]])))
 const faceInput = (face: string): DeviceInput => {

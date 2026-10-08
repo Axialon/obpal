@@ -3,7 +3,7 @@ import { emptyPad, PadButton, type PadState, type TrayControl } from '@obpal/cor
 import { restInput, type DeviceInput } from './devices/types'
 import { clamp, stick } from './devices/input'
 
-export type LocalSource = 'phone' | 'window' | 'keyboard' | 'gamepad'
+export type LocalSource = 'phone' | 'window' | 'touch' | 'keyboard' | 'gamepad'
 export interface PadLike { index: number; connected: boolean; mapping: string; axes: readonly number[]; buttons: readonly { pressed: boolean; value: number }[] }
 const finite = (v: number | undefined) => typeof v === 'number' && Number.isFinite(v) ? clamp(v, -1, 1) : 0
 /** Keep the phone's deadzone response: small jitter is zero, other values are read by its existing consumers. */

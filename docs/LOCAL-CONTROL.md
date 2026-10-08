@@ -1,5 +1,9 @@
 # Local control on the sim screen
 
+Sim **Play here**, the pairing chip's **Play here**, and hub links open the same local-control chooser. **On-screen touch controls** is an explicit choice on phones, tablets with an attached mouse, and computers. Share names touch and keyboard/mouse/gamepad separately. A saved source/unit/binding preference and entry URL never enable input after reload.
+
+On-screen controls reuse PhonePlay's PAD/STATE/tray messages and the native Seats consumer. The toolbar names its sticks and scene actions, and offers a unit selector and **Choose controls**. Changing source or unit closes the old local seat before creating another. A paired phone can take over the selected local touch seat; touch cannot evict a paired phone. Pointer release, cancellation, lost capture, blur, hidden visibility, camera switching, exit and reload release held input. Live-driver approval, arming and deadman checks remain independent.
+
 Research and implementation notes, 1 October 2026. These defaults are proposals specific to ob.Pal, based on the input and accessibility patterns below. Browser emulation verifies software behaviour; it does not establish physical USB, Bluetooth, camera or phone sensor performance.
 
 ## Comparable controls

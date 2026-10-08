@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import { measureButtonInk } from './lib/button-ink.mjs'
 import { assertButtonInk } from './lib/surface-buttons.mjs'
 import { e2eBrowserOptions } from './lib/browser.mjs'
+import { rawRun } from './lib/distill.mjs'
+import { execFileSync } from 'node:child_process'
 
 const assert = (ok, message) => { if (!ok) throw new Error(message) }
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -33,8 +35,9 @@ export async function runLocalControl(local, check, { baseline = false } = {}) {
   const browser = await chromium.launch(e2eBrowserOptions({ executablePath: process.env.OBPAL_E2E_CHROMIUM, headless: true, args: ['--ignore-certificate-errors', '--disable-features=WebRtcHideLocalIpsWithMdns', '--disable-background-timer-throttling', '--disable-renderer-backgrounding'] }))
   const out = join(process.env.OBPAL_E2E_EVIDENCE_ROOT || 'artifacts/local-control', baseline ? 'before' : 'after')
   await mkdir(out, { recursive: true })
-  const report = [], errors = []
+  const report = [], errors = [], raw = rawRun(out)
   try {
+    await runTouchReleaseEvidence(browser, local.origin, check, out, baseline)
     for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
       const context = await browser.newContext({ viewport, hasTouch: viewport.width < 500, isMobile: viewport.width < 500, deviceScaleFactor: 1, ignoreHTTPSErrors: true, reducedMotion: 'reduce' })
       await context.addInitScript(() => {
@@ -48,8 +51,8 @@ export async function runLocalControl(local, check, { baseline = false } = {}) {
           await page.goto(`${local.origin}${path}`)
           await page.waitForFunction(() => !!window.__obpal?.pairingUrl, { timeout: 30000 })
           await page.evaluate(() => document.fonts.ready)
-          if (baseline) { await page.screenshot({ path: join(out, `scene-${viewport.width}.png`) }); continue }
-          if (id === 'marblerun') await page.screenshot({ path: join(out, `scene-${viewport.width}.png`) })
+          if (baseline) { await page.screenshot({ path: join(raw, `scene-${viewport.width}.png`) }); continue }
+          if (id === 'marblerun') await page.screenshot({ path: join(raw, `scene-${viewport.width}.png`) })
           if (!await page.locator('[data-panel="local-control"]').isVisible()) {
             if (viewport.width < 500) await page.locator('.panel-dock-handle').click()
             await page.locator('[data-panel-toggle="local-control"]').click()
@@ -95,7 +98,7 @@ export async function runLocalControl(local, check, { baseline = false } = {}) {
           })
           if (id === 'marblerun') {
             await check(`picker and bindings centring guard at ${viewport.width}`, async () => {
-              await page.mouse.move(0, 0); await page.screenshot({ path: join(out, `picker-${viewport.width}.png`) })
+              await page.mouse.move(0, 0); await page.screenshot({ path: join(raw, `picker-${viewport.width}.png`) })
               await panel.getByRole('button', { name: 'Bindings', exact: true }).click()
               await page.waitForTimeout(200)
               const rows = (await page.evaluate(measureButtonInk, { surfaces: true })).filter(r => r.classes.includes('local-') || r.path?.includes('local-control'))
@@ -103,7 +106,7 @@ export async function runLocalControl(local, check, { baseline = false } = {}) {
               assert(rows.length > 0, 'no local controls measured')
               await writeFile(join(out, `ink-${viewport.width}.json`), JSON.stringify(rows, null, 2))
               const detail = assertButtonInk(rows)
-              await page.screenshot({ path: join(out, `bindings-${viewport.width}.png`) })
+              await page.screenshot({ path: join(raw, `bindings-${viewport.width}.png`) })
               await page.getByRole('button', { name: 'Close bindings', exact: true }).click()
               return detail
             })
@@ -141,8 +144,315 @@ export async function runLocalControl(local, check, { baseline = false } = {}) {
   } finally { await browser.close() }
 }
 
+/** Reproducible live poses; only the simulation clock is paused for matched stills. */
+async function runTouchReleaseEvidence(browser, origin, check, out, baseline) {
+  const proof = join(out, 'touch-release'), raw = rawRun(proof), frames = [], measurements = []
+  for (const [name, viewport, touch, hybrid] of [
+    ['desktop', { width: 1280, height: 800 }, false, false],
+    ['phone', { width: 390, height: 844 }, true, false],
+    ['tablet', { width: 1024, height: 768 }, true, false],
+    ['hybrid', { width: 1024, height: 600 }, true, true],
+  ]) {
+    const context = await browser.newContext({ viewport, hasTouch: touch, isMobile: name === 'phone', deviceScaleFactor: 1, ignoreHTTPSErrors: true, reducedMotion: name === 'hybrid' ? 'reduce' : 'no-preference' })
+    // Emulate the explicit media-query combination of a touch tablet with an attached fine pointer.
+    if (hybrid) await context.addInitScript(() => { const native = matchMedia.bind(window); window.matchMedia = query => query === '(any-pointer: fine)' ? { ...native(query), matches: true, media: query, addEventListener() {}, removeEventListener() {} } : native(query) })
+    try {
+      const page = await context.newPage()
+      await page.goto(`${origin}/sim/device/?d=trebuchet`)
+      await page.waitForFunction(() => !!window.__device?.logic && !!window.__obpal?.pairingUrl)
+      await page.evaluate(() => document.fonts.ready)
+      await openLocalPicker(page)
+      const capture = async (phase, failed = false) => {
+        if (await page.evaluate(() => !!window.__releaseStep)) await page.waitForFunction(() => [...document.querySelectorAll('#dev-units li')].every((li, n) => li.querySelector('.tele > .kit-sr')?.textContent === window.__device.logic.readout(n)))
+        if (await page.evaluate(() => !!window.__releaseStep)) measurements.push({ name, capturePhase: phase, units: await page.evaluate(() => window.__device.logic.units.map((u, n) => ({ phase: u.phase, readout: window.__device.logic.readout(n), visibleReadout: document.querySelectorAll('#dev-units li')[n]?.querySelector('.tele > .kit-sr')?.textContent }))) })
+        const path = `${name}/${phase}/frame.png`; await mkdir(join(raw, name, phase), { recursive: true }); await page.screenshot({ path: join(raw, path) }); frames.push({ path, failed, scenario: name, phase }) }
+      await capture('controls-cold')
+      await page.waitForTimeout(500); await capture('controls-warm')
+      if (!baseline) { await runTouchBehavior(page, context, check, name, capture, measurements); await page.goto(`${origin}/sim/device/?d=trebuchet`); await page.waitForFunction(() => !!window.__device?.logic && !!window.__obpal?.pairingUrl); await openLocalPicker(page) }
+      await check(`trebuchet ${baseline ? 'baseline' : 'release'} world geometry at ${name}`, async () => {
+        await page.evaluate(() => {
+          const d = window.__device, step = d.logic.step.bind(d.logic)
+          d.logic.step = () => {}; window.__releaseStep = () => step([null, null], .01)
+          window.__releasePose = n => {
+            d.stage.scene.updateMatrixWorld(true)
+            const root = d.stage.scene.getObjectByName(`trebuchet-${n + 1}`), cup = root.getObjectByName('sling-cup'), waiting = cup.children.find(o => o.geometry?.type === 'SphereGeometry')
+            const point = waiting.position.clone().set(0, 0, 0); waiting.localToWorld(point)
+            const u = d.logic.units[n]
+            const arm = root.getObjectByName('throwing-arm'), positions = []
+            for (const offset of [-1e-6, 1e-6]) { arm.rotation.x = u.arm + offset; cup.rotation.x = -arm.rotation.x; d.stage.scene.updateMatrixWorld(true); positions.push(waiting.localToWorld(point.clone().set(0, 0, 0)).toArray()) }
+            arm.rotation.x = u.arm; cup.rotation.x = -u.arm; d.stage.scene.updateMatrixWorld(true)
+            const direction = u.arm > 0 ? 1 : -1
+            return { arm: u.arm, phase: u.phase, load: point.toArray(), projectile: [n * 5, u.y, u.z], velocity: [0, u.vy, u.vz], tangent: positions[1].map((v, j) => direction * (v - positions[0][j]) / 2e-6), angle: u.release }
+          }
+          window.__releaseHome = () => d.logic.units.forEach((u, n) => d.logic.home(n))
+        })
+        await capture('rest')
+        await page.evaluate(() => { for (const u of window.__device.logic.units) { u.phase = 'winding'; u.clock = 0; u.release = u.angle; u.power = u.weight } for (let j = 0; j < 32; j++) window.__releaseStep() })
+        await page.waitForTimeout(60); await capture('winding')
+        await page.evaluate(() => { while (window.__device.logic.units[0].phase === 'winding') window.__releaseStep() })
+        await page.waitForTimeout(60)
+        const release = await page.evaluate(() => [0, 1].map(window.__releasePose))
+        await capture('first-flight')
+        for (const r of release) {
+          const gap = Math.hypot(...r.load.map((v, j) => v - r.projectile[j]))
+          measurements.push({ name, viewport, hybridMediaQueryMock: hybrid, release: r, gap })
+          if (baseline) assert(gap > 2, `baseline discontinuity not reproduced: ${gap}`)
+          else {
+            assert(gap < 1e-8, `release position gap ${gap}`)
+            const dot = r.tangent.reduce((sum, v, j) => sum + v * r.velocity[j], 0) / (Math.hypot(...r.tangent) * Math.hypot(...r.velocity))
+            assert(dot > 1 - 1e-8 && r.tangent[2] < 0, `visible release tangent disagrees with launch: ${dot}`)
+          }
+        }
+        await page.evaluate(() => { for (let j = 0; j < 600 && window.__device.logic.units.some(u => u.phase === 'flight'); j++) window.__releaseStep() })
+        await page.waitForTimeout(60); await capture('landing')
+        await page.evaluate(() => window.__releaseHome()); await page.waitForTimeout(60); await capture('reset')
+        if (!baseline) for (const angle of [20, 75]) {
+          await page.evaluate(angle => { window.__releaseHome(); for (const u of window.__device.logic.units) { u.phase = 'winding'; u.clock = 0; u.angle = u.release = angle; u.power = u.weight } while (window.__device.logic.units[0].phase === 'winding') window.__releaseStep() }, angle)
+          await page.waitForTimeout(60)
+          const limits = await page.evaluate(() => [0, 1].map(window.__releasePose))
+          for (const r of limits) {
+            const gap = Math.hypot(...r.load.map((v, j) => v - r.projectile[j])), a = angle * Math.PI / 180, norm = Math.hypot(...r.tangent)
+            measurements.push({ name, angle, release: r, gap })
+            assert(gap < 1e-8 && Math.abs(r.tangent[1] / norm - Math.sin(a)) < 1e-8 && Math.abs(r.tangent[2] / norm + Math.cos(a)) < 1e-8, `angle ${angle}: release mismatch`)
+          }
+          await capture(`release-${angle}`)
+        }
+        return release
+      })
+    } finally { await context.close() }
+  }
+  if (!baseline) await runTouchTakeover(browser, origin, check, measurements)
+  await writeFile(join(proof, 'geometry.json'), JSON.stringify({ revision: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', windowsHide: true }).trim(), browser: browser.version(), deviceScope: 'Chromium viewport/touch emulation; hybrid fine-pointer media query explicitly mocked. Motion stills pause only the simulation clock. No physical-device performance claim.', baseline, measurements }, null, 2))
+  await writeFile(join(proof, 'evidence-frames.json'), JSON.stringify({ expectedCount: frames.length, frames }, null, 2))
+}
+
+async function runTouchTakeover(browser, origin, check, measurements) {
+  const host = await browser.newContext({ viewport: { width: 1024, height: 768 }, hasTouch: true, ignoreHTTPSErrors: true })
+  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, ignoreHTTPSErrors: true })
+  try {
+    const screen = await host.newPage(), controller = await phone.newPage()
+    await screen.goto(`${origin}/sim/device/?d=trebuchet`); await screen.waitForFunction(() => !!window.__obpal?.pairingUrl)
+    await screen.getByRole('button', { name: 'Play here', exact: true }).click()
+    await screen.locator('[data-source="touch"]').click()
+    await check('paired phone takes over local touch; reconnect and local retry never evict or rearm', async () => {
+      await controller.goto(await screen.evaluate(() => window.__obpal.pairingUrl))
+      await controller.locator('.scene-btn').waitFor({ state: 'visible', timeout: 30000 })
+      const notice = controller.getByRole('button', { name: 'Dismiss connection notice', exact: true }); if (await notice.isVisible()) await notice.click()
+      await controller.addLocatorHandler(controller.locator('.hint.in'), hint => hint.getByRole('button', { name: 'Dismiss hint' }).click())
+      await controller.locator('.scene-btn').click(); await controller.locator('.pick').filter({ hasText: 'Trebuchet 1' }).first().click()
+      await screen.waitForFunction(() => { const d = window.__device, r = window.__obpal, holder = window.__sim.claims.holder(d.units[0].id); return !!holder && !r.isLocal(holder) && !r.participants.some(p => r.isLocal(p.id)) })
+      if (!await screen.locator('[data-panel="local-control"]').isVisible()) await openLocalPicker(screen)
+      await screen.locator('[data-source="touch"]').click()
+      assert(await screen.locator('.phone-play').count() === 0, 'local touch evicted paired phone')
+      await controller.reload(); await controller.locator('.scene-btn').waitFor({ state: 'visible', timeout: 30000 })
+      assert(await screen.locator('.phone-play').count() === 0, 'phone reconnect enabled local input')
+      measurements.push({ takeover: true, localSeats: await screen.evaluate(() => window.__obpal.participants.filter(p => window.__obpal.isLocal(p.id)).length), reconnectLocalRearm: false })
+    })
+  } finally { await host.close(); await phone.close() }
+}
+
+async function runTouchBehavior(page, context, check, name, capture, measurements) {
+  const panel = page.locator('[data-panel="local-control"]'), cdp = await context.newCDPSession(page)
+  const mouse = ['desktop', 'hybrid'].includes(name)
+  let finger = 0, heldAt = null
+  if (!mouse) await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
+  const runCase = (title, run) => check(title, async () => {
+    try { return await run() }
+    catch (error) { await capture(`failure-${title.replace(/[^a-z0-9]+/gi, '-').slice(0, 90)}`, true); measurements.push({ name, failure: title, error: error.message, events: await page.evaluate(() => window.__stickEvents ?? []), input: await pad() }); throw error }
+    finally {
+      if (heldAt) {
+        try { if (mouse) await page.mouse.up(); else await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] }) }
+        catch (error) { measurements.push({ name, cleanupError: error.message }) }
+        heldAt = null
+      }
+      await page.evaluate(() => { if (Object.hasOwn(document, 'hidden')) { delete document.hidden; document.dispatchEvent(new Event('visibilitychange')) } })
+    }
+  })
+  const pad = () => page.evaluate(() => { const p = window.__obpal.participants.find(p => window.__obpal.isLocal(p.id)); return p ? window.__obpal.padOf(p.id) : null })
+  const neutral = async () => until(async () => { const p = await pad(); return !p || p.axes.every(v => v === 0) }, 'held on-screen input released')
+  const hold = async (label = 'Counterweight') => {
+    await page.bringToFront()
+    const stick = page.getByRole('group', { name: label, exact: true }); await stick.scrollIntoViewIfNeeded()
+    const b = await stick.boundingBox(); assert(b, 'stick absent')
+    await stick.evaluate(el => el.addEventListener('pointerdown', e => { window.__stickPointer = e.pointerId }, { once: true }))
+    await stick.evaluate(el => { window.__stickEvents = []; if (el.dataset.proofObserved) return; el.dataset.proofObserved = '1'; for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'gotpointercapture', 'lostpointercapture']) el.addEventListener(type, e => { if (window.__stickEvents.length < 32) window.__stickEvents.push({ type, id: e.pointerId, pointerType: e.pointerType, trusted: e.isTrusted, x: e.clientX, y: e.clientY, pressure: e.pressure, timeMs: performance.now() }) }) })
+    const x = b.x + b.width / 2, y = b.y + b.height / 2 - 28
+    assert(await stick.evaluate((el, p) => el.contains(document.elementFromPoint(p.x, p.y)), { x, y }), 'stick is covered')
+    heldAt = { x, y, id: ++finger }
+    if (mouse) { await page.mouse.move(x, y); await page.mouse.down() }
+    else {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...heldAt, y: b.y + b.height / 2 }] })
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [heldAt] })
+    }
+    await until(async () => (await pad())?.axes.some(v => Math.abs(v) > .1), 'real pointer reached PAD')
+  }
+  const end = async () => { if (mouse) await page.mouse.up(); else await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); heldAt = null }
+  const heldSource = () => page.evaluate(() => { const r = window.__obpal, p = r.participants.find(p => r.isLocal(p.id)); return { id: p?.id, pad: p ? r.padOf(p.id) : null, timeMs: performance.now() } })
+  const interrupted = async (action, before) => {
+    const after = await page.evaluate(id => {
+      const r = window.__obpal, local = r.participants.filter(p => r.isLocal(p.id))
+      return { timeMs: performance.now(), previousPad: r.padOf(id) ?? null, currentPads: local.map(p => r.padOf(p.id) ?? null), localSeats: local.length, events: [...(window.__stickEvents ?? [])] }
+    }, before.id)
+    measurements.push({ name, interruption: action, injected: true, beforePointerCleanup: true, before, after })
+    assert(before.pad?.axes.some(v => Math.abs(v) > .1), `${action}: input was not held`)
+    assert(after.events.every(e => !['pointerup', 'pointercancel'].includes(e.type)), `${action}: pointer ended before interruption was measured`)
+    const idle = p => !p || p.axes.every(v => v === 0) && p.buttons === 0 && p.triggers.every(v => v === 0)
+    assert(idle(after.previousPad) && after.currentPads.every(idle), `${action}: PAD was not neutral immediately before cleanup`)
+    return after
+  }
+  try {
+    await runCase(`explicit same-scene touch movement and launch, selected lane, no extra tab at ${name}`, async () => {
+      await chooseVisibleUnit(page, panel, 'Local unit', '1', measurements, name)
+      await panel.locator('[data-source="touch"]').click()
+      const before = await page.evaluate(() => window.__device.logic.units.map(u => u.weight))
+      await hold(); await page.waitForTimeout(250); await end(); await neutral()
+      const after = await page.evaluate(() => window.__device.logic.units.map(u => u.weight))
+      assert(after[1] > before[1] && after[0] === before[0], 'touch did not exclusively adjust selected counterweight')
+      await page.getByRole('button', { name: 'Launch', exact: true }).click()
+      await page.waitForFunction(() => window.__device.logic.units[1].shots === 1)
+      assert(context.pages().length === 1, 'same-device action opened another tab')
+      await chooseVisibleUnit(page, page.locator('.phone-play'), 'On-screen unit', await page.evaluate(() => window.__device.units[0].id), measurements, name)
+      const toolbarBefore = await page.evaluate(() => window.__device.logic.units.map(u => u.weight))
+      await hold(); await page.waitForTimeout(250); await end(); await neutral()
+      const toolbarAfter = await page.evaluate(() => window.__device.logic.units.map(u => u.weight))
+      measurements.push({ name, visibleToolbarRouting: { before: toolbarBefore, after: toolbarAfter } })
+      assert(toolbarAfter[0] > toolbarBefore[0] && toolbarAfter[1] === toolbarBefore[1], 'visible toolbar selection did not exclusively route to first lane')
+      await chooseVisibleUnit(page, page.locator('.phone-play'), 'On-screen unit', await page.evaluate(() => window.__device.units[1].id), measurements, name)
+      await capture('touch-launch')
+      const layout = await page.locator('.phone-play').evaluate(el => {
+        const rect = e => { const b = e.getBoundingClientRect(); return { x: b.x, y: b.y, width: b.width, height: b.height } }
+        return { box: rect(el), overflow: document.documentElement.scrollWidth > innerWidth, targets: [...el.querySelectorAll('button,select')].map(e => ({ name: e.getAttribute('aria-label') || e.textContent, ...rect(e), visible: e.getBoundingClientRect().height > 0 })), regions: [...el.querySelectorAll('.phone-stick,.phone-play-buttons')].map(e => ({ name: e.getAttribute('aria-label') || e.className, ...rect(e) })) }
+      })
+      measurements.push({ name, touch: { before, after, tabs: context.pages().length, pointer: mouse ? 'native mouse on on-screen controls' : 'CDP touch', layout } })
+      assert(!layout.overflow && layout.box.x >= 0 && layout.box.x + layout.box.width <= await page.evaluate(() => innerWidth), 'toolbar overflow')
+      assert(layout.targets.filter(t => t.visible).every(t => t.name?.trim() && t.height >= 40), `unnamed or small touch target: ${JSON.stringify(layout.targets)}`)
+      for (let a = 0; a < layout.regions.length; a++) for (let b = a + 1; b < layout.regions.length; b++) { const x = layout.regions[a], y = layout.regions[b]; assert(x.x + x.width <= y.x || y.x + y.width <= x.x || x.y + x.height <= y.y || y.y + y.height <= x.y, `overlapping sticks/actions: ${JSON.stringify([x, y])}`) }
+    })
+    for (const release of ['pointerup', 'pointercancel', 'lostpointercapture', 'blur', 'hidden', 'camera']) await runCase(`on-screen ${release} releases held PAD at ${name}`, async () => {
+      await hold()
+      if (release === 'pointerup') await end()
+      else if (release === 'pointercancel') { if (mouse) await page.getByRole('group', { name: 'Counterweight', exact: true }).evaluate(el => el.dispatchEvent(new PointerEvent('pointercancel', { pointerId: window.__stickPointer }))); else { await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] }); heldAt = null } }
+      else if (release === 'lostpointercapture') {
+        // Capture is pending after pointerdown. Establish it with a native event before releasing it.
+        if (mouse) { heldAt.x++; await page.mouse.move(heldAt.x, heldAt.y) }
+        else { heldAt.x++; await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [heldAt] }) }
+        await page.waitForFunction(() => window.__stickEvents.some(e => e.type === 'gotpointercapture' && e.trusted))
+        await page.getByRole('group', { name: 'Counterweight', exact: true }).evaluate(el => el.releasePointerCapture(window.__stickPointer))
+        // Attempt the same-position move first. Chromium touch emulation suppresses unchanged points.
+        if (mouse) await page.mouse.move(heldAt.x, heldAt.y)
+        else {
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [heldAt] })
+          const samePositionObserved = await page.evaluate(() => window.__stickEvents.some(e => e.type === 'lostpointercapture' && e.trusted))
+          if (!samePositionObserved) { heldAt.x++; await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [heldAt] }) }
+          measurements.push({ name, captureProcessing: { samePositionMoveIssued: true, samePositionObserved, additionalNativeMovePixels: samePositionObserved ? 0 : 1 } })
+        }
+      }
+      else if (release === 'blur') await page.evaluate(() => dispatchEvent(new Event('blur')))
+      else if (release === 'hidden') await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')) })
+      else await page.getByRole('button', { name: 'Camera mode', exact: true }).evaluate(el => el.click())
+      if (release === 'lostpointercapture') await page.waitForFunction(() => window.__stickEvents.some(e => e.type === 'lostpointercapture' && e.trusted))
+      await neutral()
+      if (release === 'hidden') await page.evaluate(() => { delete document.hidden; document.dispatchEvent(new Event('visibilitychange')) })
+      if (release !== 'pointerup' && release !== 'pointercancel') await end()
+      if (release === 'pointercancel' && mouse) await end()
+      if (release === 'camera') await page.getByRole('button', { name: 'Camera mode', exact: true }).click()
+      measurements.push({ name, release, injected: ['blur', 'hidden'].includes(release) || release === 'pointercancel' && mouse, events: await page.evaluate(() => window.__stickEvents), pad: await pad() })
+    })
+    await runCase(`on-screen unit/source/exit/reload release and never accumulate seats at ${name}`, async () => {
+      // Separate injected interruption from the visible selection proof above: keep the pointer held.
+      await hold(); const unitBefore = await heldSource()
+      await page.locator('.phone-play select[aria-label="On-screen unit"]').selectOption(await page.evaluate(() => window.__device.units[0].id), { force: true })
+      await interrupted('unit native-change injection', unitBefore); await end(); await neutral()
+      assert(await page.evaluate(() => window.__obpal.participants.filter(p => window.__obpal.isLocal(p.id)).length) === 1, 'unit switch accumulated local seats')
+      await hold(); const sourceBefore = await heldSource()
+      await page.getByRole('button', { name: 'Choose controls', exact: true }).evaluate(el => el.click())
+      await interrupted('source button-handler injection', sourceBefore); await end(); await neutral()
+      assert(await page.locator('.phone-play').count() === 0, 'source chooser left touch active')
+      await panel.locator('[data-source="touch"]').click(); await hold(); const exitBefore = await heldSource()
+      await page.getByRole('button', { name: 'Leave local play', exact: true }).evaluate(el => el.click())
+      await interrupted('exit button-handler injection', exitBefore); await end(); await neutral()
+      await panel.locator('[data-source="touch"]').click(); await hold(); await page.reload()
+      await page.waitForFunction(() => !!window.__obpal?.pairingUrl)
+      // Navigation cancelled the preceding pointer; per-case finally cleans the CDP gesture.
+      assert(await page.locator('.phone-play').count() === 0 && await page.evaluate(() => window.__obpal.participants.filter(p => window.__obpal.isLocal(p.id)).length) === 0, 'reload rearmed or leaked touch seat')
+    })
+    await runCase(`Play here and sim chip choose locally without a new tab at ${name}`, async () => {
+      const exit = page.getByRole('button', { name: 'Leave local play', exact: true }); if (await exit.isVisible()) await exit.click()
+      await openSceneControls(page)
+      await page.getByRole('button', { name: 'Play here', exact: true }).click()
+      assert(await panel.isVisible() && await page.locator('.phone-play').count() === 0, 'Play here armed without choice')
+      // Use the dock to make space for the native chip card; no forced or synthetic entry click.
+      for (const id of await page.locator('.sim-window[data-state="open"]').evaluateAll(els => els.map(el => el.dataset.panel))) await minimisePanel(page, id)
+      const pill = page.locator('.obpal-chip .pill')
+      if (await pill.getAttribute('aria-expanded') !== 'true') {
+        // A phone's folded pill scans other screens; its existing tray opens this screen's own card.
+        const ownCode = page.locator('[data-quick="pair"]')
+        if (await ownCode.count()) { await page.getByRole('button', { name: 'Shortcuts', exact: true }).click(); await ownCode.click() }
+        else await pill.click()
+      }
+      const here = page.locator('.obpal-chip a.here')
+      if (!await here.isVisible()) await page.locator('.obpal-chip .scan-cues > summary').click()
+      const linkBox = await here.boundingBox(); measurements.push({ name, entry: 'visible sim chip Play here', linkBox, tabsBefore: context.pages().length })
+      await here.click()
+      assert(context.pages().length === 1 && await panel.isVisible(), 'sim chip opened another tab')
+    })
+    await runCase(`Share launches explicit touch on this scene at ${name}`, async () => {
+      await page.getByRole('button', { name: 'Share scene', exact: true }).click()
+      await page.getByRole('dialog', { name: 'Share this scene' }).getByRole('tab', { name: 'Play', exact: true }).click()
+      await page.getByRole('dialog', { name: 'Share this scene' }).getByRole('button', { name: 'On-screen touch controls', exact: true }).click()
+      await page.locator('.phone-play').waitFor({ state: 'visible' })
+      assert(context.pages().length === 1, 'Share launched another tab')
+      await page.getByRole('button', { name: 'Leave local play', exact: true }).click()
+    })
+    await runCase(`humanoid existing motion consumes same-scene stick and action at ${name}`, async () => {
+      await page.goto(`${new URL(page.url()).origin}/sim/humanoid/?test=humanoid`)
+      await page.waitForFunction(() => !!window.__humanoid?.snapshot && !!window.__obpal?.pairingUrl, { timeout: 30000 })
+      await openLocalPicker(page); await panel.locator('[data-source="touch"]').click()
+      const before = await sample(page); await hold('Move'); await page.waitForTimeout(350); await end(); await neutral()
+      const after = await sample(page); assert(changed(before, after), 'humanoid did not move')
+      await page.locator('.phone-play-buttons button').filter({ hasText: 'Wave' }).click()
+      await page.waitForFunction(() => window.__humanoid.snapshot().actors.some(a => a.preset === 'wave'))
+      await capture('humanoid-touch'); measurements.push({ name, humanoid: { before, after, action: 'wave', tabs: context.pages().length } })
+      await page.getByRole('button', { name: 'Leave local play', exact: true }).click()
+    })
+  } finally { await cdp.detach() }
+}
+
+async function revealDock(page) {
+  const handle = page.locator('.panel-dock-handle')
+  if (await handle.isVisible() && await handle.getAttribute('aria-expanded') !== 'true') await handle.click()
+}
+async function minimisePanel(page, id) {
+  await revealDock(page)
+  await page.locator(`[data-panel-toggle="${id}"]`).click()
+}
+async function focusPanel(page, id) {
+  const panel = page.locator(`[data-panel="${id}"]`)
+  if (await panel.isVisible() && await panel.getAttribute('data-focused') === 'true') return
+  if (await panel.isVisible()) await minimisePanel(page, id)
+  await revealDock(page); await page.locator(`[data-panel-toggle="${id}"]`).click()
+}
+async function openLocalPicker(page) { await focusPanel(page, 'local-control') }
+async function openSceneControls(page) {
+  await focusPanel(page, 'controls')
+  const details = page.locator('.local-play-entry').locator('xpath=ancestor::details')
+  for (let n = await details.count() - 1; n >= 0; n--) if (!await details.nth(n).evaluate(el => el.open)) await details.nth(n).locator(':scope > summary').click()
+}
+async function chooseVisibleUnit(page, scope, label, value, measurements, name) {
+  const combo = scope.getByRole('combobox', { name: label, exact: true })
+  await combo.click()
+  const list = await combo.getAttribute('aria-controls')
+  const option = page.locator(`[id="${list}"] [role="option"][data-value="${value}"]`)
+  const receipt = { label, value, comboBox: await combo.boundingBox(), optionBox: await option.boundingBox(), optionName: await option.innerText() }
+  measurements.push({ name, visibleSelection: receipt })
+  assert(receipt.comboBox && receipt.optionBox, 'visible unit choice has no target rectangle')
+  await option.click()
+  assert(await combo.getAttribute('data-value') === value, `visible ${label} did not select ${value}`)
+}
+
 export async function runUniversalFaces(browser, origin, check, out) {
   if (out) await mkdir(out, { recursive: true })
+  const raw = out ? rawRun(join(out, 'universal-faces')) : null
   for (const [id, path, faces] of [
     ['marblerun', '/sim/device/?d=marblerun', ['face.wheel', 'face.mouse', 'face.keys']],
     ['kart', '/sim/device/?d=kart', ['face.trackpad', 'face.mouse', 'face.keys']],
@@ -213,7 +523,7 @@ export async function runUniversalFaces(browser, origin, check, out) {
         await screen.waitForTimeout(250)
         const after = await sample(screen)
         assert(changed(before, after), `${face} did not change state`)
-        if (out) { await mkdir(out, { recursive: true }); await writeFile(join(out, `phone-${id}-${face.slice(5)}.json`), JSON.stringify({ id, face, before, after }, null, 2)); await page.screenshot({ path: join(out, `phone-${id}-${face.slice(5)}.png`) }) }
+        if (out) { await mkdir(out, { recursive: true }); await writeFile(join(out, `phone-${id}-${face.slice(5)}.json`), JSON.stringify({ id, face, before, after }, null, 2)); await page.screenshot({ path: join(raw, `phone-${id}-${face.slice(5)}.png`) }) }
       })
     } finally { await host.close(); await phone.close() }
   }

@@ -37,7 +37,7 @@ export class SharePanel {
       this.button('rotate', 'New link', async () => { await remote.newShareLink(this.tab); this.render() }),
     )
     const local = document.createElement('div'); local.className = 'share-local'
-    for (const [label, mode] of [['Play on this phone', 'phone'], ['Play here', 'local']] as const) {
+      for (const [label, mode] of [['On-screen touch controls', 'touch'], ['Keyboard, mouse or gamepad', 'local']] as const) {
       const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.onclick = () => { dispatchEvent(new CustomEvent('obpal:localplay', { detail: mode })); this.close() }; local.append(b)
     }
     local.dataset.sharePlay = ''

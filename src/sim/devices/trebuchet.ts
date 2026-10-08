@@ -3,11 +3,12 @@ import { Controller } from '@obpal/core'
 import { Machine, action, timestep } from './common'
 import { axis, clamp } from './input'
 import type { DeviceInput, DeviceSpec } from './types'
+import { loadPosition, READY_ARM, releaseArm, WIND_SECONDS } from './trebuchet.geometry'
 
 export const TREBUCHET_SPEC: DeviceSpec = {
   category: 'space-science',
   id: 'trebuchet', name: 'Trebuchet', unit: 'Trebuchet', units: 2, kind: 'Science',
-  blurb: 'Tune the counterweight and release angle, launch down the range and follow the arc to the targets.',
+  blurb: 'Tune the counterweight and release angle, then launch downrange. An authored release sweep feeds a simplified ballistic experiment, not coupled sling or counterweight physics.',
   teaches: 'Two analogue adjustments control a visible ballistic experiment',
   controllers: [Controller.trackpad, Controller.gamepad],
   how: {
@@ -22,8 +23,8 @@ export const shotSpeed = (weight: number) => Math.sqrt(9.81 * weight * 0.65)
 export interface Launcher { weight: number; angle: number; arm: number; phase: 'ready' | 'winding' | 'flight'; clock: number; x: number; y: number; z: number; vy: number; vz: number; score: number; shots: number; actions: number; last: number; arc: [number, number][]; hits: number[]; release: number; power: number }
 export class TrebuchetLogic extends Machine {
   readonly spec = TREBUCHET_SPEC
-  readonly units: Launcher[] = [0, 1].map(() => ({ weight: 25, angle: 45, arm: -0.65, phase: 'ready', clock: 0, x: 0, y: 1.7, z: -1.8, vy: 0, vz: 0, score: 0, shots: 0, actions: 0, last: 0, arc: [], hits: [], release: 45, power: 25 }))
-  home(n: number) { Object.assign(this.units[n], { weight: 25, angle: 45, arm: -0.65, phase: 'ready', clock: 0, x: 0, y: 1.7, z: -1.8, vy: 0, vz: 0, arc: [] }) }
+  readonly units: Launcher[] = [0, 1].map(() => ({ weight: 25, angle: 45, arm: READY_ARM, phase: 'ready', clock: 0, x: 0, y: loadPosition(READY_ARM)[1], z: loadPosition(READY_ARM)[2], vy: 0, vz: 0, score: 0, shots: 0, actions: 0, last: 0, arc: [], hits: [], release: 45, power: 25 }))
+  home(n: number) { const [x, y, z] = loadPosition(READY_ARM); Object.assign(this.units[n], { weight: 25, angle: 45, arm: READY_ARM, phase: 'ready', clock: 0, x, y, z, vy: 0, vz: 0, arc: [] }) }
   step(inputs: readonly (DeviceInput | null)[], delta: number) {
     const dt = timestep(delta)
     this.units.forEach((u, n) => {
@@ -35,13 +36,14 @@ export class TrebuchetLogic extends Machine {
       }
       if (raw?.presses.includes('launch') || action(i, 'launch')) {
         u.actions++
-        if (u.phase === 'ready') { u.phase = 'winding'; u.clock = 0; u.arc = []; u.power = u.weight; u.release = u.angle; u.shots++ }
+        if (u.phase === 'ready') { u.phase = 'winding'; u.arm = READY_ARM; u.clock = 0; u.arc = []; u.power = u.weight; u.release = u.angle; u.shots++ }
       }
       if (u.phase === 'winding') {
-        u.clock += dt; u.arm = -0.65 + Math.min(1, u.clock / 0.65) * 1.8
-        if (u.clock >= 0.65) {
+        u.clock += dt; u.arm = READY_ARM + Math.min(1, u.clock / WIND_SECONDS) * (releaseArm(u.release) - READY_ARM)
+        ;[u.x, u.y, u.z] = loadPosition(u.arm)
+        if (u.clock >= WIND_SECONDS) {
           this.events.push({ unit: n, kind: 'tick', audio: { action: 'launch' } })
-          u.phase = 'flight'; u.y = 1.7; u.z = -1.8
+          u.phase = 'flight'
           const speed = shotSpeed(u.power), a = u.release * Math.PI / 180
           u.vy = Math.sin(a) * speed; u.vz = -Math.cos(a) * speed
         }

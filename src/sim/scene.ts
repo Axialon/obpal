@@ -105,6 +105,9 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
     lightDismiss: true, toggles: '#chip-invite', foldAfterSealMs: SEAL_SHOWN_MS,
     onToggle: (open) => { $('chip-invite').setAttribute('aria-pressed', String(open)); document.documentElement.toggleAttribute('data-pair-open', open) },
   })
+  // The sim owns this launcher; the Viewer's controller test link keeps its existing behavior.
+  const here = chip.el.shadowRoot?.querySelector<HTMLAnchorElement>('a.here')
+  if (here) { here.textContent = 'Play here'; here.removeAttribute('target'); here.onclick = e => { e.preventDefault(); dispatchEvent(new CustomEvent('obpal:localplay', { detail: 'choose' })) } }
   addEventListener('obpal:viewmode', e => { if ((e as CustomEvent<string>).detail !== 'overview') chip.collapse() })
   // On a phone the pill scans other screens; this screen's own code (for another phone to scan) is in the tray.
   if (phoneCamera()) quickAction({
@@ -186,6 +189,9 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
     if (visitor(who)) return false
     const grant = people.get(who)?.simSeat
     if (grant && grant !== node) return false
+    const holder = claims.holder(node)
+    // A paired phone can take over a same-scene touch seat; local play never evicts a phone.
+    if (!remote.isLocal(who) && holder && remote.isLocal(holder)) dispatchEvent(new CustomEvent('obpal:localplay', { detail: 'release' }))
     const r = claims.take(node, who, force)
     const name = nodeName(node)
     if (!r.ok) {
@@ -345,6 +351,6 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
 
   const result: SimScene = { remote, control, claims, focus, nodes, allowed, waived, holdApproval, nameOf, colorOf, log, note, notice, publish, take, release, setNodes, nodeName }
   publish()
-  mountLocalPlay(remote, o.layout, nodes.find(n => !n.parent)?.id)
+  mountLocalPlay(remote, o.layout, nodes.find(n => !n.parent)?.id, () => nodes.filter(n => !n.parent), node => !claims.holder(node) || remote.isLocal(claims.holder(node)!))
   return result
 }

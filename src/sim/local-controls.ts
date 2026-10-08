@@ -50,7 +50,7 @@ export class LocalControls {
     input.bindings.deadman = ['KeyZ']
     try {
       const saved = JSON.parse(localStorage.getItem(`obpal.local:${opts.id}`) ?? '{}')
-      if (['keyboard', 'gamepad', 'phone', 'window'].includes(saved.source)) input.source = saved.source
+      if (['keyboard', 'gamepad', 'touch', 'phone', 'window'].includes(saved.source)) input.source = saved.source
       if (Number.isInteger(saved.unit)) input.unit = Math.max(0, Math.min(opts.units().length - 1, saved.unit))
       for (const [id, codes] of Object.entries(saved.bindings ?? {})) if (id in input.bindings && Array.isArray(codes) && codes.every(c => typeof c === 'string' && /^(Key[A-Z]|Digit[1-9]|Arrow(Up|Down|Left|Right)|Space|Enter|Shift(Left|Right))$/.test(c))) input.bindings[id] = codes as string[]
     } catch { /* Storage is optional. */ }
@@ -60,10 +60,11 @@ export class LocalControls {
     const choice = (source: LocalSource, icon: string, label: string) => {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'kit-action local-choice'; b.dataset.source = source
       localAction(b, icon, label)
-      b.onclick = () => { input.disarm(); input.source = source; this.save(); this.paint(); if (source === 'phone') opts.phone(); else if (source === 'window') opts.controllerWindow() }
+      b.onclick = () => { dispatchEvent(new CustomEvent('obpal:localplay', { detail: 'release' })); input.disarm(); input.source = source; this.save(); this.paint(); if (source === 'phone') opts.phone(); else if (source === 'window') opts.controllerWindow(); else if (source === 'touch') dispatchEvent(new CustomEvent('obpal:localplay', { detail: 'touch' })) }
       choices.append(b); return b
     }
     choice('phone', 'phone', 'Use your phone')
+    choice('touch', 'tap', 'On-screen touch controls')
     choice('window', 'frame', 'Open the controller in another window')
     this.padChoice = choice('gamepad', 'gamepad', 'Gamepad detected · press any button')
     choice('keyboard', 'keyboard', 'Keyboard and mouse')
@@ -83,14 +84,16 @@ export class LocalControls {
     this.help.className = 'local-bindings glass'; this.help.hidden = true; this.help.setAttribute('role', 'region'); this.help.setAttribute('aria-label', 'Control bindings'); document.body.append(this.help)
     this.help.addEventListener('keydown', e => { if (e.key === 'Escape') { this.help.hidden = true; this.remap = null; opts.canvas.focus(); e.stopPropagation() } })
     const panel = simPanels().add(this.el, { id: 'local-control', title: 'Play on this device', purpose: 'Choose a controller and its bindings', icon: 'play', anchor: 'controls', state: 'closed' })
-    installLocalInputSource(() => {
-      input.clear()
-      if (!['keyboard', 'gamepad'].includes(input.source)) input.source = 'keyboard'
-      input.armed = true; this.save(); this.paint(); panel.setState('open')
+    installLocalInputSource(mode => {
+      input.disarm()
+      if (mode === 'touch') input.source = 'touch'
+      else if (mode !== 'choose') { if (!['keyboard', 'gamepad'].includes(input.source)) input.source = 'keyboard'; input.armed = true }
+      this.save(); this.paint(); panel.setState('open')
       // Share closes its modal after the launch event, so focus on the next frame.
       requestAnimationFrame(() => { if (input.armed) opts.canvas.focus({ preventScroll: true }) })
       return () => { input.disarm(); this.paint() }
-    })
+    }, () => opts.units()[input.unit]?.id)
+    addEventListener('obpal:localunit', e => { const n = opts.units().findIndex(u => u.id === (e as CustomEvent<string>).detail); if (n >= 0) { input.selectUnit(n); this.save(); this.paint() } })
     opts.canvas.tabIndex = 0
     opts.canvas.setAttribute('aria-description', 'Enable local controls, then focus this scene to play. Tab leaves the scene. Question mark shows bindings; Escape releases controls.')
     const abort = new AbortController(), signal = abort.signal
