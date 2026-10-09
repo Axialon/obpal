@@ -155,7 +155,7 @@ export function calmMarks(root: ParentNode, _orbits = 1) { syncBrand(root) }
 export function mountMarks(root: ParentNode = document) {
   for (const slot of root.querySelectorAll<HTMLElement>('[data-mark]')) {
     const owner = slot.closest('.logo')
-    if (owner) setMarkup(owner, logo(location.pathname.startsWith('/link/')))
+    if (owner) setMarkup(owner, owner.closest('.sim-top') ? logoMark() : logo(location.pathname.startsWith('/link/')))
     else setMarkup(slot, logoMark())
   }
 }

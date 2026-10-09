@@ -950,7 +950,7 @@ body.resting .rest { display: grid; }
 .trust-first[data-quiet] .trust-compare > span:not(.trust-short) { display: none; }
 .trust-first[data-quiet] .trust-compare > .trust-short { display: inline; font-weight: 650; white-space: nowrap; }
 .trust-first[data-quiet] .trust-dismiss { top: 50%; transform: translateY(-50%); }
-/* The badge leaves the screen's name more room in the bar: the seal reads at 104 px. */
+/* Controller-bar badge sizing belongs here; the separate gamepad badge keeps its own width. */
 .surface .bar .link-badge { width: clamp(78px, calc(100cqw - 220px), 104px); }
 /* A narrow phone's tray: slimmer buttons, so STOP, the tools and the unit you hold all show without scrolling. */
 @media (max-width: 399px) {

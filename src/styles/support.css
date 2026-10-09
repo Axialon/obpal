@@ -27,19 +27,28 @@ body { min-height: 100vh; background: radial-gradient(120% 80% at 50% -10%, rgb(
 .go:disabled { opacity: 0.55; cursor: not-allowed; filter: grayscale(0.4); }
 .secure { margin: 10px 0 0; text-align: center; font-size: 12.5px; color: var(--muted); }
 .status { margin: 8px 0 0; text-align: center; font-size: 13px; color: var(--warn); min-height: 1em; }
+.support .status { color: var(--secondary); }
+.support-note, .support-fallback { margin: 16px 0 0; color: var(--secondary); font-size: 13.5px; line-height: 1.6; }
+.support-fallback a { color: var(--accent-soft); }
+.payment-panel { margin-top: 16px; border-radius: 14px; overflow: hidden; background: #f9f9f9; }
+.payment-panel iframe { display: block; box-sizing: border-box; max-width: 100%; }
 .banner { padding: 14px 18px; border-radius: 18px; font-weight: 650; font-size: 14px; background: var(--glass-light); color: var(--accent-ink); }
 .banner[data-kind='cancelled'] { background: var(--glass); color: var(--ink); border: 1px solid var(--glass-edge); }
 .ledger { border-radius: 24px; padding: 20px 22px; }
+.ledger h2 { margin: 0 0 14px; font-family: var(--font-display); font-size: 18px; line-height: 1.35; }
 .ledger-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
 .ledger-top strong { font-family: var(--font-display); font-size: 28px; letter-spacing: -0.04em; font-weight: 800; }
 .ledger-top span { color: var(--muted); font-size: 13px; }
 .ledger-top em { margin-left: auto; font-style: normal; font-size: 12.5px; color: var(--secondary); }
 .recent { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .recent li { display: flex; justify-content: space-between; font-size: 13.5px; color: var(--secondary); }
+.recent li span { min-width: 0; overflow-wrap: anywhere; }
+.recent li b { flex-shrink: 0; margin-left: 10px; }
 .recent li b { color: var(--ink); font-variant-numeric: tabular-nums; }
 .recent li.empty { color: var(--muted); }
 .ledger-note { margin: 12px 0 0; font-size: 11.5px; color: var(--muted); }
 .links { display: flex; justify-content: center; gap: 10px; font-size: 13px; color: var(--muted); }
+.support .links { flex-wrap: wrap; }
 .links a { color: var(--secondary); }
 .links i { font-style: normal; opacity: 0.5; }
 @media (max-width: 480px) { .amounts { grid-template-columns: repeat(3, 1fr); } }

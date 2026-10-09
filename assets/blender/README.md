@@ -143,3 +143,16 @@ model loads, finite moving camera frames and full-scene render budgets. It uses 
 `OBPAL_E2E_PORT`, `OBPAL_E2E_WORKER_PORT` and `OBPAL_E2E_CHROMIUM` environment variables.
 Its `stress.json` is written to a fresh temporary folder; copying it into the ignored rollout
 review folder adds the active-scene measurements to the viewer.
+
+For the isolated Cairn I reference pilot, run `humanoids_soft.py -- --only cairn-i --cache`
+with the existing Blender executable supplied through `BLENDER`. This builds only
+the hero and distant Cairn I models. `audit_humanoids.py -- --soft --only cairn-i --cache --combined`
+keeps the independent 65-sample sweeps and adds true-rest and combined rigid/skinned
+measurements. Keep failures and sampled distances; they are not a whole-body certificate.
+`render_soft_humanoids.py -- --only cairn-i --cache --cpu --rest --out <temporary-folder>`
+produces matched views without selecting a GPU; `--neutral` removes contact-shadow
+dependence and `--silhouettes` includes front, side and three-quarter views.
+`--cache-dir <preserved-cache>` renders or audits the baseline without rebuilding it.
+The new opening, neck and thigh selectors leave other forms' authoring unchanged.
+Concept-derived styling and simulation-default dimensions remain distinct; D4 drafts
+and Cairn physical locomotion require separate acceptance.

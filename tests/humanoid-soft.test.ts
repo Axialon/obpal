@@ -181,6 +181,33 @@ describe('original soft humanoids', () => {
       expect(profile.joints.find(j => j.id === 'right.leg.roll')!.offset[0]).toBeCloseTo(spec.pivots.leg * scale, 9)
     }
   })
+  for (const suffix of ['', '-lod']) it(`Cairn I${suffix} keeps finite normalized skin influences on existing joints`, async () => {
+    const scene = await load('cairn-i' + suffix)
+    let suits = 0
+    scene.traverse(object => {
+      const mesh = object as THREE.SkinnedMesh
+      if (!mesh.isSkinnedMesh) return
+      suits++
+      const weights = mesh.geometry.attributes.skinWeight, indices = mesh.geometry.attributes.skinIndex
+      expect(weights.itemSize).toBe(4)
+      expect(indices.itemSize).toBe(4)
+      for (let vertex = 0; vertex < weights.count; vertex++) {
+        let total = 0
+        for (let slot = 0; slot < 4; slot++) {
+          const weight = weights.getComponent(vertex, slot), joint = indices.getComponent(vertex, slot)
+          expect(Number.isFinite(weight)).toBe(true)
+          expect(weight).toBeGreaterThanOrEqual(0)
+          expect(weight).toBeLessThanOrEqual(1)
+          expect(Number.isInteger(joint)).toBe(true)
+          expect(joint).toBeGreaterThanOrEqual(0)
+          expect(joint).toBeLessThan(mesh.skeleton.bones.length)
+          total += weight
+        }
+        expect(total).toBeCloseTo(1, 4)
+      }
+    })
+    expect(suits).toBeGreaterThan(0)
+  })
   it('retains low gloss on phones without sheen or clearcoat', () => {
     for (const tiers of [softDesktop, softPhone]) for (const material of Object.values(tiers)) {
       expect((material as THREE.MeshStandardMaterial).roughness).toBeGreaterThanOrEqual(.30)

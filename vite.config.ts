@@ -68,6 +68,8 @@ function contentSecurityPolicy(page: string): string {
     'base-uri': ["'self'"],
     'form-action': ["'self'"],
   }
+  // Optional, click-loaded official Tip Panel only; parent scripts and connections keep their policy.
+  if (page === '/donate/index.html' || page === '/sponsor/index.html') d['frame-src'] = ['https://ko-fi.com']
   for (const [k, v] of Object.entries(CSP_EXTRA[page] ?? {})) d[k] = [...(d[k] ?? []), ...v]
   return Object.entries(d).map(([k, v]) => `${k} ${v.join(' ')}`).join('; ')
 }

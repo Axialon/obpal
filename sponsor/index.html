@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#0a0718" />
-    <meta name="description" content="Support ob.Pal: sponsor monthly or make a one-time donation through Stripe." />
-    <title>Sponsor ob.Pal</title>
+    <meta name="description" content="Optional support for ob.Pal's open-source software and authored films through Ko-fi." />
+    <title>Support ob.Pal · Sponsor</title>
     <link rel="icon" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
@@ -17,24 +17,20 @@
       <header class="support-top"><a class="logo" href="/" aria-label="ob.Pal home"></a><button class="switch-btn" id="t-switch" type="button" aria-label="Blackboxes apps" title="Blackboxes apps"></button><a class="back" href="/view/">Open the viewer</a></header>
       <div class="banner" id="banner" role="status" hidden></div>
       <section class="card glass">
-        <h1>Sponsor ob.Pal</h1>
-        <p class="lede">Keep the phone remote free, fast and open for everyone.</p>
-        <div class="mode-switch" role="group" aria-label="Contribution type"><button data-mode="subscription">Monthly</button><button data-mode="payment">One-time</button></div>
-        <p class="mode-note" id="mode-note"></p>
-        <div class="amounts" id="amounts"></div>
-        <label class="custom"><span>$</span><input id="custom" type="number" inputmode="decimal" min="1" max="10000" step="0.01" placeholder="Other amount" aria-label="Other amount in USD" /></label>
-        <div class="field">
-          <div class="name"><input id="name" type="text" maxlength="60" placeholder="Your name (optional)" aria-label="Your name" autocomplete="name" /></div>
-          <label class="check"><input id="public" type="checkbox" /> Show my name with my contribution</label>
-        </div>
-        <button class="btn primary go" id="go" disabled>Checking availability…</button>
-        <p class="secure" id="secure"></p>
-        <p class="status" id="status" role="alert"></p>
+        <h1>Support ob.Pal</h1>
+        <p class="lede">Optional support helps maintain ob.Pal's open-source software and authored films.</p>
+        <button class="btn primary go" id="payment-options" type="button" aria-controls="payment-panel" aria-expanded="false">Open payment options</button>
+        <p class="status" id="payment-status" role="status" aria-live="polite" aria-atomic="true">Ko-fi loads only when you open payment options.</p>
+        <div class="payment-panel" id="payment-panel" hidden></div>
+        <p class="support-note">Choose an amount and payment method in Ko-fi. PayPal or Stripe handles payment details; some steps may open another page. Apple Pay and Google Pay are unavailable in this panel.</p>
+        <p class="support-fallback"><a href="https://ko-fi.com/axialon01" target="_blank" rel="noopener">Open Ko-fi in a new tab</a> · <a href="/privacy/">Privacy</a></p>
+        <noscript><p>Use the hosted Ko-fi link above to see payment options.</p></noscript>
       </section>
-      <section class="ledger glass" aria-label="Verified contributions">
-        <div class="ledger-top"><strong id="raised">…</strong><span id="raised-label">raised</span><em id="backers"></em></div>
+      <section class="ledger glass" aria-labelledby="ledger-heading">
+        <h2 id="ledger-heading">Recorded settled Stripe contributions</h2>
+        <div class="ledger-top"><strong id="raised">…</strong><span id="raised-label">recorded</span><em id="backers"></em></div>
         <ul class="recent" id="recent"></ul>
-        <p class="ledger-note">Shared with the Blackboxes ecosystem. Only settled Stripe payments are counted.</p>
+        <p class="ledger-note">Historical settled Stripe payments shared across the BlackBoxes ecosystem. Ko-fi support is not included in these records.</p>
       </section>
       <nav class="links" id="links"></nav>
     </main>

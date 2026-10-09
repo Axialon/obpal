@@ -147,6 +147,7 @@ export async function runLocalControl(local, check, { baseline = false } = {}) {
 /** Reproducible live poses; only the simulation clock is paused for matched stills. */
 async function runTouchReleaseEvidence(browser, origin, check, out, baseline) {
   const proof = join(out, 'touch-release'), raw = rawRun(proof), frames = [], measurements = []
+  const compactBaseline = baseline || process.env.OBPAL_CONTROLLER_COMPACT_BASELINE === '1'
   for (const [name, viewport, touch, hybrid] of [
     ['desktop', { width: 1280, height: 800 }, false, false],
     ['phone', { width: 390, height: 844 }, true, false],
@@ -154,6 +155,9 @@ async function runTouchReleaseEvidence(browser, origin, check, out, baseline) {
     ['hybrid', { width: 1024, height: 600 }, true, true],
   ]) {
     const context = await browser.newContext({ viewport, hasTouch: touch, isMobile: name === 'phone', deviceScaleFactor: 1, ignoreHTTPSErrors: true, reducedMotion: name === 'hybrid' ? 'reduce' : 'no-preference' })
+    if (process.env.OBPAL_CONTROLLER_COMPACT_EVIDENCE === '1') await context.addInitScript(() => {
+      Object.defineProperty(navigator, 'getGamepads', { value: () => [{ index: 0, connected: true, mapping: 'standard', axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })) }] })
+    })
     // Emulate the explicit media-query combination of a touch tablet with an attached fine pointer.
     if (hybrid) await context.addInitScript(() => { const native = matchMedia.bind(window); window.matchMedia = query => query === '(any-pointer: fine)' ? { ...native(query), matches: true, media: query, addEventListener() {}, removeEventListener() {} } : native(query) })
     try {
@@ -168,6 +172,84 @@ async function runTouchReleaseEvidence(browser, origin, check, out, baseline) {
         const path = `${name}/${phase}/frame.png`; await mkdir(join(raw, name, phase), { recursive: true }); await page.screenshot({ path: join(raw, path) }); frames.push({ path, failed, scenario: name, phase }) }
       await capture('controls-cold')
       await page.waitForTimeout(500); await capture('controls-warm')
+      if (process.env.OBPAL_CONTROLLER_COMPACT_EVIDENCE === '1') {
+        await check(`compact source actions and header at ${name}`, async () => {
+          const panel = page.locator('[data-panel="local-control"]')
+          const snapshot = async phase => {
+            const state = await page.evaluate(() => {
+              const rect = el => ({ name: el.getAttribute('aria-label') || el.textContent, ...el.getBoundingClientRect().toJSON() })
+              const logo = document.querySelector('.sim-top .logo')
+              return { source: document.querySelector('.local-choice[aria-pressed="true"]').dataset.source, header: { ...rect(logo), mark: !!logo.querySelector('.mark'), wordmark: !!logo.querySelector('.brand-lockup'), href: logo.getAttribute('href') }, actions: [...document.querySelectorAll('.local-actions button')].filter(el => el.checkVisibility()).map(rect), helpOpen: document.querySelector('.local-bindings').checkVisibility(), saved: localStorage.getItem('obpal.local:trebuchet'), bindings: [...document.querySelectorAll('.local-bindings button[aria-label^="Remap"]')].map(el => el.getAttribute('aria-label')) }
+            })
+            measurements.push({ name, compact: phase, baseline: compactBaseline, mocked: 'Standard gamepad API only; native chooser and scene', state }); await capture(`compact-${phase}`); return state
+          }
+          try {
+            await panel.locator('[data-source="keyboard"]').click()
+            await panel.getByRole('button', { name: 'Bindings', exact: true }).click()
+            await page.getByRole('button', { name: 'Remap Forward', exact: true }).click()
+            const keyboard = await snapshot('keyboard-remap')
+            if (name === 'phone') {
+              // The phone's bindings region covers the chooser. Share remains visible above it.
+              await page.getByRole('button', { name: 'Share scene', exact: true }).click()
+              await page.getByRole('tab', { name: 'Play', exact: true }).click()
+              await page.locator('.share-panel').getByRole('button', { name: 'On-screen touch controls', exact: true }).click()
+            } else await panel.locator('[data-source="gamepad"]').click()
+            const interruptedHelp = await snapshot('source-change-with-pending-remap')
+            await page.keyboard.press('p')
+            const saved = await page.evaluate(() => localStorage.getItem('obpal.local:trebuchet'))
+            measurements.push({ name, pendingRemapProbe: { event: 'native key p after source change', before: keyboard.saved, after: saved } })
+            if (!compactBaseline) {
+              assert(!interruptedHelp.helpOpen, 'obsolete help survived source change')
+              assert(JSON.stringify(JSON.parse(saved).bindings) === JSON.stringify(JSON.parse(keyboard.saved).bindings), 'pending remap consumed a key after source change')
+            }
+            if (name === 'phone') {
+              await page.getByRole('button', { name: 'Leave local play', exact: true }).click()
+              if (await page.getByRole('button', { name: 'Close bindings', exact: true }).isVisible()) await page.getByRole('button', { name: 'Close bindings', exact: true }).click()
+              await openLocalPicker(page)
+              await panel.locator('[data-source="gamepad"]').click()
+            }
+            const gamepad = await snapshot('gamepad-source-change')
+            if (!compactBaseline) {
+              assert(gamepad.actions.some(a => a.name === 'Gamepad help') && !gamepad.actions.some(a => /Bindings|Lock mouse/.test(a.name)), 'gamepad actions include keyboard controls')
+              await panel.getByRole('button', { name: 'Gamepad help', exact: true }).click()
+              const help = await snapshot('gamepad-help')
+              assert(help.bindings.length === 0, 'gamepad help exposes keyboard remapping')
+            }
+            await panel.locator('[data-source="touch"]').click()
+            await page.locator('.phone-play').waitFor()
+            const touch = await snapshot('touch-toolbar')
+            if (!compactBaseline) {
+              assert(!touch.helpOpen && !touch.actions.some(a => /Bindings|Gamepad help|Lock mouse/.test(a.name)), 'touch actions include keyboard controls')
+              assert(touch.header.mark && !touch.header.wordmark && touch.header.name && touch.header.width >= 44 && touch.header.height >= 44 && touch.header.href === '/', 'sim home mark or target lost')
+              await page.getByRole('button', { name: 'Leave local play', exact: true }).click()
+              await openLocalPicker(page)
+              const touchChooser = await snapshot('touch-chooser')
+              assert(touchChooser.source === 'touch' && !touchChooser.helpOpen && touchChooser.actions.length === 0, 'visible touch chooser retains keyboard actions')
+              await panel.locator('[data-source="phone"]').click()
+              const phone = await snapshot('phone-choice')
+              assert(!phone.helpOpen && !phone.actions.some(a => /Bindings|Gamepad help|Lock mouse/.test(a.name)), 'phone choice retains obsolete actions')
+              await page.keyboard.press('Escape'); await openLocalPicker(page)
+              const popup = page.waitForEvent('popup')
+              await panel.locator('[data-source="window"]').click()
+              const controller = await popup
+              try {
+                const windowChoice = await snapshot('controller-window-choice')
+                assert(!windowChoice.helpOpen && !windowChoice.actions.some(a => /Bindings|Gamepad help|Lock mouse/.test(a.name)), 'controller window choice retains obsolete actions')
+              } finally { await controller.close() }
+            }
+          } catch (error) { await capture('compact-failure', true); throw error }
+          finally {
+            if (await page.locator('.phone-play').count()) await page.getByRole('button', { name: 'Leave local play', exact: true }).click()
+            if (await page.getByRole('button', { name: 'Close bindings', exact: true }).isVisible()) await page.getByRole('button', { name: 'Close bindings', exact: true }).click()
+            await openLocalPicker(page)
+            await panel.locator('[data-source="keyboard"]').click()
+          }
+        })
+        // Each original input proof starts from its own clean scene and focused chooser.
+        await page.goto(`${origin}/sim/device/?d=trebuchet`)
+        await page.waitForFunction(() => !!window.__device?.logic && !!window.__obpal?.pairingUrl)
+        await openLocalPicker(page)
+      }
       if (!baseline) { await runTouchBehavior(page, context, check, name, capture, measurements); await page.goto(`${origin}/sim/device/?d=trebuchet`); await page.waitForFunction(() => !!window.__device?.logic && !!window.__obpal?.pairingUrl); await openLocalPicker(page) }
       await check(`trebuchet ${baseline ? 'baseline' : 'release'} world geometry at ${name}`, async () => {
         await page.evaluate(() => {
@@ -325,7 +407,8 @@ async function runTouchBehavior(page, context, check, name, capture, measurement
       })
       measurements.push({ name, touch: { before, after, tabs: context.pages().length, pointer: mouse ? 'native mouse on on-screen controls' : 'CDP touch', layout } })
       assert(!layout.overflow && layout.box.x >= 0 && layout.box.x + layout.box.width <= await page.evaluate(() => innerWidth), 'toolbar overflow')
-      assert(layout.targets.filter(t => t.visible).every(t => t.name?.trim() && t.height >= 40), `unnamed or small touch target: ${JSON.stringify(layout.targets)}`)
+      const targetSize = process.env.OBPAL_CONTROLLER_COMPACT_BASELINE === '1' ? 40 : 44
+      assert(layout.targets.filter(t => t.visible).every(t => t.name?.trim() && t.height >= targetSize && t.width >= targetSize), `unnamed or small touch target: ${JSON.stringify(layout.targets)}`)
       for (let a = 0; a < layout.regions.length; a++) for (let b = a + 1; b < layout.regions.length; b++) { const x = layout.regions[a], y = layout.regions[b]; assert(x.x + x.width <= y.x || y.x + y.width <= x.x || x.y + x.height <= y.y || y.y + y.height <= x.y, `overlapping sticks/actions: ${JSON.stringify([x, y])}`) }
     })
     for (const release of ['pointerup', 'pointercancel', 'lostpointercapture', 'blur', 'hidden', 'camera']) await runCase(`on-screen ${release} releases held PAD at ${name}`, async () => {

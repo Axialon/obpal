@@ -38,8 +38,8 @@ export async function runHomeField(functionalBrowser, local, check) {
         if (result.frames.some(f => !f.tips.length)) throw new Error('marble disappeared during scroll')
         if (result.layoutReads || result.layoutsDuringScroll) throw new Error(`${result.layoutReads} frame layout reads, ${result.layoutsDuringScroll} scroll layouts`)
         if (result.longTasks.length) throw new Error(`scroll long tasks: ${result.longTasks.map(t => t.duration.toFixed(1)).join(', ')}ms`)
-        // Chromium quantises rAF timestamps; retain the raw value and allow 0.2ms at the 60Hz boundary.
-        if (result.p95 > 16.7 + 0.2) throw new Error(`raw p95 ${result.p95.toFixed(1)}ms exceeds the desktop budget plus clock tolerance`)
+        // Retain raw quantised timestamps; ignore only the binary subtraction remainder at the 16.7+0.2ms boundary.
+        if (result.p95 - (16.7 + 0.2) > 1e-6) throw new Error(`raw p95 ${result.p95.toFixed(1)}ms exceeds the desktop budget plus clock tolerance`)
         if (result.cls !== 0) throw new Error(`CLS ${result.cls}`)
         // Navigation and controls receive the original first click. The fixed canvas ignores every pointer event.
         await page.locator('.hero a[href="#see"]')[width === 390 ? 'tap' : 'click']()

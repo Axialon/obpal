@@ -16,7 +16,7 @@
 import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { chromium, devices } from 'playwright'
 import { cspCheck, cspViolations } from './csp-watch.mjs'
@@ -41,7 +41,7 @@ const HEADED = process.argv.includes('--headed')
 const SHOTS = process.env.OBPAL_SHOTS || ''
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
 const ONLY = process.env.OBPAL_E2E_PAGES_ONLY || ''
-if (ONLY && !['try', 'viewer', 'store', 'interactions', 'campaign', 'partner-films', 'partner-films-accounting', 'partner-films-http', 'partner-films-playback'].includes(ONLY)) throw new Error(`unknown pages selector: ${ONLY}`)
+if (ONLY && !['try', 'viewer', 'store', 'interactions', 'support', 'campaign', 'partner-films', 'partner-films-accounting', 'partner-films-http', 'partner-films-playback'].includes(ONLY)) throw new Error(`unknown pages selector: ${ONLY}`)
 const PAGES = ['/', '/p/', '/view/', '/sim/', '/sim/arm/', '/sim/arena/', '/sim/humanoid/', '/sim/humanoid/physics/', '/sim/octopus/', '/sim/device/', '/embed/', '/link/', '/link/desktop/', '/link/try/', '/catalogue/', '/buttons/', '/sponsor/', '/donate/', '/privacy/', '/trust/', '/campaign/']
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const results = []
@@ -174,6 +174,128 @@ async function runCampaignExclusion(origin) {
     }
   }
   return 'three retained HTML sources; emitted .assetsignore; six public URL forms return 404'
+}
+
+/** Optional support uses a locally fulfilled official panel; no provider payment is attempted. */
+async function runSupport(browser, origin) {
+  const baseline = process.env.OBPAL_KOFI_BASELINE === '1'
+  const out = join(process.env.OBPAL_E2E_EVIDENCE_ROOT, 'support'), raw = rawRun(out)
+  const observations = [], frames = [], policies = {}
+  const previousFile = 'artifacts/kofi-support/before/isolation-native/pages/support/support.json'
+  const previousPolicies = !baseline && existsSync(previousFile) ? JSON.parse(readFileSync(previousFile, 'utf8')).policies : null
+  const destination = 'https://ko-fi.com/axialon01/?hidefeed=true&widget=true&embed=true&preview=true'
+  const portal = 'https://billing.stripe.com/p/login/testPortal'
+  const hostileName = '<img src=x onerror="window.templateInjection=true"> & "phone"'
+  const shot = async (page, name) => {
+    const folder = join(raw, name); mkdirSync(folder, { recursive: true })
+    await page.screenshot({ path: join(folder, 'frame.png'), fullPage: true })
+    frames.push({ path: `${name}/frame.png`, failed: false, capturedAt: new Date().toISOString() })
+  }
+  try {
+    await check('Support page policies preserve parent directives and the exact frame boundary', async () => {
+      for (const path of PAGES) {
+        const response = await fetch(origin + path), text = await response.text()
+        const encoded = /http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(text)?.[1]
+        const policy = encoded?.replace(/&#(?:x([0-9a-f]+)|(\d+));/gi, (_, hex, decimal) => String.fromCodePoint(parseInt(hex || decimal, hex ? 16 : 10))).replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+        assert(policy, path + ' missing emitted policy')
+        policies[path] = policy
+        const directives = Object.fromEntries(policy.split(';').map(part => { const [name, ...values] = part.trim().split(/\s+/); return [name, values.join(' ')] }))
+        assert.equal(directives['frame-src'], !baseline && ['/donate/', '/sponsor/'].includes(path) ? 'https://ko-fi.com' : "'none'", path)
+        assert.equal(directives['script-src'].split(' ')[0], "'self'")
+        assert.equal(directives['require-trusted-types-for'], "'script'")
+        assert.equal(directives['trusted-types'], 'obpal-templates obpal-camera')
+        assert.equal(directives['form-action'], "'self'")
+        if (previousPolicies) assert.equal(policy.replace(/frame-src [^;]+/, "frame-src 'none'"), previousPolicies[path], path + ' parent policy changed')
+        if (!baseline && ['/donate/', '/sponsor/'].includes(path)) assert.equal(policy.replace(/frame-src [^;]+/, "frame-src 'none'"), policies['/'], path + ' parent differs from native home policy')
+      }
+      return `${PAGES.length} native page policies; only donate/sponsor may frame Ko-fi`
+    })
+    if (!baseline) await check('Native support config closes new checkout and the films link to first-party support', async () => {
+      const response = await fetch(origin + '/api/payments/config'), config = await response.json()
+      assert.equal(response.status, 200); assert.match(response.headers.get('cache-control'), /no-store/)
+      assert.equal(config.checkoutReady, false); assert.equal(config.sponsorshipReady, false)
+      assert(config.sponsorPortalUrl === null || typeof config.sponsorPortalUrl === 'string')
+      const campaign = await (await fetch(origin + '/campaign/')).text()
+      assert.equal((campaign.match(/href="\/donate\/">Support ob\.Pal<\/a>/g) || []).length, 1)
+      return 'actual local Worker readiness false; cancellation field preserved; one local film-footer support link'
+    })
+    for (const path of ['/donate/', '/sponsor/']) for (const width of [1280, 390]) {
+      await check(`${baseline ? 'Support baseline' : 'Ko-fi support'} ${path} ${width}px is first-party until requested`, async () => {
+        const ctx = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 800 }, deviceScaleFactor: 1, reducedMotion: width === 390 ? 'reduce' : 'no-preference' })
+        const row = { path, width, dpr: 1, mocked: 'Synthetic config/settled ledger and locally fulfilled Ko-fi panel; no live provider traffic', requests: [], errors: [], external: [], frames: [], ledgerRequests: 0 }
+        observations.push(row)
+        try {
+          let requested = false
+          await ctx.route('**/*', async route => {
+            const request = route.request(), url = request.url()
+            row.requests.push({ url, method: request.method() })
+            if (url === destination && requested) {
+              row.external.push(url)
+              return route.fulfill({ contentType: 'text/html', body: '<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Local Ko-fi fixture</title><body style="margin:0;padding:24px;background:#f9f9f9;color:#202124;font:18px system-ui"><h1>Mock Ko-fi panel</h1><p>Locally fulfilled test content. No live payment.</p></body></html>' })
+            }
+            if (!url.startsWith(origin + '/') && !/^(data|blob):/.test(url)) { row.external.push(url); return route.abort() }
+            if (new URL(url).pathname === '/api/payments/config') return route.fulfill({ json: { checkoutReady: false, sponsorshipReady: false, sponsorPortalUrl: portal, sponsorsUrl: null, sponsorsPending: false } })
+            if (new URL(url).pathname === '/api/donations/live') { row.ledgerRequests++; return route.fulfill({ json: { status: 'ok', totalUsd: 10, backerCount: 1, recent: [{ donorName: hostileName, amountUsd: 10 }] } }) }
+            return route.continue()
+          })
+          const page = await ctx.newPage(); page.on('pageerror', e => row.errors.push(e.message))
+          const response = await page.goto(origin + path)
+          await page.evaluate(() => document.fonts.ready)
+          await page.waitForFunction(() => document.querySelector('#raised').textContent.includes('10'))
+          assert.equal(await page.locator('iframe').count(), 0)
+          assert.equal(row.external.length, 0)
+          assert.equal(await page.getByRole('link', { name: 'Manage a sponsorship', exact: true }).getAttribute('href'), portal)
+          const ledger = await page.locator('.ledger').textContent()
+          assert((await page.locator('#recent').textContent()).includes(hostileName))
+          assert.equal(await page.locator('#recent img').count(), 0)
+          row.headers = Object.fromEntries(Object.entries(response.headers()).filter(([key]) => /content-security-policy|permissions-policy|cross-origin-(opener|embedder)-policy/.test(key)))
+          row.geometry = await page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth, title: document.querySelector('h1').textContent }))
+          await shot(page, `${path.slice(1, -1)}-${width}-initial`)
+          assert(row.geometry.scrollWidth <= width + 1)
+          if (!baseline) {
+            assert.equal(await page.getByRole('link', { name: 'Open Ko-fi in a new tab', exact: true }).getAttribute('href'), 'https://ko-fi.com/axialon01')
+            assert(ledger.includes('Recorded settled Stripe contributions') && ledger.includes('BlackBoxes') && ledger.includes('Ko-fi'))
+            const button = page.getByRole('button', { name: 'Open payment options', exact: true })
+            await button.focus()
+            row.target = await button.evaluate(node => ({ focus: document.activeElement === node, height: node.getBoundingClientRect().height }))
+            assert(row.target.focus && row.target.height >= 44)
+            requested = true; await button.press('Enter')
+            await page.frameLocator('#kofiframe').getByRole('heading', { name: 'Mock Ko-fi panel' }).waitFor()
+            await button.click()
+            assert.equal(await page.locator('#kofiframe').count(), 1)
+            assert.deepEqual(row.external, [destination])
+            assert.equal(ctx.pages().length, 1)
+            row.frame = await page.locator('#kofiframe').evaluate(node => ({ src: node.src, title: node.title, height: node.height, sandbox: node.getAttribute('sandbox'), rectangle: node.getBoundingClientRect().toJSON() }))
+            row.openGeometry = await page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth }))
+            assert.equal(row.frame.src, destination); assert.equal(row.frame.height, '712'); assert.equal(row.frame.sandbox, null)
+            assert(row.frame.title.includes('Ko-fi') && row.frame.rectangle.width <= width && row.frame.rectangle.left >= 0 && row.frame.rectangle.right <= width + 1)
+            assert(row.openGeometry.scrollWidth <= width + 1)
+            await page.locator('#kofiframe').scrollIntoViewIfNeeded()
+            await shot(page, `${path.slice(1, -1)}-${width}-mock-panel`)
+            const panelFrame = page.frames().find(frame => frame.url() === destination)
+            await panelFrame.evaluate(() => parent.postMessage({ type: 'payment-success', amount: 100000, totalUsd: 100000, checkout: 'returned' }, '*'))
+            await sleep(100)
+            assert.equal(await page.locator('.ledger').textContent(), ledger)
+            assert.equal(row.ledgerRequests, 1)
+            await page.goto(origin + path + '?checkout=returned&payment=success&totalUsd=100000#recent')
+            await page.waitForFunction(() => document.querySelector('#raised').textContent.includes('10'))
+            assert.equal(await page.locator('iframe').count(), 0)
+            assert.equal(await page.locator('.ledger').textContent(), ledger)
+            assert(!/success|nothing was charged|thank you/i.test(await page.locator('#banner').textContent()))
+            await shot(page, `${path.slice(1, -1)}-${width}-return-link`)
+            row.ledgerUnchanged = true
+          }
+          assert.equal(row.requests.filter(request => request.method !== 'GET').length, 0, 'no checkout POST or other write')
+          assert.deepEqual(row.errors, []); await cspCheck()
+          return baseline ? 'existing native support UI captured' : 'one explicitly loaded official mock frame; no writes, success inference or ledger mutation'
+        } catch (error) { row.failure = error.message; if (frames.length) frames.at(-1).failed = true; throw error }
+        finally { await ctx.close() }
+      })
+    }
+  } finally {
+    writeFileSync(join(out, 'support.json'), JSON.stringify({ source: process.env.OBPAL_SUPPORT_REVISION, baseline, baselinePolicyComparison: !!previousPolicies, browser: browser.version(), destination, scope: 'Chromium desktop/narrow emulation; local provider fixture, no provider authentication/transaction certification', policies, observations }, null, 2))
+    writeFileSync(join(out, 'evidence-frames.json'), JSON.stringify({ expectedCount: baseline ? 4 : 12, frames }, null, 2))
+  }
 }
 
 /** Measure completed downloads and the campaign-only transport through the real local Worker. */
@@ -888,6 +1010,7 @@ try {
   worker = await startWorker({ port: PORT })
   console.log(`ob.Pal pages e2e (${worker.origin})`)
   browser = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED }))
+  if (!ONLY || ONLY === 'support') await runSupport(browser, worker.origin)
   if (!ONLY || ONLY === 'partner-films' || ONLY === 'partner-films-http') await runFilmDownloads(browser, worker.origin)
   if (!ONLY || ONLY === 'partner-films-playback') await runFilmPlayback(browser, worker.origin)
   if (!ONLY || ONLY === 'campaign' || ONLY === 'partner-films' || ONLY === 'partner-films-accounting') await check('Retained offer previews are excluded from public assets', () => runCampaignExclusion(worker.origin))

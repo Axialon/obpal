@@ -13,6 +13,7 @@
  *   is unreported or out of its limits, Stop holding the pose and reaching the driver, every automatic stop saying why.
  * Needs Playwright's Chromium, or OBPAL_E2E_CHROMIUM=<path to chrome.exe>. --headed to watch. OBPAL_SHOTS=<dir> saves screens.
  * --only=tracking (or OBPAL_E2E_SIMS_ONLY=tracking) runs the arm's tracking checks and their pairing/claim setup.
+ * OBPAL_E2E_SIMS_ONLY=arm-motion runs one own-motion check after explicit pairing and camera prehistory setup.
  * --only=panels (or OBPAL_E2E_SIMS_ONLY=panels) runs just the window checks, also through e2e:all's guard.
  * --only=buttons (or OBPAL_E2E_SIMS_ONLY=buttons) checks rendered control ink and accessible icon names at three sizes.
  * --only=humanoid-physics runs the F1a acceptance proof separately; the verifier runs it before the remaining sims.
@@ -20,7 +21,7 @@
  * OBPAL_E2E_SIMS_ONLY=arm-point runs the arm's Point face: the gripper goes to, and grabs at, the mark drawn on the floor (./e2e-arm-point.mjs).
  */
 import { tempScope, keepTemp } from './lib/temp.mjs'
-import { rm } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join as joinPath } from 'node:path'
 import { chromium, devices } from 'playwright'
@@ -65,6 +66,19 @@ if (GROUPS && (!GROUPS.length || GROUPS.some(group => !FULL_SIMS_GROUPS.includes
   throw new Error('Invalid full-suite sims groups')
 }
 const CORE_ONLY = GROUPS?.[0] === 'core'
+const ARM_MOTION = process.env.OBPAL_E2E_SIMS_ONLY === 'arm-motion'
+const motionTrace = ARM_MOTION ? { actions: [], clocks: [], windows: [], assertions: [], limitations: [
+  'Prerequisite actions and waits replayed as setup, without the preceding conformance assertions.',
+  'Hints dismissed through their visible control; no DOM hint removal in the focused isolation.',
+  'Host hook exposes only anchor p0 and world tool Y, not the complete private tracking anchor.',
+] } : null
+const motionAction = async (name, fn) => {
+  if (!motionTrace) return fn()
+  const row = { name, startEpochMs: Date.now(), startNodeMs: performance.now() }
+  motionTrace.actions.push(row)
+  try { return await fn() } catch (error) { row.error = error.message; throw error }
+  finally { row.endEpochMs = Date.now(); row.endNodeMs = performance.now() }
+}
 const SHOTS = process.env.OBPAL_SHOTS || ''
 const executablePath = process.env.OBPAL_E2E_CHROMIUM || undefined
 const RTC_ARGS = ['--disable-features=WebRtcHideLocalIpsWithMdns', '--ignore-certificate-errors']
@@ -94,6 +108,7 @@ const local = await startLocal({ dist: process.env.OBPAL_E2E_LOCAL_CONTROL_BASEL
 const closers = []
 const profiles = []
 let exitCode = 0
+let finishMotionTrace = null
 
 async function screenAt(path, init) {
   const b = await chromium.launch(e2eBrowserOptions({ executablePath, headless: !HEADED, args: RTC_ARGS }))
@@ -118,6 +133,22 @@ async function phone(invite, { xr = true, way = 'motion' } = {}) {
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
   const cdp = await ctx.newCDPSession(page)
+  if (ARM_MOTION) {
+    const send = cdp.send.bind(cdp)
+    cdp.send = (method, params) => motionAction(`phone ${way}: ${method} ${JSON.stringify(params)}`, () => send(method, params))
+    // Observe only POSE bytes sent by the product, preserving its send result and packet contents.
+    await ctx.addInitScript(() => {
+      window.__motionPackets = []
+      const send = RTCDataChannel.prototype.send
+      RTCDataChannel.prototype.send = function (data) {
+        const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : null
+        const packet = bytes?.length === 32 && bytes[0] === 0x15 ? Array.from(bytes) : null
+        const result = send.call(this, data)
+        if (packet && window.__motionPackets.length < 10000) window.__motionPackets.push({ at: performance.now(), bytes: packet })
+        return result
+      }
+    })
+  }
   // A phone held like a remote, top edge toward the screen: Point needs motion sensors.
   await cdp.send('DeviceOrientation.setDeviceOrientationOverride', { alpha: 10, beta: 70, gamma: 0 })
   // Which way its 3D follows (settings): the phone's motion, its camera (WebXR) or a glow for the screen's camera.
@@ -147,7 +178,7 @@ async function phone(invite, { xr = true, way = 'motion' } = {}) {
   // A delayed coach hint can appear after a gesture's initial cleanup.
   await page.addLocatorHandler(page.locator('.hint.in'), hint => hint.getByRole('button', { name: 'Dismiss hint' }).click())
   const touches = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map(([x, y], i) => ({ x, y, id: i + 1 })) })
-  const clear = () => page.evaluate(() => document.querySelectorAll('.hint').forEach((h) => h.remove()))
+  const clear = () => ARM_MOTION ? Promise.resolve() : page.evaluate(() => document.querySelectorAll('.hint').forEach((h) => h.remove()))
   /** Hold a finger on the trackpad and drag it right by `dx` px over `steps` moves. */
   const drag = async (dx, steps = 20) => {
     await clear()
@@ -233,7 +264,7 @@ try {
   else if (ONLY_PANELS) await runPanels(local, check)
   else {
   console.log('ob.Pal sims e2e')
-  if (!CORE_ONLY) {
+  if (!CORE_ONLY && !ARM_MOTION) {
     await runPhysicsBench(local, check)
   }
   // ---- robot arm ----
@@ -257,6 +288,17 @@ try {
     draw()
     navigator.mediaDevices.getUserMedia = async () => c.captureStream(30)
   })
+  if (ARM_MOTION) await arm.page.evaluate(() => {
+    window.__motionFrames = []
+    window.__motionRecording = true
+    const frame = () => {
+      if (!window.__motionRecording) return
+      const arm = window.__arm.arms().find(a => a.id === 'a2')
+      window.__motionFrames.push({ at: performance.now(), xyz: window.__arm.toolPosition('a2'), arm: structuredClone(arm) })
+      if (window.__motionFrames.length < 10000) requestAnimationFrame(frame)
+    }
+    requestAnimationFrame(frame)
+  })
   const angle = (node) => arm.page.evaluate((n) => window.__arm.arms().flatMap((x) => x.joints).find((j) => j.node === n).angle, node)
   const poseOf = (id) => arm.page.evaluate((id) => window.__arm.arms().find((a) => a.id === id).pose, id)
   const positionOf = (id) => arm.page.evaluate((id) => window.__arm.toolPosition(id), id)
@@ -267,23 +309,105 @@ try {
   // Measure every rendered frame against the held tool position, so a transient jump also fails.
   const holdsStill = async (id, action) => {
     const before = await positionOf(id)
-    const sample = arm.page.evaluate(({ id, before }) => new Promise((resolve) => {
+    const sample = arm.page.evaluate(({ id, before, diagnostic }) => new Promise((resolve) => {
       const start = performance.now()
       let max = 0
+      const capture = diagnostic ? { start, before, frames: [] } : null
+      if (capture) window.__motionWindows = [...(window.__motionWindows ?? []), capture]
       const frame = () => {
         const p = window.__arm.toolPosition(id)
         max = Math.max(max, Math.hypot(...p.map((v, i) => v - before[i])))
+        if (capture) capture.frames.push({ at: performance.now(), xyz: p, delta: p.map((v, i) => v - before[i]), max })
         if (performance.now() - start < 800) requestAnimationFrame(frame)
         else resolve(max)
       }
       frame()
-    }), { id, before })
+    }), { id, before, diagnostic: ARM_MOTION })
     await action()
     const jump = await sample
     if (jump >= 0.01) throw new Error(`tool jumped ${(jump * 100).toFixed(2)} cm (must be less than 1 cm)`)
     return `${(jump * 1000).toFixed(2)} mm maximum movement`
   }
-  let a
+  let a, b
+  if (ARM_MOTION) finishMotionTrace = async () => {
+    const clock = async (page, label) => {
+      const beforeEpochMs = Date.now()
+      const value = await page.evaluate(() => ({ timeOrigin: performance.timeOrigin, now: performance.now() }))
+      motionTrace.clocks.push({ label, beforeEpochMs, ...value, afterEpochMs: Date.now() })
+    }
+    await clock(arm.page, 'host final')
+    if (b) await clock(b.page, 'phone B final')
+    const host = await arm.page.evaluate(() => {
+      window.__motionRecording = false
+      return { frames: window.__motionFrames, windows: window.__motionWindows ?? [], final: window.__arm.arms().find(a => a.id === 'a2') }
+    })
+    const packets = b ? await b.page.evaluate(() => window.__motionPackets ?? []) : []
+    // Cleanup follows the complete assertion window, including a failed re-grab.
+    if (b) await motionAction('cleanup: B touchEnd after trace snapshot', () => b.cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })).catch(() => {})
+    const out = joinPath(process.env.OBPAL_E2E_EVIDENCE_ROOT || 'artifacts/release-repair-r17', 'arm-motion')
+    await mkdir(out, { recursive: true })
+    await writeFile(joinPath(out, 'trace.json'), JSON.stringify({ ...motionTrace, host, phone: { packets, errors: b?.errors ?? [] }, hostErrors: arm.errors, results }, null, 2))
+    console.log(`  Own-motion diagnostic: ${out}/trace.json`)
+  }
+  if (ARM_MOTION) {
+    // Replay the same UI actions and timed motion prehistory; these are setup, not counted conformance checks.
+    const setup = (name, fn) => motionAction(`setup: ${name}`, fn)
+    await setup('A joins, asks for Shoulder, waits for approval and claims again', async () => {
+      a = await phone(arm.invite, { xr: false, way: 'glow' })
+      await until('scene list', () => a.page.locator('.scene-btn').count(), 15000)
+      await a.claim('Shoulder')
+      await until('the wait on the phone', () => a.page.evaluate(() => /let you in/.test(document.querySelector('#banner:not([hidden]) .bn-t')?.textContent ?? '')), 4000)
+      await sleep(2500)
+      await arm.page.locator('#people .allow').first().click()
+      await until('the standing line cleared', () => a.page.evaluate(() => document.getElementById('banner').hidden), 5000)
+      await sleep(1500)
+      await a.claim('Shoulder')
+      await until('shoulder held', () => arm.page.evaluate(() => !!window.__sim.claims.holder('a1.shoulder')), 5000)
+      await a.drag(260); await sleep(300); await angle('a1.shoulder'); await sleep(600); await angle('a1.shoulder'); await sleep(500)
+    })
+    await setup('B approved; blocked Arm 1 claim, Arm 2 claim and drag', async () => {
+      b = await phone(arm.invite, { way: 'xr' })
+      await until('scene list', () => b.page.locator('.scene-btn').count(), 15000)
+      await until('asking', () => arm.page.locator('#people .allow').count(), 5000)
+      await arm.page.locator('#people .allow').first().click()
+      await b.claim('Whole arm', 0); await b.claim('Whole arm', 1)
+      await until('arm 2 held', () => arm.page.evaluate(() => !!window.__sim.claims.holder('a2')), 5000)
+      await b.drag(260); await sleep(400); await angle('a2.base'); await sleep(700); await angle('a2.base'); await sleep(400)
+    })
+    await setup('Point, B for 2500ms, then A and completed claw return', async () => {
+      await b.page.locator('.modes [data-tab=point]').click()
+      await until('pointer on the floor', () => arm.page.evaluate(() => window.__arm.aims().some(x => x.hit)), 8000)
+      await b.hold('#wii-b', 2500); await b.page.locator('#wii-a').click()
+      await until('claw closed', async () => (await angle('a2.gripper')) < .1, 8000)
+      await until('claw back up', () => arm.page.evaluate(() => { const a = window.__arm.arms().find(x => x.id === 'a2'); return a.tool.height > .15 && !a.claw }), 8000)
+    })
+    await setup('camera tracking, 10cm rise, released phone move, re-grab and lost/returned tracking', async () => {
+      await b.page.locator('.modes [data-tab=track]').click(); await b.page.locator('#track-start').click()
+      await until('tracking', () => b.page.evaluate(() => document.getElementById('surface').classList.contains('tracking')), 5000)
+      await thumb(b, true); await sleep(300)
+      for (let i = 1; i <= 10; i++) { await b.page.evaluate(y => { window.__fakePose.p = [0, y, 0] }, .01 * i); await sleep(50) }
+      await sleep(900); await thumb(b, false)
+      await b.page.evaluate(() => { window.__fakePose.p = [0, .3, 0] }); await sleep(600)
+      // Preserve each original 800ms sampling window without running its conformance assertion.
+      const sampleSetup = async action => {
+        const sample = arm.page.evaluate(() => new Promise(resolve => { const start = performance.now(); const frame = () => performance.now() - start < 800 ? requestAnimationFrame(frame) : resolve(); frame() }))
+        await action(); await sample
+      }
+      await sampleSetup(() => thumb(b, true))
+      await sampleSetup(async () => {
+        await b.page.evaluate(() => { window.__fakePose.tracked = false; window.__fakePose.p = [.25, .6, .2] })
+        await until('untracked camera pose', async () => { const p = await poseOf('a2'); return p?.source === 'camera' && p.tracked === false && p.touching })
+      })
+      await sampleSetup(async () => {
+        await b.page.evaluate(() => { window.__fakePose.tracked = true })
+        await until('tracking returned', async () => (await poseOf('a2'))?.tracked)
+      })
+      const before = await positionOf('a2')
+      for (let i = 1; i <= 5; i++) { await b.page.evaluate(y => { window.__fakePose.p[1] = y }, .6 + i * .005); await sleep(60) }
+      await until('movement after re-anchoring', async () => (await positionOf('a2'))[1] - before[1] > .02)
+      await thumb(b, false); await sleep(300)
+    })
+  } else {
   await check('robot arm: a phone must be let in before its first claim', async () => {
     // This one has no WebXR (an iPhone): its 3D glows for the screen's camera.
     a = await phone(arm.invite, { xr: false, way: 'glow' })
@@ -323,7 +447,6 @@ try {
     if (Math.abs(still - rest) > 0.5) throw new Error(`kept moving without the deadman: ${rest.toFixed(1)}Â° â†’ ${still.toFixed(1)}Â°`)
     return `${before.toFixed(1)}Â° â†’ ${moved.toFixed(1)}Â°, then held at ${still.toFixed(1)}Â°`
   })
-  let b
   await check('robot arm: a second phone takes a whole arm, and dragging swings it (a held joint blocks its arm)', async () => {
     b = await phone(arm.invite, { way: 'xr' })
     await until('scene list', () => b.page.locator('.scene-btn').count(), 15000)
@@ -413,13 +536,20 @@ try {
     await sleep(300)
     return `lost: ${lost}; returned: ${returned}; following resumed`
   })
+  }
   await check('robot arm, 3D from the phoneâ€™s own motion (no camera): swinging the phone swings the gripper', async () => {
     // B switches 3D to its own motion in settings.
-    await b.page.evaluate(() => document.querySelectorAll('.hint').forEach((h) => h.remove()))
-    await b.page.locator('#gear').click()
-    await b.page.locator('.track3d [data-way=motion]').click()
-    await b.page.locator('#done').click()
-    await b.page.locator('.modes [data-tab=track]').click()
+    if (!ARM_MOTION) await b.page.evaluate(() => document.querySelectorAll('.hint').forEach((h) => h.remove()))
+    if (ARM_MOTION) {
+      for (const [label, page] of [['host target start', arm.page], ['phone B target start', b.page]]) {
+        const beforeEpochMs = Date.now()
+        motionTrace.clocks.push({ label, beforeEpochMs, ...await page.evaluate(() => ({ timeOrigin: performance.timeOrigin, now: performance.now() })), afterEpochMs: Date.now() })
+      }
+    }
+    await motionAction('target: gear', () => b.page.locator('#gear').click())
+    await motionAction('target: motion', () => b.page.locator('.track3d [data-way=motion]').click())
+    await motionAction('target: Done', () => b.page.locator('#done').click())
+    await motionAction('target: Track', () => b.page.locator('.modes [data-tab=track]').click())
     if (await b.page.locator('#track-start').isVisible()) throw new Error('motion 3D shouldnâ€™t need a start')
     const tool = () => arm.page.evaluate(() => window.__arm.arms().find((x) => x.id === 'a2').tool)
     const before = await tool()
@@ -435,6 +565,7 @@ try {
     await b.cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
     await b.cdp.send('DeviceOrientation.setDeviceOrientationOverride', { alpha: 10, beta: 70, gamma: 0 })
     const swung = Math.abs(after.yaw - before.yaw)
+    motionTrace?.assertions.push({ name: 'swing >=5 degrees', ok: swung >= 5, before, after, swung })
     if (swung < 5) {
       const arm2 = await arm.page.evaluate(() => { const x = window.__arm.arms().find((y) => y.id === 'a2'); return { state: x.state, goal: x.goal } })
       const ph = await b.page.evaluate(() => ({ tab: document.querySelector('.modes [aria-selected=true]')?.dataset.tab, mode: document.getElementById('surface')?.dataset.mode, way: localStorage.getItem('obpal.track3d') }))
@@ -442,12 +573,15 @@ try {
     }
     await sleep(400)
     const regrab = await holdsStill('a2', () => thumb(b, true))
+    motionTrace?.assertions.push({ name: 're-grab <1cm over 800ms', ok: true, detail: regrab })
     const next = await poseOf('a2')
+    motionTrace?.assertions.push({ name: 'fresh model generation', ok: next?.source === 'model' && next.gen > pose.gen, previous: pose, next })
     if (next?.source !== 'model' || next.gen <= pose.gen) throw new Error(`motion re-grab reused its origin: ${JSON.stringify(next)}`)
     await thumb(b, false)
     await b.page.locator('.modes [data-tab=rotate]').click()
     return `source model; phone swung 30Â° â†’ arm swung ${swung.toFixed(1)}Â°; re-grab: ${regrab}`
   })
+  if (!ARM_MOTION) {
   await check('robot arm, camera: a phone without WebXR glows, and the screenâ€™s camera moves the gripper as it moves', async () => {
     await a.claim('Whole arm', 0)
     await until('arm 1 held', () => arm.page.evaluate(() => !!window.__sim.claims.holder('a1')), 5000)
@@ -729,14 +863,17 @@ try {
   }
   }
   }
-  await check('no Content Security Policy violations on any page', cspCheck)
+  }
+  if (!ARM_MOTION) await check('no Content Security Policy violations on any page', cspCheck)
 } catch (e) {
   console.error(e)
   exitCode = 1
 } finally {
-  await Promise.allSettled(closers.map((c) => c.close()))
-  await local.close()
-  await Promise.allSettled(profiles.map((d) => (keepTemp() ? Promise.resolve() : rm(d, { recursive: true, force: true }))))
+  try { await finishMotionTrace?.() } finally {
+    await Promise.allSettled(closers.map((c) => c.close()))
+    await local.close()
+    await Promise.allSettled(profiles.map((d) => (keepTemp() ? Promise.resolve() : rm(d, { recursive: true, force: true }))))
+  }
 }
 const failed = results.filter((r) => !r.ok)
 console.log(failed.length || exitCode ? `FAILED ${failed.length}/${results.length}` : `passed ${results.length}/${results.length}`)

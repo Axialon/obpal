@@ -112,3 +112,18 @@ SOLE = -.08
 SHOE = [(-.192, .028, -.058), (-.174, .043, -.048), (-.140, .052, -.042), (-.095, .055, -.036),
         (-.052, .051, -.024), (-.016, .045, -.006), (.020, .042, -.001), (.052, .040, -.002),
         (.072, .031, -.012)]
+
+
+def cover_sections(family, form):
+    """Select covers before either rigid lofting or skinned limb construction.
+
+    Cairn I's lateral thigh tapers away from the fixed palm frames. The medial
+    contour and joint offsets stay put; every other form uses the original tables.
+    """
+    sections = {'torso': TORSO[form], 'pelvis': PELVIS[form], 'upper_arm': UPPER_ARM[form],
+                'forearm': FOREARM[form], 'thigh': THIGH[form], 'shin': SHIN[form]}
+    if (family, form) == ('cairn', 'i'):
+        inset = [0, .012, .024, .024, .024, .018, .008, 0, 0]
+        sections['thigh'] = [{**section, 'lat': section['lat']-amount}
+                             for section, amount in zip(THIGH[form], inset)]
+    return sections

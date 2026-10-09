@@ -100,8 +100,7 @@ export class LinkBadge {
     this.el.addEventListener('click', () => this.open())
     const style = document.createElement('style')
     style.textContent = SEAL_STYLE + DOT_LOADER_STYLE + `
-.bar .link-badge,.gp .link-badge{width:126px;padding:0 8px;justify-content:center;gap:6px}
-.bar .link-badge{width:clamp(78px,calc(100cqw - 188px),126px)}
+.bar .link-badge,.gp .link-badge{padding:0 8px;justify-content:center;gap:6px}
 .bar .link-badge .connection-seal{width:100%;min-width:0;grid-template-columns:minmax(0,1fr)}
 .bar .link-badge .connection-seal canvas{width:100%}
 .bar .host-name{min-width:44px}
@@ -110,7 +109,7 @@ export class LinkBadge {
 .link-badge .connection-seal{--seal-ink:var(--bb-ink,var(--ink));background:var(--bb-sheet,var(--sheet))}
 .link-badge .lb-ms{display:none}
 .bar .host-t{min-width:0}
-.gp .link-badge{display:inline-flex;justify-content:center;gap:6px;padding:0 8px}
+.gp .link-badge{width:126px;display:inline-flex;justify-content:center;gap:6px;padding:0 8px}
 .gp .link-badge .lb-ms{display:none}
 .trust-first .seal-compact{display:none}
 .trust-first .trust-compare{min-width:0}

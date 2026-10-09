@@ -6,10 +6,13 @@ from humanoids_soft import build_soft, FORMS
 from common import *
 from mathutils import Matrix
 
-OUT = ROOT/'artifacts/humanoid-third/renders'
+OUT = Path(sys.argv[sys.argv.index('--out')+1]) if '--out' in sys.argv else ROOT/'artifacts/humanoid-third/renders'
 OUT.mkdir(parents=True, exist_ok=True)
 DRAFT = '--draft' in sys.argv
 SILHOUETTES = '--silhouettes' in sys.argv
+CPU = '--cpu' in sys.argv
+NEUTRAL = '--neutral' in sys.argv
+CACHE = Path(sys.argv[sys.argv.index('--cache-dir')+1]) if '--cache-dir' in sys.argv else ROOT/'artifacts/humanoid-third/build/source'
 
 
 def aim(obj, at):
@@ -27,7 +30,10 @@ def studio():
     scene.cycles.samples = 16 if DRAFT else 48
     scene.cycles.use_denoising = True
     prefs = bpy.context.preferences.addons['cycles'].preferences
+    scene.cycles.device = 'CPU'
     try:
+        if CPU:
+            raise RuntimeError('CPU render requested')
         prefs.compute_device_type = 'OPTIX'
         prefs.get_devices()
         for device in prefs.devices:
@@ -43,6 +49,16 @@ def studio():
     scene.view_settings.view_transform = 'AgX'
     scene.world.color = (.16, .16, .16)
     floor = block(None, (200, .04, 200), (0, -.022, 0), 'softCore')
+    if NEUTRAL:
+        # An emission floor has no contact shadow to conceal cover intersections.
+        floor.data.materials.clear()
+        flat = bpy.data.materials.new('Neutral floor')
+        flat.use_nodes = True
+        bsdf = flat.node_tree.nodes.get('Principled BSDF')
+        bsdf.inputs['Emission Color'].default_value = (.18, .18, .18, 1)
+        bsdf.inputs['Emission Strength'].default_value = 1
+        bsdf.inputs['Base Color'].default_value = (0, 0, 0, 1)
+        floor.data.materials.append(flat)
     for name, position, energy, size, colour in [
         ('Key', (-3, 4, -3), 700, 4, (.82, .9, 1)),
         ('Rim', (2, 3, 2), 1050, 3, (.78, .91, 1)),
@@ -91,7 +107,7 @@ def silhouettes(camera, floor, name):
     black.node_tree.links.new(emission.outputs[0], output.inputs['Surface'])
     scene.view_layers[0].material_override = black
     camera.data.ortho_scale = 2.05
-    for label, angle in [('front', 0), ('side', 90)]:
+    for label, angle in [('front', 0), ('side', 90), ('three-quarter', 35)]:
         a = math.radians(angle)
         camera.location = (4*math.sin(a), 1.08, -4*math.cos(a))
         aim(camera, (0, .88, 0))
@@ -103,19 +119,20 @@ for name in FORMS:
     if '--only' in sys.argv and name != sys.argv[sys.argv.index('--only')+1]:
         continue
     if '--cache' in sys.argv:
-        bpy.ops.wm.open_mainfile(filepath=str(ROOT/'artifacts/humanoid-third/build/source'/f'{name}.blend'))
+        bpy.ops.wm.open_mainfile(filepath=str(CACHE/f'{name}.blend'))
         MATERIALS.clear()
         MATERIALS.update({material.name: material for material in bpy.data.materials})
         nodes = {obj.name.replace('_', '.'): obj for obj in bpy.context.scene.objects if obj.type == 'EMPTY'}
     else:
         nodes = build_soft(name)
-    nodes['left.arm.roll'].rotation_euler.z = -.09
-    nodes['right.arm.roll'].rotation_euler.z = .09
+    if '--rest' not in sys.argv:
+        nodes['left.arm.roll'].rotation_euler.z = -.09
+        nodes['right.arm.roll'].rotation_euler.z = .09
     bpy.context.view_layer.update()
     camera, floor = studio()
     views = [('front', 0), ('three-quarter', 35), ('side', 90), ('back', 180)]
     if SILHOUETTES:
-        views = [('front', 0), ('side', 90)]
+        views = [('front', 0), ('side', 90), ('three-quarter', 35)]
     else:
         views += [('head-front', 0), ('head-three-quarter', 35)]
     if '--heads' in sys.argv:

@@ -66,17 +66,18 @@ def limbs(nodes, form, family, low, loft, S):
     their former lips, so the suit tapers through the joint without a band.
     Returns (upper pivot, lower pivot, loft) for each limb.
     """
-    from humanoid_forms import UPPER_ARM, FOREARM, THIGH, SHIN
+    from humanoid_forms import cover_sections
+    sections = cover_sections(family, form)
     out = []
     cover = family+'Cover'
     for side, sign in [('left', -1), ('right', 1)]:
         a, l = side+'.arm', side+'.leg'
-        arm = UPPER_ARM[form]+[S(-.290, .031, .027, .032, med=.031, cz=.002)]+[shifted(x, -.29) for x in FOREARM[form]]
+        arm = sections['upper_arm']+[S(-.290, .031, .027, .032, med=.031, cz=.002)]+[shifted(x, -.29) for x in sections['forearm']]
         out.append((a+'.yaw', a+'.elbow', loft(nodes[a+'.yaw'], arm, cover, False, 24, 16, caps=(.010, .008), sign=sign,
                                               per=(2, 1), name='Arm suit source', steps=2)))
         # The thigh starts at its second section under a deep rounded cap, so its top
         # tucks under the pelvis as a dome rather than standing beside it.
-        leg = THIGH[form][1:]+[S(-.430, .045, .046, .044, med=.045)]+[shifted(x, -.43) for x in SHIN[form]]
+        leg = sections['thigh'][1:]+[S(-.430, .045, .046, .044, med=.045)]+[shifted(x, -.43) for x in sections['shin']]
         out.append((l+'.yaw', l+'.knee', loft(nodes[l+'.yaw'], leg, cover, False, 28, 16, caps=(.03, .010), sign=sign,
                                              per=(2, 1), name='Leg suit source', steps=2)))
     return out

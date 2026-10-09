@@ -12,6 +12,37 @@ await mkdir(thumbnails, { recursive: true })
 const directions = [['A', 'cairn', 'Mineral elastomer, rounded face and two soft eyes'], ['B', 'rill', 'Ash technical knit and a single horizon light'], ['C', 'hush', 'Charcoal knit hood and a recessed two-eye visor']]
 const title = (text, width, height = 72) => Buffer.from(`<svg width="${width}" height="${height}"><rect width="100%" height="100%" fill="#101314"/><text x="32" y="48" fill="#edf0e7" font-family="sans-serif" font-size="30">${text}</text></svg>`)
 const nameOf = name => name[0].toUpperCase()+name.slice(1)
+if (process.argv.includes('--pilot')) {
+  // Read retained, verified frames rather than re-rendering or concealing a view.
+  const sources = [join(root, 'before/cpu'), join(root, 'after/clearance/cpu')]
+  const frame = async (directory, source) => {
+    const manifest = JSON.parse(await readFile(join(directory, 'distill-manifest.json')))
+    if (!manifest.verified) throw new Error('Unverified pilot frames')
+    const record = manifest.files.find(file => file.source === source)
+    if (!record) throw new Error(`Missing matched view: ${source}`)
+    const bytes = await readFile(join(directory, record.path))
+    if (createHash('sha256').update(bytes).digest('hex') !== record.sha256) throw new Error('Changed retained pilot frame')
+    return bytes
+  }
+  const pairs = [
+    ['heads', ['head-front', 'head-three-quarter'], 'studio', false],
+    ['neutral', ['front', 'side', 'back', 'three-quarter'], 'neutral', false],
+    ['silhouettes', ['front', 'side', 'three-quarter'], 'silhouettes', true],
+  ]
+  for (const [name, views, mode, silhouette] of pairs) {
+    const cells = [], w = 800, h = silhouette ? 560 : 480
+    for (const [row, view] of views.entries()) for (const [column, directory] of sources.entries()) {
+      const suffix = silhouette ? 'silhouette' : 'draft', file = `cairn-i-${view}-${suffix}`
+      const bytes = await frame(directory, `${mode}/${file}/${file}.png`)
+      cells.push({ input: await sharp(bytes).flatten({ background: silhouette ? '#f4f4f0' : '#101314' }).resize(w, h-72, { fit: 'contain', background: silhouette ? '#f4f4f0' : '#101314' }).webp().toBuffer(), left: column*w, top: row*h+72 })
+      cells.push({ input: title(`${column ? 'Cairn I pilot' : 'D2 baseline'} / ${view}`, w), left: column*w, top: row*h })
+    }
+    await sharp({ create: { width: w*2, height: h*views.length, channels: 3, background: '#101314' } }).composite(cells).webp({ quality: 90 }).toFile(join(boards, `${name}.webp`))
+  }
+  await writeFile(join(boards, 'scope.json'), JSON.stringify({ scope: 'Matched CPU cache renders, not live performance. True rest, same orthographic camera and lights; neutral floor has no contact-shadow dependence. Original perspective concepts remain separate uncalibrated references; D4 approval is pending.', sourceManifests: sources.map(directory => join(directory, 'distill-manifest.json')) }, null, 2))
+  console.log(`Matched Cairn pilot comparisons: ${boards}`)
+  process.exit(0)
+}
 for (const [letter, name] of directions) {
   const panels = []
   for (const [column, form] of ['concept', 'i', 'ii'].entries()) {

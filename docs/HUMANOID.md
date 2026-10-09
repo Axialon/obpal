@@ -621,6 +621,26 @@ Open H2 decisions for the owner:
    box; refitting it is a separate physics ticket. The foot box is also wider (0.18 m)
    than a human shoe, so the shoes cover 86% of its length but not its width.
 
+#### Cairn I reference pilot
+
+The Cairn-I-only pilot enlarges the oval face opening toward original concept A,
+keeps the upper neck inside the existing head bearing and tapers the lateral thigh
+cover away from the unchanged palm frames. `cover_sections` selects Cairn I before
+both rigid lofting and skinned limb construction; other forms retain their original
+sections. Joint spacing, axes, fingers, physical boxes and the face ellipsoid are
+unchanged. Perspective concept images supply styling, not metric scale or hidden
+geometry; the dimensioned drafts remain D4 review material, not accepted references.
+
+The supplementary `audit_humanoids.py --soft --only cairn-i --cache --combined`
+measures true rest and four combined visual poses, including rigid covers and the
+forearm/palm-to-hip region without a bearing exemption. It supplements the unchanged
+65-position independent sweeps; it does not certify arbitrary whole-body collision.
+The native soft-model proof separates ten-second keyboard practice and recorded
+joint-transform replay from authored bend/reach poses. Its walking and sole motion
+are visual, not loaded physical locomotion. Cairn's existing standing/BODY physics
+measurements and failing anatomy gates remain separate; no physical walking,
+human-spacing profile, controller or physics acceptance follows from this mesh pilot.
+
 Soft finishes use cover roughness 0.86/0.94, satin graphite 0.54, ash helmet 0.55
 and smoked glass 0.30, with zero clearcoat and no image textures. Desktop materials
 add a small procedural normal perturbation, filtered at screen scale, and a cheap

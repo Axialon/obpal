@@ -29,10 +29,10 @@
 .phone-stick { position: relative; margin-top: 18px; }
 .phone-stick-label { position: absolute; top: -20px; white-space: nowrap; font: 500 12px/1.4 var(--font, system-ui); pointer-events: none; }
 .phone-play-unit { grid-column: 1 / -1; display: flex; gap: 6px; align-items: center; justify-content: center; font: 500 12px/1.4 var(--font, system-ui); }
-.phone-play-unit select { min-height: 40px; max-width: 55%; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--frost); font: inherit; }
+.phone-play-unit select { min-height: 44px; max-width: 55%; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--frost); font: inherit; }
 /* The kit portals the unit list to body, above the on-screen toolbar. */
 body:has(.phone-play-unit .kit-select[aria-expanded='true']) > .kit-listbox { z-index: 81; }
-.phone-play-buttons button { min-height: 40px; }
+.phone-play button, body.sim .phone-play button.kit-icon-action { min-width: 44px; min-height: 44px; }
 .phone-play-buttons button:not(.kit-icon-action) { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .phone-play-buttons { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; }
 @media (min-width: 700px) and (max-height: 650px) {

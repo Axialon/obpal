@@ -21,6 +21,7 @@ from mathutils.geometry import intersect_ray_tri
 import numpy as np
 
 OUT = Path(tempfile.mkdtemp(prefix='obpal-humanoid-clearance-'))
+CACHE = Path(sys.argv[sys.argv.index('--cache-dir')+1]) if '--cache-dir' in sys.argv else ROOT/'artifacts/humanoid-third/build/source'
 
 
 def shell_tree(obj):
@@ -89,13 +90,14 @@ def rigid(obj):
 
 
 report = []
+combined = []
 poses = 0
 soft = '--soft' in sys.argv
 for name, low in [(name, low) for name in (FORMS if soft else ['keel', 'morrow']) for low in [False, True]]:
     if '--only' in sys.argv and name != sys.argv[sys.argv.index('--only')+1]:
         continue
     if soft and '--cache' in sys.argv:
-        bpy.ops.wm.open_mainfile(filepath=str(ROOT/'artifacts/humanoid-third/build/source'/f'{name}{"-lod" if low else ""}.blend'))
+        bpy.ops.wm.open_mainfile(filepath=str(CACHE/f'{name}{"-lod" if low else ""}.blend'))
         nodes = {obj.name.replace('_', '.'): obj for obj in bpy.context.scene.objects if obj.type == 'EMPTY'}
     else:
         nodes = build_soft(name, low) if soft else build_robot(name, low)
@@ -165,10 +167,68 @@ for name, low in [(name, low) for name in (FORMS if soft else ['keel', 'morrow']
                         report.append({'robot': name, 'lod': int(low), 'joint': moving.name, 'angle': angle,
                                        'parts': [a_name, b_name], 'triangles': len(exterior), 'radius': max(exterior)})
         moving.rotation_euler[axis] = 0
+    if '--combined' in sys.argv and suit:
+        # Fixed, bounded visual poses supplement the independent sweep. Nonadjacent
+        # forearm/hip pairs have no bearing exemption, including at true rest.
+        postures = {
+            'rest': {},
+            'bend-reach': {'spine_pitch': -12, 'head_pitch': 20, 'left_arm_pitch': -35, 'right_arm_pitch': -35,
+                           'left_arm_elbow': 60, 'right_arm_elbow': 60},
+            'turn-reach': {'spine_yaw': 20, 'head_yaw': -20, 'left_arm_pitch': -25,
+                           'right_arm_pitch': -25, 'left_arm_elbow': 40, 'right_arm_elbow': 40},
+            'visual-stride-left': {'left_leg_pitch': -18, 'right_leg_pitch': 18,
+                                   'left_leg_knee': -25, 'right_leg_knee': -5,
+                                   'left_arm_pitch': 15, 'right_arm_pitch': -15},
+            'visual-stride-right': {'left_leg_pitch': 18, 'right_leg_pitch': -18,
+                                    'left_leg_knee': -5, 'right_leg_knee': -25,
+                                    'left_arm_pitch': -15, 'right_arm_pitch': 15},
+        }
+        axes = {moving.name: axis for moving, _, _, axis, _, _ in pairs}
+        for label, posture in postures.items():
+            for node in nodes.values():
+                node.rotation_euler = (0, 0, 0)
+            for joint, degrees in posture.items():
+                nodes[joint.replace('_', '.')].rotation_euler[axes[joint]] = math.radians(degrees)
+            bpy.context.view_layer.update()
+            points = suit.posed()
+            checks = [(leaf, stationary, moving.matrix_world.translation, radius*scale)
+                      for moving, leaf, stationary, _, _, radius in pairs]
+            for side in ['left', 'right']:
+                for target in ['pelvis', side+'.leg.yaw']:
+                    checks.append((nodes[side+'.arm.elbow'], nodes[target], Vector(), 0))
+                    checks.append((nodes[side+'.arm.wrist.yaw'], nodes[target], Vector(), 0))
+            checks.append((nodes['head.pitch'], nodes['head.yaw'], nodes['head.pitch'].matrix_world.translation, .102*scale))
+            for leaf, stationary, centre, radius in checks:
+                def regions(node):
+                    parts = [rigid(o) for o in node.children if o.type == 'MESH' and
+                             o.data.materials[0].name in [material, 'softGlass', 'softGraphite'] and 'under-suit' not in o.name]
+                    skin = suit.region(node, points)
+                    return parts+([skin] if skin else [])
+                for a in regions(leaf):
+                    for b in regions(stationary):
+                        hits = []
+                        for ia, ib in a[1].overlap(b[1]):
+                            if a[4] and b[4] and set(a[3][ia]) & set(b[3][ib]):
+                                continue
+                            hits += [p for p in intersections([a[2][i] for i in a[3][ia]], [b[2][i] for i in b[3][ib]])
+                                     if (p-centre).length > radius]
+                        vertices = set(i for face in a[3] for i in face)
+                        distances = [b[1].find_nearest(a[2][i])[3] for i in vertices if b[1].find_nearest(a[2][i])[0] is not None]
+                        combined.append({'robot': name, 'lod': int(low), 'pose': label,
+                                         'parts': [a[0], b[0]], 'bearingM': radius,
+                                         'crossingPoints': len(hits), 'sampledVertexDistanceM': min(distances) if distances else None,
+                                         'crossingBounds': [[min(p[k] for p in hits), max(p[k] for p in hits)] for k in range(3)] if hits else None})
+        for node in nodes.values():
+            node.rotation_euler = (0, 0, 0)
 result = {'poses': poses, 'scope': f'Adjacent exterior {"soft covers and skinned suit regions, blended at each pose" if soft else "obsidian shells"}, independent axes, 65 positions including limits, both LODs. Nested bearings and internal structure are intentional overlaps. Arbitrary simultaneous whole-body self-collision is outside this visual audit.', 'crossings': report}
+if '--combined' in sys.argv:
+    result['combined'] = combined
+    result['combinedScope'] = 'Five authored visual postures; skinned and rigid exterior covers/glass/neck, unchanged adjacent bearings, no forearm or hand/hip bearing exclusion. Vertex distance is sampled surface distance, not a signed clearance or whole-body certificate.'
 print(json.dumps(result, indent=2))
 OUT.mkdir(parents=True, exist_ok=True)
 (OUT/'clearance.json').write_text(json.dumps(result, indent=2))
 print(f'Clearance evidence: {OUT}')
 if report:
     raise RuntimeError(f'{len(report)} exterior shell crossing cases remain')
+if any(row['crossingPoints'] for row in combined):
+    raise RuntimeError('Combined or rest crossing cases remain; see retained measurements')

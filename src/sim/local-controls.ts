@@ -38,6 +38,9 @@ export class LocalControls {
   private status = document.createElement('p')
   private help = document.createElement('div')
   private arm: HTMLButtonElement
+  private helpAction: HTMLButtonElement
+  private mouseLock: HTMLButtonElement
+  private helpSource: LocalSource = 'keyboard'
   private padChoice: HTMLButtonElement
   private select = document.createElement('select')
   private lastStatus = ''
@@ -78,9 +81,8 @@ export class LocalControls {
     this.arm.onclick = () => { if (input.armed) input.disarm(); else { input.clear(); input.armed = true; opts.canvas.focus({ preventScroll: true }) }; this.paint() }
     actions.append(this.arm)
     const button = (icon: string, label: string, run: () => void) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'kit-action'; localAction(b, icon, label); b.onclick = run; actions.append(b); return b }
-    button('help', 'Bindings', () => this.toggleHelp())
-    const lock = button('mouse', 'Lock mouse · Esc releases', () => { if (input.source === 'keyboard' && input.armed) { opts.canvas.focus(); void opts.canvas.requestPointerLock()?.catch(() => { this.status.textContent = 'Mouse lock unavailable · drag to aim' }) } })
-    lock.hidden = !opts.canvas.requestPointerLock
+    this.helpAction = button('help', 'Bindings', () => this.toggleHelp())
+    this.mouseLock = button('mouse', 'Lock mouse · Esc releases', () => { if (input.source === 'keyboard' && input.armed) { opts.canvas.focus(); void opts.canvas.requestPointerLock()?.catch(() => { this.status.textContent = 'Mouse lock unavailable · drag to aim' }) } })
     this.help.className = 'local-bindings glass'; this.help.hidden = true; this.help.setAttribute('role', 'region'); this.help.setAttribute('aria-label', 'Control bindings'); document.body.append(this.help)
     this.help.addEventListener('keydown', e => { if (e.key === 'Escape') { this.help.hidden = true; this.remap = null; opts.canvas.focus(); e.stopPropagation() } })
     const panel = simPanels().add(this.el, { id: 'local-control', title: 'Play on this device', purpose: 'Choose a controller and its bindings', icon: 'play', anchor: 'controls', state: 'closed' })
@@ -139,15 +141,22 @@ export class LocalControls {
     this.paint()
   }
   private save() { try { localStorage.setItem(`obpal.local:${this.opts.id}`, JSON.stringify({ source: this.input.source, unit: this.input.unit, bindings: this.input.bindings })) } catch { /* Storage is optional. */ } }
-  private toggleHelp() { this.help.hidden = !this.help.hidden; this.paintHelp() }
+  private toggleHelp() {
+    if (!['keyboard', 'gamepad'].includes(this.input.source)) return
+    this.help.hidden = !this.help.hidden
+    if (this.help.hidden) this.remap = null
+    this.paintHelp()
+  }
   private paintHelp() {
     this.help.replaceChildren()
     const close = document.createElement('button'); close.type = 'button'; close.className = 'kit-action'; iconAction(close, 'close', 'Close bindings'); close.onclick = () => { this.help.hidden = true; this.remap = null; this.opts.canvas.focus() }; this.help.append(close)
     if (this.input.source === 'gamepad') {
       for (const [keys, name] of [['LS', 'Move / tilt'], ['RS', 'Aim / turn'], ['LT RT', 'Lower / rise'], ['A B X Y', 'Actions'], ['D-pad', 'Nudge'], ['Guide', 'Home']]) { const row = document.createElement('span'); row.className = 'local-binding'; setMarkup(row, html`<kbd>${keys}</kbd><span>${name}</span>`); this.help.append(row) }
+      if (this.opts.hardware?.()) { const row = document.createElement('span'); row.className = 'local-binding'; setMarkup(row, html`<kbd>LB</kbd><span>Hold to drive</span>`); this.help.append(row) }
+      return
     }
-    const rows: [string, string][] = this.input.source === 'gamepad' ? [] : [['forward', 'Forward'], ['back', 'Back'], ['left', 'Left'], ['right', 'Right'], ['turnLeft', 'Turn left'], ['turnRight', 'Turn right'], ['lookUp', 'Aim up'], ['lookDown', 'Aim down'], ['lookLeft', 'Aim left'], ['lookRight', 'Aim right'], ['rise', 'Rise / RT'], ['lower', 'Lower / LT'], ['primary', 'Primary / A'], ['secondary', 'Secondary / B'], ['third', 'X'], ['fourth', 'Y'], ['home', 'Home']]
-    if (this.opts.hardware?.()) rows.push(['deadman', 'Hold to drive · LB'])
+    const rows: [string, string][] = [['forward', 'Forward'], ['back', 'Back'], ['left', 'Left'], ['right', 'Right'], ['turnLeft', 'Turn left'], ['turnRight', 'Turn right'], ['lookUp', 'Aim up'], ['lookDown', 'Aim down'], ['lookLeft', 'Aim left'], ['lookRight', 'Aim right'], ['rise', 'Rise / RT'], ['lower', 'Lower / LT'], ['primary', 'Primary / A'], ['secondary', 'Secondary / B'], ['third', 'X'], ['fourth', 'Y'], ['home', 'Home']]
+    if (this.opts.hardware?.()) rows.push(['deadman', 'Hold to drive'])
     for (const [id, label] of rows) {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'kit-action local-binding'; b.setAttribute('aria-label', `Remap ${label}`)
       setMarkup(b, html`<span>${label}</span>${[...new Set(this.input.bindings[id].map(cap))].map(key => html`<kbd>${key}</kbd>`)}`)
@@ -162,6 +171,10 @@ export class LocalControls {
   }
   private paint() {
     const { input } = this
+    if (this.helpSource !== input.source) { this.help.hidden = true; this.remap = null; this.helpSource = input.source }
+    this.helpAction.hidden = !['keyboard', 'gamepad'].includes(input.source)
+    localAction(this.helpAction, 'help', input.source === 'gamepad' ? 'Gamepad help' : 'Bindings')
+    this.mouseLock.hidden = input.source !== 'keyboard' || !this.opts.canvas.requestPointerLock
     this.el.querySelectorAll<HTMLButtonElement>('[data-source]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.source === input.source)))
     const units = this.opts.units(), signature = units.map(u => u.id).join('|')
     if (this.select.dataset.units !== signature) { this.select.dataset.units = signature; this.select.replaceChildren(...units.map((u, n) => { const o = document.createElement('option'); o.value = String(n); o.textContent = u.name; return o })) }

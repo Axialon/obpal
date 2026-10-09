@@ -76,7 +76,9 @@ export const stripeKey = (env: PaymentsEnv) => {
   if (v.length > 1 && (q === '"' || q === "'" || q === '`') && v.endsWith(q)) v = v.slice(1, -1).trim()
   return /^(sk|rk)_(live|test)_[A-Za-z0-9]+$/.test(v) ? v : ''
 }
-const checkoutReady = (env: PaymentsEnv, origin: string) => !!stripeKey(env) && allowedOrigins(env).includes(origin)
+// New native checkout stays closed; historical signed receipts and the portal remain independent.
+const NATIVE_CHECKOUT_ENABLED = false
+const checkoutReady = (env: PaymentsEnv, origin: string) => NATIVE_CHECKOUT_ENABLED && !!stripeKey(env) && allowedOrigins(env).includes(origin)
 const sponsorshipReady = (env: PaymentsEnv, origin: string) =>
   checkoutReady(env, origin) && !!portalUrl(env.STRIPE_SPONSOR_PORTAL_URL) && (env.STRIPE_SPONSORSHIP_ENABLED === 'true' || !!env.STRIPE_WEBHOOK_SECRET)
 const unavailable = () => json({ status: 'unavailable', totalUsd: null, targetUsd: 2500, backerCount: null, recent: [], message: 'Verified donation data is unavailable.' }, 503)
@@ -125,7 +127,7 @@ export async function handlePayment(request: Request, env: PaymentsEnv): Promise
         const u = new URL(value)
         if (u.origin !== origin || u.username || u.password) return error('Return URLs must use this application origin')
       }
-      if (!checkoutReady(env, origin)) return error('Checkout is unavailable until the Stripe provider and return origins are configured.', 503)
+      if (!checkoutReady(env, origin)) return error('Native checkout is unavailable. Open the support page for payment options.', 503)
       const recurring = mode === 'subscription'
       if (recurring && !sponsorshipReady(env, origin)) return error('Sponsorship is unavailable until Stripe webhooks and the cancellation portal are configured.', 503)
       const name: string = data.donorName || 'Anonymous'

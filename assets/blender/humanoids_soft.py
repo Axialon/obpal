@@ -240,10 +240,13 @@ def egg(cx, cy, width, height, taper, power, count):
     return points
 
 
-def head_cairn(nodes, low, surface, eyes):
+def head_cairn(nodes, low, surface, eyes, form='ii'):
     head = nodes['head.pitch']
     shell_obj = shell(head, HEAD, 'cairnCover', low)
-    outline = egg(0, .158, .052, .074, .16, .92, 40 if low else 72)
+    # Concept A suggests a tall oval shield. Only Cairn I uses this opening;
+    # shell depth, eyes and every authoritative frame stay unchanged.
+    width, height = (.058, .091) if form == 'i' else (.052, .074)
+    outline = egg(0, .158, width, height, .16, .92, 40 if low else 72)
     front_window(head, shell_obj, outline, surface, .0032, 'cairnCover', low)
     for sign in [-1, 1]:
         # Recessed ear pods: a dark ring around a cover-coloured centre.
@@ -345,11 +348,17 @@ def head_hush(nodes, low, surface, eyes):
         patch(head, x, eyes, .010, .0034, 'softSignal', low, surface, .5, .0012)
 
 
-def neck(nodes, family, low):
+def neck(nodes, family, low, form='ii'):
     """Neck on head.yaw. Cairn's slender graphite neck flows out of the trapezius."""
     material = 'softGraphite' if family == 'cairn' else 'softCore'
-    loft(nodes['head.yaw'], [S(-.070, .066, .056, .062), S(-.030, .052, .046, .050), S(.020, .043, .042, .044),
-                             S(.070, .042, .044, .042, cz=-.004), S(.100, .040, .040, .040, cz=-.004)],
+    sections = [S(-.070, .066, .056, .062), S(-.030, .052, .046, .050), S(.020, .043, .042, .044),
+                S(.070, .042, .044, .042, cz=-.004), S(.100, .040, .040, .040, cz=-.004)]
+    if (family, form) == ('cairn', 'i'):
+        # The stem enters the head inside its existing bearing, rather than
+        # cutting through the lower chin beyond that envelope.
+        sections = sections[:2]+[S(.020, .039, .036, .040), S(.060, .031, .026, .032, cz=.006),
+                                S(.080, .028, .024, .030, cz=.008)]
+    loft(nodes['head.yaw'], sections,
          material, low, 20, 12, caps=(.01, .01), name='Neck')
 
 
@@ -367,6 +376,8 @@ def collar(torso, family, low):
 
 
 def body(nodes, family, form, low):
+    from humanoid_forms import cover_sections
+    sections = cover_sections(family, form)
     cover = family+'Cover'
     male = form == 'ii'
     panel = family == 'rill'
@@ -374,8 +385,8 @@ def body(nodes, family, form, low):
     side_window = ('rillPanel', [0, math.pi], .36, (-.1, .33)) if panel else None
     # The thorax finishes in a rolled neckline just outside the neck, so the neck
     # leaves it on a clean ring rather than crossing a shallow dome.
-    loft(torso, TORSO[form], cover, low, 32, 20, caps=(.012, .006), per=(2, 1), name='Thorax cover', window=side_window, steps=3)
-    loft(pelvis, PELVIS[form], cover, low, 32, 20, caps=(.010, .016), per=(2, 1), name='Pelvis cover', steps=3,
+    loft(torso, sections['torso'], cover, low, 32, 20, caps=(.012, .006), per=(2, 1), name='Thorax cover', window=side_window, steps=3)
+    loft(pelvis, sections['pelvis'], cover, low, 32, 20, caps=(.010, .016), per=(2, 1), name='Pelvis cover', steps=3,
          window=('rillPanel', [0, math.pi], .36, (-.2, .2)) if panel else None)
     # The under-suit is slim, so a cover that gives way at a joint stays a soft
     # cover-coloured dent; it shows only at the designed seams: the waist seam,
@@ -392,7 +403,7 @@ def body(nodes, family, form, low):
         ellipsoid(torso, (sign*(arm-.014), .346, -.004), (.044*k, .054*k, .050*k), 'softCore', low, 'Armpit gasket')
         a, l = side+'.arm', side+'.leg'
         shoulder = nodes[a+'.yaw']
-        loft(shoulder, UPPER_ARM[form], cover, low, 20, 12, caps=(.010, .005), sign=sign, name='Upper arm cover', steps=3)
+        loft(shoulder, sections['upper_arm'], cover, low, 20, 12, caps=(.010, .005), sign=sign, name='Upper arm cover', steps=3)
         # Under the fold bevels the under-suits stop short or taper on the flexing
         # side, as the gaskets do; the upper arm's still reaches the elbow so its
         # bone line stays enclosed when the forearm and gasket fold away.
@@ -402,12 +413,12 @@ def body(nodes, family, form, low):
         elbow = nodes[a+'.elbow']
         loft(elbow, [S(.032, .026*k, .005, .027*k), S(.002, .031*k, .032*k), S(-.028, .026*k, .005, .028*k)], 'softCore', low, 16, 10,
              caps=(.006, .006), per=(1, 1), name='Elbow gasket', steps=2)
-        loft(elbow, FOREARM[form], cover, low, 18, 12, caps=(.005, .008), sign=sign, name='Forearm cover', steps=3)
+        loft(elbow, sections['forearm'], cover, low, 18, 12, caps=(.005, .008), sign=sign, name='Forearm cover', steps=3)
         loft(elbow, [S(-.080, .019*k, .018*k), S(-.150, .018*k, .016*k), S(-.255, .016*k, .014*k)],
              'softCore', low, 10, 6, caps=(.008, .008), per=(1, 1), sign=sign, name='Forearm under-suit', steps=2)
         hand(nodes[a+'.wrist.yaw'], a.replace('.', '_'), cover, low, sign, male, family)
         thigh = nodes[l+'.yaw']
-        loft(thigh, THIGH[form], cover, low, 24, 14, caps=(.012, .006), sign=sign, name='Thigh cover', steps=3,
+        loft(thigh, sections['thigh'], cover, low, 24, 14, caps=(.012, .006), sign=sign, name='Thigh cover', steps=3,
              window=('rillPanel', [0], .5, (-.36, .02)) if panel else None)
         # The core holds the bone line but stays inside the medially offset cover.
         loft(thigh, [S(.030, .014*k, .028, med=.040*k, cx=-.008), S(-.200, .016*k, .026, med=.034*k, cx=-.006),
@@ -416,7 +427,7 @@ def body(nodes, family, form, low):
         knee = nodes[l+'.knee']
         loft(knee, [S(.044, .040*k, .042*k, .010), S(.002, .044*k, .046*k), S(-.038, .038*k, .040*k, .016)], 'softCore', low, 18, 10,
              caps=(.008, .008), per=(1, 1), name='Knee gasket', steps=2)
-        loft(knee, SHIN[form], cover, low, 20, 12, caps=(.006, .010), sign=sign, name='Shin cover', steps=3,
+        loft(knee, sections['shin'], cover, low, 20, 12, caps=(.006, .010), sign=sign, name='Shin cover', steps=3,
              window=('rillPanel', [0], .5, (-.33, -.05)) if panel else None)
         loft(knee, [S(-.080, .021*k, .021*k), S(-.200, .021*k, .021*k), S(-.410, .019*k, .019*k)],
              'softCore', low, 10, 6, caps=(.008, .008), per=(1, 1), sign=sign, name='Shin under-suit', steps=2)
@@ -853,8 +864,11 @@ def build_soft(name, low=False, clear=True):
         nodes[side+'.leg.roll'].location.x = sign*PIVOTS[form]['leg']
     bpy.context.view_layer.update()
     face = SPEC['faces'][family]
-    {'cairn': head_cairn, 'rill': head_rill, 'hush': head_hush}[family](nodes, low, face['surface'], face['eyes'])
-    neck(nodes, family, low)
+    if family == 'cairn':
+        head_cairn(nodes, low, face['surface'], face['eyes'], form)
+    else:
+        {'rill': head_rill, 'hush': head_hush}[family](nodes, low, face['surface'], face['eyes'])
+    neck(nodes, family, low, form)
     body(nodes, family, form, low)
     if SKINNED:
         def clear(pairs):

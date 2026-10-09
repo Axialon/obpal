@@ -5,6 +5,11 @@
  * phone on its side the face takes the wide column at full height.
  */
 import { devices } from 'playwright'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { rawRun } from './lib/distill.mjs'
+import { setSurface } from './lib/frost.mjs'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 async function until(what, fn, timeout = 10000, every = 100) {
@@ -98,6 +103,93 @@ export async function phoneDeclutter({ browser, origin, check }) {
       await size(412, 915)
       return `trackpad ${(share * 100).toFixed(0)}% of 915x412`
     })
+    if (process.env.OBPAL_CONTROLLER_COMPACT_EVIDENCE === '1') {
+      const out = join(process.env.OBPAL_E2E_EVIDENCE_ROOT, 'controller-compact'), raw = rawRun(out), frames = [], rows = []
+      await mkdir(out, { recursive: true })
+      try {
+        for (const [width, height, dpr] of [[390, 844, 1], [390, 844, 3], [844, 390, 2], [768, 1024, 2], [1024, 600, 2], [1280, 800, 1]]) for (const theme of ['carbon', 'light']) {
+          await check(`compact connected bar ${width}x${height} DPR${dpr} ${theme}`, async () => {
+            const firstFrame = frames.length
+            let row
+            try {
+            await phone.setViewportSize({ width, height })
+            await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: dpr, mobile: true, screenOrientation: { type: width > height ? 'landscapePrimary' : 'portraitPrimary', angle: width > height ? 90 : 0 } })
+            await setSurface(phone, theme)
+            await phone.evaluate(() => { document.querySelector('.bar .host-t').textContent = 'A long connected screen name for layout verification' })
+            await phone.waitForTimeout(400)
+            const name = `${width}x${height}-${dpr}-${theme}`
+            const capture = async (phase, selector) => {
+              for (const motion of ['reduce', 'no-preference']) {
+                await phone.emulateMedia({ reducedMotion: motion })
+                // A preference change can restart sheet-up. Wait only for finite animations on this sheet and its
+                // backdrop (or the connected rails), never the continuous seal/page animations or a finished promise.
+                const settled = await phone.evaluate(async selector => {
+                  const sheet = selector && document.querySelector(selector)
+                  const targets = sheet ? [sheet, sheet.closest('.sheet-wrap')] : [...document.querySelectorAll('.bar, .modes, .dock')]
+                  const start = performance.now(), seen = new Map()
+                  const paint = () => new Promise(resolve => requestAnimationFrame(resolve))
+                  await paint(); await paint()
+                  for (;;) {
+                    const active = document.getAnimations().filter(a => targets.includes(a.effect?.target) && Number.isFinite(a.effect.getComputedTiming().endTime) && !['finished', 'idle'].includes(a.playState))
+                    for (const a of active) seen.set(a.animationName || a.transitionProperty, { name: a.animationName || a.transitionProperty, durationMs: a.effect.getTiming().duration })
+                    if (!active.length) break
+                    if (performance.now() - start > 5000) throw Error('Controller sheet entrance did not settle within 5 s')
+                    await paint()
+                  }
+                  await paint(); await paint()
+                  return { waitedMs: performance.now() - start, animations: [...seen.values()] }
+                }, selector)
+                // Keep the lower content and footer inspectable at short heights; record the actual scroll geometry.
+                const fit = selector ? await phone.locator(selector).evaluate(el => {
+                  const initialScrollTop = el.scrollTop
+                  el.scrollTop = el.scrollHeight
+                  return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => {
+                    const rect = e => e.getBoundingClientRect().toJSON()
+                    const footer = el.querySelector('.link-foot, .actions')
+                    resolve({ box: rect(el), footer: footer && rect(footer), footerText: footer?.textContent, initialScrollTop, scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight })
+                  })))
+                }) : await phone.locator('.bar').evaluate(el => ({ box: el.getBoundingClientRect().toJSON() }))
+                const measured = { phase, reducedMotion: motion, settled, ...fit }
+                row.captures.push(measured)
+                if (selector) row.sheets.push(measured)
+                const path = `${name}/${phase}-${motion}/frame.png`; await mkdir(join(raw, name, `${phase}-${motion}`), { recursive: true }); await phone.screenshot({ path: join(raw, path) }); frames.push({ path, scenario: name, phase, reducedMotion: motion, failed: false })
+                const inside = b => b && b.x >= -1 && b.y >= -1 && b.right <= width + 1 && b.bottom <= height + 1
+                if (!inside(fit.box)) throw Error(`${phase} ${motion} outside viewport: ${JSON.stringify(fit.box)}`)
+                if (selector && !inside(fit.footer)) throw Error(`${phase} ${motion} footer outside viewport: ${JSON.stringify(fit.footer)}`)
+              }
+              await phone.emulateMedia({ reducedMotion: 'reduce' })
+            }
+            const measure = await phone.evaluate(() => {
+              const rect = e => ({ name: e.getAttribute('aria-label') || e.title || e.className, ...e.getBoundingClientRect().toJSON() })
+              const bar = document.querySelector('.bar'), badge = bar.querySelector('.link-badge'), face = document.querySelector('#pad')
+              return { viewport: { width: innerWidth, height: innerHeight }, bar: rect(bar), badge: rect(badge), seal: rect(badge.querySelector('canvas')), targets: [...bar.querySelectorAll('button')].filter(e => e.checkVisibility()).map(rect), face: rect(face), overflow: document.documentElement.scrollWidth > innerWidth, live: document.body.classList.contains('live'), label: badge.getAttribute('aria-label') }
+            })
+            row = { name, width, height, dpr, theme, reducedMotion: ['reduce', 'no-preference'], longName: 'Injected display label only; actual native connected session retained', measure, captures: [], sheets: [] }
+            rows.push(row)
+            await capture('connected')
+            if (!measure.live || measure.overflow) throw Error('connected state or page fit lost')
+            if (measure.badge.width < 78 || measure.badge.width > 104.5 || measure.badge.height < 44) throw Error(`badge size ${JSON.stringify(measure.badge)}`)
+            if (measure.seal.left < measure.badge.left || measure.seal.right > measure.badge.right || measure.seal.top < measure.badge.top || measure.seal.bottom > measure.badge.bottom) throw Error('seal outside badge')
+            for (const t of measure.targets) if (t.left < measure.bar.left - 1 || t.right > measure.bar.right + 1) throw Error(`bar target outside ${t.name}`)
+            for (const a of measure.targets) for (const b of measure.targets) if (a !== b && Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1) throw Error(`bar targets overlap: ${a.name}, ${b.name}`)
+            await phone.locator('.bar .link-badge').click()
+            await phone.getByRole('dialog', { name: 'Connection', exact: true }).waitFor()
+            await capture('comparison', '.link-sheet')
+            await phone.keyboard.press('Escape')
+            await phone.getByRole('button', { name: 'Settings', exact: true }).click()
+            await phone.locator('.sheet.settings').waitFor()
+            await capture('settings', '.sheet.settings')
+            await phone.keyboard.press('Escape')
+            return `actual native connection; badge ${measure.badge.width.toFixed(1)}px; viewport ${width}x${height}; long label injected`
+            } catch (error) { for (const frame of frames.slice(firstFrame)) frame.failed = true; if (row) row.failure = error.message; else rows.push({ width, height, dpr, theme, failure: error.message }); throw error }
+            finally { await phone.keyboard.press('Escape'); await phone.keyboard.press('Escape') }
+          })
+        }
+      } finally {
+        await writeFile(join(out, 'metrics.json'), JSON.stringify({ source: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), rows }, null, 2))
+        await writeFile(join(out, 'evidence-frames.json'), JSON.stringify({ expectedCount: 72, frames }, null, 2))
+      }
+    }
   } finally {
     await phoneCtx.close().catch(() => {})
     await screenCtx.close().catch(() => {})

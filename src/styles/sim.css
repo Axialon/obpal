@@ -36,7 +36,7 @@ body.sim .sim-actions:has(> .kit-icon-action) { display: flex; flex-wrap: wrap; 
 .sim-top { position: fixed; top: 0; left: 0; right: 0; height: 72px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; padding: 0 20px; pointer-events: none; z-index: 5; }
 .sim-top > * { pointer-events: auto; }
 .sim-top { --muted: var(--secondary); background: var(--frost); border-bottom: 1px solid var(--frost-edge); -webkit-backdrop-filter: var(--frost-blur); backdrop-filter: var(--frost-blur); box-shadow: var(--frost-shadow); }
-.sim-top .logo { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; }
+.sim-top .logo { display: inline-flex; align-items: center; justify-content: center; justify-self: start; width: 44px; height: 44px; color: var(--ink); text-decoration: none; }
 .sim-top .logo .mark { width: 36px; height: 36px; }
 .sim-top .logo .word { font-family: var(--font-display); font-size: 21px; font-weight: 700; letter-spacing: -0.03em; }
 .sim-top .logo .pt { color: var(--accent-text); }
@@ -248,8 +248,6 @@ body.stopped #stage { filter: saturate(0.4) brightness(0.8); transition: filter 
 /* A phone's bar, once phones are in: the people chip sits between the mark and the presence cluster (top right), so the
    wordmark steps back to the mark and the chip shows its faces without the count's words. */
 @media (max-width: 600px) {
-  body.sim .sim-top:has(> .chip:not([hidden])) .logo .word { display: none; }
-  body.sim .sim-top:has(> .chip:not([hidden])) .logo:has(> .brand-lockup) { width: 40px; overflow: hidden; flex: none; }
   body.sim .sim-top .chip .chip-text { display: none; }
   body.sim .sim-top .chip { gap: 4px; }
 }
