@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { cspCheck } from './csp-watch.mjs'
 import { modelProof } from './humanoid-model-proof.mjs'
 import { tendonProof } from './humanoid-tendon-proof.mjs'
-import { softProof } from './humanoid-soft-proof.mjs'
+import { softProof, cairnGaitProof } from './humanoid-soft-proof.mjs'
 import { e2eBrowserOptions } from './lib/browser.mjs'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -245,8 +245,161 @@ export async function runHumanoid(local, check) {
     return { page, ctx, errors }
   }
   try {
+    if (process.env.OBPAL_CAIRN_GAIT_ONLY === '1') {
+      await run('Cairn I rendered classical gait and sole contact', () => cairnGaitProof(browser, local.origin))
+      return
+    }
     await run('authored model views in the live renderer', () => modelProof(browser, local.origin, directory))
     await run('soft roster forms and face signatures in the live renderer', () => softProof(browser, local.origin, directory))
+    if (process.env.OBPAL_CAIRN_GAIT === '1') await run('Cairn I rendered classical gait and sole contact', () => cairnGaitProof(browser, local.origin))
+    if (process.env.OBPAL_CAIRN_GAIT === '1') await run('Cairn I BODY transition, native touch cancellation and latched Stop', async () => {
+      const { page: p, ctx } = await open(true, true)
+      const receipt = { environment: 'Emulated phone; synthetic BODY landmarks; CDP native touch and explicitly injected blur', events: [] }
+      const read = async label => {
+        const state = await p.evaluate(() => {
+          const a = window.__humanoid.actors[0]
+          const legs = a.control.profile.chains.filter(c => c.group === 'legs').flatMap(c => [...c.joints, ...c.distal])
+          return { source: a.source, owner: a.owner, pad: window.__obpal.padOf(a.owner) ?? null, pointerEvents: [...(window.cairnSafetyPointers ?? [])], position: a.control.position.toArray(), q: { ...a.control.q }, bodyLegs: legs.map(id => ({ id, retargeted: a.last.q[id], control: a.control.q[id] })), stopped: a.control.stopped, gaitActive: !!a.control.visualGait?.active, gaitResets: window.cairnSafetyResets ?? 0, feet: Object.entries(a.control.visualGait?.feet ?? {}).map(([side, f]) => ({ side, phase: f.phase, stance: f.stance, cycle: f.cycle })), rendered: { root: a.rig.root.position.toArray(), rotation: a.rig.root.quaternion.toArray(), pivots: [...a.rig.pivots].map(([id, pivot]) => [id, pivot.quaternion.toArray()]) } }
+        })
+        receipt.events.push({ label, at: Date.now(), state })
+        await writeFile(join(process.env.OBPAL_E2E_EVIDENCE_ROOT, 'cairn-safety.json'), JSON.stringify(receipt, null, 2))
+        return state
+      }
+      let cdp
+      const prepareCairn = async () => {
+        await p.evaluate(() => window.__humanoid.changeRobot(0, 'cairn', 0))
+        await p.waitForFunction(() => window.__humanoid.actors[0].rig.root.userData.lods === 2)
+        await p.evaluate(() => {
+          const gait = window.__humanoid.actors[0].control.visualGait, reset = gait.reset.bind(gait)
+          window.cairnSafetyResets = 0
+          gait.reset = () => { window.cairnSafetyResets++; reset() }
+        })
+      }
+      try {
+        await prepareCairn()
+        await p.keyboard.press('w')
+        await p.evaluate(installFixture)
+        await p.evaluate(() => window.fixture.angles = { 'left.arm.elbow': .8, 'left.leg.pitch': .35, 'left.leg.knee': .7, 'right.leg.pitch': -.2, 'right.leg.knee': .4 })
+        await until(() => p.evaluate(() => window.__humanoid.snapshot().actors[0].tracked))
+        await until(() => p.evaluate(() => Object.entries(window.__humanoid.actors[0].control.q).some(([id, q]) => id.includes('.leg.') && Math.abs(q) > .2)))
+        await until(() => p.evaluate(() => [...window.__humanoid.actors[0].rig.pivots].some(([id, p]) => id.includes('.leg.') && Math.hypot(p.quaternion.x, p.quaternion.y, p.quaternion.z) > .05)))
+        const body = await read('synthetic BODY active')
+        assert(body.source === 'body' && !body.gaitActive, 'Cairn practice gait replaced idle BODY')
+        assert(Object.entries(body.q).some(([id, q]) => id.includes('.leg.') && Math.abs(q) > .2), 'Non-neutral BODY legs were replaced')
+        assert(body.bodyLegs.every(j => Number.isFinite(j.retargeted) && Math.abs(j.retargeted - j.control) <= 1e-6), 'Same-frame BODY leg targets differ from Cairn control joints')
+        await p.evaluate(() => { window.fixture.enabled = false; window.__humanoid.clear(0) })
+        await p.keyboard.down('s'); await sleep(350); await p.keyboard.up('s')
+        const classical = await read('BODY feed cleared; native backward key released')
+        assert(classical.source === 'classical' && classical.gaitActive, 'Cairn did not return to classical practice')
+        await p.locator('#estop').click(); const stopped = await read('visible Stop')
+        await p.keyboard.down('w'); await p.keyboard.down('e'); await sleep(250)
+        const frozen = await read('movement attempted while stopped')
+        assert(frozen.stopped && JSON.stringify(stopped.rendered) === JSON.stringify(frozen.rendered) && JSON.stringify(stopped.position) === JSON.stringify(frozen.position) && JSON.stringify(stopped.q) === JSON.stringify(frozen.q), 'Cairn Stop moved rendered root or pivots before input cleanup')
+        await p.keyboard.up('w'); await p.keyboard.up('e'); await sleep(250)
+        const latched = await read('Stop remains latched after movement release')
+        assert(latched.stopped && JSON.stringify(latched.rendered) === JSON.stringify(stopped.rendered), 'Stop unlatched before Resume')
+        await p.locator('#resume').click()
+        assert(!(await read('explicit Resume')).stopped, 'Resume did not clear Stop')
+        const forward = p.getByRole('button', { name: 'Walk forward', exact: true })
+        await forward.scrollIntoViewIfNeeded()
+        const rect = await forward.boundingBox()
+        assert(rect && rect.width >= 44 && rect.height >= 44, 'Native walking target too small')
+        cdp = await ctx.newCDPSession(p)
+        const touch = [{ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, id: 1 }]
+        const before = await read('before native touch')
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: touch })
+        await sleep(350); const held = await read('native touch held')
+        assert(Math.hypot(...held.position.map((n, i) => n - before.position[i])) > .05, 'Touch did not move Cairn')
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] })
+        await sleep(100); const cancelled = await read('native touch cancelled')
+        await sleep(500); const settled = await read('after cancellation settle')
+        assert(Math.hypot(...settled.position.map((n, i) => n - cancelled.position[i])) < .0001, 'Cancelled touch retained root input')
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: touch })
+        await sleep(200)
+        await p.evaluate(() => window.dispatchEvent(new Event('blur')))
+        const blurred = await read('injected blur while touch held')
+        await sleep(400); const quiet = await read('before touch cleanup after blur')
+        assert(Math.hypot(...quiet.position.map((n, i) => n - blurred.position[i])) < .0001, 'Blur retained Cairn input')
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] })
+        // The preceding legacy keyboard/buttons fixture keeps its host claim. The native touch launcher
+        // will not evict it. Start the explicit On-screen scenario on a fresh visit, without injecting a claim.
+        receipt.onScreenPrecondition = { legacyOwner: quiet.owner, freshVisit: true, limitation: 'Legacy host-to-touch transfer is not exercised; this proves active selection from the native On-screen source.' }
+        await p.goto(`${local.origin}/sim/humanoid/?test=humanoid&preview=soft`)
+        await p.waitForFunction(() => window.__humanoid && window.__obpal?.pairingUrl && window.__sim)
+        await p.waitForFunction(() => window.__humanoid?.actors.every(a => a.rig.root.userData.prototype === 'blender'))
+        await prepareCairn()
+        await read('fresh Cairn visit before explicit On-screen choice; new actor instance')
+        assert(await p.locator('.phone-play').count() === 0 && ctx.pages().length === 1, 'Fresh visit automatically armed touch or opened another tab')
+        if (await panel(p).isVisible()) await panel(p).getByRole('button', { name: 'Close Controls', exact: true }).click()
+        const dock = p.locator('.panel-dock-handle')
+        if (await dock.isVisible() && await dock.getAttribute('aria-expanded') !== 'true') await dock.click()
+        const picker = p.locator('[data-panel="local-control"]'), toggle = p.locator('[data-panel-toggle="local-control"]')
+        if (await picker.isVisible() && await picker.getAttribute('data-focused') !== 'true') await toggle.click()
+        if (!await picker.isVisible()) await toggle.click()
+        await p.locator('[data-panel="local-control"] [data-source="touch"]').click()
+        const stick = p.getByRole('group', { name: 'Move', exact: true })
+        const stickBox = await stick.boundingBox()
+        assert(stickBox, 'On-screen Cairn stick absent')
+        await stick.evaluate(el => {
+          window.cairnSafetyPointers = []
+          for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'lostpointercapture']) el.addEventListener(type, e => window.cairnSafetyPointers.push({ type, id: e.pointerId, trusted: e.isTrusted, t: performance.now() }))
+        })
+        const heldTouch = [{ x: stickBox.x + stickBox.width / 2, y: stickBox.y + stickBox.height / 2 - 28, id: 2 }]
+        const touchStart = await read('before On-screen held selection traversal')
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: heldTouch })
+        await sleep(250)
+        const selectionHeld = await read('On-screen Cairn moving; pointer remains held')
+        assert(Math.hypot(...selectionHeld.position.map((n, i) => n - touchStart.position[i])) > .05 && selectionHeld.owner, 'Cairn was not moving before visible On-screen selection')
+        const combo = p.locator('.phone-play').getByRole('combobox', { name: 'On-screen unit', exact: true })
+        await combo.click()
+        const choosingHeld = await read('visible On-screen chooser open; before option activation or pointer cleanup')
+        assert(choosingHeld.owner === selectionHeld.owner && choosingHeld.pad?.axes.some(v => Math.abs(v) > .1) && !choosingHeld.pointerEvents.some(e => ['pointerup', 'pointercancel', 'lostpointercapture'].includes(e.type)), 'On-screen input was released before visible unit selection')
+        const list = await combo.getAttribute('aria-controls')
+        const option = p.locator(`[id="${list}"] [role="option"][data-value="robot-2"]`)
+        receipt.selection = { beforeCleanup: true, combo: await combo.boundingBox(), option: await option.boundingBox(), name: await option.innerText() }
+        await option.click()
+        await until(() => p.evaluate(() => !window.__humanoid.actors[0].owner && window.__humanoid.actors[0].control.stopped))
+        const switched = await read('visible On-screen selection loses old owner; before pointer cleanup or new input')
+        await sleep(350); const oldQuiet = await read('old Cairn after selection; original touch not cleaned up')
+        assert(!switched.owner && switched.stopped && !switched.gaitActive && switched.gaitResets > selectionHeld.gaitResets && JSON.stringify(switched.rendered) === JSON.stringify(oldQuiet.rendered), 'Active On-screen selection retained old Cairn stride or motion')
+        assert(await p.evaluate(() => !!window.__humanoid.actors[1].owner), 'On-screen selection did not claim destination')
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] })
+        const destinationBefore = await p.evaluate(() => window.__humanoid.actors[1].control.position.toArray())
+        const destinationBox = await stick.boundingBox()
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: destinationBox.x + destinationBox.width / 2, y: destinationBox.y + destinationBox.height / 2 - 28, id: 3 }] })
+        await sleep(250)
+        const destinationAfter = await p.evaluate(() => window.__humanoid.actors[1].control.position.toArray())
+        receipt.selection.destination = { before: destinationBefore, after: destinationAfter }
+        assert(Math.hypot(...destinationAfter.map((n, i) => n - destinationBefore[i])) > .05, 'Selected On-screen destination did not move')
+        assert(JSON.stringify((await read('old Cairn during destination movement')).rendered) === JSON.stringify(oldQuiet.rendered), 'Old Cairn moved with destination input')
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] })
+        await p.getByRole('button', { name: 'Leave local play', exact: true }).click()
+        await controls(p)
+        await p.locator('[data-seat="0"]').click()
+        await p.keyboard.down('w'); await sleep(200)
+        const reclaimed = await read('Cairn locally reclaimed before injected remote ownership')
+        await p.evaluate(() => {
+          const claims = window.__sim.claims
+          claims.release('host'); claims.take('robot-1', 'cairn-test-remote')
+        })
+        await until(() => p.evaluate(() => window.__humanoid.actors[0].owner === 'cairn-test-remote'))
+        const taken = await read('injected claim fixture changes remote owner; local key still held')
+        await sleep(400); const remoteQuiet = await read('remote owner without input; before local key cleanup')
+        const angles = taken.rendered.pivots.map(([, q], i) => 2 * Math.acos(Math.min(1, Math.abs(q.reduce((sum, n, k) => sum + n * remoteQuiet.rendered.pivots[i][1][k], 0)))))
+        receipt.remoteHold = { maxPivotAngleRad: Math.max(...angles), rootExactlyEqual: JSON.stringify(taken.rendered.root) === JSON.stringify(remoteQuiet.rendered.root), gaitPhaseExactlyEqual: JSON.stringify(taken.feet) === JSON.stringify(remoteQuiet.feet), criterion: 'Existing native 1e-6 angular tolerance; exact root and idle phase' }
+        await writeFile(join(process.env.OBPAL_E2E_EVIDENCE_ROOT, 'cairn-safety.json'), JSON.stringify(receipt, null, 2))
+        assert(taken.gaitResets > reclaimed.gaitResets && receipt.remoteHold.rootExactlyEqual && receipt.remoteHold.gaitPhaseExactlyEqual && receipt.remoteHold.maxPivotAngleRad <= 1e-6, 'Remote claim retained local Cairn motion')
+        await p.keyboard.up('w')
+        return receipt
+      } catch (error) {
+        receipt.error = error.message
+        await writeFile(join(process.env.OBPAL_E2E_EVIDENCE_ROOT, 'cairn-safety.json'), JSON.stringify(receipt, null, 2))
+        throw error
+      } finally {
+        await cdp?.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] }).catch(() => {})
+        await ctx.close()
+      }
+    })
     if (process.env.OBPAL_HUMANOID_MODEL_PROOF_ONLY === '1') return
     await run('sim tendon curl and jab yield and settle', () => tendonProof(browser, local.origin, directory))
     if (process.env.OBPAL_HUMANOID_TENDON_PROOF_ONLY === '1') return

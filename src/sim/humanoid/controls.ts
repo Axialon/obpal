@@ -3,6 +3,7 @@ import { Vector3 } from 'three'
 import type { DeviceInput } from '../devices/types'
 import { bounded, clamp, neutral, rad, type Angles, type RigProfile } from './profile'
 import { HEADING_LIMIT } from './retarget'
+import { CairnVisualGait } from './cairn-visual-gait'
 /** The fastest the body heading turns the root, radians per second; a lost or switched source eases back as slowly. */
 export const HEADING_RATE = 4
 export const PRESETS = ['guard', 'jab', 'cross', 'uppercut', 'block', 'wave'] as const
@@ -80,14 +81,17 @@ export class ActorControl {
   private gait = 0
   private previousBody: Angles | null = null
   private legWeight = 0
+  readonly visualGait: CairnVisualGait | null
   constructor(readonly profile: RigProfile) {
     this.q = neutral(profile)
+    this.visualGait = profile.model === 'cairn-i' ? new CairnVisualGait(profile) : null
   }
   /** The rendered root heading. Walking still follows the classical yaw alone. */
   get facing() {
     return this.yaw + this.heading
   }
   stop() {
+    this.visualGait?.reset()
     this.stopped = true
     this.preset = null
     this.moving = false
@@ -98,6 +102,7 @@ export class ActorControl {
     this.previousBody = null
   }
   resetSource() {
+    this.visualGait?.reset()
     this.preset = null
     this.previousBody = null
     this.moving = false
@@ -113,6 +118,7 @@ export class ActorControl {
   step(dt: number, intent: Intent, body: Angles | null, bodyHeading = 0) {
     dt = clamp(dt, 0, 0.05)
     if (this.stopped) return this.q
+    const before = this.visualGait ? this.position.clone() : this.position, beforeYaw = this.facing
     const goal = body && Number.isFinite(bodyHeading) ? clamp(bodyHeading, -HEADING_LIMIT, HEADING_LIMIT) : 0
     this.heading += clamp((goal - this.heading) * (1 - Math.exp(-dt / 0.06)), -HEADING_RATE * dt, HEADING_RATE * dt)
     const bodyMoved =
@@ -143,7 +149,7 @@ export class ActorControl {
     }
     this.legWeight = clamp(this.legWeight + ((this.moving ? 1 : -1) * dt) / 0.15, 0, 1)
     if (this.moving) this.gait += dt * 7
-    for (const c of this.profile.chains.filter((c) => c.group === 'legs')) {
+    for (const c of this.profile.chains.filter((c) => c.group === 'legs' && !this.visualGait)) {
       const swing = Math.sin(this.gait + (c.side < 0 ? 0 : Math.PI))
       const walk: Angles = {
         [c.joints[1]]: swing * 0.3,
@@ -157,6 +163,8 @@ export class ActorControl {
       blend = body && !this.preset ? 1 : 1 - Math.exp(-dt / 0.06)
     for (const j of this.profile.joints) this.q[j.id] += (safe[j.id] - this.q[j.id]) * blend
     this.q = bounded(this.profile, this.q)
+    this.visualGait?.advance(dt, this.position, this.facing, !body || this.moving, before, beforeYaw)
+    if (this.visualGait?.active) this.q = this.visualGait.pose(this.q, this.position, this.facing, 0).q
     return this.q
   }
 }

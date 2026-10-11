@@ -3,6 +3,273 @@ import { join } from 'node:path'
 import { writeFile, mkdir, readFile } from 'node:fs/promises'
 import { rawRun } from './lib/distill.mjs'
 import { prepareSmoothness } from './lib/smoothness-motion.mjs'
+import { Vector3 } from 'three'
+
+/** Every rendered practice frame, using loaded sole vertices rather than target angles or joint centres. */
+export async function cairnGaitProof(browser, origin) {
+  const out = join(process.env.OBPAL_E2E_EVIDENCE_ROOT, 'cairn-gait'), raw = rawRun(out), frames = []
+  const report = { source: process.env.OBPAL_PILOT_SOURCE, scope: 'Classical visual practice; no loaded physical gait or physical-device certification', scenarios: [] }
+  const capture = async (page, name) => {
+    await mkdir(join(raw, name), { recursive: true })
+    const sample = await page.evaluate(() => {
+      const s = window.cairnGait, row = s.rows.at(-1)
+      return { phase: s.phase, atSeconds: (performance.now() - s.start) / 1000, renderedFrameSeconds: row?.t, root: row?.root, lod: row?.lod }
+    })
+    await page.screenshot({ path: join(raw, name, 'frame.png') })
+    frames.push({ path: `${name}/frame.png`, capturedAt: new Date().toISOString(), sampleBeforeScreenshot: sample, failed: false })
+  }
+  try {
+    for (const [size, width, height] of [['desktop', 1440, 900], ['phone', 390, 844]]) for (const lod of [0, 1]) for (const traversal of ['pilot', 'directions', 'interruptions']) {
+      const cameraPosition = traversal === 'pilot' ? [3.3, 1.5, -3.3] : [6, 4.5, -9]
+      const context = await browser.newContext({ viewport: { width, height }, isMobile: size === 'phone', hasTouch: size === 'phone', deviceScaleFactor: 1, ignoreHTTPSErrors: true })
+      let page
+      const errors = [], actions = []
+      try {
+        page = await context.newPage()
+        page.on('pageerror', e => errors.push(e.message))
+        await page.goto(`${origin}/sim/humanoid/?test=humanoid&preview=soft`)
+        await page.waitForFunction(() => window.__humanoid?.actors.every(a => a.rig.root.userData.lods === 2))
+        await page.evaluate(() => window.__humanoid.changeRobot(0, 'cairn', 0))
+        await page.waitForFunction(() => window.__humanoid.actors[0].rig.profile.model === 'cairn-i' && window.__humanoid.actors[0].rig.root.userData.lods === 2)
+        const panel = page.locator('.sim-window[data-panel="controls"]')
+        if (await panel.isVisible()) await panel.getByRole('button', { name: 'Close Controls', exact: true }).click()
+        const pair = page.locator('.obpal-chip .pill')
+        await pair.focus(); await pair.press('Escape'); await pair.evaluate(b => b.blur())
+        await page.mouse.move(width - 3, 3)
+        await page.evaluate(position => window.__humanoid.view(position, [0, .85, 0]), cameraPosition)
+        await page.waitForTimeout(500)
+        await page.evaluate(lod => {
+          const h = window.__humanoid, actor = h.actors[0], rig = actor.rig, V = rig.root.position.constructor
+          const camera = h.camera, position = camera.position.clone(), rotation = camera.quaternion.clone(), update = camera.updateMatrixWorld.bind(camera)
+          camera.updateMatrixWorld = function(force) { this.position.copy(position); this.quaternion.copy(rotation); update(force) }
+          const detail = rig.detail.bind(rig)
+          rig.detail = () => detail(rig.root.position.clone().add(new V(0, 0, lod ? 8 : 2)))
+          rig.detail(); rig.root.updateMatrixWorld(true)
+          let floor = null, markings = null
+          rig.root.parent.traverse(m => {
+            if (!m.isMesh || !/arena_deck|arena_etch/.test(m.name)) return
+            m.updateWorldMatrix(true, false)
+            let top = -Infinity
+            for (let i = 0; i < m.geometry.attributes.position.count; i++) top = Math.max(top, m.getVertexPosition(i, new V()).applyMatrix4(m.matrixWorld).y)
+            if (/arena_deck/.test(m.name)) floor = top; else markings = top
+          })
+          if (floor === null) throw Error('Loaded deck not measured')
+          const feet = {}
+          for (const side of ['left', 'right']) {
+            const pivot = rig.pivots.get(`${side}.leg.ankle.roll`), vertices = []
+            pivot.traverse(m => {
+              let visible = true
+              for (let p = m; p && p !== rig.root; p = p.parent) visible &&= p.visible
+              if (!m.isMesh || !visible) return
+              for (let i = 0; i < m.geometry.attributes.position.count; i++) {
+                const p = m.getVertexPosition(i, new V()).applyMatrix4(m.matrixWorld)
+                vertices.push({ m, i, localY: pivot.worldToLocal(p).y })
+              }
+            })
+            const low = Math.min(...vertices.map(v => v.localY))
+            feet[side] = { vertices, sole: vertices.filter(v => v.localY <= low + .001) }
+            if (!feet[side].sole.length) throw Error('No measured sole vertices')
+          }
+          const state = window.cairnGait = { start: performance.now(), rows: [], inputEvents: [], phase: 'start', floor, markings, active: true }
+          for (const type of ['keydown', 'keyup']) addEventListener(type, e => {
+            if (state.active) state.inputEvents.push({ type, key: e.key, t: (performance.now() - state.start) / 1000 })
+          })
+          const sample = t => {
+            if (!state.active) return
+            rig.root.updateMatrixWorld(true)
+            const row = { t: (t - state.start) / 1000, phase: state.phase, q: { ...actor.control.q }, qSource: 'control targets', joints: [...rig.pivots].map(([id, p]) => ({ id, renderedLocalRotation: p.quaternion.toArray(), renderedWorldRotation: p.getWorldQuaternion(rig.root.quaternion.clone()).toArray() })), root: rig.root.position.toArray(), renderedRootRotation: rig.root.quaternion.toArray(), renderedRootMatrix: rig.root.matrixWorld.toArray(), yaw: actor.control.facing, stopped: actor.control.stopped, source: actor.source, owner: actor.owner, lod: rig.root.userData.lod, feet: {} }
+            for (const side of ['left', 'right']) {
+              const f = feet[side], points = f.sole.map(({m, i}) => m.getVertexPosition(i, new V()).applyMatrix4(m.matrixWorld))
+              const minY = Math.min(...f.vertices.map(({m, i}) => m.getVertexPosition(i, new V()).applyMatrix4(m.matrixWorld).y))
+              const gait = actor.control.visualGait?.feet?.[side]
+              row.feet[side] = { gap: minY - floor, markingGap: minY - markings, centroid: points.reduce((a, p) => a.add(p), new V()).multiplyScalar(1 / points.length).toArray(), sole: points.map(p => p.toArray()), stance: gait?.stance ?? null, gaitPhase: gait?.phase ?? null, cycle: gait?.cycle ?? null, segmentStart: gait?.fromPhase ?? null, plannedFrom: gait?.from?.toArray() ?? null, plannedFromYaw: gait?.fromYaw ?? null, plannedLanding: gait?.to?.toArray() ?? null, plannedYaw: gait?.toYaw ?? null, phaseSource: gait ? 'Cairn visual helper' : 'unavailable after reset', vertexCount: f.vertices.length }
+            }
+            state.rows.push(row); requestAnimationFrame(sample)
+          }
+          requestAnimationFrame(sample)
+        }, lod)
+        const sequence = traversal === 'pilot'
+          ? [null, 's', null, 'q', 'w', 'e', '6', null, null, null].map((key, second) => [`pilot-${second}`, key, 1000])
+          : [['start', null, 600], ['forward', 'w', 2600], ['stop-settle', null, 700], ['backward', 's', 2600], ['stop-backward', null, 700], ['strafe', 'a', 2600], ['stop-strafe', null, 700], ['heading', 'e', 1000], ['reversal', 'd', 2600], ['settle', null, 1000]]
+        const begun = Date.now()
+        let scheduled = 0
+        if (traversal === 'interruptions') {
+          const middle = async side => {
+            await page.waitForFunction(side => {
+              const f = window.cairnGait.rows.at(-1)?.feet[side]
+              return f?.stance === false && f.gaitPhase >= .7 && f.gaitPhase <= .8
+            }, side, { timeout: 5000 })
+            return page.evaluate(side => ({ side, row: window.cairnGait.rows.length - 1, t: window.cairnGait.rows.at(-1).t, foot: { phase: window.cairnGait.rows.at(-1).feet[side].gaitPhase, cycle: window.cairnGait.rows.at(-1).feet[side].cycle } }), side)
+          }
+          await page.evaluate(() => window.cairnGait.phase = 'deliberate-release')
+          await page.keyboard.down('w')
+          const release = await middle('left')
+          await page.keyboard.up('w'); actions.push({ action: 'release w during left middle swing', observed: release, acknowledgedMs: Date.now() - begun })
+          await capture(page, `${size}-lod${lod}-${traversal}-middle-release`)
+          await page.waitForTimeout(1000)
+          await capture(page, `${size}-lod${lod}-${traversal}-release-settle`)
+          await page.evaluate(() => window.cairnGait.phase = 'deliberate-reversal')
+          await page.keyboard.down('w'); await page.keyboard.down('e')
+          const reverse = await middle('right')
+          await page.keyboard.up('w'); await page.keyboard.up('e'); await page.keyboard.down('s'); await page.keyboard.down('q')
+          actions.push({ action: 'reverse translation and heading during right middle swing', observed: reverse, acknowledgedMs: Date.now() - begun })
+          await capture(page, `${size}-lod${lod}-${traversal}-middle-reversal`)
+          await page.waitForTimeout(1000); await page.keyboard.up('s'); await page.keyboard.up('q')
+          await page.waitForTimeout(1000)
+          await page.keyboard.down('d'); await page.waitForTimeout(1000); await page.keyboard.up('d')
+          actions.push({ action: 'resume with strafe then release', acknowledgedMs: Date.now() - begun })
+          await page.waitForTimeout(1000)
+          await capture(page, `${size}-lod${lod}-${traversal}-resumed-settle`)
+        } else for (const [phase, key, duration] of sequence) {
+          const action = { phase, key, scheduledStartMs: scheduled, durationMs: duration, acknowledgedStartMs: Date.now() - begun }
+          await page.evaluate(phase => window.cairnGait.phase = phase, phase)
+          if (key) await page.keyboard.down(key)
+          // Match the original pilot's fixed deadlines; screenshot work is inside the phase, not extra held-input time.
+          await page.waitForTimeout(Math.max(0, begun + scheduled + duration / 2 - Date.now()))
+          if (traversal !== 'pilot' || [0, 2, 3, 5, 6, 8, 9].includes(Number(phase.slice(6)))) await capture(page, `${size}-lod${lod}-${traversal}-${phase}`)
+          scheduled += duration
+          await page.waitForTimeout(Math.max(0, begun + scheduled - Date.now()))
+          if (key) await page.keyboard.up(key)
+          actions.push({ ...action, acknowledgedEndMs: Date.now() - begun })
+        }
+        await page.keyboard.press('Space')
+        await page.evaluate(() => window.cairnGait.phase = 'Stop')
+        await page.waitForTimeout(400)
+        if (traversal === 'directions') await capture(page, `${size}-lod${lod}-${traversal}-Stop`)
+        const data = await page.evaluate(() => { window.cairnGait.active = false; const { rows, floor, markings, inputEvents } = window.cairnGait; return { rows, floor, markings, inputEvents } })
+        for (const action of actions.filter(a => a.observed)) {
+          action.actualEvents = cairnInputReceipts(data.rows, data.inputEvents, action)
+        }
+        const summary = cairnGaitSummary(data.rows), continuity = cairnContinuitySummary(data.rows, data.inputEvents)
+        report.scenarios.push({ size, lod, traversal, camera: { position: cameraPosition, target: [0, .85, 0] }, actions, scheduledDurationMs: scheduled || null, errors, ...data, summary, continuity, markingEnvelope: { kind: 'Conservative global loaded marking top; no local footprint exemption', criterion: 'Every measured boot vertex >= top minus 1 mm', minGapM: Math.min(...data.rows.flatMap(r => Object.values(r.feet).map(f => f.markingGap))) } })
+        await writeFile(join(out, 'gait.json'), JSON.stringify(report))
+      } catch (error) {
+        const partial = await page?.evaluate(() => { if (!window.cairnGait) return null; window.cairnGait.active = false; const { rows, floor, markings, inputEvents } = window.cairnGait; return { rows, floor, markings, inputEvents } }).catch(() => null)
+        report.scenarios.push({ size, lod, traversal, partial: true, errors: [...errors, error.message], actions, ...partial })
+        throw error
+      } finally {
+        await writeFile(join(out, 'gait.json'), JSON.stringify(report))
+        await context.close()
+      }
+    }
+    const failures = report.scenarios.flatMap(s => Object.entries(s.summary).flatMap(([side, m]) => [
+      ...(m.minGapM < -.001 ? [`${s.size}/LOD${s.lod}/${side} penetration ${-m.minGapM}m`] : []),
+      ...(m.maxStanceDisplacementM > .01 ? [`${s.size}/LOD${s.lod}/${side} planted displacement ${m.maxStanceDisplacementM}m`] : []),
+      ...Object.entries(m.swingByDirection).filter(([, value]) => s.traversal === 'directions' && value < .01).map(([phase, value]) => `${s.size}/LOD${s.lod}/${side}/${phase} swing ${value}m`),
+      ...Object.keys(m.swingByDirection).filter(phase => s.traversal === 'directions' && m.completedSwings.filter(c => c.phase === phase && c.endPhase === phase && c.middleSamples && c.minMiddleGapM >= .01).length < 2).map(phase => `${s.size}/LOD${s.lod}/${side}/${phase} fewer than two complete middle-clearance swings`),
+      ...m.completedSwings.filter(c => !c.middleSamples || c.minMiddleGapM < .01).map(c => `${s.size}/LOD${s.lod}/${side}/${c.phase} middle swing clearance ${c.minMiddleGapM}m (${c.middleSamples} samples)`),
+    ]))
+    for (const s of report.scenarios) {
+      for (const action of s.actions.filter(a => a.observed)) for (const receipt of action.actualEvents) if (!receipt.accepted) failures.push(`${s.size}/LOD${s.lod} input outside measured middle swing: ${JSON.stringify(receipt)}`)
+      if (s.markingEnvelope.minGapM < -.001) failures.push(`${s.size}/LOD${s.lod} conservative marking penetration`)
+      for (const f of s.continuity.failures) failures.push(`${s.size}/LOD${s.lod}/${s.traversal} discontinuity ${JSON.stringify(f)}`)
+    }
+    report.failures = failures
+    await writeFile(join(out, 'gait.json'), JSON.stringify(report))
+    if (failures.length || report.scenarios.some(s => s.errors.length)) throw Error(failures.join('; ') || 'Runtime errors')
+    return report.scenarios.map(({ size, lod, summary }) => ({ size, lod, summary }))
+  } finally {
+    await writeFile(join(out, 'evidence-frames.json'), JSON.stringify({ expectedCount: 88, frames }, null, 2))
+  }
+}
+
+/** Join the initiating native input to retained airborne rows, without substituting a release for a reversal. */
+export function cairnInputReceipts(rows, inputEvents, action) {
+  const expected = {
+    'release w during left middle swing': [['keyup', 'w']],
+    'reverse translation and heading during right middle swing': [['keydown', 's'], ['keydown', 'q']],
+  }[action.action]
+  if (!expected) throw Error(`Unknown observed Cairn action: ${action.action}`)
+  return expected.map(([type, key]) => {
+    const event = inputEvents.find(e => e.type === type && e.key === key && e.t >= action.observed.t) ?? null
+    const row = event ? rows.findIndex(r => r.t >= event.t) : -1
+    const previous = row > 0 ? rows[row - 1] : null, next = row > 0 ? rows[row] : null
+    const foot = previous?.feet[action.observed.side], after = next?.feet[action.observed.side]
+    const sameCycle = foot?.cycle != null && foot.cycle === after?.cycle && foot.cycle === action.observed.foot.cycle
+    const bracketed = !!event && !!previous && previous.t < event.t && event.t <= next.t
+    const phase = bracketed && sameCycle ? foot.gaitPhase + (after.gaitPhase - foot.gaitPhase) * (event.t - previous.t) / (next.t - previous.t) : null
+    const accepted = Number.isFinite(phase) && phase >= .675 && phase <= .825 && foot.stance === false && after.stance === false
+    return { expected: { type, key }, event, bracketRows: row > 0 ? [row - 1, row] : null, sameCycle, phase, phaseBefore: foot?.gaitPhase, phaseAfter: after?.gaitPhase, cycleBefore: foot?.cycle, cycleAfter: after?.cycle, stanceBefore: foot?.stance, stanceAfter: after?.stance, accepted, clock: 'Host performance.now; interpolated between retained rendered phase rows, not a forced pose' }
+  })
+}
+
+export function cairnGaitSummary(rows) {
+  const summary = {}
+  for (const side of ['left', 'right']) {
+    let anchor = null, maxStanceDisplacementM = 0, maxTangentialDisplacementM = 0, nearFloorTravelM = 0, cycle = null
+    const swingByDirection = Object.fromEntries(['forward', 'backward', 'strafe', 'reversal'].map(p => [p, 0]))
+    const completedSwings = [], incompleteSwings = []
+    for (let i = 0; i < rows.length; i++) {
+      const f = rows[i].feet[side], previous = rows[i - 1]?.feet[side]
+      if (f.stance === true && previous?.stance === true && anchor) {
+        for (let n = 0; n < f.sole.length; n++) {
+          maxStanceDisplacementM = Math.max(maxStanceDisplacementM, Math.hypot(...f.sole[n].map((v, axis) => v - anchor[n][axis])))
+          maxTangentialDisplacementM = Math.max(maxTangentialDisplacementM, Math.hypot(f.sole[n][0] - anchor[n][0], f.sole[n][2] - anchor[n][2]))
+        }
+      } else anchor = f.stance === true ? f.sole : null
+      if (f.stance === false && previous?.stance !== false) cycle = { phase: rows[i].phase, start: rows[i].t, peakGapM: f.gap, middleSamples: 0, minMiddleGapM: null, partialStart: previous?.stance !== true }
+      if (f.stance === false && cycle) {
+        cycle.peakGapM = Math.max(cycle.peakGapM, f.gap)
+        const u = f.gaitPhase === null || f.gaitPhase === undefined ? null : (f.gaitPhase - .5) * 2
+        if (u !== null && u >= .35 && u <= .65) {
+          cycle.middleSamples++
+          cycle.minMiddleGapM = cycle.minMiddleGapM === null ? f.gap : Math.min(cycle.minMiddleGapM, f.gap)
+        }
+      }
+      if (f.stance === true && cycle) {
+        ;(cycle.partialStart ? incompleteSwings : completedSwings).push({ ...cycle, end: rows[i].t, endPhase: rows[i].phase })
+        cycle = null
+      }
+      if (f.stance === null && cycle) {
+        incompleteSwings.push({ ...cycle, end: rows[i].t, endPhase: rows[i].phase, reason: 'Helper reset; phase unavailable' }); cycle = null
+      }
+      if (previous && Math.abs(f.gap) <= .005 && Math.abs(previous.gap) <= .005) nearFloorTravelM += Math.hypot(f.centroid[0] - previous.centroid[0], f.centroid[2] - previous.centroid[2])
+      if (f.stance === false && rows[i].phase in swingByDirection) swingByDirection[rows[i].phase] = Math.max(swingByDirection[rows[i].phase], f.gap)
+    }
+    const gaps = rows.map(r => r.feet[side].gap).sort((a, b) => a - b)
+    summary[side] = { minGapM: gaps[0], maxGapM: gaps.at(-1), medianGapM: gaps[Math.floor(gaps.length * .5)], p95GapM: gaps[Math.floor(gaps.length * .95)], maxStanceDisplacementM, maxTangentialDisplacementM, nearFloorTravelM, swingByDirection, completedSwings, incompleteSwings, incompleteSwing: cycle, unavailablePhaseFrames: rows.filter(r => r.feet[side].gaitPhase == null).length, middleInterval: [.35, .65], frames: rows.length }
+  }
+  return summary
+}
+
+/** Adjacent rigid sole material points, including every lift-off, landing and native input edge. */
+export function cairnContinuitySummary(rows, inputEvents = []) {
+  const samples = [], failures = []
+  const v = p => new Vector3(...p), distance = (a, b) => Math.hypot(...a.map((n, i) => n - b[i]))
+  for (const side of ['left', 'right']) {
+    const first = rows[0]?.feet[side].sole
+    if (!first?.length) continue
+    const a = v(first[0]), b = first.reduce((best, p, i) => v(p).distanceToSquared(a) > v(first[best]).distanceToSquared(a) ? i : best, 0)
+    const edge = v(first[b]).sub(a)
+    const c = first.reduce((best, p, i) => edge.clone().cross(v(p).sub(a)).lengthSq() > edge.clone().cross(v(first[best]).sub(a)).lengthSq() ? i : best, 0)
+    const basis = points => {
+      const x = v(points[b]).sub(v(points[0])).normalize(), z = x.clone().cross(v(points[c]).sub(v(points[0]))).normalize()
+      return [x, z.clone().cross(x).normalize(), z]
+    }
+    let airborneInterruption = false
+    for (let i = 1; i < rows.length; i++) {
+      const before = rows[i - 1], after = rows[i], p = before.feet[side], f = after.feet[side], dt = after.t - before.t
+      const materialDeltaM = Math.max(...f.sole.map((point, n) => distance(point, p.sole[n])))
+      const x = basis(p.sole), y = basis(f.sole), orientationRad = Math.acos(Math.max(-1, Math.min(1, (x.reduce((n, axis, j) => n + axis.dot(y[j]), 0) - 1) / 2)))
+      const inputs = inputEvents.filter(e => e.t > before.t && e.t <= after.t)
+      const phaseEdge = p.stance !== f.stance || p.cycle !== f.cycle
+      const planEdge = p.segmentStart !== f.segmentStart || JSON.stringify(p.plannedLanding) !== JSON.stringify(f.plannedLanding) || p.plannedYaw !== f.plannedYaw
+      if (p.stance === false && (planEdge || inputs.length)) airborneInterruption = true
+      const rootDeltaM = distance(after.root, before.root), rootYawDeltaRad = after.yaw - before.yaw
+      const transition = phaseEdge || planEdge || inputs.length > 0 || rootDeltaM < 1e-9 || airborneInterruption
+      // These are transition guards, not a nominal swing-speed budget: unchanged quintic easing plus root turn
+      // can legitimately exceed 4m/s in the middle. Every adjacent metric remains recorded; near-zero-dt tests
+      // independently cover that middle motion. Never discount a release, phase edge or landing rebase.
+      const exceedsDiagnosticSpeed = materialDeltaM > 4 * dt + .001 || orientationRad > 8 * dt + Math.PI / 180
+      const failed = dt <= 0 || transition && exceedsDiagnosticSpeed
+      const sample = { side, row: i, t: after.t, dt, materialDeltaM, orientationRad, rootDeltaM, rootYawDeltaRad, phaseEdge, planEdge, airborneInterruption, planMetadataAvailable: p.segmentStart != null && f.segmentStart != null, transition, exceedsDiagnosticSpeed, beforePhase: p.gaitPhase ?? null, afterPhase: f.gaitPhase ?? null, beforeStance: p.stance, afterStance: f.stance, inputs, failed }
+      samples.push(sample)
+      if (failed) failures.push(sample)
+      if (f.stance !== false) airborneInterruption = false
+    }
+  }
+  return { criterion: 'At every input/phase/plan edge, stationary translation (including pure yaw), and an interruption beginning with the previous foot airborne through touchdown: material displacement <= 4m/s * dt + 1mm; rigid orientation <= 8rad/s * dt + 1deg. Ordinary middle-swing speed remains recorded separately.', samples, failures, ordinarySwingExceedances: samples.filter(s => !s.transition && s.exceedsDiagnosticSpeed), maxMaterialDeltaM: Math.max(0, ...samples.map(s => s.materialDeltaM)), maxOrientationRad: Math.max(0, ...samples.map(s => s.orientationRad)), transitions: samples.filter(s => s.transition) }
+}
 
 export async function softProof(browser, origin, directory) {
   const results = []

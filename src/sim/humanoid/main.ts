@@ -563,19 +563,34 @@ stage.onFrame = (t, dt) => {
       continue
     }
     save(a)
+    if (a.control.visualGait && !Object.keys(a.control.visualGait.feet).length) {
+      for (const chain of a.control.profile.chains.filter(c => c.group === 'legs')) {
+        const rotation = a.rig.pivots.get(chain.end)!.getWorldQuaternion(new THREE.Quaternion())
+        a.control.visualGait.seed(chain.side < 0 ? 'left' : 'right', a.rig.point(chain.end), new THREE.Euler().setFromQuaternion(rotation, 'YXZ').y)
+      }
+    }
     const q = a.control.step(dt, intent, source === 'body' ? a.last.q : null, a.last.heading)
     if (!a.control.stopped) {
       const balance = a.balance.step(a.control.profile, q, dt, a.control.moving)
       a.offset.copy(balance.root)
       const grip = a.fingers.step(body, input?.hand ?? null, a.retarget.mirror, owner)
       const closed = a.control.preset && a.control.preset !== 'wave'
-      const pose = a.tendons.step(balance.q, closed ? { left: 1, right: 1 } : grip, dt)
+      let pose = a.tendons.step(balance.q, closed ? { left: 1, right: 1 } : grip, dt)
       // Ground the actual elastic pose; the target's feet can be ahead during settling.
       const fk = forward(a.control.profile, pose),
         legs = a.control.profile.chains.filter((c) => c.group === 'legs')
       if (legs.length) {
         const lowest = Math.min(...legs.map((c) => fk.get(c.end)!.p.y - 0.08))
         a.offset.y = clamp(-lowest, -Math.max(0, fk.get(a.control.profile.root)!.p.y - 0.12), 0.4)
+      }
+      if (a.control.visualGait?.active) {
+        const deck = stage.scene.getObjectByName('arena_deckObsidian'), markings = stage.scene.getObjectByName('arena_etch')
+        const floor = markings ?? deck
+        // Read the loaded floor, including its thin markings; fallback arena has a -0.02 m deck.
+        const top = floor ? new THREE.Box3().setFromObject(floor).max.y : -0.02
+        const grounded = a.control.visualGait.pose(pose, a.control.position, a.control.facing, top)
+        pose = grounded.q
+        a.offset.copy(grounded.offset)
       }
       a.rig.pose(pose, a.control.position, a.control.facing, a.offset)
       a.rig.grip(a.tendons.grip)
