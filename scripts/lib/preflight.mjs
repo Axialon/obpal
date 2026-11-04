@@ -4,8 +4,9 @@
  * is a row: { part, check, status: 'pass' | 'FAIL' | 'WARN' | 'skip', ms, detail }.
  */
 import { newSessionLines } from './e2e.mjs'
+import { LOCAL_ORIGIN, publicOrigin } from './deployment.mjs'
 
-export const DEFAULT_ORIGIN = 'https://obpal.blackboxes.net'
+export const DEFAULT_ORIGIN = LOCAL_ORIGIN
 
 /** The parts of a run, in order. `web` is plain requests (the service, /link/, Desktop's page and the files they offer): no browser. */
 export const PARTS = ['web', 'home', 'viewer', 'sims']
@@ -35,7 +36,7 @@ export const DEFAULT_BUDGET_S = 300
  * @param {Record<string, string | undefined>} [env]
  */
 export function parseArgs(argv, env = {}) {
-  const opts = { origin: (env.OBPAL_LIVE_ORIGIN || DEFAULT_ORIGIN).replace(/\/+$/, ''), sims: [...DEFAULT_SIMS], only: [...PARTS], out: '', budgetS: DEFAULT_BUDGET_S, withoutBeacon: false, help: false }
+  const opts = { origin: (env.OBPAL_PUBLIC_ORIGIN || env.OBPAL_LIVE_ORIGIN || DEFAULT_ORIGIN).replace(/\/+$/, ''), sims: [...DEFAULT_SIMS], only: [...PARTS], out: '', budgetS: DEFAULT_BUDGET_S, withoutBeacon: false, help: false }
   const value = (flag, i) => {
     const v = argv[i + 1]
     if (v === undefined || v.startsWith('--')) throw new Error(`${flag} needs a value`)
@@ -58,7 +59,7 @@ export function parseArgs(argv, env = {}) {
       opts.budgetS = n
     } else throw new Error(`unknown option ${a}`)
   }
-  if (!/^https?:\/\/[^/]+$/.test(opts.origin)) throw new Error(`not an origin: ${opts.origin}`)
+  opts.origin = publicOrigin(opts.origin)
   const badPart = opts.only.filter((p) => !PARTS.includes(p))
   if (badPart.length) throw new Error(`unknown part ${badPart.join(', ')} (parts: ${PARTS.join(' ')})`)
   const badSim = opts.sims.filter((s) => !SIMS[s] && !/^\/?sim\/[\w/.?=&-]*$/.test(s))

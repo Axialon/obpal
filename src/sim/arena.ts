@@ -8,7 +8,6 @@ import { contactPart, contactSurface } from './contact'
 import '../styles/base.css'
 import '../styles/sim.css'
 import * as THREE from 'three'
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { batch, bolt, cylinder, environment, floorMaterial, maker, plastic, softKey } from './kit'
 import { blobShadow } from './devices/view'
@@ -26,7 +25,7 @@ import { mountSound } from './audio/session'
 import { mountSimPanels, numberSections } from './ui/panels'
 import { Readout } from '../ui/kit/readout'
 import { mountQuick, quickAction, quickViews } from '../ui/quick'
-import { modelFailed, startScene } from './kit/recovery'
+import { startScene } from './kit/recovery'
 import { LocalControls } from './local-controls'
 import { mapFaceInput } from './face-input'
 import { Seats } from './devices/seats'
@@ -111,12 +110,11 @@ for (let i = 0; i < 24; i++) {
 batch(lanes); scene.add(lanes)
 
 const FACTIONS = [
-  { faction: 'CVC', model: '/models/cvc/CVC_insignia.glb' },
-  { faction: 'CC', model: '/models/cvc/CC_insignia.glb' },
-  { faction: 'K9C', model: '/models/cvc/K9C_insignia.glb' },
-  { faction: 'MMC', model: '/models/cvc/MMC_insignia.glb' },
+  { faction: 'Team 1', model: '' },
+  { faction: 'Team 2', model: '' },
+  { faction: 'Team 3', model: '' },
+  { faction: 'Team 4', model: '' },
 ]
-const loader = new GLTFLoader()
 const slots: Slot[] = FACTIONS.map((f, i) => {
   const a = Math.PI / 4 + (i * Math.PI) / 2
   const spawn = new THREE.Vector2(Math.cos(a) * RING * 0.55, Math.sin(a) * RING * 0.55)
@@ -138,25 +136,7 @@ const slots: Slot[] = FACTIONS.map((f, i) => {
   group.visible = false
   scene.add(group)
   // The faction's insignia rides on top of its puck.
-  loader.load(f.model, (g) => {
-    const m = g.scene
-    // These small, rigid insignias need one draw per finish, including their crystal facets.
-    m.traverse(o => { if (!(o as THREE.Mesh).isMesh) o.userData.static = true })
-    batch(m, [], true)
-    const box = new THREE.Box3().setFromObject(m)
-    const size = box.getSize(new THREE.Vector3())
-    const k = (PUCK * 1.5) / Math.max(size.x, size.y, size.z)
-    m.scale.setScalar(k)
-    box.setFromObject(m)
-    const c = box.getCenter(new THREE.Vector3())
-    m.position.sub(c)
-    const holder = new THREE.Group()
-    holder.add(m)
-    holder.position.y = 0.07 + (box.max.y - box.min.y) / 2
-    holder.name = 'insignia'
-    group.add(holder)
-  }, undefined, modelFailed)
-  return { id: `p${i + 1}`, name: `Player ${i + 1} · ${f.faction}`, faction: f.faction, model: f.model, spawn, group, ring, pos: spawn.clone(), vel: new THREE.Vector2(), falling: 0, dashAt: -9, lastHitBy: null, lastHitAt: 0, points: 0, flash: 0 }
+    return { id: `p${i + 1}`, name: `Player ${i + 1} · ${f.faction}`, faction: f.faction, model: f.model, spawn, group, ring, pos: spawn.clone(), vel: new THREE.Vector2(), falling: 0, dashAt: -9, lastHitBy: null, lastHitAt: 0, points: 0, flash: 0 }
 })
 const slotOf = (id: string) => slots.find((s) => s.id === id)!
 Object.assign(window, { __arena: { slots } })

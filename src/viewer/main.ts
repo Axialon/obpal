@@ -1,5 +1,6 @@
 import { setMarkup, insertMarkup, html } from '../ui/markup'
 import { family } from '../family'
+import { siteOptions } from '../service'
 import '../styles/base.css'
 import '../styles/viewer.css'
 import * as THREE from 'three'
@@ -17,7 +18,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
 import { GlowFollower, handMove, headingOf, Mode, PairingChip, PointerFlag, Remote, type Frame, type Layout, type ModeId, type PadState, type Participant, type PointerState } from '@obpal/host'
 import { poseRelativeInView } from '@obpal/core'
-import { CATALOG, CATEGORIES, DEFAULT_ITEM, LOCAL_CATEGORY, type CatalogItem } from './catalog'
+import { CATALOG, CATEGORIES, CATEGORY_ART as CAT_ART, DEFAULT_ITEM, LOCAL_CATEGORY, type CatalogItem } from './catalog'
 import { localFolder } from './local-folder'
 import { disposeModel } from './model-resources'
 import { applyGamepad, type GamepadContext } from './gamepad-input'
@@ -52,16 +53,6 @@ const guestScene = new URLSearchParams(location.search).has('watch') || ['1', 'p
 const store = {
   get: (k: string) => { try { return localStorage.getItem(k) } catch { return null } },
   set: (k: string, v: string) => { try { localStorage.setItem(k, v) } catch { /* private mode */ } },
-}
-
-/** Visual identity per collection: rail icon and accent colour. */
-const CAT_ART: Record<string, { color: string; icon?: string; image?: string }> = {
-  cvc: { color: '#c4b5fd', image: '/models/cvc/icons/CVC_flat.svg' },
-  engines: { color: '#22d3ee', icon: 'orbit' },
-  pillars: { color: '#38bdf8', icon: 'diamond' },
-  industries: { color: '#7dd3fc', icon: 'matrix' },
-  studio: { color: '#a78bfa', icon: 'cube' },
-  [LOCAL_CATEGORY]: { color: '#93c5fd', icon: 'folder' }, // Local folder catalogue (./local-folder.ts)
 }
 
 // ---- renderer, lighting, stage ---------------------------------------------
@@ -1049,7 +1040,7 @@ function drawCursor(s: Seat, px: number, py: number, vx: number, vy: number, off
 }
 
 async function startRemote() {
-  remote = await Remote.create({ appName: 'ob.Pal Viewer', layout, seats: 8, session: location.pathname })
+  remote = await Remote.create(siteOptions({ appName: 'ob.Pal Viewer', layout, seats: 8, session: location.pathname }))
   holdForPhone(remote)
   controlSpace = new ControlSession(remote, 'viewer')
   sharedPresence.connect(remote)

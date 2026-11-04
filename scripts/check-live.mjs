@@ -1,5 +1,5 @@
 /**
- * After a deploy: is the live site whole? Read only, as a visitor would, and nothing it prints is a credential.
+ * After a deploy: actively check the selected service. Nothing it prints is a credential.
  *   pages    every page at 1440 and 390 wide loads (HTTP 200) without a page error or a sim's "could not be loaded" card;
  *            the Viewer shows a pairing code
  *   api      /api/health answers; /api/code turns away a code it doesn't know (404), a text/plain body (415) and a
@@ -11,7 +11,8 @@
  *            release, which carries all three files. Unauthenticated, so GitHub's rate limit applies
  *
  *   pnpm run check:live [-- --origin <url>] [--only pages,api,turn,headers,release]
- * The origin: --origin, else OBPAL_LIVE_ORIGIN, else https://obpal.blackboxes.net. The browser: OBPAL_E2E_CHROMIUM,
+ * These are active service checks: pages open rooms, API checks send requests and TURN uses relay traffic.
+ * The origin: --origin, else OBPAL_PUBLIC_ORIGIN (legacy OBPAL_LIVE_ORIGIN also accepted); required. The browser: OBPAL_E2E_CHROMIUM,
  * else Playwright's own Chromium (scripts/lib/browser.mjs). Exit code 1 when a check fails (a warning doesn't).
  */
 import { resolveChromium, shortPath } from './lib/browser.mjs'
@@ -20,6 +21,7 @@ import { deepText, probeRelay, watchIce } from './lib/live-browser.mjs'
 import { formatDuration, formatTable } from './lib/report.mjs'
 import { pendingWarning } from '../extension/scripts/store-manager.mjs'
 import { fileURLToPath } from 'node:url'
+import { liveOrigin } from './lib/deployment.mjs'
 
 const PARTS = ['pages', 'api', 'turn', 'headers', 'release']
 const argv = process.argv.slice(2).filter((a) => a !== '--')
@@ -32,7 +34,9 @@ if (argv.includes('--help') || argv.includes('-h')) {
   console.log(`pnpm run check:live [-- --origin <url>] [--only ${PARTS.join(',')}]`)
   process.exit(0)
 }
-const ORIGIN = (arg('--origin') || process.env.OBPAL_LIVE_ORIGIN || 'https://obpal.blackboxes.net').replace(/\/+$/, '')
+let ORIGIN
+try { ORIGIN = liveOrigin(arg('--origin'), process.env) }
+catch (error) { console.error(`check:live: ${error.message}`); process.exit(2) }
 const only = arg('--only') ? arg('--only').split(',').map((s) => s.trim()) : PARTS
 const bad = only.filter((p) => !PARTS.includes(p))
 if (bad.length || !/^https?:\/\/[^/]+$/.test(ORIGIN)) {

@@ -83,6 +83,10 @@ export class PhysicalInputs {
     const typing = !!t && ((t.tagName === 'INPUT' && !/^(checkbox|radio|button|submit|reset|range|color|file|image)$/.test((t as HTMLInputElement).type)) || t.tagName === 'TEXTAREA' || t.isContentEditable)
     // Typing belongs to the field; a shortcut (Ctrl, Alt or Cmd held) to the browser.
     if ((typing && !volume) || e.ctrlKey || e.altKey || e.metaKey) return
+    // Native button activation is the focused button's, unless explicitly listening for a binding.
+    // Keyup still releases a controller key that went down before focus moved here.
+    if (down && !this.capture && ['key:Enter', 'key:NumpadEnter', 'key:Space'].includes(id) &&
+      t?.closest('button, input[type="button"], input[type="submit"], input[type="reset"]')) return
     if (down) {
       if (e.repeat || this.keysDown.has(id)) { if (this.keysDown.get(id)) this.stop(e); return }
       const handled = this.emit(id, true)

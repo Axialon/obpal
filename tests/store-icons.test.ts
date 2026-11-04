@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { readBytes, toolbarMark, iconFixtures, referencePixels, compareIcon, oldStoreIcon, alphaPixels } from './store-node.mjs'
+import { readBytes, readText, toolbarMark, iconFixtures, referencePixels, compareIcon, oldStoreIcon, alphaPixels } from './store-node.mjs'
 
 const { source, icons } = await iconFixtures()
 // Independent rasterisation of the canonical SVG, rather than the extension renderer's downsampling path.
 const reference = await referencePixels()
+const publicSnapshot = JSON.parse(readText('public-export.allowlist.json')).payloadRevision === null
 
 describe('Link icons keep the family mark', () => {
   it.each([16, 32, 48, 128])('compares silhouette and colours at a common art size for %i px', async size => {
@@ -18,8 +19,12 @@ describe('Link icons keep the family mark', () => {
     expect(difference.silhouette).toBeGreaterThan(0.98)
     expect(difference.colourMean).toBeLessThan(2)
   })
-  it('rejects the older store redraw with its different cube and rim', async () => {
+  it.skipIf(publicSnapshot)('rejects the older store redraw with its different cube and rim', async () => {
     const difference = await compareIcon(oldStoreIcon(), 16, reference)
+    expect(difference.silhouette < 0.98 || difference.colourMean > 2).toBe(true)
+  })
+  it('rejects mismatched art framing without a historical image', async () => {
+    const difference = await compareIcon(icons.find((i: { size: number }) => i.size === 128)!.png, 0, reference)
     expect(difference.silhouette < 0.98 || difference.colourMean > 2).toBe(true)
   })
   it('changes only small stroke weights, and leaves larger SVGs exact', () => {

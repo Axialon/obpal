@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { SIMS, DEVICE_IDS } from '../src/sim/catalogue'
 import { AI_SIGNALS, catalogueMarkup, deviceMarkup, INDEXABLE_PAGES, robotsTxt, simUrl, sitemapXml, structuredData } from '../scripts/lib/seo.mjs'
 import { readText } from './devtools-node.mjs'
+import { SITE } from '../scripts/lib/preview.mjs'
 
 const pages = new Set<string>([...INDEXABLE_PAGES, ...SIMS.map(simUrl).filter((p): p is string => Boolean(p))])
 const noEmpty = (value: unknown): boolean => {
@@ -18,7 +19,7 @@ describe('search pages', () => {
   })
   it('allows crawlers and points them at every canonical sim URL', () => {
     expect(robotsTxt()).toContain(`Content-Signal: ${AI_SIGNALS}`)
-    expect(robotsTxt()).toContain('Sitemap: https://obpal.blackboxes.net/sitemap.xml')
+    expect(robotsTxt()).toContain(`Sitemap: ${SITE}/sitemap.xml`)
     expect(robotsTxt()).not.toMatch(/Disallow:/)
     const xml = sitemapXml(SIMS, () => '2026-09-28')
     const found = [...xml.matchAll(/<loc>([^<]+)<\/loc><lastmod>([^<]+)<\/lastmod>/g)]
@@ -26,7 +27,7 @@ describe('search pages', () => {
     expect(found.every(([, url, date]) => pages.has(new URL(url).pathname) && date === '2026-09-28')).toBe(true)
     for (const id of DEVICE_IDS) expect(xml).toContain(`/sim/${id}/`)
     expect(xml).not.toContain('/sim/device/')
-    expect(xml).toContain('https://obpal.blackboxes.net/trust/')
+    expect(xml).toContain(`${SITE}/trust/`)
   })
 
   it('builds an indexable trust page with its own canonical address', () => {
@@ -36,7 +37,7 @@ describe('search pages', () => {
     // The build inserts the canonical tag; duplicating it in source breaks the page's single address.
     expect(html).not.toContain('rel="canonical"')
     const graph = structuredData('/trust/', SIMS)['@graph'] as Record<string, unknown>[]
-    expect(graph.some(node => JSON.stringify(node).includes('https://obpal.blackboxes.net/trust/'))).toBe(true)
+    expect(graph.some(node => JSON.stringify(node).includes(`${SITE}/trust/`))).toBe(true)
     expect(html).not.toContain('noindex')
     expect(html).toContain('name="description"')
   })
@@ -78,7 +79,7 @@ describe('search pages', () => {
     const rover = SIMS.find(c => c.id === 'rover')!
     expect(catalogueMarkup(SIMS, id => id)).toContain('href="/sim/rover/"')
     const html = deviceMarkup('<head><title>Device</title><meta name="description" content="Generic" /><link rel="canonical" href="https://obpal.blackboxes.net/sim/device/" /><meta name="robots" content="noindex, follow" /></head><h1 id="dev-name">Device</h1><p class="eyebrow" id="dev-kind">Device</p><p class="sim-lede" id="dev-blurb"></p><div class="dev-faces" id="dev-faces" role="group" aria-label="Controllers that suit it"></div>', rover, id => id)
-    expect(html).toContain('href="https://obpal.blackboxes.net/sim/rover/"')
+    expect(html).toContain(`href="${SITE}/sim/rover/"`)
     expect(html).toContain(rover.blurb)
     expect(html).toContain('application/ld+json')
     expect(html).not.toContain('noindex')

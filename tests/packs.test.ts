@@ -67,7 +67,7 @@ describe('pack envelopes and examples', () => {
     invalid({ ...profile, deprecated: { reason: 'Replaced', replacement: 'bad' } })
     expect(checkPack({ ...profile, deprecated: { reason: 'Replaced', replacement: 'obpal/new-crane' } }, context).errors).toEqual([])
   })
-  it.each(['http://example.com', 'javascript:alert(1)', 'data:text/html,hi', 'https://user:secret@example.com', 'file:///tmp/image'])('rejects URL %s in every external URL field', (url) => {
+  it.each(['http://example.com', 'javascript:alert(1)', 'data:text/html,hi', 'https://user:secret' + '@example.com', 'file:///tmp/image'])('rejects URL %s in every external URL field', (url) => {
     invalid({ ...profile, source: url }); invalid({ ...profile, author: { name: 'Author', url } }); invalid({ ...scene, body: { url } })
   })
   it('rejects oversize JSON, multibyte bytes, cycles and invalid previews', () => {

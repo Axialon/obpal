@@ -187,7 +187,7 @@ export class LinkBadge {
     this.quietTimer = setTimeout(() => { if (this.first === first) first.dataset.quiet = '' }, TRUST_QUIET_MS)
     document.addEventListener('pointerdown', this.played, true)
     this.firstObserver = new MutationObserver(() => this.placeFirst())
-    this.firstObserver.observe(document.getElementById('app') ?? document.body, { childList: true, subtree: true })
+    this.firstObserver.observe(document.body, { childList: true, subtree: true })
     this.placeFirst()
     this.render()
     if (this.compact) this.stopMoment = landSeal(this.compact, s.delayMs, s.source)
@@ -204,7 +204,7 @@ export class LinkBadge {
   private placeFirst() {
     if (!this.first) return
     const bar = this.el.closest('.bar')
-    const gate = document.querySelector('.gate-card')
+    const gate = document.querySelector('.gate-card') ?? document.querySelector('.ctl-wrap:not(.out) .ctl-sheet[data-controller-entry]') ?? document.getElementById('controller-options')
     if (bar?.isConnected) {
       this.firstObserver?.disconnect()
       if (this.railed) return
@@ -228,7 +228,6 @@ export class LinkBadge {
       })
     } else if (gate) {
       if (this.first.parentElement !== gate) gate.prepend(this.first)
-      this.firstObserver?.disconnect()
     }
   }
   /**

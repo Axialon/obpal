@@ -28,7 +28,7 @@
     "ship": "node scripts/ship.mjs",
     "astra:pack": "node scripts/astra/pack.mjs",
     "astra:intake": "node scripts/astra/intake.mjs",
-    "deploy": "pnpm run test && pnpm run build && node scripts/keep-assets.mjs wrangler deploy && node scripts/indexnow.mjs",
+    "deploy": "node scripts/deploy.mjs",
     "sync:family": "node scripts/sync-family.mjs",
     "pack:extension": "pnpm run build:extension && pnpm --filter @obpal/extension run pack",
     "store:extension": "pnpm run build:extension && node extension/scripts/store.mjs",

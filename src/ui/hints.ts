@@ -4,8 +4,10 @@ import { noticeCount, onNoticesChange } from './kit/notice'
 import { countdown, pause, remaining, resume, type Countdown } from './kit/notice-queue'
 
 type Place = 'top' | 'bottom' | 'left' | 'right'
+export type HintRect = { left: number; top: number; width: number; height: number }
+export type HintPosition = { left: number; top: number; side: Place; arrow: number; detached?: boolean }
 const KEY = 'obpal.hint.'
-interface Live { el: HTMLElement; place: () => void; timer: number; cd: Countdown; holds: Set<'hover' | 'focus'>; press: (e: Event) => void }
+interface Live { el: HTMLElement; place: () => void; clearCue: () => void; timer: number; cd: Countdown; holds: Set<'hover' | 'focus'>; press: (e: Event) => void }
 const live = new Map<string, Live>()
 /** One hint at a time: later ones wait here and show when the current one is dismissed. */
 const queue: { id: string; show: () => void }[] = []
@@ -55,7 +57,7 @@ function watch() {
  * while it is hovered, has focus, or a notice is up), goes at the first press on what it points at, and takes the pointer
  * only on its own x, so a press on a control it covers reaches the control.
  */
-export function hint(id: string, anchor: () => Element | null, text: string, opts: { place?: Place; delay?: number; mount?: HTMLElement; gap?: number } = {}) {
+export function hint(id: string, anchor: () => Element | null, text: string, opts: { place?: Place; delay?: number; mount?: HTMLElement; gap?: number; position?: (target: HintRect, hint: HintRect) => HintPosition | null } = {}) {
   if (seen(id) || live.has(id)) return
   watch()
   const show = () => {
@@ -72,7 +74,10 @@ export function hint(id: string, anchor: () => Element | null, text: string, opt
     el.querySelector('.hint-text')!.textContent = text
     el.querySelector('button')!.onclick = (e) => { e.stopPropagation(); dismissHint(id) }
     ;(opts.mount ?? document.body).appendChild(el)
+    let clearCue = () => {}
     const position = () => {
+      clearCue(); clearCue = () => {}
+      el.classList.remove('hint-detached')
       const t = anchor()
       el.classList.toggle('away', !visible(t))
       if (!t || !visible(t)) return
@@ -91,6 +96,34 @@ export function hint(id: string, anchor: () => Element | null, text: string, opt
         x = place === 'left' ? r.left - b.width - gap : r.left + r.width + gap
         el.style.setProperty('--arrow', `${r.top + r.height / 2 - y}px`)
       }
+      const custom = opts.position?.(r, b)
+      for (const side of ['top', 'bottom', 'left', 'right']) el.classList.toggle(`hint-${side}`, side === (custom?.side ?? place))
+      if (custom) {
+        x = custom.left; y = custom.top
+        el.style.setProperty('--arrow', `${custom.arrow}px`)
+      }
+      if (custom?.detached) {
+        // A detached note names its target through the actual control, without an arrow crossing other controls.
+        const text = el.querySelector<HTMLElement>('.hint-text')!, noteId = `obpal-hint-${id}`
+        const emphasized = t.classList.contains('hint-anchor')
+        const descriptions = (t.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean)
+        const described = descriptions.includes(noteId)
+        text.id = noteId
+        el.classList.add('hint-detached'); t.classList.add('hint-anchor')
+        if (!described) t.setAttribute('aria-describedby', [...descriptions, noteId].join(' '))
+        clearCue = () => {
+          if (!emphasized) t.classList.remove('hint-anchor')
+          if (!described) {
+            const current = (t.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean)
+            if (current.includes(noteId)) {
+              const rest = current.filter(value => value !== noteId)
+              if (rest.length) t.setAttribute('aria-describedby', rest.join(' '))
+              else t.removeAttribute('aria-describedby')
+            }
+          }
+          if (text.id === noteId) text.removeAttribute('id')
+        }
+      }
       el.style.left = `${x}px`
       el.style.top = `${y}px`
     }
@@ -101,7 +134,7 @@ export function hint(id: string, anchor: () => Element | null, text: string, opt
     const press = (e: Event) => { const t = anchor(); if (t && e.target instanceof Node && t.contains(e.target)) dismissHint(id) }
     document.addEventListener('pointerdown', press, true)
     const holds = new Set<'hover' | 'focus'>()
-    const h: Live = { el, place: position, timer: 0, cd: countdown(shownBefore ? NEXT_MS : FIRST_MS, performance.now()), holds, press }
+    const h: Live = { el, place: position, clearCue: () => clearCue(), timer: 0, cd: countdown(shownBefore ? NEXT_MS : FIRST_MS, performance.now()), holds, press }
     shownBefore = true
     el.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') { holds.add('hover'); sync(id) } })
     el.addEventListener('pointerleave', () => { holds.delete('hover'); sync(id) })
@@ -122,6 +155,7 @@ export function dismissHint(id: string) {
   clearTimeout(h.timer)
   removeEventListener('resize', h.place)
   document.removeEventListener('pointerdown', h.press, true)
+  h.clearCue()
   h.el.classList.remove('in')
   setTimeout(() => h.el.remove(), 260)
   const next = queue.shift()

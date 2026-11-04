@@ -69,8 +69,11 @@ export function scanText(text, { rules = [...SECRET_RULES, ...PRIVATE_RULES], de
   const t = ALLOW.reduce((s, a) => s.split(a).join(''), text)
   const found = []
   for (const r of rules) {
-    const m = r.re.exec(t)
-    if (m && (!r.check || r.check(m))) found.push({ rule: r.id, what: r.what, hint: mask(m[0]) })
+    const matches = t.matchAll(new RegExp(r.re.source, r.re.flags.replace(/g/g, '') + 'g'))
+    for (const m of matches) if (!r.check || r.check(m)) {
+      found.push({ rule: r.id, what: r.what, hint: mask(m[0]) })
+      break
+    }
   }
   const lower = t.toLowerCase()
   for (const w of deny) if (lower.includes(w.toLowerCase())) { found.push({ rule: 'deny-word', what: 'a private word from .open-source-deny', hint: '' }); break }

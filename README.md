@@ -5,7 +5,7 @@ Your phone is the controller: robots, drones, games, music and your computer, wi
 - **Sims:** over 40 at [/sim](https://obpal.blackboxes.net/sim/), from robot arms and drones to a music studio.
 - **Together:** up to eight phones in one scene.
 - **Controllers:** gamepad, wheel, trackpad, pointer, air mouse, 3D hand, keyboard, drums and keys ([spec/CATALOGUE.md](spec/CATALOGUE.md)), and the buttons of a headset, clicker or Bluetooth pad.
-- **Websites:** [Add ob.Pal Link from the Chrome Web Store](https://chromewebstore.google.com/detail/obpal-link/jnnpcnoilofjaffabnhecfokjjknlemg), a browser extension that gives a page a gamepad (for games that read the Gamepad API), a 3D mouse or keys. Tested in Chrome, Edge, Brave and Vivaldi; see [manual install](extension/README.md#manual-install-unpacked) and [the limits](extension/README.md#limitations). With ob.Pal Desktop (Windows only, macOS coming soon), the whole PC.
+- **Websites:** [Add ob.Pal Link from the Chrome Web Store](https://chromewebstore.google.com/detail/obpal-link/jnnpcnoilofjaffabnhecfokjjknlemg), a browser extension that gives a page a gamepad (for games that read the Gamepad API), a 3D mouse or keys. See [manual install](extension/README.md#manual-install-unpacked) and [the limits](extension/README.md#limitations). With ob.Pal Desktop (Windows only), the whole PC. Public-profile browser evidence is reported separately in [the export contract](docs/PUBLIC-EXPORT.md).
 - **Your own page:** one tag, `<obpal-remote>`, or the host SDK ([below](#use-it-in-your-own-page)).
 - **Private and open:** encrypted, no accounts; the code is MIT licensed.
 
@@ -71,10 +71,20 @@ pnpm dev          # http://localhost:5175 (Vite + Worker + Durable Object)
 pnpm test         # protocol math, codec and pairing tests
 pnpm run check    # typecheck + tests
 pnpm run e2e:all  # every end-to-end suite against a local worker, one table (-- phone shared for some)
-pnpm run deploy   # test, build, deploy to obpal.blackboxes.net
-pnpm run check:live  # after a deploy: pages, pairing code, API rules, TURN, security headers, and that /link/ shows the release it downloads (-- --origin for yours)
-pnpm run demo:preflight  # before presenting: the live site as a visitor, a phone joins, three sims, a watch link, TURN, /link/ (docs/PRESENTATION.md)
 ```
+
+## Run your own service
+
+The links above use the official hosted product. Deploying this source creates a service in **your own Cloudflare
+account**, on a domain you control. Follow [the self-host setup](docs/SELF-HOSTING.md) before running deployment
+commands. The public snapshot starts with no deployment route, no contribution database, and payments disabled.
+Builds without `OBPAL_PUBLIC_ORIGIN` use loopback.
+
+Set `OBPAL_PUBLIC_ORIGIN` to your HTTPS origin and `CLOUDFLARE_ACCOUNT_ID` to your own account, and configure a matching
+custom domain and your Worker name in `wrangler.jsonc`. Then `pnpm run deploy` tests, builds, and deploys that target.
+Indexing is a separate opt-in command. `pnpm run check:live` requires an explicit origin: it opens rooms, sends API
+requests and tests TURN relay traffic, so use it only on a service you operate or have permission to test.
+Presentation checks also use the selected origin; see [the presentation runbook](docs/PRESENTATION.md).
 
 Working with Claude Code agents: `.claude/README.md` lists the lane agent, the skills, the guard hook and the merge tool.
 
@@ -101,7 +111,11 @@ MIT licensed.
 
 ## Demo assets
 
-The viewer catalogue includes brand models: Club V Crew insignia (CVC, CC, K9C, MMC) and Blackboxes ecosystem models (engine cores and Box'em matrices), under `public/models/`. They are © their respective owners and are **not** covered by the MIT license; they're included only to demonstrate the viewer.
+The development catalogue includes Club V Crew insignia and Blackboxes ecosystem models. They are © their respective owners and are **not** covered by the MIT licence. Development originals are preserved; their presence in development is not redistribution permission.
+
+The generated `public-demo-v1` profile selects the existing **cube, knot and gem**, with cube as the default and Studio/Local categories. Restricted brand models, icons, the branded procedural builder, unverified promotional screenshots and campaign films are excluded. The campaign entry explains the omitted media; its download inventory is empty. Original licences, credits and the CVC notice remain as context, without granting rights to excluded assets.
+
+`public-export.allowlist.json` classifies each tracked path and pins each included input. From a clean committed checkout with dependencies installed, `node scripts/open-source.mjs --keep-logs` materializes and scans the profile locally. Its single `public-export.manifest.json` inventories output bytes and also controls staging. See [the profile and reproduction contract](docs/PUBLIC-EXPORT.md) for the included capabilities, limits and review requirements. A locally verified export is not a deployed or published release.
 
 ## License
 

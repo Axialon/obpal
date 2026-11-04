@@ -300,7 +300,7 @@ A new utility, bridge or control system needs all of the following:
 Community data is standardised and attributed by [PACKS.md](PACKS.md): envelopes, kinds, limits, compatibility and review.
 
 **Status: the contract, picker and attributed community pack loading are built; remaining design is listed below.**
-- **Built:** the controller ids (§9.1), `layout.controllers` (§9.2) and `mode{m, c?, p?}` (§9.4), in `@obpal/core` (`CONTROLLERS`, `withControllers`, `layoutControllers`, `readMode`) and `@obpal/host`, and in PROTOCOL §3. The phone names its controller and profile in `mode`, and opens the first controller the host suggests. The embed (`<obpal-remote modes="face.wii face.trackpad">`) names controllers by these ids.
+- **Built:** the controller ids (§9.1), `layout.controllers` (§9.2) and `mode{m, c?, p?}` (§9.4), in `@obpal/core` (`CONTROLLERS`, `withControllers`, `layoutControllers`, `readMode`) and `@obpal/host`, and in PROTOCOL §3. The phone names its controller and profile in `mode`. After pairing, Options ranks the host's suggestions and waits for an explicit choice. The embed (`<obpal-remote modes="face.wii face.trackpad">`) names controllers by these ids.
 - **Built (2026-09-28):** the picker (§9.3): the controller bar and the catalogue sheet, with each controller rated for the screen (`src/controller/ratings.ts`, `switcher.ts`).
 - **Design, not built:** several devices per person (§9.5), host-authored profile imports (§9.6), and the picker's pins and bridged row. Community profiles, phone mappings and compatible mode pack selection ship under [PACKS.md](PACKS.md).
 
@@ -343,7 +343,7 @@ motion profile is implied. On a switch, notes and sustain release before mode.
 
 **A controller works on a host when everything it sends, after its profile's routes (§2), is something the host takes.** A steering wheel works in any gamepad game, because its tilt is routed into the pad's left stick. The air mouse needs a host that takes `motion.point`.
 - **Takes:** `layout.utilities` lists the utilities the host takes; absent means all of them, as today. Today only the Gamepad's chips read it, and no host sends it. With the picker, every host should.
-- **Suggests:** `layout.controllers` lists the controllers the host suggests, in order, and the first opens by default (the phone opens it once, on the first `welcome`; after that the person's choice stands).
+- **Suggests:** `layout.controllers` lists the controllers the host suggests, in order. The first ranks best in Options; it never opens automatically. A verified first connection waits for an explicit choice. A reconnect to the same active screen keeps that choice while it remains supported, with all held input released.
   - A host that sends only `modes` (every host before controllers) gets the faces whose modes it lists (`layoutControllers`): Rotate is `face.trackpad`, Point `face.wii` (or `face.mouse` with `point: 'mouse'`), 3D `face.hand`, Gamepad `face.gamepad`, and a keyboard in the tray `face.keyboard`.
   - The SDK fills in the fields older phones read (`withControllers`, which `Remote` applies to every layout it sends): absent `modes` become the controllers' modes, in order; `face.mouse` ahead of `face.wii` sets `point: 'mouse'`; `face.keyboard` adds a keyboard control to the tray; `face.wheel` ahead of `face.gamepad` suggests the Driving profile. Whatever the layout sets itself is kept.
   - Unknown ids are skipped, so a host may already name controllers a later phone will have.
@@ -380,7 +380,7 @@ Planned catalogue entries don't show on a device; the /catalogue/ page lists the
   - `@obpal/host` reads them into `Participant.controller` and `Participant.profile` (`readMode`). A device that doesn't say is taken to use the controller its mode stands for (`controllerOf`), so hosts see a controller for every phone, old or new.
   - Ids are checked for shape only (a kind, a dot and a name; a profile id as in §3), so a newer device can name a controller or a community profile the host doesn't know.
 - A claim (§5) survives a switch: the node follows whatever the participant uses next. For a system that moves real things (§7), letting go is the deadman, so the node stops until the new controller takes hold.
-- The host may answer with a new layout: another suggestion, or `utilities` that rule the controller out. The device then moves to the first controller it can use, and a toast says why.
+- The host may answer with a new layout: another suggestion, or `utilities` that rule the controller out. A changed suggestion leaves the person's supported choice alone. If that choice is no longer supported, the device releases held input and returns to Options for another explicit choice.
 - The device remembers the last controller per host, the way it remembers profiles (§3).
 
 ### 9.5 Several devices per person

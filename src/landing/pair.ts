@@ -4,6 +4,7 @@
  * move of the mouse, a key or a scroll), so a visit that never looks costs no room.
  */
 import type { Remote } from '@obpal/host'
+import { siteOptions } from '../service'
 import type { ScreenPointer } from '../viewer/pointer'
 import { holdForPhone } from '../ui/recover'
 import { ICONS } from '../ui/icons'
@@ -13,13 +14,13 @@ export interface Paired { remote: Remote; Pointer: typeof ScreenPointer }
 
 export async function startPairing(slot: HTMLElement): Promise<Paired> {
   const [{ PairingChip, Remote }, { Mode }, { ScreenPointer: Pointer }] = await Promise.all([import('@obpal/host'), import('@obpal/core'), import('../viewer/pointer')])
-  const remote = await Remote.create({
+  const remote = await Remote.create(siteOptions({
     appName: 'ob.Pal',
     // The phone is a tray first (its tilt rolls its marble, as on the phone's own page), then a pointer. Flicking it
     // upward tosses its marble either way.
     layout: { v: 1, tray: [], modes: [Mode.tilt, Mode.point], toss: true },
     seats: 4,
-  })
+  }))
   holdForPhone(remote)
   slot.replaceChildren()
   // The pairing chip as a panel in the hero's own glass: the QR code as wide as the card, the short code under it.

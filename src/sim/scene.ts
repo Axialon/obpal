@@ -6,6 +6,7 @@
 import { CONTROLLERS, layoutControllers, type SceneNode } from '@obpal/core'
 import { Claims, PairingChip, PartFocus, Remote, type Layout, type Participant } from '@obpal/host'
 import { family } from '../family'
+import { siteOptions } from '../service'
 import { ICONS } from '../ui/icons'
 import { iconAction, SIM_ACTION_ICONS } from '../ui/kit/action'
 import { mountNotices, notify, type NoticeTone } from '../ui/kit/notice'
@@ -82,7 +83,7 @@ export async function startSimScene(o: SimOptions): Promise<SimScene> {
   mountBodyCapture()
   mountNotices()
   o.layout = { ...o.layout, universal: true }
-  const remote = await Remote.create({ appName: o.appName, layout: o.layout, seats: 8, session: location.pathname + location.search.replace(/[?&](test|local)=[^&]*/g, '') })
+  const remote = await Remote.create(siteOptions({ appName: o.appName, layout: o.layout, seats: 8, session: location.pathname + location.search.replace(/[?&](test|local)=[^&]*/g, '') }))
   holdForPhone(remote)
   const query = new URLSearchParams(location.search)
   const control = new ControlSession(remote, query.get('d') ?? (location.pathname.includes('/marblerun/') ? 'marblerun' : location.pathname.includes('/arm/') ? `arm-${query.get('kind') ?? 'arm5'}` : location.pathname.includes('/humanoid/') ? 'humanoid' : 'arena'))

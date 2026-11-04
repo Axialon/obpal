@@ -4,6 +4,7 @@
  * { segment, file, status: 'pass' | 'WARN' | 'FAIL', ms, bytes, detail }.
  */
 import { DEFAULT_ORIGIN } from './preflight.mjs'
+import { publicOrigin } from './deployment.mjs'
 
 /** The length a backup clip should have, in seconds (a presenter cuts to it for half a minute, not for minutes). */
 export const CLIP_SECONDS = { min: 30, default: 40, max: 60 }
@@ -32,7 +33,7 @@ export const DEFAULT_OUT = 'artifacts/demo-clips'
  */
 export function parseArgs(argv, env = {}) {
   const opts = {
-    out: '', origin: (env.OBPAL_LIVE_ORIGIN || DEFAULT_ORIGIN).replace(/\/+$/, ''), only: SEGMENTS.map((s) => s.key),
+    out: '', origin: (env.OBPAL_PUBLIC_ORIGIN || env.OBPAL_LIVE_ORIGIN || DEFAULT_ORIGIN).replace(/\/+$/, ''), only: SEGMENTS.map((s) => s.key),
     seconds: CLIP_SECONDS.default, software: env.OBPAL_E2E_GPU === 'swiftshader', noLease: false, waitMin: null, help: false,
   }
   const folders = []
@@ -59,7 +60,7 @@ export function parseArgs(argv, env = {}) {
   }
   if (folders.length > 1) throw new Error(`one folder at most (got ${folders.length})`)
   opts.out = folders[0] ?? ''
-  if (!/^https?:\/\/[^/]+$/.test(opts.origin)) throw new Error(`not an origin: ${opts.origin}`)
+  opts.origin = publicOrigin(opts.origin)
   const keys = SEGMENTS.map((s) => s.key)
   const bad = opts.only.filter((k) => !keys.includes(k))
   if (bad.length) throw new Error(`unknown segment ${bad.join(', ')} (segments: ${keys.join(' ')})`)

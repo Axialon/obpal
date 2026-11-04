@@ -7,9 +7,9 @@ import { readText } from './devtools-node.mjs'
 const rgb = (...pixels: number[][]) => Uint8Array.from(pixels.flat())
 
 describe('demo preflight: the command line', () => {
-  it('defaults to the live site, every part and the three flagship sims', () => {
+  it('defaults to loopback, every part and the three flagship sims', () => {
     const o = parseArgs([], {})
-    expect(o).toMatchObject({ origin: 'https://obpal.blackboxes.net', only: PARTS, sims: DEFAULT_SIMS, budgetS: 300, withoutBeacon: false, help: false })
+    expect(o).toMatchObject({ origin: 'http://localhost:5175', only: PARTS, sims: DEFAULT_SIMS, budgetS: 300, withoutBeacon: false, help: false })
     expect(DEFAULT_SIMS).toEqual(['drone', 'humanoid', 'arm'])
     expect(DEFAULT_SIMS.every((s) => s in SIMS)).toBe(true)
   })

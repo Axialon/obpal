@@ -5,8 +5,10 @@
  * description of its own is described as the home page is; tests/messaging.test.ts checks them.
  */
 
-/** Where the site is served, which previews always name (a link shared from anywhere points there). */
-export const SITE = 'https://obpal.blackboxes.net'
+import { publicOrigin } from './deployment.mjs'
+
+/** Previews, canonical URLs and the sitemap share the build's explicit origin; fresh builds stay local. */
+export const SITE = publicOrigin(process.env.OBPAL_PUBLIC_ORIGIN)
 /** The preview image, at the size the social sites draw a large card. */
 export const PREVIEW_IMAGE = {
   path: '/og.png',

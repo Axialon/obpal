@@ -4,10 +4,13 @@ import { appendFileSync, mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { resolve, join } from 'node:path'
 import { guardShip, runShip } from './lib/ship.mjs'
+import { deploymentTarget, publicationTarget } from './lib/deployment.mjs'
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true }).trim()
 try {
+  deploymentTarget(process.env)
+  const target = publicationTarget(process.env)
   guardShip({ root, gitDir: git(['rev-parse', '--path-format=absolute', '--git-dir']), commonDir: git(['rev-parse', '--path-format=absolute', '--git-common-dir']), branch: git(['branch', '--show-current']), status: git(['status', '--porcelain']) })
   const sha = git(['rev-parse', 'HEAD'])
   // check:live prints the store lag warning in this command's output too.
@@ -20,7 +23,7 @@ try {
     if (run.stderr) process.stderr.write(run.stderr)
     if (run.error || run.status !== 0) throw new Error(run.error?.message || `exit ${run.status}`)
     return run.stdout + run.stderr
-  })
+  }, target)
   mkdirSync(join(root, '.claude/local'), { recursive: true })
   appendFileSync(join(root, '.claude/local/ships.log'), JSON.stringify({ at: new Date().toISOString(), sha, ...result }) + '\n')
   console.log(`Worker version: ${result.version}\ncheck:live: ${result.check}\nPublished commit: ${result.published}`)

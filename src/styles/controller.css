@@ -1,6 +1,12 @@
 html, body { height: 100%; overflow: hidden; overscroll-behavior: none; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
 body { letter-spacing: -0.006em; background: var(--page); }
-#app { position: fixed; inset: 0; z-index: 1; }
+#app { position: fixed; inset: 0; top: var(--phone-notice-space); z-index: 1; }
+
+/* Phone notices keep their shared lifetime, in a measured strip clear of controls and sheets. */
+:root { --phone-notice-space: 0px; }
+:root[data-phone-notices] { --phone-notice-space: calc(var(--phone-notice-height) + var(--sp-3)); }
+.obpal-notices[data-phone-reserved], .obpal-notices[data-phone-reserved][data-anchored] { top: var(--inset-t); bottom: auto; left: var(--inset-l); right: var(--inset-r); width: auto; transform: none; }
+:root[data-phone-notices] .surface > :is(.pad, .wii, .mouse, .music-face) { min-height: 0; }
 
 /* ---- the controller's layout system: one spacing scale, one edge, one touch size, for every face ----
    --edge: the nearest any control comes to the screen's edge, beyond its safe area. --tap: the smallest a touch target
@@ -52,7 +58,7 @@ body.live .aurora i { animation-play-state: paused; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* ---- start gate ---- */
-.gate { position: fixed; inset: 0; z-index: 20; display: grid; place-items: end center; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); background: rgb(var(--base-rgb) / 0.45); animation: fade 0.25s var(--ease); }
+.gate { position: fixed; inset: 0; top: var(--phone-notice-space); z-index: 20; display: grid; place-items: end center; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); background: rgb(var(--base-rgb) / 0.45); animation: fade 0.25s var(--ease); }
 .gate-card { width: min(440px, 100%); padding: 28px 22px 22px; border-radius: 30px; display: flex; flex-direction: column; align-items: center; text-align: center; animation: rise 0.35s var(--ease); }
 .gate-art { width: 76px; height: 76px; display: grid; place-items: center; border-radius: 26px; color: var(--accent-soft); background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.45), rgb(var(--accent2-rgb) / 0.16)); border: 1px solid var(--glass-edge); box-shadow: 0 14px 34px rgb(var(--accent-rgb) / 0.3); }
 .gate-art .ic { width: 40px; height: 40px; animation: gyro-spin 6s linear 2; }
@@ -62,7 +68,7 @@ body.live .aurora i { animation-play-state: paused; }
 /* ---- control surface ----
    One column in portrait: the top bar, the controller bar, the face in use, the screen's tray and the dock. Every
    control keeps --edge from the screen's edges (beyond its safe area) and is at least --tap across. */
-.surface { position: fixed; inset: 0; display: flex; flex-direction: column; gap: var(--sp-3);
+.surface { position: fixed; inset: 0; top: var(--phone-notice-space); display: flex; flex-direction: column; gap: var(--sp-3);
   padding: var(--inset-t) var(--inset-r) var(--inset-b) var(--inset-l);
   animation: fade 0.35s var(--ease); }
 
@@ -244,10 +250,11 @@ body.live .aurora i { animation-play-state: paused; }
 .glow-end[hidden] { display: none; }
 /* A safety stop (TrayControl tone 'stop'): red, in words, and never scrolled away behind the others. */
 .tray-btn.stop { min-width: 76px; background: linear-gradient(150deg, rgb(244 63 94 / 0.9), rgb(190 18 60 / 0.92)); border-color: rgb(254 205 211 / 0.45); box-shadow: 0 6px 20px -8px rgb(244 63 94 / 0.8); order: -1; }
-.tray-btn.stop .tray-label { color: #fff; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; font-size: 13px; }
+.tray-btn.stop .tray-label { color: #fff; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; font-size: 13px; white-space: normal; overflow-wrap: anywhere; }
 .tray-btn[aria-pressed='true'] { color: var(--accent-soft); background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.36), rgb(var(--accent2-rgb) / 0.12)); border-color: rgb(var(--accent-rgb) / 0.5); }
 .tray-btn[aria-pressed='true'] .tray-label { color: var(--accent-soft); }
 .tray-btn.select { flex-direction: row; gap: 10px; padding: 0 10px; min-width: 0; max-width: calc(var(--ui-vw, 1vw) * 62); border-color: rgb(var(--accent-rgb) / 0.45); background: linear-gradient(145deg, rgb(var(--accent-rgb) / 0.26), rgb(var(--hl-rgb) / 0.04)); color: var(--ink); }
+.tray-btn.select.hint-anchor { border-color: rgb(var(--accent-rgb)) !important; box-shadow: inset 0 0 0 2px rgb(var(--accent-rgb)); }
 .sel-thumb { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 14px; background: rgb(var(--base-rgb) / 0.55); border: 1px solid rgb(var(--hl-rgb) / 0.1); font-size: 18px; font-weight: 800; overflow: hidden; }
 .sel-thumb img { width: 36px; height: 36px; object-fit: contain; }
 /* Shared scene: this device's colour (its accent), the same as its cursor and halo on the screen. */
@@ -320,10 +327,10 @@ body.live .aurora i { animation-play-state: paused; }
    It's heavy frosted glass: the controls behind read as colour and shape, never as text. The scrim that dims and
    softens the rest fades on a layer of its own (::before), and the sheet slides rather than fades: anything fading
    around or on the sheet would let the controls behind show through sharp while it opens and closes. */
-.sheet-wrap { position: fixed; inset: 0; z-index: 30; display: grid; place-items: end center; padding: max(56px, calc(var(--safe-t) + 40px)) var(--inset-r) var(--inset-b) var(--inset-l); }
+.sheet-wrap { position: fixed; inset: 0; top: var(--phone-notice-space); z-index: 30; display: grid; place-items: end center; padding: max(56px, calc(var(--safe-t) + 40px)) var(--inset-r) var(--inset-b) var(--inset-l); }
 .sheet-wrap::before { content: ''; position: absolute; inset: 0; z-index: -1; background: rgb(var(--base-rgb) / 0.42);
   -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); animation: fade 0.2s var(--ease); }
-@supports (height: 100dvh) { .sheet-wrap { bottom: auto; height: 100dvh; } }
+@supports (height: 100dvh) { .sheet-wrap { bottom: auto; height: calc(100dvh - var(--phone-notice-space)); } }
 .sheet-wrap.out::before { animation: fade-out 0.2s var(--ease) forwards; }
 .sheet-wrap.out .sheet { animation: sheet-down 0.2s var(--ease) forwards; }
 /* A coaching hint must not cover a sheet's controls, including one that appears after the sheet opens. */
@@ -341,6 +348,11 @@ body:has(.sheet-wrap) .hint { visibility: hidden; }
 .sheet-x { grid-column: 3; width: var(--tap); height: var(--tap); border-radius: 50%; }
 .sheet-x:not(.glass) { padding: 0; border: 1px solid var(--line); background: rgb(var(--hl-rgb) / 0.06); color: var(--secondary); }
 .sheet-x .ic { width: 18px; height: 18px; }
+.sheet-head:has(> .stop) { grid-template-columns: minmax(var(--tap), 1fr) minmax(0, 1fr) var(--tap); gap: var(--sp-2); }
+.sheet-head > .stop { grid-column: 1; grid-row: 1; min-width: 0; max-width: 100%; min-height: var(--tap); height: auto; white-space: normal; overflow-wrap: anywhere; }
+/* Settings keeps a long or enlarged Stop on its own full-width row, below the grip and Close. */
+.settings > .sheet-head:has(> .stop) { grid-template-columns: var(--tap) minmax(0, 1fr) var(--tap); }
+.settings > .sheet-head > .stop { grid-column: 1 / -1; grid-row: 2; width: 100%; }
 .sheet-k { display: flex; align-items: center; gap: 10px; margin: 6px 2px -6px; font-size: 11px; font-weight: 750; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); }
 /* Numbered small-caps sections, as the catalogue's: the number in the data face, a hairline running out after. */
 .sheet-k b { font: 600 11px/1 var(--font-data); letter-spacing: 0; color: var(--accent-text); }
@@ -390,6 +402,7 @@ body:has(.sheet-wrap) .hint { visibility: hidden; }
    fits the screen (works, suits, best), a spark on the best, dimmed and dashed where the screen doesn't take it.
    Numbered small-caps headings keep the two groups apart; the legend under them says what the marks mean. */
 .ctl-sheet { position: relative; width: min(520px, 100%); gap: var(--sp-4); }
+.surface[data-controller='face.keyboard'] > :is(.pad, .wii, .mouse, .dock) { display: none; }
 .ctl-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin: -4px 2px 0; min-width: 0; }
 .ctl-head h2 { margin: 0; font: 750 22px/1.2 var(--font-display); letter-spacing: -0.03em; }
 .ctl-for { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 58%; height: 30px; margin: 0; padding: 0 12px; border-radius: 999px;
@@ -459,10 +472,10 @@ body:has(.sheet-wrap) .hint { visibility: hidden; }
 .tray-btn.select > .ic { color: var(--accent-text); }
 .pick[aria-selected='true'] { background: linear-gradient(150deg, rgb(var(--accent-rgb) / 0.3), rgb(var(--surface-rgb) / 0.4)) !important; border-color: rgb(var(--accent-rgb) / 0.7) !important; }
 .theme-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.accent-row { display: grid; grid-template-columns: repeat(5, 1fr); justify-items: center; gap: 10px 0; }
+.accent-row { display: grid; grid-template-columns: repeat(5, 1fr); justify-items: center; gap: 14px 0; margin-inline: -2px; }
 .accent-row .bb-accent { width: 36px; height: 36px; }
-/* Each swatch (the family's: its colour on the surface in effect) answers a finger a little beyond its disc. */
-.accent-row .bb-accent::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; }
+/* The transparent margin covers rounded click coordinates; spacing keeps neighboring hover targets separate. */
+.accent-row .bb-accent::after { content: ''; position: absolute; inset: -5px; border-radius: 0; }
 .theme-opt { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 9px 4px; border-radius: 16px; border: 1px solid var(--glass-edge); background: rgb(var(--hl-rgb) / 0.03); font-size: 11px; font-weight: 650; color: var(--secondary); touch-action: manipulation; }
 .theme-opt[aria-checked='true'] { border-color: rgb(var(--accent-rgb) / 0.75); background: rgb(var(--accent-rgb) / 0.12); color: var(--ink); }
 /* What the 3D hand follows: its words over three choices in a row, as the surface choices are. */
@@ -845,10 +858,10 @@ body.resting .rest { display: grid; }
 .bt-n-picks .bt-n-go { margin-left: auto; }
 
 /* Settings → Buttons: the sources that have worked here, and the way in. */
-.set-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 58px; padding: 0 12px 0 14px; border-radius: 18px; color: var(--ink); text-align: left; touch-action: manipulation; }
+.set-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 58px; height: auto; padding: 8px 12px 8px 14px; border-radius: 18px; color: var(--ink); text-align: left; touch-action: manipulation; }
 .set-row > .ic:first-child { width: 22px; height: 22px; color: var(--accent-text); }
-.set-row > span:not(.set-srcs) { flex: 1; min-width: 0; display: grid; font-size: 14.5px; font-weight: 700; letter-spacing: -0.01em; }
-.set-row small { font-size: 12px; font-weight: 550; color: var(--muted); }
+.set-row > span:not(.set-srcs) { flex: 1; min-width: 0; display: grid; gap: var(--sp-3); font-size: 14.5px; font-weight: 700; line-height: 1.3; letter-spacing: -0.01em; }
+.set-row small { font-size: 12px; font-weight: 550; line-height: 1.4; overflow-wrap: anywhere; color: var(--muted); }
 .set-row > .ic:last-child { width: 18px; height: 18px; color: var(--muted); }
 .set-srcs { display: flex; gap: 4px; }
 .set-srcs i { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 9px; background: rgb(var(--src) / 0.2); color: var(--ink); }

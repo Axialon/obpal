@@ -150,6 +150,7 @@ a { color: var(--accent-text); }
 .hint-top::before { bottom: -5px; left: calc(var(--arrow, 50%) - 5px); }
 .hint-right::before { left: -5px; top: calc(var(--arrow, 50%) - 5px); }
 .hint-left::before { right: -5px; top: calc(var(--arrow, 50%) - 5px); }
+.hint.hint-detached::before { display: none; }
 /* float on the compositor (transform), never on layout, so motion is sub-pixel smooth */
 @keyframes hint-float { 0%, 100% { transform: translate3d(0, 0, 0); } 50% { transform: translate3d(0, -4px, 0); } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; } }

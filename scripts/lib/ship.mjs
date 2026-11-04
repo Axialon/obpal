@@ -1,6 +1,7 @@
 /** Release preconditions and ordered steps, testable without a deployment. */
 import { resolve } from 'node:path'
 import { stripAnsi } from './report.mjs'
+import { publicationTarget } from './deployment.mjs'
 
 export function guardShip({ root, gitDir, commonDir, branch, status }) {
   const same = (a, b) => resolve(a).toLowerCase() === resolve(b).toLowerCase()
@@ -15,7 +16,10 @@ export function workerVersion(output) {
   return match[1]
 }
 
-export function runShip(run) {
+export function runShip(run, target) {
+  // Validate before deploy so a missing publication destination cannot leave a partially shipped release.
+  const { repository } = publicationTarget({ OBPAL_PUBLIC_REPOSITORY: target?.repository,
+    OBPAL_SNAPSHOT_AUTHOR_NAME: target?.authorName, OBPAL_SNAPSHOT_AUTHOR_EMAIL: target?.authorEmail })
   const step = (name, command, args) => {
     try { return run(command, args) } catch (error) { throw new Error(`${name} failed: ${error.message}`) }
   }
@@ -26,7 +30,7 @@ export function runShip(run) {
   const check = stripAnsi(live).split(/\r?\n/).findLast(line => /^all passed(?:,| \()/.test(line.trim()))?.trim()
   if (!check) throw new Error('check:live evidence failed: no passing summary')
   step('open-source publish', 'node', ['scripts/open-source.mjs', '--publish'])
-  const remote = step('published commit lookup', 'git', ['ls-remote', 'https://github.com/Axialon/obpal.git', 'refs/heads/main'])
+  const remote = step('published commit lookup', 'git', ['ls-remote', `https://github.com/${repository}.git`, 'refs/heads/main'])
   const published = /^([a-f0-9]{40})\s+refs\/heads\/main\s*$/i.exec(stripAnsi(remote).trim())?.[1]
   if (!published) throw new Error('published commit lookup failed: no main ref')
   step('backup', 'node', ['scripts/backup.mjs', '--label', 'ship'])

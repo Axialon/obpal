@@ -64,6 +64,7 @@ async function until(what, fn, timeout = 10000, every = 100) {
   }
 }
 const results = []
+const safeError = e => String(e?.stack ?? e?.message ?? e).replace(/(https?:\/\/[^\s"'<>]+)#[^\s"'<>]+/g, '$1#[redacted]').replace(/\b\d{5}[ -]?\d{5}\b/g, '[redacted code]')
 async function check(name, fn) {
   // OBPAL_E2E_PHONE_CHECKS=<regex> runs only the checks whose names match (the setup around them still runs).
   if (process.env.OBPAL_E2E_PHONE_CHECKS && !new RegExp(process.env.OBPAL_E2E_PHONE_CHECKS).test(name)) return
@@ -73,7 +74,7 @@ async function check(name, fn) {
     console.log(`  ✓ ${name}${detail ? ` (${detail})` : ''}`)
   } catch (e) {
     results.push({ ok: false })
-    console.log(`  ✗ ${name}: ${e?.message ?? e}`)
+    console.log(`  ✗ ${name}: ${safeError(e)}`)
   }
 }
 
@@ -95,7 +96,9 @@ try {
     { name: 'phone CSP', run: () => check('no Content Security Policy violations on any page', cspCheck) },
     { name: 'phone declutter', run: () => phoneDeclutter({ browser: sb, origin: local.origin, check }) },
   ], check)
-  if (process.env.OBPAL_E2E_PHONE_ONLY === 'connections') {
+  if (process.env.OBPAL_E2E_PHONE_ONLY === 'mobile') {
+    await phoneConnections({ browser: sb, origin: local.origin, check, shots: SHOTS })
+  } else if (process.env.OBPAL_E2E_PHONE_ONLY === 'connections') {
     await phoneConnections({ browser: sb, origin: local.origin, check, shots: SHOTS })
     await check('connection sheets and controller controls retain centred ink', async () => {
       const rows = []
@@ -423,7 +426,7 @@ try {
   }
   }
 } catch (e) {
-  console.error(e)
+  console.error(safeError(e))
   exitCode = 1
 } finally {
   await Promise.allSettled(closers.map((c) => c.close()))

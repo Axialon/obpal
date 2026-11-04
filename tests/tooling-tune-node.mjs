@@ -12,6 +12,7 @@ import { digestLane } from '../scripts/lanes/digest.mjs'
 import { execFileSync } from 'node:child_process'
 import { cleanupLane, withLedger, writeLedger, readLedger, waitLane, stopFinalLane, laneState } from '../scripts/lanes/lib.mjs'
 import { treeSize } from '../scripts/lib/maintenance.mjs'
+import { phoneEvidence, paletteTapWitness } from '../scripts/phone-evidence.mjs'
 
 const fixture = async action => {
   const root = mkdtempSync(join(tmpdir(), 'obpal-tooling-test-'))
@@ -19,7 +20,115 @@ const fixture = async action => {
 }
 const picture = path => sharp({ create: { width: 80, height: 60, channels: 3, background: '#aabbcc' } }).png().toFile(path)
 const repo = fileURLToPath(new URL('..', import.meta.url))
+
+/** Production palette caller with DOM/geometry stand-ins; no browser, GPU or image encoder. */
+function paletteErrors(primary, restoration) {
+  const source = readFileSync(join(repo, 'scripts/phone-mobile-layout.mjs'), 'utf8')
+  const start = source.indexOf('async function paletteHitEvidence('), end = source.indexOf('\nexport async function mobileLayoutEvidence(', start)
+  assert(start > 0 && end > start)
+  const probe = new Function('stableBox', `${source.slice(start, end)}; return paletteHitEvidence`)(async () => {})
+  const reports = []; let restores = 0, writes = 0
+  const record = id => ({ id, geometry: { stable: true }, samples: Array.from({ length: 13 }, (_, x) => ({ x, y: 1, owned: true })), valid: true, paint: { buttonRadius: '50%', discRadius: '50%', extensionFill: 'rgba(0, 0, 0, 0)' } })
+  const button = id => ({ getAttribute: async () => id, evaluate: async fn => fn.constructor.name === 'AsyncFunction' ? record(id) : { id, x: 1, y: 1, owned: true, hasRoom: true, available: { top: 0, bottom: 300, height: 300 } }, click: async () => { restores++; if (restoration) throw restoration } })
+  const buttons = { count: async () => 2, nth: i => button(i ? 'lime' : 'product') }
+  const phone = {
+    locator: selector => selector.includes('aria-checked') ? { evaluateAll: async () => 'product' } : selector.includes('data-accent=') ? button('product') : buttons,
+    bringToFront: async () => { if (primary) throw primary }, touchscreen: { tap: async () => {} },
+    waitForFunction: async (_fn, id) => ({ jsonValue: async () => ({ id, expectedColor: '#c6ff34', actualColor: '#c6ff34', appliedColor: '#c6ff34' }), dispose: async () => {} }),
+    evaluate: async (_fn, value) => { if (Array.isArray(value)) { writes++; return }; return true },
+  }
+  return { reports, run: () => probe(phone, async report => { reports.push(report) }), restores: () => restores, writes: () => writes }
+}
+
 export const cases = [
+  { name: 'phone palette tap witness is passive, bounded and removes its owned listeners', run() {
+    const fixture = () => {
+      const listeners = new Map(), timers = new Map(), microtasks = [], colors = { turquoise: '#99e1d9', candy: '#b2d5e5' }
+      let selected = 'candy', observer, prevented = 0, removed = 0
+      const box = (x, y, width, height) => ({ x, y, width, height })
+      const buttons = Object.fromEntries(['turquoise', 'candy'].map((id, i) => [id, { dataset: { accent: id }, closest() { return this }, matches: () => false, getBoundingClientRect: () => box(190 + i * 50, 416, 36, 36) }]))
+      const header = { getBoundingClientRect: () => box(16, 56, 288, 172) }, footer = { getBoundingClientRect: () => box(16, 642, 288, 81) }
+      const sheet = { scrollTop: 1204, scrollLeft: 0, getBoundingClientRect: () => box(16, 56, 288, 668), querySelector: selector => selector.includes('sheet-head') ? header : footer }
+      const palette = {}, documentElement = {}
+      const doc = { documentElement, querySelector: selector => selector === '.settings' ? sheet : selector.includes('accent-row') ? palette : buttons[selector.match(/data-accent="([^"]+)"/)?.[1]], querySelectorAll: () => [buttons[selected]], elementFromPoint: () => buttons.turquoise,
+        addEventListener(type, fn, options) { assert.deepEqual(options, { capture: true, passive: true }); listeners.set(type, fn) },
+        removeEventListener(type, fn, capture) { assert.equal(capture, true); assert.equal(listeners.get(type), fn); listeners.delete(type); removed++ },
+      }
+      let tick = 0
+      const env = { document: doc, innerWidth: 320, innerHeight: 740, devicePixelRatio: 1.5, performance: { now: () => ++tick }, matchMedia: () => ({ matches: false }),
+        getComputedStyle: node => ({ transform: 'none', left: '-4px', top: '-4px', width: '44px', height: '44px', borderRadius: '0px', getPropertyValue: name => name === '--bb-accent' ? colors[selected] : colors[node.dataset?.accent] ?? '' }),
+        BlackboxesFamily: { getAccent: () => selected, accentColor: () => colors[selected] },
+        MutationObserver: class { constructor(fn) { this.fn = fn; this.observed = []; this.disconnected = false; observer = this } observe(node, options) { this.observed.push({ node, options }) } disconnect() { this.disconnected = true } },
+        setTimeout(fn, ms) { assert.equal(ms, 65000); timers.set(1, fn); return 1 }, clearTimeout(id) { timers.delete(id) }, queueMicrotask: fn => microtasks.push(fn),
+      }
+      return { env, listeners, timers, buttons, observer: () => observer, removed: () => removed, prevented: () => prevented,
+        emit(type, target = buttons.candy) { listeners.get(type)?.({ type, target, isTrusted: false, pointerType: 'touch', clientX: 230.9375, clientY: 434.796875, changedTouches: [{ clientX: 230.9375, clientY: 434.796875 }], preventDefault() { prevented++ } }) },
+        select(id) { selected = id; observer.fn() }, flush() { while (microtasks.length) microtasks.shift()() } }
+    }
+    const spec = { target: 'turquoise', neighbor: 'candy', point: { x: 230.9375, y: 434.796875 } }, f = fixture()
+    assert.throws(() => paletteTapWitness({ ...spec, target: 'not-an-accent' }, f.env), /Invalid/)
+    paletteTapWitness(spec, f.env)
+    assert.equal(f.listeners.size, 7); assert.equal(f.observer().observed.length, 2)
+    assert.throws(() => paletteTapWitness(spec, f.env), /already active/)
+    f.emit('pointerdown'); f.emit('touchstart'); f.emit('pointerup'); f.emit('touchend'); f.emit('click'); f.select('turquoise'); f.flush()
+    const control = f.env.__mobilePaletteTapWitness
+    const seen = control.read(), click = seen.events.find(e => e.kind === 'click'), after = seen.events.find(e => e.kind === 'after-click')
+    assert.equal(click.targetId, 'candy'); assert.equal(click.ownerAtEventPoint, 'turquoise'); assert.equal(click.state.dpr, 1.5)
+    assert.deepEqual(after.state.selected, ['turquoise']); assert.equal(after.state.apiColor, '#99e1d9'); assert.equal(after.state.rootColor, '#99e1d9')
+    const unknown = { dataset: { accent: 'not-an-accent' }, closest() { return this } }
+    f.emit('click', unknown); f.flush()
+    assert.equal(control.read().events.filter(e => e.kind === 'click').at(-1).targetId, 'other')
+    assert(!JSON.stringify(control.read()).includes('not-an-accent'))
+    assert.equal(f.prevented(), 0)
+    for (let i = 0; i < 200; i++) control.mark('target-before')
+    const stopped = control.stop('owner-finally')
+    assert.equal(stopped.events.length, 160); assert(stopped.overflowEvents > 0)
+    assert.equal(stopped.active, false); assert.equal(f.listeners.size, 0); assert.equal(f.timers.size, 0); assert(f.observer().disconnected)
+    control.stop('owner-finally'); assert.equal(f.removed(), 7)
+    const timed = fixture(); paletteTapWitness(spec, timed.env); timed.timers.get(1)()
+    assert.equal(timed.env.__mobilePaletteTapWitness.read().active, false); assert.equal(timed.listeners.size, 0); assert(timed.observer().disconnected)
+  } },
+  { name: 'phone palette errors keep the measurement primary when restoration also fails', async run() {
+    const primary = new Error('measured palette ownership failure'), restoration = new Error('restore click intercepted')
+    const f = paletteErrors(primary, restoration)
+    await assert.rejects(f.run(), error => { assert(error instanceof AggregateError, `expected both failures; got ${error.message}`); assert.deepEqual(error.errors, [primary, restoration]); assert(error.message.startsWith(primary.message)); return true })
+    assert.deepEqual(f.reports.map(r => r.stage), ['primary', 'restoration'])
+    assert.deepEqual(f.reports.map(r => r.reason), [primary.message, restoration.message])
+    assert.equal(f.restores(), 1); assert.equal(f.writes(), 1)
+  } },
+  { name: 'phone palette errors keep a primary failure when restoration succeeds', async run() {
+    const primary = new Error('measured palette ownership failure'), f = paletteErrors(primary)
+    await assert.rejects(f.run(), error => error === primary)
+    assert.equal(f.reports.length, 1); assert.equal(f.reports[0].reason, primary.message)
+    assert.equal(f.restores(), 1); assert.equal(f.writes(), 1)
+  } },
+  { name: 'phone palette errors reject and record a restoration-only failure', async run() {
+    const restoration = new Error('restore click intercepted'), f = paletteErrors(undefined, restoration)
+    await assert.rejects(f.run(), error => error === restoration)
+    assert.deepEqual(f.reports.map(r => r.stage), ['restoration'])
+    assert.equal(f.reports[0].reason, restoration.message)
+    assert.equal(f.restores(), 1); assert.equal(f.writes(), 1)
+  } },
+  { name: 'phone capture callers preserve independent scenarios, expected states and failure metadata', run: () => fixture(async root => {
+    const raw = rawRun(root)
+    try {
+      const proof = phoneEvidence(raw, root), page = { screenshot: async ({ path }) => picture(path) }
+      await proof.expect(['320-options', '320-settings', '667-options'])
+      for (const name of ['320-options', '320-settings', '667-options']) await proof.capture(page, name, { failed: false })
+      const result = await distill(root)
+      assert.equal(result.rawCount, 3); assert.equal(result.keyframes.length, 3)
+      for (const name of ['320-options', '320-settings', '667-options']) assert(result.keyframes.includes(`${name}/0.png`))
+      verifyEvidence(root, result)
+      await proof.expect(['failure-state', 'missing-state'])
+      await proof.capture(page, 'failure-state', { failed: true })
+      const metadata = JSON.parse(readFileSync(join(root, 'evidence-frames.json')))
+      assert.equal(metadata.expectedCount, 5)
+      assert.equal(metadata.frames.find(f => f.path === 'failure-state/0.png').failed, true)
+      assert.equal(existsSync(join(raw, 'failure-state/0.png')), true)
+      assert.equal(existsSync(join(raw, 'missing-state/0.png')), false)
+      await assert.rejects(proof.capture(page, 'failure-state'), /already captured/)
+    } finally { rmSync(raw, { recursive: true, force: true }) }
+  }) },
   { name: 'wait keeps polling stalled live lanes through quiet commands and ledger contention', run: async () => {
     let clock = 2_000_000, polls = 0
     const pauses = []

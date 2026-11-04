@@ -1,5 +1,4 @@
 import * as THREE from 'three'
-import { boxemCore } from './boxem-core'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 
 export interface Category {
@@ -28,56 +27,24 @@ export interface CatalogItem {
 export const LOCAL_CATEGORY = 'local'
 
 export const CATEGORIES: Category[] = [
-  { id: 'cvc', name: 'Club V Crew', blurb: 'Brand insignia in polished metal and crystal' },
-  { id: 'engines', name: 'Blackboxes engines', blurb: 'Core matrices from the Blackboxes ecosystem' },
-  { id: 'pillars', name: "Box'em pillars", blurb: 'The four planning constraints' },
-  { id: 'industries', name: "Box'em industries", blurb: 'Constraint matrices by sector' },
   { id: 'studio', name: 'Studio', blurb: 'References for checking orientation' },
   { id: LOCAL_CATEGORY, name: 'Local', blurb: '3D files from a folder on this device' },
 ]
 
-const cvc = (id: string, name: string, file: string, icon: string, subtitle: string): CatalogItem =>
-  ({ id, name, category: 'cvc', subtitle, src: `/models/cvc/${file}.glb`, icon: `/models/cvc/icons/${icon}.svg` })
-const engine = (id: string, name: string, file: string, color: string, subtitle: string): CatalogItem =>
-  ({ id, name, category: 'engines', subtitle, src: `/models/blackboxes/${file}.glb`, color, glyph: name[0] })
-const box = (id: string, category: string, name: string, file: string, subtitle: string, glyph: string): CatalogItem =>
-  ({ id, name, category, subtitle, src: `/models/blackboxes/boxem_${file}.glb`, color: '#38bdf8', glyph })
+/** Visual identity per collection, shared with the rail and its public catalogue projection. */
+export const CATEGORY_ART: Record<string, { color: string; icon?: string; image?: string }> = {
+  studio: { color: '#a78bfa', icon: 'cube' },
+  [LOCAL_CATEGORY]: { color: '#93c5fd', icon: 'folder' },
+}
+
 
 export const CATALOG: CatalogItem[] = [
-  cvc('cvc-insignia', 'CVC insignia', 'CVC_insignia', 'CVC_flat', 'Neutral metal with tri-colour cuts'),
-  cvc('cvc-wordmark', 'CVC wordmark', 'CVC_wordmark', 'CVC_flat_wordmark', 'Insignia with acronym'),
-  cvc('mmc-insignia', 'MMC insignia', 'MMC_insignia', 'MMC_flat', 'Cyan moon and cat'),
-  cvc('mmc-wordmark', 'MMC wordmark', 'MMC_wordmark', 'MMC_flat_wordmark', 'Insignia with acronym'),
-  cvc('k9c-insignia', 'K9C insignia', 'K9C_insignia', 'K9C_flat', 'Amber sun and dog'),
-  cvc('k9c-wordmark', 'K9C wordmark', 'K9C_wordmark', 'K9C_flat_wordmark', 'Insignia with acronym'),
-  cvc('cc-insignia', 'CC insignia', 'CC_insignia', 'CC_flat', 'Amethyst crystal'),
-  cvc('cc-wordmark', 'CC wordmark', 'CC_wordmark', 'CC_flat_wordmark', 'Insignia with acronym'),
-  cvc('factions', 'Faction markers', 'Faction_Area_Markers_Demo', 'CVC_flat', 'All four markers, hovering'),
-
-  { id: 'boxem', name: "Box'em core", category: 'engines', subtitle: 'Time, budget, quality and scope', color: '#38bdf8', glyph: 'B', make: boxemCore },
-  engine('orbitem', "Orbit'em core", 'orbit_em_core_matrix', '#22d3ee', 'Cloud architecture and cost'),
-  engine('pulseem', "Pulse'em core", 'pulse_em_core_matrix', '#fb7185', 'Training, recovery and fuelling'),
-  engine('capem', "Cap'em core", 'cap_em_core_matrix', '#fcd34d', 'Startup ownership and runway'),
-  engine('synthem', "Synth'em core", 'synth_em_core_matrix', '#f0abfc', 'Sound design'),
-  engine('balancem', "Balanc'em core", 'balanc_em_core_matrix', '#6ee7b7', 'Combat and resource tuning'),
-
-  box('cost', 'pillars', 'Cost', 'coin_gem', 'Coin gem', '$'),
-  box('quality', 'pillars', 'Quality', 'diamond_core', 'Diamond core', '◆'),
-  box('scope', 'pillars', 'Scope', 'cube_matrix', 'Cube matrix', '▣'),
-  box('time', 'pillars', 'Time', 'clock_crystal', 'Clock crystal', '◷'),
-
-  box('aerospace', 'industries', 'Aerospace', 'aerospace_flight_deck', 'Flight deck', 'A'),
-  box('architecture', 'industries', 'Architecture', 'architectural_bim_matrix', 'BIM matrix', 'B'),
-  box('biomedical', 'industries', 'Biomedical', 'biomedical_device_matrix', 'Device matrix', 'M'),
-  box('vfx', 'industries', 'Cinematic VFX', 'cinematic_vfx_pipeline', 'Pipeline', 'V'),
-  box('software', 'industries', 'Software', 'software_architecture_core', 'Architecture core', 'S'),
-
   { id: 'cube', name: 'Orientation cube', category: 'studio', subtitle: 'Front ring, top dot, right bar', color: '#a78bfa', glyph: '▢', make: orientationCube },
   { id: 'knot', name: 'Knot', category: 'studio', subtitle: 'Torus knot, iridescent', color: '#a78bfa', glyph: '∞', make: knot },
   { id: 'gem', name: 'Gem', category: 'studio', subtitle: 'Faceted icosahedron', color: '#22d3ee', glyph: '◇', make: gem },
 ]
 
-export const DEFAULT_ITEM = 'cvc-insignia'
+export const DEFAULT_ITEM = "cube"
 
 /** Replace one collection's items in place: CATALOG is shared by the viewer, its keyboard stepping and the phone's picker. Used by the Local folder. */
 export function setCategoryItems(category: string, items: CatalogItem[]) {

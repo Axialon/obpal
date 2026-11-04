@@ -19,6 +19,12 @@ import { uiRect } from './uiframe'
 const LONG_PRESS_MS = 420
 
 export interface SwitcherDeps {
+  /** Release held input before a chooser covers the control surface. */
+  opening?: () => void
+  /** Wire contextual actions after the sheet is mounted, including when none is offered yet. */
+  shown?: () => void
+  /** Resume only after the covering chooser has closed, with all old held input already released. */
+  closed?: () => void
   /** Switch to a controller (the keyboard opens its dock). Called inside the tap, so the keyboard can take the focus. */
   pick: (id: ControllerId) => void
   /** A light tick, or a firmer one. */
@@ -82,7 +88,7 @@ export class Switcher {
   private tabs: HTMLElement | null = null
   private signature = ''
   private sorted: Rating[] = []
-  private current: ControllerId = 'face.trackpad'
+  private current: ControllerId | null = null
   private typing = false
   private universal = false
   /** The catalogue's extra cards: tilt and the cameras on a universal screen, else the camera tabs the bar offers. */
@@ -91,10 +97,11 @@ export class Switcher {
   private sheet: HTMLElement | null = null
   /** What the open catalogue's cards were drawn from: they're drawn again only when it changes, never under a finger. */
   private drawn = ''
-  private exits = () => {}
+  private exits: (handOver?: boolean) => void = () => {}
   private tipTimer: ReturnType<typeof setTimeout> | undefined
 
   constructor(private readonly deps: SwitcherDeps) {}
+  get opened() { return !!this.sheet }
 
   /** The bar's markup, for the surface: its slots are filled by render(). */
   html() {
@@ -117,14 +124,14 @@ export class Switcher {
    * The screen's ratings (best first) and the controller in use changed, or might have: redraw the bar's slots when
    * they differ, mark the one in use, and refresh an open catalogue.
    */
-  render(sorted: Rating[], current: ControllerId, host: string, typing: boolean, camera = false, handActive = false, body = false, bodyActive = false, universal = false) {
+  render(sorted: Rating[], current: ControllerId | null, host: string, typing: boolean, camera = false, handActive = false, body = false, bodyActive = false, universal = false) {
     this.universal = universal
     this.extras = universal ? ['tilt', 'hand', 'body'] : [...(camera ? ['hand' as const] : []), ...(body ? ['body' as const] : [])]
     this.sorted = sorted
     this.current = current
     this.host = host
     this.typing = typing
-    const slots = barSlots(sorted, current)
+    const slots = barSlots(sorted, current ?? 'face.trackpad')
     const best = sorted.find((r) => r.best)?.id ?? ''
     const signature = `${slots.map((s) => `${s.face}:${s.id}`).join(',')}|${best}|${camera}|${body}`
     if (this.tabs && signature !== this.signature) {
@@ -153,7 +160,7 @@ export class Switcher {
         this.tabs.append(button)
       }
     }
-    const face: Face | null = FACE_OF[current]
+    const face: Face | null = current ? FACE_OF[current] : null
     this.tabs?.querySelectorAll<HTMLElement>('.ctl-tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === (bodyActive ? 'camera-body' : handActive ? 'camera-hand' : face))))
     if (this.sheet) this.paintCards()
   }
@@ -164,8 +171,9 @@ export class Switcher {
   }
 
   /** Open the catalogue. */
-  open() {
+  open(entry = false) {
     if (this.sheet) return
+    this.deps.opening?.()
     const wrap = document.createElement('div')
     wrap.className = 'sheet-wrap ctl-wrap'
     setMarkup(wrap, html`<div class="sheet ctl-sheet glass" role="dialog" aria-label="Controllers">
@@ -182,25 +190,32 @@ export class Switcher {
       <p class="ctl-tip" role="status" aria-live="polite" hidden></p>
     </div>`)
     document.body.appendChild(wrap)
+    if (entry) {
+      wrap.querySelector<HTMLElement>('.ctl-sheet')!.dataset.controllerEntry = ''
+      wrap.querySelector('h2')!.textContent = 'Options'
+      wrap.querySelector('.ctl-sheet')!.setAttribute('aria-label', 'Options')
+    }
     this.sheet = wrap
     this.drawn = ''
     wrap.querySelector<HTMLButtonElement>('[data-act="close"]')!.onclick = () => this.close()
     this.exits = sheetExits(wrap, () => this.close())
     this.paintCards()
+    this.deps.shown?.()
     // The one in use in view, and the focus on it for a keyboard or a screen reader.
-    const mine = wrap.querySelector<HTMLElement>('.ctl-card[aria-checked="true"]')
+    const mine = wrap.querySelector<HTMLElement>('.ctl-card[aria-checked="true"]') ?? wrap.querySelector<HTMLElement>('.ctl-card[aria-disabled="false"]')
     mine?.scrollIntoView({ block: 'nearest' })
     mine?.focus({ preventScroll: true })
   }
 
-  close() {
+  close(handOver = false) {
     const s = this.sheet
     if (!s) return
     this.sheet = null
     clearTimeout(this.tipTimer)
-    this.exits()
+    this.exits(handOver)
     this.exits = () => {}
     s.classList.add('out')
+    this.deps.closed?.()
     setTimeout(() => s.remove(), 200)
   }
 

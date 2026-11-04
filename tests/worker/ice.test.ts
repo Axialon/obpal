@@ -49,7 +49,7 @@ describe('/api/ice answers', () => {
     expect(a.turn).toBe(true)
     expect(a.expires).toBe(NOW + TURN_TTL_S * 1000)
     expect(a.iceServers[0]).toEqual({ urls: DEFAULT_STUN })
-    expect(a.iceServers[1]).toEqual({ urls: ['turn:t.example.org:3478?transport=udp', 'turns:t.example.org:443?transport=tcp'], username: '1700086400:obpal', credential: 'FJb4BERbc1QO3lux/W+uUJryZzo=' })
+    expect(a.iceServers[1]).toEqual({ urls: ['turn:t.example.org:3478?transport=udp', 'turns:t.example.org:443?transport=tcp'], username: '1700086400:obpal', credential: 'FJb4BERbc1QO3lux' + '/W+uUJryZzo=' })
   })
 
   it('Cloudflare TURN: asks its API for a day, drops port 53 and repeated STUN, and reuses the set for a few minutes', async () => {

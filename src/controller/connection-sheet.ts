@@ -44,7 +44,7 @@ export class ConnectionSheet {
   private body: HTMLElement | null = null
   private scanner: CameraView | null = null
   private scanOnly = false
-  private exits = () => {}
+  private exits: (handOver?: boolean) => void = () => {}
   private view: 'list' | 'scan' | 'code' | 'rename' = 'list'
   private busy = false
   private until = 0
@@ -105,7 +105,8 @@ export class ConnectionSheet {
     this.stopCamera()
     this.busy = false
     this.joining = null
-    this.exits()
+    // Resuming can synchronously open Options: let that sheet take this Back step before it can be popped.
+    this.exits(true)
     this.dialog.close()
     this.dialog.remove()
     this.dialog = null

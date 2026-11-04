@@ -1,5 +1,5 @@
 /**
- * Is the live site ready to present? The run a presenter makes in the last hour, as a visitor and read only: it opens the
+ * Is the selected site ready to present? This active service test opens the
  * home page, issues a pairing code, joins an emulated phone, takes the controller through its modes, loads the Viewer and
  * three flagship sims, opens a watch link, relays a DataChannel through TURN, and fetches what /link/ and Desktop's page
  * offer. It prints one PASS/FAIL table with the time each check took, and keeps screenshots and results.json.
@@ -18,7 +18,7 @@
  * --without-beacon is a diagnostic: it removes Cloudflare's analytics script from the pages the test browser loads, to
  * show what a run would find with that injection off. The default sees the pages as a visitor does.
  *
- * The room service is the live one, so the run opens a handful of ordinary rooms (each lasts until its page closes) and
+ * The destination is OBPAL_PUBLIC_ORIGIN or --origin, defaulting to loopback, so the run opens ordinary rooms there and
  * writes nothing else there. Rendering is software (as check:live's): frame rates say that the scene runs, not how fast
  * the presenter's own screen will. The browser: OBPAL_E2E_CHROMIUM, else Playwright's own Chromium. Evidence goes to
  * artifacts/demo-preflight/<time>/ unless --out. No pairing link or watch link is printed or kept: only the masked code.

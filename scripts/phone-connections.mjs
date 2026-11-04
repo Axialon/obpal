@@ -2,13 +2,55 @@
 import { devices } from 'playwright'
 import { renderSVG } from 'uqr'
 import sharp from 'sharp'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { mobileLayoutEvidence } from './phone-mobile-layout.mjs'
+import { phoneEvidence, phoneTrace } from './phone-evidence.mjs'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 async function until(what, fn, timeout = 15000) {
   const end = Date.now() + timeout
   while (Date.now() < end) { const v = await fn(); if (v) return v; await sleep(100) }
   throw new Error(`timed out: ${what}`)
+}
+
+let arrivalShot = 0
+/** Pairing now lands on the existing ranked chooser; fixtures choose through the same user-facing card. */
+async function enterController(page, proof) {
+  const scenario = `options-arrival-${++arrivalShot}`
+  const mask = [page.locator('#code-in'), page.getByRole('textbox', { name: /code/i }), page.locator('video')]
+  await proof.expect([scenario, `${scenario}-control`])
+  try {
+    await page.locator('.ctl-sheet[data-controller-entry]').waitFor({ timeout: 25000 })
+    await page.locator('dialog.connection-wrap[open]').waitFor({ state: 'hidden', timeout: 5000 })
+    if (await page.locator('#surface').count()) throw new Error('control surface mounted before an explicit choice')
+    if (await page.locator('.ctl-card[aria-checked="true"]').count()) throw new Error('arrival selected a controller automatically')
+    await proof.capture(page, scenario, { mask })
+    if (arrivalShot === 1 && process.env.OBPAL_E2E_PHONE_SETTLED_OPTIONS === '1') {
+      const settled = `${scenario}-naturally-settled`
+      await proof.expect([settled])
+      await page.bringToFront(); await page.mouse.move(0, 0)
+      const started = await page.evaluate(() => performance.now())
+      await page.waitForFunction(() => document.visibilityState === 'visible' && !!document.querySelector('.ctl-wrap:not(.out)') && !document.querySelector('.trust-first:not([data-quiet])') && !document.querySelector('.nt-item[data-tier="toast"]'), null, { timeout: 10000 })
+      const timing = await page.evaluate(start => {
+        const now = performance.now(), welcome = (window.__mobileTrace ?? []).findLast(event => event.event === 'wire:welcome-delivered')
+        const trust = document.querySelector('.trust-first')
+        return { at: Math.round(now), waitedMs: Math.round(now - start), sinceWelcomeMs: welcome ? Math.round(now - welcome.at) : null, visibility: document.visibilityState, trustNoticePresent: !!trust, trustQuiet: trust ? trust.hasAttribute('data-quiet') : null, toastCount: document.querySelectorAll('.nt-item[data-tier="toast"]').length, policy: 'Natural trust quiet and toast removal; visible page, pointer away; no dismissal or style override' }
+      }, started)
+      await writeFile(join(process.env.OBPAL_E2E_EVIDENCE_ROOT || '.', 'connection-captures', `${settled}-timing.json`), JSON.stringify(timing, null, 2))
+      await proof.capture(page, settled, { mask })
+    }
+    await page.locator('.ctl-card[data-c="face.trackpad"]').click()
+    await page.waitForFunction(() => !!document.getElementById('surface') || !!document.getElementById('gate'))
+    if (await page.locator('#gate').count()) await page.locator('#gate #start').click()
+    await page.locator('.modes').waitFor({ timeout: 25000 })
+    await page.locator('.ctl-wrap').waitFor({ state: 'hidden', timeout: 5000 })
+    await proof.capture(page, `${scenario}-control`, { mask })
+  } catch (error) {
+    await proof.trace(page, `${scenario}-failure`).catch(() => {})
+    await proof.capture(page, `${scenario}-failure`, { mask, failed: true }).catch(() => {})
+    throw error
+  }
 }
 
 function cameraFrames() {
@@ -54,6 +96,23 @@ function cameraFrames() {
   }
 }
 
+/** Explicit-gesture permission and visibility stand-ins; Chromium emulation is not physical iPhone Chrome. */
+function iphoneMotionFixture(answer) {
+  window.__mobileMotionPermission = { answer, insideGesture: 0, outsideGesture: 0 }
+  DeviceMotionEvent.requestPermission = DeviceOrientationEvent.requestPermission = async () => {
+    if (!navigator.userActivation.isActive) { window.__mobileMotionPermission.outsideGesture++; throw new DOMException('A gesture is needed', 'NotAllowedError') }
+    window.__mobileMotionPermission.insideGesture++
+    return answer
+  }
+  if (answer === 'denied') {
+    const add = window.addEventListener
+    window.addEventListener = function (type, ...rest) { if (type !== 'deviceorientation' && type !== 'devicemotion') return add.call(this, type, ...rest) }
+  }
+  window.__mobileVisibility = 'visible'
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => window.__mobileVisibility })
+  Object.defineProperty(document, 'hidden', { configurable: true, get: () => window.__mobileVisibility === 'hidden' })
+}
+
 /** Hold a real write transaction open until the test releases it, as a busy storage process can do. */
 function delayedStorage() {
   const transaction = IDBDatabase.prototype.transaction
@@ -71,10 +130,12 @@ function delayedStorage() {
 }
 
 export async function phoneConnections({ browser, origin, check, shots }) {
-  await pendingRecovery({ browser, origin, check, shots })
+  const proof = phoneEvidence(shots, join(process.env.OBPAL_E2E_EVIDENCE_ROOT || shots || '.', 'connection-captures'))
+  await pendingRecovery({ browser, origin, check, proof })
   const screens = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true })
   const ctx = await browser.newContext({ ...devices['Pixel 7'], viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, ignoreHTTPSErrors: true })
   await ctx.addInitScript(cameraFrames)
+  await ctx.addInitScript(phoneTrace)
   await ctx.addInitScript(delayedStorage)
   const errors = []
   ctx.on('page', (p) => p.on('pageerror', (e) => errors.push(e.message)))
@@ -82,7 +143,7 @@ export async function phoneConnections({ browser, origin, check, shots }) {
   let phone = await ctx.newPage()
   const cdp = await ctx.newCDPSession(phone)
   await cdp.send('DeviceOrientation.setDeviceOrientationOverride', { alpha: 10, beta: 70, gamma: 0 })
-  const shot = async (name) => { if (shots) await phone.screenshot({ path: join(shots, `${name}.png`), animations: 'disabled' }) }
+  const shot = name => proof.capture(phone, name, { mask: [phone.locator('#code-in'), phone.getByRole('textbox', { name: /code/i }), phone.locator('video')] })
   const clear = () => phone.evaluate(() => document.querySelectorAll('.hint, .bt-notice').forEach((h) => h.remove()))
   const stopped = () => phone.evaluate(() => window.__cameras.every((s) => s.getTracks().every((t) => t.readyState === 'ended')))
   const saved = (page = phone) => page.locator('.connection-list[aria-busy="false"]').waitFor()
@@ -115,13 +176,16 @@ export async function phoneConnections({ browser, origin, check, shots }) {
       window.__obpal.on('input', () => window.__inputs++)
     })
     await phone.goto(inviteA)
+    await enterController(phone, proof)
     await phone.locator('.modes').waitFor({ timeout: 25000 }).catch(async error => {
       const state = await phone.evaluate(() => ({ text: document.body.innerText.slice(0, 800), visibility: document.visibilityState,
         marks: performance.getEntriesByType('mark').filter(m => m.name.startsWith('obpal:')).map(m => m.name) }))
       const host = await a.evaluate(() => ({ status: window.__obpal?.status, peers: window.__obpal?.participants.length ?? 0 }))
       throw new Error(`${error.message}; phone: ${JSON.stringify(state)}; screen: ${JSON.stringify(host)}; page errors: ${errors.join(' | ') || 'none'}`)
     })
-    await open(); await rename('ob.Pal Viewer', 'Desk viewer'); await close()
+    // Observe the original trust notice before unrelated saved-screen storage coverage.
+    if (process.env.OBPAL_E2E_PHONE_ONLY === 'mobile') await mobileLayoutEvidence({ phone, screen: a, check, proof })
+    else { await open(); await rename('ob.Pal Viewer', 'Desk viewer'); await close() }
 
     await check('the in-app scanner rejects foreign QR codes, offers a torch, and stops its camera on close', async () => {
       await open(); await phone.getByRole('button', { name: 'Scan another code', exact: true }).click()
@@ -150,6 +214,7 @@ export async function phoneConnections({ browser, origin, check, shots }) {
       await shot('scanner-844x390')
       const png = await sharp(Buffer.from(renderSVG(inviteB, { ecc: 'M', border: 4 }))).resize(520, 520).png().toBuffer()
       await phone.evaluate((data) => window.__cameraFrame(data), `data:image/png;base64,${png.toString('base64')}`)
+      await enterController(phone, proof)
       await until('second active', async () => (await phone.locator('.host-name').textContent()) === 'ob.Pal Viewer').catch(async error => {
         throw new Error(`${error.message}; scanner: ${await phone.locator('[data-camera-status], .connection-say').allTextContents()}; page errors: ${errors.join(' | ') || 'none'}`)
       })
@@ -170,6 +235,7 @@ export async function phoneConnections({ browser, origin, check, shots }) {
       await until('held B on second', () => b.evaluate(() => window.__buttons.some((m) => m.id === 'wii-b' && m.ev === 'down')))
       await open()
       await row('Desk viewer').locator('.connection-use').click()
+      await enterController(phone, proof)
       await phone.keyboard.up('AudioVolumeDown')
       await until('first resumed, second paused', async () => !(await a.evaluate(() => window.__obpal.participants[0]?.paused)) && await b.evaluate(() => window.__obpal.participants[0]?.paused))
       if (!(await b.evaluate(() => window.__buttons.some((m) => m.id === 'wii-b' && m.ev === 'up')))) throw new Error('held button did not release')
@@ -190,14 +256,16 @@ export async function phoneConnections({ browser, origin, check, shots }) {
     await check('names and keys persist across a reload; forgetting removes the entry and it stays forgotten', async () => {
       await open(); await close()
       await phone.reload()
+      await enterController(phone, proof)
       await phone.locator('.modes').waitFor({ timeout: 25000 })
       await open()
       if (await phone.locator('.connection-row').count() !== 2) throw new Error('list did not persist')
       await row('Living room').locator('.connection-use').click()
+      await enterController(phone, proof)
       await until('remembered screen reconnected', async () => (await phone.locator('.host-name').textContent()) === 'Living room')
       await open(); await row('Desk viewer').getByRole('button', { name: 'Forget Desk viewer', exact: true }).click()
       await until('forgotten', async () => await phone.locator('.connection-row').count() === 1)
-      await close(); await phone.reload()
+      await close(); await phone.reload(); await enterController(phone, proof)
       await phone.locator('.modes').waitFor({ timeout: 25000 }); await open()
       if (await phone.locator('.connection-row').count() !== 1 || await row('Desk viewer').count()) throw new Error('forgotten entry returned')
       const stored = await phone.evaluate(() => new Promise((resolve, reject) => {
@@ -243,6 +311,7 @@ export async function phoneConnections({ browser, origin, check, shots }) {
       await phone.locator('[data-camera-type]').click()
       await phone.locator('dialog').getByRole('textbox', { name: 'Code from your screen' }).fill(code)
       await phone.locator('dialog').getByRole('button', { name: 'Connect', exact: true }).click()
+      await enterController(phone, proof)
       await phone.locator('.modes').waitFor({ timeout: 25000 })
       await until('correct screen active', async () => (await phone.locator('.host-name').textContent()) === 'Living room')
       if (!(await stopped())) throw new Error('camera survived code entry')
@@ -298,35 +367,130 @@ export async function phoneConnections({ browser, origin, check, shots }) {
       } finally { await legacy.close() }
     })
 
-    await check('a browser requiring a motion gesture can scan before granting motion permission', async () => {
-      const apple = await browser.newContext({ ...devices['iPhone 13'], ignoreHTTPSErrors: true })
+    for (const answer of ['granted', 'denied']) await check(`Chrome-on-iPhone fixture: ${answer} motion stays in the Start gesture and survives visibility return`, async () => {
+      const fixture = devices['iPhone 13']
+      const apple = await browser.newContext({ ...fixture, userAgent: fixture.userAgent.replace(/Version\/[\d.]+/, 'CriOS/0.0.0.0'), ignoreHTTPSErrors: true })
       await apple.addInitScript(cameraFrames)
-      await apple.addInitScript(() => {
-        DeviceMotionEvent.requestPermission = DeviceOrientationEvent.requestPermission = async () => {
-          if (!navigator.userActivation.isActive) throw new DOMException('A gesture is needed', 'NotAllowedError')
-          return 'granted'
-        }
-      })
+      await apple.addInitScript(phoneTrace)
+      await apple.addInitScript(iphoneMotionFixture, answer)
+      const scenario = `iphone-chrome-${answer}`
+      await proof.expect([`${scenario}-controls`, `${scenario}-foreground`])
+      let page
+      let observingTouch = false
       try {
-        const page = await apple.newPage()
+        page = await apple.newPage()
         await page.goto(`${origin}/p/`)
         if (await page.locator('#gate').count()) throw new Error('motion prompt covered pairing')
+        if (await page.evaluate(() => window.__mobileMotionPermission.insideGesture + window.__mobileMotionPermission.outsideGesture)) throw Error('permission requested before an explicit choice')
+        if (answer === 'denied') {
+          observingTouch = true
+          await proof.expect([`${scenario}-touch-held`, `${scenario}-touch-released`])
+          for (const viewer of [a, b]) await viewer.evaluate(target => {
+            const remote = window.__obpal, known = new Set(remote.participants.map(p => p.id))
+            const state = window.__mobileDeniedTouch = { target, phase: 'before-choice', beforeChoiceInputs: 0, heldMoves: 0, releaseInputs: 0, latest: null }
+            const input = who => {
+              if (target && known.has(who.id)) return
+              if (state.phase === 'before-choice') state.beforeChoiceInputs++
+              if (state.phase === 'released') state.releaseInputs++
+            }
+            remote.on('input', input)
+            // Observe the frame the Viewer already consumes; never consume a second time or alter its input.
+            const consume = remote.consumeOf
+            remote.consumeOf = function (who, ...args) {
+              const frame = consume.call(this, who, ...args)
+              if (target && known.has(who)) return frame
+              const { connected, touching, clutch, pad1, pad2, tilt, zoom, twist } = frame
+              state.latest = { connected, touching, clutch, pad1: [...pad1], pad2: [...pad2], tilt: [...tilt], zoom, twist, controller: remote.participants.find(p => p.id === who)?.controller ?? null }
+              if (state.phase === 'held' && touching && pad1.some(n => Math.abs(n) > .01)) state.heldMoves++
+              return frame
+            }
+            window.__mobileDeniedTouchCleanup = () => { remote.off('input', input); remote.consumeOf = consume }
+          }, viewer === a)
+        }
         await page.getByRole('button', { name: 'Scan a code', exact: true }).click()
         await page.getByRole('button', { name: 'Toggle torch' }).waitFor()
         const invite = await a.evaluate(() => window.__obpal.pairingUrl)
         await page.evaluate((text) => { window.__nativeQr = text }, invite)
-        await page.getByRole('button', { name: 'Start', exact: true }).click()
+        if (answer === 'denied') {
+          await page.locator('.ctl-sheet[data-controller-entry]').waitFor({ timeout: 25000 })
+          if (await a.evaluate(() => window.__mobileDeniedTouch.beforeChoiceInputs)) throw Error('Viewer received input before an explicit Touch choice')
+          for (const viewer of [a, b]) await viewer.evaluate(() => { window.__mobileDeniedTouch.phase = 'choosing' })
+        }
+        await enterController(page, proof)
         await page.locator('.modes').waitFor({ timeout: 25000 })
         if (!(await page.evaluate(() => window.__cameras.every((s) => s.getTracks().every((t) => t.readyState === 'ended'))))) throw new Error('camera survived motion prompt')
-        return 'pairing remains reachable; motion asks only once a screen is connected'
-      } finally { await apple.close() }
+        const permission = await page.evaluate(() => window.__mobileMotionPermission)
+        if (!permission.insideGesture || permission.outsideGesture) throw Error('motion permission lost its explicit user gesture')
+        if (answer === 'denied') {
+          if (await page.locator('#gyro').getAttribute('aria-pressed') === 'true') throw Error('denied motion silently armed the touch fallback')
+          await until('explicit Trackpad choice reached the intended Viewer', () => a.evaluate(() => window.__mobileDeniedTouch.latest?.controller === 'face.trackpad'))
+          await page.evaluate(() => document.querySelectorAll('.hint, .bt-notice').forEach(h => h.remove()))
+          const pad = await page.locator('#pad').boundingBox()
+          if (!pad || pad.width < 100 || pad.height < 80) throw Error('chosen Touch trackpad has no usable drag area')
+          const touch = await apple.newCDPSession(page), x = pad.x + pad.width * .4, y = pad.y + pad.height * .55
+          for (const viewer of [a, b]) await viewer.evaluate(() => { window.__mobileDeniedTouch.phase = 'held' })
+          try {
+            await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] })
+            for (let i = 1; i <= 4; i++) {
+              await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + i * 12, y: y + i * 3, id: 1 }] })
+              await sleep(16)
+            }
+            await until('touch drag delivered to the intended Viewer', () => a.evaluate(() => {
+              const s = window.__mobileDeniedTouch
+              return s.heldMoves > 0 && s.latest?.connected && s.latest.touching && !s.latest.clutch && s.latest.controller === 'face.trackpad'
+            }))
+            await proof.capture(page, `${scenario}-touch-held`)
+          } finally {
+            for (const viewer of [a, b]) await viewer.evaluate(() => { window.__mobileDeniedTouch.phase = 'released' })
+            await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+            await touch.detach()
+          }
+          await until('released Touch input is neutral at the intended Viewer', () => a.evaluate(() => {
+            const s = window.__mobileDeniedTouch, f = s.latest
+            return s.releaseInputs > 0 && f?.connected && !f.touching && !f.clutch && [...f.pad1, ...f.pad2, ...f.tilt, f.zoom, f.twist].every(n => Math.abs(n) < .001)
+          }))
+          if (await b.evaluate(() => window.__mobileDeniedTouch.heldMoves)) throw Error('the background Viewer also received the held touch drag')
+          if (await page.evaluate(() => window.__mobileMotionPermission.insideGesture) !== permission.insideGesture) throw Error('Touch fallback requested motion permission again')
+          await proof.capture(page, `${scenario}-touch-released`)
+        }
+        await proof.capture(page, `${scenario}-controls`)
+        await page.evaluate(() => { window.__mobileVisibility = 'hidden'; document.dispatchEvent(new Event('visibilitychange')) })
+        await sleep(100)
+        await page.evaluate(() => { window.__mobileVisibility = 'visible'; document.dispatchEvent(new Event('visibilitychange')) })
+        await page.locator('#surface').waitFor()
+        if (await page.locator('#gate, .ctl-wrap:not(.out)').count()) throw Error('visibility return replaced the chosen controls')
+        if (await page.locator('#gyro').getAttribute('aria-pressed') === 'true') throw Error('visibility return re-enabled motion')
+        if (await page.evaluate(() => window.__mobileMotionPermission.insideGesture) !== permission.insideGesture) throw Error('visibility return automatically requested permission')
+        await proof.capture(page, `${scenario}-foreground`)
+        return `synthetic CriOS identity/permission/visibility on Chromium${answer === 'denied' ? '; explicit Touch drag reached only the intended Viewer and released to neutral' : ''}; real iPhone Chrome → MacBook Chrome remains unverified`
+      } catch (error) {
+        if (page) await proof.capture(page, `${scenario}-failure`, { failed: true, mask: [page.locator('#code-in'), page.getByRole('textbox', { name: /code/i }), page.locator('video')] }).catch(() => {})
+        throw error
+      } finally {
+        try {
+          if (observingTouch) {
+            try {
+              const viewers = await Promise.all([a, b].map(viewer => viewer.evaluate(() => window.__mobileDeniedTouch)))
+              const evidence = process.env.OBPAL_E2E_EVIDENCE_ROOT || shots
+              if (evidence) {
+                const dir = join(evidence, 'connection-captures')
+                await mkdir(dir, { recursive: true })
+                await writeFile(join(dir, `${scenario}-touch-delivery.json`), JSON.stringify({ qualification: 'Synthetic Chromium touch delivery to the actual local Viewer; not physical iPhone/MacBook acceptance', viewers }, null, 2))
+              }
+            } finally {
+              await Promise.all([a, b].map(viewer => viewer.evaluate(() => window.__mobileDeniedTouchCleanup?.())))
+            }
+          }
+        } finally { await apple.close() }
+      }
     })
   } finally { await ctx.close(); await screens.close() }
 }
 
 /** A missing host and delayed welcomes are simulated in the browser; no controller or transport test hooks ship. */
-async function pendingRecovery({ browser, origin, check, shots }) {
+async function pendingRecovery({ browser, origin, check, proof }) {
   const ctx = await browser.newContext({ ...devices['Pixel 7'], viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, ignoreHTTPSErrors: true, serviceWorkers: 'block' })
+  await ctx.addInitScript(phoneTrace)
   const errors = []
   ctx.on('page', p => p.on('pageerror', e => errors.push(e.message)))
   const channels = []
@@ -341,7 +505,7 @@ async function pendingRecovery({ browser, origin, check, shots }) {
     window.RTCPeerConnection = class extends Peer { constructor(...args) { super(...args); window.__peers.push(this) } }
   })
   const page = await ctx.newPage()
-  const shot = async name => { if (shots) await page.screenshot({ path: join(shots, `${name}-390x844.png`), animations: 'disabled' }) }
+  const shot = name => proof.capture(page, `${name}-390x844`, { mask: [page.locator('#code-in'), page.getByRole('textbox', { name: /code/i }), page.locator('video')] })
   try {
     await check('pending pairing stays recoverable beyond two minutes; cancel clears the attempt without replaying its code', async () => {
       await page.goto(`${origin}/p/`)
@@ -451,6 +615,7 @@ async function pendingRecovery({ browser, origin, check, shots }) {
   await check('cancelling a delayed welcome keeps the saved pairing and another active screen; late delivery cannot reactivate it', async () => {
     const screens = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true })
     const phoneCtx = await browser.newContext({ ...devices['Pixel 7'], viewport: { width: 390, height: 844 }, ignoreHTTPSErrors: true, serviceWorkers: 'block' })
+    await phoneCtx.addInitScript(phoneTrace)
     await phoneCtx.addInitScript(() => {
       window.__holdWelcomes = false; window.__welcomes = []; window.__controllers = 0; window.__peers = []; window.__channelOwners = new WeakMap(); window.__welcomedPeer = null
       const Peer = RTCPeerConnection
@@ -480,7 +645,7 @@ async function pendingRecovery({ browser, origin, check, shots }) {
       await a.goto(`${origin}/view/`); await b.goto(`${origin}/view/`)
       const inviteA = await until('active invite', () => a.evaluate(() => window.__obpal?.pairingUrl))
       const inviteB = await until('second invite', () => b.evaluate(() => window.__obpal?.pairingUrl))
-      await p.goto(inviteA); await p.locator('.modes').waitFor({ timeout: 25000 })
+      await p.goto(inviteA); await enterController(p, proof); await p.locator('.modes').waitFor({ timeout: 25000 })
       await p.evaluate(() => document.querySelectorAll('.hint, .bt-notice').forEach(el => el.remove()))
       const open = async () => { await p.getByRole('button', { name: 'Connections', exact: true }).click(); await p.locator('.connection-list[aria-busy="false"]').waitFor() }
       await open()
@@ -491,10 +656,12 @@ async function pendingRecovery({ browser, origin, check, shots }) {
       await p.getByRole('button', { name: 'Close connections' }).click()
       // First remember B normally, then return to A and delay only B's authenticated welcome on reconnect.
       await p.evaluate(url => { location.hash = new URL(url).hash }, inviteB)
+      await enterController(p, proof)
       await until('B active', async () => await p.locator('.host-name').textContent() === 'ob.Pal Viewer')
       await p.evaluate(() => { window.__pendingPeer = window.__welcomedPeer })
       await open()
       await p.getByRole('button', { name: 'Switch to Active screen', exact: true }).click()
+      await enterController(p, proof)
       await p.getByRole('button', { name: 'Connections', exact: true }).waitFor()
       const before = await p.evaluate(() => new Promise(resolve => {
         const req = indexedDB.open('obpal')
@@ -533,6 +700,7 @@ async function pendingRecovery({ browser, origin, check, shots }) {
   await check('a valid delayed welcome restores controls once; full and unavailable signaling retain their specific messages', async () => {
     const screens = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true })
     const phones = await browser.newContext({ ...devices['Pixel 7'], ignoreHTTPSErrors: true, serviceWorkers: 'block' })
+    await phones.addInitScript(phoneTrace)
     await phones.addInitScript(() => {
       window.__welcomes = []; window.__modes = 0
       const descriptor = Object.getOwnPropertyDescriptor(RTCDataChannel.prototype, 'onmessage')
@@ -559,6 +727,7 @@ async function pendingRecovery({ browser, origin, check, shots }) {
       await until('authenticated welcome held', () => valid.evaluate(() => window.__welcomes.length > 0))
       if (await valid.locator('.modes').count() || await host.evaluate(() => window.__inputs)) throw new Error('pending welcome exposed controls or sent input')
       await valid.evaluate(() => { window.__welcomes[0](); window.__welcomes[0]() })
+      await enterController(valid, proof)
       await valid.locator('.modes').waitFor({ timeout: 25000 })
       if (await valid.evaluate(() => window.__modes) !== 1) throw new Error('duplicate welcome restored controls more than once')
       await valid.close()

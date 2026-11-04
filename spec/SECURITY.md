@@ -359,14 +359,16 @@ ob.Pal is open source, and none of its security depends on a secret in the code.
 as Worker secrets, and every key that matters is made on the devices.
 
 **The room service** (a Cloudflare Worker with Durable Objects, and the site):
-1. Run `pnpm install`. In `wrangler.jsonc`, set your own `name` and `routes`. If you don't take donations, remove the
-   D1 database, the Stripe vars and `secrets.required`, which belong to donations.
-2. Build with your origin, so each page's policy names your sockets:
-   `OBPAL_PUBLIC_ORIGIN=https://your.host pnpm run build`.
-3. Run `npx wrangler deploy`. The Durable Object migrations (`Room`, `Codes`) are in `wrangler.jsonc`.
-   - The `ratelimits` bindings are optional: without them, the service runs unlimited and says so once in its log.
-   - Their `namespace_id`s are yours to choose.
-4. Point your screens at it. Screens built with `@obpal/host` take `service: 'https://your.host'` (`RemoteOptions`).
+1. Follow [the complete self-host setup](../docs/SELF-HOSTING.md). The public `wrangler.jsonc` starts with no route,
+   no D1 database and payments disabled. Choose your Worker name, account, exact custom domain and namespace IDs.
+2. Set `OBPAL_PUBLIC_ORIGIN` to your HTTPS origin and `CLOUDFLARE_ACCOUNT_ID` to your account. Set your own
+   `TURN_SECRET` for address hashing even in a STUN-only setup; it enables a relay only with `TURN_URLS`.
+3. Run `pnpm run deploy` when ready to deploy. It tests and builds with that origin and checks both source and built
+   Wrangler destinations. The Durable Object migrations (`Room`, `Codes`) are retained in `wrangler.jsonc`.
+   - `RL_SOCKET` and `RL_ICE` are optional and fail open; omitting them leaves room/ICE traffic unlimited.
+   - `RL_FILM` is required for campaign films and fails closed with 503 when absent or failed. Retain it and the
+     address-hashing secret to serve those assets. Namespace IDs are yours to choose; these limits are not cost caps.
+4. Point your screens at it. Screens built with `@obpal/host` take `service: 'https://controller.example.org'` (`RemoteOptions`).
    Your deployment serves the phone controller, from the same origin as its room service.
 
 Address hashing reuses `TURN_KEY_API_TOKEN`, `TURN_SECRET`, `STRIPE_WEBHOOK_SECRET` or `STRIPE_SECRET_KEY` (the first present, in that order), with a separate HKDF label. Keep at least one configured for the room service, even for a STUN-only self-host. There is no new secret binding. Rotating the selected secret also changes network keys; existing short codes expire within ten minutes, but connected hosts retain their previous keys until reconnect. Limit grouping across that rotation boundary resets.

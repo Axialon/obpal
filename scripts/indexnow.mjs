@@ -1,28 +1,27 @@
-/** Notify IndexNow of every URL in the deployed sitemap. A notification failure does not fail a deploy. */
-import { readdirSync, readFileSync } from 'node:fs'
+/** Inspect indexing requests locally; --submit explicitly contacts the selected site and IndexNow. */
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { SITE } from './lib/preview.mjs'
+import { publicOrigin } from './lib/deployment.mjs'
+import { indexNowPayload, submitIndexNow } from './lib/indexnow.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 
-try {
-  const keyFile = readdirSync(join(root, 'public')).find(f => /^[a-f0-9]{32}\.txt$/.test(f))
-  if (!keyFile) throw new Error('The IndexNow key file is missing')
-  const key = readFileSync(join(root, 'public', keyFile), 'utf8').trim()
-  if (`${key}.txt` !== keyFile) throw new Error('The IndexNow key file does not match its name')
-  const sitemap = readFileSync(join(root, 'dist', 'client', 'sitemap.xml'), 'utf8')
-  const urlList = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1])
-  if (!urlList.length) throw new Error('The sitemap has no URLs')
-  const keyLocation = `${SITE}/${keyFile}`
-  const liveKey = await fetch(keyLocation)
-  if (!liveKey.ok || (await liveKey.text()).trim() !== key) throw new Error('The IndexNow key file is not live yet')
-  const response = await fetch('https://api.indexnow.org/indexnow', {
-    method: 'POST', headers: { 'content-type': 'application/json; charset=utf-8' },
-    body: JSON.stringify({ host: new URL(SITE).host, key, keyLocation, urlList }),
-  })
-  if (!response.ok) throw new Error(`IndexNow returned ${response.status}: ${(await response.text()).slice(0, 300)}`)
-  console.log(`IndexNow accepted ${urlList.length} URLs (${response.status}).`)
-} catch (error) {
-  console.warn(`IndexNow notification failed: ${error.message}`)
-}
+const argv = process.argv.slice(2).filter(arg => arg !== '--')
+if (argv.includes('--help')) {
+  console.log('OBPAL_PUBLIC_ORIGIN=<your origin> pnpm run indexnow -- --key-file <your-key>.txt [--dry-run | --submit]')
+} else try {
+  let keyFile = process.env.OBPAL_INDEXNOW_KEY_FILE || ''
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--key-file') keyFile = argv[++i] || ''
+    else if (!['--submit', '--dry-run'].includes(argv[i])) throw new Error('Unknown IndexNow option; see --help')
+  }
+  if (argv.includes('--submit') && argv.includes('--dry-run')) throw new Error('Choose --dry-run or --submit')
+  if (!/^[a-f0-9]{32}\.txt$/.test(keyFile)) throw new Error('Select your own verification file with --key-file')
+  const origin = publicOrigin(process.env.OBPAL_PUBLIC_ORIGIN, { required: true, https: true })
+  const payload = indexNowPayload({ origin, keyFile, key: readFileSync(join(root, 'public', keyFile), 'utf8').trim(),
+    sitemap: readFileSync(join(root, 'dist/client/sitemap.xml'), 'utf8') })
+  const result = await submitIndexNow(payload, { submit: argv.includes('--submit') })
+  console.log(`IndexNow ${result.submitted ? 'accepted' : 'dry run:'} ${result.count} URLs at ${origin}`)
+  if (!result.submitted) console.log(payload.urlList.join('\n'))
+} catch (error) { console.error(`IndexNow: ${error.message}`); process.exitCode = 1 }

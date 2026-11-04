@@ -8,7 +8,7 @@ import { family } from '../family'
 import '../styles/base.css'
 import '../styles/controller.css'
 import {
-  Controller, CONTROLLERS, emptyState, PadButton, encodeState, Flag, isControllerId,
+  Controller, CONTROLLERS, emptyState, PadButton, encodeState, Flag,
   loadCertificate, Mode, OrientationReference, OrientationSmoother, parsePairingCode, qIdentity, STATE_BYTES, Tier, TossDetector,
   type Caps, type ControllerId, type HostMsg, type Layout, type LinkStatus, type ModeId, type PairingCode, type SceneNode,
   type ScenePerson, type TierId, type TrayControl,
@@ -42,9 +42,11 @@ import { BodyTracker } from './body-tracker'
 import '../styles/connections.css'
 import { calmMarks, icon, ICONS, logo, logoMark } from '../ui/icons'
 import { dismissHint, hint, repositionHints, setHintFrame } from '../ui/hints'
+import { placeCatalogueHint } from './catalogue-hint'
 import { enhanceSelects } from '../ui/kit/select'
 import { iconAction, SIM_ACTION_ICONS, statefulIconAction } from '../ui/kit/action'
 import { dismiss, mountNotices, notify, placeNotices, setNoticeAnchor, type NoticeTone } from '../ui/kit/notice'
+import { reservePhoneNotices } from './notices'
 import { fitControlInk } from '../ui/kit/ink'
 import { Segmented } from '../ui/kit/segmented'
 import { setPopoverFrame } from '../ui/kit/place'
@@ -56,13 +58,15 @@ import { encodePose, POSE_BYTES, PoseFlag, qAxisAngle, qMul } from '@obpal/core'
 import { OrientationLock } from './lock'
 import { uiRect, uiRotation, uiSize } from './uiframe'
 import { applyTheme, initialTheme, swatch, THEMES, themeById } from '../ui/themes'
-import { barSlots, byFit, choiceFor, CONTROLLER_ICON, controllerOn, FACE_OF, fallback, rateControllers, type Face, type Rating } from './ratings'
+import { barSlots, byFit, choiceFor, CONTROLLER_ICON, controllerOn, rateControllers, type Face, type Rating } from './ratings'
 import { Switcher } from './switcher'
+import { ControllerChoice } from './controller-choice'
 import { NodeStrip } from './strip'
 import { resolveShortLink } from './short-link'
 
 const app = document.getElementById('app')!
 mountNotices()
+reservePhoneNotices(document.querySelector('.obpal-notices'), document.documentElement)
 const isApple = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 const store = {
   get: (k: string) => { try { return localStorage.getItem(k) } catch { return null } },
@@ -371,7 +375,7 @@ async function boot(code?: Join) {
   const poseBuf = new ArrayBuffer(POSE_BYTES)
   void Tracker.supported().then((ok) => { trackOk = ok; render() })
   tracker.onPose = (p, q, tracked) => {
-    if (!link.ready) return
+    if (!surface || !link.ready || controlsCovered()) return
     poseSeq = (poseSeq + 1) & 0xffff
     link.sendState(encodePose({ flags: (tracked ? PoseFlag.tracked : 0) | ((pad?.touches ?? 0) > 0 || buttonHold ? PoseFlag.touching : 0), seq: poseSeq, t: Math.round((performance.now() - t0) * 1000) >>> 0, p, q, gen: tracker.gen, source: 'camera' }, poseBuf))
   }
@@ -433,7 +437,7 @@ async function boot(code?: Join) {
   inputs.onInput = (id, down) => {
     // Back caught while a sheet or the keyboard is open closes that first, as Back does (their history step).
     if (id === 'back' && !buttons.sheetOpen && (document.querySelector('.sheet-wrap') || keyboard.open)) { if (down) history.back(); return true }
-    return (surface && link.ready) || buttons.sheetOpen ? buttons.input(id, down) : false
+    return (surface && link.ready && !controlsCovered()) || buttons.sheetOpen ? buttons.input(id, down) : false
   }
   /** A control's PAD button, on the gamepad and the steering wheel. */
   const PAD_OF: Record<string, number> = {
@@ -560,6 +564,8 @@ async function boot(code?: Join) {
   /** The person disconnected: nothing reconnects or covers the Disconnected screen. */
   let hungUp = false
   let surface: HTMLElement | null = null
+  let settingsSheet: HTMLElement | null = null
+  let closeSettings = () => {}
   let inkTray: HTMLElement | null = null, releaseTrayInk: (() => void) | undefined
   let pad: Trackpad | null = null
   let hostName = 'Screen'
@@ -595,18 +601,10 @@ async function boot(code?: Join) {
    * The catalogue controller this phone uses now (CATALOGUE §9.1), which `mode{c}` tells the screen. The gamepad with
    * the Driving profile is the steering wheel.
    */
-  const controllerNow = (): ControllerId => controllerOn(tab, { point: mouseOn() ? 'mouse' : 'wii', wheel: gamepad.wheelInUse })
-  /** The screen's first suggested controller opens once, on the first welcome; after that the person's choice stands. */
-  let suggestionTaken = false
-  /** The face of the first controller the screen suggests (layout.controllers) that its modes let this phone show. */
-  function suggestedTab(): Tab | null {
-    const hm = hostModes()
-    for (const c of Array.isArray(layout.controllers) ? layout.controllers : []) {
-      const t = isControllerId(c) ? FACE_OF[c] : null
-      if (t && CONTROLLERS[c as ControllerId].modes.some((m) => hm.includes(m))) return t
-    }
-    return null
-  }
+  const controllerChoice = new ControllerChoice()
+  const controllerNow = (): ControllerId => controllerChoice.current(rated()) === Controller.keyboard ? Controller.keyboard : controllerOn(tab, { point: mouseOn() ? 'mouse' : 'wii', wheel: gamepad.wheelInUse })
+  let pendingKeyboard = false
+  let optionsRenderedFor = ''
   /** The name the screen goes by here: what this phone calls it, else what it calls itself. */
   const screenName = () => link.active?.row.name ?? hostName
   /** Every controller rated for this screen and this phone, best first; worked out again only when either changes. */
@@ -622,8 +620,13 @@ async function boot(code?: Join) {
    * this screen as a profile pick is). The keyboard opens its dock beside whatever is in use.
    */
   function pick(id: ControllerId) {
+    if (id === Controller.keyboard && surface) { keyboard.show('tray'); return }
+    if (!controllerChoice.pick(id, rated())) return
+    if (surface) releaseControls()
+    marbleMotionChosen = true
     if (id === Controller.keyboard) {
-      if (layout.tray.some((c) => c.type === 'keyboard')) keyboard.show('tray')
+      pendingKeyboard = true
+      startControls()
       return
     }
     const c = choiceFor(id)
@@ -631,7 +634,7 @@ async function boot(code?: Join) {
     if (c.point) pointFace = c.point
     if (c.wheel !== undefined) gamepad.setWheel(c.wheel)
     if (c.face !== tab) { if (tab !== 'gamepad') lastTab = tab; tab = c.face }
-    setMode()
+    startControls()
   }
 
   const applySmooth = () => {
@@ -682,9 +685,15 @@ async function boot(code?: Join) {
   let musicActive = false
   // Gamepad mode: Xbox-style controller streaming PAD packets (./gamepad.ts).
   const gamepad = new GamepadMode({
-    motion, settings, t0, send: (b) => link.sendState(b), toast, openSettings, fullscreen: goFullscreen, exit: () => { tab = lastTab; setMode() },
+    motion, settings, t0, send: (b) => link.sendState(b), toast, openSettings, fullscreen: goFullscreen, exit: () => pick(controllerOn(lastTab, { point: mouseOn() ? 'mouse' : 'wii', wheel: false })),
     // A new profile on the gamepad tells the screen, as mode{p}.
-    profile: () => { buttons.changed(); if (surface && mode === Mode.gamepad) sendMode() },
+    profile: () => {
+      buttons.changed()
+      if (surface && mode === Mode.gamepad) {
+        if (!controllerChoice.pick(controllerNow(), rated())) controllerChoice.clear()
+        sendMode(); render()
+      }
+    },
     mapping: () => buttons.changed(),
     modePack: (id, version) => { if (link.ready) link.sendCtl({ t: 'value', id: 'pack-mode', v: `${id}@${version}` }) },
     position: () => control.recenter(),
@@ -692,7 +701,19 @@ async function boot(code?: Join) {
     controllers: () => switcher.open(),
   })
   /** The controller bar and the catalogue (./switcher.ts). */
-  const switcher = new Switcher({ pick, hand: openHands, body: openBody, tilt: () => { settings.style = 'game'; store.set('obpal.style', 'game'); pick(Controller.trackpad) }, feel: (strong) => tick(strong), toast: (text) => toast(text) })
+  const switcher = new Switcher({
+    pick,
+    opening: () => { if (surface) releaseControls(true) },
+    shown: () => {
+      const head = document.querySelector<HTMLElement>('.ctl-wrap:not(.out) .sheet-head')
+      if (head) addOfferedStop(head)
+      syncMotion()
+    },
+    closed: () => { syncMotion(); pump(16.7) },
+    hand: openHands, body: openBody, tilt: () => { settings.style = 'game'; store.set('obpal.style', 'game'); pick(Controller.trackpad) },
+    feel: (strong) => tick(strong), toast: (text) => toast(text),
+  })
+  const controlsCovered = () => switcher.opened || !!settingsSheet || !!document.getElementById('gate')
   /** The node strip along the trackpad's edge: which part of what you hold the pad drives (./strip.ts). */
   const strip = new NodeStrip({ send: (id, v) => { if (link.ready) link.sendCtl({ t: 'value', id, v }) }, feel: (strong) => tick(strong), changed: () => render() })
 
@@ -851,7 +872,8 @@ async function boot(code?: Join) {
     })
   }
 
-  function releaseControls() {
+  function releaseControls(handOver = false) {
+    anchorOnSample = false; recenterOnSample = false
     stopHands()
     stopBody()
     buttons.releaseAll()
@@ -861,7 +883,7 @@ async function boot(code?: Join) {
     releasePointing()
     padWheel?.reset()
     pad?.reset()
-    keyboard.close()
+    keyboard.close(handOver)
     keys.reset()
     drums.release()
     if (control.sim) link.sendCtl({ t: 'value', id: 'control.aim', v: JSON.stringify({ aim: [0, 0], tilt: [0, 0], active: false }) })
@@ -882,31 +904,41 @@ async function boot(code?: Join) {
   }
 
   function switchSurface(next: Connection | null) {
+    controllerChoice.connect(next?.row.id ?? '')
+    surface = null
+    closeSettings()
     musicWire.resetClock()
     control.sim = ''; control.scope = 'object'; control.defer(); controlSent = 0
     gamepad.setControlReach(null)
     hungUp = false
-    surface = null
     pad = null
     for (const k of Object.keys(values)) delete values[k]
     hostNotice = ''; linkLine = null; seatColor = ''; scene = null; chipKey = ''; heldShown = ''
     clearTimeout(chipTimer)
     layout = { v: 1, tray: [] }
     hostName = 'Screen'
-    suggestionTaken = false
+    pendingKeyboard = false
     sentController = ''
     tab = 'rotate'; lastTab = 'rotate'; mode = Mode.hold
     pointFace = null; ratedFrom = ''; faceShown = ''
-    switcher.close()
+    // Saving the verified target can already resume Options; its replacement takes over that same Back step.
+    switcher.close(true)
     strip.reset()
     linkBadge.down()
     keyboard.setField(false)
     if (!next?.welcome) { syncMotion(); startPage(); return }
     onHost(next.welcome)
+    const selected = controllerChoice.current(rated())
+    const chosen = selected ? choiceFor(selected) : null
+    if (chosen) {
+      tab = chosen.face
+      if (chosen.face !== 'gamepad') lastTab = chosen.face
+      if (chosen.point) pointFace = chosen.point
+      if (chosen.wheel !== undefined) gamepad.setWheel(chosen.wheel, false)
+    }
     onHost({ t: 'state', values: next.values })
     if (next.scene) onHost(next.scene)
-    if (started) showSurface()
-    else startControls()
+    startControls()
     tick()
     toast(`Controlling ${next.row.name}`, undefined, SCENE_TOAST)
   }
@@ -917,9 +949,12 @@ async function boot(code?: Join) {
   startControls()
 
   function startControls() {
-    if (!permissionReady || !link.active || started) return
-    if (motionPrompt) showGate()
-    else begin()
+    if (!permissionReady || !link.ready) return
+    const selected = controllerChoice.current(rated())
+    if (!selected) { showOptions(); return }
+    if (motionPrompt && selected !== Controller.keyboard) { showGate(); return }
+    if (started) { if (surface) setMode(); else showSurface(); return }
+    begin()
   }
 
   function showGate() {
@@ -937,8 +972,9 @@ async function boot(code?: Join) {
       const pending = requestMotionPermission() // synchronous start, inside the gesture
       goFullscreen()
       tick()
-      void pending.then(() => { document.getElementById('gate')?.remove(); begin() })
+      void pending.then(() => { motionPrompt = false; document.getElementById('gate')?.remove(); startControls() })
     }
+    addOfferedStop(document.querySelector<HTMLElement>('.gate-card')!)
   }
 
   function goFullscreen() {
@@ -959,7 +995,7 @@ async function boot(code?: Join) {
   // is driven; and after two minutes untouched the screen rests (black, and free to sleep) until a touch.
   function motionWanted() {
     // A screen that takes tosses listens for a flick in any mode, gyro on or not.
-    return !!link.active && !handCamera && !bodyCamera && document.visibilityState === 'visible' && !resting && (!tierSettled || gyroOn || mode === Mode.point || mode === Mode.track || mode === Mode.gamepad || tab === 'drums' || tab === 'keys' || !!layout.toss)
+    return !!surface && !!controllerChoice.current(rated()) && !controlsCovered() && controllerNow() !== Controller.keyboard && !!link.active && !handCamera && !bodyCamera && document.visibilityState === 'visible' && !resting && (!tierSettled || gyroOn || mode === Mode.point || mode === Mode.track || mode === Mode.gamepad || tab === 'drums' || tab === 'keys' || !!layout.toss)
   }
   /** Start or stop the sensors to match what's needed; true if they just started. */
   function syncMotion(): boolean {
@@ -988,6 +1024,7 @@ async function boot(code?: Join) {
     const tosses = new TossDetector()
     motion.onSample = (dt) => {
       if (permissionReady && motion.q) { const up = motion.up(); linkBadge.tilt(up[0], up[1]) }
+      if (!surface || controlsCovered()) return
       if (anchorOnSample) { anchorOnSample = false; anchor(); control.recenter() }
       if (recenterOnSample) { recenterOnSample = false; recenterPointer() }
       drums.sample()
@@ -1030,7 +1067,7 @@ async function boot(code?: Join) {
   }
 
   function defaultMarbleMotion() {
-    if (control.sim !== 'marblerun' || marbleMotionChosen || !motion.q) return
+    if (!surface || control.sim !== 'marblerun' || marbleMotionChosen || !motion.q) return
     marbleMotionChosen = true
     setGyro(true)
   }
@@ -1108,10 +1145,7 @@ async function boot(code?: Join) {
       sceneUrl = ''
       hostName = m.name
       layout = m.layout
-      // The first controller the screen suggests opens (CATALOGUE §9.2), once: a reconnect keeps what the person chose.
-      const first = suggestionTaken ? null : suggestedTab()
-      suggestionTaken = true
-      if (first) { tab = first; if (first !== 'gamepad') lastTab = first }
+      // Host suggestions rank Options. Only an explicit choice opens a control surface.
       syncMotion()
     }
     else if (m.t === 'layout') { layout = m.layout; syncMotion() }
@@ -1119,6 +1153,7 @@ async function boot(code?: Join) {
     if (m.t === 'welcome' || m.t === 'layout') {
       gamepad.setHost({ name: hostName, profile: layout.profile, utilities: layout.utilities, modePacks: layout.modePacks, rig: layout.rig })
       keyboard.offered(layout.tray.some((c) => c.type === 'keyboard'))
+      refreshOfferedStops()
     } else if (m.t === 'state') {
       if (typeof m.values['play.scene'] === 'string') { try { const url = new URL(m.values['play.scene']); if (url.origin === location.origin && url.searchParams.get('join') === 'play') sceneUrl = url.href } catch { /* Invalid scene links are ignored. */ } }
       if ('music.sync' in m.values) musicWire.reply(m.values['music.sync'])
@@ -1132,7 +1167,7 @@ async function boot(code?: Join) {
         if (control.scope !== m.values['control.scope']) { drums.release(); keys.reset() }
         control.scope = m.values['control.scope']
       }
-      if ('control.position' in m.values && values['control.position'] !== m.values['control.position']) recenterHere(false)
+      if (surface && 'control.position' in m.values && values['control.position'] !== m.values['control.position']) recenterHere(false)
       Object.assign(values, m.values)
       // A text or password field has the focus on the screen (textField 'text' or 'secret'): the Type prompt.
       if ('textField' in m.values) keyboard.setField(m.values.textField)
@@ -1156,6 +1191,12 @@ async function boot(code?: Join) {
       if (m.toast) toast(m.toast, undefined, HOST_TOAST)
       if (m.haptic && hapticsKind() === 'vibrate') navigator.vibrate(m.haptic === 'bump' ? 20 : 9)
     }
+    if (surface && (m.t === 'welcome' || m.t === 'layout') && !controllerChoice.current(rated())) {
+      surface = null
+      releaseControls()
+      showOptions()
+    }
+    if (!surface && permissionReady && (m.t === 'welcome' || m.t === 'layout') && !controllerChoice.current(rated())) showOptions()
     if (surface && m.t === 'state' && Object.keys(m.values).every(k => k.startsWith('action.'))) {
       for (const action of ['record', 'grip'] as const) {
         const button = document.querySelector<HTMLButtonElement>(`#tray [data-id="${action}"]`)
@@ -1238,6 +1279,7 @@ async function boot(code?: Join) {
 
   /** Tell the screen the mode, with the controller in use and, on the gamepad, the profile it applies (mode{m, c, p}). */
   function sendMode() {
+    if (!surface || !controllerChoice.current(rated()) || controllerNow() === Controller.keyboard) return
     sentController = controllerNow()
     link.sendCtl({ t: 'mode', m: mode, c: controllerNow(), ...(mode === Mode.gamepad ? { p: gamepad.profileInUse } : {}) })
   }
@@ -1252,7 +1294,46 @@ async function boot(code?: Join) {
 
   // ---- surface -----------------------------------------------------------
 
+  function addOfferedStop(parent: HTMLElement) {
+    parent.dataset.offeredStopSlot = ''
+    const stop = layout.tray.find(c => c.tone === 'stop')
+    let button = parent.querySelector<HTMLButtonElement>(':scope > [data-offered-stop]')
+    if (!stop) { button?.remove(); return }
+    if (!button) {
+      button = document.createElement('button')
+      button.type = 'button'; button.className = 'tray-btn glass text stop'; button.dataset.offeredStop = ''
+      const label = document.createElement('span'); label.className = 'tray-label'; button.append(label)
+      button.onclick = () => {
+        const current = layout.tray.find(c => c.tone === 'stop')
+        if (current) { tick(); link.sendCtl({ t: 'btn', id: current.id, ev: 'tap' }) }
+      }
+      parent.append(button)
+    }
+    button.querySelector('.tray-label')!.textContent = stop.label
+  }
+
+  function refreshOfferedStops() {
+    document.querySelectorAll<HTMLElement>('[data-offered-stop-slot]').forEach(addOfferedStop)
+  }
+
+  function showOptions() {
+    if (!link.ready || !link.active?.welcome) return
+    closeSettings()
+    document.documentElement.classList.remove('gp-mode')
+    document.body.classList.remove('live')
+    if (optionsRenderedFor !== link.current || !document.getElementById('controller-options')) {
+      optionsRenderedFor = link.current
+      setMarkup(app, html`<main class="msg"><div class="logo">${logoMark()}</div><div class="msg-card glass" id="controller-options"><h1>Options</h1><p>Choose a controller for ${screenName()}.</p><button class="btn primary" id="options-open">Choose a controller</button><button class="btn" id="options-connections">Connections</button></div></main>`)
+      document.getElementById('options-open')!.onclick = () => showOptions()
+      document.getElementById('options-connections')!.onclick = () => openConnections()
+      addOfferedStop(document.getElementById('controller-options')!)
+    }
+    switcher.render(rated(), null, screenName(), false)
+    switcher.open(true)
+  }
+
   function showSurface() {
+    if (!controllerChoice.current(rated())) { showOptions(); return }
     if (surface && document.body.contains(surface)) return
     setMarkup(app, html`
       <div class="surface${settings.left ? ' left' : ''}" id="surface">
@@ -1435,29 +1516,21 @@ async function boot(code?: Join) {
     ppx.addEventListener('pointerdown', (e) => e.stopPropagation())
     ppx.addEventListener('click', (e) => { e.stopPropagation(); tick(); link.sendCtl({ t: 'btn', id: 'part-release', ev: 'tap' }) })
     renderTray()
-    // The screen's suggestion may have picked another controller before there was a surface: switch to it now.
+    // The person chose this controller; apply it only after the existing entry/permission steps.
+    syncMotion()
     if (currentMode() !== mode) setMode()
     else { render(); sendMode() }
     pump(16.7)
-    hint('models', () => document.querySelector('.tray-btn.select'), 'Browse the catalogue', { place: 'top', delay: 9000 })
+    if (pendingKeyboard) { pendingKeyboard = false; keyboard.show('tray') }
+    hint('models', () => document.querySelector('.tray-btn.select[data-id="model"]'), 'Browse the catalogue', { place: 'top', delay: 9000, position: placeCatalogueHint })
     hint('more', () => document.getElementById('ctl-more'), 'Every controller, rated for this screen', { place: 'bottom', delay: 12000 })
   }
 
   function render() {
     if (!surface) return
-    // Only what this screen takes (./ratings.ts): a controller it stops taking gives way to the best one it does take.
     const sorted = rated()
-    const was = controllerNow()
-    const next = fallback(sorted, was)
-    if (next && next !== was) {
-      const c = choiceFor(next)!
-      if (c.point) pointFace = c.point
-      if (c.wheel !== undefined && c.wheel !== gamepad.wheelInUse) gamepad.setWheel(c.wheel, false)
-      if (c.face !== tab) { if (tab !== 'gamepad') lastTab = tab; tab = c.face }
-      // Said when the screen changed what it takes under a controller it had been told about, not on first joining.
-      if (sentController === was) toast(`${CONTROLLERS[was].name} isn’t on ${screenName()} now`)
-      queueMicrotask(setMode)
-    }
+    if (!controllerChoice.current(sorted)) { surface = null; releaseControls(); showOptions(); return }
+    surface.dataset.controller = controllerNow()
     switcher.render(sorted, controllerNow(), screenName(), keyboard.open, !!layout.utilities?.includes('camera.hand'), !!handCamera, !!layout.utilities?.includes('camera.body'), !!bodyCamera, !!layout.universal)
     const isMusic = tab === 'drums' || tab === 'keys'
     if (isMusic !== musicActive) { musicActive = isMusic; musicWire.use(isMusic) }
@@ -1693,41 +1766,38 @@ async function boot(code?: Join) {
     link.sendCtl({ t: 'value', id: 'control.scope', v: next }); renderTray(); render()
   }
 
+  /** Contextual tools share the existing settings sheet; the tray keeps the task and its Stop in reach. */
+  function renderControlActions(actions: HTMLElement) {
+    actions.replaceChildren()
+    const tool = (id: string, label: string, glyph: string, run: () => void) => {
+      const b = document.createElement('button')
+      b.type = 'button'; b.className = 'btn'; b.dataset.id = id
+      setMarkup(b, html`${icon(glyph)}<span class="action-label"></span>`)
+      b.querySelector('.action-label')!.textContent = label
+      b.onclick = () => { tick(); run() }
+      actions.append(b)
+      return b
+    }
+    if (control.sim) {
+      tool('control.position', 'Set position', 'position', () => { void requestMotionPermission(); recenterHere() })
+      const wide = control.scope === 'scene'
+      const scope = tool('control.scope', wide ? 'Scene scope' : 'Object scope', wide ? 'scene' : 'cube', toggleControlScope)
+      scope.setAttribute('aria-pressed', String(wide))
+      if (wide && !['studio', 'airhockey', 'football', 'pinball', 'slotcars', 'arena'].includes(control.sim)) {
+        tool('control.take', `Take ${values['control.target'] || 'aimed object'}`, 'take', () => link.sendCtl({ t: 'btn', id: 'control.take', ev: 'tap' }))
+      }
+    }
+    if (sceneUrl) tool('scene.open', 'Open scene', 'view', () => { link.close(); location.assign(sceneUrl) })
+  }
+
   function renderTray() {
+    const actions = settingsSheet?.querySelector<HTMLElement>('.control-actions')
+    if (actions) renderControlActions(actions)
     const tray = document.getElementById('tray')
     if (!tray) return
     if (tray !== inkTray) { releaseTrayInk?.(); inkTray = tray; releaseTrayInk = fitControlInk(tray) }
     tray.replaceChildren()
-    if (control.sim) {
-      /** A tool of the calibrated sim space: an icon and a word, with its full name for the ear. */
-      const tool = (id: string, label: string, glyph: string, word: string) => {
-        const b = document.createElement('button')
-        b.type = 'button'; b.className = 'tray-btn glass'; b.dataset.id = id
-        b.setAttribute('aria-label', label); b.title = label
-        setMarkup(b, html`${icon(glyph)}<span class="tray-label"></span>`)
-        b.querySelector('.tray-label')!.textContent = word
-        return b
-      }
-      const position = tool('control.position', 'Set position', 'position', 'Position')
-      iconAction(position, 'position', 'Set position')
-      position.onclick = () => { void requestMotionPermission(); tick(); recenterHere() }
-      // Object or scene scope: one toggle, lit for the scene, drawn as what it reaches.
-      const wide = control.scope === 'scene'
-      const scope = tool('control.scope', 'Scene scope', wide ? 'scene' : 'cube', wide ? 'Scene' : 'Object')
-      scope.setAttribute('aria-pressed', String(wide))
-      scope.onclick = toggleControlScope
-      tray.append(position, scope)
-      if (wide && !['studio', 'airhockey', 'football', 'pinball', 'slotcars', 'arena'].includes(control.sim)) {
-        const take = tool('control.take', `Take ${values['control.target'] || 'aimed object'}`, 'take', 'Take')
-        take.onclick = () => link.sendCtl({ t: 'btn', id: 'control.take', ev: 'tap' })
-        tray.append(take)
-      }
-    }
     // In a shared scene, what you hold (or the scene list, to claim something) comes first.
-    if (sceneUrl) {
-      const open = document.createElement('button'); open.type = 'button'; open.className = 'tray-btn glass'
-      iconAction(open, 'view', 'Open scene'); open.onclick = () => { link.close(); location.assign(sceneUrl) }; tray.append(open)
-    }
     if (scene && scene.nodes.length) {
       const c = sceneControl()
       const mine = Object.entries(scene.held).find(([, who]) => who === scene!.you)?.[0]
@@ -1771,7 +1841,7 @@ async function boot(code?: Join) {
       if (c.type === 'keyboard') b.setAttribute('aria-expanded', String(keyboard.open))
       b.addEventListener('pointerdown', () => tick())
       b.onclick = () => {
-        if (c.type === 'select') { dismissHint('models'); openPicker(c); return }
+        if (c.type === 'select') { if (c.id === 'model') dismissHint('models'); openPicker(c); return }
         // The dock's field takes the focus inside this tap: that is what brings up the phone's keyboard (iOS needs the tap).
         if (c.type === 'keyboard') { keyboard.show('tray'); return }
         if (c.type === 'toggle') {
@@ -1782,7 +1852,7 @@ async function boot(code?: Join) {
       }
       tray.appendChild(b)
     }
-    tray.hidden = !control.sim && layout.tray.length === 0 && !(scene && scene.nodes.length)
+    tray.hidden = tray.childElementCount === 0
     // The gamepad's shared-scene actions live under its More, with the connection and who is here.
     const middle = surface?.querySelector('.gp-meta-list') ?? surface?.querySelector('.gp-mid')
     if (middle) {
@@ -1951,11 +2021,16 @@ async function boot(code?: Join) {
   }
 
   function openSettings() {
+    if (settingsSheet) return
     const sheet = document.createElement('div')
+    settingsSheet = sheet
+    releaseControls(true)
+    syncMotion()
     sheet.className = 'sheet-wrap'
     setMarkup(sheet, html`
       <div class="sheet settings glass" role="dialog" aria-label="Settings">
         <div class="sheet-head"><div class="grip" aria-hidden="true"></div><button class="icon-btn glass sheet-x" id="set-close" aria-label="Close">${ICONS.close}</button></div>
+        ${control.sim || sceneUrl ? html`<p class="sheet-k">Actions</p><div class="control-actions connection-actions" role="group" aria-label="Scene actions"></div>` : ''}
         <button class="set-row set-cam glass" id="scan-open">${ICONS.camera}<span>Scan a code<small>Connect another screen</small></span>${ICONS.right}</button>
         ${layout.utilities?.includes('camera.hand') ? html`<button class="set-row glass" id="hand-settings">${ICONS['hand-cam']}<span>Hand camera<small>Control with your other hand</small></span>${ICONS.right}</button>` : ''}
         ${layout.utilities?.includes('camera.body') ? html`<button class="set-row glass" id="body-settings">${ICONS.body}<span>Body camera<small>Prop the phone facing you</small></span>${ICONS.right}</button>` : ''}
@@ -1987,6 +2062,9 @@ async function boot(code?: Join) {
         <div class="actions"><button class="btn" id="disc">Disconnect</button><button class="btn primary" id="done">Done</button></div>
       </div>`)
     document.body.appendChild(sheet)
+    addOfferedStop(sheet.querySelector<HTMLElement>('.sheet-head')!)
+    const actions = sheet.querySelector<HTMLElement>('.control-actions')
+    if (actions) renderControlActions(actions)
     // The camera, Connections and Buttons open in the same tap, over Settings as it slides away: the camera starts
     // inside the tap (browsers that tie a camera to a gesture keep it), and each takes over Settings' Back step.
     sheet.querySelector<HTMLButtonElement>('#connections-open')!.onclick = () => { close(true); openConnections() }
@@ -2071,7 +2149,13 @@ async function boot(code?: Join) {
     })
     let exits: (handOver?: boolean) => void = () => {}
     /** `handOver`: another layer opens in this tap and takes Settings' Back step (./sheet.ts). */
-    const close = (handOver = false) => { exits(handOver); sheet.classList.add('out'); setTimeout(() => sheet.remove(), 200) }
+    const close = (handOver = false) => {
+      if (settingsSheet !== sheet) return
+      settingsSheet = null; closeSettings = () => {}
+      exits(handOver); sheet.classList.add('out'); setTimeout(() => sheet.remove(), 200)
+      syncMotion(); pump(16.7)
+    }
+    closeSettings = () => close()
     sheet.querySelector<HTMLButtonElement>('#done')!.onclick = () => close()
     sheet.querySelector<HTMLButtonElement>('#set-close')!.onclick = () => close()
     exits = sheetExits(sheet, close)
@@ -2104,7 +2188,7 @@ async function boot(code?: Join) {
   // ---- state pump ----------------------------------------------------------
 
   function pump(dt: number) {
-    if (!surface || !link.ready) return
+    if (!surface || !link.ready || !controllerChoice.current(rated()) || controlsCovered() || controllerNow() === Controller.keyboard) return
     if (handCamera || bodyCamera) {
       const now = performance.now()
       if (now - lastSend < 66) return

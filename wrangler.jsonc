@@ -1,40 +1,92 @@
-// Deployment settings for obpal.blackboxes.net. For your own deployment, change the route, the D1 database id
-// and the vars, and set the secrets listed at the end.
+// Self-host template: choose your Worker name, account and custom domain; see docs/SELF-HOSTING.md.
+// Payments are disabled. Set your own address-hashing secret before deployment.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "obpal",
   "main": "./worker/index.ts",
   "compatibility_date": "2026-07-29",
-  "assets": { "binding": "ASSETS", "not_found_handling": "404-page", "run_worker_first": ["/api/*", "/r/*", "/sim/device/*", "/campaign/films/obpal-original-complete-web.mp4", "/campaign/films/obpal-one-thumb-eight-arms.mp4", "/campaign/films/obpal-make-a-mark.mp4", "/campaign/films/obpal-take-the-ring.mp4", "/campaign/films/obpal-screen-to-track.mp4", "/campaign/films/obpal-body-sets-the-rhythm.mp4"] },
-  "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "Room" }, { "name": "CODES", "class_name": "Codes" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }, { "tag": "v2", "new_sqlite_classes": ["Codes"] }],
-  "routes": [{ "pattern": "obpal.blackboxes.net", "custom_domain": true }],
-  // Our own logs only (console.warn / console.error, which never hold an address, a code, a secret or a room): no
-  // per-request invocation logs, which would keep every request's address and URL for days.
-  "observability": { "enabled": true, "logs": { "invocation_logs": false } },
-  // Brakes on abuse (worker/limits.ts), per address and minute, counted per Cloudflare location: room sockets opened,
-  // and ICE lookups (TURN credentials). Well above what people need, many phones behind one carrier's address
-  // included; room/ICE limits are optional and a service without them runs unlimited.
-  // Film admission is required and fails closed. One hashed address (IPv6 /64) bucket covers all six films and
-  // queries, before asset work. Per-location, eventually consistent brakes, not bandwidth or spending caps.
-  "ratelimits": [
-    { "name": "RL_SOCKET", "namespace_id": "31701", "simple": { "limit": 600, "period": 60 } },
-    { "name": "RL_ICE", "namespace_id": "31702", "simple": { "limit": 300, "period": 60 } },
-    { "name": "RL_FILM", "namespace_id": "31703", "simple": { "limit": 60, "period": 60 } }
-  ],
-  // Shared Blackboxes contribution ledger (same D1 database as Box'em, Orbit'em and the other engines).
-  "d1_databases": [{ "binding": "DB", "database_name": "blackboxes-contributions", "database_id": "<your-d1-database-id>" }],
-  "vars": {
-    "CHECKOUT_RETURN_ORIGINS": "https://obpal.blackboxes.net",
-    "STRIPE_CONTRIBUTION_ORIGINS": "https://obpal.blackboxes.net",
-    "STRIPE_SPONSOR_PORTAL_URL": "",
-    "STRIPE_SPONSORSHIP_ENABLED": "true",
-    "GITHUB_SPONSORS_PENDING": "true"
+  "assets": {
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "run_worker_first": [
+      "/api/*",
+      "/r/*",
+      "/sim/device/*",
+      "/campaign/films/obpal-original-complete-web.mp4",
+      "/campaign/films/obpal-one-thumb-eight-arms.mp4",
+      "/campaign/films/obpal-make-a-mark.mp4",
+      "/campaign/films/obpal-take-the-ring.mp4",
+      "/campaign/films/obpal-screen-to-track.mp4",
+      "/campaign/films/obpal-body-sets-the-rhythm.mp4"
+    ]
   },
-  // STRIPE_SECRET_KEY: the shared Blackboxes restricted checkout key (set with `wrangler secret put` or the dashboard).
-  // Webhooks go to the shared Blackboxes receiver (boxem.blackboxes.net), so no STRIPE_WEBHOOK_SECRET here.
-  // Optional relay (worker/ice.ts): TURN_KEY_ID and TURN_KEY_API_TOKEN (secrets) for Cloudflare TURN, or TURN_URLS (a
-  // var: turn:/turns: URLs) and TURN_SECRET (a secret) for a standard TURN server such as coturn or eturnal. STUN_URLS
-  // (a var) replaces the default STUN server. spec/SECURITY.md has the self-hosting steps.
-  "secrets": { "required": ["STRIPE_SECRET_KEY"] }
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ROOMS",
+        "class_name": "Room"
+      },
+      {
+        "name": "CODES",
+        "class_name": "Codes"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "Room"
+      ]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": [
+        "Codes"
+      ]
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "invocation_logs": false
+    }
+  },
+  "ratelimits": [
+    {
+      "name": "RL_SOCKET",
+      "namespace_id": "1",
+      "simple": {
+        "limit": 600,
+        "period": 60
+      }
+    },
+    {
+      "name": "RL_ICE",
+      "namespace_id": "2",
+      "simple": {
+        "limit": 300,
+        "period": 60
+      }
+    },
+    {
+      "name": "RL_FILM",
+      "namespace_id": "3",
+      "simple": {
+        "limit": 60,
+        "period": 60
+      }
+    }
+  ],
+  "name": "my-controller",
+  "workers_dev": false,
+  "routes": [],
+  "vars": {
+    "STRIPE_SPONSORSHIP_ENABLED": "false",
+    "GITHUB_SPONSORS_PENDING": "false"
+  },
+  "secrets": {
+    "required": [
+      "TURN_SECRET"
+    ]
+  }
 }

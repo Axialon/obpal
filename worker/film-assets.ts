@@ -1,12 +1,6 @@
-/** Only the six reviewed campaign exports. Tests bind these receipts to the public manifest. */
-export const FILM_ASSETS = [
-  { file: 'obpal-original-complete-web.mp4', bytes: 11054859, sha256: 'faa68dd55a5f7f296bbc155dc50d1545b0e456defcd2a1ef95f56e5b8f6dab02' },
-  { file: 'obpal-one-thumb-eight-arms.mp4', bytes: 4752295, sha256: '37061a184884e7b499ab406dbe4d948bf0a523940a7b341ffae70e3f43710968' },
-  { file: 'obpal-make-a-mark.mp4', bytes: 7430801, sha256: '60f319085a8df8c30a881f88016572332455010ebd15cf8930fbce8202deabe3' },
-  { file: 'obpal-take-the-ring.mp4', bytes: 4180284, sha256: '694b00025c504856a41f6ccc70f7f23c1b64470c0a7b5a083b7bfe0dfe6f7cf2' },
-  { file: 'obpal-screen-to-track.mp4', bytes: 6028451, sha256: '91cd3d09be4e5e8040015dfef1088c5bc6e8cc648cf6f791bab20d60dd44bd4a' },
-  { file: 'obpal-body-sets-the-rhythm.mp4', bytes: 4664497, sha256: 'dfd7bb6a461e8dd39bc2432e6f1cd05314a5e090662c2bbf639d29e15a43c9a6' },
-] as const
+/** The public demo inventory derives from its projected manifest; omitted films have no media route. */
+import filmManifest from '../public/campaign/films/manifest.json'
+export const FILM_ASSETS: readonly { file: string; bytes: number; sha256: string }[] = filmManifest.films
 
 import type { RateLimit } from './limits'
 

@@ -4,7 +4,10 @@ import {
   bindMac, DeviceLink, forgetConnection, getPair, importPairKey, isConnection, listConnections, migrateConnections,
   putConnection, putPair, saveInvite, type DeviceMsg, type HostMsg, type LinkStatus, type StoredConnection,
 } from '@obpal/core'
-import { Connections } from '../src/controller/connections'
+import { Connections, type Connection } from '../src/controller/connections'
+import { ControllerChoice } from '../src/controller/controller-choice'
+import { choiceFor, rateControllers } from '../src/controller/ratings'
+import { readText } from './devtools-node.mjs'
 
 const secret = (n: number) => new Uint8Array(16).fill(n)
 const fp = new Uint8Array(32).fill(2)
@@ -62,20 +65,64 @@ class Link {
     this.emit('message', { t: 'welcome', proto: 1, name, kind: 'viewer', layout: { v: 1, tray: [] }, ...extra })
   }
 }
-function hub() {
+function hub(switched?: (connection: Connection | null) => void) {
   const links: Link[] = []
   const messages: HostMsg[] = []
   const order: string[] = []
   const attempts: (string | null)[] = []
   const current = new Connections({ service: 'https://obpal.example', cert: Promise.resolve(null), name: Promise.resolve('Phone'),
     caps: () => ({ tier: 0, sensorApi: 'none', haptics: 'none', platform: 'test' }),
-    beforeSwitch: () => order.push(`release:${current.current}`), switched: (c) => order.push(`switch:${c?.row.name ?? 'none'}`),
+    beforeSwitch: () => order.push(`release:${current.current}`), switched: (c) => { order.push(`switch:${c?.row.name ?? 'none'}`); switched?.(c) },
     status: () => {}, stats: () => {}, message: (m) => messages.push(m), attempt: c => attempts.push(c?.stillConnecting ? 'still' : c ? 'pending' : null), create: () => { const link = new Link(); links.push(link); return link as unknown as DeviceLink },
   })
   return { current, links, messages, order, attempts }
 }
 
 describe('switching connections', () => {
+  it.each([false, true])('clears the old face before closing Settings on a verified target switch (held motion: %s)', async held => {
+    const source = readText('src/controller/main.ts')
+    const start = source.indexOf('  function switchSurface('), end = source.indexOf('\n  const permission =', start)
+    expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start)
+    const productionSwitch = source.slice(start, end).replace('next: Connection | null', 'next')
+    const pumpGuard = source.match(/function pump\(dt: number\) \{\s*(if \([^\n]+ return)/)?.[1]
+    expect(pumpGuard).toBeTypeOf('string')
+    let h: ReturnType<typeof hub>
+    // Execute the production switch and output guard. Only rendering and sensors are stand-ins; activation/routing is real.
+    const build = new Function('link', 'ControllerChoice', 'choiceFor', 'rateControllers', 'Mode', 'Controller', 'held', `
+      const controllerChoice = new ControllerChoice(); let surface = null, settingsOpen = false;
+      let layout = { v: 1, tray: [] }, mode = Mode.hold, tab = 'rotate', lastTab = 'rotate';
+      let hungUp, pad, hostNotice, linkLine, seatColor, scene, chipKey, heldShown, chipTimer, hostName;
+      let pendingKeyboard, sentController, pointFace, ratedFrom, faceShown;
+      const values = {}, musicWire = { resetClock() {} }, control = { defer() {} };
+      const gamepad = { setControlReach() {}, setWheel() {} }, switcher = { opened: false, close() {} };
+      const strip = { reset() {} }, linkBadge = { down() {} }, keyboard = { setField() {} };
+      const SCENE_TOAST = 'scene', tick = () => {}, toast = () => {}, syncMotion = () => {}, startPage = () => {};
+      const rated = () => rateControllers(layout, { motion: true });
+      const controllerNow = () => controllerChoice.current(rated());
+      const controlsCovered = () => settingsOpen;
+      const pump = dt => { ${pumpGuard}; link.sendState(new Uint8Array([mode, Number(held)]).buffer) };
+      const closeSettings = () => { if (!settingsOpen) return; settingsOpen = false; pump(16.7) };
+      const onHost = m => { if (m.t === 'welcome') layout = m.layout };
+      const startControls = () => { if (controllerChoice.current(rated())) pump(16.7) };
+      ${productionSwitch}
+      return { switchSurface, openSettings() { controllerChoice.pick('face.wii', rated()); surface = {}; mode = Mode.point; settingsOpen = true },
+        pick() { controllerChoice.pick('face.trackpad', rated()); surface = {}; mode = Mode.hold; pump(16.7) } };
+    `)
+    const route = { get ready() { return h.current.ready }, sendState: (b: ArrayBuffer) => h.current.sendState(b) }
+    const seam = build(route, ControllerChoice, choiceFor, rateControllers, core.Mode, core.Controller, held)
+    h = hub(c => seam.switchSurface(c))
+    try {
+      await h.current.connect(join(80)); h.links[0].welcome('A'); seam.openSettings()
+      await h.current.connect(join(81))
+      expect(h.current.active?.row.name).toBe('A')
+      h.links[1].welcome('B')
+      expect(h.current.active?.row.name).toBe('B')
+      expect(h.links[1].frames).toHaveLength(0)
+      expect(h.links[1].sent.some(m => m.t === 'mode')).toBe(false)
+      seam.pick()
+      expect(h.links[1].frames).toHaveLength(1)
+    } finally { h.current.destroy(); await h.current.settled() }
+  })
   it('sends input as soon as welcome arrives while a key import and its storage commit are still pending', async () => {
     const invite = await saveInvite(join(30).pairing)
     let importDone!: (v: typeof invite) => void, commitDone!: () => void

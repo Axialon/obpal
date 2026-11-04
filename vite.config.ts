@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build, defineConfig, type Plugin } from 'vite'
 import { markupBuild } from './scripts/markup-build.mjs'
-import { pageWords, previewTags } from './scripts/lib/preview.mjs'
+import { pageWords, previewTags, SITE } from './scripts/lib/preview.mjs'
 import { catalogueMarkup, deviceMarkup, faqMarkup, INDEXABLE_PAGES, jsonLd, robotsTxt, sitemapXml, structuredData } from './scripts/lib/seo.mjs'
 import { loadSims } from './scripts/lib/load-sims.mjs'
 import { cloudflare } from '@cloudflare/vite-plugin'
@@ -36,7 +36,7 @@ const CONTROLLER_STATIC = [
  * only to here. Styles may be inline: the pages set style attributes. A page that needs more says so in CSP_EXTRA.
  * OBPAL_PUBLIC_ORIGIN names the service's origin for a build of your own.
  */
-const PUBLIC_ORIGIN = process.env.OBPAL_PUBLIC_ORIGIN ?? 'https://obpal.blackboxes.net'
+const PUBLIC_ORIGIN = SITE
 const CSP_EXTRA: Record<string, Record<string, string[]>> = {
   // The controller shows the thumbnails a screen's layout names, from any https host.
   '/p/index.html': { 'img-src': ['https:'] },
