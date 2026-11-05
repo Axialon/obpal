@@ -21,8 +21,10 @@ async function enterController(page, proof) {
   const mask = [page.locator('#code-in'), page.getByRole('textbox', { name: /code/i }), page.locator('video')]
   await proof.expect([scenario, `${scenario}-control`])
   try {
-    await page.locator('.ctl-sheet[data-controller-entry]').waitFor({ timeout: 25000 })
     await page.locator('dialog.connection-wrap[open]').waitFor({ state: 'hidden', timeout: 5000 })
+    // A verified target can replace Options during handover; settle closing wrappers before requiring uniqueness.
+    await page.waitForFunction(() => !document.querySelector('.ctl-wrap.out'), null, { timeout: 5000 })
+    await page.locator('.ctl-sheet[data-controller-entry]').waitFor({ timeout: 25000 })
     if (await page.locator('#surface').count()) throw new Error('control surface mounted before an explicit choice')
     if (await page.locator('.ctl-card[aria-checked="true"]').count()) throw new Error('arrival selected a controller automatically')
     await proof.capture(page, scenario, { mask })
@@ -185,7 +187,7 @@ export async function phoneConnections({ browser, origin, check, shots }) {
     })
     // Observe the original trust notice before unrelated saved-screen storage coverage.
     if (process.env.OBPAL_E2E_PHONE_ONLY === 'mobile') await mobileLayoutEvidence({ phone, screen: a, check, proof })
-    else { await open(); await rename('ob.Pal Viewer', 'Desk viewer'); await close() }
+    await open(); await rename('ob.Pal Viewer', 'Desk viewer'); await close()
 
     await check('the in-app scanner rejects foreign QR codes, offers a torch, and stops its camera on close', async () => {
       await open(); await phone.getByRole('button', { name: 'Scan another code', exact: true }).click()
@@ -507,9 +509,9 @@ async function pendingRecovery({ browser, origin, check, proof }) {
   const page = await ctx.newPage()
   const shot = name => proof.capture(page, `${name}-390x844`, { mask: [page.locator('#code-in'), page.getByRole('textbox', { name: /code/i }), page.locator('video')] })
   try {
+    await page.goto(`${origin}/p/`)
+    await page.clock.install()
     await check('pending pairing stays recoverable beyond two minutes; cancel clears the attempt without replaying its code', async () => {
-      await page.goto(`${origin}/p/`)
-      await page.clock.install()
       await page.locator('#code-in').fill('1234567890')
       await page.getByRole('heading', { name: 'Waiting for the screen', exact: true }).waitFor()
       await page.getByRole('button', { name: 'Cancel attempt', exact: true }).waitFor()
@@ -574,7 +576,9 @@ async function pendingRecovery({ browser, origin, check, proof }) {
       await page.locator('[data-camera-type]').click()
       await code.waitFor()
       if (!(await code.evaluate(el => el === document.activeElement)) || await page.locator('.obpal-camera[open]').count()) throw new Error('scanner-to-code did not restore typing')
+      const typingMark = await page.evaluate(() => history.state?.obpalSheet)
       await page.keyboard.press('Escape')
+      await page.waitForFunction(mark => history.state?.obpalSheet !== mark, typingMark)
       if (errors.length) throw new Error(errors.join(' | '))
       return 'typing first; no camera request; empty fresh code; Close, Escape, Back/Forward and scanner-to-code'
     })

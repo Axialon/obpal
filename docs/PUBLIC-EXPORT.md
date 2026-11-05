@@ -1,5 +1,9 @@
 # Public demo export
 
+Installing the exporter in development does not admit newer private runtime or assets into the public profile.
+Unknown paths and stale pinned inputs refuse export. Reconcile their source in a separate reviewed policy; never
+repin runtime or assets merely to make an export pass.
+
 `public-demo-v1` is generated from the development source, not maintained as a separate application. Its Viewer contains the existing procedural cube, knot and gem. Cube is the default, including fallback from an unavailable saved selection. Studio and Local remain; Local loads files explicitly chosen on that device. Arena uses its existing neutral pucks labelled Team 1–4. Other simulations retain individually classified original prototype meshes, runtime audio and required vendor assets.
 
 The profile excludes CVC/Blackboxes depictions, their catalogue helpers, unverified promotional screenshots and the six campaign films/posters. The campaign entry retains its page/share shell and explains that films are omitted; the compatible film manifest is empty. It supplies no replacement films or restricted asset pack. Development originals are untouched. The original CVC notice is retained solely as context; it does not license omitted assets. Original root licences, trademark policy, font notices, MediaPipe notice and audio credits remain unchanged.

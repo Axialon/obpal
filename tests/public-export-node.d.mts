@@ -1,4 +1,5 @@
 export function liveWithoutTarget(): { status: number | null; output: string }
+export function trackedPublicInputs(): string[]
 export function publicationFixture(mode: string): {
   status: number | null; output: string; baseline: string; source: string; tree: string; head: string; publicTree: string; parent: string; identity: string[]
   calls: { command: string; args: string[] }[]

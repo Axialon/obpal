@@ -378,6 +378,34 @@ export async function mobileLayoutEvidence({ phone, screen, check, proof }) {
     await until('fresh offered Stop layout delivered', () => phone.evaluate(({ before, ids }) => window.__mobileLayoutVersion > before && JSON.stringify(window.__mobileLastStopIds) === JSON.stringify(ids), { before, ids: id ? [id] : [] }))
   }
   try {
+    await checked('mobile: long labels and doubled computed text remain contained at320px', async () => {
+      await proof.expect(['mobile-320-long-double-text', 'mobile-320-long-double-text-live-notice', 'mobile-320-long-double-text-scan-hand', 'mobile-320-long-double-text-lower-tools'])
+      await closeLayers(); await phone.setViewportSize({ width: 320, height: 740 }); await phone.emulateMedia({ reducedMotion: 'reduce' })
+      await offer('mobile-stop', 'Stop all movement immediately')
+      await phone.locator('#gear').click()
+      await phone.evaluate(() => {
+        const targets = [...document.querySelectorAll('.settings button, .settings span, .settings p, .settings label, .settings output')]
+        window.__mobileFontSizes = targets.map(el => [el, el.style.fontSize, parseFloat(getComputedStyle(el).fontSize)])
+        for (const [el, , size] of window.__mobileFontSizes) el.style.fontSize = `${size * 2}px`
+      })
+      try {
+        await phone.waitForFunction(() => document.querySelector('.obpal-notices .nt-item[data-id="trust"][data-tier="ceremony"] .trust-first[data-quiet]'), null, { timeout: 8000 })
+        await phone.waitForTimeout(220)
+        const live = { ...await measure(true), liveCapture: { after: null } }
+        // Observe the existing notice before the long palette sweep, without changing its clock or animation.
+        await capture('320-long-double-text-live-notice', live, { animations: 'allow', failed: live.issues.length ? true : undefined })
+        const after = await measure(true)
+        live.liveCapture.after = { at: after.at, notices: after.notices, headerTargets: after.headerTargets, issues: after.issues }
+        live.issues.push(...after.issues.map(issue => `after capture: ${issue}`))
+        if (live.issues.length) throw Error(live.issues.slice(0, 6).join('; '))
+        await paletteHits()
+        const result = await finish('320-long-double-text', { textSizing: 'Synthetic doubled computed text sizes; not OS accessibility settings' })
+        await copyView('320-long-double-text-scan-hand', ['scan-open', 'hand-settings'])
+        await copyView('320-long-double-text-lower-tools', ['buttons-open', 'connections-open', 'connection-details'])
+        return result
+      }
+      finally { await phone.evaluate(() => { for (const [el, old] of window.__mobileFontSizes ?? []) el.style.fontSize = old }); await closeLayers() }
+    })
     await checked('mobile: genuine catalogue hint leaves landscape controls clear at667x375', async () => {
       await proof.expect(['mobile-667x375-catalogue-hint'])
       await closeLayers(); await phone.setViewportSize({ width: 667, height: 375 }); await phone.emulateMedia({ reducedMotion: 'reduce' })
@@ -419,34 +447,6 @@ export async function mobileLayoutEvidence({ phone, screen, check, proof }) {
         await closeLayers()
       })
     }
-    await checked('mobile: long labels and doubled computed text remain contained at320px', async () => {
-      await proof.expect(['mobile-320-long-double-text', 'mobile-320-long-double-text-live-notice', 'mobile-320-long-double-text-scan-hand', 'mobile-320-long-double-text-lower-tools'])
-      await closeLayers(); await phone.setViewportSize({ width: 320, height: 740 })
-      await offer('mobile-stop', 'Stop all movement immediately')
-      await phone.locator('#gear').click()
-      await phone.evaluate(() => {
-        const targets = [...document.querySelectorAll('.settings button, .settings span, .settings p, .settings label, .settings output')]
-        window.__mobileFontSizes = targets.map(el => [el, el.style.fontSize, parseFloat(getComputedStyle(el).fontSize)])
-        for (const [el, , size] of window.__mobileFontSizes) el.style.fontSize = `${size * 2}px`
-      })
-      try {
-        await phone.waitForFunction(() => document.querySelector('.obpal-notices .nt-item[data-id="trust"][data-tier="ceremony"] .trust-first[data-quiet]'), null, { timeout: 8000 })
-        await phone.waitForTimeout(220)
-        const live = { ...await measure(true), liveCapture: { after: null } }
-        // Observe the existing notice before the long palette sweep, without changing its clock or animation.
-        await capture('320-long-double-text-live-notice', live, { animations: 'allow', failed: live.issues.length ? true : undefined })
-        const after = await measure(true)
-        live.liveCapture.after = { at: after.at, notices: after.notices, headerTargets: after.headerTargets, issues: after.issues }
-        live.issues.push(...after.issues.map(issue => `after capture: ${issue}`))
-        if (live.issues.length) throw Error(live.issues.slice(0, 6).join('; '))
-        await paletteHits()
-        const result = await finish('320-long-double-text', { textSizing: 'Synthetic doubled computed text sizes; not OS accessibility settings' })
-        await copyView('320-long-double-text-scan-hand', ['scan-open', 'hand-settings'])
-        await copyView('320-long-double-text-lower-tools', ['buttons-open', 'connections-open', 'connection-details'])
-        return result
-      }
-      finally { await phone.evaluate(() => { for (const [el, old] of window.__mobileFontSizes ?? []) el.style.fontSize = old }); await closeLayers() }
-    })
     await checked('mobile: an open chooser releases held Wii input and pauses covered frames', async () => {
       await proof.expect(['mobile-held-release'])
       await closeLayers(); await phone.setViewportSize({ width: 390, height: 844 })

@@ -76,6 +76,7 @@ stagePublicGitModes({ destination: work, manifest: materialized.manifest })
 if (git(['write-tree'], work).trim() !== tree) throw new Error('Staged snapshot differs from the approved Git tree')
 if (!git(['status', '--porcelain'], work).trim()) {
   requirePublicBaseline(PUBLIC_REPO, baseline)
+  materialized.assertSourceUnchanged()
   console.log('Public repository already up to date.'); return
 }
 const version = JSON.parse(readFileSync(join(out, 'extension/package.json'), 'utf8')).version
@@ -84,8 +85,12 @@ git([...AUTHOR, 'commit', '--quiet', '-m', `ob.Pal snapshot (ob.Pal Link ${versi
   GIT_COMMITTER_NAME: target.authorName, GIT_COMMITTER_EMAIL: target.authorEmail,
 })
 const commit = git(['rev-parse', 'HEAD'], work).trim()
-if (git(['rev-parse', 'HEAD^{tree}'], work).trim() !== tree || git(['rev-parse', 'HEAD^'], work).trim() !== baseline) {
+if (git(['rev-parse', 'HEAD^{tree}'], work).trim() !== tree || git(['show', '-s', '--format=%P', commit], work).trim() !== baseline) {
   throw new Error('Snapshot commit differs from the approved tree or public parent')
+}
+const identity = git(['show', '-s', '--format=%an%n%ae%n%cn%n%ce', commit], work).trimEnd().split(/\r?\n/)
+if (JSON.stringify(identity) !== JSON.stringify([target.authorName, target.authorEmail, target.authorName, target.authorEmail])) {
+  throw new Error('Snapshot commit differs from the approved public identity')
 }
 requirePublicBaseline(PUBLIC_REPO, baseline)
 materialized.assertSourceUnchanged()

@@ -272,9 +272,9 @@ describe('phone mobile fixture routing', () => {
     return { events, done: run(phone, record('open'), record('rename'), record('close'), mobile, { env: { OBPAL_E2E_PHONE_ONLY: phoneOnly } }, {}, {}, {}) }
   }
 
-  it('reaches mobile evidence without consuming its genuine notice window on unrelated rename work', async () => {
+  it('observes mobile evidence before restoring the unique saved-screen identity', async () => {
     const f = route('mobile'); await f.done
-    expect(f.events).toEqual(['ready', 'mobile'])
+    expect(f.events).toEqual(['ready', 'mobile', 'open', 'rename', 'close'])
   })
 
   it.each(['connections', undefined])('preserves saved-screen preparation for the normal %s route', async phoneOnly => {
@@ -286,5 +286,59 @@ describe('phone mobile fixture routing', () => {
     const failure = new Error('live quiet trust notice absent'), f = route('mobile', failure)
     await expect(f.done).rejects.toBe(failure)
     expect(f.events).toEqual(['ready', 'mobile'])
+  })
+
+  it('loads the shared recovery document and clock before filterable cases', async () => {
+    const source = readText('scripts/phone-connections.mjs')
+    const owner = source.indexOf('async function pendingRecovery(')
+    const start = source.indexOf('  try {', owner) + '  try {'.length
+    const end = source.indexOf("    await check('pending pairing stays", start)
+    expect(owner).toBeGreaterThan(0); expect(end).toBeGreaterThan(start)
+    const events: string[] = []
+    const page = { goto: async (url: string) => { events.push(url) }, clock: { install: async () => { events.push('clock installed') } } }
+    const run = new Function('page', 'origin', `return (async () => {${source.slice(start, end)}})()`)
+    await run(page, 'https://example.test')
+    expect(events).toEqual(['https://example.test/p/', 'clock installed'])
+  })
+})
+
+describe('phone Options arrival boundary', () => {
+  /** Execute the shared arrival waits while a connection handover replaces its closing chooser. */
+  const arrive = (duplicate = false) => {
+    const source = readText('scripts/phone-connections.mjs'), owner = source.indexOf('async function enterController(')
+    const start = source.indexOf('  try {', owner) + '  try {'.length
+    const end = source.indexOf("    if (await page.locator('#surface')", start)
+    expect(owner).toBeGreaterThan(0); expect(end).toBeGreaterThan(start)
+    const events: string[] = [], waits: unknown[] = [], selectors: string[] = []
+    let closing = 0
+    const document = { querySelector: (selector: string) => { selectors.push(selector); return closing-- > 0 ? {} : null } }
+    const failure = new Error('strict mode: two active Options sheets')
+    const page = {
+      locator: (selector: string) => ({ waitFor: async (options: unknown) => {
+        events.push(selector); waits.push(options)
+        if (selector === 'dialog.connection-wrap[open]') closing = 1
+        else if (duplicate) throw failure
+      } }),
+      waitForFunction: async (predicate: () => boolean, _arg: unknown, options: unknown) => {
+        events.push('closing chooser removal'); waits.push(options)
+        for (let i = 0; i < 3; i++) if (predicate()) return
+        throw new Error('closing chooser remained attached')
+      },
+    }
+    const run = new Function('page', 'document', `return (async () => {${source.slice(start, end)}})()`)
+    return { events, waits, selectors, failure, done: run(page, document) }
+  }
+
+  it('settles connection handover and removed choosers before requiring one visible entry', async () => {
+    const f = arrive(); await f.done
+    expect(f.events).toEqual(['dialog.connection-wrap[open]', 'closing chooser removal', '.ctl-sheet[data-controller-entry]'])
+    expect(f.waits).toEqual([{ state: 'hidden', timeout: 5000 }, { timeout: 5000 }, { timeout: 25000 }])
+    expect(f.selectors).toEqual(['.ctl-wrap.out', '.ctl-wrap.out'])
+  })
+
+  it('preserves strict failure when two active choosers remain after handover', async () => {
+    const f = arrive(true)
+    await expect(f.done).rejects.toBe(f.failure)
+    expect(f.events).toEqual(['dialog.connection-wrap[open]', 'closing chooser removal', '.ctl-sheet[data-controller-entry]'])
   })
 })

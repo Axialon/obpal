@@ -1,7 +1,38 @@
 import { describe, expect, it } from 'vitest'
 import { selectPublicFiles, verifyPublicOutput, type PublicExportPolicy, type PublicOutputManifest } from '../scripts/lib/public-export.mjs'
+import { readPublicSource, trackedPublicInputs } from './public-export-node.mjs'
 
 const digest = (n: string) => n.repeat(64)
+
+describe('internal policy admission boundary', () => {
+  const admitted = () => JSON.parse(readPublicSource('public-export.allowlist.json')) as PublicExportPolicy
+  it('classifies the current inventory without inferring new public inputs', () => {
+    const plan = selectPublicFiles(trackedPublicInputs(), admitted())
+    expect(plan.inputs.length).toBeGreaterThan(0)
+    expect(() => selectPublicFiles([...trackedPublicInputs(), 'src/unreviewed.ts'], admitted())).toThrow('unclassified tracked path')
+  })
+  it('retains the reviewed immutable runtime or the explicitly projected public-only policy', () => {
+    const p = admitted()
+    if (p.payloadRevision === null) {
+      expect(p.include.every(row => row.source === 'tooling')).toBe(true)
+      expect(p.exclude.map(row => row.path)).toEqual(['public-export.manifest.json'])
+      expect(p.blockedSha256).toEqual([])
+    } else {
+      expect(p.payloadRevision).toBe('a7394a1375c5190f3a53095e0791d32e58e2cf77')
+      expect(p.blockedSha256.length).toBeGreaterThanOrEqual(63)
+    }
+    expect(p.include.filter(row => /coach/.test(row.path))).toEqual([])
+    expect(p.include.filter(row => row.role === 'asset' && /^public\/models\/(?:cvc|blackboxes)\//.test(row.path))).toEqual([])
+  })
+  it('keeps later private coach and native gate paths excluded rather than activating the public projection policy', () => {
+    const p = admitted(), excluded = new Set(p.exclude.map(row => row.path)), tracked = new Set(trackedPublicInputs())
+    for (const path of ['worker/coach.ts', 'worker/nebius-coach.ts', 'src/sim/arm/coach/panel.ts', 'scripts/lib/merge-report.mjs']) {
+      if (tracked.has(path)) expect(excluded.has(path)).toBe(true)
+      expect(p.include.some(row => row.path === path)).toBe(false)
+    }
+    if (p.payloadRevision !== null) expect(p.exclude.length).toBeGreaterThan(1)
+  })
+})
 function policy(): PublicExportPolicy {
   return { schema: 1, profile: 'public-demo-v1', payloadRevision: 'a'.repeat(40),
     include: [

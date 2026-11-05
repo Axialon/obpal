@@ -64,6 +64,26 @@ describe('explicit operation destinations', () => {
 })
 
 describe('pinned existing public repository publication', () => {
+  it.each(['identity', 'parent', 'extra-parent', 'noop-source'])('refuses %s drift before any publication call', mode => {
+    const result = publicationFixture(mode)
+    if (mode === 'extra-parent') {
+      const injected = result.calls.find(call => call.command === 'fixture' && call.args[0] === 'extra-parent')
+      expect(injected?.args).toHaveLength(3)
+      expect(injected?.args[1]).toBe(result.baseline)
+      expect(injected?.args[2]).not.toBe(result.baseline)
+    }
+    expect(result.status, result.output).toBe(1)
+    expect(result.head).toBe(result.baseline)
+    expect(result.calls.some(call => call.command === 'git' && call.args.includes('push'))).toBe(false)
+    expect(result.calls.some(call => call.command === 'gh' && call.args.includes('create'))).toBe(false)
+  })
+  it('accepts an unchanged matching public tree without a publication call', () => {
+    const result = publicationFixture('noop')
+    expect(result.status, result.output).toBe(0)
+    expect(result.head).toBe(result.baseline)
+    expect(result.output).toContain('already up to date')
+    expect(result.calls.some(call => call.command === 'git' && call.args.includes('push'))).toBe(false)
+  })
   it.each(['lookup', 'private', 'repository', 'branch', 'pins', 'source-pin', 'baseline', 'tree', 'source', 'clone-race', 'drift'])(
     'stops before push on %s without creating a repository', mode => {
       const result = publicationFixture(mode)

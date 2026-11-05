@@ -1302,7 +1302,7 @@
       "noticePaths": [
         "LICENSE"
       ],
-      "inputSha256": "f3241ba52c529cb15df179a27209430658e30cc3e3ea9728ac99eeed9458415c"
+      "inputSha256": "caac54458aa1bf78dfbe38a8a63147b951561c608df4e15351554e9a587ac4cb"
     },
     {
       "path": "docs/SELF-HOSTING.md",
@@ -6228,7 +6228,7 @@
       "noticePaths": [
         "LICENSE"
       ],
-      "inputSha256": "55296ea6f062c55489b73ed6d65059ccd98602a49de6d2abd9e720271a737a24"
+      "inputSha256": "bafa714cb70ac4ce07c460862f53e38b3b9354aa4a9acc4bb61eea3b7d229357"
     },
     {
       "path": "scripts/oss-audit.mjs",
@@ -6298,7 +6298,7 @@
       "noticePaths": [
         "LICENSE"
       ],
-      "inputSha256": "8b068772fd6fe1be6f194298f7e9061ce8ef2076df9a95d2b6149b8c75bea552"
+      "inputSha256": "251fca5f04f008fba61bda8d69b63f5ebaded3c549616d2ccaa4ab4aaa014f6d"
     },
     {
       "path": "scripts/phone-controllers.mjs",
@@ -6338,7 +6338,7 @@
       "noticePaths": [
         "LICENSE"
       ],
-      "inputSha256": "09452803c9b13890bb17beaaad0d286c5eab88053ca467595740eac0bc38e0dd"
+      "inputSha256": "9af2d8b720584c8f6a68c4c8c541f050136b99af8391469299efe386f6fffb10"
     },
     {
       "path": "scripts/phone-pointing.mjs",
@@ -14449,7 +14449,7 @@
       "noticePaths": [
         "LICENSE"
       ],
-      "inputSha256": "3d41709f11d4bb1363cbc2bd0f78dce09abb6d774e1cbf9c16af51f3cecd8705"
+      "inputSha256": "e7c9683a807e343230bff3bd760cb47eb75efb0200e07f22f1abe0c6470bb130"
     },
     {
       "path": "tests/physics-constraint-response.test.ts",
@@ -14539,7 +14539,7 @@
       "noticePaths": [
         "LICENSE"
       ],
-      "inputSha256": "065633ed62efa3e8b53b7dc1857501fd311e67b905a045ceed3eefedfc882afe"
+      "inputSha256": "728877fa3ca09774b7011964c29d788321748dd4aa1f539e919522ea7edf7b42"
     },
     {
       "path": "tests/public-export-node.mjs",
@@ -14549,7 +14549,7 @@
       "noticePaths": [
         "LICENSE"
       ],
-      "inputSha256": "0944c2a7e5e1406f0e035c28c3c62ca73d0c72b2903d8f6b224eb226b52f5e7a"
+      "inputSha256": "7dd5cdfe4aa88be50247968f020ba046f92a1f217d81432aed89afcde820641b"
     },
     {
       "path": "tests/public-export-policy.test.ts",
@@ -14559,7 +14559,7 @@
       "noticePaths": [
         "LICENSE"
       ],
-      "inputSha256": "48b762ed9efcf31adc8fef8547745a4002ea5813d517349526dbe94fd7759901"
+      "inputSha256": "e3e0d0db7b5aaa1e1aa96fe26b5f830c4ebca6b0b7469c050d0fde228c61bac0"
     },
     {
       "path": "tests/public-export.test.ts",
@@ -14569,7 +14569,7 @@
       "noticePaths": [
         "LICENSE"
       ],
-      "inputSha256": "7f2bbfd3d27460a1b56ad01075beaa6df15cf6e3caa6fff1255a992dd0f38225"
+      "inputSha256": "1a54051c413389972507795cc8bfbd5ba61b4afd1f03219491d40a8b145ea6b9"
     },
     {
       "path": "tests/publish-npm.test.ts",

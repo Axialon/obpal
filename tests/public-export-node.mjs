@@ -12,6 +12,10 @@ import * as publicExport from '../scripts/lib/public-export.mjs'
 import { isLocalOnly } from '../scripts/lib/scan.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
+export function trackedPublicInputs() {
+  return execFileSync('git', ['-c', 'core.fsmonitor=false', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'],
+    { cwd: root, encoding: 'utf8', windowsHide: true }).split('\0').filter(Boolean)
+}
 export function readPublicSource(path) {
   if (!/^[a-zA-Z0-9_./-]+$/.test(path) || path.split('/').includes('..')) throw new Error('Noncanonical fixture source')
   return readFileSync(join(root, path), 'utf8')
@@ -202,7 +206,8 @@ export function publicationFixture(mode) {
     fixtureGit(seed, ['init', '--quiet', '-b', 'main'])
     writeFileSync(join(seed, 'README.md'), 'Existing public snapshot\n')
     fixtureGit(seed, ['add', 'README.md'])
-    const baseline = fixtureCommit(seed), source = fixtureGit(dir, ['rev-parse', 'HEAD'])
+    let baseline = fixtureCommit(seed)
+    const source = fixtureGit(dir, ['rev-parse', 'HEAD'])
     fixtureGit(owned, ['clone', '--quiet', '--bare', seed, remote])
     const result = publicExport.materializePublicExport({ root: dir, out })
     publicExport.stagePublicOutput({ ...result, out, destination: stage, root: dir })
@@ -210,6 +215,14 @@ export function publicationFixture(mode) {
     fixtureGit(stage, ['add', '-A'])
     publicExport.stagePublicGitModes({ destination: stage, manifest: result.manifest })
     const tree = fixtureGit(stage, ['write-tree'])
+    if (mode === 'noop' || mode === 'noop-source') {
+      fixtureGit(stage, ['fetch', '--quiet', remote, 'refs/heads/main'])
+      const matching = fixtureGit(stage, ['hash-object', '-t', 'commit', '-w', '--stdin'],
+        `tree ${tree}\nparent ${baseline}\nauthor Fixture <fixture@example.invalid> 2 +0000\ncommitter Fixture <fixture@example.invalid> 2 +0000\n\nExisting matching fixture snapshot\n`)
+      fixtureGit(stage, ['push', '--quiet', remote, `${matching}:refs/heads/main`])
+      fixtureGit(seed, ['fetch', '--quiet', remote, 'refs/heads/main'])
+      baseline = matching
+    }
     writeFileSync(join(seed, 'README.md'), 'A concurrent public change\n')
     fixtureGit(seed, ['add', 'README.md'])
     const driftTree = fixtureGit(seed, ['write-tree'])
@@ -238,6 +251,10 @@ cp.execFileSync = (command, args, options = {}) => {
     return JSON.stringify(meta)
   }
   if (command !== 'git') throw new Error('Unexpected external command')
+  if (args.includes('commit') && settings.mode === 'identity') options = { ...options, env: { ...options.env,
+    GIT_AUTHOR_NAME: 'Unexpected fixture identity', GIT_AUTHOR_EMAIL: 'unexpected@example.invalid',
+    GIT_COMMITTER_NAME: 'Unexpected fixture identity', GIT_COMMITTER_EMAIL: 'unexpected@example.invalid' } }
+  if (args.includes('commit') && settings.mode === 'parent') args = [...args, '--amend']
   const operation = args.find(value => ['clone', 'ls-remote', 'fetch', 'push'].includes(value))
   if (operation) {
     appendFileSync(settings.calls, JSON.stringify({ command, args }) + '\\n')
@@ -248,6 +265,7 @@ cp.execFileSync = (command, args, options = {}) => {
         run('git', ['--git-dir', settings.remote, 'update-ref', 'refs/heads/main', settings.drift])
       }
       if (settings.mode === 'source' && lookups === 1) writeFileSync(join(settings.dir, 'LICENSE'), 'Changed source\\n')
+      if (settings.mode === 'noop-source' && lookups === 2) writeFileSync(join(settings.dir, 'LICENSE'), 'Changed source after staging\\n')
       return run(command, args.map(value => value === url ? settings.remote : value), options)
     }
     const actual = run('git', ['remote', 'get-url', 'origin'], { cwd: options.cwd, encoding: 'utf8' }).trim()
@@ -255,7 +273,19 @@ cp.execFileSync = (command, args, options = {}) => {
     if (settings.mode === 'push' && operation === 'push') throw new Error('Synthetic push rejection')
     if (settings.mode === 'readback' && operation === 'fetch') throw new Error('Synthetic readback failure')
   }
-  return run(command, args, options)
+  const result = run(command, args, options)
+  if (args.includes('commit') && settings.mode === 'extra-parent') {
+    run('git', ['fetch', '--quiet', settings.remote, 'refs/fixture/drift'], options)
+    const parent = run('git', ['rev-parse', 'HEAD^'], options).trim()
+    const raw = run('git', ['cat-file', 'commit', 'HEAD'], options)
+    const changed = raw.replace('parent ' + parent + '\\n', 'parent ' + parent + '\\nparent ' + settings.drift + '\\n')
+    if (changed === raw) throw new Error('Synthetic parent mutation did not apply')
+    const commit = run('git', ['hash-object', '-t', 'commit', '-w', '--stdin'], { ...options, input: changed }).trim()
+    run('git', ['update-ref', 'HEAD', commit], options)
+    const parents = run('git', ['show', '-s', '--format=%P', commit], options).trim().split(' ')
+    appendFileSync(settings.calls, JSON.stringify({ command: 'fixture', args: ['extra-parent', ...parents] }) + '\\n')
+  }
+  return result
 }
 syncBuiltinESMExports()
 `)
