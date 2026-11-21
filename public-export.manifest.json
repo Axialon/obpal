@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "profile": "public-demo-v1",
-  "policySha256": "890018c064da7d3e209691d5ca627f8a70445a43aef25b7d8d62a164642e84a6",
+  "policySha256": "9bcfb737e2caa68362d39fca41b20d13ab330c234548f303161cb88e95d810ff",
   "rows": [
     {
       "path": ".agents/skills/obpal-develop/SKILL.md",
@@ -3403,7 +3403,7 @@
     {
       "path": "public-export.allowlist.json",
       "sourcePath": "public-export.allowlist.json",
-      "sourceSha256": "890018c064da7d3e209691d5ca627f8a70445a43aef25b7d8d62a164642e84a6",
+      "sourceSha256": "9bcfb737e2caa68362d39fca41b20d13ab330c234548f303161cb88e95d810ff",
       "sha256": "c5e586123bc90ad672bd40853a6914e10a8c5cb65094299a47380e158eab257d",
       "bytes": 434395,
       "mode": "100644",
