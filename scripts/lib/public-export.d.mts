@@ -7,6 +7,7 @@ export interface PublicInputRow {
   path: string
   role: PublicRole
   source: 'payload' | 'tooling'
+  toolingRevision?: string
   rights: string
   noticePaths: string[]
   inputSha256?: string

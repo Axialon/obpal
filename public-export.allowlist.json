@@ -1302,7 +1302,7 @@
       "noticePaths": [
         "LICENSE"
       ],
-      "inputSha256": "caac54458aa1bf78dfbe38a8a63147b951561c608df4e15351554e9a587ac4cb"
+      "inputSha256": "1e1da6ad22083d454fd816d3eb5904e9788209474ca6793700f49744dba5d345"
     },
     {
       "path": "docs/SELF-HOSTING.md",
@@ -5788,7 +5788,7 @@
       "noticePaths": [
         "LICENSE"
       ],
-      "inputSha256": "a116126740ce10094e7fcc5ad3735b97bf7a90cfa29105d8e18d67df54bf0fc0"
+      "inputSha256": "7ff4364ae611ae34afa37e375eb3e85069acfcd9471cb36bcfd515e8dcbd460a"
     },
     {
       "path": "scripts/lib/public-export.mjs",
@@ -5798,7 +5798,7 @@
       "noticePaths": [
         "LICENSE"
       ],
-      "inputSha256": "b5a7882821c21c52fe8a692cd07545a80bb1b0a4b53296184b5b2b644d0ea545"
+      "inputSha256": "ebffe9ae84981d938d1b42331d1361706ec28f3c38bc2a32fbc16b3eea0cbeee"
     },
     {
       "path": "scripts/lib/report.d.mts",
@@ -14549,7 +14549,7 @@
       "noticePaths": [
         "LICENSE"
       ],
-      "inputSha256": "7dd5cdfe4aa88be50247968f020ba046f92a1f217d81432aed89afcde820641b"
+      "inputSha256": "88d20d39feaf5f0dbba5a8cde4a3030fdc41c18b2a05b804207486e01131776a"
     },
     {
       "path": "tests/public-export-policy.test.ts",
@@ -14559,7 +14559,7 @@
       "noticePaths": [
         "LICENSE"
       ],
-      "inputSha256": "e3e0d0db7b5aaa1e1aa96fe26b5f830c4ebca6b0b7469c050d0fde228c61bac0"
+      "inputSha256": "d2ed3afa3353eeb89eb97737dfc2756f655ad807392d0d9bcc2fa05da46c1897"
     },
     {
       "path": "tests/public-export.test.ts",
@@ -14569,7 +14569,7 @@
       "noticePaths": [
         "LICENSE"
       ],
-      "inputSha256": "1a54051c413389972507795cc8bfbd5ba61b4afd1f03219491d40a8b145ea6b9"
+      "inputSha256": "5494dc83b8e306baa06a19a64e550f92a22a0001d7be7919da7fecc9984f097a"
     },
     {
       "path": "tests/publish-npm.test.ts",

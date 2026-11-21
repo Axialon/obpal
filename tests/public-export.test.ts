@@ -209,8 +209,8 @@ describe('one immutable materialized public inventory', () => {
     expect(result.error).toBeNull()
     expect(result.reproduced).toBe(true)
   })
-  it('preserves executable Git modes from the payload rather than the different tooling tree through staging and reproduction', () => {
-    const result = materializationFixture('modes')
+  it.each(['modes', 'historical-tooling'])('uses the approved bytes and Git mode through staging and public reproduction: %s', mode => {
+    const result = materializationFixture(mode)
     expect(result.error).toBeNull()
     expect(result.toolingMode).toBe('100644')
     expect(result.stagedGitMode).toBe('100755')

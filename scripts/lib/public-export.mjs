@@ -76,12 +76,15 @@ export function selectPublicFiles(trackedPaths, policy) {
     JSON.stringify(c.categories) !== '["studio","local"]' || c.defaultId !== 'cube') fail('unknown public catalogue')
   const classified = new Map(), included = new Map(), blocked = new Set(policy.blockedSha256)
   for (const row of policy.include) {
-    if (!keys(row, ['path', 'role', 'source', 'rights', 'noticePaths'], ['inputSha256', 'provenance', 'transform'])) fail('unknown inclusion fields')
+    if (!keys(row, ['path', 'role', 'source', 'rights', 'noticePaths'], ['inputSha256', 'provenance', 'transform', 'toolingRevision'])) fail('unknown inclusion fields')
     const key = pathKey(row.path)
     if (classified.has(key)) fail('duplicate or case-colliding path')
     classified.set(key, row)
     if (!roles.has(row.role) || !['payload', 'tooling'].includes(row.source) || !rights.has(row.rights) ||
       !Array.isArray(row.noticePaths) || row.noticePaths.some(path => typeof path !== 'string')) fail('unverified rights or role')
+    if (row.toolingRevision !== undefined && (policy.payloadRevision === null || row.source !== 'tooling' || row.role !== 'code' ||
+      !['vite.config.ts', 'tests/store-fields.test.ts', 'src/sim/scene.ts'].includes(row.path) || typeof row.toolingRevision !== 'string' ||
+      !/^[a-f0-9]{40}$/.test(row.toolingRevision))) fail('unapproved historical tooling input')
     row.noticePaths.forEach(pathKey)
     const context = row.path === 'public/models/cvc/NOTICE.md' && row.role === 'notice' && row.rights === 'notice-context'
     if (isLocalOnly(row.path) || riskyPath(row.path) || key === '.git' || key.startsWith('.git/') ||
@@ -210,16 +213,17 @@ function sourceFreeze(root) {
 /** Batch immutable Git blobs; no output is copied from a mutable worktree. */
 function inputBlobs(root, revision, plan) {
   const inputModes = {}
-  for (const ref of new Set([revision, plan.payloadRevision].filter(Boolean))) {
+  const sourceRef = row => row.source === 'payload' ? plan.payloadRevision ?? revision : row.toolingRevision ?? revision
+  for (const ref of new Set(plan.inputs.map(sourceRef))) {
     const modes = new Map(git(root, ['ls-tree', '-r', '-z', ref]).toString('utf8').split('\0').filter(Boolean).map(row => {
       const [header, path] = row.split('\t'); return [path, header.split(' ')[0]]
     }))
-    for (const row of plan.inputs.filter(row => (row.source === 'payload' ? plan.payloadRevision ?? revision : revision) === ref)) {
+    for (const row of plan.inputs.filter(row => sourceRef(row) === ref)) {
       if (!['100644', '100755'].includes(modes.get(row.path))) fail(`${row.path}: immutable source has an unexpected link or mode`)
       inputModes[row.path] = modes.get(row.path)
     }
   }
-  const queries = plan.inputs.map(row => `${row.source === 'payload' ? plan.payloadRevision ?? revision : revision}:${row.path}`)
+  const queries = plan.inputs.map(row => `${sourceRef(row)}:${row.path}`)
   const buffer = git(root, ['cat-file', '--batch'], queries.join('\n') + '\n'), blobs = new Map()
   let offset = 0
   for (const row of plan.inputs) {
@@ -397,7 +401,7 @@ export function materializePublicExport({ root, out, deny = [] }) {
   const { blobs, inputModes } = inputBlobs(root, revision, plan), output = new Map()
   plan.inputModes = inputModes
   for (const row of plan.inputs) if (row.transform !== 'policy') output.set(row.path, project(row, blobs.get(row.path), policy, blobs))
-  const projectedPolicy = { ...policy, payloadRevision: null, include: plan.inputs.map(row => ({ ...row, source: 'tooling',
+  const projectedPolicy = { ...policy, payloadRevision: null, include: plan.inputs.map(({ toolingRevision, ...row }) => ({ ...row, source: 'tooling',
     ...(row.transform === 'policy' ? {} : { inputSha256: digest(output.get(row.path)) }) })),
     exclude: [{ path: 'public-export.manifest.json', reason: 'Generated output inventory; regenerated from the verified policy' }], blockedSha256: [] }
   // The policy's own hash is external; it cannot recursively pin itself.

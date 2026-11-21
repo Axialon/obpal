@@ -14,11 +14,14 @@ describe('internal policy admission boundary', () => {
   it('retains the reviewed immutable runtime or the explicitly projected public-only policy', () => {
     const p = admitted()
     if (p.payloadRevision === null) {
-      expect(p.include.every(row => row.source === 'tooling')).toBe(true)
+      expect(p.include.every(row => row.source === 'tooling' && row.toolingRevision === undefined)).toBe(true)
       expect(p.exclude.map(row => row.path)).toEqual(['public-export.manifest.json'])
       expect(p.blockedSha256).toEqual([])
     } else {
       expect(p.payloadRevision).toBe('a7394a1375c5190f3a53095e0791d32e58e2cf77')
+      const historical = p.include.filter(row => row.toolingRevision !== undefined)
+      expect(historical.map(row => row.path).sort()).toEqual(['src/sim/scene.ts', 'tests/store-fields.test.ts', 'vite.config.ts'])
+      expect(new Set(historical.map(row => row.toolingRevision)).size).toBe(1)
       expect(p.blockedSha256.length).toBeGreaterThanOrEqual(63)
     }
     expect(p.include.filter(row => /coach/.test(row.path))).toEqual([])
@@ -60,6 +63,20 @@ describe('exact public export policy', () => {
     expect(plan.transforms).toEqual([{ path: 'public-export.allowlist.json', kind: 'policy' }])
     expect(plan.omissions).toEqual(policy().exclude)
     expect(plan.payloadRevision).toBe('a'.repeat(40))
+  })
+  it.each(['vite.config.ts', 'tests/store-fields.test.ts', 'src/sim/scene.ts'])('admits reviewed historical tooling only in a private policy: %s', path => {
+    const p = policy(), row = p.include[1]
+    Object.assign(row, { path, source: 'tooling', toolingRevision: 'b'.repeat(40) })
+    const paths = () => [...p.include, ...p.exclude].map(item => item.path)
+    expect(selectPublicFiles(paths(), p).inputs[1]).toEqual(row)
+    row.toolingRevision = 'master'
+    expect(() => selectPublicFiles(paths(), p)).toThrow('historical tooling')
+    row.toolingRevision = 'b'.repeat(40)
+    row.path = 'src/main.ts'
+    expect(() => selectPublicFiles(paths(), p)).toThrow('historical tooling')
+    row.path = path
+    p.payloadRevision = null
+    expect(() => selectPublicFiles(paths(), p)).toThrow('historical tooling')
   })
   it.each(['src/new.ts', 'public/new.glb', 'public/renamed.png'])('refuses an unclassified tracked input: %s', path => {
     expect(() => selectPublicFiles([...tracked(), path], policy())).toThrow()

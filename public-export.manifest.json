@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "profile": "public-demo-v1",
-  "policySha256": "734be8c55959eb29698641444463c56adaa90f114a678110dd2f17328aa52311",
+  "policySha256": "890018c064da7d3e209691d5ca627f8a70445a43aef25b7d8d62a164642e84a6",
   "rows": [
     {
       "path": ".agents/skills/obpal-develop/SKILL.md",
@@ -1494,9 +1494,9 @@
     {
       "path": "docs/PUBLIC-EXPORT.md",
       "sourcePath": "docs/PUBLIC-EXPORT.md",
-      "sourceSha256": "caac54458aa1bf78dfbe38a8a63147b951561c608df4e15351554e9a587ac4cb",
-      "sha256": "caac54458aa1bf78dfbe38a8a63147b951561c608df4e15351554e9a587ac4cb",
-      "bytes": 7831,
+      "sourceSha256": "1e1da6ad22083d454fd816d3eb5904e9788209474ca6793700f49744dba5d345",
+      "sha256": "1e1da6ad22083d454fd816d3eb5904e9788209474ca6793700f49744dba5d345",
+      "bytes": 8062,
       "mode": "100644",
       "role": "documentation",
       "noticePaths": [
@@ -3403,8 +3403,8 @@
     {
       "path": "public-export.allowlist.json",
       "sourcePath": "public-export.allowlist.json",
-      "sourceSha256": "734be8c55959eb29698641444463c56adaa90f114a678110dd2f17328aa52311",
-      "sha256": "5d2d345f1678d4385deacd1c8880cd703d9b98c8f8d72b64ff3f71cf91204e93",
+      "sourceSha256": "890018c064da7d3e209691d5ca627f8a70445a43aef25b7d8d62a164642e84a6",
+      "sha256": "c5e586123bc90ad672bd40853a6914e10a8c5cb65094299a47380e158eab257d",
       "bytes": 434395,
       "mode": "100644",
       "role": "policy",
@@ -6559,9 +6559,9 @@
     {
       "path": "scripts/lib/public-export.d.mts",
       "sourcePath": "scripts/lib/public-export.d.mts",
-      "sourceSha256": "a116126740ce10094e7fcc5ad3735b97bf7a90cfa29105d8e18d67df54bf0fc0",
-      "sha256": "a116126740ce10094e7fcc5ad3735b97bf7a90cfa29105d8e18d67df54bf0fc0",
-      "bytes": 3039,
+      "sourceSha256": "7ff4364ae611ae34afa37e375eb3e85069acfcd9471cb36bcfd515e8dcbd460a",
+      "sha256": "7ff4364ae611ae34afa37e375eb3e85069acfcd9471cb36bcfd515e8dcbd460a",
+      "bytes": 3066,
       "mode": "100644",
       "role": "code",
       "noticePaths": [
@@ -6571,9 +6571,9 @@
     {
       "path": "scripts/lib/public-export.mjs",
       "sourcePath": "scripts/lib/public-export.mjs",
-      "sourceSha256": "b5a7882821c21c52fe8a692cd07545a80bb1b0a4b53296184b5b2b644d0ea545",
-      "sha256": "b5a7882821c21c52fe8a692cd07545a80bb1b0a4b53296184b5b2b644d0ea545",
-      "bytes": 33002,
+      "sourceSha256": "ebffe9ae84981d938d1b42331d1361706ec28f3c38bc2a32fbc16b3eea0cbeee",
+      "sha256": "ebffe9ae84981d938d1b42331d1361706ec28f3c38bc2a32fbc16b3eea0cbeee",
+      "bytes": 33401,
       "mode": "100644",
       "role": "code",
       "noticePaths": [
@@ -17000,9 +17000,9 @@
     {
       "path": "tests/public-export-node.mjs",
       "sourcePath": "tests/public-export-node.mjs",
-      "sourceSha256": "7dd5cdfe4aa88be50247968f020ba046f92a1f217d81432aed89afcde820641b",
-      "sha256": "7dd5cdfe4aa88be50247968f020ba046f92a1f217d81432aed89afcde820641b",
-      "bytes": 23873,
+      "sourceSha256": "88d20d39feaf5f0dbba5a8cde4a3030fdc41c18b2a05b804207486e01131776a",
+      "sha256": "88d20d39feaf5f0dbba5a8cde4a3030fdc41c18b2a05b804207486e01131776a",
+      "bytes": 24289,
       "mode": "100644",
       "role": "code",
       "noticePaths": [
@@ -17012,9 +17012,9 @@
     {
       "path": "tests/public-export-policy.test.ts",
       "sourcePath": "tests/public-export-policy.test.ts",
-      "sourceSha256": "e3e0d0db7b5aaa1e1aa96fe26b5f830c4ebca6b0b7469c050d0fde228c61bac0",
-      "sha256": "e3e0d0db7b5aaa1e1aa96fe26b5f830c4ebca6b0b7469c050d0fde228c61bac0",
-      "bytes": 10647,
+      "sourceSha256": "d2ed3afa3353eeb89eb97737dfc2756f655ad807392d0d9bcc2fa05da46c1897",
+      "sha256": "d2ed3afa3353eeb89eb97737dfc2756f655ad807392d0d9bcc2fa05da46c1897",
+      "bytes": 11797,
       "mode": "100644",
       "role": "code",
       "noticePaths": [
@@ -17024,9 +17024,9 @@
     {
       "path": "tests/public-export.test.ts",
       "sourcePath": "tests/public-export.test.ts",
-      "sourceSha256": "1a54051c413389972507795cc8bfbd5ba61b4afd1f03219491d40a8b145ea6b9",
-      "sha256": "1a54051c413389972507795cc8bfbd5ba61b4afd1f03219491d40a8b145ea6b9",
-      "bytes": 16893,
+      "sourceSha256": "5494dc83b8e306baa06a19a64e550f92a22a0001d7be7919da7fecc9984f097a",
+      "sha256": "5494dc83b8e306baa06a19a64e550f92a22a0001d7be7919da7fecc9984f097a",
+      "bytes": 16891,
       "mode": "100644",
       "role": "code",
       "noticePaths": [

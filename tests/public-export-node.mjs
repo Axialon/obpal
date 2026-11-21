@@ -116,23 +116,35 @@ function prepareFixture(files) {
 }
 /** Exercise immutable inputs and the same manifest stager used by publication, without calling a publication flag. */
 export function materializationFixture(mode) {
+  const historicalTool = mode === 'historical-tooling'
+  const checkModes = mode === 'modes' || historicalTool
+  const modePath = historicalTool ? 'vite.config.ts' : 'desktop/package/install.command'
   const { dir, policy } = prepareFixture({ 'src/viewer/catalog.ts': readPublicSource('src/viewer/catalog.ts'),
     'wrangler.jsonc': readPublicSource('wrangler.jsonc'), 'public/models/cvc/private.glb': 'restricted-geometry\0',
     'worker/film-assets.ts': readPublicSource('worker/film-assets.ts'), 'worker/limits.ts': readPublicSource('worker/limits.ts'),
     'public/campaign/films/manifest.json': readPublicSource('public/campaign/films/manifest.json'),
-    ...(mode === 'modes' ? { 'desktop/package/install.command': '#!/bin/sh\nexit 0\n' } : {}),
+    ...(checkModes ? { [modePath]: historicalTool ? 'export default {}\n' : '#!/bin/sh\nexit 0\n' } : {}),
     ...(mode === 'closure' ? { 'src/consumer.ts': "import './missing-module'\n" } : {}),
     ...(mode === 'asset-closure' ? { 'src/consumer.ts': "export const model = '/models/missing.glb'\n" } : {}) })
   const out = mkdtempSync(join(tmpdir(), 'obpal-export-output-')), staged = mkdtempSync(join(tmpdir(), 'obpal-export-stage-'))
   const extraTemps = []
   try {
-    if (mode === 'modes') {
-      fixtureGit(dir, ['update-index', '--chmod=+x', 'desktop/package/install.command'])
-      policy.payloadRevision = fixtureCommit(dir)
-      policy.include.find(row => row.path === 'desktop/package/install.command').source = 'payload'
+    if (checkModes) {
+      const initial = fixtureGit(dir, ['rev-parse', 'HEAD'])
+      fixtureGit(dir, ['update-index', '--chmod=+x', modePath])
+      const reviewed = fixtureCommit(dir), row = policy.include.find(input => input.path === modePath)
+      if (historicalTool) {
+        policy.payloadRevision = initial
+        row.toolingRevision = reviewed
+        writeFileSync(join(dir, modePath), 'export default { privateBuild: true }\n')
+        fixtureGit(dir, ['add', modePath])
+      } else {
+        policy.payloadRevision = reviewed
+        row.source = 'payload'
+      }
       writeFileSync(join(dir, 'public-export.allowlist.json'), JSON.stringify(policy))
       fixtureGit(dir, ['add', 'public-export.allowlist.json'])
-      fixtureGit(dir, ['update-index', '--chmod=-x', 'desktop/package/install.command'])
+      fixtureGit(dir, ['update-index', '--chmod=-x', modePath])
       fixtureCommit(dir)
     }
     if (mode === 'input-hash') {
@@ -158,20 +170,20 @@ export function materializationFixture(mode) {
     result.assertSourceUnchanged()
     publicExport.stagePublicOutput({ ...result, out, destination: staged, root: dir })
     let reproduced, stagedGitMode, reexportMode, toolingMode
-    if (mode === 'reexport' || mode === 'modes') {
+    if (mode === 'reexport' || checkModes) {
       fixtureGit(staged, ['init', '--quiet'])
       fixtureGit(staged, ['add', '-f', '--', ...result.files])
       if (typeof publicExport.stagePublicGitModes === 'function') publicExport.stagePublicGitModes({ destination: staged, manifest: result.manifest })
-      if (mode === 'modes') {
-        stagedGitMode = fixtureGit(staged, ['ls-files', '--stage', 'desktop/package/install.command']).slice(0, 6)
-        toolingMode = fixtureGit(dir, ['ls-files', '--stage', 'desktop/package/install.command']).slice(0, 6)
+      if (checkModes) {
+        stagedGitMode = fixtureGit(staged, ['ls-files', '--stage', modePath]).slice(0, 6)
+        toolingMode = fixtureGit(dir, ['ls-files', '--stage', modePath]).slice(0, 6)
       }
       fixtureCommit(staged)
       const again = mkdtempSync(join(tmpdir(), 'obpal-export-reproduce-')); extraTemps.push(again)
       const repeated = publicExport.materializePublicExport({ root: staged, out: again })
       reproduced = repeated.manifest.rows.every(row => readFileSync(join(again, row.path)).equals(readFileSync(join(out, row.path))) &&
         row.mode === result.manifest.rows.find(original => original.path === row.path).mode)
-      reexportMode = repeated.manifest.rows.find(row => row.path === 'desktop/package/install.command')?.mode
+      reexportMode = repeated.manifest.rows.find(row => row.path === modePath)?.mode
     }
     return { error: null, paths: result.manifest.rows.map(row => row.path), stagedPaths: readdirSync(staged, { recursive: true, withFileTypes: true })
       .filter(e => e.isFile() && !resolve(e.parentPath).startsWith(resolve(join(staged, '.git')))).map(e => join(e.parentPath, e.name).slice(staged.length + 1).replaceAll('\\', '/')),
